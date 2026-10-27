@@ -4,7 +4,8 @@
 
 use serde_json::json;
 use solidcraft_engine::doc::cam::{
-    BoxAxisRef, BoxPoint, CamSetup, CamStock, SetupOperationType, StockOffsetMode, WcsOrientationMode, WcsOriginMode, WorkCoordinateSystem,
+    BoxAxisRef, BoxPoint, CamSetup, CamStock, SetupOperationType, StockHowMade, StockOffsetMode, WcsOrientationMode, WcsOriginMode,
+    WorkCoordinateSystem,
 };
 
 use crate::ui_kit::{self, Button};
@@ -374,6 +375,24 @@ fn stock_tab(ui: &mut egui::Ui, draft: &mut CamSetup) {
             }
         }
     });
+    ui_kit::section(ui, "setup_stock_integrity", "Stock integrity", true, |ui| {
+        let modes: Vec<&str> = StockHowMade::ALL.iter().map(|m| m.label()).collect();
+        let mut idx = StockHowMade::ALL.iter().position(|m| *m == draft.stock_integrity.how_made).unwrap_or(0);
+        ui_kit::choice_row(ui, "How the stock was made", "setup_stock_how", &mut idx, &modes);
+        draft.stock_integrity.how_made = StockHowMade::ALL[idx];
+        ui_kit::text_row(ui, "Alloy and temper", &mut draft.stock_integrity.alloy, "6061-T6");
+        ui_kit::row(ui, "Plate thickness", |ui| {
+            ui_kit::number_field(ui, &mut draft.stock_integrity.plate_thickness_mm, 0.0..=500.0, 0.5, " mm")
+        });
+        ui_kit::checkbox(ui, "Stress relieved", &mut draft.stock_integrity.stress_relieved);
+        ui_kit::text(ui, draft.stock_integrity.how_made.residual_risk(), ui_kit::Text::Hint("stock_risk"));
+        ui_kit::text(
+            ui,
+            "Finish thin walls in alternating bands from the top down. Lower feed last.",
+            ui_kit::Text::Hint("stock_order"),
+        );
+        ui_kit::text(ui, "Re-clamp at lower torque after roughing.", ui_kit::Text::Hint("stock_reclamp"));
+    });
 }
 
 fn post_tab(ui: &mut egui::Ui, draft: &mut CamSetup) {
@@ -512,6 +531,9 @@ fn save_setup(app: &mut SolveApp, name: &str, mut draft: CamSetup) -> bool {
     let Ok(operation_type) = serde_json::to_value(draft.operation_type) else {
         return false;
     };
+    let Ok(stock_integrity) = serde_json::to_value(&draft.stock_integrity) else {
+        return false;
+    };
     let Ok(wcs_orientation) = serde_json::to_value(draft.wcs_orientation) else {
         return false;
     };
@@ -539,6 +561,7 @@ fn save_setup(app: &mut SolveApp, name: &str, mut draft: CamSetup) -> bool {
             "post_opts": post_opts,
             "machine": draft.machine,
             "post": draft.post,
+            "stock_integrity": stock_integrity,
         }),
     ) {
         Ok(_) => {

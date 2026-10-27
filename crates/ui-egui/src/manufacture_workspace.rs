@@ -45,6 +45,10 @@ pub struct State {
     pub active_setup: String,
     pub cam_mode: CamMode,
     pub setup_dialog: Option<crate::manufacture_setup::SetupDialogState>,
+    pub selected_tool: Option<usize>,
+    pub tool_library_dialog: Option<crate::manufacture_tools::ToolLibraryState>,
+    pub edit_tool_dialog: Option<crate::manufacture_tools::EditToolState>,
+    pub manage_stub_dialog: Option<crate::manufacture_tools::ManageStubState>,
 }
 
 pub fn is_tab(tab: &str) -> bool {
@@ -97,6 +101,9 @@ pub fn reset_document(app: &mut SolveApp) {
 
 pub fn close_floating_dialogs(app: &mut SolveApp) {
     app.manufacture_workspace.setup_dialog = None;
+    app.manufacture_workspace.tool_library_dialog = None;
+    app.manufacture_workspace.edit_tool_dialog = None;
+    app.manufacture_workspace.manage_stub_dialog = None;
     app.ui.pick_bodies = false;
 }
 
@@ -127,6 +134,26 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         }
         "cam.setup" => {
             crate::manufacture_setup::open_new(app);
+            false
+        }
+        "manufacture.tools.library" => {
+            crate::manufacture_tools::open_tool_library(app);
+            false
+        }
+        "manufacture.tools.new" => {
+            crate::manufacture_tools::open_edit_tool(app, None);
+            false
+        }
+        "manufacture.manage.machine_library" => {
+            crate::manufacture_tools::open_manage_stub(app, crate::manufacture_tools::ManageStubKind::MachineLibrary);
+            false
+        }
+        "manufacture.manage.post_library" => {
+            crate::manufacture_tools::open_manage_stub(app, crate::manufacture_tools::ManageStubKind::PostLibrary);
+            false
+        }
+        "manufacture.manage.template_library" => {
+            crate::manufacture_tools::open_manage_stub(app, crate::manufacture_tools::ManageStubKind::TemplateLibrary);
             false
         }
         id if id.starts_with("manufacture.") => {
@@ -162,6 +189,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 
 pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::manufacture_setup::show_dialogs(app, ui);
+    crate::manufacture_tools::show_dialogs(app, ui);
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -263,5 +291,17 @@ mod tests {
         assert!(crate::scenario::handle_at("button:manufacture.turning.face").is_some());
         assert!(crate::scenario::handle_at("button:manufacture.2d.contour").is_none());
         assert!(crate::scenario::handle_at("button:solid.extrude").is_none());
+    }
+
+    #[test]
+    fn tool_library_opens_without_creating_setup() {
+        let mut h = Harness::new();
+        h.step(&json!({"start": "manufacture.tools.library"})).unwrap();
+        h.frames(2);
+        assert!(active(&h.app));
+        assert!(h.app.manufacture_workspace.tool_library_dialog.is_some());
+        assert!(h.app.session.doc.cam.setups.is_empty());
+        assert!(h.app.session.doc.cam.tools.is_empty());
+        assert!(h.widget("Tool Library").is_some());
     }
 }

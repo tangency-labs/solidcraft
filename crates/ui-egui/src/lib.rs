@@ -173,9 +173,10 @@ pub(crate) mod display_lod;
 mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
-pub mod mouse_gesture;
 pub mod manufacture_setup;
+pub mod manufacture_tools;
 pub mod manufacture_workspace;
+pub mod mouse_gesture;
 pub(crate) mod navigation;
 pub use navigation::WebWheelGestures;
 pub mod open_elsewhere;

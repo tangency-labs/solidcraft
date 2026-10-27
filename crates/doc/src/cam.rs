@@ -69,6 +69,69 @@ impl CamSettings {
     }
 }
 
+/// How the blank was made. Residual-stress risk ranking from the #1621 shop notes:
+/// cold-formed and purpose-designed forgings low, castings and heat-treated stock high, hot-rolled curls.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StockHowMade {
+    #[default]
+    Unknown,
+    SawCut,
+    Forged,
+    Cast,
+    HotRolled,
+    Plate,
+}
+
+impl StockHowMade {
+    pub const ALL: &'static [StockHowMade] =
+        &[StockHowMade::Unknown, StockHowMade::SawCut, StockHowMade::Forged, StockHowMade::Cast, StockHowMade::HotRolled, StockHowMade::Plate];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            StockHowMade::Unknown => "Unknown",
+            StockHowMade::SawCut => "Saw-cut / cold-formed",
+            StockHowMade::Forged => "Forging",
+            StockHowMade::Cast => "Casting",
+            StockHowMade::HotRolled => "Hot-rolled",
+            StockHowMade::Plate => "Plate",
+        }
+    }
+
+    pub fn residual_risk(self) -> &'static str {
+        match self {
+            StockHowMade::SawCut | StockHowMade::Forged => "low residual-stress risk",
+            StockHowMade::Unknown | StockHowMade::Plate => "medium residual-stress risk",
+            StockHowMade::Cast | StockHowMade::HotRolled => "high residual-stress risk",
+        }
+    }
+}
+
+/// Stock record the planner needs for release distortion (Level 0: risk and direction, not a number).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StockIntegrity {
+    #[serde(default, skip_serializing_if = "is_unknown_how_made")]
+    pub how_made: StockHowMade,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stress_relieved: bool,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub alloy: String,
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub plate_thickness_mm: f64,
+}
+
+fn is_unknown_how_made(v: &StockHowMade) -> bool {
+    *v == StockHowMade::Unknown
+}
+
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
+}
+
+fn is_default_integrity(v: &StockIntegrity) -> bool {
+    *v == StockIntegrity::default()
+}
+
 /// One machining setup: ISO 841 work frame, RS-274 work offset, optional stock, and operations.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CamSetup {
@@ -115,6 +178,8 @@ pub struct CamSetup {
     pub machine: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub post: Option<String>,
+    #[serde(default, skip_serializing_if = "is_default_integrity")]
+    pub stock_integrity: StockIntegrity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub operations: Vec<CamOperation>,
 }
@@ -160,6 +225,7 @@ impl CamSetup {
             post_opts: SetupPostOpts::default(),
             machine: None,
             post: None,
+            stock_integrity: StockIntegrity::default(),
             operations: Vec::new(),
         }
     }

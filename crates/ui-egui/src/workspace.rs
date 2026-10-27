@@ -66,12 +66,8 @@ pub struct Section {
 const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.configure"];
 
 const MFG_SETUP: &[&str] = &["manufacture.setup.new"];
-const MFG_MANAGE: &[&str] = &[
-    "manufacture.tools.library",
-    "manufacture.manage.machine_library",
-    "manufacture.manage.post_library",
-    "manufacture.manage.template_library",
-];
+const MFG_MANAGE: &[&str] =
+    &["manufacture.tools.library", "manufacture.manage.machine_library", "manufacture.manage.post_library", "manufacture.manage.template_library"];
 const MFG_2D: &[&str] = &[
     "manufacture.2d.contour",
     "manufacture.2d.face",
@@ -134,7 +130,6 @@ const MFG_MODIFY: &[&str] = &[
     "manufacture.modify.move_entry",
 ];
 const MFG_POST: &[&str] = &["manufacture.post.process", "manufacture.post.time", "manufacture.post.sheet"];
-
 
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
 /// itself after every edit, so a Solve button (and the search hit for it) only confuses.

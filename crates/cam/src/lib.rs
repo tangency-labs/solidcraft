@@ -4,7 +4,9 @@
 //!
 //! Everything here works in a setup's work coordinates: millimetres, tool axis along +Z, feeds
 //! in mm/min. The crate knows nothing of documents or the B-rep kernel; the engine hands it
-//! regions.
+//! regions. Machine presets, an MTConnect plugin host, FOCAS/THINC protocol stubs, and
+//! Inspection Plus review snippets sit beside the mill posts: they do not store toolpaths on
+//! the design.
 //!
 //! The region offsetting is our own: every boundary piece is offset, corners that open away
 //! from the offset side get a joining arc, the pieces are cut where they cross, and a piece is
@@ -14,23 +16,37 @@
 #![forbid(unsafe_code)]
 
 mod check;
+mod focas;
 mod gcode;
+mod machine;
+mod mtconnect;
 mod offset;
 mod ops;
 mod path;
 mod piece;
 mod post;
+mod probe;
 mod readback;
+mod thinc;
 mod tool;
 
 pub use check::verify;
+pub use focas::FocasBackend;
 pub use gcode::{Operation, Program, emit, parse, work_offset_code};
+pub use machine::{
+    Availability, FakeMachineHost, MachineAxes, MachineBackend, MachineBackendDescriptor, MachineError, MachineHost, MachineIntegration,
+    MachineIntegrationKind, MachineLiveStatus, MachineProfile, MachineResult, ProbeCapability, ProbeMacroStyle, SpindleTaper, ToolChanger,
+    ToolChangerKind, preset_machines,
+};
+pub use mtconnect::{FixedHttpGet, HttpGet, MtConnectBackend, StdHttpGet, parse_mtconnect_current, sample_haas_current_xml};
 pub use offset::offset_regions;
 pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, pocket};
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
 pub use post::{CommentStyle, LineNumbers, Post, Units};
+pub use probe::{ProbeCycle, ProbeSnippetRequest, emit_snippet, style_for_post};
 pub use readback::{Readback, allowed_deviation, readback};
-pub use tool::{Tool, ToolKind};
+pub use thinc::ThincBackend;
+pub use tool::{Tool, ToolKind, cantilever_stiffness_n_per_um, tooth_passing_hz, wall_stiffness_n_per_um, youngs_modulus_gpa};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CamError {

@@ -1418,7 +1418,6 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     }
 }
 
-
 /// Setups live in the left browser when Manufacture is active (#1782).
 fn setup_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     if !crate::manufacture_workspace::active(app) {

@@ -26,7 +26,8 @@ use crate::{EngineError, Result, Session};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("cam.tool.define", "Define Tool", tool_cmd).icon("hole").params(
         "number (1…9999); kind?: flat_endmill|ball_endmill|drill (default flat_endmill); diameter (mm); flute_length (mm); \
-         description?; flutes?; spindle_rpm?; feed?; plunge_feed?; stepdown?; stepover?",
+         description?; flutes?; spindle_rpm?; feed?; plunge_feed?; stepdown?; stepover?; \
+         stick_out?; shaft_diameter?; material?: carbide|hss|cobalt|ceramic|diamond; holder_gauge?; holder_stiffness?",
     ),
     CommandSpec::new("cam.tool.remove", "Remove Tool", tool_remove).icon("delete").params("number"),
     CommandSpec::new("cam.setup", "CAM Setup", setup_cmd).icon("settings").params(
@@ -34,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          tool_axis?: [x,y,z] (programmed +Z, default [0,0,1]); \
          x_axis?: [x,y,z] (programmed +X, square to the tool axis; omitted, derived); \
          work_origin?: [x,y,z] mm part zero in the model (default [0,0,0]); \
-         stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
+         stock?: {min:[x,y,z], max:[x,y,z]}; stock_integrity?: {how_made, stress_relieved, alloy, plate_thickness_mm}; delete?: bool",
     ),
     CommandSpec::new("cam.op.contour", "2D Contour", contour_cmd).icon("cut").params(
         "setup; name; tool (number); sketch?: id or name, with profiles?: as solid.extrude; faces?: [{body, name, at?}]; \
@@ -101,6 +102,13 @@ fn tool_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     tool.plunge_feed = num(p, "plunge_feed").or(tool.plunge_feed);
     tool.stepdown = num(p, "stepdown").or(tool.stepdown);
     tool.stepover = num(p, "stepover").or(tool.stepover);
+    tool.stick_out = num(p, "stick_out").or(tool.stick_out);
+    tool.shaft_diameter = num(p, "shaft_diameter").or(tool.shaft_diameter);
+    if let Some(m) = str_(p, "material") {
+        tool.material = Some(m.chars().take(32).collect());
+    }
+    tool.holder_gauge = num(p, "holder_gauge").or(tool.holder_gauge);
+    tool.holder_stiffness = num(p, "holder_stiffness").or(tool.holder_stiffness);
     tool.validate().map_err(|e| bad(cmd, e.to_string()))?;
     let doc = s.doc_mut();
     if doc.cam.tools.len() >= MAX_TOOLS && !doc.cam.tools.iter().any(|t| t.number == number) {
@@ -207,6 +215,8 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`post` must be a name or null")),
         None => existing.as_ref().and_then(|e| e.post.clone()),
     };
+    setup.stock_integrity =
+        parse_value(cmd, p, "stock_integrity", existing.as_ref().map(|e| e.stock_integrity.clone()).unwrap_or_default())?;
     if p.get("wcs").is_some() {
         setup.work_origin = setup.wcs.origin;
         setup.tool_axis = setup.wcs.z_axis();
@@ -876,6 +886,7 @@ fn setup_json(setup: &CamSetup) -> Value {
         "work_origin": setup.work_origin,
         "stock": setup.stock,
         "stock_spec": setup.stock_spec,
+        "stock_integrity": setup.stock_integrity,
         "wcs": setup.wcs,
         "model_bodies": setup.model_bodies,
         "operations": setup.operations.iter().map(|op| match op {
@@ -1049,6 +1060,48 @@ mod tests {
         assert_eq!(run(&mut s, "cam.setup", json!({}))["setup"]["name"], "Setup 2");
         assert_eq!(s.doc.cam.setups.len(), 2);
         assert!(s.execute("cam.setup", &json!({"delete": true})).is_err());
+    }
+
+    #[test]
+    fn tool_define_keeps_stick_out_and_material() {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "cam.tool.define",
+            json!({
+                "number": 1, "diameter": 10, "flute_length": 20,
+                "stick_out": 30, "shaft_diameter": 8, "material": "carbide"
+            }),
+        );
+        let tool = s.doc.cam.tool(1).unwrap();
+        assert_eq!(tool.stick_out, Some(30.0));
+        assert_eq!(tool.shaft_diameter, Some(8.0));
+        assert_eq!(tool.material.as_deref(), Some("carbide"));
+        let k = tool.stiffness_n_per_um();
+        assert!((k - 13.4).abs() < 0.1, "{k}");
+    }
+
+    #[test]
+    fn setup_keeps_stock_integrity() {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "cam.setup",
+            json!({
+                "name": "Top",
+                "stock_integrity": {
+                    "how_made": "hot_rolled",
+                    "stress_relieved": true,
+                    "alloy": "7050-T7451",
+                    "plate_thickness_mm": 90.5
+                }
+            }),
+        );
+        let setup = s.doc.cam.setup("Top").unwrap();
+        assert_eq!(setup.stock_integrity.how_made, solidcraft_doc::cam::StockHowMade::HotRolled);
+        assert!(setup.stock_integrity.stress_relieved);
+        assert_eq!(setup.stock_integrity.alloy, "7050-T7451");
+        assert_eq!(setup.stock_integrity.plate_thickness_mm, 90.5);
     }
 
     #[test]

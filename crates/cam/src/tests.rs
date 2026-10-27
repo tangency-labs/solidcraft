@@ -609,6 +609,10 @@ fn posts_are_data_and_bad_ones_are_refused() {
     let post: Post = serde_json::from_str(&json).unwrap();
     assert_eq!(post, own);
     assert_eq!(Post::builtin("LinuxCNC"), Some(Post::rs274()));
+    assert_eq!(Post::builtin("grbl").unwrap().extension, "nc");
+    assert_eq!(Post::builtin("mach3").unwrap().extension, "tap");
+    assert!(Post::builtin("fanuc").unwrap().two_digit_codes);
+    assert!(Post::builtin("haas").unwrap().two_digit_codes);
     assert!(Post::BUILTIN.iter().all(|name| Post::builtin(name).is_some_and(|p| p.validate().is_ok())));
     let broken = |change: fn(&mut Post)| {
         let mut p = Post::rs274();
@@ -659,4 +663,29 @@ fn work_offsets_go_where_the_post_writes_them() {
         assert!(emit(&program, &Post::rs274()).is_err());
     }
     assert_eq!(work_offset_code(6).unwrap(), "G59");
+}
+
+#[test]
+fn carbide_end_mill_stiffness_matches_the_stock_integrity_example() {
+    // 10 mm carbide, 30 mm stick-out, 8 mm core: k ≈ 13.4 N/µm (#1621).
+    let k = cantilever_stiffness_n_per_um(600.0, 8.0, 30.0);
+    close(k, 13.4, 0.1);
+    let mut tool = Tool::new(1, ToolKind::FlatEndmill, 10.0, 20.0);
+    tool.material = Some("carbide".into());
+    tool.stick_out = Some(30.0);
+    tool.shaft_diameter = Some(8.0);
+    close(tool.stiffness_n_per_um(), 13.4, 0.1);
+}
+
+#[test]
+fn aluminium_wall_stiffness_matches_the_stock_integrity_example() {
+    // 30 mm high, 4 mm thick, 100 mm long, 6061: k ≈ 4.1 N/µm. Halving thickness cubes the drop.
+    close(wall_stiffness_n_per_um(69.0, 4.0, 30.0, 100.0), 4.1, 0.15);
+    close(wall_stiffness_n_per_um(69.0, 2.0, 30.0, 100.0), 0.51, 0.05);
+}
+
+#[test]
+fn tooth_passing_frequency_is_rpm_times_flutes_over_sixty() {
+    close(tooth_passing_hz(12_000.0, 4), 800.0, 1e-9);
+    assert_eq!(tooth_passing_hz(0.0, 4), 0.0);
 }
