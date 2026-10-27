@@ -91,6 +91,11 @@
 //! - **Cone intersection.** The cone's iso circle through a point
 //!   (`SmCone::CreateIsoCircleFromPoint`) is [`Cone::create_iso_circle_from_point`];
 //!   the cone is taken without owner (its zone tolerance finds no face).
+//! - **Opt-in fix** ([`UpstreamFixes::sphere_small_circle_not_touching`](crate::kernel::UpstreamFixes::sphere_small_circle_not_touching),
+//!   WR-79, #396): `IntersectWithPlane` and `IntersectWithSphere` return a touching
+//!   point only when the intersection circle's own radius is within the tolerance, not
+//!   when the gap to tangency is, which collapses circles of radius up to about
+//!   `sqrt(2 R tol)`. Off by default (upstream behaviour). No input-driven recursion.
 //! - **Parent calls.** `Transform` finishes in `SmSurfOfRevolution::Transform` (status
 //!   ignored), its polar-converter rebuild given the sphere's iso circles as upstream's
 //!   virtual call does; `ReadFromDB` reads the parent record with
@@ -1067,7 +1072,15 @@ impl Sphere {
         }
 
         // See if we are intersecting at a singularity point
-        if dist_to_plane > self.radius - tol {
+        let touching = if k.fixes.sphere_small_circle_not_touching {
+            // the circle collapses to a point only when its radius sqrt(R^2 - d^2) is
+            // within the tolerance (the fork's tangency-labs/smlib@30d25bf)
+            let gap = self.radius - dist_to_plane;
+            gap <= 0.0 || gap * (self.radius + dist_to_plane) <= tol * tol
+        } else {
+            dist_to_plane > self.radius - tol
+        };
+        if touching {
             // build degenerate curve
             let bsc = BSplineCurve::create_degenerate_curve(3, projected)?;
 
@@ -1179,10 +1192,30 @@ impl Sphere {
         }
 
         // Take care of touching situations
-        if dist + tol > radius + other_radius || dist - tol < (radius - other_radius).abs() {
+        let (touching, touching_inside) = if k.fixes.sphere_small_circle_not_touching {
+            // the circle collapses to a point only when its radius h is within the
+            // tolerance: (2 d h)^2 = (d+r1+r2)(r1+r2-d)(d-r1+r2)(d+r1-r2), each factor
+            // formed directly (the fork's tangency-labs/smlib@30d25bf)
+            let out_gap = radius + other_radius - dist;
+            let in_gap = dist - (radius - other_radius).abs();
+            let height4 = (dist + radius + other_radius)
+                * out_gap
+                * (dist - radius + other_radius)
+                * (dist + radius - other_radius);
+            (
+                out_gap <= 0.0 || in_gap <= 0.0 || height4 <= 4.0 * tol * tol * dist * dist,
+                in_gap < out_gap,
+            )
+        } else {
+            (
+                dist + tol > radius + other_radius || dist - tol < (radius - other_radius).abs(),
+                dist - tol < (radius - other_radius).abs(),
+            )
+        };
+        if touching {
             let mut sign = 1.0;
             // when touching inside
-            if dist - tol < (radius - other_radius).abs() {
+            if touching_inside {
                 // when OtherSphere is larger than thisSphere
                 if radius < other_radius {
                     // let Vec run from OtherCenter to ThisCenter

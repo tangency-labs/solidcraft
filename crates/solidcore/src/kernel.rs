@@ -297,6 +297,8 @@ pub struct UpstreamFixes {
     pub fillet_refuse_ball_not_fitting: bool,
     /// `SmMerge::BooleanLists` copies its surface operands with the virtual `Copy` (the derived surface, its natural domain and its kind), where upstream's base copy constructor slices every surface to a geometry-less `SmSurface`, so a surface list always fails with `SM_ERR` and the planar 2D path is never taken (WR-196; `plan/upstream-issues/WR-196--booleanlists-slices-derived-surfaces-into-base-smsurface.md`).
     pub boolean_lists_virtual_surface_copies: bool,
+    /// `SmSphere::IntersectWithPlane` and `IntersectWithSphere` return a single touching point only when the intersection circle's own radius (`sqrt(R^2 - d^2)`, or the two-sphere circle's height, each formed from the gaps to tangency) is within the tolerance, not whenever the gap to tangency is, which collapsed circles of radius up to about `sqrt(2 R tol)` (1e-3 for `R = 1`, `tol = 1e-6`) into one point (WR-79 part 1, #396; the fork's tangency-labs/smlib@30d25bf).
+    pub sphere_small_circle_not_touching: bool,
 }
 
 /// Options for [`Kernel::new`].
