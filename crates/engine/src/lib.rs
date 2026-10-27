@@ -42,7 +42,9 @@ use serde_json::Value;
 use solidcraft_doc::{Document, Model, ModelState};
 use solidcraft_geom::Vec3;
 
-pub use cmd::{CommandInfo, CommandSpec, auto_operation, command_specs, extrude_reach, find_command, resolve_design_links, standard_view};
+pub use cmd::{
+    CommandInfo, CommandSpec, LinkProblem, LinkState, auto_operation, command_specs, extrude_reach, find_command, resolve_design_links, standard_view,
+};
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;

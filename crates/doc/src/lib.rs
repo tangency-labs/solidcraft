@@ -96,6 +96,9 @@ pub enum DocError {
     Invalid(String),
     #[error("unknown {0}")]
     Unknown(String),
+    /// A design saved by a newer SolidCraft than this one: the message says to update.
+    #[error("{0}")]
+    Newer(String),
     #[error(transparent)]
     Sketch(#[from] solidcraft_sketch::SketchError),
     #[error(transparent)]

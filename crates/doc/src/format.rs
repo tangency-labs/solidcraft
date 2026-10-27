@@ -316,7 +316,7 @@ impl Formats<'_> {
             |part: &Part| applied.is_some_and(|names| names.iter().any(|name| self.canonical_applied_name(version, name) == part.name));
         if let Some(applied) = applied {
             if let Some(unknown) = applied.iter().find(|name| !self.knows_part_name(self.canonical_applied_name(version, name))) {
-                return Err(DocError::Invalid(format!(
+                return Err(DocError::Newer(format!(
                     "this design was saved by a newer SolidCraft (file format {version} with `{unknown}`, which this version doesn't know): update SolidCraft to open it"
                 )));
             }
@@ -579,7 +579,7 @@ pub fn read(s: &str) -> Result<Document> {
         return Err(DocError::Invalid("not a SolidCraft design (format 0)".into()));
     }
     if version > FORMAT {
-        return Err(DocError::Invalid(format!(
+        return Err(DocError::Newer(format!(
             "this design was saved by a newer SolidCraft (file format {version}; this version reads formats up to {FORMAT}): update SolidCraft to open it"
         )));
     }

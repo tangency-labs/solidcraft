@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{DesignLink, Document, FeatureKind};
 
 use super::CommandSpec;
-use super::design_link::{absolute, resolve, stored};
+use super::design_link::{LinkState, absolute, link_presence, open_linked, resolve, same_file, stored};
 use crate::params::{bad, str_, vec3};
 use crate::{EngineError, Result, Session};
 
@@ -57,7 +57,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("component.links", "List Links", list_links).icon("chain").noundo().params(
         "→ linked components: component, name, path, file (resolved), found (null when the file is on a network location not allowed, \
-         or names a device: it is not looked for), and then host (the network location) and reason",
+         or names a device: it is not looked for), and then host (the network location); state and reason when the file can't be \
+         reached (missing, unreadable, not_allowed: a network location not allowed or outside the folders this agent may use)",
     ),
 ];
 
@@ -91,16 +92,12 @@ type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_
 /// The solid bodies of the design at `file`, evaluated, as an Import feature.
 fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
     let shown = file.display().to_string();
-    if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
+    if own.is_some_and(|o| same_file(Path::new(o), file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
     // A network location only when its server is allowed, a device never: judged from the text
     // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
-    let bytes = solidcraft_io::vfs::read_design_path(&shown, own, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| {
-        let e = e.to_string();
-        EngineError::Other(if e.starts_with(&shown) { e } else { format!("{shown}: {e}") })
-    })?;
-    let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
+    let doc = open_linked(file, own).map_err(|e| EngineError::Other(e.reason))?;
     session_bodies(&Session::opened_at(doc, None, Some(&shown)), &shown)
 }
 
@@ -146,7 +143,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     // A network or device path is judged from its text, as given, before anything reads it.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
     let file = absolute(Path::new(given));
-    if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
+    if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
@@ -296,11 +293,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // A network or device path is judged from its text before the disk is asked anything.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
-    // The ordinary lexical check in linked_bodies also works in the browser VFS. On native
-    // hosts, reject an alias of this assembly too (a symlink or a path with different case).
-    if let (Ok(candidate), Some(Ok(own))) = (file.canonicalize(), s.path.as_deref().map(std::fs::canonicalize))
-        && candidate == own
-    {
+    // The same path, or on native hosts an alias of this assembly (a symlink or a path with
+    // different case): the one self-link rule Insert Design and Update Links use too.
+    if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
@@ -362,16 +357,23 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             let file = resolve(s.path.as_deref(), &l.path);
             let name = s.doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone());
             let path = stored(s.path.as_deref(), &file);
-            let file = file.to_string_lossy();
+            let shown = file.to_string_lossy();
             // A refused path is not looked for at all: on Windows asking whether a file on
             // `\\host\share` exists already connects to the host.
             match link_refusal(s.path.as_deref(), &l.path) {
-                None => json!({"component": c, "name": name, "path": path, "file": file,
-                    "found": solidcraft_io::vfs::design_path_is_file(&file, s.path.as_deref())}),
-                Some(solidcraft_io::vfs::Remote::Network(host)) => json!({"component": c, "name": name, "path": path, "file": file,
-                    "found": null, "host": host, "reason": format!("on the network location \\\\{host}, which is not allowed")}),
-                Some(solidcraft_io::vfs::Remote::Device) => json!({"component": c, "name": name, "path": path, "file": file,
-                    "found": null, "reason": "names a device, not a file"}),
+                None => {
+                    let mut out = json!({"component": c, "name": name, "path": path, "file": shown,
+                        "found": solidcraft_io::vfs::design_path_is_file(&shown, s.path.as_deref())});
+                    if let Some(why) = link_presence(&file, s.path.as_deref()) {
+                        out["state"] = json!(why.state);
+                        out["reason"] = json!(why.reason);
+                    }
+                    out
+                }
+                Some(solidcraft_io::vfs::Remote::Network(host)) => json!({"component": c, "name": name, "path": path, "file": shown,
+                    "found": null, "host": host, "state": LinkState::NotAllowed, "reason": format!("on the network location \\\\{host}, which is not allowed")}),
+                Some(solidcraft_io::vfs::Remote::Device) => json!({"component": c, "name": name, "path": path, "file": shown,
+                    "found": null, "state": LinkState::Unreadable, "reason": "names a device, not a file"}),
             }
         })
         .collect();
@@ -516,6 +518,8 @@ mod tests {
         std::fs::remove_file(&part).unwrap();
         let err = b.execute("component.update_links", &json!({})).unwrap_err().to_string();
         assert!(err.contains("plate"), "{err}");
+        let links = run(&mut b, "component.links", json!({}));
+        assert_eq!((&links["links"][0]["found"], &links["links"][0]["state"]), (&json!(false), &json!("missing")), "{links}");
         assert!((volume(&mut b) - 9000.0).abs() < 1e-6);
         // Break Link keeps the bodies and forgets the file.
         run(&mut b, "component.break_link", json!({"component": "plate"}));
