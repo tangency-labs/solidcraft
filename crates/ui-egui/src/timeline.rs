@@ -667,7 +667,7 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
                 ui.close();
             }
         }
-        crate::ui_kit::Menu::separator(ui);
+        ui.separator();
         let new = crate::context_menu::button(ui, crate::i18n::tr_label("New Branch"), "");
         crate::scenario::publish_handle("history:branch_new", new.rect.center());
         if new.clicked() {
