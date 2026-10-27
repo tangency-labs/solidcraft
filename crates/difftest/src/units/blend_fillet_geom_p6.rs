@@ -556,7 +556,8 @@ impl Target {
         let Some(srf) = self.brep.face(f).map_err(h)?.surface.as_ref() else {
             return Ok(None);
         };
-        let d = srf.natural_uv_domain();
+        // (runner helper without a kernel in scope)
+        let d = srf.natural_uv_domain_if_built();
         let (u, v) = (d.u_interval(), d.v_interval());
         Ok(Some([u.min(), v.min(), u.max(), v.max()]))
     }

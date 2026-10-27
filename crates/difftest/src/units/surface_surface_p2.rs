@@ -1381,7 +1381,7 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError>
             ];
             if let Some(x) = &s {
                 {
-                    push_dom(o, &x.natural_uv_domain());
+                    push_dom(o, &x.natural_uv_domain_with_nurb(k)?);
                     push_dom(o, &x.step_uv_domain());
                     o.extend([
                         x.degree(SurfParamType::U) as f64,

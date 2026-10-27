@@ -635,7 +635,7 @@ impl FilletSolver {
         let cylinder = cone_patch.copy_and_add_analytics(k)?;
 
         // get cylinder u parameter range
-        let uv_domain = cylinder.natural_uv_domain();
+        let uv_domain = cylinder.natural_uv_domain_with_nurb(k)?;
         let rail_crv_ivl = Extent1d::from_min_max(uv_domain.min.x, uv_domain.max.x);
 
         // Calc Rail0, Rail1 - set their extent = cylinder u parameter range
@@ -780,7 +780,7 @@ impl FilletSolver {
         let mut cone = Surface::from(cone);
         ignore_status(cone.swap_uv(k))?;
 
-        let uv_domain = cone.natural_uv_domain();
+        let uv_domain = cone.natural_uv_domain_with_nurb(k)?;
         let ivl = Extent1d::from_min_max(uv_domain.min.x, uv_domain.max.x);
 
         // Calc rail0
@@ -1154,7 +1154,7 @@ impl FilletSolver {
         let torus = Surface::from(torus);
 
         // Calc rails: the min and max SM_SP_V isoParameter curves
-        let uv_domain = torus.natural_uv_domain();
+        let uv_domain = torus.natural_uv_domain_with_nurb(k)?;
         let rail_crv0 = torus
             .create_iso_parametric_curve(k, SurfParamType::V, uv_domain.min.y, 0.0, None, false)?
             .curve;
@@ -1324,7 +1324,7 @@ impl FilletSolver {
         let sphere = Surface::from(sphere);
 
         // rails: the patch's v = min and v = max isoparameter curves
-        let uv_domain = sphere.natural_uv_domain();
+        let uv_domain = sphere.natural_uv_domain_with_nurb(k)?;
         let rail_crv0 = sphere
             .create_iso_parametric_curve(k, SurfParamType::V, uv_domain.min.y, 0.0, None, false)?
             .curve;
@@ -1516,7 +1516,7 @@ impl FilletSolver {
             .solver_surface(rail_index)?
             .map(|surface| surface.base_surface().clone())
             .ok_or_else(|| invalid("no offset surface"))?;
-        let mut domain = base.natural_uv_domain();
+        let mut domain = base.natural_uv_domain_with_nurb(k)?;
         // virtual SetupOffsetExtension: dispatched on the solver's kind
         ops.setup_offset_extension(k, &base, &mut domain)?;
         set_interval(
@@ -1666,7 +1666,7 @@ impl FilletSolver {
             .surface(rail_index)?
             .map(|slot| slot.surface.base_surface().clone())
             .ok_or_else(|| invalid("no offset surface"))?;
-        let mut domain = base.natural_uv_domain();
+        let mut domain = base.natural_uv_domain_with_nurb(k)?;
         // virtual SetupOffsetExtension: dispatched on the solver's kind
         ops.setup_offset_extension(k, &base, &mut domain)?;
         let mut intervals = ExtentNd::new(jacobian_size);
@@ -1938,7 +1938,7 @@ impl FilletSolver {
             let solutions = side.global_curve_intersect(
                 k,
                 [CliffHandle::Curve, CliffHandle::Surface],
-                &side.natural_uv_domain(),
+                &side.natural_uv_domain_with_nurb(k)?,
                 &cs_curve,
                 &trim_ivl,
                 self.approx_tol_3d,
@@ -2453,7 +2453,9 @@ pub fn find_rollover_side_edge<O: ClassObject>(
                     .and_then(|row| row.get(1))
                     .copied()
                     .ok_or_else(|| invalid("short surface evaluation"))?;
-                let center_uv = orig_fillet.natural_uv_domain().evaluate(0.5, 0.5);
+                let center_uv = orig_fillet
+                    .natural_uv_domain_with_nurb(k)?
+                    .evaluate(0.5, 0.5);
                 if uv.y > center_uv.y {
                     bin_vec = -bin_vec;
                 }

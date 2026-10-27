@@ -165,7 +165,8 @@ impl<'a, S> TangentField<'a, S> {
         // set m_vUVDomain
         let uv_domain = match uv_domain {
             Some(d) => d,
-            None => surface.natural_uv_domain(),
+            // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
+            None => surface.natural_uv_domain_if_built(),
         };
         Ok(Self {
             uv_curve,

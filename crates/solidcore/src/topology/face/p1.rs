@@ -1027,7 +1027,8 @@ fn store_surface(
     }
 
     // update the Face domain, change the surface owner, save the surface
-    face.uv_domain = surface.natural_uv_domain();
+    // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+    face.uv_domain = surface.natural_uv_domain_if_built();
     surface.set_owner(Some(this));
     face.surface = Some(surface);
     b.geometry_owner_keys.insert(EntityRef::Face(f), this);
@@ -2539,7 +2540,7 @@ mod tests {
         // old surface is dropped (`bDeleteCurrFace`) or handed back
         let (mut b, f, _, _) = plane_face_with_faceuses();
         let s = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::X));
-        let domain = s.natural_uv_domain();
+        let domain = s.natural_uv_domain_if_built();
         assert!(set_surface(&mut b, f, me(f), s, true).unwrap().is_none());
         let face = b.face(f).unwrap();
         assert_eq!(face.uv_domain, domain);

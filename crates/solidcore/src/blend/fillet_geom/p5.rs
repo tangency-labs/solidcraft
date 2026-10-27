@@ -857,7 +857,7 @@ impl FilletBrep {
                 .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
             let lifted = surface1.lift_curve(
                 k,
-                &surface1.natural_uv_domain(),
+                &surface1.natural_uv_domain_with_nurb(k)?,
                 &uv1,
                 &uv1.natural_interval(),
                 tol / 10.0,
@@ -1778,7 +1778,7 @@ impl FilletBrep {
         // next - Lift pUVCurve to p3DCurve
         let lifted = fillet_surface.lift_curve(
             k,
-            &fillet_surface.natural_uv_domain(),
+            &fillet_surface.natural_uv_domain_with_nurb(k)?,
             &uv_curve,
             &uv_curve.natural_interval(),
             solver.approx_tol_3d / 4.0,
@@ -1877,7 +1877,7 @@ impl FilletBrep {
             .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?;
 
         // locals: FilletSurface Natural domain and current tolerance
-        let uv_domain = fillet_surface.natural_uv_domain();
+        let uv_domain = fillet_surface.natural_uv_domain_with_nurb(k)?;
         let sid = self
             .geom(g)?
             .fillet_solver()
@@ -2177,7 +2177,7 @@ impl FilletBrep {
             .fillet_surface()?
             .cloned()
             .ok_or_else(|| SolidError::null_pointer(OP_CLIFF))?;
-        let fil_srf_domain = fillet_surface.natural_uv_domain();
+        let fil_srf_domain = fillet_surface.natural_uv_domain_with_nurb(k)?;
 
         for rail_idx in 0..2 {
             let main_rail = self

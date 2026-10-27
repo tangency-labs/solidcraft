@@ -818,7 +818,8 @@ type Run = Result<Vec<f64>, SolidError>;
 /// A cache of `s` over its natural domain.
 fn cache_of(s: &BSplineSurface, dom: Option<Extent2d>) -> SurfaceCache<i64> {
     let surface = Surface::from(s.copy());
-    let d = dom.unwrap_or_else(|| surface.natural_uv_domain());
+    // (runner helper without a kernel in scope)
+    let d = dom.unwrap_or_else(|| surface.natural_uv_domain_if_built());
     let mut c = SurfaceCache::new(surface, d, SurfaceCacheOptions::default());
     c.set_surface_handle(Some(SURFACE_HANDLE));
     c

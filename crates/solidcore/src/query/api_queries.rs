@@ -1065,7 +1065,7 @@ mod tests {
             Ok(&self.surface)
         }
         fn face_uv_domain(&self, _: Object) -> Result<Extent2d> {
-            Ok(self.surface.natural_uv_domain())
+            Ok(self.surface.natural_uv_domain_if_built())
         }
         fn face_tolerance(&self, _: Object) -> Result<f64> {
             Ok(1e-5)

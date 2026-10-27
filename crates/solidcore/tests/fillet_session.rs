@@ -360,7 +360,7 @@ fn actual_target_extension_map_retains_native_containing_surface() {
     let mut target = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
     let face = target.faces().ids().next().unwrap();
     let surface = target.face(face).unwrap().surface.as_ref().unwrap().clone();
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_if_built();
     let duplicate = surface.clone();
     let mut session = FilletSession::new(&mut k, &mut target).unwrap();
     assert!(session.extended_surface(face).is_none());
@@ -373,7 +373,7 @@ fn actual_target_extension_map_retains_native_containing_surface() {
         .unwrap();
     let actual = session.extended_surface(face).unwrap();
     assert_eq!(std::ptr::from_ref(actual), retained);
-    assert_eq!(actual.natural_uv_domain(), domain);
+    assert_eq!(actual.natural_uv_domain_if_built(), domain);
 }
 
 #[test]
@@ -578,7 +578,7 @@ fn actual_box_face_stage_constructs_a_distinct_intermediate_body() {
         .fillet_surface(geom)
         .unwrap()
         .unwrap()
-        .natural_uv_domain();
+        .natural_uv_domain_if_built();
     assert_eq!((before.min().x, before.max().x), (0.0, 1.0));
     let context = k.context.doing_boolean();
     session.shrink_fillet_faces(&mut k).unwrap();
@@ -587,7 +587,7 @@ fn actual_box_face_stage_constructs_a_distinct_intermediate_body() {
         .fillet_surface(geom)
         .unwrap()
         .unwrap()
-        .natural_uv_domain();
+        .natural_uv_domain_if_built();
     // Independent native direct-component baseline; default trim options.
     assert_eq!((after.min().x, after.max().x), (0.25, 0.75));
     assert_eq!((after.min().y, after.max().y), (0.0, 1.0));
@@ -635,7 +635,7 @@ fn actual_box_shared_constructor_builds_and_stitches_native_intermediate_body() 
                 .unwrap()
         )
     );
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_if_built();
     assert_eq!((domain.min().x, domain.max().x), (0.0, 1.0));
     let Some(FilletObject::Attribute(marker)) = session.executive().edge_attribute else {
         panic!("constructor must retain actual executive edge attribute");

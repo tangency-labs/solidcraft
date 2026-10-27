@@ -1234,7 +1234,8 @@ impl BSplineCurve {
 
                     // project 3dPoint (sPosTang[2*jj]) to Surface1 near sUVGuessPoint
                     let guess = Vec2::new(guess_3d.x, guess_3d.y);
-                    let domain = surface.natural_uv_domain();
+                    // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
+                    let domain = surface.natural_uv_domain_if_built();
                     let (_found, sol_value, sol_params) =
                         surface_local_point_solve(k, surface, &domain, pos_jj, guess)?;
 

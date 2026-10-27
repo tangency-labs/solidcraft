@@ -329,7 +329,8 @@ fn options_of(p: &OptsIn) -> SurfaceCacheOptions {
 }
 
 fn cache_of(surface: Surface, opts: &OptsIn) -> SurfaceCache<i64> {
-    let dom = surface.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let dom = surface.natural_uv_domain_if_built();
     let mut c = SurfaceCache::new(surface, dom, options_of(opts));
     c.start_fast_subdivision_angle_deg = opts.start;
     c.set_surface_handle(Some(SURFACE_HANDLE));

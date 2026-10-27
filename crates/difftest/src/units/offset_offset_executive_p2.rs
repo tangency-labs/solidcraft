@@ -873,7 +873,7 @@ fn rust_projection(kernel: &Kernel, fixture: &Fixture, brep: &Brep) -> HResult<P
             result.values.extend(domain_values(face.uv_domain));
             result
                 .values
-                .extend(domain_values(surface.natural_uv_domain()));
+                .extend(domain_values(surface.natural_uv_domain_with_nurb(kernel).map_err(|e| HarnessError::new(e.to_string()))?));
             let lo = face.uv_domain.min();
             let hi = face.uv_domain.max();
             for fraction in [0.0, 0.5, 1.0] {

@@ -2035,7 +2035,7 @@ pub fn remove_topological_with_notifications(
                     .surface
                     .as_ref()
                     .ok_or_else(|| SolidError::null_pointer(OP))?
-                    .natural_uv_domain();
+                    .natural_uv_domain_with_nurb(k)?;
                 crate::topology::face::p2::set_uv_domain(b, keep, &domain)?;
                 let tolerance = b.face(keep)?.tolerance;
                 if topological.dist_between > tolerance / 10.0 {

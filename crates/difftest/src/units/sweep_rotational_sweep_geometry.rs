@@ -683,7 +683,7 @@ fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve, uv: bool) -> Result<(), Fa
 /// As the shim's `put_surface`.
 fn put_surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<(), Fail> {
     o.push(s.type_code() as f64);
-    let d = s.natural_uv_domain();
+    let d = s.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
     let (mn, mx) = (d.min(), d.max());
     o.extend([mn.x, mn.y, mx.x, mx.y]);
     for i in 0..N_SURF_SAMPLES {
@@ -906,7 +906,7 @@ fn run_rust_op(i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
         OpIn::FaceSame { surface, ftol } => {
             let (mut b, shell) = new_brep(&k, s)?;
             let srf = rust_surface(surface)?;
-            let dom = srf.natural_uv_domain();
+            let dom = srf.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
             let mut face = Face::new(shell);
             face.surface = Some(srf);
             face.uv_domain = dom;

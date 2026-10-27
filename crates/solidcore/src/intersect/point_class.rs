@@ -1276,7 +1276,7 @@ impl<O: ClassObject> PointClassification<O> {
             PointClassType::Surface => {
                 let s = self.surface_of(geometry, OP_COMPUTE)?;
                 let o = self.object.ok_or_else(|| null_object(OP_COMPUTE))?;
-                obj_surface = Some((DropTarget::Surface(o), s.natural_uv_domain()));
+                obj_surface = Some((DropTarget::Surface(o), s.natural_uv_domain_with_nurb(k)?));
             }
             PointClassType::Volume => {
                 obj_volume = Some(

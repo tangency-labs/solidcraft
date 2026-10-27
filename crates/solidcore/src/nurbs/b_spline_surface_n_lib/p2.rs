@@ -2116,7 +2116,7 @@ fn corner_blend_n(
         // boundary surface case
         if negate_tan_curves.is_none() {
             // classify the ends of the curve against the surface UVDomain
-            let curr_uv_domain = curr_srf.natural_uv_domain();
+            let curr_uv_domain = curr_srf.natural_uv_domain_with_nurb(k)?;
             let tol_uv = curr_uv_domain.size() / 1000.0;
             let tol = min2(tol_uv.x, tol_uv.y);
             let start_bndries = curr_uv_domain.point_boundaries(curr_start_uv, tol);

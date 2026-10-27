@@ -43,7 +43,8 @@ pub(super) fn snapshot(session: &FilletSession<'_>) -> SolidResult<(Vec<f64>, Ve
                 owner.map_or(0.0, |o| o.type_code as f64),
                 label(&faces, face),
             ]);
-            let domain = surface.natural_uv_domain();
+            // (runner helper without a kernel in scope)
+            let domain = surface.natural_uv_domain_if_built();
             values.extend([
                 domain.min().x,
                 domain.min().y,

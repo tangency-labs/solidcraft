@@ -653,7 +653,7 @@ fn build_face(
     // connect face to surface just temporarily to help with some radial sectoring
     // that will follow (the face is not on the face list yet).
     let face_ref = (env.key_of)(EntityRef::Face(face));
-    let domain = transfer.owned_surface()?.natural_uv_domain();
+    let domain = transfer.owned_surface()?.natural_uv_domain_with_nurb(k)?;
     transfer.install(brep, face)?;
     set_surface_owner(
         k,

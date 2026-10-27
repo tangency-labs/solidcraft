@@ -531,7 +531,8 @@ pub(crate) fn gen_analytic(rng: &mut Rng, scale: f64) -> AnalyticSrf {
 
 /// The UV point at fractions `(a, b)` of the surface's domain and its 3D point.
 fn on_surface(k: &Kernel, s: &Surface, a: f64, b: f64) -> Option<[f64; 3]> {
-    let d = s.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = s.natural_uv_domain_if_built();
     s.evaluate_point(k, d.evaluate(a, b)).ok().map(v3a)
 }
 

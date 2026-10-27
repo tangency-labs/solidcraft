@@ -2123,7 +2123,8 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 let face = *rm.target_faces.get(q).ok_or_else(|| harness("face"))?;
                 match fc.extended_surface(&exec, face) {
                     Some(s) => {
-                        let d = s.natural_uv_domain();
+                        // (runner helper without a kernel in scope)
+                        let d = s.natural_uv_domain_if_built();
                         rec.extend([d.max().x, d.max().y]);
                     }
                     None => rec.extend([-1.0, -1.0]),

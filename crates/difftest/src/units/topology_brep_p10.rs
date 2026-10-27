@@ -968,7 +968,8 @@ impl Out<'_> {
         };
         self.i(1);
         self.i(s.type_code());
-        let dom: Extent2d = s.natural_uv_domain();
+        // (runner helper that does not return Result)
+        let dom: Extent2d = s.natural_uv_domain_if_built();
         let (lo, hi) = (dom.min(), dom.max());
         self.d(lo.x);
         self.d(lo.y);

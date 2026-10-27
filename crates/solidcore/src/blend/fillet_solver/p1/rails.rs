@@ -430,7 +430,7 @@ impl Rails<'_> {
         let solutions = surface.global_curve_intersect(
             self.k,
             [CliffHandle::Curve(&curve), CliffHandle::Surface(surface)],
-            &surface.natural_uv_domain(),
+            &surface.natural_uv_domain_with_nurb(self.k)?,
             &curve,
             &interval,
             approx,

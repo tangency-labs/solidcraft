@@ -498,7 +498,7 @@ pub fn create_uv_curve(
     // locals
     let start_pnt = fb.vertex_point(start_fv)?;
     let end_pnt = fb.vertex_point(end_fv)?;
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
 
     // when asked - create 2 UVTrimCurves running along surface seam
     if create_two_boundary_curves {
@@ -641,7 +641,7 @@ pub fn create_uv_curve(
     let param_tol = (uv_domain.size().max_dimension() + 1.0) * EFF_ZERO;
 
     // the solutions name pSurface (SmFilletGeom.cpp:4461-4504), see UvSurfaceHandle
-    let handle = UvSurfaceHandle(surface.natural_uv_domain());
+    let handle = UvSurfaceHandle(surface.natural_uv_domain_with_nurb(k)?);
     let solve = |pnt: Point3, op: SolverOperation, tol: f64, req: SolutionRequested| {
         surface.global_point_solve(
             k,
@@ -1520,7 +1520,7 @@ impl FilletBrep {
                 .ok_or_else(|| SolidError::null_pointer(OP_EXT))?
                 .clone_for_evaluation()?;
             let tol = fil_solver()?.approx_tol_3d;
-            let domain = surf1.natural_uv_domain();
+            let domain = surf1.natural_uv_domain_with_nurb(k)?;
             for pnt in [pnt1, pnt2] {
                 let solutions =
                     crate::intersect::point_class::live_owned_surface_global_point_solve(
@@ -1705,7 +1705,7 @@ impl FilletBrep {
             .geom(g)?
             .fillet_surface()?
             .ok_or_else(nul)?
-            .natural_uv_domain();
+            .natural_uv_domain_with_nurb(k)?;
         let (geom_type, solver_id, rails, other_rails1, other_rails2, side_eus) = {
             let geom = self.geom(g)?;
             (
@@ -2397,7 +2397,7 @@ impl FilletBrep {
             )?;
 
             // Lift it to 3D
-            let uv_domain = base_surf.natural_uv_domain();
+            let uv_domain = base_surf.natural_uv_domain_with_nurb(k)?;
             let face_tol = crate::topology::face::p2::tolerance(target, face)?;
             let lifted = base_surf.lift_curve(
                 k,
@@ -2539,7 +2539,7 @@ mod tests {
     fn uv_curve_on_plane_is_a_line() {
         let k = kernel();
         let srf = plane_patch(1.0);
-        let dom = srf.natural_uv_domain();
+        let dom = srf.natural_uv_domain_if_built();
         let a = srf.evaluate_point(&k, dom.evaluate(0.2, 0.3)).unwrap();
         let b = srf.evaluate_point(&k, dom.evaluate(0.2, 0.9)).unwrap();
         let (fb, v) = fb_with_points(&k, &[a, b]);
@@ -2560,7 +2560,7 @@ mod tests {
     fn uv_curve_diagonal_without_vertexuse_falls_back_to_line() {
         let k = kernel();
         let srf = plane_patch(1.0);
-        let dom = srf.natural_uv_domain();
+        let dom = srf.natural_uv_domain_if_built();
         let a = srf.evaluate_point(&k, dom.evaluate(0.1, 0.1)).unwrap();
         let b = srf.evaluate_point(&k, dom.evaluate(0.8, 0.7)).unwrap();
         let (fb, v) = fb_with_points(&k, &[a, b]);

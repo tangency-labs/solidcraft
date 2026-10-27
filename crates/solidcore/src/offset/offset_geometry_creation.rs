@@ -1173,7 +1173,7 @@ impl OffsetGeometryCreation {
             // self-intersection locals
             let angle_tol = 20.0 * PI / 180.0;
             let use_surface_edges = [false, false];
-            let uv_domain = brep.surface(off)?.natural_uv_domain();
+            let uv_domain = brep.surface(off)?.natural_uv_domain_with_nurb(k)?;
 
             // find self intersections
             let ssi = {
@@ -1663,7 +1663,7 @@ impl OffsetGeometryCreation {
         let sur = brep
             .face_surface(face)?
             .ok_or(dangling("face without surface"))?;
-        let surf_domain = surface_of(brep, sur)?.natural_uv_domain();
+        let surf_domain = surface_of(brep, sur)?.natural_uv_domain_with_nurb(k)?;
         let mut min = face_domain.min();
         let mut max = face_domain.max();
         if (min.x - surf_domain.min().x).abs() < EFF_ZERO {
@@ -3815,7 +3815,7 @@ impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
             let sur = brep
                 .face_surface(face)?
                 .ok_or(dangling("face without surface"))?;
-            let old_domain = surface_of(brep, sur)?.natural_uv_domain();
+            let old_domain = surface_of(brep, sur)?.natural_uv_domain_with_nurb(k)?;
             // Reparameterize's status is ignored
             {
                 let s = brep

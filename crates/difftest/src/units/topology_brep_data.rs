@@ -230,7 +230,8 @@ impl Dump<'_> {
         self.i(1);
         let sf = &s.object;
         self.i(sf.type_code());
-        let dom = sf.natural_uv_domain();
+        // (runner helper without a kernel in scope)
+        let dom = sf.natural_uv_domain_if_built();
         let (a, b) = (dom.min(), dom.max());
         self.d(a.x);
         self.d(a.y);

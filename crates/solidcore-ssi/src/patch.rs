@@ -304,7 +304,7 @@ mod tests {
     fn patch_parameters_are_the_surfaces() {
         let k = Kernel::default();
         for (name, s) in surfaces(&k) {
-            let d = s.natural_uv_domain();
+            let d = s.natural_uv_domain_if_built();
             let p = patch(&k, &s, &d).unwrap();
             assert!(
                 p.analytic.is_some(),
@@ -330,7 +330,7 @@ mod tests {
     fn a_face_domain_keeps_the_parameters() {
         let k = Kernel::default();
         for (name, s) in surfaces(&k) {
-            let d = s.natural_uv_domain();
+            let d = s.natural_uv_domain_if_built();
             let (lo, hi) = (d.min(), d.max());
             let (w, h) = (hi.x - lo.x, hi.y - lo.y);
             let inner = Extent2d::from_bounds(

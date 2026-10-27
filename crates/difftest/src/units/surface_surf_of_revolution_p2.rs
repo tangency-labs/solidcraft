@@ -348,7 +348,7 @@ fn rust_op(
                 k,
                 &dom_of(*dom, s.base().natural_uv_domain()),
                 other_surface,
-                &dom_of(*other_dom, other_surface.natural_uv_domain()),
+                &dom_of(*other_dom, other_surface.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?),
                 [true, true],
                 *tol,
                 None,

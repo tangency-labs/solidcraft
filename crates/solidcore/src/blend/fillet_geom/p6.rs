@@ -570,7 +570,7 @@ impl FilletBrep {
         let face = self.fillet_edge(e)?.original_face().ok_or_else(nul)?;
         let surf = face2::surface(target, face)?.ok_or_else(nul)?;
         let tol = face2::tolerance(target, face)?;
-        let uv_domain = surf.natural_uv_domain();
+        let uv_domain = surf.natural_uv_domain_with_nurb(k)?;
         let (start_fv, end_fv) = self.edge_end_vertices(e, OP_BLENDING)?;
 
         let prim_eu = primary_edgeuse(self.brep(), e)?.ok_or_else(nul)?;
@@ -958,7 +958,7 @@ impl FilletBrep {
             .clone();
 
         // Drop two end points to fillet
-        let uv_domain = fillet_surface.natural_uv_domain();
+        let uv_domain = fillet_surface.natural_uv_domain_with_nurb(k)?;
 
         let p1 = self.vertex_point(start_fv)?;
         let solutions1 = fillet_surface.global_point_solve::<NoObject>(
@@ -1187,7 +1187,7 @@ impl FilletBrep {
         } else {
             // RailUVCurve as the appropriate FilletSurface IsoParameterCurve
             let surface = self.geom(fillet_geom)?.fillet_surface()?.ok_or_else(nul)?;
-            let uv_domain = surface.natural_uv_domain();
+            let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
 
             // compare RailPoint to a FilletSurface Point to see if rail runs along
             // sUVDomain.MinY IsoParamCurve
@@ -1819,7 +1819,7 @@ impl FilletBrep {
             .geom(g)?
             .fillet_surface()?
             .ok_or_else(|| SolidError::null_pointer(OP_SETUP))?;
-        let uv_domain = surface.natural_uv_domain();
+        let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let mut uv = uv_domain.evaluate(end_index as f64, rail_index as f64);
         uv.x = parameter;
 

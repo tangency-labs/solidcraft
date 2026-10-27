@@ -515,7 +515,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             ) {
                 Ok(surface) => {
                     o.extend([0.0, 1.0, flag(surface.owner().is_none())]);
-                    let domain = surface.natural_uv_domain();
+                    let domain = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
                     o.extend([
                         domain.min().x,
                         domain.min().y,

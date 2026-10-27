@@ -973,9 +973,9 @@ fn plane_global_curve_intersect(
         k,
         [
             PlaneHandle::Curve(curve.natural_interval()),
-            PlaneHandle::Plane(surface.natural_uv_domain()),
+            PlaneHandle::Plane(surface.natural_uv_domain_with_nurb(k)?),
         ],
-        &surface.natural_uv_domain(),
+        &surface.natural_uv_domain_with_nurb(k)?,
         curve,
         ivl,
         tol,

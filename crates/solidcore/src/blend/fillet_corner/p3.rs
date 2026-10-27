@@ -1665,7 +1665,7 @@ impl FilletCorner {
         // pCurve1->GetNaturalInterval(), m_dThisApproxTol3d, ..)` (virtual with the
         // defaults `bKeepAllDropCurves = TRUE`, no fail record): the `SmPlane`
         // override for a plane (with the surface's owner), the base body otherwise.
-        let domain = surface.natural_uv_domain();
+        let domain = surface.natural_uv_domain_with_nurb(env.k)?;
         let interval = curve1.natural_interval();
         // (the drop gives `SmBSplineCurve`s; for a plane a UV `SmLine` stays a line, as
         // upstream keeps the `SmLine` object behind the pointer, `SetUVCurve` stores it)

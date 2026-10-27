@@ -498,7 +498,8 @@ impl SrfInVolume {
     /// `GetNaturalUVDomain`: the base surface's.
     #[must_use]
     pub fn natural_uv_domain(&self) -> Extent2d {
-        self.surface.natural_uv_domain()
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        self.surface.natural_uv_domain_if_built()
     }
 
     /// `GetSTEPUVDomain`: the base surface's.

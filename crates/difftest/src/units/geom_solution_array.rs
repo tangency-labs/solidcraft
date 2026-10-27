@@ -92,7 +92,8 @@ impl SolutionObject for Obj {
     }
 
     fn natural_uv_domain(&self) -> Option<Extent2d> {
-        (self.kind() == ObjectKind::Surface).then(|| shim_plane().natural_uv_domain())
+        // (runner helper without a kernel in scope)
+        (self.kind() == ObjectKind::Surface).then(|| shim_plane().natural_uv_domain_if_built())
     }
 
     fn vertex_point(&self) -> Option<Point3> {

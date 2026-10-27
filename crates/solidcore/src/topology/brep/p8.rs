@@ -385,7 +385,7 @@ pub fn create_planar_face_with_3d_curves(
 
     // create the plane - returns an error for open, degenerate, or nonCoplanar curves
     let plane = Surface::create_plane_with_3d_curves(k, curves, tol_3d).map_err(plane_failed)?;
-    let plane_domain = plane.plane.natural_uv_domain();
+    let plane_domain = plane.plane.natural_uv_domain_with_nurb(k)?;
 
     let mut next_loop = 0usize;
     let mut next_curve = 0usize;

@@ -369,7 +369,7 @@ pub fn create_rectangle(
     let base = BSplineSurface::create_bilinear_surface(p00, p10, p01, p11)?;
     let plane = Surface::from(base).copy_and_add_analytics(k)?;
     let mut brep = new_brep(k)?;
-    let domain = plane.natural_uv_domain();
+    let domain = plane.natural_uv_domain_with_nurb(k)?;
     ignore_status(create_face(k, &mut brep, plane, domain))?;
     Ok(brep)
 }
@@ -1057,7 +1057,7 @@ impl PrimitiveCreation {
         for (rotation, index) in [(-90.0, 3), (180.0, 1)] {
             patch.rotate_at_pt(Vec3::ZERO, Vec3::X, rotation)?;
             let surface = Surface::from(BSplineSurface::from_gw_nurb(&patch));
-            let domain = surface.natural_uv_domain();
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
             let mut boundary = FaceCurves {
                 curve_loops: vec![2],
                 curves_3d: Some(Vec::new()),
@@ -1460,14 +1460,14 @@ mod tests {
             .surface
             .as_ref()
             .unwrap()
-            .natural_uv_domain();
+            .natural_uv_domain_if_built();
         let covered_b = b
             .face(fb)
             .unwrap()
             .surface
             .as_ref()
             .unwrap()
-            .natural_uv_domain();
+            .natural_uv_domain_if_built();
         assert!(covered_a.min().x <= -2.0 && covered_a.min().y <= -3.0);
         assert!(covered_a.max().x >= 4.0 && covered_a.max().y >= 5.0);
         assert_eq!(covered_a, covered_b);

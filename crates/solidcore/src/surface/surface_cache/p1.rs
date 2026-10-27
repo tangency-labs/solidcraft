@@ -3469,7 +3469,7 @@ mod tests {
         )
         .unwrap();
         let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
-        let d = surface.natural_uv_domain();
+        let d = surface.natural_uv_domain_if_built();
         let mut c = SurfaceCache::new(surface, d, SurfaceCacheOptions::default());
         c.set_surface_handle(Some(-1));
         c

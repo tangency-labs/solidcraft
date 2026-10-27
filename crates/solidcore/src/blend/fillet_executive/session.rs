@@ -3616,7 +3616,7 @@ impl SessionObjects<'_> {
         let found = crate::error::ignored(
             surface.simple_coincidence_checker::<crate::topology::ObjectHandle>(
                 k,
-                &surface.natural_uv_domain(),
+                &surface.natural_uv_domain_with_nurb(k)?,
                 curve,
                 &interval,
                 corner.approx_tol_3d,

@@ -699,7 +699,8 @@ impl crate::blend::fillet_solver::curve_blend_sih::SmoothingSolver for ConstantR
     fn base_natural_uv_domain(&self, rail: usize) -> Result<Extent2d> {
         Ok(own_offset_surface(&self.solver, rail)?
             .base_surface()
-            .natural_uv_domain())
+            // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+            .natural_uv_domain_if_built())
     }
 
     fn rail_surface(&self, rail: usize) -> Result<Surface> {

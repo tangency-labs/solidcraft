@@ -627,7 +627,8 @@ fn eval(c: &Crv, t: f64) -> Option<[f64; 3]> {
 
 fn surface_point(s: &Srf, u: f64, v: f64) -> Option<[f64; 3]> {
     let srf = surface_of(s).ok()?;
-    let d = srf.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let d = srf.natural_uv_domain_if_built();
     let uv = solidcore::math::Point2::new(
         d.min().x + u * (d.max().x - d.min().x),
         d.min().y + v * (d.max().y - d.min().y),

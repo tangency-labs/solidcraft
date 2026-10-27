@@ -990,7 +990,8 @@ fn checked_surface<'s>(
     };
 
     // Negated in-range test so a NaN parameter is rejected too.
-    let domain = surface.natural_uv_domain();
+    // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+    let domain = surface.natural_uv_domain_if_built();
     let (lo, hi) = (domain.min(), domain.max());
     if !(uv.x >= lo.x && uv.x <= hi.x && uv.y >= lo.y && uv.y <= hi.y) {
         return Err(SolidError::invalid_input(

@@ -3096,7 +3096,7 @@ mod tests {
                     if a.y == z.y {
                         continue;
                     }
-                    a.x = surface.natural_uv_domain().max().x;
+                    a.x = surface.natural_uv_domain_if_built().max().x;
                     z.x = a.x;
                     if eu1::orientation(&b, eu).unwrap() == OrientType::Opposite {
                         core::mem::swap(&mut a, &mut z);
@@ -3134,7 +3134,7 @@ mod tests {
                 // retain its failure, even though both seam sides map to the same
                 // points in 3D. No endpoint here comes from projection.
                 let eus = loop_edgeuses(&b, l).unwrap();
-                let d = surface.natural_uv_domain();
+                let d = surface.natural_uv_domain_if_built();
                 let (u0, u1, v0, v1) = (d.min().x, d.max().x, d.min().y, d.max().y);
                 let corners = [
                     ([u0, v1], [u0, v0]),
@@ -3201,7 +3201,7 @@ mod tests {
                 continue;
             };
             let (mut a, mut z) = edge_uv_ends(&k, &mut b, eu).unwrap();
-            a.x = surface.natural_uv_domain().max().x;
+            a.x = surface.natural_uv_domain_if_built().max().x;
             z.x = a.x;
             if eu1::orientation(&b, eu).unwrap() == OrientType::Opposite {
                 core::mem::swap(&mut a, &mut z);

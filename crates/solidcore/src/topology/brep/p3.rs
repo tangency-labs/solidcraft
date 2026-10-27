@@ -3513,7 +3513,7 @@ fn turn_to_nurbs_in(
 
             // first extend the new surface in all directions by a small amount
             let new_surface = Surface::from(new_bss);
-            let domain = new_surface.natural_uv_domain();
+            let domain = new_surface.natural_uv_domain_with_nurb(k)?;
             // (status not checked upstream: a failed call leaves the Init() box, whose
             // size clamps to 1.0 below)
             let srf_bbox =

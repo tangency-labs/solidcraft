@@ -1364,7 +1364,7 @@ pub(crate) fn natural_face(
     b: &mut Brep,
     surface: Surface,
 ) -> Result<FaceId, HarnessError> {
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
     let mut records = BTreeMap::new();
     let mut attributes = AttributeStore::default();
     let key_of = super::topology_brep_p8::key_of;

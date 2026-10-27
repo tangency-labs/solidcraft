@@ -460,7 +460,7 @@ pub(crate) fn rust_brep(k: &Kernel, f: &FaceIn) -> Result<(Brep, FaceId), Harnes
         type_code: fp2::TYPE,
         key: ObjectKey(1),
     }));
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
     let face = b
         .add_face_record(Face {
             surface: Some(surface),

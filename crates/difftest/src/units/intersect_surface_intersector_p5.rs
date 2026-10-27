@@ -297,7 +297,8 @@ fn link(i: i64) -> Option<NodeId> {
 
 /// The cache of `surface` over its natural domain with the hand-built tree `t`.
 fn rust_cache(surface: Surface, t: &[NodeIn], handle: H) -> Result<SurfaceCache<H>, HarnessError> {
-    let d = surface.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let d = surface.natural_uv_domain_if_built();
     let mut cache = SurfaceCache::new(surface, d, SurfaceCacheOptions::default());
     cache.set_surface_handle(Some(handle));
     let mut tree: Tree<H> = Tree::new(Some(TreeOwner::SurfaceCache));

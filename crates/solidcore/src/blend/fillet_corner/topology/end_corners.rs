@@ -587,7 +587,7 @@ impl FilletCorner {
             let solutions = base.global_point_solve_point_test_off::<ObjectHandle>(
                 k,
                 None,
-                &base.natural_uv_domain(),
+                &base.natural_uv_domain_with_nurb(k)?,
                 SolverOperation::Intersect,
                 corner_pnt,
                 tol,

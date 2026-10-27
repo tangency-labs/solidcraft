@@ -392,7 +392,7 @@ fn rust_brep(
     let err = |e: SolidError| harness(format!("brep: {e}"));
     let lu = LoopuseId::from_index(0);
     let n = u32::try_from(i.edgeuses.len()).map_err(|_| harness("edge uses"))?;
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
     let mut b = Brep::new();
     b.add_region_record(Region {
         in_brep: true,
@@ -979,7 +979,8 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
     let surface_in = gen_surface(rng, gs);
     let surface = rust_surface(&k, &surface_in).ok()??;
     let plane = matches!(surface_in, SurfIn::Plane { .. });
-    let dom = surface.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let dom = surface.natural_uv_domain_if_built();
     let (lo, hi) = (dom.min(), dom.max());
     let (w, h) = (hi.x - lo.x, hi.y - lo.y);
     if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {

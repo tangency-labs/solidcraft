@@ -1545,7 +1545,7 @@ fn run_rust_op_in(
                 let s = must(b.face(f))?.surface.as_ref();
                 out.push(s.map_or(-1.0, |x| x.type_code() as f64));
                 if let (Some(_), Some(s)) = (offset, s) {
-                    let d = s.natural_uv_domain();
+                    let d = s.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
                     out.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
                 }
             }

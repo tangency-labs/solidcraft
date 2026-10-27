@@ -1020,7 +1020,7 @@ pub fn create_non_rational_curve_with_context<O: crate::geom::solution_array::So
         let mut new_uv_trim_curve = None;
         if let Some(base) = opt_base_surface {
             let trim_ivl = new_curve.natural_interval();
-            let domain = base.natural_uv_domain();
+            let domain = base.natural_uv_domain_with_nurb(k)?;
             let dropped = drop_curve(k, base, &domain, &new_curve, &trim_ivl, approx_tol, context)?;
             new_uv_trim_curve = Some(
                 dropped

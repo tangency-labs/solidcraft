@@ -1433,7 +1433,7 @@ mod tests {
             .surface
             .as_ref()
             .unwrap()
-            .natural_uv_domain()
+            .natural_uv_domain_if_built()
             .min();
         let face_handle = FilletObject::Topology(FilletBody::Target, EntityRef::Face(face));
         let mut geometry =

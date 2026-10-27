@@ -306,7 +306,8 @@ impl CalcState {
         geom0: FilletGeomId,
         split_original_fillet: bool,
     ) -> Self {
-        let domain = base_surfaces[0].natural_uv_domain();
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        let domain = base_surfaces[0].natural_uv_domain_if_built();
         Self {
             edge_curve,
             ivl,
@@ -1941,8 +1942,8 @@ fn c3_trace_setup(
     st: &mut CalcState,
 ) -> Result<[Surface; 2]> {
     // get fillet baseSurface domains
-    let mut domain1 = st.base_surfaces[0].natural_uv_domain();
-    let mut domain2 = st.base_surfaces[1].natural_uv_domain();
+    let mut domain1 = st.base_surfaces[0].natural_uv_domain_if_built();
+    let mut domain2 = st.base_surfaces[1].natural_uv_domain_if_built();
 
     // extend baseSurface domains by m_dSurfaceExtensionFactor * rDomain.GetSize();
     // don't extend in periodic directions nor through singular boundaries
@@ -2057,7 +2058,7 @@ mod tests_c3 {
     fn analytic_planes() -> (Surface, Surface) {
         use crate::geom::vector2d::Vec2;
         use crate::surface::plane::Plane;
-        let domain = planes().0.natural_uv_domain();
+        let domain = planes().0.natural_uv_domain_if_built();
         let plane = |x: [f64; 3], y: [f64; 3]| {
             Surface::from(Plane::new(
                 Vec3::new(0.0, 0.0, 0.0),
@@ -2218,8 +2219,8 @@ mod tests_c3 {
         let mut st = state(line(), [a.clone(), b.clone()]);
         let surfaces = with_cx(&k, |cx| c3_trace_setup(&mut fs, cx, &mut st)).unwrap();
 
-        let mut d1 = a.natural_uv_domain();
-        let mut d2 = b.natural_uv_domain();
+        let mut d1 = a.natural_uv_domain_if_built();
+        let mut d2 = b.natural_uv_domain_if_built();
         fs.solver.setup_offset_extension(&k, &a, &mut d1).unwrap();
         fs.solver.setup_offset_extension(&k, &b, &mut d2).unwrap();
         assert_eq!(st.trace.domains[0].min, d1.min);
@@ -4701,7 +4702,7 @@ impl crate::blend::fillet_solver::curve_blend_sih::SmoothingSolver for Intersect
     fn base_natural_uv_domain(&self, rail: usize) -> Result<Extent2d> {
         Ok(offset_surface(&*self.ops, rail)?
             .base_surface()
-            .natural_uv_domain())
+            .natural_uv_domain_if_built())
     }
 
     fn rail_surface(&self, rail: usize) -> Result<Surface> {

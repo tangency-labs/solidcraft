@@ -423,7 +423,7 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
     let op = solver_op(i.solver)?;
     let test = v3(i.test);
     let tol = i.tol;
-    let obj = SrfObj(surface.natural_uv_domain());
+    let obj = SrfObj(surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
     let global = || {
         SurfPtGlobalSolver::new(
             &k,
@@ -836,7 +836,7 @@ fn gen_rev_case(rng: &mut Rng) -> Result<Inputs, HarnessError> {
     );
     let surf = AnySurf::Rev { rev };
     let s = any_surface(&k, wrap, &surf)?;
-    let nd = s.natural_uv_domain();
+    let nd = s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
     let d = [nd.min().x, nd.min().y, nd.max().x, nd.max().y];
     // the largest coordinate magnitude over a grid of surface points
     let mut size = 1e-12_f64;

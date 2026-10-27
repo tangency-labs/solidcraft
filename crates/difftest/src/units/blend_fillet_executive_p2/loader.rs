@@ -344,7 +344,7 @@ pub(crate) fn loader_rust(i: &LoaderScript) -> Result<Output, HarnessError> {
                 if let Some(surface) = surface {
                     let uv = surface
                         .base_surface()
-                        .natural_uv_domain()
+                        .natural_uv_domain_with_nurb(&k)?
                         .evaluate(0.5, 0.5);
                     let point = surface.surface.evaluate_point(&k, uv)?;
                     out.extend([0.0, point.x, point.y, point.z]);

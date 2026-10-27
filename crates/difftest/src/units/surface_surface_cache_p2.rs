@@ -496,7 +496,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             Ok(Ok(o))
         }
         OpIn::Add { adds, queries } => {
-            let d = surface.natural_uv_domain();
+            let d = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
             let mut cache = SurfaceCache::<i64>::new(surface, d, SurfaceCacheOptions::default());
             let mut o = vec![0.0];
             for a in adds {
@@ -659,7 +659,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
             Ok(Ok(o))
         }
         OpIn::SubdivBlock { opts, dom, nosurf } => {
-            let d = surface.natural_uv_domain();
+            let d = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
             let mut cache = cache_of(surface, d, opts);
             let mut tree: Tree<i64> = Tree::new(Some(TreeOwner::SurfaceCache));
             let handle = (!nosurf).then_some(SURFACE_HANDLE);

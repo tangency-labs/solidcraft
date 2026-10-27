@@ -975,7 +975,7 @@ fn run_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 return Ok(());
             };
             let c = rust_curve(k, curve)?;
-            let dom = domain.map_or_else(|| s.natural_uv_domain(), ext);
+            let dom = match domain { Some(d) => ext(*d), None => s.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))? };
             let ivl = interval.map_or_else(
                 || c.natural_interval(),
                 |i| Extent1d::from_min_max(i[0], i[1]),
@@ -1284,7 +1284,8 @@ fn gen_scale(rng: &mut Rng) -> f64 {
 /// The surface and its natural domain (`None` when it cannot be built).
 fn surface_with_domain(k: &Kernel, s: &SurfIn) -> Option<(Surface, [f64; 4])> {
     let srf = rust_surface(k, s).ok()??;
-    let d = srf.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = srf.natural_uv_domain_if_built();
     Some((srf, [d.u_min(), d.v_min(), d.u_max(), d.v_max()]))
 }
 

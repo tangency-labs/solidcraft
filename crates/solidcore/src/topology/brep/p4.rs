@@ -1797,7 +1797,8 @@ pub fn shrink_geometry(k: &Kernel, b: &mut Brep) -> Result<()> {
         let Some(face_domain) = ignored(face_calculate_uv_domain(k, b, f))? else {
             continue;
         };
-        let surf_domain = deref(face2::surface(b, f)?, OP_SHRINK)?.natural_uv_domain();
+        let surf_domain =
+            deref(face2::surface(b, f)?, OP_SHRINK)?.natural_uv_domain_with_nurb(k)?;
         let tol = face_domain.size().length() / 1000.0;
         let mut min = face_domain.min();
         let mut max = face_domain.max();
@@ -1819,7 +1820,8 @@ pub fn shrink_geometry(k: &Kernel, b: &mut Brep) -> Result<()> {
 
     for face in brep_get_surfaces(b)? {
         let mut face_domain = face2::uv_domain(b, face)?;
-        let surf_domain = deref(face2::surface(b, face)?, OP_SHRINK)?.natural_uv_domain();
+        let surf_domain =
+            deref(face2::surface(b, face)?, OP_SHRINK)?.natural_uv_domain_with_nurb(k)?;
         // The status of `Intersect` is dropped upstream, but on disjoint domains it has
         // `Init()`ed the result (SmExtent2d.cpp:414-418), and that undefined extent is
         // the face domain from here on (`AreEqual`, `TrimWithDomain`, `SetUVDomain`).

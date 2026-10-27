@@ -312,7 +312,8 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
         Ok(Some(
             fp2::surface(self.b, self.f)?
                 .ok_or(SolidError::null_pointer(OP_CACHE_FACE))?
-                .natural_uv_domain(),
+                // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+                .natural_uv_domain_if_built(),
         ))
     }
 

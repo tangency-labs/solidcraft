@@ -745,7 +745,8 @@ fn surface_handle(id: u8, s: &Surface) -> Handle {
     Handle {
         id,
         interval: None,
-        domain: Some(s.natural_uv_domain()),
+        // (runner helper without a kernel in scope)
+        domain: Some(s.natural_uv_domain_if_built()),
     }
 }
 
@@ -1366,7 +1367,8 @@ pub(crate) fn natural(s: &SrfIn) -> [f64; 4] {
         SrfIn::Plane { .. } | SrfIn::Revolution { .. } => {
             let d = surface_of(s).map_or_else(
                 |_| Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
-                |x| x.natural_uv_domain(),
+                // (runner helper without a kernel in scope)
+                |x| x.natural_uv_domain_if_built(),
             );
             [d.min().x, d.min().y, d.max().x, d.max().y]
         }

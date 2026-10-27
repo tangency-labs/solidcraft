@@ -237,9 +237,9 @@ fn plane_intersections(
             k,
             [
                 BoundaryObject::curve(0, natural),
-                BoundaryObject::plane(plane.natural_uv_domain()),
+                BoundaryObject::plane(plane.natural_uv_domain_with_nurb(k)?),
             ],
-            &plane.natural_uv_domain(),
+            &plane.natural_uv_domain_with_nurb(k)?,
             curve,
             &natural,
             tol,

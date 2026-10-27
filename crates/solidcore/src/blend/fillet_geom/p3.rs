@@ -991,8 +991,8 @@ impl FilletBrep {
         };
         let surf1 = off(&*solver, 0)?;
         let surf2 = off(&*solver, 1)?;
-        let mut domain1 = surf1.surface.natural_uv_domain();
-        let mut domain2 = surf2.surface.natural_uv_domain();
+        let mut domain1 = surf1.surface.natural_uv_domain_with_nurb(k)?;
+        let mut domain2 = surf2.surface.natural_uv_domain_with_nurb(k)?;
         let tolerance = solver.solver().approx_tol_3d;
         let ang_tol = solver.solver().ang_tol_rad;
         let scale = ivl.length();

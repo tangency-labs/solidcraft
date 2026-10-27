@@ -945,7 +945,8 @@ impl<O: SolutionObject> ParameterDomains<O> for TopologyDomains<'_, O> {
             self.objects
                 .surface(*surface)
                 .ok()
-                .map(Surface::natural_uv_domain)
+                // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+                .map(Surface::natural_uv_domain_if_built)
         })
     }
 }

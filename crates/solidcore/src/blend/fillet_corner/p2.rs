@@ -950,7 +950,7 @@ impl FilletCorner {
             .fillet_surface()?
             .ok_or_else(|| invalid(OP, "fillet geometry without fillet surface"))?;
 
-        let srf_domain = fillet_srf.natural_uv_domain();
+        let srf_domain = fillet_srf.natural_uv_domain_with_nurb(k)?;
         // u runs the long way, v goes across the fillet. (statuses ignored)
         let srf_pt00 =
             unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(0.0, 0.0)))?;
@@ -1798,7 +1798,7 @@ impl FilletCorner {
         // Then determine the orientation of pFilletSurface. But first, drop two end
         // points of pOppositeEdge onto pOppositeFillet
         let mut offset_orientation2 = 1.0;
-        let uv_domain = opposite_fillet.natural_uv_domain();
+        let uv_domain = opposite_fillet.natural_uv_domain_with_nurb(env.k)?;
         let drop_uv = |p: Point3| -> Result<Point2> {
             let sols = opposite_fillet.global_point_solve::<ObjectHandle>(
                 env.k,

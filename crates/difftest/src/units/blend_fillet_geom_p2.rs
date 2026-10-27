@@ -553,7 +553,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
                         return Ok(Rec::Flat(o));
                     }
                 };
-                let domain = surface.natural_uv_domain();
+                let domain = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
                 let shell = rm.target.add_shell().map_err(h)?;
                 let f: FaceId = rm.target.add_face(shell).map_err(h)?;
                 let fr = rm.target.face_mut(f).map_err(h)?;
@@ -744,7 +744,8 @@ fn gen_pair(k: &Kernel, rng: &mut Rng, scale: f64) -> (SurfIn, SurfIn) {
             let p = surface_of(&s)
                 .ok()
                 .and_then(|rs| {
-                    let d = rs.natural_uv_domain();
+                    // (runner helper that does not return Result)
+                    let d = rs.natural_uv_domain_if_built();
                     rs.evaluate_point(k, d.evaluate(rng.uniform(0.2, 0.8), rng.uniform(0.2, 0.8)))
                         .ok()
                 })
@@ -1013,7 +1014,8 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
         _ => SurfIn::Analytic(gen_analytic(rng, scale)),
     };
     let rs = surf(&k, &face).ok()?.ok()?;
-    let d = rs.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = rs.natural_uv_domain_if_built();
     let at = |a: f64, b: f64| -> Option<([f64; 3], [f64; 2])> {
         let uv = d.evaluate(a, b);
         rs.evaluate_point(&k, uv)

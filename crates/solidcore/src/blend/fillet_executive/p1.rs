@@ -1378,7 +1378,10 @@ pub fn remove_topo_edges(k: &mut Kernel, b: &mut Brep, edges: &[Option<EdgeId>])
         if let [f0, f1] = faces[..] {
             let domains = match (face_p2::surface(b, f0)?, face_p2::surface(b, f1)?) {
                 (None, None) => None,
-                (Some(s0), Some(s1)) => Some((s0.natural_uv_domain(), s1.natural_uv_domain())),
+                (Some(s0), Some(s1)) => Some((
+                    s0.natural_uv_domain_with_nurb(k)?,
+                    s1.natural_uv_domain_with_nurb(k)?,
+                )),
                 _ => return Err(SolidError::invalid_input(OP, "face without surface")),
             };
             if let Some((domain0, domain1)) = domains {
@@ -1393,7 +1396,7 @@ pub fn remove_topo_edges(k: &mut Kernel, b: &mut Brep, edges: &[Option<EdgeId>])
                 let new_surface = face_p2::surface(b, kept_face)?
                     .ok_or_else(|| SolidError::invalid_input(OP, "face without surface"))?
                     .copy_and_add_analytics(k)?;
-                let face_domain = new_surface.natural_uv_domain();
+                let face_domain = new_surface.natural_uv_domain_with_nurb(k)?;
                 face_p2::set_uv_domain(b, delete_face, &face_domain)?;
                 // the face owns the copy (under the identity the DeleteSurface names it
                 // by); the DeleteSurface is deleted

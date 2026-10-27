@@ -870,7 +870,7 @@ fn rust_op(k: &Kernel, i: &Inputs, o: &mut Vec<f64>) -> Result<(), Fail> {
                 };
                 let other_ref = other.as_ref().unwrap_or(&sa);
                 let db = if natural_db {
-                    other_ref.natural_uv_domain()
+                    other_ref.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?
                 } else {
                     ext(*db)
                 };

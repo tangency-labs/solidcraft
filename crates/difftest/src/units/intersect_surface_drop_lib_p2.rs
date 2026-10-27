@@ -1057,7 +1057,8 @@ pub(crate) fn gen_scale(rng: &mut Rng) -> f64 {
 /// The surface and its natural domain (`None` when it cannot be built).
 pub(crate) fn surface_with_domain(k: &Kernel, s: &SurfIn) -> Option<(Surface, [f64; 4])> {
     let srf = rust_surface(k, s).ok()??;
-    let d = srf.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = srf.natural_uv_domain_if_built();
     Some((srf, [d.u_min(), d.v_min(), d.u_max(), d.v_max()]))
 }
 

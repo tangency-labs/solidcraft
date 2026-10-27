@@ -567,7 +567,7 @@ pub fn create_srf_of_revolution(
 
     // Check for OtherCurve/SurfOfRevolution coincidence
     let ivl = other_curve.natural_interval();
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     let found = surface.simple_coincidence_checker::<ObjectHandle>(
         k,
         &uv_domain,
@@ -946,8 +946,9 @@ impl FilletCorner {
         ext_surface: Surface,
     ) -> bool {
         if let Some(old_surface) = map.get(&original_face) {
-            let new_domain = ext_surface.natural_uv_domain();
-            let old_domain = old_surface.natural_uv_domain();
+            // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+            let new_domain = ext_surface.natural_uv_domain_if_built();
+            let old_domain = old_surface.natural_uv_domain_if_built();
             if new_domain.is_contained_by(&old_domain, EFF_ZERO) {
                 // Old domain was bigger, delete the new ext surface.
                 return false;
@@ -1531,7 +1532,7 @@ impl FilletCorner {
         let runs_on = surface
             .simple_coincidence_checker_with_context(
                 k,
-                &surface.natural_uv_domain(),
+                &surface.natural_uv_domain_with_nurb(k)?,
                 &curve,
                 &interval,
                 self.approx_tol_3d,
@@ -2094,7 +2095,7 @@ impl FilletCorner {
 
         // for every m_Surfaces->Surface - build 1 face with natural edge boundaries
         for surface in self.surfaces.clone() {
-            let uv_domain = surface.natural_uv_domain();
+            let uv_domain = surface.natural_uv_domain_with_nurb(env.k)?;
 
             // Add surface Natural IsoParameter boundaries to s3DCurves array
             let mut curves_3d = Vec::new();
@@ -2278,7 +2279,7 @@ impl FilletCorner {
 
         // Drop both ends of base curve onto two fillets
         let drop_uv = |k: &Kernel, surface: &Surface, p: Point3| -> Result<Point2> {
-            let uv_domain = surface.natural_uv_domain();
+            let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
             let solutions = surface.global_point_solve::<ObjectHandle>(
                 k,
                 None,
@@ -2744,7 +2745,7 @@ fn loop_orientation(
     patch_normal: Vec3,
     op: &'static str,
 ) -> Result<OrientType> {
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     let solutions = surface.global_point_solve::<ObjectHandle>(
         k,
         None,
@@ -2787,7 +2788,7 @@ fn make_face(
         .fillet
         .as_mut()
         .ok_or_else(|| SolidError::invalid_input(op, NULL_DEREF))?;
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(env.k)?;
     let region = fillet.brep.infinite_region();
     let key_of = fillet.notify.key_of;
     let face_ref = |f: FaceId| key_of(EntityRef::Face(f));

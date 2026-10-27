@@ -1102,12 +1102,12 @@ impl OffsetExecutive {
                 }
                 record.mark(Some(&kernel.context), mark_type);
                 let surface = required(temporary.face(id)?.surface.as_ref(), OP_EXTENDED)?;
-                let original_domain = surface.natural_uv_domain();
+                let original_domain = surface.natural_uv_domain_with_nurb(kernel)?;
                 // Face-owned surfaces use the caller's result-arena identities.
                 let extension = self
                     .get_create_extended_surface(kernel, key.key.0, surface)?
                     .clone();
-                let extension_domain = extension.natural_uv_domain();
+                let extension_domain = extension.natural_uv_domain_with_nurb(kernel)?;
                 // cpp:1639: UNSURE retains the original; FALSE suppresses UV trim
                 // creation. The optional modified-face list is not requested.
                 let (original_surface, _) =

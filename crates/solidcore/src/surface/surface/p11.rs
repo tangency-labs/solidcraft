@@ -1481,9 +1481,9 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                 // natural domains, with boundary testing)
                 let found = view1.eval.local_surface_intersect(
                     k,
-                    &view1.eval.natural_uv_domain(),
+                    &view1.eval.natural_uv_domain_with_nurb(k)?,
                     view2.eval,
-                    &view2.eval.natural_uv_domain(),
+                    &view2.eval.natural_uv_domain_with_nurb(k)?,
                     tol,
                     uv_guess1,
                     uv_guess2,

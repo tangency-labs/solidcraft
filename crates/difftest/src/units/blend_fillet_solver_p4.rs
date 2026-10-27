@@ -1036,7 +1036,8 @@ fn gen_surface(rng: &mut Rng, s: f64) -> SurfaceIn {
 /// The natural UV domain the Rust surface reports (`umin vmin umax vmax`).
 fn natural(k: &Kernel, s: &SurfaceIn) -> Option<[f64; 4]> {
     let srf = rust_surface(k, s).ok()?.ok()?;
-    let d = srf.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = srf.natural_uv_domain_if_built();
     Some([d.min().x, d.min().y, d.max().x, d.max().y])
 }
 

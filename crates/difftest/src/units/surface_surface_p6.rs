@@ -663,7 +663,8 @@ impl SolutionObject for Obj {
 }
 
 fn surface_obj(i: u8, s: &Surface) -> Obj {
-    let d = s.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let d = s.natural_uv_domain_if_built();
     Obj::Surface(i, [d.min().x, d.min().y, d.max().x, d.max().y])
 }
 
@@ -883,8 +884,8 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 base,
                 surface1: Some(&s),
                 surface2: Some(&s2),
-                uv_domain1: s.natural_uv_domain(),
-                uv_domain2: s2.natural_uv_domain(),
+                uv_domain1: s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?,
+                uv_domain2: s2.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?,
                 kernel: &k,
                 caches: [None, None],
                 face_queries: None,

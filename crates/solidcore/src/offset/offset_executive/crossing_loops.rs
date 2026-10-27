@@ -205,7 +205,7 @@ impl OffsetExecutive {
         let (zone_tol, uv_tol) = {
             let surface = required(b.face(f)?.surface.as_ref())?;
             let zone_tol = zone_tol_3d(kernel, surface)?;
-            let uv_mid = surface.natural_uv_domain().mid();
+            let uv_mid = surface.natural_uv_domain_with_nurb(kernel)?.mid();
             (zone_tol, map_to_2d(kernel, zone_tol, uv_mid, surface)?)
         };
         let mut fu = required(face::upward_faceuse(b, f)?)?;

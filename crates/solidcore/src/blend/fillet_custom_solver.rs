@@ -723,7 +723,7 @@ fn initial_setup(
             k,
             base2,
             face_owner(brep, surface2.base_id),
-            &base2.natural_uv_domain(),
+            &base2.natural_uv_domain_with_nurb(k)?,
             pnt,
             EFF_ZERO_SQ,
         )?;

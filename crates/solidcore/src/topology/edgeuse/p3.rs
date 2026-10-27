@@ -1033,7 +1033,8 @@ fn set_create_fail(
         from_call: 3,
         create_path_type: path,
         has_context: true,
-        uv_domain: surface.natural_uv_domain(),
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        uv_domain: surface.natural_uv_domain_if_built(),
         surface: Some(surface_handle),
         curve: Some(curve_handle),
         interval: curve.natural_interval(),

@@ -263,7 +263,9 @@ pub fn run_rust(case: &SsiCase, tol: Option<f64>) -> Result<RawOutput, EngineFai
             Ok(s) => {
                 let d = match dom {
                     Some(d) => Extent2d::from_bounds(d[0], d[2], d[1], d[3]),
-                    None => s.natural_uv_domain(),
+                    None => s
+                        .natural_uv_domain_with_nurb(&k)
+                        .map_err(|e| EngineFailure::Build(e.to_string()))?,
                 };
                 built.push((s, d));
             }

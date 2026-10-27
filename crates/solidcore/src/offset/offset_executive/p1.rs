@@ -684,7 +684,7 @@ impl OffsetExecutive {
                     NotifyOperation::PreEdit,
                     [Some(face_ref), None, None],
                 ))?;
-                let domain = new_surface.natural_uv_domain();
+                let domain = new_surface.natural_uv_domain_with_nurb(kernel)?;
                 crate::topology::face::p2::set_uv_domain(brep, f, &domain)?;
                 // swap the approx surface for the exact offset surface
                 crate::topology::brep::p2::replace_surface(
@@ -855,7 +855,7 @@ impl OffsetExecutive {
             None,
         )?;
         // cpp:2819: m_pOffsetBrep->CreateFaceFromSurface(pNewSurface, natural domain)
-        let domain = new_surface.natural_uv_domain();
+        let domain = new_surface.natural_uv_domain_with_nurb(kernel)?;
         let new_face = match notifications {
             Some(notifications) => {
                 let key_of = notifications.key_of;
@@ -1487,7 +1487,7 @@ impl OffsetExecutive {
         loop_points: &[Vec3],
         notifications: &mut NotifyState<'_>,
     ) -> Result<FaceId> {
-        let domain = surface.natural_uv_domain();
+        let domain = surface.natural_uv_domain_with_nurb(kernel)?;
         let key_of = notifications.key_of;
         let this_face = |face: FaceId| key_of(EntityRef::Face(face));
         let brep = required(self.offset_brep.as_mut())?;
@@ -1731,7 +1731,7 @@ impl OffsetExecutive {
             let fits = original
                 .face(face_id)?
                 .uv_domain
-                .is_contained_by(&surface.natural_uv_domain(), EFF_ZERO)
+                .is_contained_by(&surface.natural_uv_domain_with_nurb(kernel)?, EFF_ZERO)
                 || self.operation == OffsetOperation::LocalOperation;
             if fits {
                 orientation
@@ -1750,7 +1750,7 @@ impl OffsetExecutive {
             false,
             true,
         )?;
-        let offset_domain = surface.natural_uv_domain();
+        let offset_domain = surface.natural_uv_domain_with_nurb(kernel)?;
         let face_domain = original.face(face_id)?.uv_domain;
         if face_domain.is_contained_by(&offset_domain, EFF_ZERO)
             || self.operation == OffsetOperation::LocalOperation
@@ -1922,7 +1922,7 @@ impl OffsetExecutive {
             }
             first.copy(kernel)?
         };
-        let mut copy_domain = copy_plane.natural_uv_domain();
+        let mut copy_domain = copy_plane.natural_uv_domain_with_nurb(kernel)?;
         let SurfaceKind::Plane(plane) = copy_plane.kind_mut() else {
             return Err(SolidError::null_pointer(OP));
         };
@@ -1938,7 +1938,7 @@ impl OffsetExecutive {
             copy_domain.add_point(plane.project_point_to_uv_domain(corner));
         }
         ignore_status(plane.adjust_step_uv_domain(&copy_domain))?;
-        let copy_plane_domain = copy_plane.natural_uv_domain();
+        let copy_plane_domain = copy_plane.natural_uv_domain_with_nurb(kernel)?;
 
         // make a planar face using the offset UV trim curves (as 3D curves)
         let mut loops = Vec::new();
@@ -3511,9 +3511,15 @@ mod tests {
         let first = executive
             .get_create_extended_surface(&kernel, 41, &base)
             .unwrap();
-        assert_eq!(first.natural_uv_domain(), expected.natural_uv_domain());
+        assert_eq!(
+            first.natural_uv_domain_if_built(),
+            expected.natural_uv_domain_if_built()
+        );
         let first_point = first
-            .evaluate_point(&kernel, first.natural_uv_domain().evaluate(0.5, 0.5))
+            .evaluate_point(
+                &kernel,
+                first.natural_uv_domain_if_built().evaluate(0.5, 0.5),
+            )
             .unwrap();
         // A cached identity does not evaluate even a different/malformed supplied base.
         let broken = Surface::from(BSplineSurface::new());
@@ -3522,7 +3528,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             cached
-                .evaluate_point(&kernel, cached.natural_uv_domain().evaluate(0.5, 0.5))
+                .evaluate_point(
+                    &kernel,
+                    cached.natural_uv_domain_if_built().evaluate(0.5, 0.5)
+                )
                 .unwrap(),
             first_point
         );
@@ -3531,7 +3540,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             other
-                .evaluate_point(&kernel, other.natural_uv_domain().evaluate(0.5, 0.5))
+                .evaluate_point(
+                    &kernel,
+                    other.natural_uv_domain_if_built().evaluate(0.5, 0.5)
+                )
                 .unwrap()
                 .z,
             7.0
@@ -3776,7 +3788,7 @@ mod tests {
         let face = brep.face(offset_face).unwrap();
         let surface = face.surface.as_ref().unwrap();
         assert!(matches!(surface.kind(), SurfaceKind::BSpline(_)));
-        assert_eq!(face.uv_domain, surface.natural_uv_domain());
+        assert_eq!(face.uv_domain, surface.natural_uv_domain_if_built());
         let p = surface
             .evaluate_point(&kernel, Vec2::new(0.5, 0.5))
             .unwrap();
@@ -4596,7 +4608,7 @@ mod tests {
         assert!(matches!(surface.kind(), SurfaceKind::BSpline(_)));
         assert!(cap.trim_curves.is_empty());
         assert!(cap.curve_orientations.is_empty());
-        let domain = surface.natural_uv_domain();
+        let domain = surface.natural_uv_domain_if_built();
         for (u, v) in [(0.17, 0.29), (0.43, 0.61), (0.83, 0.79)] {
             let uv = crate::math::Point2::new(
                 (1.0 - u) * domain.min().x + u * domain.max().x,

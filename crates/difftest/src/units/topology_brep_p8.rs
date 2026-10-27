@@ -463,7 +463,8 @@ fn put_surface(k: &Kernel, o: &mut Vec<f64>, s: Option<&Surface>, dom: &Extent2d
         o.push(-1.0);
         return;
     };
-    let n = s.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let n = s.natural_uv_domain_if_built();
     o.extend([
         s.type_code() as f64,
         n.min().x,
@@ -561,10 +562,10 @@ fn rust_op(k: &mut Kernel, b: &mut Brep, i: &Inputs, fenv: &mut FaceBuildEnv<'_,
             continuity,
         } => {
             let s = surface.as_ref().map(rust_surface).transpose()?;
-            let dom = s.as_ref().map_or_else(
-                || Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
-                Surface::natural_uv_domain,
-            );
+            let dom = match s.as_ref() {
+                Some(s) => s.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?,
+                None => Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
+            };
             p8::create_faces_from_surface(k, b, s, &dom, continuity_of(*continuity)?, fenv).map(
                 |faces| Made {
                     faces,

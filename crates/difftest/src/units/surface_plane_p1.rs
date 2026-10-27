@@ -948,7 +948,7 @@ fn rust_op(k: &Kernel, op: &OpIn, a: &mut Plane, o: &mut Vec<f64>) -> Result<(),
         OpIn::Inherited { v } => {
             let s = Surface::from(a.clone());
             o.push(0.0);
-            put_dom(o, &s.natural_uv_domain());
+            put_dom(o, &s.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?);
             let max = s
                 .max_analytic_domain(k)
                 .map_err(|e| harness(format!("max analytic domain: {e}")))?;

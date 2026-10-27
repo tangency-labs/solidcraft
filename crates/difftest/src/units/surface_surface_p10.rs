@@ -463,7 +463,8 @@ fn build_cache(surface: &Surface, nodes: &[NodeIn]) -> Result<SurfaceCache<H>, H
     let handle = H(1);
     let mut cache = SurfaceCache::new(
         surface.clone(),
-        surface.natural_uv_domain(),
+        // (runner helper without a kernel in scope)
+        surface.natural_uv_domain_if_built(),
         SurfaceCacheOptions::default(),
     );
     cache.set_surface_handle(Some(handle));

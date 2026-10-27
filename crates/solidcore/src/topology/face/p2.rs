@@ -2742,7 +2742,7 @@ pub fn fix_uv_trim_curves_notified(
     let vertex_point = b.vertex(vertex)?.point;
     let curr_face =
         eu1::face(b, eu_current)?.ok_or_else(|| null("FixUVTrimCurves: edge use without face"))?;
-    let _ = surface_deref(b, curr_face)?.natural_uv_domain();
+    let _ = surface_deref(b, curr_face)?.natural_uv_domain_with_nurb(k)?;
 
     let curr_edge = edge_deref(b, eu_current)?;
     let prev_edge = edge_deref(b, eu_previous)?;

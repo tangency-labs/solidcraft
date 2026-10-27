@@ -587,7 +587,7 @@ fn rust_off(k: &Kernel, o: &OffIn) -> Result<solidcore::Result<OffsetSurface>, H
 
 /// The 3x3 `EvaluatePoint` grid over the natural domain.
 fn put_grid(k: &Kernel, o: &mut Vec<f64>, s: &Surface) -> Result<(), Fail> {
-    let d = s.natural_uv_domain();
+    let d = s.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
     for i in 0..3 {
         for j in 0..3 {
             let uv = d.evaluate(f64::from(i) / 2.0, f64::from(j) / 2.0);
@@ -613,14 +613,15 @@ fn put_state(k: &Kernel, o: &mut Vec<f64>, s: &OffsetSurface) -> Result<(), Fail
     s.with_extended_base_surface(|e| match e {
         Some(e) => {
             o.push(1.0);
-            put_dom(o, &e.natural_uv_domain());
+            // (an extension is a B-spline surface: never lazy)
+            put_dom(o, &e.natural_uv_domain_if_built());
             o.push(e.type_code() as f64);
         }
         None => o.push(0.0),
     });
     let b = s.base_surface();
     o.push(b.type_code() as f64);
-    put_dom(o, &b.natural_uv_domain());
+    put_dom(o, &b.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?);
     o.push(s.type_code() as f64);
     put_grid(k, o, &Surface::from(s.clone()))
 }
@@ -630,7 +631,7 @@ fn put_result(k: &Kernel, o: &mut Vec<f64>, r: &Surface) -> Result<(), Fail> {
     if let SurfaceKind::OffsetSurface(off) = r.kind() {
         put_state(k, o, off)
     } else {
-        put_dom(o, &r.natural_uv_domain());
+        put_dom(o, &r.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?);
         put_grid(k, o, r)
     }
 }
@@ -1222,7 +1223,8 @@ fn gen_off(rng: &mut Rng, scale: f64, depth: usize) -> OffIn {
 /// points, at least `1e-9`), built on the Rust side.
 fn base_info(k: &Kernel, off: &OffIn) -> Option<([f64; 4], f64)> {
     let s = rust_srf(k, &off.base).ok()?.ok()?;
-    let d = s.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = s.natural_uv_domain_if_built();
     let r = [d.min().x, d.min().y, d.max().x, d.max().y];
     if !(r.iter().all(|c| c.is_finite() && c.abs() < 1e5) && r[0] < r[2] && r[1] < r[3]) {
         return None;
@@ -1645,7 +1647,7 @@ fn fill_placeholders(case: &mut Case) -> Result<(), HarnessError> {
     .map_err(|e| bad(&e.to_string()))?;
     let k = Kernel::default();
     let base = rust_srf(&k, &off.base)?.map_err(|e| bad(&format!("base: {e}")))?;
-    let d = base.natural_uv_domain();
+    let d = base.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
     let (u0, v0, u1, v1) = (d.min().x, d.min().y, d.max().x, d.max().y);
     let (lu, lv) = (u1 - u0, v1 - v0);
     let on = || -> Result<[f64; 3], HarnessError> {

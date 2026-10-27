@@ -411,7 +411,7 @@ impl PrimitiveCreation {
                     };
                     let mut success = false;
                     if let Some(surface) = rev {
-                        let domain = surface.natural_uv_domain();
+                        let domain = surface.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
                         success =
                             ignored(a.surface_face(brep, surface, domain, &mut face))?.is_some();
                     }

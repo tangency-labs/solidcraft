@@ -319,7 +319,7 @@ fn skin_with_scratch(
         for &face in side_faces.iter() {
             let surface = crate::topology::face::p2::surface(a.brep(brep)?, face)?
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
-            let domain = surface.natural_uv_domain();
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
             skin_u_min = min2(skin_u_min, domain.min().x);
             skin_u_max = max2(skin_u_max, domain.max().x);
         }
@@ -329,7 +329,7 @@ fn skin_with_scratch(
         for &face in side_faces.iter() {
             let surface = crate::topology::face::p2::surface(a.brep(brep)?, face)?
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
-            let domain = surface.natural_uv_domain();
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
             if (domain.min().x - skin_u_min).abs() <= EFF_ZERO_SQRT {
                 let curve = surface
                     .create_iso_parametric_curve(

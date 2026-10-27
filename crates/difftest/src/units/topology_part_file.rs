@@ -113,7 +113,7 @@ fn dump(k: &mut Kernel, part: &Part) -> Result<Vec<f64>, SolidError> {
     }
     o.push(part.surfaces.len() as f64);
     for s in &part.surfaces {
-        let d = s.object.natural_uv_domain();
+        let d = s.object.natural_uv_domain_with_nurb(k)?;
         let (lo, hi) = (d.min(), d.max());
         o.extend([s.object.type_code() as f64, lo.x, lo.y, hi.x, hi.y]);
     }

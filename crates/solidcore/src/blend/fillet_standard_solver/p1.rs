@@ -1233,7 +1233,7 @@ impl ConstantDistanceFs {
                 .solver
                 .rail(other_rail)?
                 .base_surface()
-                .natural_uv_domain();
+                .natural_uv_domain_with_nurb(k)?;
             let size: Vec2 = self.solver.surface_extension_factor * domain.size();
 
             let n = guess_t.len();

@@ -203,7 +203,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         SurfParamType::from_code(i.direction as u64).ok_or_else(|| harness("direction"))?;
     let mut domain = Extent2d::from_bounds(i.domain[0], i.domain[1], i.domain[2], i.domain[3]);
     if i.analytic_cone != 0 {
-        let natural = surface.natural_uv_domain();
+        let natural = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
         domain = Extent2d::from_points(
             natural.evaluate(i.domain[0], i.domain[1]),
             natural.evaluate(i.domain[2], i.domain[3]),
@@ -268,7 +268,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             cc.tessellate(&k)
                 .map_err(|e| harness(format!("CSI fixture cache setup: {e}")))?;
             {
-                let surface_handle = Handle(1, Some(surface.natural_uv_domain()));
+                let surface_handle = Handle(1, Some(surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?));
                 let mut cache = SurfaceCache::<Handle>::new(
                     surface,
                     Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),

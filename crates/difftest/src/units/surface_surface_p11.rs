@@ -321,7 +321,7 @@ fn run_rust_lift(i: &LiftInputs) -> Result<Output, HarnessError> {
             let mut db = read_file_db(file, b'S')?;
             let s = Surface::read_from_db(&k, B_SPLINE_SURFACE_TYPE, &mut db, 30)
                 .map_err(|e| harness(format!("{file}: {e}")))?;
-            let d = domain.map_or_else(|| s.natural_uv_domain(), domain_of);
+            let d = match domain { Some(d) => domain_of(*d), None => s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))? };
             (s, d)
         }
         LiftSurfaceIn::Inline(si) => (surface(&k, si)?, domain(si.domain)),
@@ -874,7 +874,7 @@ mod tests {
         assert!(close(t.major_radius(), 0.3, 1e-12));
         assert!(close(t.minor_radius(), 0.2, 1e-12));
         assert!(!t.inside_out());
-        let nurb = s.natural_uv_domain();
+        let nurb = s.natural_uv_domain_if_built();
         assert!(close(nurb.min().x, 0.0, 1e-12) && close(nurb.max().x, 1.0, 1e-12));
         assert!(close(nurb.min().y, 0.0, 1e-12) && close(nurb.max().y, 1.0, 1e-12));
         let step = s.step_uv_domain();

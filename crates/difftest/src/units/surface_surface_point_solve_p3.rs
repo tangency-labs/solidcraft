@@ -218,7 +218,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let surface = geometry(&k, i)?;
     let domain = dom_of(i.dom);
     let operation = solver_op(i.solver)?;
-    let object = Object(surface.natural_uv_domain());
+    let object = Object(surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
     let oob = |s: &Surface| match s.kind() {
         SurfaceKind::BSpline(b) => Some(b.is_out_of_bounds_enabled()),
         SurfaceKind::Plane(p) => Some(p.base().is_out_of_bounds_enabled()),
@@ -340,7 +340,8 @@ fn candidate(rng: &mut Rng) -> Option<Inputs> {
     let (surf, natural, size) = if rng.chance(0.15) {
         let rev = gen_rev(rng);
         let surface = Surface::from(rev_rust(&k, &rev).ok()?.ok()?);
-        let domain = surface.natural_uv_domain();
+        // (runner helper that does not return Result)
+        let domain = surface.natural_uv_domain_if_built();
         (
             Geometry::Rev { rev },
             [
@@ -370,7 +371,8 @@ fn candidate(rng: &mut Rng) -> Option<Inputs> {
         },
     };
     let surface = geometry(&k, &case).ok()?;
-    let d = surface.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = surface.natural_uv_domain_if_built();
     let natural = [d.min().x, d.min().y, d.max().x, d.max().y];
     let domain = if rng.chance(0.4) {
         gen_sub_dom(rng, natural)
@@ -492,7 +494,8 @@ impl UnitDiff for Runner {
             },
         };
         let surface = geometry(&Kernel::default(), &input)?;
-        let domain = surface.natural_uv_domain();
+        // (runner helper without a kernel in scope)
+        let domain = surface.natural_uv_domain_if_built();
         for (index, point) in SURFACE_SMS_POINTS.into_iter().enumerate() {
             let mut input = input.clone();
             input.dom = [

@@ -24,7 +24,7 @@
 //! | [`Surface::create_extended_surface`], [`Surface::create_extended_surface_dir`] | `CreateExtendedSurface` (both) |
 //! | [`Surface::drop_point_fast`]                      | `DropPointFast`                                  |
 //! | [`Surface::evaluate`], [`Surface::evaluate_point`] | `Evaluate`, `EvaluatePoint`                     |
-//! | [`Surface::natural_uv_domain`], [`Surface::step_uv_domain`] | `GetNaturalUVDomain`, `GetSTEPUVDomain` |
+//! | [`Surface::natural_uv_domain_if_built`], [`Surface::step_uv_domain`] | `GetNaturalUVDomain`, `GetSTEPUVDomain` |
 //! | [`Surface::degree`], [`Surface::number_control_points`] | `GetDegree`, `GetNumberControlPoints`       |
 //! | [`Surface::max_analytic_domain`]                  | `GetMaxAnalyticDomain`                           |
 //! | [`Surface::is_bilinear`], [`Surface::is_parallel_to_vector`] | `IsBilinear`, `IsParallelToVector`    |
@@ -1660,12 +1660,14 @@ impl Surface {
 
     // ---- simple queries -------------------------------------------------------------
 
-    /// The natural parameter domain (`GetNaturalUVDomain`), without a kernel: unlike
-    /// upstream, which makes a missing NURB first, a lazy cone, sphere, torus or surface
-    /// of revolution (no NURB yet) answers its NURB-less base's empty domain. Callers
-    /// that hold a kernel use [`Surface::natural_uv_domain_with_nurb`].
+    /// The natural parameter domain (`GetNaturalUVDomain`) as far as it is built, without
+    /// a kernel: unlike upstream, which makes a missing NURB first, a lazy cone, sphere,
+    /// torus or surface of revolution (no NURB yet) answers its NURB-less base's empty
+    /// domain. Callers that hold a kernel use [`Surface::natural_uv_domain_with_nurb`];
+    /// this is for surfaces known to be built (B-splines, planes, made NURBs) and for
+    /// kernel-free code.
     #[must_use]
-    pub fn natural_uv_domain(&self) -> Extent2d {
+    pub fn natural_uv_domain_if_built(&self) -> Extent2d {
         match &self.kind {
             SurfaceKind::BSpline(s) => s.natural_uv_domain(),
             SurfaceKind::CurveBounded(s) => s.natural_uv_domain(),
@@ -3459,8 +3461,9 @@ pub trait SurfaceEvaluate {
         guess: Option<Point2>,
     ) -> Result<Option<(Point2, f64)>>;
 
-    /// `GetNaturalUVDomain`.
-    fn natural_uv_domain(&self) -> Extent2d;
+    /// `GetNaturalUVDomain` without a kernel (a lazy analytic [`Surface`] answers its
+    /// NURB-less base's empty domain, see [`Surface::natural_uv_domain_if_built`]).
+    fn natural_uv_domain_if_built(&self) -> Extent2d;
 
     /// `Evaluate` (see [`Surface::evaluate`]).
     ///
@@ -3585,8 +3588,9 @@ impl SurfaceEvaluate for Surface {
         self.approx_eq(k, other)
     }
 
-    fn natural_uv_domain(&self) -> Extent2d {
-        Self::natural_uv_domain(self)
+    fn natural_uv_domain_if_built(&self) -> Extent2d {
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        Surface::natural_uv_domain_if_built(self)
     }
 
     fn evaluate(
@@ -3695,8 +3699,8 @@ impl SurfaceEvaluate for BSplineSurface {
         Ok(self.approx_eq(other))
     }
 
-    fn natural_uv_domain(&self) -> Extent2d {
-        Self::natural_uv_domain(self)
+    fn natural_uv_domain_if_built(&self) -> Extent2d {
+        BSplineSurface::natural_uv_domain(self)
     }
 
     fn evaluate(
@@ -3775,7 +3779,8 @@ pub const fn base_natural_uv_domain() -> Extent2d {
 /// `SmSurface::GetSTEPUVDomain`: the natural domain of `surface`.
 #[must_use]
 pub fn base_step_uv_domain(surface: &Surface) -> Extent2d {
-    surface.natural_uv_domain()
+    // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+    surface.natural_uv_domain_if_built()
 }
 
 /// `SmSurface::GetDegree`: reports `SM_ERR` and returns `SM_ERR` (1001) as the
@@ -6758,7 +6763,7 @@ mod tests {
         assert_eq!(s.type_code(), B_SPLINE_SURFACE_TYPE);
         assert!(s.is_kind_of(TYPE).unwrap());
         assert!(s.owner().is_none());
-        let d = s.natural_uv_domain();
+        let d = s.natural_uv_domain_if_built();
         assert_eq!(s.step_uv_domain().min(), d.min());
         assert_eq!(s.degree(SurfParamType::U), 1);
         let p = s.evaluate_point(k, Point2::new(1.0, 1.0)).unwrap();
@@ -6783,8 +6788,8 @@ mod tests {
         let (a, b) = s
             .split_at(&Kernel::default(), 0.5, SurfParamType::U)
             .unwrap();
-        assert!(a.natural_uv_domain().u_max() <= 0.5 + 1e-12);
-        assert!(b.natural_uv_domain().u_min() >= 0.5 - 1e-12);
+        assert!(a.natural_uv_domain_if_built().u_max() <= 0.5 + 1e-12);
+        assert!(b.natural_uv_domain_if_built().u_min() >= 0.5 - 1e-12);
         assert_eq!(
             s.convert_uv_from_step_to_nurbs(&Kernel::default(), Point2::new(0.1, 0.2))
                 .unwrap(),
@@ -7221,7 +7226,7 @@ mod kernel_dispatch_tests {
                 surface.type_code(),
                 if cylinder { CYLINDER_TYPE } else { CONE_TYPE }
             );
-            let uv = surface.natural_uv_domain().evaluate(0.25, 0.5);
+            let uv = surface.natural_uv_domain_if_built().evaluate(0.25, 0.5);
             let expected = cone.evaluate_point(&kernel, uv).unwrap();
             assert_eq!(surface.evaluate_point(&kernel, uv).unwrap(), expected);
             assert_eq!(surface.copy(k).unwrap().type_code(), surface.type_code());

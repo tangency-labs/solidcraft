@@ -920,7 +920,7 @@ impl RotationalSweepGeometry {
             let s = surf_to_trim.as_ref().unwrap_or(&new_surf);
             s.create_natural_uv_trim_curves(
                 k,
-                &s.natural_uv_domain(),
+                &s.natural_uv_domain_with_nurb(k)?,
                 start_trim_curve_param,
                 false,
             )?

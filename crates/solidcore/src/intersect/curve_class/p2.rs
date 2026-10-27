@@ -1207,9 +1207,9 @@ fn refine_on_pair(
     let ssi = SurfaceIntersector::new(
         k,
         s1,
-        &s1.natural_uv_domain(),
+        &s1.natural_uv_domain_with_nurb(k)?,
         s2,
-        &s2.natural_uv_domain(),
+        &s2.natural_uv_domain_with_nurb(k)?,
         false,
     )?;
     let r = ssi.refine_point(
@@ -1563,21 +1563,21 @@ fn refine_large_gap<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
                 continue;
             }
         }
-        let expanded = |s: &Surface| {
-            let mut d = s.natural_uv_domain();
+        let expanded = |s: &Surface| -> Result<crate::geom::extent2d::Extent2d> {
+            let mut d = s.natural_uv_domain_with_nurb(k)?;
             d.expand_absolute(0.01);
-            d
+            Ok(d)
         };
         let uv_0 = entry(&st.uv_points, 0)?;
         let uv_1 = entry(&st.uv_points, 1)?;
         let found: Option<[Point2; 3]> = if defined(uv_0) && defined(uv_1) && defined(uv_ii) {
             ignored(surface1.local_surface_surface_intersect(
                 k,
-                &expanded(surface1),
+                &expanded(surface1)?,
                 surface2,
-                &expanded(surface2),
+                &expanded(surface2)?,
                 surf,
-                &expanded(surf),
+                &expanded(surf)?,
                 uv_0,
                 uv_1,
                 uv_ii,
@@ -1587,11 +1587,11 @@ fn refine_large_gap<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
         } else {
             match ignored(surface1.local_surface_surface_intersect_xyz::<NoObject>(
                 k,
-                &expanded(surface1),
+                &expanded(surface1)?,
                 surface2,
-                &expanded(surface2),
+                &expanded(surface2)?,
                 surf,
-                &expanded(surf),
+                &expanded(surf)?,
                 src_curve_pt,
                 Some(edge_curve_pt),
             ))? {
@@ -1645,7 +1645,7 @@ fn refine_large_gap<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
             if !are_perpendicular(tan, srf_norm, Some(this_ang_tol_rad)) {
                 found = ignored(e_surface_unique.local_curve_intersect(
                     k,
-                    &e_surface_unique.natural_uv_domain(),
+                    &e_surface_unique.natural_uv_domain_with_nurb(k)?,
                     &src_curve,
                     &src_curve.natural_interval(),
                     xsect_tol_3d, /* was 1.0, too big [B254] */
@@ -1660,7 +1660,7 @@ fn refine_large_gap<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
                 k,
                 [None, None],
                 None,
-                &e_surface_unique.natural_uv_domain(),
+                &e_surface_unique.natural_uv_domain_with_nurb(k)?,
                 &src_curve,
                 &src_curve.natural_interval(),
                 xsect_tol_3d, /* was 1.0, too big [b254] */
@@ -1817,7 +1817,7 @@ fn refine_large_gap<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
                 if !are_perpendicular(tan, srf_norm, Some(this_ang_tol_rad)) {
                     found = ignored(c_surface_unique.local_curve_intersect(
                         k,
-                        &c_surface_unique.natural_uv_domain(),
+                        &c_surface_unique.natural_uv_domain_with_nurb(k)?,
                         &edge_curve,
                         &edge_curve.natural_interval(),
                         xsect_tol_3d, /* was 1.0 , which is too big [B254] */
@@ -1832,7 +1832,7 @@ fn refine_large_gap<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
                     k,
                     [None, None],
                     None,
-                    &c_surface_unique.natural_uv_domain(),
+                    &c_surface_unique.natural_uv_domain_with_nurb(k)?,
                     &edge_curve,
                     &edge_curve.natural_interval(),
                     xsect_tol_3d, /* was 1.0, too big [B254] */

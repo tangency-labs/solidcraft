@@ -768,7 +768,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 s.degree(SurfParamType::U) as f64,
                 s.degree(SurfParamType::V) as f64,
             ]);
-            put_dom(&mut o, &s.natural_uv_domain());
+            put_dom(&mut o, &s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
             put_dom(&mut o, &step);
             put_dom(&mut o, &max);
             o.extend([b(c.owns_surface()), b(c.owns_volume())]);

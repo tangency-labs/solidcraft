@@ -1328,7 +1328,7 @@ fn run_rust_geom(k: &mut Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
             let s = rust_surface(surface)?;
             let cs = rust_curves(curves)?;
             let n = cs.len();
-            let dom = s.natural_uv_domain();
+            let dom = s.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
             let input = tt::TrimInput {
                 loop_counts: vec![n],
                 curves: cs,
@@ -1710,7 +1710,7 @@ fn mirror_pre(
         o.push(-1.0);
         return Ok(());
     }
-    let d = srf.natural_uv_domain();
+    let d = srf.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
     let side = side_of(side);
     let (low, high) = if side == SurfParamType::U {
         (d.min().x, d.max().x)
@@ -2046,7 +2046,7 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
                 o.push(NULL_DEREF);
                 return Ok(o);
             };
-            let bounds = srf.natural_uv_domain();
+            let bounds = srf.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
             let closed = srf
                 .is_closed(k, &bounds, SurfParamType::U, None, false)
                 .map_err(f)?

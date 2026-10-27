@@ -109,7 +109,8 @@ fn check(k: &Kernel, name: &str, lazy: &Surface) {
         "{name}: the fixture must start without its NURB"
     );
     let reference = made(k, lazy);
-    let dom = reference.natural_uv_domain();
+    // (the made reference has its NURB: built)
+    let dom = reference.natural_uv_domain_if_built();
     let uv = dom.evaluate(0.3, 0.6);
     let want = answers(k, &reference, &dom, uv);
     assert!(

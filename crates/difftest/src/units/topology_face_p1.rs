@@ -849,7 +849,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
             let face = b.face(f).map_err(e)?;
             put_domain(&mut o, &face.uv_domain);
             match face.surface.as_ref() {
-                Some(s) => put_domain(&mut o, &s.natural_uv_domain()),
+                Some(s) => put_domain(&mut o, &s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?),
                 None => o.push(-1.0),
             }
         }

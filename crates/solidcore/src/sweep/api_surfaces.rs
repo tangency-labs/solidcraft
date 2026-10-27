@@ -432,7 +432,10 @@ mod tests {
         assert_eq!(surface.owner(), None);
         assert_eq!(
             surface
-                .evaluate_point(&revolution_kernel, surface.natural_uv_domain().min())
+                .evaluate_point(
+                    &revolution_kernel,
+                    surface.natural_uv_domain_if_built().min()
+                )
                 .unwrap(),
             Point3::ZERO,
         );

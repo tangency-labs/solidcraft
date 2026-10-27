@@ -183,7 +183,8 @@ impl PrimitiveCreation {
                 }
                 let surface = swung_surface(a.kernel(brep)?, path, profile, scale * curve_scale)?;
                 let surface = Surface::from(surface);
-                let domain = surface.natural_uv_domain();
+                // (a B-spline surface just made: never lazy)
+                let domain = surface.natural_uv_domain_if_built();
                 a.surface_faces(brep, surface, domain, &mut faces)?;
             }
         }
@@ -251,7 +252,8 @@ impl PrimitiveCreation {
                 },
             )?;
             let surface = Surface::from(surface);
-            let domain = surface.natural_uv_domain();
+            // (a B-spline surface just made: never lazy)
+            let domain = surface.natural_uv_domain_if_built();
             ignore_status(a.surface_faces(brep, surface, domain, &mut made))?;
             new_faces.extend_from_slice(&made);
         }
@@ -295,7 +297,8 @@ impl PrimitiveCreation {
             )
         })?;
         a.set_editing(brep, true)?;
-        let domain = surface.natural_uv_domain();
+        // (a B-spline surface just made: never lazy)
+        let domain = surface.natural_uv_domain_if_built();
         ignore_status(a.surface_face(brep, surface, domain, output))?;
         Ok(())
     }
@@ -357,7 +360,8 @@ impl PrimitiveCreation {
                     approx_tol,
                 )?;
                 let surface = Surface::from(surface);
-                let domain = surface.natural_uv_domain();
+                // (a B-spline surface just made: never lazy)
+                let domain = surface.natural_uv_domain_if_built();
                 let mut made = Vec::new();
                 ignore_status(a.surface_faces(brep, surface, domain, &mut made))?;
                 let first = side_faces.len();
@@ -390,7 +394,7 @@ impl PrimitiveCreation {
                 let total = side_faces.len();
                 for (i, &face) in side_faces.iter().enumerate() {
                     let surface = face_surface(a, (brep, face))?;
-                    let domain = surface.natural_uv_domain();
+                    let domain = surface.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
                     if i < count {
                         direction = if options.translational_sweep {
                             SurfParamType::V
@@ -471,7 +475,8 @@ fn sweep_end_curves(
     for group in groups {
         let mut spans = Vec::new();
         for &face in side_faces.get(group.clone()).unwrap_or_default() {
-            let domain = face_surface(a, (brep, face))?.natural_uv_domain();
+            let domain =
+                face_surface(a, (brep, face))?.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
             let span = if translational {
                 (domain.min().y, domain.max().y)
             } else {
@@ -565,8 +570,8 @@ mod tests {
                 &Curve::from(profile),
                 0.5,
             )?);
-            let domain = surface.natural_uv_domain();
-            assert_eq!(domain, expected.natural_uv_domain());
+            let domain = surface.natural_uv_domain_if_built();
+            assert_eq!(domain, expected.natural_uv_domain_if_built());
             for i in 0..=4 {
                 for j in 0..=4 {
                     let uv = domain.evaluate(f64::from(i) / 4.0, f64::from(j) / 4.0);
@@ -586,7 +591,7 @@ mod tests {
         let profile = imported_line(Vec3::new(2.0, 0.0, 0.0), Vec3::Z, 1.0);
         let path = Curve::from(Line::from_points(Vec3::X, Vec3::X + Vec3::Y, 3));
         let surface = Surface::from(swung_surface(&kernel, &path, &profile, 1.0)?);
-        let uv = surface.natural_uv_domain().min();
+        let uv = surface.natural_uv_domain_if_built().min();
         let point = surface.evaluate_point(&kernel, uv)?;
         // Surface construction uses the existing NURB, even though scale
         // initialization above must use the original analytic evaluations.

@@ -42,7 +42,10 @@ pub fn run_solidcore_ssi(case: &SsiCase, tol: Option<f64>) -> Result<RawOutput, 
             Ok(s) => {
                 let d = match dom {
                     Some(d) => Extent2d::from_bounds(d[0], d[2], d[1], d[3]),
-                    None => s.natural_uv_domain(),
+                    // (GetNaturalUVDomain makes a lazy analytic's NURB first)
+                    None => s
+                        .natural_uv_domain_with_nurb(&k)
+                        .map_err(|e| EngineFailure::Build(e.to_string()))?,
                 };
                 built.push((s, d));
             }

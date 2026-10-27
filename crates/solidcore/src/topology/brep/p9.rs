@@ -1473,8 +1473,8 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     };
     let start_vertex = required(b.vertexuse(start)?.vertex, "start VU without vertex")?;
     let end_vertex = required(b.vertexuse(end)?.vertex, "end VU without vertex")?;
-    let domain =
-        required(b.face(face)?.surface.as_ref(), "face without surface")?.natural_uv_domain();
+    let domain = required(b.face(face)?.surface.as_ref(), "face without surface")?
+        .natural_uv_domain_with_nurb(k)?;
     let (end_orientation, t_start, t_end) = if input.orientation == OrientType::Same {
         (
             OrientType::Opposite,

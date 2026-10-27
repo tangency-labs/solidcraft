@@ -1070,7 +1070,7 @@ mod tests {
             let mut b = rounded_quarter_disc(&mut k, fix);
             let dome = *b.face_list().last().unwrap();
             let surface = b.face(dome).unwrap().surface.as_ref().unwrap();
-            let d = surface.natural_uv_domain();
+            let d = surface.natural_uv_domain_if_built();
             // the farthest the dome's surface strays from the sphere of radius 20 about the origin
             let mut stray = 0.0_f64;
             for i in 0..=8 {

@@ -1907,7 +1907,7 @@ mod tests {
                 // Only swapped, unequal domains make Reparameterize build the NURB.
                 assert_eq!(extrusion.base().gw_nurb().is_some(), swap_uv);
             }
-            assert_eq!(copy.natural_uv_domain(), domain);
+            assert_eq!(copy.natural_uv_domain_if_built(), domain);
             for ((u, v), expected) in samples.into_iter().zip(before) {
                 let uv = domain.evaluate(u, v);
                 assert_eq!(s.evaluate_point(uv).unwrap(), expected);

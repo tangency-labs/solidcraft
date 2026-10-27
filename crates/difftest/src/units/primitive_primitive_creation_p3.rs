@@ -148,7 +148,7 @@ fn ruled(data: &[f64]) -> Result<Vec<f64>> {
     out.push(f64::from(result.is_ok()));
     if let Ok((surface, map)) = result {
         let surface = Surface::from(surface);
-        let domain = surface.natural_uv_domain();
+        let domain = surface.natural_uv_domain_with_nurb(&k)?;
         out.extend([
             domain.min().x,
             domain.min().y,

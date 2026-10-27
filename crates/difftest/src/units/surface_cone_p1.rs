@@ -1175,7 +1175,7 @@ pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, su
         Err(e) => return to_output(&i, &[status(&e)]),
     };
     if queries {
-        let natural = surface.natural_uv_domain();
+        let natural = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
         let low = natural.evaluate(0.2, 0.2); let high = natural.evaluate(0.8, 0.8);
         let domain = if subdomain { Extent2d::from_bounds(low.x, low.y, high.x, high.y) } else { natural };
         let result = (|| -> solidcore::Result<()> {

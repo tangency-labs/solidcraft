@@ -384,7 +384,8 @@ impl SolutionObject for Obj {
 }
 
 fn surface_obj(s: &Surface) -> Obj {
-    let d = s.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let d = s.natural_uv_domain_if_built();
     Obj::Surface([d.min().x, d.min().y, d.max().x, d.max().y])
 }
 
@@ -599,7 +600,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
                 None,
             ))? {
                 Ok(blend) => {
-                    let nd = blend.natural_uv_domain();
+                    let nd = blend.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
                     o.extend([0.0, nd.min().x, nd.min().y, nd.max().x, nd.max().y]);
                     for a in 0..=4 {
                         for c in 0..=4 {
@@ -624,7 +625,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let handle = surface_obj(&s);
             let mut cache = SurfaceCache::<Obj>::new(
                 s.clone(),
-                s.natural_uv_domain(),
+                s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?,
                 SurfaceCacheOptions {
                     chord_height_tolerance: 0.01,
                     ..SurfaceCacheOptions::default()

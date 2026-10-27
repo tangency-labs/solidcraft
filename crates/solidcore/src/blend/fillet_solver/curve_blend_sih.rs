@@ -341,7 +341,7 @@ fn lift<S: SmoothingSolver + ?Sized>(
     let uv_curve = Curve::from(uv.clone());
     let lifted = surface.lift_curve(
         k,
-        &surface.natural_uv_domain(),
+        &surface.natural_uv_domain_with_nurb(k)?,
         &uv_curve,
         &uv.natural_interval(),
         fs.this_approx_tol_3d() * 10.0,

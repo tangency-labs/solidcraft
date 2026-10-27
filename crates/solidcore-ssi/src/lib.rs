@@ -283,9 +283,9 @@ mod tests {
         global_surface_intersect(
             k,
             s1,
-            &s1.natural_uv_domain(),
+            &s1.natural_uv_domain_if_built(),
             s2,
-            &s2.natural_uv_domain(),
+            &s2.natural_uv_domain_if_built(),
             Some(1e-6),
             None,
         )
@@ -377,7 +377,7 @@ mod tests {
         );
         let x = run(&k, &c, &p);
         assert!(!x.curves_3d.is_empty());
-        let d = c.natural_uv_domain();
+        let d = c.natural_uv_domain_if_built();
         for uv in x.surface1_uv_curves.iter().flatten() {
             for q in samples(&k, uv, 200) {
                 assert!(
@@ -409,7 +409,7 @@ mod tests {
         );
         let x = run(&k, &p, &s);
         assert!(x.curves_3d.len() >= 2, "{} curves", x.curves_3d.len());
-        let d = s.natural_uv_domain();
+        let d = s.natural_uv_domain_if_built();
         for uv in x.surface2_uv_curves.iter().flatten() {
             for q in samples(&k, uv, 400) {
                 assert!(
@@ -454,7 +454,10 @@ mod tests {
                 Vec3::new(0.0, 1.0, 0.0),
             ),
         );
-        let (d1, d2) = (p.natural_uv_domain(), s.natural_uv_domain());
+        let (d1, d2) = (
+            p.natural_uv_domain_if_built(),
+            s.natural_uv_domain_if_built(),
+        );
         for engine in [Engine::Ssi, Engine::SsiThenPort] {
             let x =
                 intersect(engine, &k, &p, &d1, &s, &d2, [true, true], Some(1e-6), None).unwrap();

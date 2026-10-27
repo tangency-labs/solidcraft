@@ -404,7 +404,8 @@ fn rust_cache(
     t: Option<&[NodeIn]>,
     handle: H,
 ) -> Result<SurfaceCache<H>, HarnessError> {
-    let d = surface.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let d = surface.natural_uv_domain_if_built();
     let mut cache = SurfaceCache::new(surface, d, SurfaceCacheOptions::default());
     cache.set_surface_handle(Some(handle));
     let Some(t) = t else {

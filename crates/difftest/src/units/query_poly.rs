@@ -658,7 +658,8 @@ fn build_owners(owners: &[OwnerIn]) -> Result<OwnerWorld, Fail> {
             }
         };
         if let Some(s) = &face.surface {
-            face.uv_domain = s.natural_uv_domain();
+            // (runner helper without a kernel in scope)
+            face.uv_domain = s.natural_uv_domain_if_built();
         }
         let id = rs(brep.add_face_record(face))?;
         rs(brep.shell_mut(shell))?.faces.push(id);
@@ -711,7 +712,7 @@ fn owner_samples(
     put(points, start);
     put(points, end);
     if let Some(surface) = surface.filter(|_| mapping) {
-        let domain = surface.natural_uv_domain();
+        let domain = rs(surface.natural_uv_domain_with_nurb(k))?;
         let a = Vec2::new(start.x, start.y);
         let b = Vec2::new(end.x, end.y);
         let (su, sv) = domain.classify_point(a, solidcore::math::EFF_ZERO_PARAM, None);

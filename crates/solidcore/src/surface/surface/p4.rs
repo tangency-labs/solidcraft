@@ -635,8 +635,8 @@ impl EvalNFunctions for SsiNormalizeEnfo<'_> {
         if let Some(jac) = jacobian {
             // The analytic Jacobian upstream builds is overwritten by the finite
             // difference one over the natural domains of both surfaces.
-            let dom = self.surface.natural_uv_domain();
-            let dom2 = self.other_surface.natural_uv_domain();
+            let dom = self.surface.natural_uv_domain_with_nurb(k)?;
+            let dom2 = self.other_surface.natural_uv_domain_with_nurb(k)?;
             let domains = [
                 dom.u_interval(),
                 dom.v_interval(),
@@ -1147,7 +1147,7 @@ impl Surface {
         known_closed: bool,
     ) -> Result<Option<CrvOnSurf>> {
         // locals
-        let uv_domain = self.natural_uv_domain();
+        let uv_domain = self.natural_uv_domain_with_nurb(kernel)?;
         let uv_min = uv_domain.min();
         let uv_max = uv_domain.max();
         let is_closed = known_closed || self.is_closed(kernel, &uv_domain, param, None, false)?.0;
@@ -2360,7 +2360,7 @@ mod tests {
             3,
         ));
         let uv = Point2::new(0.1, 0.2);
-        let dom = s.natural_uv_domain();
+        let dom = s.natural_uv_domain_if_built();
         let r = classify_curve_surface_xsect_point(
             k,
             &s,

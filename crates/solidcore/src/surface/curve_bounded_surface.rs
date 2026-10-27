@@ -301,7 +301,8 @@ impl CurveBoundedSurface {
     /// The basis surface's natural parameter domain (`GetNaturalUVDomain`).
     #[must_use]
     pub fn natural_uv_domain(&self) -> Extent2d {
-        self.basis.natural_uv_domain()
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        self.basis.natural_uv_domain_if_built()
     }
 
     /// The basis surface's unit normal at `uv` (`EvaluateNormal`).
@@ -648,7 +649,7 @@ mod tests {
         let b = patch();
         let c = cbs();
         let s = Surface::from(c.clone());
-        assert_eq!(s.natural_uv_domain(), b.natural_uv_domain());
+        assert_eq!(s.natural_uv_domain_if_built(), b.natural_uv_domain());
         let uv = Point2::new(0.25, 0.5);
         assert_eq!(
             s.evaluate_point(k, uv).unwrap(),

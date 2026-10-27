@@ -235,7 +235,8 @@ pub fn base_evaluate_normal<S: SurfaceEvaluate + ?Sized>(
         }
     }
 
-    let uv_domain = surface.natural_uv_domain();
+    // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
+    let uv_domain = surface.natural_uv_domain_if_built();
     let mut step = 1.0e-8;
 
     // First check for the parallel-derivatives case (the lengths of the
@@ -1374,10 +1375,11 @@ impl Surface {
         if let Some(context) = context.as_deref() {
             gs.face_queries = context.face_queries();
         }
+        let domain = self.natural_uv_domain_with_nurb(k)?;
         gs.operands = Some(SolveOperands {
             operands: [
                 handles[0].map(|h| (h, OperandDomain::Curve(curve.natural_interval()))),
-                handles[1].map(|h| (h, OperandDomain::Surface(self.natural_uv_domain()))),
+                handles[1].map(|h| (h, OperandDomain::Surface(domain))),
             ],
         });
 
@@ -1563,10 +1565,14 @@ impl Surface {
         if let Some(context) = context.as_deref() {
             gs.face_queries = context.face_queries();
         }
+        let (domain, other_domain) = (
+            self.natural_uv_domain_with_nurb(k)?,
+            other.natural_uv_domain_with_nurb(k)?,
+        );
         gs.operands = Some(SolveOperands {
             operands: [
-                handles[0].map(|h| (h, OperandDomain::Surface(self.natural_uv_domain()))),
-                handles[1].map(|h| (h, OperandDomain::Surface(other.natural_uv_domain()))),
+                handles[0].map(|h| (h, OperandDomain::Surface(domain))),
+                handles[1].map(|h| (h, OperandDomain::Surface(other_domain))),
             ],
         });
 
@@ -2068,7 +2074,8 @@ pub fn compute_higher_order_derivs<S: SurfaceEvaluate + ?Sized>(
     want_g4: bool,
 ) -> Result<HigherOrderDerivs> {
     // locals
-    let domain = surface.natural_uv_domain();
+    // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
+    let domain = surface.natural_uv_domain_if_built();
 
     // finite difference step - watch for stepping out of surface boundaries
     let mut step = EFF_ZERO_SQRT / 1000.0; // 1.0e-9
@@ -2141,7 +2148,8 @@ pub fn compute_inward_vector<S: SurfaceEvaluate + ?Sized>(
     let (_, du, dv) = evaluate_1st_derivatives(k, surface, uv, Side::Left, Side::Left)?;
 
     // towards midPoint UV vec
-    let mid_uv = surface.natural_uv_domain().evaluate(0.5, 0.5);
+    // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
+    let mid_uv = surface.natural_uv_domain_if_built().evaluate(0.5, 0.5);
     let dir_uv = mid_uv - uv;
     let dir_uv = dir_uv.unitize().unwrap_or(dir_uv);
 
@@ -3058,7 +3066,7 @@ mod tests {
     fn inward_vector_points_to_middle() {
         let k = &Kernel::default();
         let s = plane();
-        let d = s.natural_uv_domain();
+        let d = s.natural_uv_domain_if_built();
         let v = compute_inward_vector(k, &s, d.min()).unwrap();
         assert!((v.length() - 1.0).abs() < 1e-12);
     }

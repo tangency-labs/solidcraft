@@ -749,7 +749,8 @@ pub(super) fn put_curve(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
 }
 
 fn put_surface(k: &Kernel, o: &mut Vec<f64>, s: &Surface) {
-    let d = s.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = s.natural_uv_domain_if_built();
     o.extend([d.u_min(), d.u_max(), d.v_min(), d.v_max()]);
     for i in 0..=2 {
         for j in 0..=2 {

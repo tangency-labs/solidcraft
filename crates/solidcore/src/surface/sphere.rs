@@ -2778,7 +2778,7 @@ mod tests {
             &k,
             &domain,
             &other,
-            &other.natural_uv_domain(),
+            &other.natural_uv_domain_if_built(),
             [true, true],
             None,
             None,

@@ -1121,7 +1121,8 @@ fn face_with_edges(
             ..Shell::default()
         })
         .map_err(setup)?;
-    let domain = surface.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let domain = surface.natural_uv_domain_if_built();
     let face = brep
         .add_face_record(Face {
             surface: Some(surface),
@@ -1646,7 +1647,7 @@ fn rust_extend(input: &Extension) -> RResult<Output> {
             ],
         );
         let Some(surface) = surface else { continue };
-        let domain = surface.natural_uv_domain();
+        let domain = surface.natural_uv_domain_with_nurb(&kernel)?;
         let kind = match surface.kind() {
             SurfaceKind::Plane(_) => 1,
             SurfaceKind::BSpline(_) => 2,
@@ -1892,7 +1893,7 @@ fn put_rust_vertex_surface(
     surface: &Surface,
     samples: &[[f64; 2]],
 ) -> RResult<()> {
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
     raw.extend([
         surface.type_code() as f64,
         domain.min().x,

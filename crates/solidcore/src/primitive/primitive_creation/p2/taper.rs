@@ -388,7 +388,8 @@ fn taper(
                 Ok((surface, _)) => {
                     // create a face from the ruled surface in the scratch B-rep
                     let surface = Surface::from(surface);
-                    let domain = surface.natural_uv_domain();
+                    // (a B-spline surface just made: never lazy)
+                    let domain = surface.natural_uv_domain_if_built();
                     let mut face = None;
                     ignore_status(a.surface_face(scratch, surface, domain, &mut face))?;
                 }
@@ -526,7 +527,8 @@ fn surface_intersection_method(
             Err(_) => {}
             Ok((surface, map)) => {
                 let surface = Surface::from(surface);
-                let domain = surface.natural_uv_domain();
+                // (a B-spline surface just made: never lazy)
+                let domain = surface.natural_uv_domain_if_built();
                 let mut face = None;
                 ignore_status(a.surface_face(surfaces, surface, domain, &mut face))?;
                 // the ruled surface carries its offset map

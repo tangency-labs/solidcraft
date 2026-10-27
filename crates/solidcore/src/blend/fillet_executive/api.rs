@@ -357,7 +357,7 @@ pub fn create_face_from_surface(
     brep: &mut Brep,
     surface: &Surface,
 ) -> Result<FaceId> {
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
     let mut state = crate::topology::brep::p2::ArenaNotifyState::new(brep);
     let mut env = state.env(None);
     let mut marks = crate::topology::topology_traverser::Marks::default();

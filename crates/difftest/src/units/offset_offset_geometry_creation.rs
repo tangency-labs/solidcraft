@@ -1629,7 +1629,7 @@ impl OffsetExecutive<H> for Exec {
             self.inner.insert_extended_surface(key, surface.clone());
         }
         let ext = self.inner.get_create_extended_surface(k, key, &surface)?;
-        let domain = ext.natural_uv_domain();
+        let domain = ext.natural_uv_domain_with_nurb(k)?;
         if seeded {
             // the seeded entry is the base itself, as `m_vSurfExtSurf.Insert(s, s)`
             return Ok((base, domain));
@@ -1736,7 +1736,8 @@ fn put_srf(k: &Kernel, o: &mut Vec<f64>, s: Option<&Surface>) {
         return;
     };
     o.push(s.type_code() as f64);
-    let d = s.natural_uv_domain();
+    // (runner helper that does not return Result)
+    let d = s.natural_uv_domain_if_built();
     o.extend([d.u_min(), d.u_max(), d.v_min(), d.v_max()]);
     for i in 0..=2 {
         for j in 0..=2 {

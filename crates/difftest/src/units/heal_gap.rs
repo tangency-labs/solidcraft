@@ -784,7 +784,8 @@ fn topo_args(
     };
     let dom = match face {
         Some(f) => match &b.face(f).map_err(err)?.surface {
-            Some(s) => s.natural_uv_domain(),
+            // (runner helper without a kernel in scope)
+            Some(s) => s.natural_uv_domain_if_built(),
             None => dom_of([0.0, 0.0, 1.0, 1.0]),
         },
         None => dom_of([0.0, 0.0, 1.0, 1.0]),
@@ -1366,7 +1367,8 @@ fn natural_ivl(c: &CurveIn) -> Option<[f64; 2]> {
 
 fn surface_dom(s: &SurfIn) -> Option<[f64; 4]> {
     let s = surface_of(s).ok()?;
-    let d = s.natural_uv_domain();
+    // (runner helper without a kernel in scope)
+    let d = s.natural_uv_domain_if_built();
     let (u, v) = (d.u_interval(), d.v_interval());
     Some([u.min(), v.min(), u.max(), v.max()])
 }

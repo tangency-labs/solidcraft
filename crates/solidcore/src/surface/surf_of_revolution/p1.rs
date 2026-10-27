@@ -1257,7 +1257,7 @@ impl SurfOfRevolution {
                 )?,
             );
             let point_3d = self.base.evaluate_point(nurbs_uv)?;
-            let domain = step_surface.natural_uv_domain();
+            let domain = step_surface.natural_uv_domain_with_nurb(k)?;
             // Always set output (the status is ignored): LocalPointSolve leaves a default
             // solution when it fails.
             let (u, v) = match ignored(step_surface.local_point_solve::<()>(

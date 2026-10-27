@@ -144,7 +144,7 @@ const LENGTH_SAMPLES: usize = 16;
 fn boundary(k: &Kernel, surface: &Surface, tol: f64) -> Result<Vec<(f64, bool)>> {
     let sides = surface.create_natural_uv_trim_curves(
         k,
-        &surface.natural_uv_domain(),
+        &surface.natural_uv_domain_with_nurb(k)?,
         SurfParamType::U,
         false,
     )?;
@@ -431,7 +431,7 @@ struct Layout {
 impl Layout {
     /// The layout of `surface` about the axis through `base_pt` along unit `axis`.
     fn of(k: &Kernel, surface: &Surface, base_pt: Point3, axis: Vec3) -> Result<Self> {
-        let d = surface.natural_uv_domain();
+        let d = surface.natural_uv_domain_with_nurb(k)?;
         let mut corners = [Point3::ZERO; 4];
         for (corner, (u, v)) in
             corners
@@ -704,7 +704,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
-            let a = s.natural_uv_domain();
+            let a = s.natural_uv_domain_if_built();
             for i in 0..=6 {
                 for j in 0..=6 {
                     let (f, g) = (f64::from(i) / 6.0, f64::from(j) / 6.0);

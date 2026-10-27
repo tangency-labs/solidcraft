@@ -575,7 +575,7 @@ fn line_parameters(
         face.surface
             .as_ref()
             .ok_or_else(|| SolidError::invalid_input(OP, "ray target face without surface"))?
-            .natural_uv_domain(),
+            .natural_uv_domain_with_nurb(k)?,
     );
     let solutions = crate::topology::face::p4::global_line_intersect_held(
         k, b, f, surface, held, &uv_domain, origin, direction, None, false, tol,

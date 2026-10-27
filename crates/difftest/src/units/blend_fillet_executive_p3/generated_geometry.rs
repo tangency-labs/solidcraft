@@ -38,7 +38,7 @@ pub(super) fn snapshot(k: &Kernel, session: &FilletSession<'_>) -> Result<(Vec<f
             state.extend([index as f64, f64::from(surface.is_some())]);
             if let Some(surface) = surface {
                 state.push(surface.type_code() as f64);
-                let domain = surface.natural_uv_domain();
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
                 values.extend([
                     domain.min().x,
                     domain.min().y,

@@ -167,7 +167,8 @@ impl IsoCurve {
             return c;
         }
 
-        let uv_domain = c.surface.natural_uv_domain();
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        let uv_domain = c.surface.natural_uv_domain_if_built();
         if surf_param == SurfParamType::U {
             if uv_domain.min().x > iso_parameter {
                 c.iso_parameter = uv_domain.min().x;
@@ -239,7 +240,8 @@ impl IsoCurve {
     /// `SM_SP_U` twice).
     pub fn create_uv_iso_line(&self) -> Result<Curve> {
         // locals
-        let domain = self.surface.natural_uv_domain();
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        let domain = self.surface.natural_uv_domain_if_built();
         let mut line_point = Point3::new(domain.min().x, domain.min().y, 0.0);
         let (line_ivl, line_unit_vec) = if self.surf_param == SurfParamType::U {
             line_point.x = self.iso_parameter;
@@ -274,7 +276,8 @@ impl IsoCurve {
     /// (`GetNaturalInterval`).
     #[must_use]
     pub fn natural_interval(&self) -> Extent1d {
-        let uv_domain = self.surface.natural_uv_domain();
+        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
+        let uv_domain = self.surface.natural_uv_domain_if_built();
         if self.surf_param == SurfParamType::U {
             return Extent1d::from_min_max(uv_domain.min().y, uv_domain.max().y);
         }
