@@ -6,7 +6,7 @@
 //!
 //! [`run`] builds real `SmPlane` / `SmBSplineSurface` surfaces, an `SmGrid` and an
 //! `SmRayTracer` owning it, applies the [`Op`]s in order and returns one flat record: per
-//! `Fire` and `Local` op
+//! `Fire`, `Local`, `AddSurface` and `AddPolyBrep` op
 //!
 //! * `Fire`: `status hits <solution> n_elements ids(n) mins(n) maxs(n)`;
 //! * `Local`: `status found needs_subdivision <solution>`;
@@ -14,11 +14,15 @@
 //!   `u_min v_min u_max v_max`, the box `min(3) max(3)`, the mid-point data `point(3) du(3)
 //!   dv(3) normal(3)`, the pseudo box `basis(9) interval_min_max(6)` and the polar box `state
 //!   domain(4) basis(9)` (domain and basis only for a bounded state, else zeros);
+//! * `AddPolyBrep`: `status n_elements element(n)`, 10 values per polygon element it made:
+//!   the box `min(3) max(3)`, the sphere centre (3) and radius;
 //!
 //! where `<solution>` is `type num_variables num_objects solution_value p[0..10] surface
-//! object1 node0` (`surface` the surface index or `-1`, `object1` `-1` for null, `node0` `1`
-//! when `m_apNodes[0]` is set). The ids of a `Fire` are positions among the `AddLeaf` leaves, `-1`
-//! for an element `AddSurface` made. `SolverTol` and `AddLeaf` add nothing.
+//! object1 node0 poly0(2) poly1(2)` (`surface` the surface index or `-1`, `object1` `-1` for
+//! null, `node0` `1` when `m_apNodes[0]` is set, `poly0` / `poly1` the poly B-rep and face
+//! indices of objects 0 and 1, `-1 -1` when not a poly face). The ids of a `Fire` are positions
+//! among the `AddLeaf` leaves, `-1` for an element `AddSurface` or `AddPolyBrep` made.
+//! `SolverTol` and `AddLeaf` add nothing.
 //!
 //! | [`Op`]       | upstream                                                                    |
 //! |--------------|-----------------------------------------------------------------------------|
@@ -27,6 +31,7 @@
 //! | `Fire`       | `SmRayTracer::FireRay`                                                      |
 //! | `Local`      | `SmLSI3LocalSolver::LocalSolve` on a leaf                                   |
 //! | `AddSurface` | `SmRayTracer::AddSurfaceToGrid`                                             |
+//! | `AddPolyBrep` | `SmPolyBrep` (one region and shell, closed loops) and `SmRayTracer::AddPolyBrepToGrid` |
 //!
 //! [`run`] accepts only finite inputs of magnitude at most [`MAX_COORD`] (ray parameters and
 //! tolerances: any finite value); planes with independent axes and positive scales; Bezier
@@ -35,7 +40,10 @@
 //! natural domain with non-inverted bounding boxes (a pseudo box may be inverted) and non-zero polar vectors; ray vectors of `Local`
 //! ops that are zero or at least [`MIN_LOCAL_VECTOR`] (the Newton iteration divides by it); at most
 //! [`MAX_OPS`] ops, [`MAX_LEAVES`] leaves, [`MAX_SURFACES`] surfaces and [`MAX_POLAR`] polar
-//! vectors per leaf.
+//! vectors per leaf; at most [`MAX_POLY_BREPS`] poly B-reps of 1..=[`MAX_POLY_VERTICES`]
+//! vertices and 1..=[`MAX_POLY_FACES`] faces, each face with 1..=[`MAX_POLY_LOOPS`] loops of
+//! 1..=[`MAX_LOOP_VERTICES`] vertices (a face needs an outer loop with a first edge, which
+//! `sm_FindPolyHit` dereferences), and vertex indices in range.
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -66,6 +74,16 @@ pub const MAX_SURFACES: usize = 4;
 pub const MAX_POLAR: usize = 8;
 /// Shortest non-zero ray vector of a `Local` op (a zero vector is allowed: `LocalSolve` handles it).
 pub const MIN_LOCAL_VECTOR: f64 = 1e-6;
+/// Most poly B-reps per program.
+pub const MAX_POLY_BREPS: usize = 4;
+/// Most vertices per poly B-rep.
+pub const MAX_POLY_VERTICES: usize = 1024;
+/// Most faces per poly B-rep.
+pub const MAX_POLY_FACES: usize = 512;
+/// Most loops per poly face.
+pub const MAX_POLY_LOOPS: usize = 8;
+/// Most vertices per poly loop.
+pub const MAX_LOOP_VERTICES: usize = 32;
 /// `NL_NOW`: the weight of a non-rational control point.
 pub const NOW: f64 = -f64::MAX;
 
@@ -131,6 +149,31 @@ pub struct LeafIn {
     pub polar: Vec<[f64; 3]>,
     /// The box the element is registered with in the grid voxels.
     pub elem_box: [f64; 6],
+}
+
+/// A poly face: its tolerance (also its edges'), the normal given to its constructor and
+/// its closed loops, outer first, as vertex indices.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolyFaceIn {
+    /// `SmPolyFace(dTol, ..)` and the `AddPolyEdge` tolerance of its edges.
+    pub tolerance: f64,
+    /// `SmPolyFace(.., pOptNormal)` (`None` = null: the normal is computed).
+    pub normal: Option<[f64; 3]>,
+    /// The loops (each closed: one edge per vertex).
+    pub loops: Vec<Vec<usize>>,
+}
+
+/// A poly B-rep of one region and one shell, added to the grid.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolyBrepIn {
+    /// `SmPolyBrep(dTol)`.
+    pub tolerance: f64,
+    /// `x y z tol` per vertex (`SmPolyVertex(point, tol)`).
+    pub vertices: Vec<[f64; 4]>,
+    /// The faces, in creation order.
+    pub faces: Vec<PolyFaceIn>,
+    /// `dExpansionTolerance` of `AddPolyBrepToGrid`.
+    pub expansion: f64,
 }
 
 /// A `FireRay` call.
@@ -211,6 +254,8 @@ pub enum Op {
     RenderPixel(usize, usize),
     /// `RenderRay(point, vector)` (after `DoRender`): record `status r g b pixels_shaded`.
     RenderRay([f64; 3], [f64; 3]),
+    /// Builds a poly B-rep and runs `AddPolyBrepToGrid` on it.
+    AddPolyBrep(PolyBrepIn),
 }
 
 /// The renderer constructor arguments.
@@ -409,6 +454,7 @@ fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
     }
     e.int(prog.ops.len());
     let mut leaves = 0_usize;
+    let mut poly_breps = 0_usize;
     let mut rendered = Render::None;
     for op in &prog.ops {
         match op {
@@ -588,6 +634,49 @@ fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
                 e.int(10);
                 e.nums(p)?;
                 e.nums(v)?;
+            }
+            Op::AddPolyBrep(b) => {
+                if poly_breps >= MAX_POLY_BREPS {
+                    return Err(bad("too many poly B-reps"));
+                }
+                poly_breps += 1;
+                let nv = b.vertices.len();
+                if !(1..=MAX_POLY_VERTICES).contains(&nv) {
+                    return Err(bad("poly vertex count"));
+                }
+                if !(1..=MAX_POLY_FACES).contains(&b.faces.len()) {
+                    return Err(bad("poly face count"));
+                }
+                e.int(11);
+                e.any(b.tolerance)?;
+                e.int(nv);
+                for v in &b.vertices {
+                    e.nums(&v[..3])?;
+                    e.any(v[3])?;
+                }
+                e.int(b.faces.len());
+                for f in &b.faces {
+                    if !(1..=MAX_POLY_LOOPS).contains(&f.loops.len()) {
+                        return Err(bad("poly loop count"));
+                    }
+                    e.any(f.tolerance)?;
+                    e.flag(f.normal.is_some());
+                    e.nums(&f.normal.unwrap_or([0.0; 3]))?;
+                    e.int(f.loops.len());
+                    for l in &f.loops {
+                        if !(1..=MAX_LOOP_VERTICES).contains(&l.len()) {
+                            return Err(bad("poly loop vertex count"));
+                        }
+                        e.int(l.len());
+                        for &v in l {
+                            if v >= nv {
+                                return Err(bad("poly vertex index"));
+                            }
+                            e.int(v);
+                        }
+                    }
+                }
+                e.any(b.expansion)?;
             }
         }
     }

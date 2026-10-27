@@ -12,8 +12,12 @@
 // from the leaf's domain, box, pseudo box and polar box given as data, computing the mid-point
 // data from the real surface exactly as Init does (a case can give leaves the surface's own
 // subdivision does not have). ADD_SURFACE runs the real SmRayTracer::AddSurfaceToGrid, which
-// builds the surface cache and makes the leaves from its tree. SmGrid's protected members are
-// reached by exposing them while SmGrid.h is included.
+// builds the surface cache and makes the leaves from its tree. ADD_POLY_BREP builds a real
+// SmPolyBrep (one region, one shell, closed loops; the constructors and AddPolyEdge as the
+// query.poly shim uses them) and runs the real SmRayTracer::AddPolyBrepToGrid, which builds its
+// SmBrepCache and adds a polygon element per surface-tree leaf; FireRay then reaches
+// sm_FindPolyHit. SmGrid's and SmPolyBrep's protected members are reached by exposing them while
+// their headers are included.
 #include "sc_shim.h"
 
 #include <SmAxis2Placement.h>
@@ -43,6 +47,12 @@
 #include <SmGrid.h>
 #undef protected
 
+#define protected public
+#define private public
+#include <SmPoly.h>
+#undef private
+#undef protected
+
 #include <SmRayTracer.h>
 
 #include "sc_sm.h"
@@ -63,6 +73,14 @@ enum : int32_t
     OP_DO_RENDER = 8,
     OP_RENDER_PIXEL = 9,
     OP_RENDER_RAY = 10,
+    OP_ADD_POLY_BREP = 11,
+};
+
+// The poly B-reps of a program and their faces in creation order (the ids of a solution).
+struct Polys
+{
+    std::vector<SmPolyBrep*> breps;
+    std::vector<std::vector<SmPolyFace*>> faces;
 };
 
 struct Bad : std::runtime_error
@@ -164,8 +182,10 @@ void put3(std::vector<double>& o, const SmVector3d& v)
 }
 
 // The solution fields of FireRay / LocalSolve: type, variable and object counts, solution value,
-// the ten start parameters, the surface index and whether object 1 and node 0 are set.
-void put_solution(std::vector<double>& o, const SmSolution& s, const std::vector<SmSurface*>& surfs)
+// the ten start parameters, the surface index, whether object 1 and node 0 are set, and the poly
+// B-rep and face indices of object 0 and of object 1 (-1 -1 when not a poly face of the program).
+void put_solution(std::vector<double>& o, const SmSolution& s, const std::vector<SmSurface*>& surfs,
+                  const Polys& polys)
 {
     o.push_back((double)s.m_eSolutionType);
     o.push_back((double)s.m_lNumVariables);
@@ -182,6 +202,77 @@ void put_solution(std::vector<double>& o, const SmSolution& s, const std::vector
     o.push_back(surf);
     o.push_back(s.m_apObjects[1] == nullptr ? -1.0 : -2.0);
     o.push_back(s.m_apNodes[0] == nullptr ? 0.0 : 1.0);
+    for (int j = 0; j < 2; j++)
+    {
+        double brep = -1.0;
+        double face = -1.0;
+        for (size_t b = 0; b < polys.faces.size(); b++)
+            for (size_t f = 0; f < polys.faces[b].size(); f++)
+                if (s.m_apObjects[j] != nullptr && s.m_apObjects[j] == (SmObject*)polys.faces[b][f])
+                {
+                    brep = (double)b;
+                    face = (double)f;
+                }
+        o.push_back(brep);
+        o.push_back(face);
+    }
+}
+
+// `tol n_vertices (x y z tol)* n_faces (tol has_normal nx ny nz n_loops (k v0 .. v(k-1))*)*`: one
+// region, one shell, the face normal given to the constructor or not, every loop closed (k edges),
+// each edge with its face's tolerance.
+SmPolyBrep* read_poly_brep(Rd& rd, const SmContext& ctx, std::vector<SmPolyFace*>& faces)
+{
+    double tol = rd.num();
+    SmPolyBrep* b = new (ctx) SmPolyBrep(tol);
+    try
+    {
+        SmPolyRegion* region = new (b) SmPolyRegion(b);
+        SmPolyShell* shell = new (b) SmPolyShell(region);
+        int64_t nv = rd.idx(1, 1024);
+        std::vector<SmPolyVertex*> vertices;
+        for (int64_t i = 0; i < nv; ++i)
+        {
+            SmVector3d p = rd.vec();
+            double t = rd.num();
+            SmPolyVertex* v = new (b) SmPolyVertex(p, t);
+            b->m_pPolyVertexListHead->PostInsert(v);
+            vertices.push_back(v);
+        }
+        int64_t nf = rd.idx(1, 512);
+        for (int64_t i = 0; i < nf; ++i)
+        {
+            double ftol = rd.num();
+            bool has_n = rd.flag();
+            SmVector3d n = rd.vec();
+            SmPolyFace* f = new (b) SmPolyFace(ftol, NULL, NULL, shell, has_n ? &n : NULL);
+            faces.push_back(f);
+            int64_t nl = rd.idx(1, 8);
+            for (int64_t l = 0; l < nl; ++l)
+            {
+                int64_t k = rd.idx(1, 32);
+                std::vector<SmPolyVertex*> vs;
+                for (int64_t j = 0; j < k; ++j)
+                    vs.push_back(vertices[(size_t)rd.idx(0, nv - 1)]);
+                SmPolyLoop* lp = NULL;
+                f->StartPolyEdgeLoop(lp);
+                for (int64_t j = 0; j < k; ++j)
+                {
+                    SmPolyVertex* v0 = vs[(size_t)j];
+                    SmPolyVertex* v1 = vs[(size_t)((j + 1) % k)];
+                    SmPolyEdge* e = NULL;
+                    lp->AddPolyEdge(ftol, v0->GetPoint(), v1->GetPoint(), v0, NULL, b, e);
+                }
+                lp->FinishPolyEdgeLoop(b);
+            }
+        }
+    }
+    catch (...)
+    {
+        delete b;
+        throw;
+    }
+    return b;
 }
 
 int32_t run(const double* p, int64_t n, std::vector<double>& o)
@@ -192,6 +283,7 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
     SmRayTracer* rt = nullptr;
     SmRayRenderer* renderer = nullptr;
     std::vector<SmSurfaceGridElement*> leaves;
+    Polys polys;
     int32_t rc = SC_OK;
     try
     {
@@ -210,7 +302,7 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
         int64_t nops = rd.idx(0, 64);
         for (int64_t k = 0; k < nops; k++)
         {
-            int op = (int)rd.idx(1, 10);
+            int op = (int)rd.idx(1, 11);
             switch (op)
             {
             case OP_SOLVER_TOL:
@@ -296,7 +388,7 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
                 SmStatus s = rt->FireRay(rp, rv, maxT, bHit, sol, ge, mn, mx);
                 o.push_back(st(s));
                 o.push_back(bHit ? 1.0 : 0.0);
-                put_solution(o, sol, surfs);
+                put_solution(o, sol, surfs, polys);
                 o.push_back((double)ge.GetSize());
                 for (ULONG i = 0; i < ge.GetSize(); i++)
                 {
@@ -343,7 +435,7 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
                 o.push_back(st(s));
                 o.push_back(bFound ? 1.0 : 0.0);
                 o.push_back(bNeeds ? 1.0 : 0.0);
-                put_solution(o, sol, surfs);
+                put_solution(o, sol, surfs, polys);
                 break;
             }
             case OP_ADD_SURFACE:
@@ -466,6 +558,34 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
                 o.push_back((double)renderer->GetPixelsShaded());
                 break;
             }
+            case OP_ADD_POLY_BREP:
+            {
+                if (polys.breps.size() >= 4)
+                    throw Bad();
+                std::vector<SmPolyFace*> faces;
+                SmPolyBrep* pb = read_poly_brep(rd, sCtx, faces);
+                polys.breps.push_back(pb);
+                polys.faces.push_back(faces);
+                double expansion = rd.num();
+                SmTArray<void*> before;
+                g->m_sPolygonElementMgr.GetActiveElements(before);
+                SmStatus s = rt->AddPolyBrepToGrid(pb, expansion);
+                SmTArray<void*> after;
+                g->m_sPolygonElementMgr.GetActiveElements(after);
+                // status, the number of polygon elements it made, and per element its box, sphere
+                // centre and radius
+                o.push_back(st(s));
+                o.push_back((double)(after.GetSize() - before.GetSize()));
+                for (ULONG i = before.GetSize(); i < after.GetSize(); i++)
+                {
+                    SmGridElement* e = (SmGridElement*)after[i];
+                    put3(o, e->m_sBBox.GetMin());
+                    put3(o, e->m_sBBox.GetMax());
+                    put3(o, e->m_sSphereCenter);
+                    o.push_back(e->m_dSphereRadius);
+                }
+                break;
+            }
             default:
                 throw Bad();
             }
@@ -481,6 +601,8 @@ int32_t run(const double* p, int64_t n, std::vector<double>& o)
         delete rt; // deletes the grid, not the surfaces
     for (SmSurface* s : surfs)
         delete s;
+    for (SmPolyBrep* b : polys.breps)
+        delete b; // and its SmBrepCache
     return rc;
 }
 } // namespace

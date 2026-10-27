@@ -15,6 +15,7 @@
 //! | [`RayTracer::fire_ray`], [`RayHit`]               | `SmRayTracer::FireRay`                    |
 //! | [`RayTracer::add_surface_to_grid`], [`RayTracer::add_surface_with_bbox`] | `SmRayTracer::AddSurfaceToGrid` |
 //! | [`RayTracer::add_poly_brep_to_grid`]              | `SmRayTracer::AddPolyBrepToGrid`          |
+//! | [`RayTracer::poly_brep`], [`RayTracer::poly_brep_count`] | `m_sPolyBreps`                     |
 //! | [`RayRenderer`], [`RayRenderer::new`]               | `SmRayRenderer`, `SmRayRenderer::SmRayRenderer` |
 //! | `Drop` (implicit)                                 | `~SmRayRenderer`                          |
 //! | [`RayRenderer::do_render`], [`RayRenderer::render_pixel`], [`RayRenderer::render_ray`] | `SmRayRenderer::DoRender`, `RenderPixel`, `RenderRay` |
@@ -59,25 +60,41 @@
 //!   on; see the status deviation of `geom::grid` (a failed `Evaluate` is retried
 //!   without `non_zero_tangents`, a failed `EvaluateNormal` keeps the cross product,
 //!   [`SolidError::Unported`] is always propagated).
-//! - **Polygon elements.** `sm_FindPolyHit` walks the `SmBrepCache` tree of a
-//!   polygon grid element and tests `SmPolyFace`s: neither exists yet, so a polygon
-//!   element in the ray's path is [`SolidError::Unported`], as is
-//!   [`RayTracer::add_poly_brep_to_grid`], so the `SmPolyBrep` list and the
-//!   per-context mark locks of `FireRay` (nothing can put a poly B-rep in the list)
-//!   are not ported; `GetMemoryUsed`, `Dump` and the drawing blocks are not reached
-//!   by the upstream tests and not ported either.
+//! - **Poly B-reps.** The tracer holds each poly B-rep it was given mutably
+//!   (`SmPolyFace::GetNormal` and `PointInPolygon` cache through `const_cast`
+//!   upstream) together with the `SmBrepCache` that `AddPolyBrepToGrid` builds; the
+//!   cache is owned by the tracer rather than the cache manager (the `SM_NO_PRE_EDIT`
+//!   notification just dropped any cache the poly B-rep had, so `GetOrCreateObjectCache`
+//!   always makes a new one). A polygon grid element holds its tree node, and the
+//!   tracer maps the element to its poly B-rep; a [`RayObject::PolyFace`] names the
+//!   poly B-rep by its index in the tracer's list. Upstream returns from
+//!   `AddPolyBrepToGrid` with elements already in the grid when `AddElement` fails;
+//!   the poly B-rep is then not listed, here as upstream, and a later ray reaching such
+//!   an element is [`SolidError::InvalidInput`].
+//! - **Marks.** `FireRay` takes a new `SM_MT_MARK` on the context of every poly B-rep
+//!   (`SmNewMarkAndLock`, unlocked on return) and `sm_FindPolyHit` marks each poly face
+//!   it tests with it; here each ray keeps the set of poly faces it has tested. (The
+//!   loop meant to skip poly B-reps sharing a context `continue`s only its inner loop;
+//!   a second new mark on the same context changes no face test.)
+//! - **`sm_FindPolyHit` recursion** on the parent node, after the node's own faces,
+//!   is a loop up the parent links in the same order, bounded by the tree's node count
+//!   (a longer chain is a cycle: [`SolidError::InvalidInput`]).
+//! - `GetMemoryUsed`, `Dump` and the drawing blocks are not reached by the upstream
+//!   tests and not ported.
 //! - **Renderer.** [`RayRenderer`] owns its tracer and light sources by value.
 //!   `DoRender` returns the pixel colours (upstream keeps one row in a local and prints
 //!   a progress line per row with `smos_WriteBuffer`, which is dropped); the colours
 //!   upstream leaves unset before `DoRender` are black; the hit node `RenderRay`
 //!   passes as the skip element is `m_apNodes[0]`, which `FireRay` always clears, so
 //!   no element is skipped; unsigned products wrap as upstream's `ULONG`.
-//! - **Unported callees.** `SmFace::PointClassify` (`query.face_p2`) and the poly
-//!   types return [`SolidError::Unported`] (see the `UNPORTED` markers). The surface
-//!   cache and its tree (`smsurf_GetSurfaceCache`, `GetTree`) are ported.
+//! - **Unported callees.** `SmFace::PointClassify` goes through the caller's
+//!   [`RayFaceClassifier`]; a face-owned surface traced without one is
+//!   [`SolidError::Unported`] (`query.face_p2`, a dispatch gap). The surface cache and
+//!   its tree (`smsurf_GetSurfaceCache`, `GetTree`), the poly types and the poly B-rep
+//!   cache are ported.
 //! - `SM_ERR` results the upstream ignores or `SER`s keep their behaviour; the
 //!   `SM_DEBUG_CODE` blocks are not ported. No recursion depends on input here
-//!   (`sm_FindPolyHit`, which recurses up a tree, is unported).
+//!   (`sm_FindPolyHit`'s is the bounded loop above).
 
 use crate::curve::curve::p2::evaluate_geometric;
 use crate::curve::curve::Curve;
@@ -88,25 +105,31 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
-    circle_coplanar_circle_intersect, line_closest_point, line_coplanar_circle_intersect,
-    line_plane_intersect_uv, CircleCircle,
+    self as gu, circle_coplanar_circle_intersect, line_closest_point,
+    line_coplanar_circle_intersect, line_plane_intersect_uv, CircleCircle,
 };
 use crate::geom::grid::{
-    ElementId, Grid, GridItem, HierarchyElement, HierarchyId, SurfaceGridElement,
+    ElementId, ElementSource, Grid, GridItem, HierarchyElement, HierarchyId, SurfaceGridElement,
 };
-use crate::geom::object::ObjectRef;
+use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, SolutionType};
-use crate::geom::tree::NodeId;
+use crate::geom::tree::{NodeId, Tree};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, PI};
 use crate::nurbs::knots::Side;
+use crate::query::poly::{PolyBrep, PolyFaceId, PolyNotifyEnv};
 use crate::surface::surface::p1::evaluate_1st_derivatives;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::p1::SurfaceCache;
+use crate::topology::brep_cache::{
+    arena_identity, make_brep_cache, BrepCache, CacheObject, CacheSource,
+};
+use crate::topology::topology::TopologyRecords;
 use crate::topology::{EdgeId, FaceId, VertexId};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A light source (`SmLightSource`): white light from a point or in a direction.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -139,6 +162,9 @@ pub enum RayObject {
     Edge(EdgeId),
     /// The vertex of the hit point (`SmVertex`).
     Vertex(VertexId),
+    /// A poly face that was hit (`SmPolyFace`): the poly B-rep's index in the
+    /// tracer's poly B-rep list and the face in it.
+    PolyFace(usize, PolyFaceId),
 }
 
 impl SolutionObject for RayObject {
@@ -148,8 +174,18 @@ impl SolutionObject for RayObject {
             Self::Face(_) => ObjectKind::Face,
             Self::Edge(_) => ObjectKind::Edge,
             Self::Vertex(_) => ObjectKind::Vertex,
+            Self::PolyFace(..) => ObjectKind::PolyFace,
         }
     }
+}
+
+/// A poly B-rep in the tracer (`m_sPolyBreps`) with the `SmBrepCache` that
+/// `AddPolyBrepToGrid` built for it: its polygon grid elements are leaves of the
+/// cache's surface tree.
+#[derive(Debug)]
+struct TracedPolyBrep<'s> {
+    brep: &'s mut PolyBrep,
+    cache: BrepCache,
 }
 
 /// The outputs of `SmSurface::EvaluateNormalSection`.
@@ -831,6 +867,11 @@ pub struct RayTracer<'s> {
     solver: Lsi3LocalSolver,
     /// `m_sSurfaces`: the surfaces added to the grid.
     surfaces: Vec<&'s Surface>,
+    /// `m_sPolyBreps`: the poly B-reps added to the grid, with their caches.
+    poly_breps: Vec<TracedPolyBrep<'s>>,
+    /// The poly B-rep (index in `poly_breps`) whose cache tree holds the node of
+    /// each polygon grid element (upstream reaches the tree through the node).
+    poly_elements: BTreeMap<ElementId, usize>,
     /// `m_pSkipElement`: an element `FireRay` does not test.
     pub skip_element: Option<ElementId>,
     /// How a face-owned surface's points are classified against its face.
@@ -863,6 +904,8 @@ impl<'s> RayTracer<'s> {
             grid,
             solver,
             surfaces: Vec::new(),
+            poly_breps: Vec::new(),
+            poly_elements: BTreeMap::new(),
             faces: None,
             skip_element: None,
             hit_any_thing: false,
@@ -922,15 +965,29 @@ impl<'s> RayTracer<'s> {
         &self.surfaces
     }
 
+    /// The number of poly B-reps added so far (`m_sPolyBreps.GetSize()`).
+    #[must_use]
+    pub fn poly_brep_count(&self) -> usize {
+        self.poly_breps.len()
+    }
+
+    /// The poly B-rep at `index` in the tracer's poly B-rep list (`m_sPolyBreps`),
+    /// the index a [`RayObject::PolyFace`] holds.
+    #[must_use]
+    pub fn poly_brep(&self, index: usize) -> Option<&PolyBrep> {
+        self.poly_breps.get(index).map(|p| &*p.brep)
+    }
+
     /// Intersects a ray with the geometry in the grid (`FireRay`): the nearest hit
     /// (any hit when [`RayTracer::hit_any_thing`]) with ray parameter in
     /// `[-EFF_ZERO, dMaxRayParameter)`; use `BIG_DOUBLE` for an infinite ray.
     ///
     /// # Errors
     ///
-    /// Those of the grid walk; [`SolidError::Unported`] from the solver or a polygon
-    /// element; [`SolidError::InvalidInput`] for a grid element that is neither a
-    /// surface nor a polygon element or whose surface is not registered.
+    /// Those of the grid walk and of the poly face tests; [`SolidError::Unported`] from
+    /// the solver; [`SolidError::InvalidInput`] for a grid element that is neither a
+    /// surface nor a polygon element, whose surface is not registered or whose poly
+    /// B-rep is not listed.
     pub fn fire_ray(
         &mut self,
         k: &Kernel,
@@ -948,7 +1005,9 @@ impl<'s> RayTracer<'s> {
             max_distances: Vec::new(),
         };
 
-        // (The per-context mark locks of the poly B-reps: none can be added.)
+        // Use pPolyBrep->Context->Mark as a tag for new ray-firing: one new mark per
+        // ray for every poly face (the faces this ray has tested)
+        let mut marked: BTreeSet<(usize, PolyFaceId)> = BTreeSet::new();
 
         // Init Grid scratch ray walking data with first Voxel/Ray intersection
         let hits_nothing = self.grid.setup_3ddda(ray_point, ray_vector)?;
@@ -995,10 +1054,62 @@ impl<'s> RayTracer<'s> {
                 // handle PolyBrep Faces
                 let leaf = match item {
                     GridItem::Polygon(node) => {
+                        // get SmGridElement's SmTreeNode - PolyBreps store SmTreeNodes in
+                        // SmGridElements
+                        let index =
+                            *self
+                                .poly_elements
+                                .get(&id)
+                                .ok_or(SolidError::InvalidInput {
+                                    operation: OP,
+                                    reason: "polygon grid element of no listed poly B-rep",
+                                })?;
+                        let traced =
+                            self.poly_breps
+                                .get_mut(index)
+                                .ok_or(SolidError::InvalidInput {
+                                    operation: OP,
+                                    reason: "polygon grid element of no listed poly B-rep",
+                                })?;
+                        let tree = traced
+                            .cache
+                            .surface_tree()
+                            .ok_or(SolidError::null_pointer(OP))?;
+
                         // Handle polygon ray firing
-                        let hit = find_poly_hit(node, ray_point, ray_vector, hit_t)?;
-                        if let Some(hit) = hit {
-                            hit_t = hit;
+                        let hit = find_poly_hit(
+                            k,
+                            tree,
+                            traced.brep,
+                            node,
+                            PolyRay {
+                                point: ray_point,
+                                vector: ray_vector,
+                                hit_any_thing: self.hit_any_thing,
+                            },
+                            hit_t,
+                            &mut |face| marked.insert((index, face)),
+                        )?;
+                        if let Some((t, hit_face)) = hit {
+                            hit_t = t;
+                            let hit_pnt = ray_point + ray_vector * hit_t;
+                            let (hit_normal, _) =
+                                traced.brep.face_normal(k, hit_face, false, true)?;
+                            let out = &mut result.solution;
+                            out.solution_type = SolutionType::SingleValue;
+                            out.num_variables = 1;
+                            out.start.parameters[0] = hit_t; // ray parameter
+                            out.start.parameters[1] = BIG_DOUBLE;
+                            out.start.parameters[2] = BIG_DOUBLE;
+                            out.start.parameters[3] = hit_pnt.x; // ray/face intersection point
+                            out.start.parameters[4] = hit_pnt.y;
+                            out.start.parameters[5] = hit_pnt.z;
+                            out.start.parameters[6] = hit_normal.x; // face normal at xsect
+                            out.start.parameters[7] = hit_normal.y;
+                            out.start.parameters[8] = hit_normal.z;
+                            out.num_objects = 1;
+                            out.objects[0] = Some(RayObject::PolyFace(index, hit_face));
+                            out.objects[1] = Some(RayObject::PolyFace(index, hit_face));
                             result.hits_something = true;
                             if self.hit_any_thing {
                                 break;
@@ -1140,19 +1251,66 @@ impl<'s> RayTracer<'s> {
         self.grid.expand_hierarchy(k, id, &mut cache)
     }
 
-    /// Embeds the faces of a poly B-rep in the grid (`AddPolyBrepToGrid`).
+    /// Embeds the faces of a poly B-rep in the grid (`AddPolyBrepToGrid`): notifies
+    /// the poly B-rep of an edit (`env` is its notification environment), builds its
+    /// `SmBrepCache` and adds every leaf of the cache's surface tree to the grid as a
+    /// polygon element over the leaf's box expanded by `expansion_tolerance`. The
+    /// poly B-rep joins the tracer's poly B-rep list, so it stays borrowed.
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`]: `SmPolyBrep` and its `SmBrepCache` are not ported
-    /// (`query.poly`), so `P` stands for the poly B-rep type to come.
-    pub fn add_poly_brep_to_grid<P: ?Sized>(
+    /// Those of [`PolyBrep::notify`], of the cache build and of
+    /// [`Grid::add_element`]; a null pointer when the cache has no surface tree.
+    pub fn add_poly_brep_to_grid<R: TopologyRecords + ?Sized, T>(
         &mut self,
-        _poly_brep: &P,
-        _expansion_tolerance: f64,
+        k: &Kernel,
+        poly_brep: &'s mut PolyBrep,
+        env: &mut PolyNotifyEnv<'_, R, T>,
+        expansion_tolerance: f64,
     ) -> Result<()> {
-        // UNPORTED(query.poly): SmPolyBrep::Notify
-        Err(SolidError::unported("SmPolyBrep::Notify", "query.poly"))
+        const OP: &str = "intersect::ray_tracer::RayTracer::add_poly_brep_to_grid";
+        // warn PolyBrep its about to be modifided
+        let this = Some(env.this);
+        poly_brep.notify(env, NotifyOperation::PreEdit, this, None, None)?;
+
+        // Compute a Brep Cache - a spatial decomposition of the vertices, edges and
+        // faces contained in 3 SmTree objects used as a VertexTree, an EdgeTree, and a
+        // FaceTree (the notification dropped any cache the poly B-rep had)
+        let cache = make_brep_cache(k, CacheSource::PolyBrep(&*poly_brep), &arena_identity)?;
+
+        // get all Surface Tree Nodes
+        let tree = cache.surface_tree().ok_or(SolidError::null_pointer(OP))?;
+        let index = self.poly_breps.len();
+
+        // For every Surface Tree Node
+        for node_id in tree.all_tree_nodes() {
+            let node = tree.node(node_id)?;
+
+            // skip non-leaf nodes
+            if node.child1.is_some() {
+                continue;
+            }
+
+            // Get PNode's boundingBox increased by Tol
+            let mut bbox = node.bbox;
+            bbox.expand_absolute(expansion_tolerance);
+
+            // Add leaf node to Grid: an SmGridElement holding the node, listed in every
+            // voxel that its box meets
+            let id = self
+                .grid
+                .add_element(ElementSource::PolyBrep(node_id), &bbox)?;
+            self.poly_elements.insert(id, index);
+        } // end iter every Surface Tree Node
+
+        // Add the PolyBrep to the SmRayTracer PolyBrep List
+        self.poly_breps.push(TracedPolyBrep {
+            brep: poly_brep,
+            cache,
+        });
+
+        // all done
+        Ok(())
     }
 
     /// `AddSurfaceToGrid` up to the expansion, from the point where the top node of
@@ -1430,21 +1588,105 @@ impl<'s> RayRenderer<'s> {
     }
 }
 
-/// `sm_FindPolyHit`: the nearest hit of the ray on the poly faces of a polygon element's
-/// tree node and its parents, with parameter below `hit_t`: its parameter.
+/// The ray of [`find_poly_hit`].
+#[derive(Debug, Clone, Copy)]
+struct PolyRay {
+    /// `crRayPoint`: the ray's start point.
+    point: Point3,
+    /// `crRayVector`: the ray's unit direction.
+    vector: Vec3,
+    /// `bHitAnyThing`: stop at the first hit.
+    hit_any_thing: bool,
+}
+
+/// `sm_FindPolyHit`: intersects the ray with the poly faces of `node` (a node of the
+/// `SmBrepCache` surface tree `tree` of `brep`) and of its parents. A face hit with ray
+/// parameter in `(-EFF_ZERO, hit_t)` lowers `hit_t`; the last such hit is returned
+/// with its face (with `hit_any_thing`, the first). `mark` marks a face for this ray
+/// and is false when the ray has tested the face before (`IsMarked` / `Mark`), which
+/// then is skipped.
+///
+/// Upstream recurses on the parent node after the node's own faces; this walks up the
+/// parents in a loop in the same order, bounded by the tree's node count.
 fn find_poly_hit(
-    _node: NodeId,
-    _ray_point: Point3,
-    _ray_vector: Vec3,
-    _hit_t: f64,
-) -> Result<Option<f64>> {
-    // The node's tree is the SmBrepCache surface tree of a poly B-rep and its objects
-    // are SmPolyFaces (SmPolyFace::ComputeSphereBound, GetNormal, PointInPolygon).
-    // UNPORTED(query.poly): SmPolyFace::ComputeSphereBound
-    Err(SolidError::unported(
-        "SmPolyFace::ComputeSphereBound",
-        "query.poly",
-    ))
+    k: &Kernel,
+    tree: &Tree<CacheObject>,
+    brep: &mut PolyBrep,
+    node: NodeId,
+    ray: PolyRay,
+    mut hit_t: f64,
+    mark: &mut dyn FnMut(PolyFaceId) -> bool,
+) -> Result<Option<(f64, PolyFaceId)>> {
+    const OP: &str = "intersect::ray_tracer::find_poly_hit";
+    let mut hit_face = None;
+    let mut current = Some(node);
+    let max_depth = tree.all_tree_nodes().len();
+    let mut depth = 0usize;
+    while let Some(node) = current {
+        // (a parent chain longer than the tree has nodes is a cycle)
+        depth += 1;
+        if depth > max_depth {
+            return Err(SolidError::InvalidInput {
+                operation: OP,
+                reason: "tree parent links form a cycle",
+            });
+        }
+
+        // for every object in pNode
+        for list in tree.node_object_list(node)? {
+            let Some(CacheObject::PolyFace(poly_face)) = tree.list(list)?.object else {
+                return Err(SolidError::null_pointer(OP));
+            };
+
+            // skip already processed PolyFaces (and mark this one)
+            if !mark(poly_face) {
+                continue; // This face has been processed before
+            }
+
+            // get PolyFace bounding sphere/Ray Distance
+            let (sphere_center, sphere_radius) =
+                brep.face_compute_sphere_bound(poly_face, false)?;
+            let vec_to_center = sphere_center - ray.point;
+            let center_t = vec_to_center.dot(ray.vector);
+            let point_on_ray = ray.point + ray.vector * center_t;
+            let vec_to = point_on_ray - sphere_center;
+            let dist_sq = vec_to.length_squared();
+            let sph_rad_sq = sphere_radius * sphere_radius;
+
+            // skip PolyFaces whose bounding Sphere does not intersect the ray
+            if dist_sq > sph_rad_sq {
+                continue;
+            }
+            let (normal, _) = brep.face_normal(k, poly_face, false, true)?;
+            let poly_loop = brep
+                .face_outer_poly_loop(poly_face)?
+                .ok_or(SolidError::null_pointer(OP))?;
+            let first_edge = brep
+                .loop_first_poly_edge(poly_loop)?
+                .ok_or(SolidError::null_pointer(OP))?;
+            let origin = brep.edge_start_point(first_edge)?;
+            let Ok(t_param) = gu::line_plane_intersect(ray.point, ray.vector, origin, normal)
+            else {
+                continue;
+            };
+            let point = ray.point + ray.vector * t_param;
+            if point.distance_squared(sphere_center) > sph_rad_sq {
+                continue; // Intersection is outside of sphere radius.
+            }
+            let inside = brep.face_point_in_polygon(k, poly_face, point, true)?;
+            if inside && t_param < hit_t && t_param > -EFF_ZERO {
+                hit_t = t_param;
+                hit_face = Some(poly_face);
+                if ray.hit_any_thing {
+                    return Ok(hit_face.map(|f| (hit_t, f)));
+                }
+            }
+        } // end iter every pNode Object
+
+        // continue on the parent node
+        current = tree.node(node)?.parent;
+    }
+    Ok(hit_face.map(|f| (hit_t, f)))
 }
 
 #[cfg(test)]
@@ -1457,6 +1699,180 @@ mod tests {
     fn grid() -> Grid<usize> {
         let bbox = Extent3d::from_bounds(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
         Grid::new(&bbox, [2, 2, 2]).unwrap()
+    }
+
+    /// A poly B-rep of horizontal squares `[2, 8] x [2, 8]` at the heights `zs`, wound
+    /// counter-clockwise seen from above, and their faces.
+    fn stacked_squares(k: &Kernel, zs: &[f64]) -> (PolyBrep, Vec<PolyFaceId>) {
+        let mut b = PolyBrep::new(k, 1.0e-5);
+        let r = b.add_region().unwrap();
+        let s = b.add_shell(r).unwrap();
+        let mut faces = Vec::new();
+        for &z in zs {
+            let f = b.add_face(k, s, 1.0e-5, None).unwrap();
+            let pts = [
+                Vec3::new(2.0, 2.0, z),
+                Vec3::new(8.0, 2.0, z),
+                Vec3::new(8.0, 8.0, z),
+                Vec3::new(2.0, 8.0, z),
+            ];
+            let vs: Vec<_> = pts
+                .iter()
+                .map(|&p| b.add_vertex(k, p, 1.0e-5).unwrap())
+                .collect();
+            let l = b.start_poly_edge_loop(f).unwrap();
+            for j in 0..4 {
+                b.add_poly_edge(k, l, 1.0e-5, pts[j], pts[(j + 1) % 4], vs[j])
+                    .unwrap();
+            }
+            b.finish_poly_edge_loop(l).unwrap();
+            faces.push(f);
+        }
+        (b, faces)
+    }
+
+    /// Adds `brep` to `tracer` with an empty notification environment.
+    fn add_poly<'s>(k: &Kernel, tracer: &mut RayTracer<'s>, brep: &'s mut PolyBrep) {
+        use crate::geom::a_object::CacheStore;
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::query::poly::PolyObjectKind;
+        let mut records: BTreeMap<ObjectKey, crate::topology::topology::Topology> = BTreeMap::new();
+        let mut attributes = AttributeStore::new();
+        let mut caches: CacheStore<()> = CacheStore::new();
+        let mut env = PolyNotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            caches: &mut caches,
+            context: None,
+            this: ObjectRef {
+                type_code: PolyObjectKind::Brep.type_code(),
+                key: ObjectKey(1),
+            },
+        };
+        tracer
+            .add_poly_brep_to_grid(k, brep, &mut env, 1.0e-3)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_poly_brep_adds_one_polygon_element_per_surface_tree_leaf() {
+        let k = Kernel::default();
+        let (mut b, _) = stacked_squares(&k, &[2.0, 6.0]);
+        let mut tracer = RayTracer::new(grid(), 1.0e-6, 1.0e-9);
+        add_poly(&k, &mut tracer, &mut b);
+        assert_eq!(tracer.poly_brep_count(), 1);
+        let elements = tracer.poly_elements.len();
+        assert!(elements >= 1);
+        let tree = tracer.poly_breps[0].cache.surface_tree().unwrap();
+        let leaves = tree
+            .all_tree_nodes()
+            .into_iter()
+            .filter(|&n| tree.node(n).unwrap().child1.is_none())
+            .count();
+        assert_eq!(elements, leaves);
+    }
+
+    #[test]
+    fn a_ray_hits_the_nearest_poly_face() {
+        let k = Kernel::default();
+        let (mut b, faces) = stacked_squares(&k, &[2.0, 6.0]);
+        let mut tracer = RayTracer::new(grid(), 1.0e-6, 1.0e-9);
+        add_poly(&k, &mut tracer, &mut b);
+        let hit = tracer
+            .fire_ray(
+                &k,
+                Vec3::new(5.0, 5.0, 9.5),
+                Vec3::new(0.0, 0.0, -1.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(hit.hits_something);
+        let s = &hit.solution;
+        assert_eq!(s.solution_type, SolutionType::SingleValue);
+        assert_eq!(s.num_variables, 1);
+        assert_eq!(s.num_objects, 1);
+        assert_eq!(s.objects[0], Some(RayObject::PolyFace(0, faces[1])));
+        assert_eq!(s.objects[1], Some(RayObject::PolyFace(0, faces[1])));
+        assert_eq!(
+            s.start.parameters[..9],
+            [3.5, BIG_DOUBLE, BIG_DOUBLE, 5.0, 5.0, 6.0, 0.0, 0.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn a_poly_face_behind_the_ray_start_is_not_hit() {
+        let k = Kernel::default();
+        let (mut b, faces) = stacked_squares(&k, &[2.0, 6.0]);
+        let mut tracer = RayTracer::new(grid(), 1.0e-6, 1.0e-9);
+        add_poly(&k, &mut tracer, &mut b);
+        let hit = tracer
+            .fire_ray(
+                &k,
+                Vec3::new(5.0, 5.0, 4.0),
+                Vec3::new(0.0, 0.0, -1.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(hit.hits_something);
+        assert_eq!(
+            hit.solution.objects[0],
+            Some(RayObject::PolyFace(0, faces[0]))
+        );
+        assert_eq!(hit.solution.start.parameters[0], 2.0);
+    }
+
+    #[test]
+    fn rays_outside_or_along_the_poly_faces_hit_nothing() {
+        let k = Kernel::default();
+        let (mut b, _) = stacked_squares(&k, &[2.0, 6.0]);
+        let mut tracer = RayTracer::new(grid(), 1.0e-6, 1.0e-9);
+        add_poly(&k, &mut tracer, &mut b);
+        // through the faces' planes outside the squares
+        let miss = tracer
+            .fire_ray(
+                &k,
+                Vec3::new(9.0, 5.0, 9.5),
+                Vec3::new(0.0, 0.0, -1.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(!miss.hits_something);
+        // parallel to the faces, between them
+        let along = tracer
+            .fire_ray(
+                &k,
+                Vec3::new(0.5, 5.0, 4.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(!along.hits_something);
+        // stopped before the first face
+        let short = tracer
+            .fire_ray(&k, Vec3::new(5.0, 5.0, 9.5), Vec3::new(0.0, 0.0, -1.0), 3.0)
+            .unwrap();
+        assert!(!short.hits_something);
+    }
+
+    #[test]
+    fn hit_any_thing_stops_at_a_poly_hit() {
+        let k = Kernel::default();
+        let (mut b, faces) = stacked_squares(&k, &[2.0, 6.0]);
+        let mut tracer = RayTracer::new(grid(), 1.0e-6, 1.0e-9);
+        tracer.hit_any_thing = true;
+        add_poly(&k, &mut tracer, &mut b);
+        let hit = tracer
+            .fire_ray(
+                &k,
+                Vec3::new(5.0, 5.0, 9.5),
+                Vec3::new(0.0, 0.0, -1.0),
+                BIG_DOUBLE,
+            )
+            .unwrap();
+        assert!(hit.hits_something);
+        assert!(faces
+            .iter()
+            .any(|&f| hit.solution.objects[0] == Some(RayObject::PolyFace(0, f))));
     }
 
     #[test]

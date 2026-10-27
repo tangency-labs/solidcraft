@@ -11,9 +11,13 @@
 //! (`SmLSI3LocalSolver::LocalSolve` on one leaf) and `add_surface`
 //! (`SmRayTracer::AddSurfaceToGrid`: builds the surface cache and expands the surface into
 //! its subdivision leaves; the record holds each leaf's domain, box, mid-point data, pseudo box
-//! and polar box). Both sides produce the flat record documented in the ffi module, reported
-//! as the values `rec`. The grid elements of a ray walk are reported as positions among the
-//! `add_leaf` leaves (`-1` for a leaf `add_surface` made).
+//! and polar box) and `add_poly_brep` (an `SmPolyBrep` of one region and shell with closed
+//! loops, then `SmRayTracer::AddPolyBrepToGrid`: builds its `SmBrepCache` and adds a polygon
+//! element per surface-tree leaf, whose box and sphere the record holds; rays reaching them run
+//! `sm_FindPolyHit`, and a poly face hit is reported by poly B-rep and face position). Both
+//! sides produce the flat record documented in the ffi module, reported as the values `rec`.
+//! The grid elements of a ray walk are reported as positions among the `add_leaf` leaves (`-1`
+//! for an element `add_surface` or `add_poly_brep` made).
 //!
 //! Deferred cases: every ray or solve that gets past the leaf's pseudo box test reaches
 //! `SmSurface::LocalLineIntersect` (`surface.surface_p8`). The generator makes mostly cases whose rays are rejected before
@@ -42,7 +46,13 @@ use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
+use solidcore::geom::a_object::CacheStore;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::object::ObjectRef;
+use solidcore::query::poly::{PolyBrep, PolyFaceId, PolyNotifyEnv, PolyObjectKind};
 use solidcore::surface::plane::Plane;
+use solidcore::topology::topology::Topology;
+use std::collections::BTreeMap;
 use solidcore::surface::surface::Surface;
 use solidcore::SolidError;
 use solidcore_ffi::units::intersect_ray_tracer as ffi;
@@ -89,6 +99,16 @@ struct GridIn {
     size: [usize; 3],
     ray_tol: f64,
     ray_acc: f64,
+}
+
+/// A poly face: tolerance (also its edges'), the constructor normal and closed loops of
+/// vertex indices, outer first.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PolyFaceSpec {
+    tol: f64,
+    #[serde(default)]
+    normal: Option<P3>,
+    loops: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +176,13 @@ enum OpIn {
     RenderRay {
         p: P3,
         v: P3,
+    },
+    AddPolyBrep {
+        tol: f64,
+        /// `x y z tol` per vertex.
+        vertices: Vec<[f64; 4]>,
+        faces: Vec<PolyFaceSpec>,
+        expansion: f64,
     },
 }
 
@@ -293,6 +320,24 @@ fn ffi_program(i: &Inputs) -> ffi::Program {
                 },
                 OpIn::RenderPixel { x, y } => ffi::Op::RenderPixel(*x, *y),
                 OpIn::RenderRay { p, v } => ffi::Op::RenderRay(*p, *v),
+                OpIn::AddPolyBrep {
+                    tol,
+                    vertices,
+                    faces,
+                    expansion,
+                } => ffi::Op::AddPolyBrep(ffi::PolyBrepIn {
+                    tolerance: *tol,
+                    vertices: vertices.clone(),
+                    faces: faces
+                        .iter()
+                        .map(|f| ffi::PolyFaceIn {
+                            tolerance: f.tol,
+                            normal: f.normal,
+                            loops: f.loops.clone(),
+                        })
+                        .collect(),
+                    expansion: *expansion,
+                }),
             })
             .collect(),
     }
@@ -355,6 +400,60 @@ fn rust_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
     }
 }
 
+/// The poly B-rep the shim builds: `SmPolyBrep(tol)`, one region and shell, the vertices
+/// (`SmPolyVertex` put on the vertex list), then per face `SmPolyFace(tol, .., normal)` and
+/// per loop `StartPolyEdgeLoop`, one `AddPolyEdge` per vertex and `FinishPolyEdgeLoop`.
+/// Returns it with its faces in creation order.
+fn build_poly(
+    k: &Kernel,
+    tol: f64,
+    vertices: &[[f64; 4]],
+    faces: &[PolyFaceSpec],
+) -> solidcore::Result<(PolyBrep, Vec<PolyFaceId>)> {
+    let bad = |reason| SolidError::InvalidInput {
+        operation: "difftest::intersect_ray_tracer::build_poly",
+        reason,
+    };
+    // the FFI's bounds, so a fuzzed case cannot make the Rust side allocate without end
+    if vertices.is_empty()
+        || vertices.len() > ffi::MAX_POLY_VERTICES
+        || faces.is_empty()
+        || faces.len() > ffi::MAX_POLY_FACES
+    {
+        return Err(bad("poly B-rep size"));
+    }
+    let mut b = PolyBrep::new(k, tol);
+    let region = b.add_region()?;
+    let shell = b.add_shell(region)?;
+    let mut vs = Vec::new();
+    for v in vertices {
+        vs.push(b.add_vertex(k, Vec3::new(v[0], v[1], v[2]), v[3])?);
+    }
+    let mut out = Vec::new();
+    for f in faces {
+        if f.loops.is_empty() || f.loops.len() > ffi::MAX_POLY_LOOPS {
+            return Err(bad("poly loop count"));
+        }
+        let face = b.add_face(k, shell, f.tol, f.normal.map(v3))?;
+        out.push(face);
+        for l in &f.loops {
+            if l.is_empty() || l.len() > ffi::MAX_LOOP_VERTICES {
+                return Err(bad("poly loop size"));
+            }
+            let lp = b.start_poly_edge_loop(face)?;
+            for (j, &i0) in l.iter().enumerate() {
+                let i1 = l.get((j + 1) % l.len()).copied().ok_or(bad("loop"))?;
+                let v0 = *vs.get(i0).ok_or(bad("poly vertex index"))?;
+                let v1 = *vs.get(i1).ok_or(bad("poly vertex index"))?;
+                let (p0, p1) = (b.vertex_point(v0)?, b.vertex_point(v1)?);
+                b.add_poly_edge(k, lp, f.tol, p0, p1, v0)?;
+            }
+            b.finish_poly_edge_loop(lp)?;
+        }
+    }
+    Ok((b, out))
+}
+
 /// The status of a failed Rust operation, as upstream numbers it.
 fn status_of(e: &SolidError) -> f64 {
     match e {
@@ -364,9 +463,18 @@ fn status_of(e: &SolidError) -> f64 {
     }
 }
 
-/// `surface_of` maps the tracer's surface list to the runner's surfaces: `add_surface`
-/// lists a surface a second time.
-fn put_solution(o: &mut Vec<f64>, s: &Solution<RayObject>, surface_of: &[usize]) {
+/// The runner's view of the tracer's lists: `surface_of` maps the tracer's surface list to
+/// the runner's surfaces (`add_surface` lists a surface a second time), `poly_of` the
+/// tracer's poly B-rep list to the program's `add_poly_brep` ops, whose faces in creation
+/// order are `poly_faces`.
+struct Lists<'a> {
+    surface_of: &'a [usize],
+    poly_of: &'a [usize],
+    poly_faces: &'a [Vec<PolyFaceId>],
+}
+
+fn put_solution(o: &mut Vec<f64>, s: &Solution<RayObject>, lists: &Lists<'_>) {
+    let surface_of = lists.surface_of;
     o.push(f64::from(s.solution_type.code()));
     o.push(s.num_variables as f64);
     o.push(s.num_objects as f64);
@@ -386,6 +494,16 @@ fn put_solution(o: &mut Vec<f64>, s: &Solution<RayObject>, surface_of: &[usize])
     } else {
         0.0
     });
+    for j in 0..2 {
+        let ids = match s.objects.get(j).copied().flatten() {
+            Some(RayObject::PolyFace(b, f)) => lists.poly_of.get(b).and_then(|&b| {
+                let faces = lists.poly_faces.get(b)?;
+                Some([b as f64, faces.iter().position(|&x| x == f)? as f64])
+            }),
+            _ => None,
+        };
+        o.extend(ids.unwrap_or([-1.0, -1.0]));
+    }
 }
 
 fn put_color(
@@ -417,6 +535,8 @@ struct Stats {
     elements_seen: usize,
     rejected_leaves: usize,
     errors: usize,
+    /// Rays whose nearest (or any) hit is a poly face.
+    poly_hits: usize,
 }
 
 fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64>> {
@@ -430,6 +550,32 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
             })
         })
         .collect::<Result<_, _>>()?;
+    // the poly B-reps of the `add_poly_brep` ops, built up front so the tracer can hold them
+    let mut polys: Vec<PolyBrep> = Vec::new();
+    let mut poly_faces: Vec<Vec<PolyFaceId>> = Vec::new();
+    for op in &i.ops {
+        if let OpIn::AddPolyBrep {
+            tol,
+            vertices,
+            faces,
+            ..
+        } = op
+        {
+            if polys.len() >= ffi::MAX_POLY_BREPS {
+                return Err(SolidError::InvalidInput {
+                    operation: "difftest::intersect_ray_tracer",
+                    reason: "too many poly B-reps",
+                });
+            }
+            let (b, f) = build_poly(k, *tol, vertices, faces)?;
+            polys.push(b);
+            poly_faces.push(f);
+        }
+    }
+    let mut poly_slots = polys.iter_mut();
+    // the program's poly B-rep of each entry of the tracer's poly B-rep list
+    let mut poly_of: Vec<usize> = Vec::new();
+    let mut poly_ops = 0_usize;
     let grid = Grid::new(&ext3(i.grid.bbox), i.grid.size)?;
     let mut tracer_slot = Some(RayTracer::new(grid, i.grid.ray_tol, i.grid.ray_acc));
     let mut renderer: Option<RayRenderer> = None;
@@ -526,7 +672,15 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                     Ok(hit) => {
                         rec.push(0.0);
                         rec.push(f64::from(u8::from(hit.hits_something)));
-                        put_solution(&mut rec, &hit.solution, &surface_of);
+                        put_solution(
+                            &mut rec,
+                            &hit.solution,
+                            &Lists {
+                                surface_of: &surface_of,
+                                poly_of: &poly_of,
+                                poly_faces: &poly_faces,
+                            },
+                        );
                         rec.push(hit.grid_elements.len() as f64);
                         rec.extend(hit.grid_elements.iter().map(|e| {
                             leaf_ids.iter().position(|l| l == e).map_or(-1.0, |p| p as f64)
@@ -539,13 +693,25 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                             st.grid_misses += 1;
                         }
                         st.rejected_leaves += usize::from(!hit.hits_something);
+                        st.poly_hits += usize::from(matches!(
+                            hit.solution.objects.first(),
+                            Some(Some(RayObject::PolyFace(..)))
+                        ));
                     }
                     Err(e @ SolidError::Unported { .. }) => return Err(e),
                     Err(e) => {
                         st.errors += 1;
                         rec.push(status_of(&e));
                         rec.push(0.0);
-                        put_solution(&mut rec, &Solution::new(), &surface_of);
+                        put_solution(
+                            &mut rec,
+                            &Solution::new(),
+                            &Lists {
+                                surface_of: &surface_of,
+                                poly_of: &poly_of,
+                                poly_faces: &poly_faces,
+                            },
+                        );
                         rec.push(0.0);
                     }
                 }
@@ -589,7 +755,15 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 }
                 rec.push(f64::from(u8::from(r.found_intersection)));
                 rec.push(f64::from(u8::from(r.needs_more_subdivision)));
-                put_solution(&mut rec, &r.solution, &surface_of);
+                put_solution(
+                    &mut rec,
+                    &r.solution,
+                    &Lists {
+                        surface_of: &surface_of,
+                        poly_of: &poly_of,
+                        poly_faces: &poly_faces,
+                    },
+                );
             }
             OpIn::AddSurface { surface } => {
                 let surf = surfaces.get(*surface).ok_or_else(|| bad_index("surface"))?;
@@ -701,6 +875,53 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 let r = renderer.as_mut().ok_or_else(|| bad_index("renderer"))?;
                 let res = r.render_ray(k, v3(*p), v3(*v));
                 put_color(&mut rec, res, r.pixels_shaded())?;
+            }
+            OpIn::AddPolyBrep { expansion, .. } => {
+                let brep = poly_slots.next().ok_or_else(|| bad_index("poly B-rep"))?;
+                let program_index = poly_ops;
+                poly_ops += 1;
+                let tracer = tracer!();
+                let before = tracer.grid_mut().elements().len();
+                let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+                let mut attributes = AttributeStore::new();
+                let mut caches: CacheStore<()> = CacheStore::new();
+                let mut env = PolyNotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attributes,
+                    caches: &mut caches,
+                    context: None,
+                    this: ObjectRef {
+                        type_code: PolyObjectKind::Brep.type_code(),
+                        key: ObjectKey(1),
+                    },
+                };
+                let status =
+                    match tracer.add_poly_brep_to_grid(k, brep, &mut env, *expansion) {
+                        Ok(()) => {
+                            poly_of.push(program_index);
+                            0.0
+                        }
+                        Err(e @ SolidError::Unported { .. }) => return Err(e),
+                        Err(e) => status_of(&e),
+                    };
+                // the polygon elements it made: count, then per element its box, sphere
+                // centre and radius
+                let made: Vec<_> = tracer
+                    .grid_mut()
+                    .elements()
+                    .iter()
+                    .skip(before)
+                    .filter(|e| matches!(e.item(), GridItem::Polygon(_)))
+                    .collect();
+                rec.push(status);
+                rec.push(made.len() as f64);
+                for e in made {
+                    let b = e.bounding_box();
+                    let (b0, b1) = (b.min(), b.max());
+                    rec.extend([b0.x, b0.y, b0.z, b1.x, b1.y, b1.z]);
+                    let c = e.sphere_center();
+                    rec.extend([c.x, c.y, c.z, e.sphere_radius()]);
+                }
             }
         }
     }
@@ -1172,10 +1393,123 @@ fn gen_case(rng: &mut Rng, safe: bool) -> Inputs {
     if !safe && rng.chance(0.1) && !surfaces.is_empty() {
         ops.push(OpIn::AddSurface { surface: 0 });
     }
+    // poly B-reps and rays at their faces (drawn after everything above, so the ops before
+    // them do not depend on whether they are made)
+    if rng.chance(0.35) {
+        gen_poly_ops(rng, &mut ops, gbox, scale);
+    }
     Inputs {
         surfaces,
         grid,
         ops,
+    }
+}
+
+/// One planar polygon face: its loops as points, outer first (a triangle, a quad, a regular
+/// polygon, a non-convex star or a quad with a square hole), on a plane through `c` spanned
+/// by `bx`, `by`, half size `r`; wound the other way with `reversed`.
+fn gen_polygon(rng: &mut Rng, c: P3, bx: P3, by: P3, r: f64, reversed: bool) -> Vec<Vec<P3>> {
+    let at = |a: f64, b: f64| add(c, add(scale3(bx, a * r), scale3(by, b * r)));
+    let ring = |n: usize, radius: &dyn Fn(usize) -> f64| -> Vec<P3> {
+        (0..n)
+            .map(|i| {
+                let t = 2.0 * std::f64::consts::PI * i as f64 / n as f64;
+                at(radius(i) * t.cos(), radius(i) * t.sin())
+            })
+            .collect()
+    };
+    let mut loops = match rng.below(5) {
+        0 => vec![vec![at(-1.0, -1.0), at(1.0, -0.5), at(0.0, 1.0)]],
+        1 => vec![vec![at(-1.0, -1.0), at(1.0, -1.0), at(1.0, 1.0), at(-1.0, 1.0)]],
+        2 => vec![ring(rng.range_i64(5, 8) as usize, &|_| 1.0)],
+        3 => vec![ring(2 * rng.range_i64(3, 6) as usize, &|i| if i % 2 == 0 { 1.0 } else { 0.4 })],
+        _ => {
+            let h = rng.uniform(0.2, 0.6);
+            vec![
+                vec![at(-1.0, -1.0), at(1.0, -1.0), at(1.0, 1.0), at(-1.0, 1.0)],
+                vec![at(-h, -h), at(-h, h), at(h, h), at(h, -h)],
+            ]
+        }
+    };
+    if reversed {
+        for l in &mut loops {
+            l.reverse();
+        }
+    }
+    loops
+}
+
+/// Appends up to two poly B-reps of random planar faces inside `gbox` and rays at them.
+fn gen_poly_ops(rng: &mut Rng, ops: &mut Vec<OpIn>, gbox: E6, scale: f64) {
+    let lo = [gbox[0], gbox[1], gbox[2]];
+    let hi = [gbox[3], gbox[4], gbox[5]];
+    let diag = len3(sub(hi, lo));
+    let mut targets: Vec<(P3, P3)> = Vec::new();
+    for _ in 0..rng.range_i64(1, 2) {
+        if ops.len() + 2 > ffi::MAX_OPS {
+            return;
+        }
+        let tol = *rng.choose(&[1e-5, 1e-6, 1e-3]).unwrap_or(&1e-5) * scale;
+        let mut vertices: Vec<[f64; 4]> = Vec::new();
+        let mut faces = Vec::new();
+        for _ in 0..rng.range_i64(1, 12) {
+            let c = [
+                rng.uniform(lo[0], hi[0]),
+                rng.uniform(lo[1], hi[1]),
+                rng.uniform(lo[2], hi[2]),
+            ];
+            let [bx, by, bz] = if rng.chance(0.3) {
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+            } else {
+                rotation_basis(rng)
+            };
+            let r = diag * rng.uniform(0.02, 0.3);
+            let reversed = rng.chance(0.3);
+            let loops = gen_polygon(rng, c, bx, by, r, reversed);
+            let mut idx = Vec::new();
+            for l in &loops {
+                idx.push(
+                    l.iter()
+                        .map(|p| {
+                            vertices.push([p[0], p[1], p[2], tol]);
+                            vertices.len() - 1
+                        })
+                        .collect(),
+                );
+            }
+            let normal = if rng.chance(0.15) {
+                Some(if reversed { scale3(bz, -1.0) } else { bz })
+            } else {
+                None
+            };
+            faces.push(PolyFaceSpec { tol, normal, loops: idx });
+            targets.push((add(c, scale3(add(bx, by), r * rng.uniform(-0.3, 0.3))), bz));
+        }
+        ops.push(OpIn::AddPolyBrep {
+            tol,
+            vertices,
+            faces,
+            expansion: *rng.choose(&[0.0, 1e-3 * scale, 0.05 * diag]).unwrap_or(&0.0),
+        });
+    }
+    while ops.len() < ffi::MAX_OPS && rng.chance(0.85) {
+        let Some(&(target, normal)) = rng.choose(&targets) else {
+            return;
+        };
+        // through the target: along the face normal (either way) or any direction
+        let dir = match rng.below(5) {
+            0 => normal,
+            1 => scale3(normal, -1.0),
+            _ => unit_dir(rng),
+        };
+        let start = sub(target, scale3(dir, diag * rng.uniform(0.2, 1.5)));
+        ops.push(OpIn::Fire {
+            p: start,
+            v: dir,
+            max_t: if rng.chance(0.85) { BIG_DOUBLE } else { rng.uniform(0.0, 2.0) * diag },
+            hit_any: rng.chance(0.4),
+            skip: None,
+        });
     }
 }
 
@@ -1256,5 +1590,95 @@ mod tests {
         assert!(ok + deferred == MIN_GENERATED, "{ok} {deferred} {st:?}");
         assert!(st.walks > 200, "{st:?}");
         assert!(st.elements_seen > 100, "{st:?}");
+        assert!(st.poly_hits > 50, "{st:?}");
+    }
+
+    fn poly_fixture_cases() -> Vec<(String, Inputs)> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/intersect.ray_tracer/poly_breps.json");
+        let text = std::fs::read_to_string(path).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        v["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                let name = c["name"].as_str().unwrap().to_string();
+                (name, serde_json::from_value(c["inputs"].clone()).unwrap())
+            })
+            .collect()
+    }
+
+    /// Every poly fixture gets a ray onto a poly face (passing cases that only miss would
+    /// leave `sm_FindPolyHit`'s hit path unchecked).
+    #[test]
+    fn poly_fixtures_hit_poly_faces() {
+        let k = Kernel::default();
+        for (name, i) in poly_fixture_cases() {
+            let mut st = Stats::default();
+            run_rust(&k, &i, &mut st).unwrap();
+            if name != "poly_render_shadows" {
+                assert!(st.poly_hits > 0, "{name}: {st:?}");
+            }
+        }
+    }
+
+    /// In `poly_big_face_over_small_faces` the big face lies on an inner node of the cache's
+    /// surface tree, so the rays that hit it reach it only by the walk up the parents.
+    #[test]
+    fn the_big_poly_face_sits_on_an_inner_tree_node() {
+        use solidcore::topology::brep_cache::{
+            arena_identity, make_brep_cache, CacheObject, CacheSource,
+        };
+        let k = Kernel::default();
+        let (_, i) = poly_fixture_cases()
+            .into_iter()
+            .find(|(n, _)| n == "poly_big_face_over_small_faces")
+            .unwrap();
+        let Some(OpIn::AddPolyBrep {
+            tol,
+            vertices,
+            faces,
+            ..
+        }) = i.ops.first()
+        else {
+            panic!("first op is the poly B-rep");
+        };
+        let (b, ids) = build_poly(&k, *tol, vertices, faces).unwrap();
+        let cache = make_brep_cache(&k, CacheSource::PolyBrep(&b), &arena_identity).unwrap();
+        let tree = cache.surface_tree().unwrap();
+        let holder = tree
+            .all_tree_nodes()
+            .into_iter()
+            .find(|&n| {
+                tree.node_object_list(n).is_ok_and(|l| {
+                    l.iter().any(|&o| {
+                        tree.list(o).unwrap().object == Some(CacheObject::PolyFace(ids[0]))
+                    })
+                })
+            })
+            .unwrap();
+        assert!(tree.node(holder).unwrap().child1.is_some());
+        // and a ray from above hits it first, found through the walk up from its leaf
+        let (mut b, ids) = build_poly(&k, *tol, vertices, faces).unwrap();
+        let mut tracer = RayTracer::new(Grid::new(&ext3(i.grid.bbox), i.grid.size).unwrap(), 1e-5, 1e-8);
+        let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+        let mut attributes = AttributeStore::new();
+        let mut caches: CacheStore<()> = CacheStore::new();
+        let mut env = PolyNotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            caches: &mut caches,
+            context: None,
+            this: ObjectRef {
+                type_code: PolyObjectKind::Brep.type_code(),
+                key: ObjectKey(1),
+            },
+        };
+        tracer.add_poly_brep_to_grid(&k, &mut b, &mut env, 1e-3).unwrap();
+        let hit = tracer
+            .fire_ray(&k, Vec3::new(4.5, 6.5, 9.8), Vec3::new(0.0, 0.0, -1.0), BIG_DOUBLE)
+            .unwrap();
+        assert_eq!(hit.solution.objects[0], Some(RayObject::PolyFace(0, ids[0])));
     }
 }
