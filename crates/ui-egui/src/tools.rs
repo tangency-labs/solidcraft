@@ -508,6 +508,13 @@ pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value,
         let history = std::mem::take(&mut app.session.undo);
         crate::sketch_palette::apply_mode(app, t.cmd, &result);
         app.session.undo = history;
+        // A box typed `name = expression` defined the parameter `name` (#7567).
+        let defined: Vec<_> = result["defined"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|name| format!("`{name}`")).collect();
+        match defined.as_slice() {
+            [] => {}
+            [name] => app.set_status(format!("Parameter {name} defined"), false),
+            names => app.set_status(format!("Parameters {} defined", names.join(", ")), false),
+        }
         Ok(result)
     }
 }

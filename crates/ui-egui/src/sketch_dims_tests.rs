@@ -454,3 +454,66 @@ fn value_boxes_stay_in_view_and_off_the_cursor() {
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(80.0, 30.0));
     assert!(tiny.contains_rect(egui::Rect::from_min_size(in_view(egui::pos2(-200.0, -200.0), Some(tiny), Some(egui::pos2(40.0, 15.0))), BOX)));
 }
+
+/// `name = expression` in a value box, as in the Dimension tool's: the shape takes the
+/// expression's size while it is typed and when placed, and the new parameter `name` drives its
+/// dimension (#7567).
+#[test]
+fn a_box_typed_name_equals_value_defines_the_parameter_driving_the_dimension() {
+    let mut h = drawing("sketch.circle.center");
+    type_value(&mut h, "width=20");
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(crate::sketch_dims::locked_value(&h.app, tool, "Diameter"), Some(20.0), "the preview follows the typed size");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
+    assert!(sk.radius(0).is_some_and(|r| (r - 10.0).abs() < 1e-6), "{:?}", sk.radius(0));
+    let width = h.app.session.doc.param("width").expect("the parameter is defined");
+    assert_eq!((width.expr.as_str(), width.unit.as_str(), width.model), ("20", "mm", false));
+    let dimension = sk.constraints.iter().find_map(|c| c.param.as_deref()).expect("a driving dimension");
+    assert_eq!(h.app.session.doc.param(dimension).unwrap().expr, "width");
+    assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some(("Parameter `width` defined", false)));
+
+    // In an inch design the right-hand side is in inches, while typing too.
+    let mut h = Harness::new();
+    h.app.run("document.units", json!({"units":"in"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+    h.step(&json!({"click":{"world":[0,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[25.4,12.7,0]}})).unwrap();
+    type_value(&mut h, "#w = 2");
+    tab(&mut h, false);
+    type_value(&mut h, "h = 1");
+    let tool = h.app.tool.as_ref().unwrap();
+    assert!((crate::sketch_dims::locked_value(&h.app, tool, "Width").unwrap() - 50.8).abs() < 1e-6);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("w").map(|p| p.unit.as_str()), Some("in"), "{:?}", h.app.status);
+    assert!(h.app.session.doc.param("h").is_some());
+    assert_eq!(h.app.status.as_ref().map(|(text, _, _)| text.as_str()), Some("Parameters `h`, `w` defined"));
+}
+
+/// A box that is not a dimension (a polygon's sides, a rounded rectangle's corner radius) has
+/// nothing for a parameter to drive: `name = ...` there is refused, not quietly dropped.
+#[test]
+fn a_definition_in_a_box_that_is_not_a_dimension_is_refused() {
+    for (command, tabs, text, says) in [
+        ("sketch.polygon.inscribed", 1, "n = 6", "Sides: only a box that becomes a dimension can define `n`"),
+        ("sketch.rectangle.rounded", 2, "r = 2", "Radius: only a box that becomes a dimension can define `r`"),
+        ("sketch.circle.center", 0, "w =", "Diameter: `w =` needs a value after the `=`"),
+    ] {
+        let mut h = drawing(command);
+        for _ in 0..tabs {
+            tab(&mut h, false);
+        }
+        type_value(&mut h, text);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.curves.is_empty(), "{command} {text}: placed {:?}", h.app.status);
+        assert!(h.app.session.doc.params.iter().all(|p| p.model), "{command} {text}: no user parameter");
+        let status = h.app.status.as_ref().expect("the refusal is reported");
+        assert!(status.2 && status.0.starts_with(says), "{command} {text}: {status:?}");
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "{command} {text}: the first point stays down");
+    }
+}

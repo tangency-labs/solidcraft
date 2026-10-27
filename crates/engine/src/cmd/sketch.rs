@@ -51,7 +51,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", draw_dimensioned).icon("dimension")
         .enabled(in_sketch)
-        .params(concat!("command: sketch creation command, params: object, dimensions: object of role to numeric or expression value; creates geometry and all driving dimensions atomically in one undo step", created_doc!())),
+        .params(concat!("command: sketch creation command, params: object, dimensions: object of role to numeric or expression value, or `name = expression` (also `#name = expression`), which defines the user parameter `name` as sketch.dimension does (the reply's `defined` lists the names); creates geometry and all driving dimensions atomically in one undo step", created_doc!())),
     CommandSpec::new("sketch.rectangle.two_point", "2-Point Rectangle", rect_two_point)
         .at("SKETCH", "CREATE")
         .icon("rect")

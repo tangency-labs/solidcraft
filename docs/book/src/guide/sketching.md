@@ -44,6 +44,14 @@ drop-down. The button and the family's shortcut start the variant you picked las
 shortcut such as L can start a Midpoint Line; pick the variant you want from the drop-down to
 change it ([Keyboard shortcuts](shortcuts.md)).
 
+Once a shape's first point is down, value boxes (a line's length and angle, a rectangle's width
+and height, a circle's diameter…) follow the cursor. Typing goes into the first box, Tab moves to
+the next and Enter places the shape; each typed value becomes a dimension. A value is an
+expression (`25`, `1 in`, `d1 * 2`), or `width = 20` (also `#width = 20`), which also adds the
+user parameter `width` and dimensions with it, as when [placing a dimension](parameters.md). A
+box that does not become a dimension (a polygon's sides, a rounded rectangle's corner radius)
+takes a value only.
+
 The Sketch Palette's **Construction Geometries** option hides construction curves while you
 work. A hidden construction curve cannot be picked by a click or by a box. Nothing invisible
 is selectable. The option belongs to one sketch and is saved with the design. Centerlines are

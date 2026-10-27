@@ -227,3 +227,81 @@ fn dimensioned_authoring_uses_selected_occurrence_and_keeps_local_geometry() {
     close(sk.points[a].pos.x, 0.0);
     close(sk.points[b].pos.x, 5.0 / std::f64::consts::SQRT_2);
 }
+
+/// The expression of the parameter driving the first dimension `kind` matches.
+fn driving(s: &Session, kind: fn(&ConstraintKind) -> bool) -> String {
+    let sk = sketch(s);
+    let c = sk.constraints.iter().find(|c| kind(&c.kind)).unwrap();
+    s.doc.param(c.param.as_deref().unwrap()).unwrap().expr.clone()
+}
+
+/// A typed box value `name = expression` defines the user parameter `name`, which drives the
+/// dimension, as the Dimension tool's value does (#7567).
+#[test]
+fn a_typed_definition_defines_the_parameter_that_drives_the_dimension() {
+    let is_diameter = |k: &ConstraintKind| matches!(k, ConstraintKind::Diameter { .. });
+    let mut s = session();
+    let undo = s.undo.len();
+    let out = draw(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":3}), json!({"diameter":"width = 20"}));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(out["defined"], json!(["width"]), "{out}");
+    close(measure(&s, is_diameter), 20.0);
+    let width = s.doc.param("width").unwrap();
+    assert_eq!((width.expr.as_str(), width.unit.as_str(), width.model), ("20", "mm", false));
+    assert_eq!(driving(&s, is_diameter), "width");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(sketch(&s).curves.is_empty() && s.doc.param("width").is_none());
+
+    // A bare number is in the design's unit, in the size checks too.
+    let mut s = session();
+    run(&mut s, "document.units", json!({"units":"in"}));
+    draw(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":3}), json!({"diameter":"#w = 2"}));
+    close(measure(&s, is_diameter), 50.8);
+    assert_eq!(s.doc.param("w").unwrap().unit, "in");
+    let mut s = session();
+    run(&mut s, "document.units", json!({"units":"in"}));
+    let slot = json!({"p0":[0,0],"p1":[60,0],"width":10,"connect":false});
+    draw(&mut s, "sketch.slot.overall", slot.clone(), json!({"length":"len = 2","width":"0.5"}));
+    close(measure(&s, |k| matches!(k, ConstraintKind::SlotOverallLength { .. })), 50.8);
+
+    // Both boxes of a rectangle may define a name.
+    let mut s = session();
+    let out = draw(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[5,5]}), json!({"width":"w = 30","height":"h=10"}));
+    assert_eq!(out["defined"], json!(["h", "w"]), "{out}");
+    let is_length = |k: &ConstraintKind| matches!(k, ConstraintKind::Length { .. });
+    let sk = sketch(&s);
+    let mut lengths: Vec<_> =
+        sk.constraints.iter().filter(|c| is_length(&c.kind)).map(|c| solidcraft_sketch::measure_dimension(&sk, &c.kind).unwrap()).collect();
+    lengths.sort_by(f64::total_cmp);
+    assert_eq!(lengths.len(), 2);
+    close(lengths[0], 10.0);
+    close(lengths[1], 30.0);
+}
+
+#[test]
+fn a_refused_typed_definition_changes_nothing() {
+    let mut s = session();
+    run(&mut s, "parameters.add", json!({"name":"taken","expression":"5","unit":"mm"}));
+    let circle = |value: &str| json!({"command":"sketch.circle.center","params":{"center":[0,0],"radius":3},"dimensions":{"diameter":value}});
+    let rect =
+        |w: &str, h: &str| json!({"command":"sketch.rectangle.two_point","params":{"p0":[0,0],"p1":[5,5]},"dimensions":{"width":w,"height":h}});
+    for (params, says) in [
+        (circle("taken = 20"), "already a parameter"),
+        (circle("w ="), "needs a value"),
+        (circle("2 = 3"), ""),
+        (circle("w == 3"), ""),
+        (circle("w = -4"), "invalid diameter"),
+        (circle(&format!("w = {}", "1".repeat(4096))), "bounded"),
+        // The same name twice: the second box finds it taken.
+        (rect("w = 30", "w = 10"), "already a parameter"),
+        // A box's value can't use a name the other box defines: neither exists yet.
+        (rect("w = 30", "h = w / 2"), ""),
+    ] {
+        let snapshot = serde_json::to_value(&*s.doc).unwrap();
+        let undo = s.undo.len();
+        let error = s.execute("sketch.draw.dimensioned", &params).expect_err(&params.to_string()).to_string();
+        assert!(error.contains(says), "{params}: {error}");
+        assert_eq!(serde_json::to_value(&*s.doc).unwrap(), snapshot, "{params}");
+        assert_eq!(s.undo.len(), undo);
+    }
+}

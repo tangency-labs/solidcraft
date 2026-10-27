@@ -2,12 +2,14 @@
 //! boxes (line length and angle, rectangle width and height, circle diameter…) sit next to the
 //! segment they measure and follow the cursor. Typing goes straight into the first box and
 //! locks that value; Tab moves to the next box; Enter places the shape with the typed values,
-//! which become dimension constraints. Values are expressions ("25", "1 in", "d1 * 2").
+//! which become dimension constraints. Values are expressions ("25", "1 in", "d1 * 2"), or
+//! `name = expression`, which also defines the user parameter `name` (#7567).
 
 use crate::ui_kit::{Container, Surface};
 use egui::{Pos2, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::doc::Document;
+use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
 use solidcraft_engine::geom::Vec2;
 
 use crate::SolveApp;
@@ -57,7 +59,19 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
 /// A locked box's value (mm or radians).
 fn locked(app: &SolveApp, t: &Tool, label: &str) -> Option<f64> {
     let b = t.dims.iter().chain(&t.dim_history).find(|b| b.label == label && b.locked)?;
-    crate::length_input::eval(&app.session.doc, &b.value, b.kind).ok().filter(|v| v.is_finite())
+    eval(&app.session.doc, &b.value, b.kind).ok().filter(|v| v.is_finite())
+}
+
+/// A box value's size. `name = expression` is the right-hand side's: the size the parameter
+/// `name` will hold once the shape is placed.
+fn eval(doc: &Document, text: &str, kind: ValueKind) -> solidcraft_engine::doc::Result<f64> {
+    crate::length_input::eval(doc, definition(text).map_or(text, |(_, rhs)| rhs), kind)
+}
+
+/// Whether a box becomes one of the shape's dimensions. A rounded rectangle's radius is its own
+/// parameter (sent with the shape); sides and rho are counts and shape factors.
+fn is_dimension(t: &Tool, label: &str) -> bool {
+    !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
 
 fn dir_or_x(v: Vec2) -> Vec2 {
@@ -346,10 +360,7 @@ pub fn dimensions(t: &Tool) -> Value {
         .dim_history
         .iter()
         .chain(&t.dims)
-        // A rounded rectangle's radius is its own parameter (sent with the shape), not a dimension.
-        .filter(|dimension| {
-            dimension.locked && !matches!(dimension.label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && dimension.label == "Radius")
-        })
+        .filter(|dimension| dimension.locked && is_dimension(t, dimension.label))
         .map(|dimension| (dimension.label.to_ascii_lowercase(), json!(dimension.value)))
         .collect::<serde_json::Map<_, _>>();
     Value::Object(values)
@@ -361,8 +372,15 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
         if dimension.value.len() > 4096 {
             return Err(format!("{} expression is too long", dimension.label));
         }
-        let value =
-            crate::length_input::eval(&app.session.doc, &dimension.value, dimension.kind).map_err(|error| format!("{}: {error}", dimension.label))?;
+        if let Some((name, rhs)) = definition(&dimension.value) {
+            if !is_dimension(t, dimension.label) {
+                return Err(format!("{}: only a box that becomes a dimension can define `{name}`; type the value alone", dimension.label));
+            }
+            if rhs.is_empty() {
+                return Err(format!("{}: `{name} =` needs a value after the `=`", dimension.label));
+            }
+        }
+        let value = eval(&app.session.doc, &dimension.value, dimension.kind).map_err(|error| format!("{}: {error}", dimension.label))?;
         if !value.is_finite() || value.abs() > 1e9 {
             return Err(format!("{} must be finite and within the model's size limits", dimension.label));
         }
