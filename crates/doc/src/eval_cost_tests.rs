@@ -225,8 +225,10 @@ fn a_sketch_on_a_face_still_sees_the_placed_bodies() {
     assert_eq!(work.digested, 0);
 }
 
-#[test]
-fn editing_a_sketch_on_a_turned_occurrence_reuses_its_frame_bodies() {
+/// A sketch on a face of a plate placed turned (its own frame, so the plate is moved into it),
+/// evaluated once: the design, its model, the plate's component, the sketch, its anchor and the
+/// face picked.
+fn sketch_on_a_turned_occurrence() -> (Document, Model, u64, u64, FaceAnchor, Plane) {
     use solidcraft_sketch::{LinkKind, LinkSource};
 
     let mut doc = Document::new("turned face");
@@ -262,6 +264,12 @@ fn editing_a_sketch_on_a_turned_occurrence_reuses_its_frame_bodies() {
     let first = counted(|| model.evaluate(&doc));
     assert!(first.moved > 0, "{first:?}");
     assert!(model.result(id).unwrap().error.is_none(), "{:?}", model.result(id).unwrap().error);
+    (doc, model, comp, id, anchor, picked)
+}
+
+#[test]
+fn editing_a_sketch_on_a_turned_occurrence_reuses_its_frame_bodies() {
+    let (mut doc, model, comp, id, anchor, picked) = sketch_on_a_turned_occurrence();
     let reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
     for mut model in [model, reopened] {
         let before = state_in_face_anchor_frame(&doc, &model.state_before(id), &anchor, 0).unwrap().bodies.first().unwrap().mesh();
@@ -289,6 +297,27 @@ fn editing_a_sketch_on_a_turned_occurrence_reuses_its_frame_bodies() {
         doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap().transform = turned;
         model.evaluate(&doc);
     }
+}
+
+/// Evaluations between two edits of the sketch that move nothing (a delete refreshes the model
+/// more than once, an undo can take its sketch from the cache) leave its frame bodies in place:
+/// they once aged them out, and the next edit moved and meshed every placed body again, which
+/// in a design of thousands of imported bodies took a minute per edit.
+#[test]
+fn evaluations_that_move_nothing_keep_the_frame_bodies() {
+    let (mut doc, mut model, _, id, _, _) = sketch_on_a_turned_occurrence();
+    let edit = |doc: &mut Document, to: Vec2| doc.sketch_mut(id).unwrap().points.get_mut(1).unwrap().pos = to;
+    edit(&mut doc, Vec2::new(4., 5.));
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.moved, 0, "{work:?}");
+    for _ in 0..3 {
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!((work.moved, model.last_recomputed), (0, 0), "{work:?}");
+    }
+    edit(&mut doc, Vec2::new(6., 7.));
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.last_recomputed, 1);
+    assert_eq!(work.moved, 0, "the edit after idle evaluations must reuse the moved plate: {work:?}");
 }
 
 #[test]
