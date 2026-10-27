@@ -416,7 +416,7 @@ fn original_clipped_step_checkpoint_evidence() {
     let input: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
     let plain_cpp = ffi::run(&ffi_program(&input)).unwrap();
     let plain_rust =
-        rust_record(&input).unwrap_or_else(|_| panic!("original Rust operation failed"));
+        rust_record(&Kernel::default(), &input).unwrap_or_else(|_| panic!("original Rust operation failed"));
     let (cpp_record, cpp_events) =
         unpack_cpp(&ffi::probe_next(&ffi_program(&input)).unwrap()).unwrap();
     let (rust_record, rust_events) = observed_rust(&input).unwrap();

@@ -11,7 +11,10 @@
 //! produce the record documented in the ffi module (statuses `0` = `SM_SUCCESS`, else the
 //! `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust error upstream cannot produce;
 //! op values only on success), reported as the values `rec`. A case whose Rust side reaches an
-//! unported unit is deferred as a whole.
+//! unported unit is deferred as a whole. Every case's C++ side runs in a fresh child
+//! process, where `ComputePointValues`' function-static `sdStaticStep` (ND-3) starts
+//! unlatched as on a first call, and every Rust case on a fresh [`Kernel`]; the step each
+//! side leaves latched is compared as `fillet_point_step` (the C++ one read in the child).
 //!
 //! The constant-radius `SetupOffsetValues` dispatch runs the ported standard solver,
 //! so `ComputePointValuesDelta` can compare both mutated surface records.
@@ -316,9 +319,22 @@ fn ffi_program(i: &Inputs) -> ffi::Program {
 
 // ---- C++ side -----------------------------------------------------------------------------
 
+/// Compared key: the `sdStaticStep` latch (ND-3: `SmFilletSolver::ComputePointValues`'
+/// function static, fixed by the first call in a process) after the case.
+const POINT_STEP: &str = "fillet_point_step";
+
+/// Every case's C++ side runs in a fresh child process
+/// ([`with_fresh_static_step`](solidcore_ffi::units::blend_fillet_solver_p4::with_fresh_static_step)),
+/// where `sdStaticStep` starts unlatched as on a first call whatever ran before; the step
+/// the case leaves latched is compared, never seeded into the Rust side.
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    match ffi::run(&ffi_program(i)) {
-        Ok(rec) => Ok(Output::new().values("rec", rec)),
+    let program = ffi_program(i);
+    match solidcore_ffi::units::blend_fillet_solver_p4::with_fresh_static_step(|| {
+        ffi::run(&program)
+    }) {
+        Ok((rec, step)) => Ok(Output::new()
+            .values("rec", rec)
+            .values(POINT_STEP, vec![step])),
         Err(e) => Err(harness(format!("C++: {e}"))),
     }
 }
@@ -691,8 +707,7 @@ fn rail_offset(k: &Kernel, d: f64, base: Surface, id: SurfaceId) -> Result<Offse
     })
 }
 
-fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
-    let k = Kernel::default();
+fn rust_record(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     let a = rust_surface(&i.a)?;
     let b = match &i.b {
         Some(b) => Some(rust_surface(b)?),
@@ -701,9 +716,9 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let bref = b.as_ref().unwrap_or(&a);
     let s = &i.solver;
     let orient = s.orient.map(|f| if f { 1.0 } else { -1.0 });
-    let off0 = rail_offset(&k, s.radii[0] * orient[0], a.clone(), SurfaceId::Free(0))?;
+    let off0 = rail_offset(k, s.radii[0] * orient[0], a.clone(), SurfaceId::Free(0))?;
     let off1 = rail_offset(
-        &k,
+        k,
         s.radii[1] * orient[1],
         bref.clone(),
         SurfaceId::Free(u32::from(b.is_some())),
@@ -725,13 +740,13 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let mut pseudo = FilletBrep::new();
     if let Err(e) = solver
         .solver
-        .add_constructor_fillet_geom(&k, &mut pseudo, FilletSolverId(0))
+        .add_constructor_fillet_geom(k, &mut pseudo, FilletSolverId(0))
     {
         return Err(Fail::Harness(harness(format!("fillet geometry: {e}"))));
     }
 
     let mut fi: Fi<'_> =
-        match FilletIntersector::new(&k, &a, &ext(i.dom1), bref, &ext(i.dom2), None) {
+        match FilletIntersector::new(k, &a, &ext(i.dom1), bref, &ext(i.dom2), None) {
             Ok(fi) => fi,
             Err(e) => {
                 if let Some(d) = Output::unported(&e) {
@@ -750,7 +765,7 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
     }
 
     let mut o = vec![op_code(&i.op)];
-    run_op(&i.op, &k, &mut fi, &mut solver, &mut pseudo, &mut o)?;
+    run_op(&i.op, k, &mut fi, &mut solver, &mut pseudo, &mut o)?;
 
     // state
     let si = &fi.base.base;
@@ -782,9 +797,15 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
     Ok(o)
 }
 
+/// Every case runs on a fresh kernel, whose `sdStaticStep` latch sets itself.
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    match rust_record(i) {
-        Ok(rec) => Ok(Output::new().values("rec", rec)),
+    let k = Kernel::default();
+    match rust_record(&k, i) {
+        // read as the C++ probe reads `sdStaticStep` (its crossing point latches 1e-5)
+        Ok(rec) => Ok(Output::new().values("rec", rec).values(
+            POINT_STEP,
+            vec![k.fillet_point_step.get().unwrap_or(1.0e-5)],
+        )),
         Err(Fail::Deferred(d)) => Ok(*d),
         Err(Fail::Harness(e)) => Err(e),
     }

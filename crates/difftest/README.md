@@ -434,8 +434,8 @@ ratchet waivers once the PR has merged.
 The harness never feeds C++ outputs or C++ process state into the Rust side;
 process-global C++ state is isolated per case (fresh child process), and any such
 latched state is compared as an output. For example, the C++ side of every
-`blend.fillet_solver_p4` and `blend.fillet_executive_p3` case runs in a forked child
-(`solidcore_ffi::isolate::fresh_process`), where `ComputePointValues`' function-static
+`blend.fillet_solver_p4`, `blend.fillet_executive_p3` and `blend.fillet_intersector`
+case runs in a forked child (`solidcore_ffi::isolate::fresh_process`), where `ComputePointValues`' function-static
 `sdStaticStep` (ND-3) starts unlatched; the child reads it after the case, the Rust case
 runs on a fresh `Kernel::default()`, and both latched steps are compared as
 `fillet_point_step`. A child that crashes is `SC_ERR_CHILD_CRASHED`.
