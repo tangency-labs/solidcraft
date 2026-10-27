@@ -15,6 +15,9 @@
 //!   out their acquire while the user is there. The app closes, keeping unsaved changes for
 //!   recovery, and starts again on the next API (D3D12 → Vulkan → OpenGL → the software
 //!   renderer), kept in `graphics.json`.
+//! - **Graphics settings tried from Preferences** (the graphics API, anti-aliasing; [`graphics_start`]):
+//!   the start that tries them asks to keep them. One that never says so (a crash, a hang, the
+//!   question timed out) leaves the trial marked as started, and the next start drops it.
 
 use std::path::{Path, PathBuf};
 
@@ -321,19 +324,31 @@ impl HangWatch {
     }
 }
 
-/// The backend a launch whose GPU hung on `backend` starts again on, kept in `graphics.json` for
-/// later launches too (`cpu`: the software renderer, which has nothing to fall back to). Each
-/// hang moves on to the next of [`WINDOWS_ORDER`], then to the software renderer, so a GPU hangs
-/// at most once on each: a safe-mode restart would leave the backend that hung saved for the
-/// next normal start. D3D12 goes to Vulkan, which runs the GPUs whose D3D12 driver hung (#1789);
-/// it isn't probed here, as loading Vulkan's drivers into this process is what crashed once
-/// (`WINDOWS_ORDER`): the new launch finds out, and falls back to software if it has no GPU.
-pub fn after_hang(backend: eframe::wgpu::Backend, cpu: bool) -> Option<&'static str> {
+/// How a launch whose GPU hung starts again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Restart {
+    /// On this backend (`graphics.json`'s `backend`), kept for later launches too.
+    Backend(&'static str),
+    /// As it was: the hang came with graphics settings on trial, which the next start drops
+    /// ([`graphics_start`]).
+    Again,
+}
+
+/// The restart after the GPU hung on `backend` (`cpu`: the software renderer, which has nothing
+/// to fall back to; `trial`: with graphics settings on trial, which the next start drops). Each
+/// hang moves on to the next of [`WINDOWS_ORDER`], then to the software renderer, kept in
+/// `graphics.json` for later launches too, so a GPU hangs at most once on each: a safe-mode
+/// restart would leave the backend that hung saved for the next normal start. D3D12 goes to
+/// Vulkan, which runs the GPUs whose D3D12 driver hung (#1789); it isn't probed here, as loading
+/// Vulkan's drivers into this process is what crashed once (`WINDOWS_ORDER`): the new launch
+/// finds out, and falls back to software if it has no GPU.
+pub fn after_hang(backend: eframe::wgpu::Backend, cpu: bool, trial: bool) -> Option<Restart> {
     match backend {
+        _ if trial => Some(Restart::Again),
         _ if cpu => None,
-        eframe::wgpu::Backend::Dx12 => Some("vulkan"),
-        eframe::wgpu::Backend::Vulkan => Some("gl"),
-        _ => Some(SOFTWARE_BACKEND),
+        eframe::wgpu::Backend::Dx12 => Some(Restart::Backend("vulkan")),
+        eframe::wgpu::Backend::Vulkan => Some(Restart::Backend("gl")),
+        _ => Some(Restart::Backend(SOFTWARE_BACKEND)),
     }
 }
 
@@ -355,6 +370,7 @@ pub fn hang_note(hung: &str, safe_mode: bool, backend: Option<&str>) -> String {
 /// A backend's name (`Dx12`, `vulkan`, …) as people know the graphics API.
 fn api_name(backend: &str) -> &str {
     match backend.trim().to_ascii_lowercase().as_str() {
+        "" | "auto" => "Automatic",
         "dx12" => "Direct3D 12",
         "vulkan" => "Vulkan",
         "gl" => "OpenGL",
@@ -390,6 +406,164 @@ pub fn fallback_note(previous: &str, failed: eframe::wgpu::Backends, next: &str,
     let error: String = error.chars().take(1024).collect();
     let line = format!("{previous} Graphics fallback: {failed:?} failed ({error}); trying {next}.");
     line.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(4096).collect()
+}
+
+/// The graphics APIs Preferences offers on this system besides Automatic, as `graphics.json`'s
+/// `backend` names them (#4015). None on macOS, which has Metal alone.
+pub const GRAPHICS_APIS: &[&str] = if cfg!(target_os = "windows") {
+    &["dx12", "vulkan", "gl"]
+} else if cfg!(target_os = "macos") {
+    &[]
+} else {
+    &["vulkan", "gl"]
+};
+
+/// The APIs Preferences warns about on this system: D3D12 when its GPUs are all AMD integrated
+/// ones, whose driver it froze, at times until the computer was restarted (#3321).
+pub fn apis_that_freeze(windows: bool, hardware: impl FnOnce(eframe::wgpu::Backends) -> Vec<HardwareAdapter>) -> Vec<&'static str> {
+    if !windows {
+        return Vec::new();
+    }
+    let found = hardware(eframe::wgpu::Backends::DX12);
+    if !found.is_empty() && found.iter().all(HardwareAdapter::hangs_on_d3d12) { vec!["dx12"] } else { Vec::new() }
+}
+
+/// The saved settings to start with after the last launch crashed (`crashed`) on `saved`: an API
+/// Preferences warns about on this system (`freezes`, [`apis_that_freeze`]) goes back to Automatic.
+/// AMD's integrated GPUs crashed on D3D12 once a design opened, after the start and its trial had
+/// gone fine and the user kept it (#4015). `None`: they stay.
+pub fn after_crash(saved: &GraphicsChoice, crashed: bool, freezes: impl FnOnce() -> Vec<&'static str>) -> Option<GraphicsChoice> {
+    let chosen: Vec<&str> = saved.backend.split(',').map(str::trim).filter(|b| !b.is_empty() && *b != "auto").collect();
+    if !crashed || chosen.is_empty() {
+        return None;
+    }
+    let freezes = freezes();
+    chosen.iter().any(|b| freezes.contains(b)).then(|| GraphicsChoice { backend: "auto".into(), msaa: saved.msaa })
+}
+
+/// The notice when [`after_crash`] put `backend` (a backend's name) back to Automatic.
+pub fn after_crash_note(backend: &str) -> String {
+    format!(
+        "SolidCraft closed unexpectedly on {}, which can freeze this computer's graphics, so it went back to Automatic. Preferences can choose it again.",
+        api_name(backend)
+    )
+}
+
+/// Whether a crash report `kind` ([`solidcraft_engine::crash::Summary`]) means the launch ended:
+/// a panic nothing caught or an unclean exit, not a command or kernel call recovered from.
+pub fn launch_crashed(kind: &str) -> bool {
+    matches!(kind, "panic" | "unclean_exit")
+}
+
+/// [`hardware_adapters`], keeping D3D12's: the start asks for them ([`choose_backends`]), then
+/// Preferences ([`apis_that_freeze`]).
+pub fn hardware_adapters_once(backends: eframe::wgpu::Backends) -> Vec<HardwareAdapter> {
+    static D3D12: std::sync::OnceLock<Vec<HardwareAdapter>> = std::sync::OnceLock::new();
+    if backends == eframe::wgpu::Backends::DX12 { D3D12.get_or_init(|| hardware_adapters(backends)).clone() } else { hardware_adapters(backends) }
+}
+
+/// Anti-aliasing samples when `graphics.json` has none (or one that isn't 1, 2, 4 or 8).
+pub const DEFAULT_MSAA: u16 = 4;
+
+/// Graphics settings a launch starts with (`graphics.json`'s `backend` and `msaa`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphicsChoice {
+    /// `auto`, or the backends to start (`dx12`, `vulkan`, `gl`, or a comma list).
+    pub backend: String,
+    pub msaa: u16,
+}
+
+impl GraphicsChoice {
+    /// The choice in a JSON object, with `fallback`'s values where it has none (or a bad one).
+    fn read(json: Option<&serde_json::Value>, fallback: &GraphicsChoice) -> GraphicsChoice {
+        let backend = json.and_then(|v| v.get("backend")).and_then(serde_json::Value::as_str).map(str::trim).filter(|b| !b.is_empty());
+        let msaa = json
+            .and_then(|v| v.get("msaa"))
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|m| u16::try_from(m).ok())
+            .filter(|m| [1, 2, 4, 8].contains(m));
+        GraphicsChoice { backend: backend.map_or_else(|| fallback.backend.clone(), str::to_string), msaa: msaa.unwrap_or(fallback.msaa) }
+    }
+
+    /// As the notice names it, with only what differs from `other` ("Vulkan, 8× anti-aliasing").
+    fn describe(&self, other: &GraphicsChoice) -> String {
+        let mut parts = Vec::new();
+        if self.backend != other.backend || self.msaa == other.msaa {
+            parts.push(api_name(&self.backend).to_string());
+        }
+        if self.msaa != other.msaa {
+            parts.push(format!("{}× anti-aliasing", self.msaa));
+        }
+        parts.join(", ")
+    }
+}
+
+/// Settings tried from Preferences, as a launch finds them (#4015).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Trial {
+    None,
+    /// This launch tries them: it starts with them and asks whether to keep them.
+    Trying(GraphicsChoice),
+    /// The launch that tried them ended without keeping them: they are dropped.
+    Failed(GraphicsChoice),
+}
+
+/// `graphics.json` as a launch reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GraphicsStart {
+    /// The settings kept for every launch.
+    pub saved: GraphicsChoice,
+    pub trial: Trial,
+    /// The file to write back before the window opens, when it changes: the trial marked as
+    /// started, or dropped.
+    pub rewrite: Option<serde_json::Value>,
+}
+
+impl GraphicsStart {
+    /// The settings this launch starts with.
+    pub fn current(&self) -> &GraphicsChoice {
+        match &self.trial {
+            Trial::Trying(tried) => tried,
+            _ => &self.saved,
+        }
+    }
+
+    /// The notice when a trial was dropped.
+    pub fn note(&self) -> Option<String> {
+        let Trial::Failed(tried) = &self.trial else { return None };
+        Some(format!(
+            "The graphics settings tried at the last start ({}) weren't kept, so SolidCraft went back to {}.",
+            tried.describe(&self.saved),
+            self.saved.describe(tried)
+        ))
+    }
+}
+
+/// Read `graphics.json` (`file`) at start. Preferences writes settings to try as its `trial`
+/// object, next to the saved `backend` and `msaa`. The first launch to find it tries them and
+/// marks it `started`; the app removes the trial when the user keeps the settings (they become
+/// the saved ones) or goes back. A trial already started belongs to a launch that never got
+/// that far, so it is dropped. Safe mode leaves a trial that hasn't started for the next start.
+pub fn graphics_start(file: Option<&serde_json::Value>, safe_mode: bool) -> GraphicsStart {
+    let defaults = GraphicsChoice { backend: "auto".into(), msaa: DEFAULT_MSAA };
+    let saved = GraphicsChoice::read(file, &defaults);
+    let Some(trial) = file.and_then(|f| f.get("trial")).filter(|t| t.is_object()) else {
+        return GraphicsStart { saved, trial: Trial::None, rewrite: None };
+    };
+    let tried = GraphicsChoice::read(Some(trial), &saved);
+    let started = trial.get("started").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let mut rewrite = file.cloned().unwrap_or_default();
+    if started {
+        if let Some(o) = rewrite.as_object_mut() {
+            o.remove("trial");
+        }
+        return GraphicsStart { saved, trial: Trial::Failed(tried), rewrite: Some(rewrite) };
+    }
+    if safe_mode {
+        return GraphicsStart { saved, trial: Trial::None, rewrite: None };
+    }
+    rewrite["trial"]["started"] = serde_json::json!(true);
+    GraphicsStart { saved, trial: Trial::Trying(tried), rewrite: Some(rewrite) }
 }
 
 /// The device feature for a 32-bit float depth buffer with a stencil (reversed depth, #1434).
@@ -807,15 +981,96 @@ mod tests {
         assert!(!resized.hung(0.0, true, 0, Some(0.5)), "a moment's refusal");
 
         // Each API hangs at most once: D3D12, then Vulkan, then OpenGL, then software.
-        assert_eq!(after_hang(Backend::Dx12, false), Some("vulkan"));
-        assert_eq!(after_hang(Backend::Vulkan, false), Some("gl"));
-        assert_eq!(after_hang(Backend::Gl, false), Some(SOFTWARE_BACKEND));
-        assert_eq!(after_hang(Backend::Dx12, true), None, "software: nothing to fall back to");
+        assert_eq!(after_hang(Backend::Dx12, false, false), Some(Restart::Backend("vulkan")));
+        assert_eq!(after_hang(Backend::Vulkan, false, false), Some(Restart::Backend("gl")));
+        assert_eq!(after_hang(Backend::Gl, false, false), Some(Restart::Backend(SOFTWARE_BACKEND)));
+        assert_eq!(after_hang(Backend::Dx12, true, false), None, "software: nothing to fall back to");
         assert!(cpu_renderer_env(Some(SOFTWARE_BACKEND)), "the saved software renderer starts as such");
+        // Settings on trial: start again as it was, and the next start drops them (#4015).
+        assert_eq!(after_hang(Backend::Vulkan, false, true), Some(Restart::Again));
+        assert_eq!(after_hang(Backend::Dx12, true, true), Some(Restart::Again));
         let note = hang_note("Dx12", false, Some("vulkan"));
         assert!(note.contains("on Direct3D 12") && note.contains("on Vulkan") && note.contains("recovery"), "{note}");
         assert!(hang_note("Vulkan", true, Some("gl")).contains("in safe mode"));
         assert!(hang_note("Gl", false, Some("cpu")).contains("on the software renderer, which it keeps using"));
+    }
+
+    /// Settings tried from Preferences (#4015): the first start tries them and marks the trial
+    /// started; one that finds it started drops it and says so; safe mode leaves it waiting.
+    #[test]
+    fn graphics_settings_on_trial_are_tried_once_and_dropped_unless_kept() {
+        use serde_json::json;
+        let saved = GraphicsChoice { backend: "dx12".into(), msaa: 4 };
+        let vulkan_8x = GraphicsChoice { backend: "vulkan".into(), msaa: 8 };
+        // No file, or one without a trial: the saved settings (defaults where missing), unchanged.
+        let none = graphics_start(None, false);
+        assert_eq!(none.current(), &GraphicsChoice { backend: "auto".into(), msaa: DEFAULT_MSAA });
+        assert_eq!((none.trial, none.rewrite), (Trial::None, None));
+        let plain = graphics_start(Some(&json!({"backend": "dx12", "msaa": 16})), false);
+        assert_eq!(plain.current(), &saved, "16 isn't a sample count: the default");
+        assert_eq!(plain.rewrite, None);
+
+        // The first start tries the trial and marks it started.
+        let file = json!({"backend": "dx12", "msaa": 4, "trial": {"backend": "vulkan", "msaa": 8}});
+        let first = graphics_start(Some(&file), false);
+        assert_eq!(first.trial, Trial::Trying(vulkan_8x.clone()));
+        assert_eq!(first.current(), &vulkan_8x);
+        assert_eq!(first.saved, saved);
+        assert_eq!(first.note(), None);
+        let marked = first.rewrite.clone().unwrap();
+        assert_eq!(marked["trial"]["started"], json!(true));
+        assert_eq!((marked["backend"].clone(), marked["msaa"].clone()), (json!("dx12"), json!(4)), "the saved settings stay");
+
+        // That start never kept them (it crashed, hung, or the question timed out): the next one
+        // drops the trial, starts with the saved settings and says what happened.
+        let next = graphics_start(Some(&marked), false);
+        assert_eq!(next.trial, Trial::Failed(vulkan_8x));
+        assert_eq!(next.current(), &saved);
+        assert_eq!(next.rewrite, Some(json!({"backend": "dx12", "msaa": 4})));
+        let note = next.note().unwrap();
+        assert!(note.contains("(Vulkan, 8× anti-aliasing)") && note.contains("back to Direct3D 12, 4× anti-aliasing"), "{note}");
+        // Only what differs is named; Automatic by name.
+        let api_only = graphics_start(Some(&json!({"msaa": 4, "trial": {"backend": "gl", "started": true}})), false);
+        assert_eq!(
+            api_only.note().unwrap(),
+            "The graphics settings tried at the last start (OpenGL) weren't kept, so SolidCraft went back to Automatic."
+        );
+
+        // Safe mode leaves a trial that hasn't started for the next normal start, but still drops
+        // one that has.
+        let safe = graphics_start(Some(&file), true);
+        assert_eq!((safe.current(), &safe.trial, &safe.rewrite), (&saved, &Trial::None, &None));
+        assert!(matches!(graphics_start(Some(&marked), true).trial, Trial::Failed(_)));
+        // Every API Preferences offers is a backend the start understands.
+        for api in GRAPHICS_APIS {
+            assert!(!eframe::wgpu::Backends::from_comma_list(api).is_empty(), "{api}");
+        }
+    }
+
+    #[test]
+    fn preferences_warn_about_d3d12_only_where_it_froze_the_gpu() {
+        let with = |adapters: Vec<HardwareAdapter>| move |_: eframe::wgpu::Backends| adapters;
+        assert_eq!(apis_that_freeze(true, with(vec![AMD_IGPU])), vec!["dx12"]);
+        assert!(apis_that_freeze(true, with(vec![AMD_IGPU, NVIDIA])).is_empty(), "a graphics card besides");
+        assert!(apis_that_freeze(true, with(vec![NVIDIA])).is_empty());
+        assert!(apis_that_freeze(true, with(Vec::new())).is_empty(), "WARP alone");
+        assert!(apis_that_freeze(false, |_| panic!("only Windows has D3D12")).is_empty());
+    }
+
+    #[test]
+    fn a_crash_on_an_api_that_freezes_this_gpu_goes_back_to_automatic() {
+        let d3d12 = GraphicsChoice { backend: "dx12".into(), msaa: 1 };
+        let freezes = || vec!["dx12"];
+        assert_eq!(after_crash(&d3d12, true, freezes), Some(GraphicsChoice { backend: "auto".into(), msaa: 1 }), "anti-aliasing stays");
+        assert_eq!(after_crash(&d3d12, false, freezes), None, "no crash");
+        assert_eq!(after_crash(&d3d12, true, Vec::new), None, "D3D12 doesn't freeze this GPU");
+        let vulkan = GraphicsChoice { backend: "vulkan".into(), msaa: 4 };
+        assert_eq!(after_crash(&vulkan, true, freezes), None);
+        let auto = GraphicsChoice { backend: "auto".into(), msaa: 4 };
+        assert_eq!(after_crash(&auto, true, || panic!("Automatic isn't probed")), None);
+        assert!(launch_crashed("unclean_exit") && launch_crashed("panic"));
+        assert!(!launch_crashed("command_panic") && !launch_crashed("kernel_panic_recovered"));
+        assert!(after_crash_note("dx12").contains("on Direct3D 12"));
     }
 
     #[test]

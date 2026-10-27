@@ -683,6 +683,8 @@ pub struct SolveApp {
     /// Settings put back at start because they kept SolidCraft from starting, one line each,
     /// shown until dismissed (`prefs::show_reset_notice`).
     pub settings_reset: Vec<prefs::SettingReset>,
+    /// The graphics settings that apply at start, and settings on trial (`prefs::Graphics`).
+    pub graphics: prefs::Graphics,
     /// The last command was a big operation: autosave after it.
     pub big_operation: bool,
     /// Autosave interval (minutes; 0 = only after big operations). A preference.
@@ -868,6 +870,7 @@ impl SolveApp {
             msaa_compatibility: false,
             graphics_fallback: None,
             settings_reset: Vec::new(),
+            graphics: Default::default(),
             big_operation: false,
             autosave_minutes: 5.0,
             custom_titlebar: false,
@@ -2952,6 +2955,8 @@ impl SolveApp {
                 agent_chat::poll(self, ui.ctx());
                 // Preferences and Keyboard Shortcuts open from Home too (its links, the gear, Ctrl+,).
                 prefs::show(self, ui.ctx());
+                // A start that tries graphics settings asks about them over Home too (#4015).
+                prefs_notice::graphics_trial(self, ui.ctx());
                 return;
             }
         }
