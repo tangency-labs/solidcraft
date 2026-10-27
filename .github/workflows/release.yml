@@ -101,6 +101,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-icons
@@ -140,6 +143,9 @@ jobs:
             "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_${{ matrix.deb }}.deb"
           sudo dpkg -i "$RUNNER_TEMP/nfpm.deb"
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
@@ -325,6 +331,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-macos-${{ matrix.arch }}
@@ -423,6 +432,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh ${{ matrix.target }}
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-windows-${{ matrix.arch }}
@@ -554,6 +566,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-web

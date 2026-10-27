@@ -45,6 +45,9 @@ jobs:
           # main goes through the merge queue; this deploy key may push past it.
           ssh-key: ${{ secrets.GENERATED_FILES_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: generated-files
