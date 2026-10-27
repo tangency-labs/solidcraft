@@ -289,6 +289,8 @@ pub struct UpstreamFixes {
     pub offset_stitch_at_body_tolerance: bool,
     /// `SmCurve::GlobalCurveIntersect` moves a point solution to an end of either curve when that end lies within tolerance of the other curve and the curves stay within tolerance of each other over the whole stretch between (`sm_MoveContactsToCurveEnds`), so a tangential contact is not placed inside the curve (WR-455, #855; the fork's tangency-labs/smlib@601d804).
     pub curve_contacts_at_curve_ends: bool,
+    /// `SmOffsetExecutive::ShellBrep` of a solid inward fails when the inset leaves no cavity (an empty offset, `SM_ERR_INVALID_INPUT`) or the offset is not a closed solid (`SM_ERR`), instead of handing the input back unhollowed as a success (WR-454, #380; the fork's tangency-labs/smlib@fbe43bb).
+    pub shell_empty_cavity_fails: bool,
 }
 
 /// Options for [`Kernel::new`].

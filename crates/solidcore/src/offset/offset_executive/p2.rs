@@ -243,6 +243,20 @@ impl OffsetExecutive {
             // cpp:217–251: the helper's scope drops any separately retained
             // executive temporary before querying the result's manifold status.
             let mut shell = run_shell_offset(kernel, original, options, faces, notifications)?;
+            // Opt-in (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid whose
+            // offset leaves nothing has no cavity to take away (the difference would hand
+            // the input back unhollowed); an offset that is no closed solid bounds none.
+            if kernel.fixes.shell_empty_cavity_fails
+                && options.offset.distance < 0.0
+                && input_is_manifold
+            {
+                if bp1::num_faces(&shell) == 0 {
+                    return Err(invalid_input(OP_SHELL));
+                }
+                if !brep_is_manifold_solid(&shell)? {
+                    return Err(SolidError::sm_err(OP_SHELL));
+                }
+            }
             if !brep_is_manifold_solid(&shell)? && !options.create_offset_solid {
                 return Ok(shell);
             }
@@ -4701,5 +4715,45 @@ mod tests {
                 "volume {volume}"
             );
         }
+    }
+
+    /// tangency-labs/solidcore#380: a closed inward shell of a box whose wall is as thick
+    /// as (or thicker than) the inradius leaves no cavity. Upstream returns the empty
+    /// offset as a success (the fork: the body unhollowed); with the opt-in it fails, and a thinner wall still shells.
+    #[test]
+    fn issue_380_shell_with_no_cavity_fails_with_the_fix() {
+        let shell = |fix: bool, wall: f64| -> Result<Brep> {
+            use crate::primitive::api_primitives::create_box;
+            let mut kernel = Kernel::default();
+            kernel.fixes.shell_empty_cavity_fails = fix;
+            let mut part =
+                create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+            part.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            let mut notifications = NotificationFixture::new(&part);
+            OffsetExecutive::shell_brep(
+                &mut kernel,
+                part,
+                ShellOptions {
+                    offset: OffsetOptions {
+                        distance: -wall,
+                        extend_convex_edges: true,
+                        merge_results: true,
+                    },
+                    create_offset_solid: false,
+                    merge_sheet_side_walls: false,
+                },
+                &[],
+                &mut notifications.context(),
+            )
+            .result
+        };
+        for wall in [5.0, 6.0] {
+            // upstream: an empty offset is "not a manifold solid", returned as a success
+            let upstream = shell(false, wall).unwrap();
+            assert_eq!(bp1::num_faces(&upstream), 0);
+            assert_status(shell(true, wall), 1007);
+        }
+        let thin = shell(true, 1.0).unwrap();
+        assert!(brep_is_manifold_solid(&thin).unwrap());
     }
 }
