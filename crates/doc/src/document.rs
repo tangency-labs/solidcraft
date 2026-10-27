@@ -3512,11 +3512,12 @@ impl Document {
         match self.marker {
             // A marker right after the last feature moves on past a feature added there, or the
             // new feature would be added rolled back (#7741).
-            Some(m) if m <= self.features.len() => {
-                self.features.insert(m, f);
-                self.marker = Some(m + 1);
+            Some(marker) => {
+                let position = marker.min(self.features.len());
+                self.features.insert(position, f);
+                self.marker = Some(position + 1);
             }
-            _ => self.features.push(f),
+            None => self.features.push(f),
         }
         if let Some(group_id) = insertion_group {
             let positions: std::collections::BTreeMap<u64, usize> =
