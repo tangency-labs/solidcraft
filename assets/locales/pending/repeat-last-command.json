@@ -3,9 +3,17 @@
     "cmd.edit_repeat": "Repeat Last Command",
     "ui.repeat_nothing": "Nothing to repeat yet: start a tool or dialog first."
   },
+  "ar": {
+    "cmd.edit_repeat": "تكرار آخر أمر",
+    "ui.repeat_nothing": "لا يوجد ما يُكرَّر بعد: ابدأ أداة أو مربع حوار أولًا."
+  },
   "de": {
     "cmd.edit_repeat": "Letzten Befehl wiederholen",
     "ui.repeat_nothing": "Noch nichts zu wiederholen: Starten Sie zuerst ein Werkzeug oder einen Dialog."
+  },
+  "he": {
+    "cmd.edit_repeat": "חזרה על הפקודה האחרונה",
+    "ui.repeat_nothing": "אין עדיין מה לחזור עליו: התחל קודם כלי או תיבת דו־שיח."
   },
   "ja": {
     "cmd.edit_repeat": "最後のコマンドを繰り返す",
