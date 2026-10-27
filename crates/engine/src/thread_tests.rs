@@ -711,6 +711,42 @@ fn a_left_handed_thread_turns_the_other_way() {
     assert!(volumes[2] > want * 1.2 && volumes[2] < 2.0 * want, "{volumes:?}");
 }
 
+/// A left-hand thread and tapped hole saved by v0.24.0 (format 39, `handedness: "left"`) open
+/// left-handed; a tapped hole takes `hand` like a thread, never `both`, and only with a thread.
+#[test]
+fn a_format_39_left_hand_thread_and_tapped_hole_open_left_handed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 12, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [20, 30, 12], "thread": "M6", "depth": 8, "hand": "left"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 9, "base": [80, 0, 0], "body_name": "Shaft", "operation": "new"}));
+    run(&mut s, "solid.thread", json!({"face": [85, 0, 4.5], "designation": "M10", "hand": "left"}));
+    let hands = |s: &Session| -> Vec<solidcraft_doc::thread_forms::ThreadHand> {
+        s.model.state().threads.iter().map(|t| t.hand).collect()
+    };
+    let left = solidcraft_doc::thread_forms::ThreadHand::Left;
+    assert_eq!(hands(&s), [left, left]);
+    // What format 39 wrote: the direction as `handedness`, no pending changes.
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["format"] = json!("solidcraft/39");
+    v.as_object_mut().unwrap().remove("format_pending");
+    for f in v["features"].as_array_mut().unwrap() {
+        if let Some(h) = f.as_object_mut().unwrap().remove("hand") {
+            f["handedness"] = h;
+        }
+    }
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    assert_eq!(hands(&reopened), [left, left]);
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 60, "height": 12}));
+    for (params, why) in [
+        (json!({"position": [20, 30, 12], "thread": "M6", "depth": 8, "hand": "both"}), "unknown hand"),
+        (json!({"position": [20, 30, 12], "depth": 8, "hand": "left"}), "needs `thread`"),
+    ] {
+        let err = s.execute("solid.hole", &params).unwrap_err().to_string();
+        assert!(err.contains(why), "{err}");
+    }
+}
+
 /// A trapezoidal nut: the groove from the drilled minor diameter D1 = d - P out to the
 /// internal root D4 = d + 2 ac (ISO 2904), 2π∫ r w(r) dr per turn.
 #[test]

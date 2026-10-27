@@ -828,6 +828,9 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Thread depth")]
         thread_depth: Option<Expr>,
+        /// The tapped thread's hand: right (the default) or left; never both.
+        #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
+        hand: crate::thread_forms::ThreadHand,
         /// To Object: drill down to the face (or point) here instead of `depth`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
