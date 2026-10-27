@@ -1506,6 +1506,10 @@ preference_settings! {
     /// that component first, so the sketch belongs to it (`sketch.create` `activate_part`,
     /// #10215). Off (the default): the sketch belongs to the active component, as before.
     sketch_face_activates_part: bool = false, PAGE_SKETCH => check_id("prefs.sketch_face_activates_part");
+    /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
+    /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch
+    /// runs its command, and one that builds a feature finishes the sketch first (#2815).
+    sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// A shape drawn in a sketch gets all its dimensions at once: the typed values, and every

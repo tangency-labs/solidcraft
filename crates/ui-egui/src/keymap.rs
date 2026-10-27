@@ -377,9 +377,7 @@ pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
 }
 
 /// Where a command's shortcut works: in a sketch (the SKETCH tab's tools), in the model (the
-/// other tabs), or everywhere (commands on no tab: undo, views, files; and inspecting, views and
-/// files wherever their buttons sit). A sketch and the model are separate: a key runs only a
-/// command of the one the view is in, or one that works everywhere.
+/// other tabs), or everywhere (commands on no tab: undo, views, files).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Scope {
     Render,
@@ -396,7 +394,6 @@ pub(crate) fn scope(id: &str) -> Scope {
         Some("SKETCH") => Scope::Sketch,
         Some(tab) if tab.starts_with("RENDER") => Scope::Render,
         Some("") | None => Scope::Everywhere,
-        Some(_) if ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p)) => Scope::Everywhere,
         Some(_) => Scope::Model,
     }
 }
@@ -408,9 +405,17 @@ fn clash(a: &str, b: &str) -> bool {
     x == y || x == Scope::Everywhere || y == Scope::Everywhere
 }
 
+/// Whether a command's key runs in a sketch and in the model alike when the two keep their keys
+/// apart: one of no tab, and inspecting, views and files wherever their buttons sit (Measure's I).
+fn runs_everywhere(id: &str) -> bool {
+    scope(id) == Scope::Everywhere || ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p))
+}
+
 /// The enabled command a key press runs, if any: one of the mode the view is in (a sketch tool
-/// while a sketch is open, a model command otherwise), else one that works everywhere. A model
-/// command's key pressed in a sketch (F, Fillet) runs nothing, nor a sketch tool's in the model.
+/// while a sketch is open, a model command otherwise) before any other. With Preferences ›
+/// Shortcuts › Keep model keys out of sketches on, only one of that mode or one that works
+/// everywhere: a model command's key pressed in a sketch (E, F) runs nothing, nor a sketch
+/// tool's in the model.
 pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     let here = if crate::render_workspace::active(app) {
         Scope::Render
@@ -427,8 +432,12 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
         .collect();
-    // In Render any enabled command is the fallback, as before.
-    enabled.iter().find(|id| scope(id) == here).or_else(|| enabled.iter().find(|id| here == Scope::Render || scope(id) == Scope::Everywhere)).copied()
+    let mine = enabled.iter().find(|id| scope(id) == here);
+    if app.preferences.sketch_keys_only && here != Scope::Render {
+        mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
+    } else {
+        mine.or(enabled.first()).copied()
+    }
 }
 
 /// Run a shortcut key: its enabled command; outside a sketch, a sketch tool's key opens Create
@@ -640,6 +649,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 action = Some((String::new(), chosen));
             }
             ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
+            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only).on_hover_text(app.tr("ui.sketch_keys_only_tip"));
         }
         // The list Help and Home open looks like the Shortcuts page of Preferences: say it can't
         // be changed here, and lead to the page where it can (#7409).
