@@ -2,8 +2,14 @@
   "en": {
     "ui.gpu_memory_lowered": "The graphics card is out of memory: the view is drawn at a lower quality."
   },
+  "ar": {
+    "ui.gpu_memory_lowered": "نفدت ذاكرة بطاقة الرسومات: يُرسم العرض بجودة أقل."
+  },
   "de": {
     "ui.gpu_memory_lowered": "Die Grafikkarte hat keinen Speicher mehr frei: Die Ansicht wird in geringerer Qualität gezeichnet."
+  },
+  "he": {
+    "ui.gpu_memory_lowered": "הזיכרון של כרטיס המסך אזל: התצוגה מוצגת באיכות נמוכה יותר."
   },
   "ja": {
     "ui.gpu_memory_lowered": "グラフィックカードのメモリが不足しています。ビューは低い画質で描画されます。"
