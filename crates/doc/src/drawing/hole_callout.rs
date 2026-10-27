@@ -4,15 +4,19 @@
 //! - A callout names one hole by persistent ids only ([`HoleRef`]): the Hole feature's id and,
 //!   for a hole drilled at sketch points, the point's id. Never a face index or a nearest point.
 //! - It resolves to one of four outcomes ([`Resolution`]): resolved, suppressed (the feature is
-//!   suppressed), failed (the feature did not evaluate) or lost (the feature or the point is
-//!   gone). A lost callout keeps its ids and is never moved to another hole. A feature id the
-//!   design never gave is an error, not lost; a point the feature doesn't drill is lost, since a
+//!   suppressed), failed (the feature did not evaluate, or a later feature removed its hole) or
+//!   lost (the feature or the point is gone). A lost callout keeps its ids and is never moved to
+//!   another hole. An id below the design's id counter that names no feature and nothing else
+//!   reads as lost; an id the design never gave, or one of a component, folder, canvas or other
+//!   item that is not a feature, is an error. A point the feature doesn't drill is lost, since a
 //!   callout can't tell a deleted point from one that was never there.
 //! - The values come from the feature record, evaluated with the design's parameters as the
 //!   model evaluates it, so the callout follows edits. Through or blind comes from the feature
 //!   and the hole's own named faces (`F<id>:bore:…`): a hole with a depth is blind while its
-//!   bore keeps a floor on its axis, and through when the depth reaches past the material. The
-//!   depth is the feature's, measured from the face the hole starts on.
+//!   bore keeps a floor on its axis, and through when the depth reaches past the material. A
+//!   hole whose bore is in the model the feature made but not in the model as it is now was
+//!   removed by a later feature, and reads as failed with that reason. The depth is the
+//!   feature's, measured from the face the hole starts on.
 //! - The text: numbers through the shared length formatter ([`crate::display_units`]), the
 //!   words in the drawing's content language. Nothing is read from a view, and nothing is saved.
 //!
@@ -131,7 +135,8 @@ impl TextStyle {
     /// Refuses an unknown unit, too many decimals or a malformed language tag.
     pub fn validate(&self) -> Result<()> {
         if !["mm", "cm", "m", "in", "ft"].contains(&self.units.as_str()) {
-            return Err(DocError::Invalid(format!("unknown length unit `{}` (mm, cm, m, in or ft)", self.units.escape_debug())));
+            let unit: String = self.units.chars().take(32).collect();
+            return Err(DocError::Invalid(format!("unknown length unit `{}` (mm, cm, m, in or ft)", unit.escape_debug())));
         }
         if self.decimals > MAX_DECIMALS {
             return Err(DocError::Invalid(format!("decimals are 0 to {MAX_DECIMALS}")));
@@ -159,6 +164,9 @@ impl HoleRef {
 pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resolution> {
     hole.validate()?;
     let Some(f) = doc.feature(hole.feature) else {
+        if let Some(kind) = other_item(doc, hole.feature) {
+            return Err(DocError::Invalid(format!("{} is a {kind}, not a Hole feature", hole.feature)));
+        }
         // An id the design gave once belonged to something that has since been removed.
         if hole.feature >= 1 && hole.feature < doc.next_id {
             return Ok(Resolution::Lost { reason: format!("feature {} is gone", hole.feature) });
@@ -166,10 +174,7 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
         return Err(DocError::Unknown(format!("feature {}", hole.feature)));
     };
     let FeatureKind::Hole { points, .. } = &f.kind else {
-        return Err(DocError::Invalid(format!(
-            "not supported yet: a hole callout of a {} feature (only Hole features have them)",
-            f.kind.base_name()
-        )));
+        return Err(DocError::Invalid(format!("not supported yet: hole callouts of {} features (only Hole features have them)", f.kind.base_name())));
     };
     // Which hole of the feature: its point's place among the feature's points.
     let index = match (points, &hole.point) {
@@ -188,7 +193,12 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
             if !sketch_has_point(doc, sp.sketch.0, id) {
                 return Ok(Resolution::Lost { reason: format!("point `{}` is gone from sketch {}", id.escape_debug(), sp.sketch.0) });
             }
-            if sp.single { 0 } else { i }
+            // A Single hole drills at its first point only.
+            if sp.single && i != 0 {
+                let first = sp.ids.first().map(|p| p.escape_debug().to_string()).unwrap_or_default();
+                return Ok(Resolution::Lost { reason: format!("feature {} drills only at point `{first}`", f.id) });
+            }
+            i
         }
         (None, Some(_)) => return Err(DocError::Invalid(format!("feature {} is placed by position: it takes no `point`", f.id))),
         (None, None) => 0,
@@ -196,19 +206,32 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
     if f.suppressed {
         return Ok(Resolution::Suppressed);
     }
-    match model.result(f.id) {
+    let own = match model.result(f.id) {
         None => return Ok(Resolution::Failed { reason: "not evaluated".into() }),
         Some(r) if r.skipped => return Ok(Resolution::Failed { reason: "not evaluated: it is after the end of the timeline".into() }),
         Some(r) if r.error.is_some() => return Ok(Resolution::Failed { reason: r.error.clone().unwrap_or_default() }),
-        Some(_) => {}
-    }
+        Some(r) => r.state.clone(),
+    };
     let (vals, _) = crate::eval::evaluation_values(doc);
     let before = model.state_before(f.id);
-    let callout = measure(&vals, &before, &model.state(), f, index)?;
-    Ok(match callout {
-        Some(callout) => Resolution::Resolved { callout },
-        None => Resolution::Failed { reason: "the hole cuts no material".into() },
-    })
+    measure(&vals, &before, &own, &model.state(), f, index)
+}
+
+/// What the id `id`, which names no feature, names instead, if anything.
+fn other_item(doc: &Document, id: u64) -> Option<&'static str> {
+    let a = &doc.assembly;
+    [
+        ("component", doc.components.iter().any(|c| c.id == id)),
+        ("browser folder", doc.browser_groups.iter().any(|g| g.id == id)),
+        ("timeline folder", doc.timeline_groups.iter().any(|g| g.id == id)),
+        ("canvas", doc.canvases.iter().any(|c| c.id == id)),
+        ("joint", a.joints.iter().any(|j| j.id == id)),
+        ("contact set", a.contact_sets.iter().any(|c| c.id == id)),
+        ("motion study", a.studies.iter().any(|s| s.id == id)),
+        ("exploded view", a.exploded.iter().any(|v| v.id == id)),
+    ]
+    .into_iter()
+    .find_map(|(kind, is)| is.then_some(kind))
 }
 
 /// Whether the sketch feature `sketch` still has the point `id`.
@@ -216,9 +239,17 @@ fn sketch_has_point(doc: &Document, sketch: u64, id: &str) -> bool {
     matches!(doc.feature(sketch).map(|f| &f.kind), Some(FeatureKind::Sketch { sketch, .. }) if sketch.points.iter().any(|p| p.id == id))
 }
 
-/// Hole `index` of the Hole feature `f`, drilled into `before` and found in `after` (the model as
-/// it is now). `None` when the model has no face of that hole.
-fn measure(vals: &BTreeMap<String, Value>, before: &ModelState, after: &ModelState, f: &Feature, index: usize) -> Result<Option<HoleCallout>> {
+/// Hole `index` of the Hole feature `f`, drilled into `before`, made in `own` (the model just
+/// after the feature) and found in `after` (the model as it is now). Failed when `after` has no
+/// face of that hole.
+fn measure(
+    vals: &BTreeMap<String, Value>,
+    before: &ModelState,
+    own: &ModelState,
+    after: &ModelState,
+    f: &Feature,
+    index: usize,
+) -> Result<Resolution> {
     let FeatureKind::Hole { diameter, depth, hole, thread, to, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     let (spots, dir) = crate::eval::hole_spots(vals, before, f)?;
     if spots.is_empty() || spots.len() > MAX_HOLES {
@@ -263,36 +294,55 @@ fn measure(vals: &BTreeMap<String, Value>, before: &ModelState, after: &ModelSta
         Some(d) => Some(length(&d, "depth")?),
         None => None,
     };
-    let Some(floor) = bore_floor(after, f.id, at, dir, diameter / 2.0) else { return Ok(None) };
+    let Some(floor) = bore_floor(after, f.id, at, dir, diameter / 2.0) else {
+        let reason = match bore_floor(own, f.id, at, dir, diameter / 2.0) {
+            Some(_) => "a later feature removed the hole",
+            None => "the hole cuts no material",
+        };
+        return Ok(Resolution::Failed { reason: reason.into() });
+    };
     let extent = match depth {
         Some(depth) if floor => Extent::Blind { depth },
         _ => Extent::Through,
     };
     let start_face = crate::naming::face_names_at(before, &[at]).into_iter().next().unwrap_or_default();
-    Ok(Some(HoleCallout { count: spots.len(), diameter, thread, extent, form, start: at.into(), start_face, direction: dir.into() }))
+    let callout = HoleCallout { count: spots.len(), diameter, thread, extent, form, start: at.into(), start_face, direction: dir.into() };
+    Ok(Resolution::Resolved { callout })
 }
 
 /// Whether the bore of feature `id` at `at` (drilled along `dir`, of radius `r`) keeps a floor in
 /// `st`: a face of the bore (`F<id>:bore:…`) across its axis below the start, the flat bottom or
 /// the drill point. `None` when no face of that bore is in the model at all.
 fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64) -> Option<bool> {
+    use solidcraft_kernel::FaceSurface;
     let prefix = format!("F{id}:bore:");
     let (mut wall, mut floor) = (false, false);
     for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let names = crate::naming::face_names(b);
-        for (i, name) in names.iter().enumerate() {
-            if !name.starts_with(&prefix) {
-                continue;
-            }
-            let Some(spot) = crate::naming::face_spot(b, i) else { continue };
+        if !names.iter().any(|n| n.starts_with(&prefix)) {
+            continue;
+        }
+        // One pass over the body's triangles for all its faces, not one per bore face.
+        let spots = crate::naming::face_spots(b);
+        for (name, spot) in names.iter().zip(spots.iter()) {
+            let Some(spot) = spot.filter(|_| name.starts_with(&prefix)) else { continue };
             let v = spot.point - at;
             let along = v.dot(dir);
             let off = (v - dir * along).len();
-            // On this hole's axis and below its start; the wall lies at the radius.
+            // On this hole's axis and below its start.
             if along <= 0.0 || off > r * 1.001 + 1e-6 {
                 continue;
             }
-            if off < r * 0.999 - 1e-6 {
+            // The wall is a cylinder about the axis; a flat bottom or a drill point lies across
+            // it. Only a face of no known surface is told by where its spot is: the wall at the
+            // radius (a facet of a curved face lies inside it by its sag, so this is a fallback).
+            let across = match spot.surface {
+                Some(FaceSurface::Cylinder { axis, .. }) if axis.dot(dir).abs() > 1.0 - 1e-6 => false,
+                Some(FaceSurface::Plane { normal, .. }) if normal.dot(dir).abs() > 1.0 - 1e-6 => true,
+                Some(FaceSurface::Cone { axis, .. }) if axis.dot(dir).abs() > 1.0 - 1e-6 => true,
+                _ => off < r * 0.999 - 1e-6,
+            };
+            if across {
                 floor = true;
             } else {
                 wall = true;

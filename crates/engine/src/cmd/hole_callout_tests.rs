@@ -114,6 +114,24 @@ fn a_hole_on_a_pocket_floor_takes_its_depth_from_the_floor() {
     assert!(!solid_at(&s, 35.0, 20.0, 25.5) && solid_at(&s, 35.0, 20.0, 24.5), "the model's floor is at z = 25");
     // The Ø35 bore: through from the floor, never `x 35 deep`.
     assert_eq!(lines(&callout(&mut s, "Bore")), ["Ø35.0 THRU"]);
+    // Drilled from a sketch on the block's top plane (z = 40) over the pocket: the hole starts on
+    // the floor below the point, and its 10 mm go from there (z 35 → 25), not from the sketch.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Top"}));
+    run(&mut s, "sketch.point", json!({"point": [65, 40], "id": "q"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Top", "points": ["q"], "diameter": 10, "depth": 10, "name": "FromTop"}));
+    let c = callout_with(&mut s, "FromTop", Some("q"), json!({}));
+    assert!(near(&c["callout"]["start"][2], 35.0), "{c}");
+    let face = c["callout"]["start_face"].as_str().unwrap_or_default().to_string();
+    assert!(face.starts_with(&format!("F{pocket}:")), "{face}");
+    assert!(near(&c["callout"]["extent"]["depth"], 10.0), "{c}");
+    assert_eq!(lines(&c), ["Ø10.0 ↧ 10.0"]);
+    assert!(!solid_at(&s, 65.0, 40.0, 25.5) && solid_at(&s, 65.0, 40.0, 24.5), "the model's floor is at z = 25");
+    // To Object: from the top (z = 40) to a point on the pocket floor (z = 35), 5 deep.
+    run(&mut s, "solid.hole", json!({"position": [10, 30, 40], "diameter": 6, "to": [35, 20, 35], "name": "ToFloor"}));
+    let c = callout(&mut s, "ToFloor");
+    assert!(near(&c["callout"]["extent"]["depth"], 5.0), "{c}");
+    assert_eq!(lines(&c), ["Ø6.0 ↧ 5.0"]);
 }
 
 #[test]
@@ -184,14 +202,12 @@ fn holes_at_sketch_points_count_and_a_deleted_point_is_lost() {
     assert_eq!(lost["status"], "lost", "{lost}");
     assert_eq!(lost["hole"], json!({"feature": id_of(&s, "Holes"), "point": "p3"}));
     assert!(lost.get("callout").is_none(), "{lost}");
+    // Today the whole Hole feature fails when one of its points is deleted, so the others read
+    // failed, naming the point. When the feature drills the points that are left, this becomes
+    // `5× Ø9.0 THRU` with p2 at its own point.
     let p2 = callout_with(&mut s, "Holes", Some("p2"), json!({}));
-    if p2["status"] == "resolved" {
-        let a = std::f64::consts::TAU * 2.0 / 6.0;
-        assert!(near(&p2["callout"]["start"][0], 47.5 * a.cos()), "p2 stays at its own point: {p2}");
-        assert_eq!(p2["callout"]["count"], 5, "{p2}");
-    } else {
-        assert_eq!(p2["status"], "failed", "{p2}");
-    }
+    assert_eq!(p2["status"], "failed", "{p2}");
+    assert!(p2["reason"].as_str().is_some_and(|r| r.contains("p3")), "{p2}");
     // Undo brings p3's hole back, at p3.
     run(&mut s, "edit.undo", json!({}));
     let back = callout_with(&mut s, "Holes", Some("p3"), json!({}));
@@ -241,6 +257,55 @@ fn suppress_undo_and_parameter_edits_change_the_callout() {
     assert_eq!(gone["hole"], json!({"feature": id}));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.0 ↧ 12.0", "⌴ Ø14.0 ↧ 4.0"]);
+    // A later pocket, 15 deep around it, cuts the whole hole away (12 deep from z = 40): failed, saying so.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Over"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [80, 20], "p1": [100, 40]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 15, "direction": "negative", "operation": "cut", "name": "Over"}));
+    let c = callout(&mut s, "H");
+    assert_eq!(c["status"], "failed", "{c}");
+    assert!(c["reason"].as_str().is_some_and(|r| r.contains("later feature")), "{c}");
+}
+
+#[test]
+fn a_single_hole_at_a_sketch_point_needs_no_point_and_is_lost_with_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "S"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 15], "id": "c"}));
+    run(&mut s, "sketch.point", json!({"point": [45, 15], "id": "d"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "S", "points": ["c"], "single": true, "diameter": 6, "depth": 4, "name": "One"}));
+    // No point, or its own point: the same hole, at c.
+    for point in [None, Some("c")] {
+        let c = callout_with(&mut s, "One", point, json!({}));
+        assert_eq!(c["status"], "resolved", "{c}");
+        assert!(near(&c["callout"]["start"][0], 15.0) && near(&c["callout"]["start"][1], 15.0), "{c}");
+        assert_eq!(c["callout"]["count"], 1, "{c}");
+        assert_eq!(lines(&c), ["Ø6.0 ↧ 4.0"]);
+    }
+    // Another point of the sketch: the hole isn't drilled there.
+    assert_eq!(callout_with(&mut s, "One", Some("d"), json!({}))["status"], "lost");
+    // A hand-edited Single hole listing a second point drills only at its first; the second
+    // point's callout is lost, never moved to the hole at c.
+    let one = id_of(&s, "One");
+    if let Some(f) = std::sync::Arc::make_mut(&mut s.doc).feature_mut(one)
+        && let solidcraft_doc::FeatureKind::Hole { points: Some(sp), .. } = &mut f.kind
+    {
+        sp.ids.push("d".into());
+    }
+    s.refresh();
+    let d = callout_with(&mut s, "One", Some("d"), json!({}));
+    assert_eq!(d["status"], "lost", "{d}");
+    assert!(d["reason"].as_str().is_some_and(|r| r.contains("only at point `c`")), "{d}");
+    // Deleting c loses the callout, with or without its point.
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    run(&mut s, "sketch.delete", json!({"entities": ["c"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    for point in [None, Some("c")] {
+        let c = callout_with(&mut s, "One", point, json!({}));
+        assert_eq!(c["status"], "lost", "{c}");
+    }
 }
 
 #[test]
@@ -268,26 +333,32 @@ fn hostile_callout_input_is_refused_without_a_panic() {
         assert!(r.is_err(), "{p} gave {r:?}");
         r.err().map(|e| e.to_string()).unwrap_or_default()
     };
-    // Ids: unknown, malformed, of another kind of feature.
-    for p in [
-        json!({"feature": 999_999}),
-        json!({"feature": u64::MAX}),
-        json!({"feature": 0}),
-        json!({"feature": -3}),
-        json!({"feature": 2.5}),
-        json!({"feature": "Holes"}),
-        json!({}),
-        json!({"feature": holes, "point": 7}),
-        json!({"feature": holes, "point": ""}),
-        json!({"feature": holes, "point": "p\u{0}1"}),
-        json!({"feature": holes, "point": "p".repeat(10_000)}),
-        json!({"feature": id_of(&s, "Centre"), "point": "p1"}),
-        json!({"feature": holes, "point": ids[0], "decimals": 7}),
-        json!({"feature": holes, "point": ids[0], "decimals": 1e300}),
-        json!({"feature": holes, "point": ids[0], "units": "furlong"}),
-        json!({"feature": holes, "point": ids[0], "language": "-"}),
+    let component = run(&mut s, "component.create", json!({"name": "Bought"}))["component"].as_u64().unwrap_or_default();
+    // Ids: unknown, malformed, of another kind of feature or of an item that is no feature; each
+    // refused for its own reason.
+    for (p, why) in [
+        (json!({"feature": 999_999}), "feature"),
+        (json!({"feature": u64::MAX}), "feature"),
+        (json!({"feature": 0}), "feature"),
+        (json!({"feature": -3}), "feature"),
+        (json!({"feature": 2.5}), "feature"),
+        (json!({"feature": "Holes"}), "feature"),
+        (json!({}), "feature"),
+        (json!({"feature": component}), "is a component"),
+        (json!({"feature": holes, "point": 7}), "point"),
+        (json!({"feature": holes, "point": ""}), "point"),
+        (json!({"feature": holes, "point": "p\u{0}1"}), "point"),
+        (json!({"feature": holes, "point": "p".repeat(10_000)}), "point"),
+        (json!({"feature": id_of(&s, "Centre"), "point": "p1"}), "position"),
+        (json!({"feature": holes, "point": ids[0], "decimals": 7}), "decimals"),
+        (json!({"feature": holes, "point": ids[0], "decimals": 1e300}), "decimals"),
+        (json!({"feature": holes, "point": ids[0], "units": "furlong"}), "unit"),
+        (json!({"feature": holes, "point": ids[0], "units": "x".repeat(10_000)}), "unit"),
+        (json!({"feature": holes, "point": ids[0], "language": "-"}), "language"),
     ] {
-        refused(&mut s, p);
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+        assert!(e.len() < 400, "{p}: the message echoes no long input: {e}");
     }
     // A hole at sketch points needs its point.
     assert!(refused(&mut s, json!({"feature": holes})).contains("point"));
@@ -301,8 +372,10 @@ fn hostile_callout_input_is_refused_without_a_panic() {
         *diameter = "1e999 mm".into();
     }
     s.refresh();
-    let r = s.execute("drawing.hole_callout", &json!({"feature": centre}));
-    assert!(r.is_err() || r.as_ref().is_ok_and(|v| v["status"] == "failed"), "{r:?}");
+    // The model can't evaluate it, so the callout reads failed before its own range checks
+    // (which stay as a guard).
+    let c = run(&mut s, "drawing.hole_callout", json!({"feature": centre}));
+    assert_eq!(c["status"], "failed", "{c}");
     // Too many points.
     if let Some(f) = std::sync::Arc::make_mut(&mut s.doc).feature_mut(holes)
         && let solidcraft_doc::FeatureKind::Hole { points: Some(sp), .. } = &mut f.kind

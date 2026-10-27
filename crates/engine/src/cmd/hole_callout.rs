@@ -11,8 +11,8 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("drawing.hole_callout", "Hole Callout", callout).icon("inspect").noundo().params(
     "feature: the Hole feature's id; point?: its sketch point id (one of the holes it drills at sketch points; none for a hole placed by \
-     position); units?: mm|cm|m|in|ft (default the design's); decimals?: 0…6 (default 1); language?: the drawing's content language, a BCP 47 \
-     tag (default en) → hole: {feature, point?}; status: resolved | suppressed (the feature is) | failed (it did not evaluate) | lost (the \
+     position); units?: mm|cm|m|in|ft (default the design's); decimals?: 0…6 (default 1; inches show at least 3); language?: the drawing's content language, a BCP 47 \
+     tag (default en) → hole: {feature, point?}; status: resolved | suppressed (the feature is) | failed (it did not evaluate, or a later feature removed the hole) | lost (the \
      feature or the point is gone; never moved to another hole); reason? (failed, lost); callout? {count (holes the feature drills), diameter \
      (the drilled one), thread?, extent: {type: through} | {type: blind, depth (from the face the hole starts on)}, form: {type: simple} | \
      {type: drilled, tip_angle} | {type: counterbore, diameter, depth} | {type: countersink, diameter, angle}, start, start_face, direction} \
