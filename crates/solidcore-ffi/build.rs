@@ -130,6 +130,18 @@ fn main() {
     {
         println!("cargo:rerun-if-changed={}", h.display());
     }
+    // the headers and `.inc` files under `support/`, which shims include by relative
+    // path (watched only when present: a missing path would rerun this script always)
+    let support_dir = shim_dir.join("support");
+    if support_dir.is_dir() {
+        println!("cargo:rerun-if-changed={}", support_dir.display());
+        for h in sorted_files(&support_dir, "h")
+            .into_iter()
+            .chain(sorted_files(&support_dir, "inc"))
+        {
+            println!("cargo:rerun-if-changed={}", h.display());
+        }
+    }
     if !shims.is_empty() {
         let mut b = cc::Build::new();
         b.cpp(true).warnings(false).include(&shim_dir);
