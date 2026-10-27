@@ -1053,6 +1053,15 @@ impl EvalCache {
         EvalCache { budget: bytes, ..EvalCache::default() }
     }
 
+    /// Results stored.
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
     fn get(&mut self, key: u64) -> Option<CachedEval> {
         let r = self.map.get(&key).cloned();
         if r.is_some() {

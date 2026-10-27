@@ -1171,14 +1171,15 @@ fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model) -
 /// (the model of `after_doc`). With the history rolled back, the features after the marker are
 /// evaluated too, on copies of the models (which share their cache): a delete made in the
 /// rolled-back history that breaks them says so before it is made, rather than leaving error marks
-/// that only show at the end of the timeline (#3471).
+/// that only show at the end of the timeline (#3471). A change that leaves them the same inputs
+/// needs no such evaluation ([`only_constraints_changed`]).
 pub(super) fn newly_broken_in_history(
     before_doc: &solidcraft_doc::Document,
     before: &solidcraft_doc::Model,
     after_doc: &solidcraft_doc::Document,
     after: &solidcraft_doc::Model,
 ) -> Vec<(String, String)> {
-    if before_doc.marker.is_none() && after_doc.marker.is_none() {
+    if (before_doc.marker.is_none() && after_doc.marker.is_none()) || only_constraints_changed(before_doc, before, after_doc, after) {
         return newly_broken(before, after);
     }
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
@@ -1189,6 +1190,50 @@ pub(super) fn newly_broken_in_history(
         model
     };
     newly_broken(&whole(before_doc, before), &whole(after_doc, after))
+}
+
+/// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
+/// model parameters nothing uses any more), every sketch whose constraints changed solving to
+/// the same geometry, profiles and ends as before. The features after the marker are then built
+/// from the same inputs, so evaluating the whole history twice would find nothing new (#7253):
+/// deleting one dimension of a sketch with a long rolled-back history after it took minutes.
+fn only_constraints_changed(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+) -> bool {
+    let without_constraints = |doc: &solidcraft_doc::Document| {
+        let mut doc = doc.clone();
+        for f in &mut doc.features {
+            if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+                sketch.constraints.clear();
+            }
+        }
+        doc
+    };
+    let (mut b, a) = (without_constraints(before_doc), without_constraints(after_doc));
+    if b.params.iter().any(|p| !a.params.contains(p) && (!p.model || !after_doc.param_users(&p.name).is_empty())) {
+        return false;
+    }
+    b.params.retain(|p| a.params.contains(p));
+    if b != a {
+        return false;
+    }
+    // What a later feature reads of a sketch: the solved geometry, its plane, profiles and ends.
+    let solved = |model: &solidcraft_doc::Model, id: u64| {
+        let r = model.result(id).filter(|r| !r.skipped && r.error.is_none())?;
+        let s = r.state.sketch(id)?;
+        let mut sketch = s.sketch.clone();
+        sketch.constraints.clear();
+        Some((s.plane, sketch, serde_json::to_value(&s.profiles).ok()?, s.ends.clone(), s.report.ok()))
+    };
+    before_doc.features.iter().zip(&after_doc.features).all(|(fb, fa)| match (&fb.kind, &fa.kind) {
+        (FeatureKind::Sketch { sketch: sb, .. }, FeatureKind::Sketch { sketch: sa, .. }) if sb.constraints != sa.constraints => {
+            solved(before, fb.id).is_some_and(|x| solved(after, fa.id).is_some_and(|y| x == y))
+        }
+        _ => true,
+    })
 }
 
 fn reorder(s: &mut Session, p: &Value) -> Result<Value> {

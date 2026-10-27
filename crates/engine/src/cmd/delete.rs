@@ -270,6 +270,43 @@ mod tests {
         assert_eq!(done["would_fail"], json!(["Hole"]), "{done}");
     }
 
+    /// Deleting a dimension of a sketch with a rolled-back history after it (#7253): the sketch
+    /// keeps its geometry, so the check before the delete does not build the features after the
+    /// marker again (that took minutes on a long history). A deleted line still breaks them, and
+    /// the check still says so.
+    #[test]
+    fn deleting_a_dimension_in_a_rolled_back_history_builds_nothing_after_the_marker() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true}));
+        let lines: Vec<String> = s.model.state().sketch(sk).unwrap().sketch.curves.iter().map(|c| c.id.clone()).collect();
+        let param = run(&mut s, "sketch.dimension", json!({"entities": [lines[0], lines[1]], "type": "angle"}))["param"].as_str().map(str::to_string);
+        let angle = s.model.state().sketch(sk).unwrap().sketch.constraints.iter().find(|c| param.is_some() && c.param == param).unwrap().id.clone();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Plate"}));
+        let later = 6;
+        for i in 0..later {
+            run(&mut s, "solid.cylinder", json!({"base": [12 + 3 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"}));
+        }
+        run(&mut s, "timeline.roll_to", json!({"position": 1}));
+        run(&mut s, "sketch.edit", json!({"sketch": sk}));
+        let cached = |s: &Session| s.model.cache.lock().map(|c| c.len()).unwrap_or(0);
+        let before = cached(&s);
+        let doc = s.doc.clone();
+        let items = json!([{"type": "sketch_constraint", "id": angle}]);
+        let dry = run(&mut s, "selection.delete", json!({"items": items, "dry_run": true}));
+        assert_eq!((&dry["deleted"], &dry["would_fail"]), (&json!([]), &json!([])), "{dry}");
+        assert_eq!(*s.doc, *doc, "the check changes nothing");
+        // The sketch itself is solved again; Plate and the cuts are not built.
+        let built = cached(&s).saturating_sub(before);
+        assert!(built < later, "{built} results built for the check");
+        let line = json!([{"type": "sketch_curve", "id": lines[1]}]);
+        let dry = run(&mut s, "selection.delete", json!({"items": line, "dry_run": true}));
+        assert!(dry["would_fail"].as_array().unwrap().contains(&json!("Plate")), "{dry}");
+        run(&mut s, "selection.delete", json!({"items": items}));
+        assert!(s.model.state().sketch(sk).unwrap().sketch.constraints.iter().all(|c| c.id != angle));
+    }
+
     #[test]
     fn mixed_selection_is_one_undo_step() {
         let (mut s, _) = part();
