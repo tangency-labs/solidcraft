@@ -163,6 +163,9 @@ fn zone_tolerance(owner: PlaneOwner) -> Result<f64> {
         PlaneOwner::Face(Some(tol)) => Ok(tol),
         // UNPORTED(topology.face_p2): SmFace::GetTolerance (a bare face handle without
         // the tolerance its B-rep caches on the surface)
+        // Proof (unreachable): a B-rep face's surface carries the face tolerance
+        // (Brep::sync_face_surface_tolerance invariant, see Surface::face_zone_tol_3d); 0
+        // hits in the green difftest sweep.
         PlaneOwner::Face(None) => Err(SolidError::unported(
             "SmFace::GetTolerance",
             "topology.face_p2",

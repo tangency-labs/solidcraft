@@ -431,6 +431,9 @@ pub fn resolve_object_zone_tol_3d<O>(
         Some(r) => r.get(object),
         // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on a handle the
         // caller gave no resolver for
+        // Proof (unreachable): only Rayfire solvers read this; the library ones
+        // (offset_geometry_creation, brep p2) pass a resolver or override
+        // object_zone_tol_3d; 0 hits in the green difftest sweep.
         None => Err(SolidError::Unported {
             upstream: "SmTol::GetZoneTol3d(const SmObject*)",
             unit: "geom.tol",

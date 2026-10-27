@@ -482,6 +482,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // SmTol::GetZoneTol3d(m_cpSurface): GetFace() ? its tolerance : the system's
         // (the face's tolerance as its B-rep cached it on the surface;
         // UNPORTED(topology.face_p2): SmFace::GetTolerance for a bare face handle)
+        // Proof (unreachable): a B-rep face's surface carries the face tolerance
+        // (Brep::sync_face_surface_tolerance invariant, see Surface::face_zone_tol_3d); 0
+        // hits in the green difftest sweep.
         let zone_tol = crate::surface::surface::p1::zone_tol_3d(k, self.surface())?;
 
         // local tolerance state - a zero ChordHeight or Angle Tol value means to ignore the test

@@ -1114,6 +1114,9 @@ impl Surface {
         // We need a tolerance value.
         // pFace ? pFace->GetTolerance() : SM_XSECT_TOL_3D (the face's tolerance cached
         // on the surface; UNPORTED(topology.face_p2) for a bare face handle)
+        // Proof (unreachable): a B-rep face's surface carries the face tolerance
+        // (Brep::sync_face_surface_tolerance invariant, see Surface::face_zone_tol_3d); 0
+        // hits in the green difftest sweep.
         let dist_tol = self.face_zone_tol_3d()?.unwrap_or(XSECT_TOL_3D);
 
         // first try DropPointFast(), to catch special cases.
@@ -1366,6 +1369,9 @@ impl Surface {
         // GWC:TODO - upstream's magic numbers for the tolerance
         // GetFace() ? its tolerance (cached on the surface; UNPORTED(topology.face_p2)
         // for a bare face handle) : 1e-05
+        // Proof (unreachable): a B-rep face's surface carries the face tolerance
+        // (Brep::sync_face_surface_tolerance invariant, see Surface::face_zone_tol_3d); 0
+        // hits in the green difftest sweep.
         let face_tol = |s: &Self| -> Result<f64> { Ok(s.face_zone_tol_3d()?.unwrap_or(1e-05)) };
         let tol1 = face_tol(self)?;
         let tol2 = face_tol(surface2)?;

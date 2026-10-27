@@ -673,6 +673,8 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             }
             // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an owner outside
             // this view's topology records
+            // Proof (unreachable): an owner outside this view's topology records has no library
+            // path; 0 hits in the green difftest sweep.
             CacheObject::Other(_) => Err(SolidError::unported(
                 "SmTol::GetZoneTol3d(const SmObject*)",
                 "geom.tol",

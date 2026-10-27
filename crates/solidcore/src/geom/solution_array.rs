@@ -1085,6 +1085,9 @@ impl<O: SolutionObject> Solution<O> {
         self.object_tolerance_with(index, |_| {
             // UNPORTED(geom.tol): SmTol::GetZoneTol3d(const SmObject*) on an opaque handle
             // (callers that can resolve it use `object_tolerance_with`)
+            // Proof (unreachable): no library caller (object_tolerance is used by tests and
+            // difftest); the library uses object_tolerance_with
+            // (GlobalSolve::object_zone_tol_3d); 0 hits in the green difftest sweep.
             Err(SolidError::Unported {
                 upstream: "SmTol::GetZoneTol3d(const SmObject*)",
                 unit: "geom.tol",
@@ -1186,6 +1189,9 @@ fn vertex_point<O: SolutionObject>(vertex: &O) -> Result<Point3> {
     }
     // UNPORTED(topology.vertex): SmVertex::GetPoint (a handle that cannot reach its
     // vertex)
+    // Proof (unreachable): no library caller (Solution::point/point_of are used by tests
+    // and difftest); the library resolves through query::api_queries::solution_point; 0
+    // hits in the green difftest sweep.
     Err(SolidError::Unported {
         upstream: "SmVertex::GetPoint",
         unit: "topology.vertex",
@@ -1198,6 +1204,9 @@ fn edge_curve<O: SolutionObject>(edge: &O) -> Result<O> {
         return Ok(c);
     }
     // UNPORTED(topology.edge): SmEdge::GetCurve (a handle that cannot reach its edge)
+    // Proof (unreachable): no library caller (Solution::point/point_of are used by tests
+    // and difftest); the library resolves through query::api_queries::solution_point; 0
+    // hits in the green difftest sweep.
     Err(SolidError::Unported {
         upstream: "SmEdge::GetCurve",
         unit: "topology.edge",
@@ -1227,6 +1236,9 @@ fn evaluate_curve<O: SolutionObject>(curve: &O, t: f64) -> Result<Point3> {
     }
     // UNPORTED(curve.curve_p2): SmCurve::EvaluatePoint (a handle that cannot reach its
     // curve, or a failed evaluation, whose point upstream leaves as it was)
+    // Proof (unreachable): no library caller (Solution::point/point_of are used by tests
+    // and difftest); the library resolves through query::api_queries::solution_point; 0
+    // hits in the green difftest sweep.
     Err(SolidError::Unported {
         upstream: "SmCurve::EvaluatePoint",
         unit: "curve.curve_p2",
@@ -1256,6 +1268,9 @@ fn face_surface<O: SolutionObject>(face: &O) -> Result<O> {
     }
     // UNPORTED(topology.face_p2): SmFace::GetSurface (a handle that cannot reach its
     // face)
+    // Proof (unreachable): no library caller (Solution::point/point_of are used by tests
+    // and difftest); the library resolves through query::api_queries::solution_point; 0
+    // hits in the green difftest sweep.
     Err(SolidError::Unported {
         upstream: "SmFace::GetSurface",
         unit: "topology.face_p2",
@@ -1286,6 +1301,9 @@ fn evaluate_surface<O: SolutionObject>(surface: &O, u: f64, v: f64) -> Result<Po
     }
     // UNPORTED(surface.surface_p2): SmSurface::EvaluatePoint (a handle that cannot
     // reach its surface, or a failed evaluation, whose point upstream leaves as it was)
+    // Proof (unreachable): no library caller (Solution::point/point_of are used by tests
+    // and difftest); the library resolves through query::api_queries::solution_point; 0
+    // hits in the green difftest sweep.
     Err(SolidError::Unported {
         upstream: "SmSurface::EvaluatePoint",
         unit: "surface.surface_p2",

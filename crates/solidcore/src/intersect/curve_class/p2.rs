@@ -917,6 +917,8 @@ pub fn refine_cci_to_surfaces<O: ClassObject, S: Copy>(
     // this entry point has no adapter to resolve the edge ([`refine_cci_to_surfaces_in`]
     // has one)
     // UNPORTED(topology.edge): SmEdge::GetCurve
+    // Proof (unreachable): B-rep-less entry point; library callers use the `_in` twin, only
+    // difftest and a unit test call this one; 0 hits in the green difftest sweep.
     Err(SolidError::unported("SmEdge::GetCurve", "topology.edge"))
 }
 

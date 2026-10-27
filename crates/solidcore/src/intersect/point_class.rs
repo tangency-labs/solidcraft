@@ -633,6 +633,9 @@ impl<O: ClassObject> PointClassification<O> {
                         Some(_) => return Err(wrong_entity(OP_GEOMETRY)),
                         // UNPORTED(topology.edge): SmEdge::GetBrep (of SmCurve::GetEdge; an
                         // adapter that cannot resolve the owning edge)
+                        // Proof (unreachable): fires only for an adapter whose owner_entity
+                        // fails on this owner; the library adapters resolve it; 0 hits in
+                        // the green difftest sweep.
                         None => {
                             return Err(SolidError::unported("SmEdge::GetBrep", "topology.edge"))
                         }
@@ -651,6 +654,9 @@ impl<O: ClassObject> PointClassification<O> {
                         Some(_) => return Err(wrong_entity(OP_GEOMETRY)),
                         // UNPORTED(topology.face_p4): SmFace::GetBrep (of SmSurface::GetFace;
                         // an adapter that cannot resolve the owning face)
+                        // Proof (unreachable): fires only for an adapter whose owner_entity
+                        // fails on this owner; the library adapters resolve it; 0 hits in
+                        // the green difftest sweep.
                         None => {
                             return Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
                         }
@@ -1181,6 +1187,8 @@ impl<O: ClassObject> PointClassification<O> {
             if self.point_class == Pc::Vertex {
                 let Some(set_vertex_point) = set_vertex_point else {
                     // UNPORTED(topology.vertex): SmVertex::SetPoint
+                    // Proof (unreachable): needs a None vertex setter with an SSS point on
+                    // a vertex class; 0 hits in the green difftest sweep.
                     return Err(SolidError::unported(
                         "SmVertex::SetPoint",
                         "topology.vertex",
@@ -1849,6 +1857,9 @@ pub fn object_zone_tol_3d<O: ClassObject>(
                         Some(_) => Err(wrong_entity(OP_GEOMETRY)),
                         // UNPORTED(topology.face_p2): SmFace::GetTolerance (a bare face
                         // owner the adapter cannot resolve)
+                        // Proof (unreachable): a B-rep face's surface carries the face
+                        // tolerance (Brep::sync_face_surface_tolerance invariant, see
+                        // Surface::face_zone_tol_3d); 0 hits in the green difftest sweep.
                         None => Err(SolidError::unported(
                             "SmFace::GetTolerance",
                             "topology.face_p2",
@@ -1867,6 +1878,9 @@ pub fn object_zone_tol_3d<O: ClassObject>(
                     Some(_) => Err(wrong_entity(OP_GEOMETRY)),
                     // UNPORTED(topology.edge): SmEdge::GetTolerance (an adapter that
                     // cannot resolve the curve's owning edge)
+                    // Proof (unreachable): fires only when the adapter cannot resolve the
+                    // curve's owning edge; the library adapters resolve it; 0 hits in the
+                    // green difftest sweep.
                     None => Err(SolidError::unported(
                         "SmEdge::GetTolerance",
                         "topology.edge",
@@ -2337,6 +2351,10 @@ fn volume_evaluate_point(volume: &Volume, uvw: Point3) -> Result<Point3> {
 /// `SmVertex::GetPoint`.
 fn vertex_point<O>(_vertex: O) -> Result<Point3> {
     // UNPORTED(topology.vertex): SmVertex::GetPoint
+    // Proof (unreachable): adapter-less free fn used only by
+    // PointClassification::merge_into_object (Vertex arm); library callers use the
+    // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
+    // sweep.
     Err(SolidError::unported(
         "SmVertex::GetPoint",
         "topology.vertex",
@@ -2346,6 +2364,10 @@ fn vertex_point<O>(_vertex: O) -> Result<Point3> {
 /// `SmVertex::SetPoint`.
 fn set_vertex_point<O>(_vertex: O, _point: Point3) -> Result<()> {
     // UNPORTED(topology.vertex): SmVertex::SetPoint
+    // Proof (unreachable): adapter-less free fn used only by
+    // PointClassification::merge_into_object (Vertex arm); library callers use the
+    // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
+    // sweep.
     Err(SolidError::unported(
         "SmVertex::SetPoint",
         "topology.vertex",
@@ -2355,6 +2377,10 @@ fn set_vertex_point<O>(_vertex: O, _point: Point3) -> Result<()> {
 /// `SmVertex::SetTolerance(zone_tol_3d)` (defaults `bUpdateOnlyIfLarger = TRUE`, ...).
 fn set_vertex_tolerance<O>(_vertex: O, _zone_tol_3d: f64) -> Result<()> {
     // UNPORTED(topology.vertex): SmVertex::SetTolerance
+    // Proof (unreachable): adapter-less free fn used only by
+    // PointClassification::merge_into_object (Vertex arm); library callers use the
+    // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
+    // sweep.
     Err(SolidError::unported(
         "SmVertex::SetTolerance",
         "topology.vertex",
@@ -2364,6 +2390,10 @@ fn set_vertex_tolerance<O>(_vertex: O, _zone_tol_3d: f64) -> Result<()> {
 /// `SmVertex::SetExact`.
 fn set_vertex_exact<O>(_vertex: O, _exact: bool) -> Result<()> {
     // UNPORTED(topology.vertex): SmVertex::SetExact
+    // Proof (unreachable): adapter-less free fn used only by
+    // PointClassification::merge_into_object (Vertex arm); library callers use the
+    // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
+    // sweep.
     Err(SolidError::unported(
         "SmVertex::SetExact",
         "topology.vertex",
@@ -2373,6 +2403,10 @@ fn set_vertex_exact<O>(_vertex: O, _exact: bool) -> Result<()> {
 /// `SmTol::GetScaledZero(const SmVertex&)`.
 fn vertex_scaled_zero<O>(_vertex: O) -> Result<f64> {
     // UNPORTED(topology.vertex): SmTol::GetScaledZero(const SmVertex&) (SmVertex::GetPoint)
+    // Proof (unreachable): adapter-less free fn used only by
+    // PointClassification::merge_into_object (Vertex arm); library callers use the
+    // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
+    // sweep.
     Err(SolidError::unported(
         "SmVertex::GetPoint",
         "topology.vertex",
@@ -2382,6 +2416,10 @@ fn vertex_scaled_zero<O>(_vertex: O) -> Result<f64> {
 /// `SmTol::GetZoneTol3d(const SmVertex*)`.
 fn vertex_tolerance<O>(_vertex: O) -> Result<f64> {
     // UNPORTED(topology.vertex): SmVertex::GetTolerance
+    // Proof (unreachable): adapter-less free fn used only by
+    // PointClassification::merge_into_object (Vertex arm); library callers use the
+    // B-rep-carrying variants (merge_into_brep, Mutable); 0 hits in the green difftest
+    // sweep.
     Err(SolidError::unported(
         "SmVertex::GetTolerance",
         "topology.vertex",

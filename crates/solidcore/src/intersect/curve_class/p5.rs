@@ -104,6 +104,8 @@ pub trait ClassGeometryMut<O>: ClassGeometry<O> {
                 Ok(())
             }
             // UNPORTED(topology.edge): SmEdge::SetCurve
+            // Proof (unreachable): the library ClassGeometry impls resolve the edge handle
+            // (topology_entity/_mut); 0 hits in the green difftest sweep.
             _ => Err(SolidError::unported("SmEdge::SetCurve", "topology.edge")),
         }
     }
@@ -1152,6 +1154,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 let mate = geometry.topology_intersector_mate(ti, edge).ok_or(
                     // UNPORTED(boolean.topology_intersector_p1): SmTopologyIntersector::GetOtherMate
                     // (an adapter that cannot reach the intersector behind its handle)
+                    // Proof (unreachable): only if topology_intersector() is Some and the
+                    // adapter returns no mate; the library ClassGeometry impls resolve it;
+                    // 0 hits in the green difftest sweep.
                     SolidError::unported(
                         "SmTopologyIntersector::GetOtherMate",
                         "boolean.topology_intersector_p1",

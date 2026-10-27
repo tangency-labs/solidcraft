@@ -2052,6 +2052,9 @@ impl<O: ClassObject, G: ClassGeometry<O>> FilletAccess<O> for ReadOnly<'_, G> {
     }
     fn set_vertex_point(&mut self, _vertex: O, _point: Point3) -> Result<()> {
         // UNPORTED(topology.vertex): SmVertex::SetPoint
+        // Proof (unreachable): the ReadOnly view serves queries that only make caches, and
+        // 0 hits in the green difftest sweep show none met this; Mutable and the B-rep
+        // impls resolve it.
         Err(SolidError::unported(
             "SmVertex::SetPoint",
             "topology.vertex",
@@ -2059,6 +2062,9 @@ impl<O: ClassObject, G: ClassGeometry<O>> FilletAccess<O> for ReadOnly<'_, G> {
     }
     fn set_edge_curve(&mut self, _edge: O, _curve: Curve) -> Result<()> {
         // UNPORTED(topology.edge): SmEdge::SetCurve
+        // Proof (unreachable): the ReadOnly view serves queries that only make caches, and
+        // 0 hits in the green difftest sweep show none met this; Mutable and the B-rep
+        // impls resolve it.
         Err(SolidError::unported("SmEdge::SetCurve", "topology.edge"))
     }
 }
@@ -2082,6 +2088,9 @@ impl<O: ClassObject, G: ClassGeometry<O>> FaceQueries<O> for ReadOnly<'_, G> {
         _uv_space_okay: bool,
     ) -> Result<EndInside> {
         // UNPORTED(topology.face_p4): SmFace::FindVertexSector
+        // Proof (unreachable): the ReadOnly view serves queries that only make caches, and
+        // 0 hits in the green difftest sweep show none met this; Mutable and the B-rep
+        // impls resolve it.
         Err(SolidError::unported(
             "SmFace::FindVertexSector",
             "topology.face_p4",

@@ -653,6 +653,9 @@ pub fn zone_tol_3d_of_curve(k: &Kernel, curve: &Curve) -> Result<f64> {
     })?;
     if edge.is_some() {
         // UNPORTED(topology.edge): SmEdge::GetTolerance; justified: findings.md intersect.surface_drop_lib_p3
+        // Proof (unreachable): callers are geom::tol::is_degenerate_curve (tests only) and
+        // offset_geometry_creation (an unowned arc copy, the system branch); 0 hits in the
+        // green difftest sweep.
         return Err(SolidError::unported(
             "SmEdge::GetTolerance",
             "topology.edge",
@@ -660,6 +663,9 @@ pub fn zone_tol_3d_of_curve(k: &Kernel, curve: &Curve) -> Result<f64> {
     }
     if chain {
         // UNPORTED(topology.edge): SmCurve::GetEdge through the owning curves and edge uses (the owner-chain resolver needs the B-rep arena); justified: findings.md intersect.surface_drop_lib_p3
+        // Proof (unreachable): callers are geom::tol::is_degenerate_curve (tests only) and
+        // offset_geometry_creation (an unowned arc copy, the system branch); 0 hits in the
+        // green difftest sweep.
         return Err(SolidError::unported("SmCurve::GetEdge", "topology.edge"));
     }
     Ok(zone_tol_3d(k, SmallTopoType::NormalSize))

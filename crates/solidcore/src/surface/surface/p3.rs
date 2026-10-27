@@ -142,6 +142,9 @@ fn surface_approx_tol_3d(
     // without it stays UNPORTED(topology.face_p2): SmFace::GetTolerance
     // (`Surface::face_zone_tol_3d`); the face props pass it through
     // `get_singularities_of_face`
+    // Proof (unreachable): a B-rep face's surface carries the face tolerance
+    // (Brep::sync_face_surface_tolerance invariant, see Surface::face_zone_tol_3d); 0 hits
+    // in the green difftest sweep.
     if let Some(zone) = surface.face_zone_tol_3d()? {
         return Ok(approx_tol3d(k, 0.5 * zone));
     }
