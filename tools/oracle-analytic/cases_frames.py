@@ -4,11 +4,13 @@
 Run from the worktree root:  python3 tools/oracle-analytic/cases_frames.py [case ...]
 Writes tests/oracle/<case>/expected.json with "source": "analytic".
 
-Every member is a straight bar of a rectangular section, so each is a box: its volume, area and
-centre follow from its section and its length after trimming. Nothing here is measured from a CAD
+Every member is a straight bar of a rectangular section: a box when its ends are square, a
+prism with slanted ends when mitred. Its volume, area and centre follow from its section and its
+length at its middle line after trimming. Nothing here is measured from a CAD
 kernel. Stdlib only.
 """
 import json
+import math
 import os
 import sys
 
@@ -47,8 +49,36 @@ def c96_frame_tower():
     }
 
 
+def c97_frame_mitre():
+    """A 600 x 400 frame in 45 x 45 bar on XY, its lines through the bars' centres, the four corners
+    mitred with a 2 mm gap. The mitre plane of a right-angled corner leans 45 deg from each bar; each
+    cut face stands 1 back from it, so each end moves 1 / cos 45 = sqrt 2 along its bar and a bar is
+    L - 2 sqrt 2 long at its middle line. In plan a bar is an isosceles trapezoid: outer edge that
+    + 45, inner edge that - 45. The frame is symmetric about x = 300 and y = 200."""
+    s, g = 45.0, 2.0
+    r2 = math.sqrt(2.0)
+    lengths = [600.0 - g * r2, 400.0 - g * r2, 600.0 - g * r2, 400.0 - g * r2]
+    vol = sum(s * s * lc for lc in lengths)
+    # Top and bottom: trapezoids of area 45 Lc; outer and inner sides 45 (Lc + 45) and 45 (Lc - 45);
+    # two end faces 45 high and 45 sqrt 2 across.
+    area = sum(4 * s * lc + 2 * s * s * r2 for lc in lengths)
+    return {
+        "source": "analytic",
+        "method": "4 mitred 45 x 45 bars round a 600 x 400 rectangle, 2 gap: middle-line lengths L - 2 sqrt 2 (each end 1 / cos 45 back); "
+        "V = 2025 (2 x 600 + 2 x 400 - 8 sqrt 2); area per bar = 4 x 45 Lc + 2 x 45 x 45 sqrt 2; "
+        "centre of mass at the frame's centre by symmetry; bbox the outer corners, 22.5 outside the lines",
+        "body_count": len(lengths),
+        "volume_mm3": vol,
+        "area_mm2": area,
+        "center_of_mass": [300.0, 200.0, 0.0],
+        "bbox": {"min": [-s / 2, -s / 2, -s / 2], "max": [600.0 + s / 2, 400.0 + s / 2, s / 2]},
+        "faces": 6 * len(lengths),
+    }
+
+
 CASES = {
     "96-frame-tower": c96_frame_tower,
+    "97-frame-mitre": c97_frame_mitre,
 }
 
 
