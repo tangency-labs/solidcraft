@@ -855,7 +855,52 @@ fn ribbon_button_width(painter: &egui::Painter, label: &str) -> f32 {
     (widest + BUTTON_LABEL_PADDING).clamp(BUTTON_MIN_WIDTH, BUTTON_MAX_WIDTH)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CjkScript {
+    Han,
+    Hiragana,
+    Katakana,
+    Other,
+}
+
+fn cjk_script(c: char) -> CjkScript {
+    match c {
+        '\u{3040}'..='\u{309F}' => CjkScript::Hiragana,
+        '\u{30A0}'..='\u{30FF}' | '\u{31F0}'..='\u{31FF}' | '\u{FF65}'..='\u{FF9F}' => CjkScript::Katakana,
+        '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' => CjkScript::Han,
+        _ => CjkScript::Other,
+    }
+}
+
+/// Whether byte offset `end` sits at a word boundary in a spaceless Japanese ribbon label.
+fn cjk_word_break(label: &str, end: usize) -> bool {
+    let (Some(prev), Some(next)) = (label.get(..end).and_then(|s| s.chars().next_back()), label.get(end..).and_then(|s| s.chars().next())) else {
+        return false;
+    };
+    let (a, b) = (cjk_script(prev), cjk_script(next));
+    if a == CjkScript::Katakana && b == CjkScript::Katakana {
+        let before = label.get(..end).unwrap_or_default();
+        return before.ends_with("サーフェス") || before.ends_with("フラット");
+    }
+    match (a, b) {
+        (CjkScript::Han, CjkScript::Katakana)
+        | (CjkScript::Katakana, CjkScript::Han | CjkScript::Hiragana)
+        | (CjkScript::Hiragana, CjkScript::Han | CjkScript::Katakana) => true,
+        (CjkScript::Han, CjkScript::Hiragana) => next == 'を',
+        (CjkScript::Other, CjkScript::Katakana | CjkScript::Hiragana) => prev.is_ascii_alphabetic(),
+        (CjkScript::Katakana | CjkScript::Hiragana, CjkScript::Other) => next.is_ascii_alphabetic(),
+        _ => false,
+    }
+}
+
 fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<String> {
+    if let Some((first, second)) = label.split_once('\n') {
+        let first = first.trim();
+        let second = second.trim();
+        if !first.is_empty() && !second.is_empty() {
+            return vec![first.to_owned(), second.to_owned()];
+        }
+    }
     let measure = |text: &str| ribbon_label_width(painter, text);
     let normalized = label.split_whitespace().collect::<Vec<_>>().join(" ");
     let label = normalized.as_str();
@@ -880,9 +925,14 @@ fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<S
         }
         return lines;
     }
+    let has_delimiters = label.chars().any(|c| c.is_whitespace() || c == '/');
     let mut end = 0;
-    for token in label.split_inclusive(|c: char| c.is_whitespace() || c == '/') {
-        let next = end + token.len();
+    for (at, ch) in label.char_indices() {
+        let next = at + ch.len_utf8();
+        let is_break = next == label.len() || ch.is_whitespace() || ch == '/' || (!has_delimiters && cjk_word_break(label, next));
+        if !is_break {
+            continue;
+        }
         if end > 0 && measure(label.get(..next).unwrap_or_default().trim()) > width {
             break;
         }
@@ -3242,7 +3292,7 @@ mod ribbon_label_tests {
                             assert!(
                                 label.char_indices().any(|(at, ch)| {
                                     let end = at + ch.len_utf8();
-                                    (ch.is_whitespace() || ch == '/')
+                                    (ch.is_whitespace() || ch == '/' || cjk_word_break(label, end))
                                         && label[end..].trim_start().starts_with(next)
                                         && (first.ends_with('…') || label[..end].trim() == first)
                                 }),
@@ -3282,6 +3332,24 @@ mod ribbon_label_tests {
             let lines = ribbon_button_lines(&painter, "長い日本語のラベル 続き", 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[0].ends_with('…'));
+            let ja = crate::i18n::Locale::for_language("ja");
+            for (id, expected) in [
+                ("sketch.create", vec!["新規", "スケッチ"]),
+                ("config.table", vec!["構成", "テーブル"]),
+                ("construct.plane.offset", vec!["オフセット", "平面"]),
+                ("surface.loft", vec!["サーフェス", "ロフト"]),
+                ("mesh.convert", vec!["メッシュを", "変換"]),
+                ("component.create", vec!["新規", "コンポ"]),
+                ("joint.origin", vec!["ジョイント", "原点"]),
+                ("joint.drive", vec!["ジョイント", "を駆動"]),
+            ] {
+                let command = solidcraft_engine::find_command(id).unwrap();
+                let label = ja.label(crate::workspace::ribbon_button_label(command));
+                let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
+                assert_eq!(ribbon_button_lines(&painter, label, width), expected, "{id}");
+            }
+            let comp = solidcraft_engine::find_command("component.create").unwrap();
+            assert_eq!(ja.label(comp.label), "新規コンポーネント");
             // Hebrew comes in display order (`bidi::visual`): the reader starts at the right end,
             // so "סקיצה חדשה" (New Sketch, stored as "חדשה סקיצה") puts סקיצה on the first line.
             let label = crate::bidi::visual("סקיצה חדשה").into_owned();
