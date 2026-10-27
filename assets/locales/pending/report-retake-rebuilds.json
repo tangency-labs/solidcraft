@@ -4,10 +4,20 @@
     "issue.note_details_kept": "Screenshot captured locally. Your edited technical details were kept: check that they still match the current view.",
     "issue.note_details_updated": "Technical details updated to match the current view. Screenshot captured locally. Review it before attaching it on GitHub."
   },
+  "ar": {
+    "issue.note_changed_while_waiting": "تغيّرت الإعدادات أو النموذج أثناء انتظار المعاينة. أعد التقاط الشاشة لتحديث التفاصيل التقنية للعرض الحالي.",
+    "issue.note_details_kept": "التُقطت لقطة الشاشة محليًا. احتُفظ بالتفاصيل التقنية التي عدّلتها: تحقّق من أنها لا تزال تطابق العرض الحالي.",
+    "issue.note_details_updated": "حُدّثت التفاصيل التقنية لتطابق العرض الحالي. التُقطت لقطة الشاشة محليًا. راجعها قبل إرفاقها في GitHub."
+  },
   "de": {
     "issue.note_changed_while_waiting": "Einstellungen oder Modell haben sich geändert, während auf die Vorschau gewartet wurde. Nehmen Sie den Screenshot neu auf, um die technischen Details für die aktuelle Ansicht zu aktualisieren.",
     "issue.note_details_kept": "Screenshot lokal aufgenommen. Ihre bearbeiteten technischen Details wurden beibehalten: Prüfen Sie, ob sie noch zur aktuellen Ansicht passen.",
     "issue.note_details_updated": "Technische Details an die aktuelle Ansicht angepasst. Screenshot lokal aufgenommen. Prüfen Sie ihn, bevor Sie ihn auf GitHub anhängen."
+  },
+  "he": {
+    "issue.note_changed_while_waiting": "ההגדרות או המודל השתנו בזמן ההמתנה לתצוגה המקדימה. צלם את המסך מחדש כדי לעדכן את הפרטים הטכניים לתצוגה הנוכחית.",
+    "issue.note_details_kept": "צילום המסך נלכד מקומית. הפרטים הטכניים שערכת נשמרו: בדוק שהם עדיין תואמים לתצוגה הנוכחית.",
+    "issue.note_details_updated": "הפרטים הטכניים עודכנו כך שיתאימו לתצוגה הנוכחית. צילום המסך נלכד מקומית. בדוק אותו לפני שתצרף אותו ב־GitHub."
   },
   "ja": {
     "issue.note_changed_while_waiting": "プレビューを待っている間に設定またはモデルが変更されました。スクリーンショットを撮り直すと、技術的な詳細が現在の表示に合わせて更新されます。",
