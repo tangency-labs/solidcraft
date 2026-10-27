@@ -135,6 +135,12 @@ pub struct Draft {
     expected: String,
     image: Option<Arc<ColorImage>>,
     texture: Option<TextureHandle>,
+    /// What the technical details are built from, to rebuild them on Retake (#7350).
+    origin: Origin,
+    /// [`Draft::body`] as built: when it is unchanged, the user didn't edit it.
+    built_body: String,
+    /// Said with the next screenshot: the technical details were rebuilt for it.
+    rebuilt: Option<&'static str>,
     pub note: String,
     source_signature: u64,
     /// The description has taken the focus it gets on opening; Continue finding it empty clears
@@ -155,6 +161,9 @@ impl Draft {
             expected: String::new(),
             image: None,
             texture: None,
+            origin: Origin::View { error: None },
+            built_body: String::new(),
+            rebuilt: None,
             note: String::new(),
             source_signature,
             focus_requested: false,
@@ -191,6 +200,18 @@ impl Draft {
         report
     }
 }
+
+enum Origin {
+    /// [`draft_for`] with the dialog open and the error the report was made with.
+    View { error: Option<String> },
+    /// [`crash_draft`]: the crash report, not the view.
+    Crash,
+}
+
+/// What a draft's note says after a Retake rebuilt its technical details for the current view.
+const NOTE_DETAILS_UPDATED: &str =
+    "Technical details updated to match the current view. Screenshot captured locally. Review it before attaching it on GitHub.";
+const NOTE_DETAILS_KEPT: &str = "Screenshot captured locally. Your edited technical details were kept: check that they still match the current view.";
 
 struct Pending {
     token: u64,
@@ -475,6 +496,9 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
     truncate(&mut title, 160);
     let mut draft = Draft::new(title, body, source_signature(app, dialog));
     draft.title_prefix = format!("{label}: ");
+    // More than the details show of it, so a rebuild shows the same.
+    draft.origin = Origin::View { error: error.map(|e| limited(e, 8000)) };
+    draft.built_body.clone_from(&draft.body);
     draft
 }
 
@@ -545,6 +569,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
     let mut title = format!("Crash: {}", s("message").lines().next().unwrap_or_default());
     truncate(&mut title, 160);
     let mut draft = Draft::new(title, body, 0);
+    draft.origin = Origin::Crash;
     draft.description =
         limited(&format!("{what}{}.", command.map(|c| format!(" while running `{}`", limited(c, 160))).unwrap_or_default()), MAX_ANSWER);
     draft
@@ -592,17 +617,51 @@ pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::D
         app.issue_report.cad_focus = ctx.memory(|m| m.focused());
     }
     cancel_capture(app);
-    app.issue_report.draft = Some(draft_for(app, dialog, error));
-    if let Some(draft) = app.issue_report.draft.as_mut() {
-        let rect = ctx.content_rect();
-        let _ = write!(
-            &mut draft.body,
-            "\nWindow: {:.0}×{:.0} logical points; {:.2} physical pixels/point\n",
-            rect.width(),
-            rect.height(),
-            ctx.pixels_per_point()
-        );
-        truncate(&mut draft.body, MAX_BODY);
+    app.issue_report.draft = Some(window_draft(app, ctx, dialog, error));
+    capture(app, ctx, dialog);
+}
+
+/// [`draft_for`] and the window it is shown in.
+fn window_draft(app: &SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, error: Option<&str>) -> Draft {
+    let mut draft = draft_for(app, dialog, error);
+    let rect = ctx.content_rect();
+    let _ = write!(
+        &mut draft.body,
+        "\nWindow: {:.0}×{:.0} logical points; {:.2} physical pixels/point\n",
+        rect.width(),
+        rect.height(),
+        ctx.pixels_per_point()
+    );
+    truncate(&mut draft.body, MAX_BODY);
+    draft.built_body.clone_from(&draft.body);
+    draft
+}
+
+/// Retake: a draft whose design, dialog, selection or preview changed since it was made gets its
+/// technical details rebuilt for the current view first, and keeps what was typed (#7350). Edited
+/// details stay as edited; a crash draft's come from its crash report and stay too.
+fn retake(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>) {
+    let current = source_signature(app, dialog);
+    let Some(draft) = app.issue_report.draft.as_ref() else { return };
+    let changed = draft.source_signature != current;
+    let fresh = match &draft.origin {
+        Origin::View { error } if changed => Some(window_draft(app, ctx, dialog, error.as_deref())),
+        _ => None,
+    };
+    let Some(draft) = app.issue_report.draft.as_mut() else { return };
+    draft.rebuilt = None;
+    if changed {
+        draft.source_signature = current;
+    }
+    if let Some(fresh) = fresh {
+        if draft.body == draft.built_body {
+            draft.body.clone_from(&fresh.body);
+            draft.rebuilt = Some(NOTE_DETAILS_UPDATED);
+        } else {
+            draft.rebuilt = Some(NOTE_DETAILS_KEPT);
+        }
+        draft.built_body = fresh.body;
+        draft.title_prefix = fresh.title_prefix;
     }
     capture(app, ctx, dialog);
 }
@@ -626,12 +685,11 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
     let context = context_signature(app, dialog);
     let full = app.queued_shots.len() >= 16;
     let busy = app.preview.busy;
+    // The screenshot the draft has stays until a new one is taken (#7350).
     let Some(draft) = app.issue_report.draft.as_mut() else { return };
-    draft.image = None;
-    draft.texture = None;
     if draft.source_signature != current_source {
         draft.note =
-            "Settings or model changed. Close this draft and create a new report to capture matching context; your text is still available to copy."
+            "Settings or model changed while waiting for the preview. Retake the screenshot to update the technical details for the current view."
                 .into();
         return;
     }
@@ -652,8 +710,12 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
             PREVIEW_WAIT_MS / 1000.0
         );
         if !draft.body.contains(line.trim()) {
+            let built = draft.body == draft.built_body;
             draft.body.push_str(&line);
             truncate(&mut draft.body, MAX_BODY);
+            if built {
+                draft.built_body.clone_from(&draft.body);
+            }
         }
     }
     // The form hides for the capture: give its focused field back after it.
@@ -784,7 +846,8 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
         match fitted(image, MAX_IMAGE_PIXELS, max_side) {
             Some(image) => {
                 draft.image = Some(image);
-                draft.note = "Screenshot captured locally. Review it before attaching it on GitHub.".into();
+                draft.texture = None;
+                draft.note = draft.rebuilt.take().unwrap_or("Screenshot captured locally. Review it before attaching it on GitHub.").into();
             }
             None => draft.note = "Screenshot dimensions are unsupported. The text draft is still available.".into(),
         }
@@ -846,7 +909,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.issue_report.draft = Some(draft);
         if retake {
             let dialog = app.dialog.clone();
-            capture(app, ctx, dialog.as_ref());
+            self::retake(app, ctx, dialog.as_ref());
         }
     } else {
         cancel_capture(app);
@@ -1738,6 +1801,126 @@ mod tests {
         let draft = h.app.issue_report.draft.as_ref().unwrap();
         assert_eq!(draft.description, "The preview vanished.");
         assert!(draft.image.is_some());
+    }
+
+    fn green(w: usize, h: usize) -> Arc<ColorImage> {
+        Arc::new(ColorImage::new([w, h], vec![egui::Color32::GREEN; w * h]))
+    }
+
+    /// Retake after the design changed rebuilds the technical details for the current view and
+    /// keeps what was typed; it used to refuse for the rest of the draft (#7350).
+    #[test]
+    fn issue_report_retake_after_a_command_rebuilds_the_details_and_keeps_the_answers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"FirstBox"})).unwrap();
+        help::run(&mut h.app, &h.ctx, "report");
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut h.app, token, green(4, 3));
+        h.frames(16);
+        let draft = h.app.issue_report.draft.as_mut().unwrap();
+        (draft.title, draft.description, draft.steps, draft.expected) = ("Title".into(), "Happened".into(), "Steps".into(), "Expected".into());
+        assert!(draft.body.contains("FirstBox") && !draft.body.contains("SecondBox"));
+        // An agent runs a command while the report is open.
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"SecondBox"})).unwrap();
+        h.frames(16);
+        h.step(&json!({"widget":"Retake screenshot"})).unwrap();
+        assert!(pending(&h.app), "{}", h.app.issue_report.draft.as_ref().unwrap().note);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert!(draft.body.contains("SecondBox") && draft.body.contains(&format!("Revision: {}", h.app.session.revision)), "{}", draft.body);
+        assert_eq!((&*draft.title, &*draft.description, &*draft.steps, &*draft.expected), ("Title", "Happened", "Steps", "Expected"));
+        assert_eq!(draft.image.as_ref().unwrap().size, [4, 3], "the old screenshot stays until the new one is taken");
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut h.app, token, green(6, 5));
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!(draft.image.as_ref().unwrap().size, [6, 5]);
+        assert_eq!(draft.note, NOTE_DETAILS_UPDATED);
+        // And again: the rebuilt draft is the new baseline.
+        h.app.run("solid.box", json!({"length":3,"width":3,"height":3,"name":"ThirdBox"})).unwrap();
+        let (ctx, dialog) = (h.ctx.clone(), h.app.dialog.clone());
+        retake(&mut h.app, &ctx, dialog.as_ref());
+        assert!(pending(&h.app) && h.app.issue_report.draft.as_ref().unwrap().body.contains("ThirdBox"));
+    }
+
+    /// Technical details edited by hand are the user's: Retake keeps them, and says so.
+    #[test]
+    fn issue_report_retake_after_a_change_keeps_edited_details() {
+        let mut app = app();
+        let ctx = crate::fonts::test_context();
+        begin(&mut app, &ctx, None, None);
+        let draft = app.issue_report.draft.as_mut().unwrap();
+        draft.body = "Details with the private parts removed".into();
+        draft.description = "Happened".into();
+        app.run("solid.box", json!({"length":5,"width":5,"height":5,"body_name":"SecondBox"})).unwrap();
+        retake(&mut app, &ctx, None);
+        assert!(pending(&app));
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut app, token, green(4, 3));
+        let draft = app.issue_report.draft.as_ref().unwrap();
+        assert_eq!((&*draft.body, &*draft.description), ("Details with the private parts removed", "Happened"));
+        assert!(draft.image.is_some());
+        assert_eq!(draft.note, NOTE_DETAILS_KEPT);
+    }
+
+    /// A crash draft's details come from its crash report: Retake keeps them and takes the
+    /// screenshot, also with a feature dialog open.
+    #[test]
+    fn issue_report_retake_of_a_crash_draft_keeps_its_body() {
+        let mut app = app();
+        combine(&mut app);
+        let ctx = crate::fonts::test_context();
+        begin_crash(&mut app, &ctx, &json!({"kind":"command_panic","message":"synthetic panic","id":"crash-1"}));
+        let body = app.issue_report.draft.as_ref().unwrap().body.clone();
+        assert!(body.contains("synthetic panic"));
+        app.session.selection = vec![Sel::Feature { id: 1 }];
+        let dialog = app.dialog.clone();
+        retake(&mut app, &ctx, dialog.as_ref());
+        assert!(pending(&app), "{}", app.issue_report.draft.as_ref().unwrap().note);
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut app, token, green(4, 3));
+        let draft = app.issue_report.draft.as_ref().unwrap();
+        assert_eq!(draft.body, body);
+        assert!(draft.image.is_some() && draft.note.starts_with("Screenshot captured locally"), "{}", draft.note);
+    }
+
+    /// A capture that is refused, waits, times out, comes back stale or malformed keeps the
+    /// screenshot the draft has; only a new frame replaces it (#7350).
+    #[test]
+    fn issue_report_failed_capture_keeps_the_screenshot() {
+        let mut app = app();
+        let ctx = crate::fonts::test_context();
+        begin(&mut app, &ctx, None, None);
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut app, token, green(4, 3));
+        let kept = |app: &SolveApp| app.issue_report.draft.as_ref().unwrap().image.as_ref().map(|i| i.size);
+        // Waits for the preview, then is refused: the selection changed meanwhile.
+        app.preview.busy = true;
+        retake(&mut app, &ctx, None);
+        assert!(app.issue_report.waiting.is_some());
+        assert_eq!(kept(&app), Some([4, 3]));
+        app.session.selection = vec![Sel::Feature { id: 1 }];
+        app.preview.busy = false;
+        tick(&mut app, &ctx);
+        assert!(!pending(&app) && app.issue_report.draft.as_ref().unwrap().note.contains("Settings or model changed"));
+        assert_eq!(kept(&app), Some([4, 3]), "refused");
+        retake(&mut app, &ctx, None);
+        app.issue_report.pending.as_mut().unwrap().deadline = -1.0;
+        tick(&mut app, &ctx);
+        assert!(app.issue_report.draft.as_ref().unwrap().note.contains("No app frame"));
+        assert_eq!(kept(&app), Some([4, 3]), "timed out");
+        retake(&mut app, &ctx, None);
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        app.cam.distance *= 2.0;
+        receive(&mut app, token, green(6, 5));
+        assert_eq!(kept(&app), Some([4, 3]), "stale");
+        retake(&mut app, &ctx, None);
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut app, token, Arc::new(ColorImage::new([0, 0], vec![])));
+        assert_eq!(kept(&app), Some([4, 3]), "malformed");
+        retake(&mut app, &ctx, None);
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut app, token, green(6, 5));
+        assert_eq!(kept(&app), Some([6, 5]));
     }
 
     #[test]

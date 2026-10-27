@@ -1,0 +1,22 @@
+{
+  "en": {
+    "issue.note_changed_while_waiting": "Settings or model changed while waiting for the preview. Retake the screenshot to update the technical details for the current view.",
+    "issue.note_details_kept": "Screenshot captured locally. Your edited technical details were kept: check that they still match the current view.",
+    "issue.note_details_updated": "Technical details updated to match the current view. Screenshot captured locally. Review it before attaching it on GitHub."
+  },
+  "de": {
+    "issue.note_changed_while_waiting": "Einstellungen oder Modell haben sich geändert, während auf die Vorschau gewartet wurde. Nehmen Sie den Screenshot neu auf, um die technischen Details für die aktuelle Ansicht zu aktualisieren.",
+    "issue.note_details_kept": "Screenshot lokal aufgenommen. Ihre bearbeiteten technischen Details wurden beibehalten: Prüfen Sie, ob sie noch zur aktuellen Ansicht passen.",
+    "issue.note_details_updated": "Technische Details an die aktuelle Ansicht angepasst. Screenshot lokal aufgenommen. Prüfen Sie ihn, bevor Sie ihn auf GitHub anhängen."
+  },
+  "ja": {
+    "issue.note_changed_while_waiting": "プレビューを待っている間に設定またはモデルが変更されました。スクリーンショットを撮り直すと、技術的な詳細が現在の表示に合わせて更新されます。",
+    "issue.note_details_kept": "スクリーンショットをローカルに取得しました。編集した技術的な詳細はそのまま残しました。現在の表示と合っているか確認してください。",
+    "issue.note_details_updated": "技術的な詳細を現在の表示に合わせて更新しました。スクリーンショットをローカルに取得しました。GitHub に添付する前に確認してください。"
+  },
+  "zh": {
+    "issue.note_changed_while_waiting": "等待预览时设置或模型已更改。重新截图即可按当前视图更新技术详情。",
+    "issue.note_details_kept": "已在本地截图。已保留你编辑过的技术详情：请检查它们是否仍与当前视图一致。",
+    "issue.note_details_updated": "技术详情已按当前视图更新。已在本地截图。附加到 GitHub 之前请先检查。"
+  }
+}
