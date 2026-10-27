@@ -727,7 +727,7 @@ impl FilletBrep {
         let g2 = self.eu_geom(mate)?;
         let mut fs2_tol: Option<f64> = None;
 
-        let surface1: Surface;
+        let mut surface1: Surface;
         let mut surface2: Option<Surface> = None;
         let tol: f64;
         if let Some(g1) = g1 {
@@ -805,6 +805,23 @@ impl FilletBrep {
                             tol,
                             solvers,
                         ))?;
+
+                        // Upstream's `pSurface1` / `pSurface2` point at the fillet
+                        // geometries' own surfaces, which the fix edits in place (a
+                        // closed corner's end row becomes its start row); re-read them.
+                        surface1 = self
+                            .geom(g1)?
+                            .fillet_surface()?
+                            .cloned()
+                            .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?;
+                        if surface2.is_some() {
+                            surface2 = Some(
+                                self.geom(g2)?
+                                    .fillet_surface()?
+                                    .cloned()
+                                    .ok_or_else(|| SolidError::null_pointer(OP_CROSS))?,
+                            );
+                        }
                     }
                 }
             }
