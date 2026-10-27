@@ -27,6 +27,34 @@
     "Radial menu and mouse gestures": "Radialmenü und Mausgesten",
     "Remove": "Entfernen"
   },
+  "ar": {
+    "Add an outer tool": "إضافة أداة خارجية",
+    "Commands…": "الأوامر…",
+    "Compact (icons only)": "مضغوط (الأيقونات فقط)",
+    "Hold before the radial menu opens": "مدة الضغط قبل فتح القائمة الدائرية",
+    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.": "اضغط على الزر الأيمن دون تحريك ثم حرّك: تُفتح القائمة الدائرية، وإفلات الزر فوق أمر يشغّله. التحريك قبل ذلك يحرّك العرض، والإفلات دون تحريك يفتح القائمة المعتادة.",
+    "Inner ring": "الحلقة الداخلية",
+    "Inner ring, clockwise from the top": "الحلقة الداخلية، باتجاه عقارب الساعة من الأعلى",
+    "Outer ring": "الحلقة الخارجية",
+    "Outer ring, clockwise from the top": "الحلقة الخارجية، باتجاه عقارب الساعة من الأعلى",
+    "Radial menu": "القائمة الدائرية",
+    "Radial menu and mouse gestures": "القائمة الدائرية وإيماءات الفأرة",
+    "Remove": "إزالة"
+  },
+  "he": {
+    "Add an outer tool": "הוספת כלי חיצוני",
+    "Commands…": "פקודות…",
+    "Compact (icons only)": "מצומצם (סמלים בלבד)",
+    "Hold before the radial menu opens": "משך ההחזקה לפני פתיחת התפריט המעגלי",
+    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.": "יש להחזיק את הלחצן הימני ללא תזוזה ואז להזיז: התפריט המעגלי נפתח, ושחרור מעל פקודה מפעיל אותה. הזזה מוקדמת יותר מזיזה את התצוגה; שחרור ללא הזזה פותח את התפריט הרגיל.",
+    "Inner ring": "טבעת פנימית",
+    "Inner ring, clockwise from the top": "טבעת פנימית, בכיוון השעון מלמעלה",
+    "Outer ring": "טבעת חיצונית",
+    "Outer ring, clockwise from the top": "טבעת חיצונית, בכיוון השעון מלמעלה",
+    "Radial menu": "תפריט מעגלי",
+    "Radial menu and mouse gestures": "תפריט מעגלי ומחוות עכבר",
+    "Remove": "הסרה"
+  },
   "ja": {
     "Add an outer tool": "外側のツールを追加",
     "Commands…": "コマンド…",
@@ -40,6 +68,20 @@
     "Radial menu": "ラジアルメニュー",
     "Radial menu and mouse gestures": "ラジアルメニューとマウスジェスチャー",
     "Remove": "削除"
+  },
+  "vi": {
+    "Add an outer tool": "Thêm công cụ vòng ngoài",
+    "Commands…": "Lệnh…",
+    "Compact (icons only)": "Thu gọn (chỉ biểu tượng)",
+    "Hold before the radial menu opens": "Thời gian giữ trước khi menu tròn mở",
+    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.": "Giữ yên chuột phải rồi di chuyển: menu tròn mở ra, thả chuột trên một lệnh sẽ chạy lệnh đó. Di chuyển sớm hơn sẽ xoay khung nhìn; thả chuột mà không di chuyển sẽ mở menu thông thường.",
+    "Inner ring": "Vòng trong",
+    "Inner ring, clockwise from the top": "Vòng trong, theo chiều kim đồng hồ từ trên xuống",
+    "Outer ring": "Vòng ngoài",
+    "Outer ring, clockwise from the top": "Vòng ngoài, theo chiều kim đồng hồ từ trên xuống",
+    "Radial menu": "Menu tròn",
+    "Radial menu and mouse gestures": "Menu tròn và cử chỉ chuột",
+    "Remove": "Xóa"
   },
   "zh": {
     "Add an outer tool": "添加外圈工具",
