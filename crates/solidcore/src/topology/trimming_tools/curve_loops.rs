@@ -24,6 +24,7 @@
 //! | [`CurveLoops::insert_into_loops`]            | `InsertIntoLoops`                                         |
 //! | [`CurveLoops::insert_iso_xsect_segment`]     | `InsertIsoXSectSegment`                                   |
 //! | [`CurveLoops::update_solution_objects`]      | `UpdateSolutionObjects`                                   |
+//! | [`StoreDomains`]                             | the `SmCurve*` dereference of `SmSolution::GetParameterInterval` |
 //!
 //! Deviations:
 //! - **Curves.** Upstream keeps `SmCurve*`s it does not own; here a curve is a
@@ -47,7 +48,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::solution_array::{ObjectKind, SolutionArray, SolutionObject};
+use crate::geom::solution_array::{ObjectKind, ParameterDomains, SolutionArray, SolutionObject};
 use crate::geom::tol;
 use crate::kernel::Kernel;
 use crate::math::Point3;
@@ -80,6 +81,21 @@ impl SolutionObject for LoopObject {
         match self {
             Self::Curve(_) => ObjectKind::Curve,
             Self::Other(k) => *k,
+        }
+    }
+}
+
+/// The parameter domains of [`LoopObject`]s read from the caller's curve store
+/// (upstream dereferences the `SmCurve*`: `SmCurve::GetNaturalInterval`), for
+/// [`SolutionArray::add_sorted_solution_in`]. Other kinds ask the handle itself.
+#[derive(Debug, Clone, Copy)]
+pub struct StoreDomains<'a>(pub &'a [Curve]);
+
+impl ParameterDomains<LoopObject> for StoreDomains<'_> {
+    fn natural_interval(&self, curve: &LoopObject) -> Option<Extent1d> {
+        match curve {
+            LoopObject::Curve(key) => self.0.get(key.0).map(Curve::natural_interval),
+            LoopObject::Other(_) => curve.natural_interval(),
         }
     }
 }

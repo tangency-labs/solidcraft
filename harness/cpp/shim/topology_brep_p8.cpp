@@ -9,7 +9,8 @@
 // documented in crates/solidcore-ffi/src/units/topology_brep_p8.rs, which validates every
 // input. Surface blocks are `-1` (null) or sc_topology_fixture.h's read_surface block
 // (SmPlane, SmBSplineSurface); curve blocks are `0` + read_curve's block (an
-// SmBSplineCurve) or `1 P0[3] P1[3]` (an SmLine(P0, P1, 3)).
+// SmBSplineCurve), `1 P0[3] P1[3]` (an SmLine(P0, P1, 3)) or `2` + read_curve's block
+// (the SmBSplineCurve with the given knots written back over its own NURB).
 //
 // Output: `status`, after a success the op's results (objects by their index in a walk of
 // the B-rep after the op, -1 null), then the B-rep after the op, also after a failure: the topology graph
@@ -60,6 +61,17 @@ SmCurve* p8_curve(Rd& rd, const SmContext& ctx)
         SmPoint3d a = rd.vec();
         SmPoint3d b = rd.vec();
         return new (ctx) SmLine(a, b, 3, &ctx);
+    }
+    if (kind == 2)
+    {
+        // read_curve's block, then the given knots written back over the fixed-up NURB
+        int64_t start = rd.at;
+        SmBSplineCurve* c = read_curve(rd, ctx);
+        gw_INDEX m = (gw_INDEX)rd.in[start + 3];
+        gw_CURVE* own = c->GetGwNurbPointer();
+        for (gw_INDEX i = 0; i <= m; i++)
+            own->knt->U[i] = rd.in[rd.at - (int64_t)(m + 1) + (int64_t)i];
+        return c;
     }
     return read_curve(rd, ctx);
 }

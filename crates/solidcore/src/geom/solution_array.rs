@@ -28,7 +28,7 @@
 //! | [`Solution::parameter_interval_in`], [`ParameterDomains`] | `SmSolution::GetParameterInterval` (object domains read through a caller's resolver) |
 //! | [`Solution::object_tolerance`]                | `SmSolution::GetObjectTolerance`                           |
 //! | [`Solution::object_tolerance_with`]           | `SmSolution::GetObjectTolerance` (caller-resolved handle)   |
-//! | [`Solution::is_equal`]                        | `SmSolution::IsEqual`                                      |
+//! | [`Solution::is_equal`], [`Solution::is_equal_in`] | `SmSolution::IsEqual`                                  |
 //! | `are_sequential` (private)                    | `sm_AreSequential`                                         |
 //! | [`SolutionObject`], [`ObjectKind`]            | the `SmObject*` of `m_apObjects` and its `IsKindOf` tests  |
 //! | [`SolutionArray`], [`SolutionArray::new`]     | `SmSolutionArray`, `SmSolutionArray()`                     |
@@ -43,7 +43,7 @@
 //! | [`SolutionArray::add`]                        | `SmSolutionArray::Add`                                     |
 //! | `set_at_grow` (private)                       | `SmSolutionArray::SetAtGrow`                               |
 //! | [`SolutionArray::append`]                     | `SmSolutionArray::Append`                                  |
-//! | [`SolutionArray::add_sorted_solution`]        | `SmSolutionArray::AddSortedSolution`                       |
+//! | [`SolutionArray::add_sorted_solution`], [`SolutionArray::add_sorted_solution_in`] | `SmSolutionArray::AddSortedSolution` |
 //! | [`SolutionArray::insert_at`], [`SolutionArray::try_insert_at`] | `SmSolutionArray::InsertAt(ULONG, const SmSolution&, ULONG)` |
 //! | [`SolutionArray::remove_at`]                  | `SmSolutionArray::RemoveAt`                                |
 //! | `OperandObject`, `SolutionArray::without_objects` (crate) | the non-null `this` / operand objects of upstream's solves |
@@ -59,7 +59,8 @@
 //!   points, an edge's curve and interval, a face's surface and UV domain: the
 //!   [`SolutionObject`] hooks). A caller holding the geometry behind opaque handles
 //!   reads parameter domains through its own [`ParameterDomains`] instead
-//!   ([`Solution::parameter_interval_in`]). Tree nodes (`m_apNodes`) are opaque
+//!   ([`Solution::parameter_interval_in`], [`Solution::is_equal_in`],
+//!   [`SolutionArray::add_sorted_solution_in`]). Tree nodes (`m_apNodes`) are opaque
 //!   [`NodeId`]s.
 //!   Solves whose caller gives no handle name `OperandObject` stand-ins internally
 //!   (upstream's solutions always name the solve's curves and surfaces, whose
@@ -1133,6 +1134,16 @@ impl<O: SolutionObject> Solution<O> {
     ///
     /// As [`Solution::parameter_interval`].
     pub fn is_equal(&self, other: &Self) -> Result<bool> {
+        self.is_equal_in(other, &OwnDomains)
+    }
+
+    /// [`Solution::is_equal`] reading the objects' parameter domains through
+    /// `domains` ([`Solution::parameter_interval_in`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Solution::parameter_interval_in`].
+    pub fn is_equal_in(&self, other: &Self, domains: &dyn ParameterDomains<O>) -> Result<bool> {
         const OP: &str = "geom::solution_array::Solution::is_equal";
         self.check(OP)?;
         other.check(OP)?;
@@ -1156,8 +1167,8 @@ impl<O: SolutionObject> Solution<O> {
 
         // ParameterValues off by more than ScaledZero or more than 1/10000th of the parameter length
         for i in 0..s1.num_variables {
-            let ivl1 = s1.parameter_interval(i)?;
-            let ivl2 = s2.parameter_interval(i)?;
+            let ivl1 = s1.parameter_interval_in(i, domains)?;
+            let ivl2 = s2.parameter_interval_in(i, domains)?;
             let length1 = ivl1.map_or(0.0, |ivl| 0.0001 * ivl.length());
             let length2 = ivl2.map_or(0.0, |ivl| 0.0001 * ivl.length());
 
@@ -1653,6 +1664,22 @@ impl<O: SolutionObject> SolutionArray<O> {
         new: &Solution<O>,
         key: SortKey,
     ) -> Result<Option<usize>> {
+        self.add_sorted_solution_in(new, key, &OwnDomains)
+    }
+
+    /// [`SolutionArray::add_sorted_solution`] comparing solutions with
+    /// [`Solution::is_equal_in`] over `domains` (the parameter domains of the
+    /// solutions' objects).
+    ///
+    /// # Errors
+    ///
+    /// Errors of [`Solution::is_equal_in`] and of the parameter reads.
+    pub fn add_sorted_solution_in(
+        &mut self,
+        new: &Solution<O>,
+        key: SortKey,
+        domains: &dyn ParameterDomains<O>,
+    ) -> Result<Option<usize>> {
         // skip BigSolutions - unitialized values
         if new.start.solution_value == BIG_DOUBLE {
             return Ok(None);
@@ -1665,7 +1692,7 @@ impl<O: SolutionObject> SolutionArray<O> {
         // for every current solution
         for (ii, old) in self.data.iter_mut().enumerate() {
             // don't add duplicate solutions (SolValues within ZeroSqrt and ParamValues within ScaledZero)
-            if old.is_equal(new)? {
+            if old.is_equal_in(new, domains)? {
                 // save the better solution - improve tolerances
                 if new.start.solution_value.abs() < old.start.solution_value.abs() {
                     *old = *new;

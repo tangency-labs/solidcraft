@@ -7,8 +7,11 @@
 //! (null) or `sc_topology_fixture.h`'s `read_surface` block: `1 O[3] N[3]` (an `SmPlane`)
 //! or `0 oob form n m p q r s cpts knots_u knots_v` (an `SmBSplineSurface`). A curve
 //! block is `0` + `read_curve`'s `dim n p m cpts(x y z w)*(n+1) knots*(m+1)` (an
-//! `SmBSplineCurve`; `w = NOW` non-rational, `z = NOZ` in 2D) or `1 P0[3] P1[3]` (an
-//! `SmLine(P0, P1, 3)`). A UV curve block is `read_curve`'s block alone.
+//! `SmBSplineCurve`; `w = NOW` non-rational, `z = NOZ` in 2D), `1 P0[3] P1[3]` (an
+//! `SmLine(P0, P1, 3)`) or `2` + `read_curve`'s block (the `SmBSplineCurve` with the
+//! given knots written back over its own NURB after construction, undoing the
+//! constructor's knot fix-up; refused when `sm_GetKnots` would merge two distinct knots,
+//! UB-266). A UV curve block is `read_curve`'s block alone.
 //!
 //! | [`Op`]             | input | results |
 //! |--------------------|-------|---------|
@@ -141,6 +144,11 @@ fn points(rd: &mut Reader<'_>, count: usize, dim2: bool) -> Result<(), FfiError>
 
 /// `read_curve`'s block.
 fn bspline_curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+    bspline_knots(rd).map(drop)
+}
+
+/// `read_curve`'s block; its knots.
+fn bspline_knots(rd: &mut Reader<'_>) -> Result<Vec<f64>, FfiError> {
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve dimension 2 or 3"));
@@ -155,12 +163,18 @@ fn bspline_curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let knots = (0..=m)
         .map(|_| rd.finite())
         .collect::<Result<Vec<_>, _>>()?;
-    check_knots(&knots, p)
+    check_knots(&knots, p)?;
+    Ok(knots)
 }
 
-/// A 3D curve block (`0` B-spline, `1` line).
+/// A 3D curve block (`0` B-spline, `1` line, `2` B-spline with its given knots written
+/// back after construction).
 fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
-    if rd.index(1)? == 1 {
+    let kind = rd.index(2)?;
+    if kind == 2 {
+        return raw_bspline_curve(rd);
+    }
+    if kind == 1 {
         // (a line with ends closer than SM_EFF_ZERO is the degenerate line SmLine makes)
         for _ in 0..6 {
             rd.finite()?;
@@ -168,6 +182,27 @@ fn curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
         return Ok(());
     }
     bspline_curve(rd)
+}
+
+/// A curve block of kind `2`: `read_curve`'s block, whose knots the shim writes back over
+/// the curve's own NURB. Refused when `sm_GetKnots` would count a knot of another value
+/// as a duplicate of the last unique one (`SM_IS_ZERO`: `|d| <= SM_EFF_ZERO`): the
+/// continuities then have fewer entries than the Bezier spans and
+/// `SmCurveCache::Tessellate` reads past them (UB-266).
+fn raw_bspline_curve(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+    let knots = bspline_knots(rd)?;
+    let mut unique: Option<f64> = None;
+    for &u in &knots {
+        match unique {
+            Some(last) if (last - u).abs() <= 1.0e-12 => {
+                if u != last {
+                    return Err(bad("distinct knots within SM_EFF_ZERO (UB-266)"));
+                }
+            }
+            _ => unique = Some(u),
+        }
+    }
+    Ok(())
 }
 
 /// A surface block; `false` for a null surface.
