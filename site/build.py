@@ -622,7 +622,7 @@ def chart_svg(points, cid="chart", title="Share of upstream lines ported over ti
     parts.append(f'<line class="cross" x1="0" x2="0" y1="{T}" y2="{H - B}" visibility="hidden"/>')
     parts.append(f'<rect class="hit" x="{L}" y="{T}" width="{W - L - R}" height="{H - T - B}"/>')
     parts.append("</svg>")
-    legend = ('<div class="legend"><span><i class="sw green"></i>green (bit-identical to C++)</span>'
+    legend = ('<div class="legend"><span><i class="sw green"></i>green (matches C++ within 1e-9)</span>'
               '<span><i class="sw partial"></i>green + partial (ported)</span></div>')
     return (legend + '<div class="chartbox">' + "".join(parts) +
             '<div class="tip" hidden></div></div>')
@@ -916,7 +916,7 @@ fixtures and fixed-seed generated cases) and the topology is identical and every
 <p>{len(ssi.get('cases', []))} cases from the external
 <a href="{esc(ssi.get('corpus', {}).get('repo', ''))}">ssi-corpus</a>, scored against known true intersections.
 Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)} compared,
-{par.get('identical', 0)} identical, {par.get('mismatched', 0)} mismatched.
+{par.get('identical', 0)} agree within 1e-9, {par.get('mismatched', 0)} mismatched.
 <a href="ssi.html">All cases</a>.</p>
 <div class="scroll narrow"><table><thead><tr><th>Verdict</th><th>C++</th><th>Rust</th></tr></thead>
 <tbody>{ssi_rows}</tbody></table></div>
@@ -1206,7 +1206,7 @@ counts). Click a column heading to sort.</p>
         if rflags and rflags != flags:
             ftxt += "".join(f"<li>Rust: {esc(f)}</li>" for f in rflags)
         par = c.get("parity") or {}
-        ptxt = ("identical" if par.get("pass") and not par.get("mismatches") else
+        ptxt = ("agree" if par.get("pass") and not par.get("mismatches") else
                 f"{par.get('mismatches')} mismatches" if par else "")
         crow.append(
             f'<tr data-class="{esc(c.get("class", ""))}" data-cpp="{esc(cpp.get("verdict", ""))}" data-rust="{esc(rv)}">'
