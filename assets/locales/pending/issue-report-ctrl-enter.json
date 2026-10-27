@@ -19,6 +19,10 @@
     "Ctrl+Enter continues on GitHub.": "Ctrl+EnterでGitHubに進みます。",
     "⌘Enter continues on GitHub.": "⌘EnterでGitHubに進みます。"
   },
+  "vi": {
+    "Ctrl+Enter continues on GitHub.": "Nhấn Ctrl+Enter để tiếp tục trên GitHub.",
+    "⌘Enter continues on GitHub.": "Nhấn ⌘Enter để tiếp tục trên GitHub."
+  },
   "zh": {
     "Ctrl+Enter continues on GitHub.": "按Ctrl+Enter在GitHub中继续。",
     "⌘Enter continues on GitHub.": "按⌘Enter在GitHub中继续。"
