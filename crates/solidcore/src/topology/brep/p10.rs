@@ -2076,6 +2076,10 @@ fn remove_faces(
 /// flag is set meanwhile. The merges' and face removals' B-rep edits are notified
 /// through `notify`.
 ///
+/// Whole-face side classification preserves the projection curve's exact knot
+/// values: reference, vertex, edge-midpoint and ray-fallback queries all evaluate
+/// one shared exact wrapper, rather than a knot-tuned copy.
+///
 /// # Errors
 ///
 /// Those of the projection, merge, side classification and face removal;
@@ -2186,7 +2190,10 @@ fn faces_to_delete(
     let mut to_delete = Vec::new();
     let mut edges: Vec<EdgeId> = Vec::new();
 
-    let curve = &Curve::from(curve.clone());
+    // Native classifies against crCurveToProject itself. One exact owning wrapper
+    // adapts the BSplineCurve to the polymorphic solver without tuning its knots;
+    // every reference, vertex, midpoint and ray-fallback vote shares that wrapper.
+    let curve = &Curve::from(curve.clone_exact());
 
     // First find which side the reference point is on.
     let delete_right_side = find_side_of_curve(k, curve, reference, direction, tol)?;

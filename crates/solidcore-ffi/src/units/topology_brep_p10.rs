@@ -69,6 +69,11 @@
 
 use crate::{check, FfiError, SC_ERR_BUFFER};
 
+/// Native projection would extrude a raw curve above `NL_MAXDEG` into a surface
+/// whose evaluation overruns NLib's fixed scratch arrays. Classification with an
+/// empty face subset uses the separate SMLib evaluator and remains valid below 32.
+pub const STATUS_UNDEFINED_PROJECTION_DEGREE: i32 = -1101;
+
 mod sys {
     extern "C" {
         pub fn sc_topology_brep_p10_run(
@@ -159,6 +164,17 @@ pub enum Patch {
     },
 }
 
+/// Exact 3D NURB passed by reference to `ProjectAndTrim`, without knot tuning.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectionCurve {
+    /// Polynomial degree.
+    pub degree: usize,
+    /// Homogeneous control points.
+    pub control_points: Vec<[f64; 4]>,
+    /// Raw knot vector.
+    pub knots: Vec<f64>,
+}
+
 /// One request to [`run`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
@@ -172,6 +188,10 @@ pub struct Request {
     pub patches: Vec<Patch>,
     /// The operation.
     pub op: Op,
+    /// Optional exact NURB instead of the operation's line segment.
+    pub projection_curve: Option<ProjectionCurve>,
+    /// Pass an empty face subset to projection, while retaining whole-B-rep classification.
+    pub empty_projection_subset: bool,
 }
 
 /// One output value.
@@ -265,6 +285,53 @@ fn encode(req: &Request) -> Result<(Vec<i64>, Vec<f64>), FfiError> {
             dbls.extend(reference);
             dbls.push(approx_tol.unwrap_or(0.0));
             dbls.push(angle_tol.unwrap_or(0.0));
+            ints.extend([
+                i64::from(req.empty_projection_subset),
+                i64::from(req.projection_curve.is_some()),
+            ]);
+            if let Some(c) = &req.projection_curve {
+                let n = c.control_points.len();
+                // sm_BasisDerivs and sm_CrvSplit index through p in 32-wide scratch arrays.
+                if !(2..=1024).contains(&n) || c.degree == 0 || c.degree >= 32 || c.degree >= n
+                    || c.knots.len() != n + c.degree + 1
+                    || c.knots.iter().any(|x| !x.is_finite())
+                    || c.knots.windows(2).any(|w| w.first() > w.last())
+                    || c.control_points.iter().flatten().any(|x| !x.is_finite())
+                {
+                    return Err(bad("invalid raw projection NURB"));
+                }
+                // The new raw path must not expose the native cache's sub-EFF_ZERO
+                // span UB (UB-266). The regression gaps remain strictly above this.
+                for pair in c.knots.windows(2) {
+                    if let [a, b] = pair {
+                        if b > a && b - a < 1e-12 {
+                            return Err(bad("raw projection span below native EFF_ZERO"));
+                        }
+                    }
+                }
+                let p = c.degree;
+                let m = c.knots.len() - 1;
+                let a = *c.knots.first().ok_or_else(|| bad("empty knots"))?;
+                let b = *c.knots.last().ok_or_else(|| bad("empty knots"))?;
+                let head = c.knots.get(..=p).ok_or_else(|| bad("short knots"))?;
+                let tail = c.knots.get(m - p..).ok_or_else(|| bad("short knots"))?;
+                let inner = c.knots.get(p + 1..m - p).ok_or_else(|| bad("short knots"))?;
+                if a >= b || head.iter().any(|&k| k != a) || tail.iter().any(|&k| k != b)
+                    || inner.iter().any(|&k| k == a || k == b)
+                {
+                    return Err(bad("raw projection knots not clamped"));
+                }
+                let mut run = 1;
+                for pair in inner.windows(2) {
+                    run = if pair.first() == pair.last() { run + 1 } else { 1 };
+                    if run > p {
+                        return Err(bad("raw projection multiplicity above degree"));
+                    }
+                }
+                ints.extend([(n - 1) as i64, c.degree as i64, (c.knots.len() - 1) as i64]);
+                dbls.extend(c.control_points.iter().flatten().copied());
+                dbls.extend_from_slice(&c.knots);
+            }
         }
     }
     Ok((ints, dbls))
@@ -326,4 +393,75 @@ pub fn run(req: &Request) -> Result<Vec<Item>, FfiError> {
             .collect();
     }
     Err(FfiError::Status(SC_ERR_BUFFER))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn projection_request(degree: usize) -> Request {
+        let count = degree + 1;
+        Request {
+            path: String::new(),
+            binary: false,
+            options: [false; 6],
+            patches: Vec::new(),
+            op: Op::Project {
+                trim: 0,
+                a: [0.0; 3],
+                b: [1.0, 0.0, 0.0],
+                dir: [0.0, 0.0, 1.0],
+                reference: [0.0, -1.0, 0.0],
+                approx_tol: None,
+                angle_tol: None,
+            },
+            projection_curve: Some(ProjectionCurve {
+                degree,
+                control_points: (0..count)
+                    .map(|i| [i as f64, 0.0, 0.0, 1.0])
+                    .collect(),
+                knots: std::iter::repeat_n(0.0, count)
+                    .chain(std::iter::repeat_n(1.0, count))
+                    .collect(),
+            }),
+            empty_projection_subset: true,
+        }
+    }
+
+    #[test]
+    fn raw_projection_degree_stays_below_native_scratch_width() {
+        // Check admission only: degree 32 must never reach the native evaluator.
+        for (degree, accepted) in [(31, true), (32, false)] {
+            assert_eq!(
+                encode(&projection_request(degree)).is_ok(),
+                accepted,
+                "degree {degree}"
+            );
+        }
+    }
+
+    #[test]
+    fn raw_projection_degree_guard_checks_the_actual_projection_faces() {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/topology.brep_p10");
+        for (file, empty_subset, allowed) in [
+            ("raw_vote_rectangle.smb", false, false),
+            ("raw_vote_rectangle.smb", true, true),
+            ("empty_brep.smb", false, true),
+        ] {
+            let mut req = projection_request(18);
+            req.path = fixtures.join(file).to_string_lossy().into_owned();
+            req.empty_projection_subset = empty_subset;
+            let result = run(&req);
+            if allowed {
+                let items = result.expect("classification-only degree 18 is defined");
+                assert_eq!(items.first(), Some(&Item::Int(0)), "fixture must build");
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(FfiError::Status(STATUS_UNDEFINED_PROJECTION_DEGREE))
+                ));
+            }
+        }
+    }
 }

@@ -37,11 +37,15 @@
 #include <SmShell.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
+#include <SmNurbsCrv.h>
+#include <NL_Nurbsdef.h>
+#include <nurbs.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
 #include <SmVertex.h>
 #include <SmVertexuse.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstring>
 #include <map>
@@ -72,6 +76,8 @@ enum Patch : int64_t
 
 // Status of a request the guard keeps away from upstream.
 const int64_t ST_GUARD = -2;
+// Matches the per-unit Rust FFI status; no unsafe projection is attempted.
+const int32_t STATUS_UNDEFINED_PROJECTION_DEGREE = -1101;
 
 struct Out
 {
@@ -1039,6 +1045,9 @@ int32_t run(const char* path, Rd& rd, Out& o)
     int64_t flag = 0, trim = 0, has_approx = 0, has_angle = 0;
     double pts[12] = {0};
     double approx = 0.0, angle = 0.0;
+    bool empty_subset = false;
+    int64_t raw_n = -1, raw_p = 0, raw_m = 0;
+    std::vector<double> raw_points, raw_knots;
     if (op == OP_CLOSURE || op == OP_REMOVE_ALL)
         flag = rd.i();
     if (op == OP_PROJECT)
@@ -1050,6 +1059,20 @@ int32_t run(const char* path, Rd& rd, Out& o)
             pts[k] = rd.d();
         approx = rd.d();
         angle = rd.d();
+        empty_subset = rd.i() != 0;
+        if (rd.i() != 0)
+        {
+            raw_n = rd.i();
+            raw_p = rd.i();
+            raw_m = rd.i();
+            if (raw_n < 1 || raw_n >= 1024 || raw_p < 1 || raw_p >= GW_MAX_DEGREE ||
+                raw_p > raw_n || raw_m != raw_n + raw_p + 1)
+                return SC_ERR_ARG;
+            for (int64_t k = 0; k < 4 * (raw_n + 1); ++k)
+                raw_points.push_back(rd.d());
+            for (int64_t k = 0; k <= raw_m; ++k)
+                raw_knots.push_back(rd.d());
+        }
         if (trim < 0 || trim > 2)
             return SC_ERR_ARG;
     }
@@ -1072,6 +1095,10 @@ int32_t run(const char* path, Rd& rd, Out& o)
     o.i((int64_t)own.data->m_bIsGeomBorrowed);
     Graph g;
     walk(own.brep, g);
+    // Projection extrudes the source degree into an NLib surface (NL_MAXDEG).
+    // Empty subsets and B-reps without faces only classify with SMLib's evaluator.
+    if (op == OP_PROJECT && raw_n >= 0 && !empty_subset && !g.faces.empty() && raw_p > NL_MAXDEG)
+        return STATUS_UNDEFINED_PROJECTION_DEGREE;
     export_graph(own.brep, g, o);
 
     if (op == OP_CLOSURE)
@@ -1103,18 +1130,58 @@ int32_t run(const char* path, Rd& rd, Out& o)
         SmPoint3d a(pts[0], pts[1], pts[2]), b(pts[3], pts[4], pts[5]);
         SmVector3d dir(pts[6], pts[7], pts[8]);
         SmPoint3d ref(pts[9], pts[10], pts[11]);
-        SmBSplineCurve* c = NULL;
-        SmStatus cs = SmBSplineCurve::CreateLineSegment(ctx, 3, a, b, c);
+        struct ProjectionInput
+        {
+            SmBSplineCurve* curve = nullptr;
+            gw_CURVE* raw = nullptr;
+            ~ProjectionInput()
+            {
+                delete curve;
+                if (raw != nullptr)
+                    smos_Free(raw);
+            }
+        } input;
+        SmStatus cs = SM_SUCCESS;
+        if (raw_n >= 0)
+        {
+            input.raw = sm_AllocateNurbCurve((gw_INDEX)raw_n, (gw_DEGREE)raw_p, (gw_INDEX)raw_m);
+            for (int64_t k = 0; k <= raw_n; ++k)
+            {
+                input.raw->pol->Pw[k].x = raw_points[4 * k];
+                input.raw->pol->Pw[k].y = raw_points[4 * k + 1];
+                input.raw->pol->Pw[k].z = raw_points[4 * k + 2];
+                input.raw->pol->Pw[k].w = raw_points[4 * k + 3];
+            }
+            for (int64_t k = 0; k <= raw_m; ++k)
+                input.raw->knt->U[k] = raw_knots[k];
+            input.curve = new (ctx) SmBSplineCurve(input.raw, 3, TRUE);
+        }
+        else
+            cs = SmBSplineCurve::CreateLineSegment(ctx, 3, a, b, input.curve);
         o.i(st(cs));
         if (cs != SM_SUCCESS)
             return SC_OK;
-        SmObjDelete clean(c);
-        SmStatus ps = own.brep->ProjectAndTrim(*c, dir, ref, (SmTrimType)trim, has_approx ? &approx : NULL,
-                                               has_angle ? &angle : NULL, NULL);
+        SmTArray<SmFace*> subset;
+        SmStatus ps = own.brep->ProjectAndTrim(*input.curve, dir, ref, (SmTrimType)trim,
+                                               has_approx ? &approx : NULL,
+                                               has_angle ? &angle : NULL,
+                                               empty_subset ? &subset : NULL);
         o.i(st(ps));
         Graph g2;
         walk(own.brep, g2);
         export_graph(own.brep, g2, o);
+        if (raw_n >= 0)
+        {
+            o.i((int64_t)g.faces.size());
+            int64_t retained = 0;
+            for (size_t index = 0; index < g.faces.size(); ++index)
+                if (std::find(g2.faces.begin(), g2.faces.end(), g.faces[index]) != g2.faces.end())
+                {
+                    o.i((int64_t)index);
+                    ++retained;
+                }
+            o.i(retained);
+        }
     }
     return SC_OK;
 }

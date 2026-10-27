@@ -51,6 +51,7 @@ use solidcore::topology::{
 };
 use solidcore::{EntityRef, Kernel, SolidError};
 use solidcore_ffi::units::topology_brep_p10::{self as ffi, Item, Op, Patch, Request};
+use super::topology_vertexuse::CrvIn;
 
 use crate::case::{repo_root, CaseContext};
 use crate::fixtures::upstream_test_file;
@@ -77,6 +78,12 @@ struct Inputs {
     patches: Vec<PatchIn>,
     #[serde(default)]
     op: OpIn,
+    /// Exact borrowed NURB input; unlike the copying constructors, neither engine tunes knots.
+    #[serde(default)]
+    projection_curve: Option<CrvIn>,
+    /// Exercise whole-face classification after an intentionally empty projection subset.
+    #[serde(default)]
+    empty_projection_subset: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -180,6 +187,31 @@ fn to_output(items: &[Item], include_bits: bool) -> Output {
     } else {
         out
     }
+}
+
+/// Exposes stable pre-operation face identities as well as the complete geometry dump.
+fn operation_output(items: &[Item], i: &Inputs) -> Result<Output, HarnessError> {
+    let out = to_output(items, bit_audit(i));
+    if i.projection_curve.is_none() || !matches!(i.op, OpIn::Project { .. }) || items.len() <= 1 {
+        return Ok(out);
+    }
+    let Some(Item::Int(count)) = items.last() else {
+        return Err(harness("missing retained-face count"));
+    };
+    let count = usize::try_from(*count).map_err(|_| harness("negative retained-face count"))?;
+    let end = items.len() - 1;
+    let start = end.checked_sub(count).ok_or_else(|| harness("short face inventory"))?;
+    let original = start.checked_sub(1).and_then(|n| items.get(n));
+    let Some(Item::Int(original)) = original else {
+        return Err(harness("missing original-face count"));
+    };
+    let retained = items.get(start..end).ok_or_else(|| harness("short face inventory"))?
+        .iter().map(|item| match item {
+            Item::Int(id) => Ok(*id),
+            Item::Dbl(_) => Err(harness("non-integer face identity")),
+        }).collect::<Result<Vec<_>, _>>()?;
+    Ok(out.ints("face_counts", vec![*original, count as i64])
+        .ints("retained_original_faces", retained))
 }
 
 /// Why the C++ side must not build these inputs, if it must not: requests on which
@@ -343,11 +375,23 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         options: i.options,
         patches,
         op,
+        projection_curve: i.projection_curve.as_ref().map(|c| ffi::ProjectionCurve {
+            degree: c.p,
+            control_points: c.cpts.clone(),
+            knots: c.u.clone(),
+        }),
+        empty_projection_subset: i.empty_projection_subset,
     };
-    let include_bits = bit_audit(i);
-    ffi::run(&req)
-        .map(|items| to_output(&items, include_bits))
-        .map_err(|e| harness(format!("ffi: {e}")))
+    let items = match ffi::run(&req) {
+        Ok(items) => items,
+        Err(solidcore_ffi::FfiError::Status(ffi::STATUS_UNDEFINED_PROJECTION_DEGREE)) => {
+            return Ok(Output::rejected(
+                "projecting a raw curve above NL_MAXDEG into a face overruns native surface scratch arrays",
+            ));
+        }
+        Err(e) => return Err(harness(format!("ffi: {e}"))),
+    };
+    operation_output(&items, i)
 }
 
 // ---- the Rust side --------------------------------------------------------------------
@@ -636,7 +680,16 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
             angle_tol,
         } => {
             let v = |p: [f64; 3]| Vec3::new(p[0], p[1], p[2]);
-            let curve = match BSplineCurve::create_line_segment(3, v(a), v(end)) {
+            let curve_result = if let Some(c) = &i.projection_curve {
+                let points = c.cpts.iter().map(|p| {
+                    solidcore::nurbs::math::CPoint::new(p[0], p[1], p[2], p[3])
+                }).collect();
+                solidcore::nurbs::crv_basic::Curve::new(points, c.p, c.u.clone())
+                    .map(|nurb| BSplineCurve::from_nurb(nurb, c.dim, true))
+            } else {
+                BSplineCurve::create_line_segment(3, v(a), v(end))
+            };
+            let curve = match curve_result {
                 Ok(c) => {
                     out.push(Item::Int(0));
                     c
@@ -667,7 +720,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
             let opts = ProjectAndTrimOptions {
                 approximation_tol_3d: approx_tol,
                 angle_tol_radians: angle_tol,
-                subset_faces: None,
+                subset_faces: i.empty_projection_subset.then_some(&[]),
             };
             // the merges' edits notify the build's records and attribute store under
             // the build's names
@@ -694,6 +747,17 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
             }
             let g2 = Graph::walk(&b).map_err(|e| harness(e.to_string()))?;
             export(&k, &b, &g2, &records, &mut out).map_err(|e| harness(e.to_string()))?;
+            if i.projection_curve.is_some() {
+                out.push(Item::Int(g.faces.items.len() as i64));
+                let mut retained = 0;
+                for (index, id) in g.faces.items.iter().enumerate() {
+                    if g2.faces.items.contains(id) {
+                        out.push(Item::Int(index as i64));
+                        retained += 1;
+                    }
+                }
+                out.push(Item::Int(retained));
+            }
         }
     }
     Ok(Ok(out))
@@ -1305,9 +1369,8 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let inputs: Inputs = case.parse()?;
-        let include_bits = bit_audit(&inputs);
         match rust(&inputs)? {
-            Ok(items) => Ok(to_output(&items, include_bits)),
+            Ok(items) => operation_output(&items, &inputs),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
         }
     }
@@ -1422,6 +1485,8 @@ fn generate(rng: &mut Rng) -> Inputs {
         options,
         patches,
         op,
+        projection_curve: None,
+        empty_projection_subset: false,
     }
 }
 
