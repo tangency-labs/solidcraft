@@ -1509,7 +1509,7 @@ fn render_preview_navigates_like_the_modelling_viewport_in_every_preset() {
 /// view controls all work in the Render workspace, framing the product scene.
 #[test]
 fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube, crate::prefs::NavigatorStyle::CompassCube] {
         let mut h = Harness::new();
         h.app.preferences.navigator_style = style;
         h.app.preferences.look_at_anim = false;
@@ -1546,6 +1546,7 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         let handle = match style {
             crate::prefs::NavigatorStyle::Axes => "axis_view:home",
             crate::prefs::NavigatorStyle::Cube => "navigation_cube:control:home",
+            crate::prefs::NavigatorStyle::CompassCube => "compass_cube:control:home",
         };
         h.step(&json!({"click":{"handle":handle}})).unwrap();
         h.settle();

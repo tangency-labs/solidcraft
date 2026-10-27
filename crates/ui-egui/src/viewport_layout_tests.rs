@@ -315,7 +315,7 @@ fn opening_different_command_dialogs_keeps_published_navigation_positions() {
 #[test]
 fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
     let corner = vec2(92.0, 48.0);
-    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube, crate::prefs::NavigatorStyle::CompassCube] {
         for (width, height) in [(1400.0, 900.0), (700.0, 450.0), (310.0, 240.0), (160.0, 160.0), (90.0, 50.0)] {
             let vp = Rect::from_min_size(pos2(20.0, 30.0), vec2(width, height));
             let content = Rect::from_min_max(pos2(vp.left() + width * 0.25, vp.top()), vp.max);

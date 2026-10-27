@@ -37,7 +37,7 @@ CommandSpec::new("view.navigate", "Navigate View", navigate)
     .icon("orbit")
     .noundo()
     .doc_only()
-    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
+    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|yaw_left|yaw_right|pitch_up|pitch_down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down|yaw_left|yaw_right|pitch_up|pitch_down turn; default 90); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
 CommandSpec::new("view.normal_to", "Normal to Selection", normal_to)
         .icon("camera")
         .noundo()
@@ -268,21 +268,37 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
         use std::f64::consts::FRAC_PI_2;
         let (r, u, b) = cam.basis();
         // Left, right, up and down turn the view a quarter turn (the navigation cube's arrows),
-        // or `degrees` (the arrow keys' 15° steps, #1541).
-        let (sin, cos) = match p.get("degrees") {
-            None => (1.0, 0.0),
+        // or `degrees` (the arrow keys' 15° steps, #1541). Yaw left and right orbit about the
+        // model's vertical axis, preserving elevation (the compass cube's ±90° ring).
+        let degrees = match p.get("degrees") {
+            None => 90.0,
             Some(d) => d
                 .as_f64()
                 .filter(|d| d.is_finite() && *d > 0.0 && *d <= 180.0)
-                .map(|d| if d == 90.0 { (1.0, 0.0) } else { d.to_radians().sin_cos() })
                 .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
         };
+        let (sin, cos) = if degrees == 90.0 { (1.0, 0.0) } else { degrees.to_radians().sin_cos() };
         let turn = |toward: solidcraft_geom::Vec3| cam.looking_from(b * cos + toward * sin);
+        // Yaw-only turn about the up axis: Front → Right → Back → Left, keeping pitch and roll.
+        let yaw_turn = |cam: &mut Camera, delta: f64| {
+            use std::f64::consts::{PI, TAU};
+            cam.yaw = (cam.yaw + delta + PI).rem_euclid(TAU) - PI;
+        };
+        // Pitch-only turn about the camera's right axis: over the top or underneath,
+        // keeping heading (and roll). Clamped like a standard view.
+        let pitch_turn = |cam: &mut Camera, delta: f64| {
+            let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
+            cam.pitch = (cam.pitch + delta).clamp(-lim, lim);
+        };
         match p.get("action").and_then(Value::as_str) {
             Some("left") => cam = turn(-r),
             Some("right") => cam = turn(r),
             Some("up") => cam = turn(u),
             Some("down") => cam = turn(-u),
+            Some("yaw_left") => yaw_turn(&mut cam, degrees.to_radians()),
+            Some("yaw_right") => yaw_turn(&mut cam, -degrees.to_radians()),
+            Some("pitch_up") => pitch_turn(&mut cam, degrees.to_radians()),
+            Some("pitch_down") => pitch_turn(&mut cam, -degrees.to_radians()),
             Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
             Some("home") => {
@@ -733,6 +749,64 @@ mod tests {
             json!({"camera":cam,"action":"unknown"}),
         ] {
             assert!(s.execute("view.navigate", &params).is_err());
+        }
+    }
+
+    #[test]
+    fn yaw_orbit_preserves_elevation_around_the_vertical_axis() {
+        let mut s = Session::default();
+        for up in [UpAxis::Z, UpAxis::Y] {
+            // Elevated quarter view, not a principal view: yaw steps must keep the pitch.
+            let cam = Camera { yaw: 0.3, pitch: 0.5, roll: 0.0, distance: 120.0, up, ..Default::default() };
+            let left: Camera =
+                serde_json::from_value(navigate(&mut s, &json!({"camera":cam,"action":"yaw_left"})).unwrap()["camera"].clone()).unwrap();
+            let right: Camera =
+                serde_json::from_value(navigate(&mut s, &json!({"camera":cam,"action":"yaw_right"})).unwrap()["camera"].clone()).unwrap();
+            assert!((left.pitch - cam.pitch).abs() < 1e-12);
+            assert!((right.pitch - cam.pitch).abs() < 1e-12);
+            assert_eq!((left.target, left.distance, left.fov, left.roll, left.up), (cam.target, cam.distance, cam.fov, cam.roll, cam.up));
+            assert!((left.yaw - cam.yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+            assert!((right.yaw - cam.yaw + std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+            // Front → Right → Back → Left with the default 90° steps.
+            let mut at = Camera { yaw: 0.0, pitch: 0.2, up, ..Default::default() };
+            for _ in 0..4 {
+                let next: Camera =
+                    serde_json::from_value(navigate(&mut s, &json!({"camera":at,"action":"yaw_right"})).unwrap()["camera"].clone()).unwrap();
+                assert!((next.pitch - at.pitch).abs() < 1e-12);
+                at = next;
+            }
+            assert!((at.yaw - 0.0).abs() < 1e-12 && (at.pitch - 0.2).abs() < 1e-12);
+            // Degrees scale the yaw step, like the arrow keys.
+            let fifteen: Camera =
+                serde_json::from_value(navigate(&mut s, &json!({"camera":cam,"action":"yaw_right","degrees":15})).unwrap()["camera"].clone())
+                    .unwrap();
+            assert!((fifteen.yaw - cam.yaw + 15.0_f64.to_radians()).abs() < 1e-12);
+            assert!((fifteen.pitch - cam.pitch).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn pitch_orbit_preserves_heading_over_the_top_and_underneath() {
+        let mut s = Session::default();
+        for up in [UpAxis::Z, UpAxis::Y] {
+            let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
+            // Elevated quarter view, not a principal view: pitch steps must keep the heading.
+            let cam = Camera { yaw: 0.3, pitch: 0.2, roll: 0.1, distance: 120.0, up, ..Default::default() };
+            let over: Camera =
+                serde_json::from_value(navigate(&mut s, &json!({"camera":cam,"action":"pitch_up"})).unwrap()["camera"].clone()).unwrap();
+            assert!((over.pitch - lim).abs() < 1e-12, "a 90° tip from 0.2 reaches the top clamp");
+            assert!((over.yaw - cam.yaw).abs() < 1e-12);
+            assert_eq!((over.target, over.distance, over.fov, over.roll, over.up), (cam.target, cam.distance, cam.fov, cam.roll, cam.up));
+            let under: Camera =
+                serde_json::from_value(navigate(&mut s, &json!({"camera":cam,"action":"pitch_down"})).unwrap()["camera"].clone()).unwrap();
+            assert!((under.pitch - (0.2 - std::f64::consts::FRAC_PI_2)).abs() < 1e-12);
+            assert!((under.yaw - cam.yaw).abs() < 1e-12);
+            assert_eq!((under.target, under.distance, under.fov, under.roll, under.up), (cam.target, cam.distance, cam.fov, cam.roll, cam.up));
+            // Degrees scale the pitch step, like the arrow keys.
+            let fifteen: Camera =
+                serde_json::from_value(navigate(&mut s, &json!({"camera":cam,"action":"pitch_up","degrees":15})).unwrap()["camera"].clone()).unwrap();
+            assert!((fifteen.pitch - cam.pitch - 15.0_f64.to_radians()).abs() < 1e-12);
+            assert!((fifteen.yaw - cam.yaw).abs() < 1e-12);
         }
     }
 }

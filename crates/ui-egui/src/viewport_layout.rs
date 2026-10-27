@@ -101,7 +101,7 @@ impl Layout {
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
             let compact = (navigation.top() - top - 4.0).min(cube_size);
-            axis_view = if style == crate::prefs::NavigatorStyle::Cube && compact >= 96.0 {
+            axis_view = if style != crate::prefs::NavigatorStyle::Axes && compact >= 96.0 {
                 Rect::from_min_size(pos2(content.right() - compact, top), vec2(compact, compact))
             } else {
                 Rect::NOTHING

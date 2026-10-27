@@ -306,15 +306,17 @@ pub enum NavigatorStyle {
     #[default]
     Axes,
     Cube,
+    CompassCube,
 }
 
 impl NavigatorStyle {
-    pub const ALL: [Self; 2] = [Self::Axes, Self::Cube];
+    pub const ALL: [Self; 3] = [Self::Axes, Self::Cube, Self::CompassCube];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Axes => "Signed axes",
             Self::Cube => "Cube",
+            Self::CompassCube => "Compass cube",
         }
     }
 }
@@ -4013,6 +4015,7 @@ mod tests {
         h.call("ui.click", json!({"x":picker.x,"y":picker.y}));
         let cube = crate::scenario::rect_of("prefs:navigator:Cube").unwrap().center();
         assert!(crate::scenario::rect_of("prefs:navigator:Signed axes").is_some());
+        assert!(crate::scenario::rect_of("prefs:navigator:Compass cube").is_some());
         h.call("ui.click", json!({"x":cube.x,"y":cube.y}));
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube);
         assert!(crate::scenario::handle_at("navigation_cube:front").is_some());

@@ -129,18 +129,30 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui_kit::divider(ui, "navigation_view_controls");
         ui_kit::settings_form(ui, 150.0, |ui| {
             ui_kit::row(ui, app.tr_label("View navigator"), |ui| {
-                let mut selected = usize::from(app.preferences.navigator_style == NavigatorStyle::Cube);
+                let mut selected = match app.preferences.navigator_style {
+                    NavigatorStyle::Axes => 0,
+                    NavigatorStyle::Cube => 1,
+                    NavigatorStyle::CompassCube => 2,
+                };
                 if ui_kit::segmented(
                     ui,
                     &mut selected,
-                    &[app.tr("prefs.axes"), crate::i18n::tr_label("Cube")],
+                    &[app.tr("prefs.axes"), crate::i18n::tr_label("Cube"), crate::i18n::tr_label("Compass cube")],
                     ui_kit::Segments { intrinsic: true, ..Default::default() },
                 ) {
-                    app.preferences.navigator_style = if selected == 0 { NavigatorStyle::Axes } else { NavigatorStyle::Cube };
+                    app.preferences.navigator_style = match selected {
+                        0 => NavigatorStyle::Axes,
+                        1 => NavigatorStyle::Cube,
+                        _ => NavigatorStyle::CompassCube,
+                    };
                 }
                 if let Some(rect) = crate::scenario::rect_of(&format!("dialog:segments:{}", crate::i18n::tr_label("View navigator"))) {
                     crate::scenario::publish_target("prefs:navigator", rect);
-                    for (label, key) in [(app.tr("prefs.axes"), "Signed axes"), (crate::i18n::tr_label("Cube"), "Cube")] {
+                    for (label, key) in [
+                        (app.tr("prefs.axes"), "Signed axes"),
+                        (crate::i18n::tr_label("Cube"), "Cube"),
+                        (crate::i18n::tr_label("Compass cube"), "Compass cube"),
+                    ] {
                         if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{label}", crate::i18n::tr_label("View navigator"))) {
                             crate::scenario::publish_target(
                                 &format!("prefs:navigator:{key}"),

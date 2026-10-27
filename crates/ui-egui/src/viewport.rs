@@ -41,6 +41,9 @@ mod refine_wait_tests;
 #[path = "navigation_cube.rs"]
 mod navigation_cube;
 
+#[path = "compass_cube.rs"]
+mod compass_cube;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavMode {
     Orbit,
@@ -177,6 +180,9 @@ pub struct ViewportState {
     pub(crate) trackpad_gesture: bool,
     /// A primary press on the axis gizmo: the pointer position used by its last orbit step.
     pub axis_drag: Option<Pos2>,
+    /// That press began on the compass cube's ring: the drag rolls about the viewing
+    /// direction instead of orbiting.
+    pub axis_drag_roll: bool,
     /// Unsnapped camera while Shift-orbit previews a standard or diagonal view.
     pub orbit_free: Option<Camera>,
     pub build_ms: f64,
@@ -2672,6 +2678,7 @@ pub(crate) fn axis_view_size(style: crate::prefs::NavigatorStyle) -> f32 {
     match style {
         crate::prefs::NavigatorStyle::Axes => 116.0,
         crate::prefs::NavigatorStyle::Cube => navigation_cube::SIZE,
+        crate::prefs::NavigatorStyle::CompassCube => compass_cube::SIZE,
     }
 }
 // Keep command panels anchored independently of the compact cube's display size.
@@ -5405,7 +5412,8 @@ fn axis_hit(tips: &[(&str, Vec3, Pos2, f64)], p: Pos2) -> Option<usize> {
     tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
 }
 
-/// Dragging anywhere on the axis gizmo orbits about the view centre. A stationary press
+/// Dragging on the axis gizmo orbits about the view centre, except on the compass
+/// cube's ring, which rolls about the viewing direction. A stationary press
 /// on a tip chooses its view. Floating windows own their input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     let (pressed, down, decided, origin, pos, shift) = ui.input(|i| {
@@ -5418,15 +5426,43 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
             crate::prefs::NavigatorStyle::Cube => {
                 navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
             }
+            crate::prefs::NavigatorStyle::CompassCube => {
+                compass_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / compass_cube::DESIGN_SIZE)
+            }
         });
+        // A press on the compass ring rolls about the viewing direction; anywhere else orbits.
+        app.viewport.axis_drag_roll = app.preferences.navigator_style == crate::prefs::NavigatorStyle::CompassCube
+            && origin.is_some_and(|p| {
+                let scale = axis_rect(app, rect).width() / compass_cube::DESIGN_SIZE;
+                compass_cube::on_ring(axis_center(app, rect), p, scale)
+            });
         if app.viewport.axis_drag.is_some() {
             app.viewport.orbit_free = None;
         }
     }
     if !down && app.viewport.axis_drag.take().is_some() {
         app.viewport.orbit_free = None;
+        app.viewport.axis_drag_roll = false;
     }
     let Some(last) = app.viewport.axis_drag.filter(|_| decided) else { return false };
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    if app.viewport.axis_drag_roll {
+        // Roll about the viewing direction so the model follows the finger around the ring.
+        let c = axis_center(app, rect);
+        if let Some(p) = pos {
+            let before = (last.y - c.y).atan2(last.x - c.x);
+            let now = (p.y - c.y).atan2(p.x - c.x);
+            let delta = (now - before + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            if delta.abs() > 1e-9 {
+                app.cancel_view_animation();
+                app.cam.roll_by(f64::from(delta));
+                app.viewport.orbit_free = None;
+            }
+            app.viewport.axis_drag = Some(p);
+            ui.ctx().request_repaint();
+        }
+        return true;
+    }
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     if let Some(p) = pos {
         app.cancel_view_animation();
@@ -5441,12 +5477,14 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     match app.preferences.navigator_style {
         crate::prefs::NavigatorStyle::Axes => signed_axis_view(app, ui, rect),
         crate::prefs::NavigatorStyle::Cube => navigation_cube::show(app, ui, rect),
+        crate::prefs::NavigatorStyle::CompassCube => compass_cube::show(app, ui, rect),
     }
 }
 
 fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if !axis_rect(app, rect).is_positive() || !axis_rect(app, rect).is_finite() {
         app.viewport.axis_drag = None;
+        app.viewport.axis_drag_roll = false;
         crate::scenario::publish_count("axis_view_highlights", 0.0);
         return;
     }

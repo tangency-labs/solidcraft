@@ -144,6 +144,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let outer = axis_rect(app, rect);
     if !outer.is_positive() {
         app.viewport.axis_drag = None;
+        app.viewport.axis_drag_roll = false;
         crate::scenario::publish_count("axis_view_highlights", 0.0);
         return;
     }

@@ -375,7 +375,9 @@ animated view changes is enabled (the default), at the configured animation spee
 
 The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
-`down`, `clockwise`, `counterclockwise`, `home`, `fit`). The result contains `camera` and `fit`;
+`down`, `clockwise`, `counterclockwise`, `home`, `fit`, plus the compass ring's world-aligned
+snaps `yaw_left`, `yaw_right`, `pitch_up`, `pitch_down`, which turn about the up axis or the
+camera's right axis preserving the other angle). The result contains `camera` and `fit`;
 UI callers apply the camera with their animation preference, without editing the design.
 
 Shift-orbit snapping includes 45-degree edge views and isometric corner views, with a
