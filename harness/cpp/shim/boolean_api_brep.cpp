@@ -10,7 +10,8 @@
 // checked here as well (a malformed program is SC_ERR_ARG). The whole program is parsed before
 // any upstream object is built. Operand B-reps are boxes (SmApiCreateBox), spheres
 // (SmApiCreateSphere), sheets (SmApiCreatePlane), tori (SmApiCreateTorus), an operand moved
-// by SmApiRotate / SmApiTranslate steps or the SmApiBoolean result of two operands; a failing
+// by SmApiRotate / SmApiTranslate steps, a skin solid (SmApiCreateSkinPrimitive of NURB
+// curves) or the SmApiBoolean result of two operands; a failing
 // constructor or operand Boolean is SC_ERR_ARG, except a failing SmApiCreateTorus, whose
 // status becomes the call's (record `2`) so its radius guard is compared. `out` receives the
 // API status (0 = SM_SUCCESS, else the SmStatus) and, on success, the op's outputs.
@@ -26,6 +27,7 @@
 #include <SmApiGeneral.h>
 #include <SmApiPrimitives.h>
 #include <SmApiQueries.h>
+#include <SmBSplineCurve.h>
 #include <SmBrep.h>
 #include <SmContext.h>
 #include <SmFaceuse.h>
@@ -34,6 +36,7 @@
 #include <SmSurface.h>
 #include <SmTArray.h>
 #include <SmVector3d.h>
+#include <nurbs.h>
 
 #include <algorithm>
 #include <stdexcept>
@@ -70,7 +73,13 @@ enum : int32_t
     BK_BOOLEAN = 4,  // SmApiBoolean(a, b, operation)'s result
     BK_TORUS = 5,    // SmApiCreateTorus(center, major, minor)
     BK_MOVED = 6,    // an operand moved by SmApiRotate / SmApiTranslate steps
+    BK_SKIN = 7,     // SmApiCreateSkinPrimitive(counts, NURB curves, degree, cap)
 };
+
+// Most curves (and profiles) of one BK_SKIN operand (MAX_SKIN_CURVES in the Rust module),
+// and most control points of one of its curves (MAX_SKIN_POINTS).
+const int64_t MAX_SKIN_CURVES = 16;
+const int64_t MAX_SKIN_POINTS = 512;
 
 // Steps of a BK_MOVED operand.
 enum : int32_t
@@ -123,6 +132,9 @@ struct BrepSpec
     double d[6] = {0, 0, 0, 0, 0, 0};
     std::vector<BrepSpec> sub; // BK_BOOLEAN: a, b; BK_MOVED: the operand
     std::vector<double> steps; // BK_MOVED: per step its kind then 7 (rotate) or 3 numbers
+    // BK_SKIN: profile counts, then per curve `p n+1 (n+1)*4 points (n+p+2) knots`, and in
+    // d[0] d[1] the loft degree and cap flag
+    std::vector<double> counts, curves;
 };
 
 BrepSpec read_spec(Rd& rd, int depth = 0)
@@ -130,7 +142,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     if (depth >= MAX_DEPTH)
         throw Bad();
     BrepSpec s;
-    s.kind = (int32_t)rd.idx(1, 6);
+    s.kind = (int32_t)rd.idx(1, 7);
     int k = 0;
     switch (s.kind)
     {
@@ -140,6 +152,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     case BK_BOOLEAN: k = 0; break;
     case BK_TORUS: k = 5; break;
     case BK_MOVED: k = 0; break;
+    case BK_SKIN: k = 0; break;
     default: throw Bad();
     }
     if (s.kind == BK_BOOLEAN)
@@ -168,7 +181,70 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
         }
         s.sub.push_back(read_spec(rd, depth + 1));
     }
+    if (s.kind == BK_SKIN)
+    {
+        int64_t np = rd.idx(2, MAX_SKIN_CURVES);
+        int64_t total = 0;
+        for (int64_t i = 0; i < np; i++)
+        {
+            int64_t c = rd.idx(1, MAX_SKIN_CURVES);
+            total += c;
+            s.counts.push_back((double)c);
+        }
+        int64_t nc = rd.idx(1, MAX_SKIN_CURVES);
+        if (nc != total)
+            throw Bad();
+        for (int64_t i = 0; i < nc; i++)
+        {
+            int64_t p = rd.idx(1, 17);
+            int64_t n1 = rd.idx(2, MAX_SKIN_POINTS);
+            if (p >= n1)
+                throw Bad();
+            s.curves.push_back((double)p);
+            s.curves.push_back((double)n1);
+            for (int64_t j = 0; j < 4 * n1 + n1 + p + 1; j++)
+                s.curves.push_back(rd.num());
+        }
+        s.d[0] = (double)rd.idx(1, 17);
+        s.d[1] = rd.flag() ? 1.0 : 0.0;
+    }
     return s;
+}
+
+// The BK_SKIN operand: SmApiCreateSkinPrimitive of its curves (each an
+// SmBSplineCurve(gw_CURVE*, 3, FALSE)), which leaves the curves with the caller.
+SmApiStatus build_skin(const BrepSpec& s, SmBrep*& r)
+{
+    const SmContext& ctx = *SmApiGetOrCreateContext();
+    std::vector<SmBSplineCurve*> owned;
+    SmTArray<ULONG> counts;
+    SmTArray<const SmCurve*> curves;
+    for (size_t i = 0; i < s.counts.size(); i++)
+        counts.Add((ULONG)s.counts[i]);
+    const double* d = s.curves.data();
+    size_t at = 0;
+    while (at < s.curves.size())
+    {
+        int64_t p = (int64_t)d[at++];
+        int64_t n1 = (int64_t)d[at++];
+        gw_CURVE* cur = sm_AllocateNurbCurve((gw_INDEX)(n1 - 1), (gw_DEGREE)p, (gw_INDEX)(n1 + p));
+        for (int64_t j = 0; j < n1; j++)
+        {
+            cur->pol->Pw[j].x = d[at++];
+            cur->pol->Pw[j].y = d[at++];
+            cur->pol->Pw[j].z = d[at++];
+            cur->pol->Pw[j].w = d[at++];
+        }
+        for (int64_t j = 0; j <= n1 + p; j++)
+            cur->knt->U[j] = d[at++];
+        owned.push_back(new (ctx) SmBSplineCurve(cur, 3, FALSE));
+        curves.Add(owned.back());
+    }
+    SmApiStatus stat = SmApiCreateSkinPrimitive(counts, curves, (ULONG)s.d[0],
+                                                s.d[1] != 0.0 ? TRUE : FALSE, r, NULL, NULL, NULL);
+    for (size_t i = 0; i < owned.size(); i++)
+        delete owned[i];
+    return stat;
 }
 
 std::vector<BrepSpec> read_specs(Rd& rd, int64_t max)
@@ -191,6 +267,7 @@ SmBrep* build(const BrepSpec& s)
     case BK_SPHERE: stat = SmApiCreateSphere(o, s.d[3], r); break;
     case BK_PLANE: stat = SmApiCreatePlane(o, s.d[3], s.d[4], r); break;
     case BK_TORUS: stat = SmApiCreateTorus(o, s.d[3], s.d[4], r); break;
+    case BK_SKIN: stat = build_skin(s, r); break;
     case BK_MOVED:
     {
         r = build(s.sub[0]);

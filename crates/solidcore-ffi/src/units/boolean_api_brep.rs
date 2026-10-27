@@ -12,8 +12,11 @@
 //! `4 operation brep brep` (the `SmApiBoolean` result of two operand blocks) or
 //! `5 C[3] major minor` (`SmApiCreateTorus`, the `SmBrep*&` overload) or
 //! `6 n steps... brep` (the operand block moved by `n` steps, each `0 P[3] A[3] angle_deg`
-//! for `SmApiRotate` or `1 V[3]` for `SmApiTranslate`, at most [`MAX_STEPS`]). Nested
-//! blocks are at most [`MAX_DEPTH`] deep.
+//! for `SmApiRotate` or `1 V[3]` for `SmApiTranslate`, at most [`MAX_STEPS`]) or
+//! `7 np counts... nc curves... degree cap` (`SmApiCreateSkinPrimitive` of `nc` NURB
+//! curves, each `p n+1 (n+1) x [x y z w] (n+p+2) knots`, built as
+//! `SmBSplineCurve(gw_CURVE*, 3, FALSE)`; at most [`MAX_SKIN_CURVES`]). Nested blocks are
+//! at most [`MAX_DEPTH`] deep.
 //!
 //! | [`Call`]        | op | args                                   | output after the status (on success)            |
 //! |-----------------|----|----------------------------------------|-------------------------------------------------|
@@ -52,7 +55,7 @@
 //! executed B-rep nodes in range and binary operands non-null (`SmMerge::BooleanTrees`
 //! indexes unchecked and clears each leaf slot). Safe repeated leaves remain accepted.
 
-use crate::validate::bad;
+use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest B-rep list accepted by [`run`] (per list for [`Call::Lists`]).
@@ -63,6 +66,10 @@ pub const MAX_TREE: usize = 64;
 pub const MAX_DEPTH: usize = 4;
 /// Most steps of one [`BrepSpec::Moved`] operand.
 pub const MAX_STEPS: usize = 8;
+/// Most curves (and profiles) of one [`BrepSpec::Skin`] operand.
+pub const MAX_SKIN_CURVES: usize = 16;
+/// Largest control point count of one [`BrepSpec::Skin`] curve.
+pub const MAX_SKIN_POINTS: usize = 512;
 /// `dRelativeAccuracy` of the [`Call::Measured`] volume (`SmApiBrepComputeVolume`).
 pub const VOLUME_ACCURACY: f64 = 1e-6;
 /// `dRelativeAccuracy` of the [`Call::Measured`] face areas (`SmApiFaceComputeArea`).
@@ -129,6 +136,61 @@ pub enum BrepSpec {
         /// Second operand (deleted by upstream).
         b: Box<BrepSpec>,
     },
+    /// `SmApiCreateSkinPrimitive(counts, curves, degree, cap)` of 3D NURB curves.
+    Skin {
+        /// Curves in each profile (each at least 1, summing to `curves.len()`).
+        counts: Vec<u64>,
+        /// The profile curves, concatenated.
+        curves: Vec<SkinCurve>,
+        /// Loft degree (1 to 17).
+        degree: u64,
+        /// Cap the first and last profiles.
+        cap: bool,
+    },
+}
+
+/// A 3D NURB curve of a [`BrepSpec::Skin`] operand: degree, weighted control points
+/// `[w x, w y, w z, w]` (`w` = `NOW` for every point of a non-rational curve) and the
+/// full knot vector.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkinCurve {
+    /// Degree `p`.
+    pub p: usize,
+    /// Control points.
+    pub cpts: Vec<[f64; 4]>,
+    /// Knots (`cpts.len() + p + 1` of them).
+    pub knots: Vec<f64>,
+}
+
+/// Checks a skin curve: `1 <= p <= min(n, 17)`, `m = n+p+1`, finite non-decreasing
+/// knots, finite 3D points, uniformly rational (positive weights) or non-rational.
+fn check_skin_curve(c: &SkinCurve) -> Result<(), FfiError> {
+    let n1 = c.cpts.len();
+    if !(2..=MAX_SKIN_POINTS).contains(&n1) || !(1..=17).contains(&c.p) || c.p >= n1 {
+        return Err(bad(
+            "skin curve: need 1 <= p <= n, p <= 17, 2 to 512 points",
+        ));
+    }
+    if c.knots.len() != n1 + c.p + 1 {
+        return Err(bad("skin curve: need m = n + p + 1"));
+    }
+    if c.knots.iter().any(|k| !k.is_finite())
+        || c.knots.windows(2).any(|w| matches!(w, [a, b] if a > b))
+    {
+        return Err(bad("skin curve: knots must be finite and non-decreasing"));
+    }
+    let rational = c.cpts.first().is_some_and(|&[_, _, _, w]| w != NOW);
+    for &[x, y, z, w] in &c.cpts {
+        if !(x.is_finite() && y.is_finite() && z.is_finite()) || z == NOZ {
+            return Err(bad("skin curve: control points must be finite and 3D"));
+        }
+        if (w != NOW) != rational || (rational && !(w.is_finite() && w > 0.0)) {
+            return Err(bad(
+                "skin curve: mixed rationality or a non-positive weight",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// One step of a [`BrepSpec::Moved`] operand.
@@ -320,6 +382,28 @@ fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
             check_spec(a, depth + 1)?;
             check_spec(b, depth + 1)?;
         }
+        BrepSpec::Skin {
+            counts,
+            curves,
+            degree,
+            cap: _,
+        } => {
+            if !(2..=MAX_SKIN_CURVES).contains(&counts.len()) {
+                return Err(bad("skin: need 2 to 16 profiles"));
+            }
+            if curves.len() > MAX_SKIN_CURVES || counts.contains(&0) {
+                return Err(bad("skin: at most 16 curves, at least 1 per profile"));
+            }
+            if counts.iter().sum::<u64>() != curves.len() as u64 {
+                return Err(bad("skin: profile counts must sum to the curve count"));
+            }
+            if !(1..=17).contains(degree) {
+                return Err(bad("skin: loft degree must be 1 to 17"));
+            }
+            for c in curves {
+                check_skin_curve(c)?;
+            }
+        }
     }
     Ok(())
 }
@@ -393,6 +477,25 @@ fn push_checked(o: &mut Vec<f64>, s: &BrepSpec) {
             o.push(f64::from(*operation));
             push_checked(o, a);
             push_checked(o, b);
+        }
+        BrepSpec::Skin {
+            counts,
+            curves,
+            degree,
+            cap,
+        } => {
+            o.push(7.0);
+            o.push(counts.len() as f64);
+            o.extend(counts.iter().map(|&c| c as f64));
+            o.push(curves.len() as f64);
+            for c in curves {
+                o.push(c.p as f64);
+                o.push(c.cpts.len() as f64);
+                o.extend(c.cpts.iter().flatten());
+                o.extend(&c.knots);
+            }
+            o.push(*degree as f64);
+            o.push(f64::from(u8::from(*cap)));
         }
     }
 }
