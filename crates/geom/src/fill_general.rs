@@ -91,6 +91,10 @@ pub struct Across {
     pub normal: Vec3,
     /// G2: the neighbour's curvature vector along `leave` (unit speed).
     pub bend: Option<Vec3>,
+    /// G2 and up: the neighbour as a height over its tangent plane to the order asked
+    /// ([`crate::linkage::Jet`], on the frame `normal × leave`, `leave`), which the conditions of
+    /// [`crate::fill_iso`] read. `None` where only `bend` is known.
+    pub jet: Option<crate::linkage::Jet>,
 }
 
 /// One sample of the loop.
@@ -226,7 +230,9 @@ pub fn fill_general(
 fn finite_station(s: &Station) -> bool {
     s.p.is_finite()
         && s.up.is_finite()
-        && s.across.is_none_or(|a| a.leave.is_finite() && a.normal.is_finite() && a.bend.is_none_or(|b| b.is_finite()))
+        && s.across.is_none_or(|a| {
+            a.leave.is_finite() && a.normal.is_finite() && a.bend.is_none_or(|b| b.is_finite()) && a.jet.is_none_or(|j| j.is_finite())
+        })
 }
 
 /// How close a grid came: what [`fill_general`] reports when none is close enough.

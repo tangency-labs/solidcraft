@@ -76,6 +76,30 @@ impl Linear for Vec3 {
     }
 }
 
+/// Homogeneous points as they are: a rational spline's control values `(x·w, y·w, z·w, w)`
+/// combine linearly, so carrying one into a larger space (degree elevation, knot insertion) is
+/// exact on them.
+impl Linear for HPoint {
+    fn zero() -> Self {
+        HPoint::ZERO
+    }
+    fn plus(self, o: Self) -> Self {
+        self + o
+    }
+    fn times(self, s: f64) -> Self {
+        self * s
+    }
+    fn to_h(self) -> HPoint {
+        self
+    }
+    fn from_h(h: HPoint) -> Self {
+        h
+    }
+    fn is_finite(self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite() && self.w.is_finite()
+    }
+}
+
 /// A clamped B-spline space: a degree and a knot vector whose first and last `degree + 1` knots
 /// are the domain's ends, interior knots repeated at most `degree` times (the space's splines
 /// are continuous).

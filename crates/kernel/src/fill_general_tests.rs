@@ -195,7 +195,7 @@ fn spec(g: Continuity) -> PatchSpec {
 fn report(name: &str, r: &PatchReport) {
     eprintln!(
         "{name}: fill reports gap {:e}, normals within {:.4}° ({:.4}° near clashing corners), curvature mismatch {:e}, points within {:e}",
-        r.gap, r.normal_deviation_deg, r.normal_deviation_all_deg, r.curvature_mismatch, r.point_gap
+        r.gap, r.normal_deviation_deg, r.normal_deviation_all_deg, r.jumps[2], r.point_gap
     );
 }
 
