@@ -163,9 +163,9 @@ fn placement_inverse(m: &M4) -> M4 {
             col[i] = row[j] / det;
         }
     }
-    for i in 0..3 {
-        out[3][i] = -(0..3).map(|k| out[k][i] * m[3][k]).sum::<f64>();
-    }
+    // The translation taken back through the inverted linear part.
+    let back: [f64; 3] = std::array::from_fn(|i| -(0..3).map(|k| out[k][i] * m[3][k]).sum::<f64>());
+    out[3][..3].copy_from_slice(&back);
     out
 }
 

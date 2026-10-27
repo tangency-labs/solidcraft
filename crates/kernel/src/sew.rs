@@ -376,7 +376,7 @@ fn curve_derivs(knots: &[f64], points: &[[f64; 4]], t: f64) -> Option<[Vec3; 4]>
         let h = points.get(first + i)?;
         for k in 0..4 {
             let n = d.get(k).copied().unwrap_or(0.0);
-            a[k] = a[k] + Vec3::new(h[0], h[1], h[2]) * n;
+            a[k] += Vec3::new(h[0], h[1], h[2]) * n;
             w[k] += h[3] * n;
         }
     }
@@ -388,7 +388,7 @@ fn curve_derivs(knots: &[f64], points: &[[f64; 4]], t: f64) -> Option<[Vec3; 4]>
         let mut num = a[k];
         for j in 1..=k {
             let binom = [[1.0, 0.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0], [1.0, 2.0, 1.0, 0.0], [1.0, 3.0, 3.0, 1.0]][k][j];
-            num = num - c[k - j] * (binom * w[j]);
+            num -= c[k - j] * (binom * w[j]);
         }
         c[k] = num * (1.0 / w[0]);
     }

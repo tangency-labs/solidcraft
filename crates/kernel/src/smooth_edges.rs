@@ -1,177 +1,142 @@
-//! Display-only tangent joins. Unknown geometry retains its existing presentation.
-use solidcraft_geom::brep::{Curve, Loop, Shell, Surface};
+//! Display-only tangent joins: which edges the shaded view leaves out because the two faces meet
+//! across them with one tangent plane (G1), and which it must keep because they are a crease or
+//! an authored split.
+//!
+//! One rule for every surface: at stations along the edge, each face's outward normal is
+//! evaluated on its exact surface ([`Face::parameters`]) at the edge's exact pcurve in that face
+//! (the use's own pcurve, so a seam a face meets itself across is the same test with its two
+//! pcurves), turned by the side the shell uses the face on. The edge is smooth when the normals
+//! agree within [`ANGLE`] at every station, and a crease when they differ by more anywhere. The
+//! flags are display-only: the edge keeps its identity and stays pickable, its faces stay apart
+//! (pieces of one surface are [`crate::topo::seam_flags`]'s business), and unknown geometry
+//! (a station that does not evaluate) keeps its existing presentation.
+use solidcraft_geom::brep::eval::SurfaceEval;
+use solidcraft_geom::brep::{Brep, Loop, Shell};
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::body::Body;
 
 const MAX_FACES: usize = 50_000;
 const MAX_EDGES: usize = 200_000;
+/// Surface evaluations one body may spend (two per station).
 const WORK: usize = 2_000_000;
-const ANGLE: f64 = 1e-8;
+/// Stations along each edge: the middles of this many equal parameter spans, so neither end
+/// (where a pole or a vertex of a degenerate face sits) is one.
+const STATIONS: usize = 8;
+/// Largest angle between the faces' normals, in radians, that still counts as tangent: half a
+/// degree. Shading is the visible trace of a join: across a crease of angle θ the lit intensity
+/// jumps by at most about θ of its range, and half a degree (0.0087) is under 1%, below the
+/// 1–2% step the eye tells apart on a smooth gradient. So a join this close to tangent shows no
+/// line in the shading, and drawing one would only show how the surface was cut into faces
+/// (a thread's flank pieces, a sweep's spans). Exact tangency (fillets, analytic seams) reads
+/// 1e-12 or so, far inside it; real creases a model means are degrees.
+const ANGLE: f64 = 0.5 * std::f64::consts::PI / 180.0;
+/// Below this sine of the angle between ∂S/∂u and ∂S/∂v the normal is undefined (a pole, an
+/// apex): such a station says nothing.
+const DEGENERATE: f64 = 1e-9;
 
-#[derive(Clone, Copy)]
-struct Boundary {
-    a: Vec3,
-    b: Vec3,
-    normal: Vec3,
-    error: f64,
-}
-
-fn charge(work: &mut usize, amount: usize) -> Option<()> {
-    *work = work.checked_sub(amount)?;
-    Some(())
-}
-
-fn roundoff(points: &[Vec3]) -> f64 {
-    points.iter().flat_map(|p| [p.x.abs(), p.y.abs(), p.z.abs()]).fold(1., f64::max) * f64::EPSILON * 64.
-}
-
-/// Only a clamped Bezier profile swept by one common linear translation (a B-spline surface
-/// record: `points[i][j]`, i along u). Its whole ruling normal is bounded from the linear cross
-/// derivative, not sampled. `orientation`: the face's outward normal is the natural one.
-fn ruled(u_knots: &[f64], v_knots: &[f64], controls: &[Vec<[f64; 3]>], orientation: bool, work: &mut usize) -> Option<[Boundary; 2]> {
-    let rows = controls.len();
-    let cols = controls.first()?.len();
-    if !(2..=33).contains(&rows) || !(2..=33).contains(&cols) || controls.iter().any(|row| row.len() != cols) {
-        return None;
-    }
-    charge(work, rows.checked_mul(cols)?.checked_mul(4)?)?;
-    let clamped = |knots: &[f64], count: usize| {
-        let (Some(first), Some(last)) = (knots.first(), knots.last()) else { return false };
-        knots.len() == count * 2
-            && first.is_finite()
-            && last.is_finite()
-            && first < last
-            && knots.iter().take(count).all(|k| k == first)
-            && knots.iter().skip(count).all(|k| k == last)
-    };
-    if !clamped(u_knots, rows) || !clamped(v_knots, cols) {
-        return None;
-    }
-    for transpose in [false, true] {
-        let (count, axial) = if transpose { (cols, rows) } else { (rows, cols) };
-        if axial != 2 {
-            continue;
-        }
-        let at = |i: usize, j: usize| {
-            let p = if transpose { controls.get(j)?.get(i)? } else { controls.get(i)?.get(j)? };
-            let p = Vec3::new(p[0], p[1], p[2]);
-            p.is_finite().then_some(p)
-        };
-        let a = at(0, 0)?;
-        let b = at(0, 1)?;
-        let ruling = b - a;
-        if ruling.len() < 1e-6 {
-            continue;
-        }
-        let mut valid = true;
-        for i in 0..count {
-            let p = at(i, 0)?;
-            let q = at(i, 1)?;
-            if (q - p - ruling).len() > roundoff(&[a, b, p, q]) {
-                valid = false;
-                break;
-            }
-        }
-        if !valid {
-            continue;
-        }
-        let boundary = |index: usize, next: usize, end: bool| {
-            let a = at(index, 0)?;
-            let b = at(index, 1)?;
-            let tangent = if end { a - at(next, 0)? } else { at(next, 0)? - a };
-            let error = roundoff(&[a, b, at(next, 0)?]);
-            // Ill-conditioned derivatives cannot certify a tiny angular join.
-            if tangent.len() <= error / ANGLE || ruling.len() <= error / ANGLE {
-                return None;
-            }
-            let cross = if transpose { ruling.cross(tangent) } else { tangent.cross(ruling) };
-            let normal = cross.normalized()? * if orientation { 1. } else { -1. };
-            let top_tangent = if end { b - at(next, 1)? } else { at(next, 1)? - b };
-            let top_cross = if transpose { ruling.cross(top_tangent) } else { top_tangent.cross(ruling) };
-            let top_normal = top_cross.normalized()? * if orientation { 1. } else { -1. };
-            // Along this linear ruling the cross derivative is a linear
-            // interpolation of these endpoint vectors. Positive alignment
-            // excludes a singularity; all intermediate normal directions lie
-            // between their directions. Include that whole-span variation.
-            if normal.dot(top_normal) <= 0. {
-                return None;
-            }
-            let conditioning = cross.len().min(top_cross.len());
-            let normal_error = 8. * error * (tangent.len().max(top_tangent.len()) + ruling.len()) / conditioning + normal.dist(top_normal);
-            if !normal_error.is_finite() || normal_error > ANGLE {
-                return None;
-            }
-            Some(Boundary { a, b, normal, error: normal_error })
-        };
-        if let (Some(first), Some(last)) = (boundary(0, 1, false), boundary(count - 1, count - 2, true)) {
-            return Some([first, last]);
-        }
-    }
-    None
-}
-
-/// How a face's outward normal along one of its straight edges is known: the two ruling
-/// boundaries of a ruled patch, or the closed form of a plane, cylinder or cone.
-enum Normals {
-    Ruled([Boundary; 2]),
-    Analytic { surface: Surface, orientation: bool },
-}
-
-/// The face's outward normal along the straight edge from `a` to `b`: a ruled patch's along its
-/// boundary ruling there, an analytic face's from its closed form at both ends (their difference
-/// is the uncertainty, so an edge that is no ruling, where the normal turns, certifies nothing).
-fn normal_along(normals: &Normals, a: Vec3, b: Vec3) -> Option<Boundary> {
-    match normals {
-        Normals::Ruled(boundaries) => on_boundary(boundaries, a, b),
-        Normals::Analytic { surface, orientation } => {
-            let sign = if *orientation { 1. } else { -1. };
-            let at = |p: Vec3| analytic_normal(surface, p).map(|n| n * sign);
-            let (na, nb) = (at(a)?, at(b)?);
-            let error = na.dist(nb) + roundoff(&[a, b]);
-            (na.dot(nb) > 0. && error.is_finite()).then_some(Boundary { a, b, normal: na, error })
-        }
-    }
-}
-
-/// The natural (unit) normal of a plane, cylinder or cone at a point on it: the plane's u × v;
-/// away from the axis for a cylinder; for a cone, away from the axis and back along it by its
-/// half angle (the record's (u, v): radius `radius_at_origin + v tan a` at height v).
-fn analytic_normal(surface: &Surface, p: Vec3) -> Option<Vec3> {
-    let v3 = |x: [f64; 3]| Vec3::new(x[0], x[1], x[2]);
-    let radial = |frame: &solidcraft_geom::brep::Frame| -> Option<(Vec3, Vec3)> {
-        let z = v3(frame.x_axis).cross(v3(frame.y_axis)).normalized()?;
-        let d = p - v3(frame.origin);
-        Some(((d - z * d.dot(z)).normalized()?, z))
-    };
-    match surface {
-        Surface::Plane { u_axis, v_axis, .. } => v3(*u_axis).cross(v3(*v_axis)).normalized(),
-        Surface::Cylinder { frame, .. } => radial(frame).map(|(r, _)| r),
-        Surface::Cone { frame, half_angle, .. } => radial(frame).and_then(|(r, z)| (r * half_angle.cos() - z * half_angle.sin()).normalized()),
-        _ => None,
-    }
-}
-
-/// A straight edge: a line, or a B-spline of degree 1 with two control points (as SMLib gives
-/// an extrusion's rulings).
-fn straight(c: &Curve) -> bool {
-    match c {
-        Curve::Line { .. } => true,
-        Curve::Spline { knots, points } => points.len() == 2 && knots.len() == 4,
-        _ => false,
-    }
-}
-
-fn on_boundary(boundaries: &[Boundary; 2], a: Vec3, b: Vec3) -> Option<Boundary> {
-    boundaries.iter().find_map(|boundary| {
-        let tolerance = roundoff(&[a, b, boundary.a, boundary.b]);
-        ((a.dist(boundary.a) <= tolerance && b.dist(boundary.b) <= tolerance) || (a.dist(boundary.b) <= tolerance && b.dist(boundary.a) <= tolerance))
-            .then_some(*boundary)
-    })
+/// What the stations along one edge say.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Join {
+    Smooth,
+    Crease,
+    Unknown,
 }
 
 pub(crate) fn flags(body: &Body, mesh: &Mesh) -> (Vec<bool>, Vec<bool>) {
     crate::guard("smooth display edges", || Ok(classify(body, mesh, WORK))).unwrap_or_default()
+}
+
+/// A face ready to evaluate: its surface and the sign that turns the natural normal outward.
+struct FaceEval {
+    surface: SurfaceEval,
+    side: f64,
+}
+
+/// Each face's evaluator, or `None` where its surface does not evaluate or no shell uses it. A
+/// face's side is the one its first shell uses it on.
+fn face_evals(record: &Brep) -> Vec<Option<FaceEval>> {
+    let mut forward: Vec<Option<bool>> = vec![None; record.faces.len()];
+    for shell in &record.shells {
+        if let Shell::Faces { faces, .. } = shell {
+            for f in faces {
+                if let Some(slot) = forward.get_mut(f.face as usize) {
+                    slot.get_or_insert(f.forward);
+                }
+            }
+        }
+    }
+    record
+        .faces
+        .iter()
+        .zip(forward)
+        .map(|(face, forward)| {
+            let surface = SurfaceEval::new(face.parameters()).ok()?;
+            Some(FaceEval { surface, side: if forward? { 1.0 } else { -1.0 } })
+        })
+        .collect()
+}
+
+/// The outward unit normal of `face` at `uv`; `Some(None)` where the normal is undefined there.
+fn normal(face: &FaceEval, uv: [f64; 2]) -> Option<Option<Vec3>> {
+    let (p, su, sv) = face.surface.derivs(uv[0], uv[1])?;
+    if !p.is_finite() || !su.is_finite() || !sv.is_finite() {
+        return None;
+    }
+    let n = su.cross(sv);
+    if !(n.len() > DEGENERATE * su.len() * sv.len()) {
+        return Some(None);
+    }
+    Some(n.normalized().map(|n| n * face.side))
+}
+
+/// How the two uses of edge `e` meet: their faces' outward normals compared at [`STATIONS`]
+/// stations, each through its own pcurve.
+fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, work: &mut usize) -> Join {
+    let Some(edge) = record.edges.get(e) else { return Join::Unknown };
+    let [a, b] = edge.uses.as_slice() else { return Join::Unknown };
+    let side = |u: &solidcraft_geom::brep::EdgeUseRef| {
+        let face = faces.get(u.face as usize)?.as_ref()?;
+        let Loop::Edges { edges } = record.faces.get(u.face as usize)?.loops.get(u.r#loop as usize)? else { return None };
+        let used = edges.get(u.position as usize)?;
+        (used.edge as usize == e).then_some((face, &used.pcurve))
+    };
+    let (Some((fa, pa)), Some((fb, pb))) = (side(a), side(b)) else { return Join::Unknown };
+    let [t0, t1] = edge.interval;
+    if !(t0.is_finite() && t1.is_finite() && t0 < t1) {
+        return Join::Unknown;
+    }
+    let mut measured = false;
+    for k in 0..STATIONS {
+        let Some(left) = work.checked_sub(2) else { return Join::Unknown };
+        *work = left;
+        let t = t0 + (t1 - t0) * (k as f64 + 0.5) / STATIONS as f64;
+        let (Some(ua), Some(ub)) = (pa.eval(t), pb.eval(t)) else { return Join::Unknown };
+        let (Some(na), Some(nb)) = (normal(fa, ua), normal(fb, ub)) else { return Join::Unknown };
+        let (Some(na), Some(nb)) = (na, nb) else { continue };
+        let angle = na.cross(nb).len().atan2(na.dot(nb));
+        if !angle.is_finite() {
+            return Join::Unknown;
+        }
+        if angle > ANGLE {
+            return Join::Crease;
+        }
+        measured = true;
+    }
+    if measured { Join::Smooth } else { Join::Unknown }
+}
+
+/// Does the mesh's edge `e` bound the faces the record's edge `e` is used by? A mesh that says
+/// otherwise is not this record's, and its edge keeps its presentation.
+fn same_faces(record: &Brep, mesh: &Mesh, e: usize) -> bool {
+    let (Some(edge), Some(listed)) = (record.edges.get(e), mesh.edge_faces.get(e)) else { return false };
+    let mut used: Vec<u32> = edge.uses.iter().map(|u| u.face).collect();
+    let mut listed = listed.clone();
+    used.sort_unstable();
+    used.dedup();
+    listed.sort_unstable();
+    listed.dedup();
+    used == listed
 }
 
 fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>) {
@@ -181,97 +146,45 @@ fn classify(body: &Body, mesh: &Mesh, mut work: usize) -> (Vec<bool>, Vec<bool>)
     }
     let mut split_points = 0usize;
     for line in body.split_keep() {
-        if charge(&mut work, line.len().saturating_add(1)).is_none() {
-            return (Vec::new(), Vec::new());
-        }
+        let Some(left) = work.checked_sub(line.len().saturating_add(1)) else { return (Vec::new(), Vec::new()) };
+        work = left;
         let Some(total) = split_points.checked_add(line.len()) else { return (Vec::new(), Vec::new()) };
         split_points = total;
     }
-    // Each face's outward normal is its surface's natural one.
-    let mut forward = vec![None; rec.faces.len()];
-    for sh in &rec.shells {
-        if let Shell::Faces { faces, .. } = sh {
-            for f in faces {
-                if let Some(slot) = forward.get_mut(f.face as usize) {
-                    *slot = Some(f.forward);
-                }
-            }
-        }
-    }
-    let mut boundaries = Vec::with_capacity(rec.faces.len());
-    for (face, orientation) in rec.faces.iter().zip(&forward) {
-        let edge_count = face
-            .loops
-            .iter()
-            .map(|l| match l {
-                Loop::Edges { edges } => edges.len(),
-                Loop::Vertex { .. } => 0,
-            })
-            .fold(0usize, usize::saturating_add);
-        if face.loops.len() > 16 || edge_count > 16 || charge(&mut work, edge_count + 1).is_none() {
-            boundaries.push(None);
-            continue;
-        }
-        let normals = match (&face.surface, orientation) {
-            (Surface::Spline { u_knots, v_knots, points }, Some(o)) => ruled(u_knots, v_knots, points, *o, &mut work).map(Normals::Ruled),
-            (s @ (Surface::Plane { .. } | Surface::Cylinder { .. } | Surface::Cone { .. }), Some(o)) => {
-                Some(Normals::Analytic { surface: s.clone(), orientation: *o })
-            }
-            _ => None,
-        };
-        boundaries.push(normals);
-    }
-    let mut out = vec![false; mesh.edges.len()];
+    let faces = face_evals(&rec);
+    let mut smooth = vec![false; mesh.edges.len()];
     let mut sharp = vec![false; mesh.edges.len()];
     // The mesh's edges are the record's, in its order.
-    for (current, edge) in rec.edges.iter().enumerate().take(mesh.edges.len().min(MAX_EDGES)) {
-        if charge(&mut work, 1).is_none() {
-            break;
-        }
-        let Some([a, b]) = mesh.edge_faces.get(current).map(Vec::as_slice) else { continue };
-        if a == b {
-            continue;
-        }
-        let Some(line) = mesh.edges.get(current) else { continue };
+    for (current, line) in mesh.edges.iter().enumerate().take(rec.edges.len()) {
         let Some(split_work) = line.len().checked_add(1).and_then(|n| n.checked_mul(split_points)) else { break };
-        if charge(&mut work, split_work).is_none() {
-            break;
-        }
-        if crate::heal::on_split_line(line, body.split_keep()) {
-            if let Some(flag) = sharp.get_mut(current) {
-                *flag = true;
+        let Some(left) = work.checked_sub(split_work) else { break };
+        work = left;
+        let flag = if crate::heal::on_split_line(line, body.split_keep()) {
+            sharp.get_mut(current)
+        } else if !same_faces(&rec, mesh, current) {
+            None
+        } else {
+            match join(&rec, &faces, current, &mut work) {
+                Join::Smooth => smooth.get_mut(current),
+                Join::Crease => sharp.get_mut(current),
+                Join::Unknown => None,
             }
-            continue;
-        }
-        let (Some(Some(ba)), Some(Some(bb))) = (boundaries.get(*a as usize), boundaries.get(*b as usize)) else { continue };
-        // Only exact straight rulings qualify; a bowed/twisted edge with matching endpoints
-        // must remain visible.
-        if !straight(&edge.curve) {
-            continue;
-        }
-        let ends = |v: u32| rec.vertices.get(v as usize).map(|x| Vec3::new(x.point[0], x.point[1], x.point[2]));
-        let (Some(p), Some(q)) = (ends(edge.vertices[0]), ends(edge.vertices[1])) else { continue };
-        let (Some(na), Some(nb)) = (normal_along(ba, p, q), normal_along(bb, p, q)) else { continue };
-        let uncertainty = na.error + nb.error;
-        let cross = na.normal.cross(nb.normal).len();
-        if na.normal.dot(nb.normal) > 0.
-            && cross + uncertainty <= ANGLE
-            && let Some(flag) = out.get_mut(current)
-        {
+        };
+        if let Some(flag) = flag {
             *flag = true;
-        } else if (cross > ANGLE + uncertainty || na.normal.dot(nb.normal) < -uncertainty)
-            && let Some(flag) = sharp.get_mut(current)
-        {
-            *flag = true;
+        }
+        if work == 0 {
+            break;
         }
     }
-    (out, sharp)
+    (smooth, sharp)
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use solidcraft_geom::brep::Surface;
     use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
 
     fn circle(radius: f64, count: usize) -> Loop2 {
@@ -356,15 +269,15 @@ mod tests {
         assert!(classify(&body, &mesh, 0).0.iter().all(|f| !*f));
     }
 
-    #[test]
-    fn a_small_real_crease_is_visible() {
+    /// An extruded circle of eight cubics whose first cubic leaves its start turned by `degrees`:
+    /// the wall join there is a crease of that angle.
+    fn creased(degrees: f64) -> (Body, Mesh, usize) {
         let mut outer = circle(10., 8);
         if let Seg2::Cubic { p0, p1, .. } = &mut outer.segs[0] {
-            p1.x += (p1.y - p0.y) * 1e-6;
+            p1.x += (p1.y - p0.y) * degrees.to_radians().tan();
         }
         let body = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 3.).unwrap().remove(0);
         let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
-        assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 7);
         let crease = mesh
             .edges
             .iter()
@@ -374,24 +287,27 @@ mod tests {
                     && line.first().zip(line.last()).is_some_and(|(a, b)| (a.z - b.z).abs() > 2.9)
             })
             .unwrap();
+        (body, mesh, crease)
+    }
+
+    #[test]
+    fn a_crease_over_half_a_degree_is_visible_and_one_under_it_is_not() {
+        let (_, mesh, crease) = creased(1.0);
+        assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 7);
         assert!(!mesh.smooth_edges[crease]);
         assert!(mesh.sharp_edges[crease]);
         assert!(mesh.shaded_edge_visible(crease));
         assert!(mesh.edge_pickable(crease));
+        let (_, mesh, crease) = creased(0.2);
+        assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 8);
+        assert!(!mesh.shaded_edge_visible(crease));
+        assert!(mesh.edge_pickable(crease), "a smooth join is only left undrawn");
     }
 
     #[test]
     fn actual_authored_split_of_a_curved_ruled_wall_stays_visible() {
         let body = ring(4);
-        let face = crate::native::brep_record(&body)
-            .unwrap()
-            .faces
-            .iter()
-            .position(|face| match &face.surface {
-                Surface::Spline { u_knots, v_knots, points } => ruled(u_knots, v_knots, points, true, &mut { WORK }).is_some(),
-                _ => false,
-            })
-            .unwrap();
+        let face = crate::native::brep_record(&body).unwrap().faces.iter().position(|face| matches!(face.surface, Surface::Spline { .. })).unwrap();
         let tool = crate::SplitTool::Plane(Plane::new(Vec3::new(7., 0., 0.), Vec3::Y, Vec3::Z).unwrap());
         let split = crate::split_faces(&body, &[face], &tool).unwrap();
         assert!(split.face_count() > body.face_count());
@@ -406,22 +322,60 @@ mod tests {
         }
     }
 
+    /// The edges of a body's mesh by how the shaded view draws them: (smooth, crease, neither).
+    fn census(body: &Body) -> (usize, usize, usize) {
+        let mesh = body.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+        let smooth = mesh.smooth_edges.iter().filter(|f| **f).count();
+        let sharp = mesh.sharp_edges.iter().filter(|f| **f).count();
+        assert!(mesh.smooth_edges.iter().zip(&mesh.sharp_edges).all(|(a, b)| !(*a && *b)));
+        (smooth, sharp, mesh.edges.len() - smooth - sharp)
+    }
+
     #[test]
-    fn singular_twisted_and_reversed_normal_certificates_are_conservative() {
-        // A Bezier surface of `points[i][j]`, i along u, one span each way.
-        let ruled_of = |points: Vec<Vec<[f64; 3]>>, orientation: bool, work: &mut usize| {
-            let knots = |n: usize| [vec![0.0; n], vec![1.0; n]].concat();
-            ruled(&knots(points.len()), &knots(points.first().map_or(0, Vec::len)), &points, orientation, work)
-        };
-        let p = |x: f64, y: f64, z: f64| [x, y, z];
-        let straight = vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 0., 3.)]];
-        let forward = ruled_of(straight.clone(), true, &mut { WORK }).unwrap();
-        let backward = ruled_of(straight.clone(), false, &mut { WORK }).unwrap();
-        assert!(forward[0].normal.dot(backward[0].normal) < -0.99);
-        let twisted = vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 1., 3.)]];
-        assert!(ruled_of(twisted, true, &mut { WORK }).is_none());
-        let singular = vec![vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(0., 0., 0.), p(0., 0., 3.)], vec![p(1., 0., 0.), p(1., 0., 3.)]];
-        assert!(ruled_of(singular, true, &mut { WORK }).is_none());
-        assert!(ruled_of(straight, true, &mut 0).is_none());
+    fn a_spheres_and_a_cylinders_seams_are_smooth_and_their_rims_creases() {
+        let sphere = crate::sphere(Vec3::ZERO, 10.).unwrap();
+        let (smooth, sharp, _) = census(&sphere);
+        assert!(smooth >= 1 && sharp == 0, "sphere: {smooth} smooth, {sharp} creases");
+        let cylinder = crate::cylinder(Vec3::ZERO, Vec3::Z, 8., 20.).unwrap();
+        let mesh = cylinder.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+        for (i, line) in mesh.edges.iter().enumerate() {
+            let vertical = line.first().zip(line.last()).is_some_and(|(a, b)| (a.z - b.z).abs() > 19.);
+            assert_eq!(mesh.smooth_edges[i], vertical, "edge {i}");
+            assert_eq!(mesh.sharp_edges[i], !vertical, "edge {i}: a rim is a crease");
+        }
+    }
+
+    /// A box with its top edges and one upright edge rounded: every round meets its faces and
+    /// its neighbours tangentially, so none of those joins is drawn; the box's own edges are.
+    #[test]
+    fn a_filleted_boxs_tangent_joins_are_smooth_and_its_corners_creases() {
+        let block = crate::box_solid(Vec3::ZERO, Vec3::new(20., 20., 10.)).unwrap();
+        let picks = [Vec3::new(10., 0., 10.), Vec3::new(20., 10., 10.), Vec3::new(10., 20., 10.), Vec3::new(0., 10., 10.), Vec3::new(20., 20., 5.)];
+        let rounded = crate::fillet(&block, &picks, 3.).unwrap();
+        let mesh = rounded.mesh(&crate::MeshTolerance::chord(0.02)).unwrap();
+        for (i, line) in mesh.edges.iter().enumerate() {
+            let (Some(a), Some(b)) = (line.first(), line.last()) else { panic!("edge {i} has no points") };
+            let corner = |p: &Vec3| [p.x, p.y].iter().all(|c| c.abs() < 1e-6 || (c - 20.).abs() < 1e-6);
+            // The bottom rim, the three square upright edges, and the miters where two top
+            // rounds meet over a square corner are creases.
+            let bottom = line.iter().all(|p| p.z.abs() < 1e-6);
+            let square_upright = corner(a) && corner(b) && (a.z - b.z).abs() > 1.;
+            let miter = (corner(a) && (b.z - 10.).abs() < 1e-6) || (corner(b) && (a.z - 10.).abs() < 1e-6);
+            if bottom || square_upright || miter {
+                assert!(mesh.sharp_edges[i] && mesh.shaded_edge_visible(i), "edge {i} {line:?} is a crease");
+            } else {
+                assert!(mesh.smooth_edges[i] && !mesh.shaded_edge_visible(i), "edge {i} {:?}..{:?} is a tangent join", line.first(), line.last());
+                assert!(mesh.edge_pickable(i), "edge {i} stays pickable");
+            }
+        }
+    }
+
+    #[test]
+    fn a_degenerate_normal_says_nothing() {
+        let face = FaceEval { surface: SurfaceEval::new(&Surface::Sphere { frame: solidcraft_geom::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: 2. }).unwrap(), side: 1. };
+        assert_eq!(normal(&face, [0.3, std::f64::consts::FRAC_PI_2]), Some(None), "the pole");
+        let n = normal(&face, [0., 0.]).unwrap().unwrap();
+        assert!((n - Vec3::X).len() < 1e-12, "{n:?}");
+        assert_eq!(normal(&face, [f64::NAN, 0.]), None);
     }
 }

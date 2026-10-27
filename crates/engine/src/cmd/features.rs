@@ -238,7 +238,7 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     } else if let Some(d) = extrude_reach(s, p) {
         if p.get("to").is_some() { d - start } else { d }
     } else {
-        through_all_reach(&st, p, base)?
+        through_all_reach(st, p, base)?
     };
     if st.bodies.is_empty() || !d.is_finite() {
         return Some("new");
@@ -254,7 +254,7 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     } else if implicit_all {
         st.bodies.iter().collect()
     } else {
-        active_scope(s, &st)
+        active_scope(s, st)
     };
     if parts.is_empty()
         && let Some(body) = started_on.as_deref().and_then(|name| st.body(name))

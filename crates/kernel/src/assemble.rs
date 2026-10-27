@@ -281,10 +281,10 @@ impl Assembly {
             let frame = if *takes { form::frame_of(&f.surface) } else { None };
             for u in f.loops.iter().flatten() {
                 let e = u.edge as usize;
-                if u.given.is_some() {
-                    if let Some(g) = given.get_mut(e) {
-                        *g = true;
-                    }
+                if u.given.is_some()
+                    && let Some(g) = given.get_mut(e)
+                {
+                    *g = true;
                 }
                 if !on_form && let Some(o) = open.get_mut(e) {
                     *o = false;
