@@ -10,25 +10,14 @@
 //! Two kinds of case. `props`: a script of ops on one face props object (`SetProps` and its
 //! three stages, `ReSet`, `HasProps`, `HasProblems`, `IsPoint3dOnPole`, field seeds, and
 //! `SmLoopProps::SetProps` of every loop); the outputs are each op's result and a snapshot of
-//! the props after it (op 9: the loop props `SetProps_Stage3` left, with the `ClassifyLoops`
-//! containment and orientations). `tree`: building a loop tree with `AddChild` / `AddSibling` /
+//! the props after it. `tree`: building a loop tree with `AddChild` / `AddSibling` /
 //! `AddPartner` and `FindItem` queries (fake loop numbers).
 //!
 //! **Faces.** A plane or a surface of revolution (`CreateCanonical`: a cylinder, a cone with
 //! or without apex, a sphere or a torus, with the swept angle either 360 degrees, a closed
 //! surface, or below it, an open one that `AdjustSTEPUVDomain` trims), with a vertex loop
-//! (at the origin, or at a pole), edge loops (an outer loop and holes of line edges) or circle
-//! loops (one `SmCircle` edge each: latitude circles of a revolution, no-area loops on a
-//! closed one, or circles on the plane). The face tolerance reaches `GetSingularities`
-//! through `SmFace::GetTolerance`.
-//!
-//! **Stage 3.** The `s3gen####` cases ([`STAGE3_GENERATED`], their own seeds) draw faces whose
-//! loops `ClassifyLoops` classifies: nested, side-by-side and misoriented loops on a plane,
-//! latitude circles on cylinders, cones and spheres; the script runs Stage 3 (directly or
-//! through `SetProps`), sometimes resets to Stage 2 and runs it again. The healer's calls
-//! keep what the face queries leave on the B-rep for the next op, as upstream's
-//! (`set_props_with_query_gaps`, `set_props_stage2_mut`, `set_props_stage3_mut`): a re-run
-//! of `ClassifyLoops` reads the UV trim curves the first one made.
+//! (at the origin, or at a pole) or edge loops (an outer loop and holes of line edges). The
+//! face tolerance reaches `GetSingularities` through `SmFace::GetTolerance`.
 //!
 //! **Scripts are guarded.** [`ffi::validate`] runs on both sides and rejects what crashes or is
 //! undefined upstream (including the scripts of UB-131: `SetProps_Stage2` / `Stage3` on a
@@ -36,10 +25,9 @@
 //! `expect_rejected` is a regression case for the guard: both sides must reject it (the
 //! error `rejected`); the C++ is never called for it.
 //!
-//! Not reached: `m_lBadMissingPoles` (it needs a pole on a side in the surface's closed
-//! direction with a `SM_CD_POLE_NO_VERTEX` classify curve end; a surface closed both ways
-//! classifies its ends as seams) and the bad closed-loop counts (every built loop has a
-//! closed vertex chain).
+//! Deferred: closed faces (`SetProps_Stage2` reaches `SmFace::HasSeamProblem`,
+//! `topology.face_p4`) and every `SetProps_Stage3` (`SmFace::ClassifyLoops`, `query.face_p4`).
+//! The loop-props loop of Stage 3 is compared by op 8 instead, without the classification.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -72,7 +60,7 @@ use solidcore::topology::{
 };
 use solidcore_ffi::units::heal_face_props as ffi;
 
-use crate::case::{CaseContext, CaseSource};
+use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
@@ -221,19 +209,6 @@ pub(crate) enum LoopsIn {
     Vertex { at: [f64; 3] },
     /// Edge loops (the first one outer, the others holes): corner points joined by lines.
     Edges { loops: Vec<Vec<[f64; 3]>> },
-    /// Loops of one circle edge each (the first one outer).
-    Circles { circles: Vec<CircleIn> },
-}
-
-/// A loop of one circle edge `SmCircle(c, x, y, d, r)` (`d` in degrees), its one vertex at
-/// the circle's start.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct CircleIn {
-    pub(crate) c: [f64; 3],
-    pub(crate) x: [f64; 3],
-    pub(crate) y: [f64; 3],
-    pub(crate) d: [f64; 2],
-    pub(crate) r: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,18 +286,6 @@ pub(crate) fn ffi_face(f: &FaceIn) -> ffi::FaceSpec {
         None => ffi::Loops::Vertex([0.0; 3]),
         Some(LoopsIn::Vertex { at }) => ffi::Loops::Vertex(*at),
         Some(LoopsIn::Edges { loops }) => ffi::Loops::Edges(loops.clone()),
-        Some(LoopsIn::Circles { circles }) => ffi::Loops::Circles(
-            circles
-                .iter()
-                .map(|c| ffi::CircleLoop {
-                    c: c.c,
-                    x: c.x,
-                    y: c.y,
-                    d: c.d,
-                    r: c.r,
-                })
-                .collect(),
-        ),
     };
     ffi::FaceSpec {
         tol: f.tol,
@@ -533,12 +496,6 @@ pub(crate) fn rust_brep(k: &Kernel, f: &FaceIn) -> Result<(Brep, FaceId), Harnes
                 rust_edge_loop(&mut b, face, up, pts, j == 0)?;
             }
         }
-        Some(LoopsIn::Circles { circles }) => {
-            for (j, c) in circles.iter().enumerate() {
-                let curve = rust_circle(k, c.c, c.x, c.y, c.d, c.r)?;
-                rust_curve_loop(k, &mut b, face, up, curve, j == 0)?;
-            }
-        }
     }
     Ok((b, face))
 }
@@ -670,60 +627,6 @@ fn rust_edge_loop(
         .map_err(e)?;
     }
     let made = rust_loop_records(b, face, up, LoopuseStart::Edgeuse(Some(eu0)), outer)?;
-    if made != lu {
-        return Err(harness("loop use id"));
-    }
-    Ok(())
-}
-
-/// A loop of the one edge `curve` over its natural interval, as `StartLoop` / `StartEdge` /
-/// `EndLoop` build it: one vertex at the curve's start (`EndLoop` evaluates the edge use's
-/// start), both ends of the edge on it, the edge use its own neighbour.
-fn rust_curve_loop(
-    k: &Kernel,
-    b: &mut Brep,
-    face: FaceId,
-    up: FaceuseId,
-    curve: Curve,
-    outer: bool,
-) -> Result<(), HarnessError> {
-    let e = |e: solidcore::SolidError| harness(e.to_string());
-    let lu = next_id!(b.loopuses(), LoopuseId);
-    let eu = next_id!(b.edgeuses(), EdgeuseId);
-    let vu = next_id!(b.vertexuses(), VertexuseId);
-    let edge = next_id!(b.edges(), EdgeId);
-    let interval = curve.natural_interval();
-    let start = curve
-        .evaluate_point(k, interval.min())
-        .map_err(|err| harness(format!("circle start: {err}")))?;
-    let v = b.add_vertex(start).map_err(e)?;
-    let tolerance = b.tolerance();
-    b.add_edge_record(Edge {
-        vertices: [v, v],
-        edgeuses: vec![eu],
-        interval,
-        tolerance,
-        curve: Some(curve),
-    })
-    .map_err(e)?;
-    b.add_vertexuse_record(Vertexuse {
-        vertex: Some(v),
-        owner: VertexuseOwner::Edgeuse(Some(eu)),
-        ..Vertexuse::default()
-    })
-    .map_err(e)?;
-    b.vertex_mut(v).map_err(e)?.vertexuses.push(vu);
-    b.add_edgeuse_record(Edgeuse {
-        edge: Some(edge),
-        owner: EdgeuseOwner::Loopuse(Some(lu)),
-        ccw: Some(eu),
-        cw: Some(eu),
-        vertexuse: Some(vu),
-        orientation: OrientType::Same,
-        ..Edgeuse::default()
-    })
-    .map_err(e)?;
-    let made = rust_loop_records(b, face, up, LoopuseStart::Edgeuse(Some(eu)), outer)?;
     if made != lu {
         return Err(harness("loop use id"));
     }
@@ -953,34 +856,6 @@ fn loop_snapshot(
     Ok((loops.len() as f64, o))
 }
 
-/// Op 9: the loop props `SetProps_Stage3` left in the face props (the first loops): the
-/// loop's index on the face, the `SmLoopProps::SetProps` props and the `ClassifyLoops`
-/// containment and orientations.
-fn stage3_loop_snapshot(b: &Brep, p: &FaceProps<H>, face: FaceId) -> Vec<f64> {
-    let t = |x: solidcore::heal::face_props::Tri| x.code() as f64;
-    let loops = b.face(face).map(|f| f.loops.clone()).unwrap_or_default();
-    let mut o: Vec<f64> = Vec::new();
-    for lp in p.loop_props.iter().take(ffi::MAX_LOOP_SNAPS) {
-        let at = lp
-            .loop_
-            .and_then(|l| loops.iter().position(|x| *x == l))
-            .map_or(-1.0, |i| i as f64);
-        o.push(at);
-        o.push(lp.loopuse_type.code() as f64);
-        o.push(lp.edge_cnt as f64);
-        o.push(t(lp.closed_3d));
-        o.push(t(lp.closed_ptrs));
-        o.push(t(lp.good_closed));
-        o.push(t(lp.area_loop));
-        o.push(lp.containment.code() as f64);
-        o.push(orient_code(lp.loop_orient) as f64);
-        o.push(orient_code(lp.desired_loop_orient) as f64);
-        o.push(t(lp.good_orient));
-    }
-    o.resize(ffi::SNAP_LEN, 0.0);
-    o
-}
-
 pub(crate) fn seed<O: LoopObject>(p: &mut FaceProps<O>, face: FaceId, field: i64, idx: i64, v: f64) {
     use solidcore::heal::face_props::{MixedLinkType as M, Tri};
     let tri = |x: f64| match x as i64 {
@@ -1042,9 +917,7 @@ fn rust_props(f: &FaceIn, ops: &[[f64; 5]]) -> Result<Output, HarnessError> {
         let heal = HealerOpType::from_code(o[2] as i64).unwrap_or_default();
         let stage = PropStage::from_code(o[1] as i64).unwrap_or_default();
         let res: Result<f64, solidcore::SolidError> = match op {
-            // the healer's calls on its B-rep: what the face queries leave on it (UV trim
-            // curves, tolerance growth, gap caches) stays for the next op, as upstream
-            0 => status(p.set_props_with_query_gaps(&k, &mut b, stage, face, o[3] as u64, heal)),
+            0 => status(p.set_props(&k, &b, stage, face, o[3] as u64, heal)),
             1 => {
                 p.reset(stage);
                 Ok(0.0)
@@ -1062,15 +935,10 @@ fn rust_props(f: &FaceIn, ops: &[[f64; 5]]) -> Result<Output, HarnessError> {
             }
             6 => match o[1] as i64 {
                 1 => status(p.set_props_gaps(&k, &b, face, o[3] as u64, heal)),
-                2 => status(p.set_props_stage2_mut(&k, &mut b, face, o[3] as u64, heal)),
-                _ => status(p.set_props_stage3_mut(&k, &mut b, face, o[3] as u64, heal)),
+                2 => status(p.set_props_stage2(&k, &b, face, o[3] as u64, heal)),
+                _ => status(p.set_props_stage3(&k, &b, face, o[3] as u64, heal)),
             },
             7 => Ok(f64::from(u8::from(p.is_periodic_u())) + 2.0 * f64::from(u8::from(p.is_periodic_v()))),
-            9 => {
-                out.push(p.loop_props.len() as f64);
-                out.extend(stage3_loop_snapshot(&b, &p, face));
-                continue;
-            }
             8 => match loop_snapshot(&k, &b, &p, face) {
                 Ok((n, snap)) => {
                     out.push(n);
@@ -1438,200 +1306,6 @@ fn gen_props(rng: &mut Rng) -> CaseIn {
     }
 }
 
-/// Generated `SetProps_Stage3` cases (named `s3gen####`, their own seeds): drawn so that
-/// `ClassifyLoops` classifies the loops and Stage 3 runs to its end.
-pub const STAGE3_GENERATED: usize = 300;
-
-/// A circle loop about the z axis at height `z` (radius `r`), counter-clockwise seen from +z
-/// unless `ccw` is false, over `d` degrees.
-fn z_circle(c: [f64; 3], r: f64, ccw: bool, d: [f64; 2]) -> CircleIn {
-    CircleIn {
-        c,
-        x: [1.0, 0.0, 0.0],
-        y: if ccw { [0.0, 1.0, 0.0] } else { [0.0, -1.0, 0.0] },
-        d,
-        r,
-    }
-}
-
-/// Loops on the plane `z = z0`: polygons or circles about one centre (outer, hole, island,
-/// hole in the island) or side by side, each with a random orientation now and then, in a
-/// random order now and then.
-fn gen_plane_loops(rng: &mut Rng, z0: f64) -> LoopsIn {
-    let c = [rng.uniform(-0.5, 0.5), rng.uniform(-0.5, 0.5), z0];
-    let n = 1 + rng.below(4) as usize;
-    let nested = rng.chance(0.7);
-    let circles = rng.chance(0.4);
-    let mut specs: Vec<([f64; 3], f64, bool)> = Vec::new();
-    for i in 0..n {
-        let (centre, radius) = if nested {
-            (c, 3.0 * 0.6_f64.powi(i as i32) * rng.uniform(0.9, 1.0))
-        } else {
-            ([c[0] - 2.25 + 1.5 * i as f64, c[1], z0], 0.6)
-        };
-        // the nesting alternates the orientations: outer, hole, island, hole
-        let mut ccw = !nested || i % 2 == 0;
-        if rng.chance(0.2) {
-            ccw = !ccw;
-        }
-        specs.push((centre, radius, ccw));
-    }
-    if n > 1 && rng.chance(0.2) {
-        specs.swap(0, 1);
-    }
-    if circles {
-        let open = rng.chance(0.1);
-        LoopsIn::Circles {
-            circles: specs
-                .iter()
-                .map(|&(centre, r, ccw)| {
-                    let d = if open { [0.0, rng.uniform(200.0, 350.0)] } else { [0.0, 360.0] };
-                    z_circle(centre, r, ccw, d)
-                })
-                .collect(),
-        }
-    } else {
-        LoopsIn::Edges {
-            loops: specs
-                .iter()
-                .map(|&(centre, r, ccw)| gen_polygon(rng, centre, r, ccw))
-                .collect(),
-        }
-    }
-}
-
-/// A surface of revolution about the z axis with latitude circle loops on it: a cylinder, a
-/// cone (with or without its apex) or a sphere, the circles at random heights and
-/// orientations (no-area loops on a closed surface), now and then over less than a turn.
-fn gen_revolution_circles(rng: &mut Rng) -> (SurfIn, LoopsIn) {
-    let r = rng.uniform(0.5, 2.0);
-    let n = 1 + rng.below(3) as usize;
-    let mut heights: Vec<f64> = (0..n).map(|_| rng.uniform(0.05, 0.95)).collect();
-    heights.sort_by(f64::total_cmp);
-    let (gen, at): (GenIn, Vec<([f64; 3], f64)>) = match rng.below(3) {
-        0 | 1 => {
-            let z0 = rng.uniform(-2.0, 0.0);
-            let z1 = rng.uniform(0.5, 2.0);
-            let r1 = if rng.chance(0.5) {
-                r
-            } else if rng.chance(0.4) {
-                0.0
-            } else {
-                r * rng.uniform(0.3, 1.8)
-            };
-            let at = heights
-                .iter()
-                .map(|t| {
-                    let z = z0 + (z1 - z0) * t;
-                    ([0.0, 0.0, z], r + (r1 - r) * ((z - z0) / (z1 - z0)))
-                })
-                .collect();
-            (
-                GenIn::Line {
-                    a: [r, 0.0, z0],
-                    b: [r1, 0.0, z1],
-                },
-                at,
-            )
-        }
-        _ => {
-            let at = heights
-                .iter()
-                .map(|t| {
-                    let phi = (-80.0 + 160.0 * t).to_radians();
-                    ([0.0, 0.0, r * phi.sin()], r * phi.cos())
-                })
-                .collect();
-            let d = *rng
-                .choose(&[[-90.0, 90.0], [-90.0, 90.0], [-90.0, 85.0], [-85.0, 90.0]])
-                .unwrap_or(&[-90.0, 90.0]);
-            (
-                GenIn::Circle {
-                    c: [0.0; 3],
-                    x: [1.0, 0.0, 0.0],
-                    y: [0.0, 0.0, 1.0],
-                    d,
-                    r,
-                },
-                at,
-            )
-        }
-    };
-    let sweep: f64 = if rng.chance(0.8) { 360.0 } else { *rng.choose(&[180.0, 270.0]).unwrap_or(&270.0) };
-    let circles = at
-        .iter()
-        .map(|&(c, radius)| {
-            let d = if sweep < 360.0 || rng.chance(0.1) {
-                [0.0, sweep.min(rng.uniform(150.0, 350.0))]
-            } else {
-                [0.0, 360.0]
-            };
-            z_circle(c, radius, rng.chance(0.5), d)
-        })
-        .collect();
-    (
-        SurfIn::Revolution {
-            gen,
-            point: [0.0; 3],
-            axis: [0.0, 0.0, 1.0],
-            swap: rng.chance(0.3),
-            sweep,
-        },
-        LoopsIn::Circles { circles },
-    )
-}
-
-fn gen_stage3(rng: &mut Rng) -> CaseIn {
-    let tol = *rng
-        .choose(&[1e-5, 1e-5, 1e-5, 1e-6, 1e-4, 1e-3, 1e-2, 0.1, 1.0])
-        .unwrap_or(&1e-5);
-    let z0 = rng.uniform(-1.0, 1.0);
-    let (surf, loops) = if rng.chance(0.5) {
-        (None, gen_plane_loops(rng, z0))
-    } else {
-        let (s, l) = gen_revolution_circles(rng);
-        (Some(s), l)
-    };
-    let face = FaceIn {
-        tol,
-        o: [0.0, 0.0, z0],
-        x: [1.0, 0.0, 0.0],
-        y: [0.0, 1.0, 0.0],
-        domain: [-4.0, -4.0, 4.0, 4.0],
-        surf,
-        loops: Some(loops),
-    };
-    let heal = f64::from(*rng.choose(&[19, 20, 21, 26, 26, 26]).unwrap_or(&26));
-    let index = rng.range_i64(0, 5) as f64;
-    let mut ops: Vec<[f64; 5]> = Vec::new();
-    if rng.chance(0.3) {
-        ops.push([0.0, 4.0, 26.0, index, 0.0]);
-    }
-    if rng.chance(0.5) {
-        ops.push([0.0, 6.0, heal, index, 0.0]);
-    } else {
-        ops.push([6.0, 3.0, heal, index, 0.0]);
-    }
-    ops.push([9.0, 0.0, 0.0, 0.0, 0.0]);
-    if rng.chance(0.3) {
-        ops.push([3.0, rng.range_i64(0, 7) as f64, 0.0, 0.0, 0.0]);
-    }
-    if rng.chance(0.2) {
-        // a reset to Stage 2 then Stage 3 again
-        ops.push([1.0, 5.0, 0.0, 0.0, 0.0]);
-        ops.push([0.0, 6.0, heal, index, 0.0]);
-        ops.push([9.0, 0.0, 0.0, 0.0, 0.0]);
-    }
-    if rng.chance(0.3) {
-        ops.push([8.0, 0.0, 0.0, 0.0, 0.0]);
-    }
-    CaseIn::Props {
-        face,
-        ops,
-        expect_rejected: false,
-    }
-}
-
 fn gen_tree(rng: &mut Rng) -> CaseIn {
     let n = rng.range_i64(1, 8);
     let mut items: Vec<[i64; 2]> = Vec::new();
@@ -1697,27 +1371,7 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        let mut cases = default_cases(self, &ctx)?;
-        // the Stage 3 family, on its own seeds (the `gen####` cases are unchanged)
-        let family = "heal.face_props/stage3";
-        for i in 0..STAGE3_GENERATED {
-            let seed = CaseContext::seed_for(family, i);
-            let mut rng = Rng::new(seed);
-            let c = gen_stage3(&mut rng);
-            if let CaseIn::Props { face, ops, .. } = &c {
-                if ffi::validate(&ffi_face(face), &ffi_ops(ops)).is_err() {
-                    continue;
-                }
-            }
-            let inputs = serde_json::to_value(c).map_err(|e| harness(e.to_string()))?;
-            cases.push(Case {
-                unit: self.id().to_string(),
-                name: format!("s3gen{i:04}"),
-                source: CaseSource::Generated { seed },
-                inputs,
-            });
-        }
-        Ok(cases)
+        default_cases(self, &ctx)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
