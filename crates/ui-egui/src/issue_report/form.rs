@@ -90,8 +90,19 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.6);
     // Ctrl+Enter (⌘Enter on a Mac) in any field continues on GitHub. Read before the fields see
-    // it, so it adds no line break.
-    let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+    // it, so it adds no line break. Only the press counts: the repeats of a held key are dropped,
+    // so holding it opens GitHub once.
+    let submit = ctx.input_mut(|i| {
+        let mut pressed_now = false;
+        i.events.retain(|e| match e {
+            egui::Event::Key { key: egui::Key::Enter, pressed, repeat, modifiers, .. } if modifiers.command => {
+                pressed_now |= *pressed && !*repeat;
+                false
+            }
+            _ => true,
+        });
+        pressed_now
+    });
     let (closed, mut action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
         .cards(cards)
         .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))

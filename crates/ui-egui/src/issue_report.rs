@@ -1133,7 +1133,7 @@ mod tests {
     }
 
     /// Ctrl+Enter (⌘Enter on a Mac) continues on GitHub from a field, without a line break, and
-    /// asks for a description first like the button does (#7203).
+    /// asks for a description first like the button does (#7203). Holding it opens GitHub once.
     #[test]
     fn issue_report_ctrl_enter_continues_on_github() {
         let mut h = crate::scenario::Harness::new();
@@ -1141,20 +1141,38 @@ mod tests {
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(8);
         assert!(h.widget(form::shortcut_hint(h.ctx.os())).is_some(), "the dialog says so");
-        let enter = egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
-        let press = |h: &mut crate::scenario::Harness| {
-            h.frame_with(vec![enter.clone()]);
-            let mut commands = h.output.commands.clone();
+        // As the platforms send it: ⌘ sets mac_cmd and command, Ctrl elsewhere ctrl and command.
+        // egui marks a press of a key it already holds down as a repeat.
+        let key = |pressed: bool| {
+            let modifiers = if h.ctx.os() == egui::os::OperatingSystem::Mac {
+                egui::Modifiers { mac_cmd: true, command: true, ..Default::default() }
+            } else {
+                egui::Modifiers { ctrl: true, command: true, ..Default::default() }
+            };
+            egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers }
+        };
+        let (down, up) = (key(true), key(false));
+        // Held for `repeats` frames after the press, then released.
+        let press = |h: &mut crate::scenario::Harness, repeats: usize| {
+            let mut commands = Vec::new();
+            for _ in 0..=repeats {
+                h.frame_with(vec![down.clone()]);
+                commands.extend(h.output.commands.clone());
+            }
+            h.frame_with(vec![up.clone()]);
+            commands.extend(h.output.commands.clone());
             h.frames(2);
             commands.extend(h.output.commands.clone());
             commands
         };
-        let commands = press(&mut h);
+        let commands = press(&mut h, 0);
         assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
         assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description, "an empty description is asked for");
         h.frame_with(vec![egui::Event::Text("The preview disappeared".into())]);
-        let commands = press(&mut h);
-        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))), "{commands:?}");
+        // Held down, it continues on GitHub once: its repeats open nothing more.
+        let commands = press(&mut h, 3);
+        let opened = commands.iter().filter(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))).count();
+        assert_eq!(opened, 1, "{commands:?}");
         let draft = h.app.issue_report.draft.as_ref().unwrap();
         assert_eq!(draft.description, "The preview disappeared", "no line break");
         assert!(draft.opened_github);
