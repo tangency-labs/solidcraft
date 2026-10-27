@@ -2055,6 +2055,9 @@ pub struct Renderer {
     /// The scene target's depth back to the far plane between the section's marking and push
     /// passes ([`Cut`]); stencil and colour untouched.
     section_reset: Option<wgpu::RenderPipeline>,
+    /// The new resolve textures [`clear_resolve_targets`] has cleared (tests count them).
+    #[cfg(test)]
+    resolve_clears: u32,
 }
 
 /// A triangle over the whole viewport at the far plane's depth (`FAR`), writing no colour:
@@ -2851,6 +2854,8 @@ impl Renderer {
                 ao: ao.join(),
                 depth_reset,
                 section_reset,
+                #[cfg(test)]
+                resolve_clears: 0,
                 target: GpuTarget { oit: oit.is_some(), ..t },
                 window,
                 max_texture: device.limits().max_texture_dimension_2d,
@@ -3798,6 +3803,11 @@ impl Renderer {
             self.ss = None;
             match allocated(device, || self.supersampled(device, size)) {
                 Ok(ss) => {
+                    let _cleared = clear_resolve_targets(encoder, ss.resolve.as_ref());
+                    #[cfg(test)]
+                    {
+                        self.resolve_clears += _cleared;
+                    }
                     self.ss = Some(ss);
                     drawn = Some((size, filtered));
                     break;
@@ -3817,7 +3827,14 @@ impl Renderer {
         if see_through && self.oit_targets.as_ref().is_none_or(|t| t.size != size) {
             self.oit_targets = None;
             match self.oit.as_ref().map(|p| allocated(device, || p.targets(device, size, samples))) {
-                Some(Ok(targets)) => self.oit_targets = Some(targets),
+                Some(Ok(targets)) => {
+                    let _cleared = clear_resolve_targets(encoder, targets.resolves());
+                    #[cfg(test)]
+                    {
+                        self.resolve_clears += _cleared;
+                    }
+                    self.oit_targets = Some(targets);
+                }
                 Some(Err(e)) => {
                     log::warn!("see-through surfaces are sorted: the GPU refused their {} × {} targets: {e}", size[0], size[1]);
                     self.oit = None;
@@ -3922,6 +3939,32 @@ impl Renderer {
         });
         Supersampled { size, color, resolve, depth, bind }
     }
+}
+
+/// Clear new textures that only a multisample resolve writes (the frame's resolved colour, the
+/// see-through surfaces' resolved sums), once, before their first resolve; how many it cleared.
+/// Direct3D 12 requires a render target placed in reused memory to be cleared, discarded or
+/// copied over before anything else uses it. A resolve is none of these, but wgpu counts it as
+/// the texture's first write and never clears it. Some AMD Radeon drivers then kept that memory's
+/// old compression state, and the multisampled scene showed as nothing at all (no grid, origin
+/// planes or bodies), a flat colour or speckles (#6828, #7157, #6613, #7052). At 1x the scene is
+/// drawn into a texture its own pass clears, which is why 1x anti-aliasing showed it.
+fn clear_resolve_targets<'a>(encoder: &mut wgpu::CommandEncoder, views: impl IntoIterator<Item = &'a wgpu::TextureView>) -> u32 {
+    let mut cleared = 0;
+    for view in views {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("sc_resolve_clear"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            ..Default::default()
+        });
+        cleared += 1;
+    }
+    cleared
 }
 
 /// Which part of a frame [`Renderer::draw`] draws.
@@ -4738,6 +4781,49 @@ mod glass_tests {
                 red(&render_frame(&mut r, &device, &queue, &frame, false)) && r.frame_budget == budget && r.ss.as_ref().map(|ss| ss.size) == size
             );
         }
+    }
+
+    /// A multisampled scene is resolved into textures nothing else writes. Direct3D 12 needs such a
+    /// texture cleared before its first use, and on some AMD Radeon cards an uncleared one showed
+    /// the scene as nothing at all: no grid, origin planes or bodies (#6828, #7157). Each new
+    /// resolve texture is cleared once when it is made (not every frame), and the picture shows.
+    #[test]
+    fn new_resolve_targets_are_cleared_before_their_first_resolve() {
+        let Some((adapter, device, queue)) = crate::open_headless().ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        if ![format, depth].iter().all(|f| adapter.get_texture_format_features(*f).flags.sample_count_supported(4)) {
+            return;
+        }
+        let window = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
+        let mut r = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 4, ..window }, window, None);
+        let middle = |pixels: &[u8]| -> [i32; 4] {
+            let at = (32 * 64 + 32) * 4;
+            std::array::from_fn(|i| pixels.get(at + i).map_or(-1, |v| i32::from(*v)))
+        };
+        let mut frame = test_frame(test_scene(), 1.0);
+        let shown = middle(&render_frame(&mut r, &device, &queue, &frame, false));
+        assert!(shown[0] > 200 && shown[1] < 60, "the multisampled scene shows its red triangle: {shown:?}");
+        assert_eq!(r.resolve_clears, 1, "the new frame's resolved colour is cleared first");
+        frame.view_proj[3][0] += 0.25;
+        render_frame(&mut r, &device, &queue, &frame, false);
+        assert_eq!(r.resolve_clears, 1, "a frame of the same size keeps its textures and clears nothing");
+        // Supersampled: a larger frame, so new textures, cleared again.
+        render_frame(&mut r, &device, &queue, &test_frame(test_scene(), 2.0), false);
+        assert_eq!(r.resolve_clears, 2, "the supersampled frame's new resolved colour is cleared first");
+        // See-through surfaces: the order-independent transparency's resolved sums too.
+        if r.oit.is_some() {
+            // A new scene key, so the renderer takes the see-through scene instead of keeping its own.
+            let glass = Frame { key: 2, ..test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0) };
+            render_frame(&mut r, &device, &queue, &glass, false);
+            assert!(r.model.see_through() && r.oit_targets.is_some(), "the see-through frame is drawn with order-independent transparency");
+            assert_eq!(r.resolve_clears, 5, "the frame's colour and both see-through sums are cleared first");
+        }
+        // One sample: the scene's own pass clears the texture it draws into, and nothing is resolved.
+        let mut single = Renderer::with_window_target(&device, GpuTarget { depth: Some(depth), samples: 1, ..window }, window, None);
+        render_frame(&mut single, &device, &queue, &test_frame(test_scene(), 1.0), false);
+        assert!(single.ss_ready, "the 1x scene is drawn offscreen too");
+        assert_eq!(single.resolve_clears, 0, "at one sample no texture is resolved into");
     }
 
     /// The Render workspace's preview once painted the modelling viewport's last frame instead of
