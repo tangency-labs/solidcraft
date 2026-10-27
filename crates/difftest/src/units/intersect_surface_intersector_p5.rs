@@ -143,6 +143,10 @@ struct Inputs {
     raw_knots: [bool; 2],
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes the field by reference"
+)]
 fn no_raw_knots(r: &[bool; 2]) -> bool {
     !r[0] && !r[1]
 }
