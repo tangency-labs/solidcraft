@@ -1547,7 +1547,10 @@ fn resolve_region<'a>(
     regions: Option<&'a dyn crate::topology::shell::RegionLookup>,
     symbol: &'static str,
 ) -> Result<crate::topology::shell::RegionRef<'a>> {
-    // UNPORTED(topology.shell): SmRegion::GetBrep / IsInfiniteRegion / IsVoid (justified: plan/findings.md "topology.shell: borrowed region context for attribute backedges")
+    // DOCUMENTED GAP (not an UNPORTED stub: topology.shell is green): SmRegion::GetBrep / IsInfiniteRegion / IsVoid need a caller-supplied
+    // `RegionLookup`; plan/findings/topology.shell--borrowed-region-context-for-attribute-backedges-pr-80-issue.md.
+    // Every notify caller that passes `None` (change-owner, geometry edits) never reaches
+    // a region handler; the `None` deferral is covered by the unit tests of this file.
     // REGION-LOOKUP(#86): no library `RegionLookup` exists yet, so a region handler
     // reached without a caller-supplied context defers here instead of inferring
     // region state. The owner of issue #86 replaces this with the real lookup
