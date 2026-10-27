@@ -15,6 +15,12 @@ const BRACKET_FCSTD: &[u8] = include_bytes!("fixtures/bracket.FCStd");
 /// groove and a chamfer (`fixtures/make_knob_fcstd.py`, FreeCAD 26.3).
 const KNOB_FCSTD: &[u8] = include_bytes!("fixtures/knob.FCStd");
 
+/// A PartDesign body saved from FreeCAD's window, so its tip's shape stays shown beside the
+/// body's: a sketch with two holes padded, a slot pocketed along the X axis and mirrored, holes
+/// repeated about Z and along X, a shape binder and filleted corners (`fixtures/make_plate_fcstd.py`,
+/// FreeCAD 26.3).
+const PLATE_FCSTD: &[u8] = include_bytes!("fixtures/plate.FCStd");
+
 /// STEP text, which these importers refuse.
 const STEP_TEXT: &str = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n";
 
@@ -236,4 +242,31 @@ fn hostile_freecad_history_never_panics() {
         let r = std::panic::catch_unwind(|| native_cad_design(&good[..good.len() / 2], "hostile.FCStd"));
         assert!(r.is_ok());
     }
+}
+
+/// A body with holes in its sketch, a pocket along an origin axis, a mirror, polar and linear
+/// patterns and a binder rebuilds step for step: FreeCAD's volume, 7818.009 mm³.
+#[test]
+fn freecad_patterns_and_mirrors_rebuild() {
+    let d = native_cad_design(PLATE_FCSTD, "plate.FCStd").unwrap();
+    let kinds = types(&d);
+    for kind in ["MirrorFeature", "CircularPatternFeature", "RectangularPatternFeature", "FilletFeature"] {
+        assert!(kinds.contains(&kind), "{kind}: {kinds:?}");
+    }
+    assert_eq!(kinds.iter().filter(|k| **k == "Sketch").count(), 4, "the binder makes no feature: {kinds:?}");
+    let m = measured(&d);
+    assert_eq!(m.len(), 1);
+    assert!((m[0].volume - 7818.009).abs() < 0.05, "volume {}", m[0].volume);
+}
+
+/// In a file saved from FreeCAD's window the tip feature's shape is shown, and so is a binder;
+/// neither is imported beside the body's own shape.
+#[test]
+fn freecad_shown_tip_and_binders_are_not_imported_twice() {
+    let sf = crate::step_import_feature(PLATE_FCSTD, "plate.FCStd").unwrap();
+    let solidcraft_doc::FeatureKind::Import { skip, .. } = &sf.kind else { panic!("not an Import feature") };
+    let built: Vec<_> = sf.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b).collect();
+    assert_eq!(built.len(), 1, "{} bodies in the file, {} skipped", sf.import.bodies.len(), skip.len());
+    let v = solidcraft_kernel::measure(&built[0].body).unwrap().volume;
+    assert!((v - 7818.009).abs() < 0.05, "volume {v}");
 }

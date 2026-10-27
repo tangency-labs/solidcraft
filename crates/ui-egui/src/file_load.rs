@@ -484,15 +484,15 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
         return Ok(());
     }
     default_reuse_import(app, &mut request);
-    if matches!(request.kind, Kind::Open | Kind::Insert) {
-        for (k, v) in preferred_options(app, &request.path) {
-            request.options.entry(k).or_insert(v);
-        }
-    }
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
     if matches!(request.kind, Kind::Open | Kind::Insert) {
+        // After `reuse_open`: an already open tab is kept whatever the import preferences say,
+        // as the folder option is.
+        for (k, v) in preferred_options(app, &request.path) {
+            request.options.entry(k).or_insert(v);
+        }
         step_folder_option(app, &request.path, &mut request.options);
     }
     #[cfg(target_arch = "wasm32")]

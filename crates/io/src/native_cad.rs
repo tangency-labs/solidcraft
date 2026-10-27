@@ -154,8 +154,8 @@ mod convert {
             return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
         }
 
-        // Decode in memory under the caps, as deep as the STEP writer reads: solids and products,
-        // not the design history, which the import does not keep.
+        // Decode in memory under the caps, at the depth the caller chose: the STEP writer reads
+        // solids and products; a FreeCAD history rebuild reads the design too.
         let options = DecodeOptions { depth, policy };
         let decoded = codec.decode(&mut Cursor::new(bytes), &options).map_err(|e| match e {
             DecodeFailure::Codec(e) => format!("{name}: could not read this {format} file: {e}"),
@@ -183,24 +183,86 @@ mod convert {
                 arenas.placements.insert(object, m);
             }
         }
+        // The origin axes patterns name: an `App::Line` runs along its placement's first column.
+        let native = ir.native.namespace("fcstd").map(|n| n.arenas());
+        let object_name = |v: &serde_json::Value| v.as_str().and_then(|o| o.rsplit_once('#')).map(|(_, n)| n.to_string());
+        let lines: std::collections::HashSet<String> = native
+            .and_then(|a| a.get("objects"))
+            .into_iter()
+            .flatten()
+            .filter(|r| r.field("type_name").is_some_and(|t| t == "App::Line"))
+            .filter_map(|r| r.field("name").and_then(|n| n.as_str().map(str::to_string)))
+            .collect();
+        for r in native.and_then(|a| a.get("properties")).into_iter().flatten() {
+            if !r.field("name").is_some_and(|n| n == "Direction" || n == "Axis") {
+                continue;
+            }
+            let (Some(owner), Some(links)) = (r.field("owner").as_ref().and_then(object_name), r.field("links")) else { continue };
+            let Some([link]) = links.as_array().map(Vec::as_slice) else { continue };
+            let whole = link.get("subelements").and_then(|s| s.as_array()).is_none_or(|s| s.iter().all(|e| e.as_str().is_none_or(str::is_empty)));
+            let Some(line) = link.get("object").and_then(object_name).filter(|l| whole && lines.contains(l)) else { continue };
+            if let Some(m) = arenas.placements.get(&line) {
+                let at = solidcore_record::Vec3::new(m[0][3], m[1][3], m[2][3]);
+                let along = solidcore_record::Vec3::new(m[0][0], m[1][0], m[2][0]);
+                arenas.pattern_axes.insert(owner, (at, along));
+            }
+        }
         let index = std::cell::OnceCell::new();
         let work = WorkBudget::new(EDGE_WORK);
         let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
         super::design::rebuild(&arenas, &edge_point)
     }
 
+    /// Mark hidden what FreeCAD shows only through its body: the shapes of the features inside a
+    /// PartDesign body that has a shape of its own (a file saved from FreeCAD's window keeps the
+    /// tip feature's shape visible beside the body's identical one), and binders, which are
+    /// reference copies of other geometry. The STEP writer marks them invisible, and the import
+    /// leaves them out.
+    fn hide_body_members(ir: &mut CadIr) {
+        use serde_json::Value;
+        let Ok(Value::Array(features)) = serde_json::to_value(&ir.model.features) else { return };
+        let operation = |f: &Value| {
+            let d = f.get("definition")?;
+            if d.get("definition").and_then(Value::as_str) == Some("post_process") { d.get("operation").cloned() } else { Some(d.clone()) }
+        };
+        let outputs = |f: &Value| -> Vec<String> {
+            f.get("outputs").and_then(Value::as_array).into_iter().flatten().filter_map(|o| o.as_str().map(str::to_string)).collect()
+        };
+        let mut members = std::collections::HashSet::new();
+        for f in &features {
+            let Some(d) = operation(f) else { continue };
+            let body = d.get("role").and_then(Value::as_str) == Some("solid_bodies") && !outputs(f).is_empty();
+            if d.get("definition").and_then(Value::as_str) == Some("tree_node") && body {
+                members.extend(
+                    d.pointer("/children/children").and_then(Value::as_array).into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)),
+                );
+            }
+        }
+        let mut hidden = std::collections::HashSet::new();
+        for f in &features {
+            let member = f.get("id").and_then(Value::as_str).is_some_and(|id| members.contains(id));
+            let binder = operation(f).is_some_and(|d| d.get("definition").and_then(Value::as_str) == Some("binder"));
+            if member || binder {
+                hidden.extend(outputs(f));
+            }
+        }
+        for body in ir.model.bodies.iter_mut().filter(|b| hidden.contains(b.id.as_str())) {
+            body.visible = Some(false);
+        }
+    }
+
     /// Curve evaluation steps spent placing fillet and chamfer edges, at most.
     const EDGE_WORK: usize = 1 << 22;
 
     /// A point on model edge `id`: its carrier at the middle of its range.
-    fn edge_point(ir: &CadIr, index: &ModelIndex<'_>, work: &WorkBudget, id: &str) -> Option<solidcraft_geom::Vec3> {
+    fn edge_point(ir: &CadIr, index: &ModelIndex<'_>, work: &WorkBudget, id: &str) -> Option<solidcore_record::Vec3> {
         let edge = ir.model.edges.iter().find(|e| e.id.as_str() == id)?;
         let curve = edge.carrier.curve()?;
         let [a, b] = edge.param_range()?.get();
         let t = 0.5 * (a + b);
         let p =
             finite_or_refusal(EvaluationAdmission::Standard.within_work_slice(work, |adm| model_curve_point_by_id(adm, index, curve, t))).ok()??;
-        Some(solidcraft_geom::Vec3::new(p.x, p.y, p.z))
+        Some(solidcore_record::Vec3::new(p.x, p.y, p.z))
     }
 
     pub(super) fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
@@ -210,7 +272,8 @@ mod convert {
         }
         let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
         let policy = policy();
-        let (ir, report, fidelity) = decoded.into_parts();
+        let (mut ir, report, fidelity) = decoded.into_parts();
+        hide_body_members(&mut ir);
         if !report.geometry_transferred() {
             return Err(format!("{name}: no geometry could be read from this {format} file"));
         }

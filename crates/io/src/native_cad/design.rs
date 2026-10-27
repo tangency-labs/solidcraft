@@ -14,12 +14,13 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::sketch::{ConstraintKind, CurveKind, Sketch};
 use solidcraft_doc::{
     AxisRef, Dir, Direction, Document, Expr, Extent, ExtrudeConvention, FeatureKind, Operation, PlaneRef, Position, ProfileSel, RevolveConvention,
     SketchId,
 };
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 /// Features read at most (a design with more is imported as solids).
 const MAX_FEATURES: usize = 2000;
@@ -49,6 +50,11 @@ pub(super) struct Arenas {
     /// Each FreeCAD object's placement (by object name), a row-major 4 × 4 matrix. A body's
     /// features are placed in it; a feature's stored shape is placed by its own.
     pub(super) placements: HashMap<String, Mat4>,
+    /// The origin axis (origin, direction) a LinearPattern's `Direction` or a PolarPattern's
+    /// `Axis` names, by pattern object name: cadmpeg (0.6.6 and still 0.6.7) takes such an axis's
+    /// direction from the third column of its placement, where a FreeCAD origin axis runs along
+    /// the first.
+    pub(super) pattern_axes: HashMap<String, (Vec3, Vec3)>,
 }
 
 /// A row-major 4 × 4 placement matrix.
@@ -79,6 +85,7 @@ impl Arenas {
             constraints: list(serde_json::to_value(&model.sketch_constraints).map_err(wire)?),
             parameters: by_id(list(serde_json::to_value(&model.parameters).map_err(wire)?)),
             placements: HashMap::new(),
+            pattern_axes: HashMap::new(),
         })
     }
 }
@@ -155,7 +162,14 @@ pub(super) fn rebuild(arenas: &Arenas, edge_point: &EdgePoint<'_>) -> Result<Nat
         features.iter().find(|f| s(f, "id") == Some(id)).and_then(|f| s(f, "name")).map_or_else(|| short(id).to_string(), str::to_string)
     };
 
-    let mut b = Builder { doc: Document::new("FreeCAD"), warnings: Vec::new(), sketches: HashMap::new(), bodies: HashMap::new(), frame: IDENTITY };
+    let mut b = Builder {
+        doc: Document::new("FreeCAD"),
+        warnings: Vec::new(),
+        sketches: HashMap::new(),
+        bodies: HashMap::new(),
+        frame: IDENTITY,
+        made: HashMap::new(),
+    };
     // A point on a model edge, placed: the edge's shape by its object's placement, and that
     // object by its body's.
     let placed_edge = |edge: &str| -> Option<Vec3> {
@@ -176,8 +190,9 @@ pub(super) fn rebuild(arenas: &Arenas, edge_point: &EdgePoint<'_>) -> Result<Nat
         let body = body_of.get(id).map(|b| name_of(b));
         b.frame = body_of.get(id).and_then(|b| arenas.placements.get(short(b))).copied().unwrap_or(IDENTITY);
         let made = match s(d, "definition").unwrap_or_default() {
-            // Structure (bodies, groups, spreadsheets) and construction geometry make no solid.
-            "tree_node" | "datum_plane" | "datum_axis" | "datum_point" | "datum_coordinate_system" => None,
+            // Structure (bodies, groups, spreadsheets), construction geometry and binders (copies
+            // of other geometry for sketches to refer to) make no solid.
+            "tree_node" | "datum_plane" | "datum_axis" | "datum_point" | "datum_coordinate_system" | "binder" => None,
             "sketch" => Some(b.sketch(arenas, d, &name)?),
             _ if suppressed => {
                 b.warnings.push(format!("{name}: suppressed in FreeCAD, left out"));
@@ -190,8 +205,12 @@ pub(super) fn rebuild(arenas: &Arenas, edge_point: &EdgePoint<'_>) -> Result<Nat
                 Some(b.primitive(d, &name, body.as_deref(), &placement)?)
             }
             "fillet" | "chamfer" => Some(b.edge_treatment(d, &name, body.as_deref(), &placed_edge)?),
+            "pattern" => Some(b.pattern(d, &name, body.as_deref(), arenas.pattern_axes.get(short(id)))?),
             other => return Err(format!("{name}: FreeCAD {tag} ({other}) is not rebuilt yet")),
         };
+        if let Some(fid) = made {
+            b.made.insert(id.to_string(), fid);
+        }
         if let (Some(fid), true) = (made, suppressed)
             && let Some(f) = b.doc.feature_mut(fid)
         {
@@ -213,6 +232,8 @@ struct Builder {
     bodies: HashMap<String, ()>,
     /// The placement of the body the current feature is in.
     frame: Mat4,
+    /// cadmpeg feature id → our feature made for it (the last, when it made several).
+    made: HashMap<String, u64>,
 }
 
 const IDENTITY: Mat4 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
@@ -275,8 +296,8 @@ impl Builder {
         }
     }
 
-    /// `pocket`: a FreeCAD Pocket, which travels against the direction cadmpeg states (cadmpeg
-    /// gives the sketch normal, reversed with `Reversed`, for Pad and Pocket alike).
+    /// `pocket`: a FreeCAD Pocket, which travels against the sketch normal cadmpeg states as its
+    /// direction (the normal, reversed with `Reversed`, for Pad and Pocket alike).
     fn extrude(&mut self, d: &Value, name: &str, body: Option<&str>, pocket: bool) -> Result<u64, String> {
         let (sketch, plane) = self.profile(d, name)?;
         if d.pointer("/start/kind").and_then(Value::as_str).is_some_and(|k| k != "profile_plane") {
@@ -290,7 +311,10 @@ impl Builder {
             Some("reversed_profile_normal") => -plane.normal(),
             _ => plane.normal(),
         };
-        let along = if pocket { -along } else { along };
+        // Only a direction cadmpeg took from the sketch normal is turned for a Pocket; one taken
+        // from an edge or given outright is the way it travels.
+        let from_normal = d.pointer("/direction/source/kind").and_then(Value::as_str).is_none_or(|k| k == "profile_normal");
+        let along = if pocket && from_normal { -along } else { along };
         let n = plane.normal();
         let cos = along.dot(n) / along.len().max(f64::MIN_POSITIVE);
         if cos.abs() < 1.0 - 1e-9 {
@@ -327,9 +351,10 @@ impl Builder {
         // Through all both ways is a symmetric through all here.
         let direction = if through && s(e, "kind") == Some("two_sided") { Direction::Symmetric } else { direction };
         let (operation, targets, made) = self.operation(s(d, "op").unwrap_or("join"), name, body)?;
+        let profiles = self.even_odd(sketch);
         let kind = FeatureKind::Extrude {
             sketch: SketchId(sketch),
-            profiles: ProfileSel::All,
+            profiles,
             extent: Extent {
                 distance: mm(first.unwrap_or(10.0)),
                 convention,
@@ -341,6 +366,11 @@ impl Builder {
                 to: None,
                 to_offset: None,
                 from: None,
+                // The PR was written before these: no second side follows the first (the
+                // FreeCAD two-sided extent is one side each way), no taper, no join apart.
+                second_follows_first: false,
+                corner: None,
+                to_body_apart: false,
             },
             operation,
             targets,
@@ -369,12 +399,23 @@ impl Builder {
         }
         let corner = solidcraft_doc::point_expr(at);
         let kind = match s(solid, "kind") {
-            Some("box") if upright => {
-                FeatureKind::Box { corner, length: mm(len("length")?), width: mm(len("width")?), height: mm(len("height")?), operation: op }
-            }
-            Some("cylinder") if whole("angle", TAU) => {
-                FeatureKind::Cylinder { base: corner, axis: Dir(z), radius: mm(len("radius")?), height: mm(len("height")?), operation: op }
-            }
+            Some("box") if upright => FeatureKind::Box {
+                corner,
+                length: mm(len("length")?),
+                width: mm(len("width")?),
+                height: mm(len("height")?),
+                operation: op,
+                // FreeCAD places a Part box by its lowest corner, as `corner` is.
+                centred: false,
+            },
+            Some("cylinder") if whole("angle", TAU) => FeatureKind::Cylinder {
+                base: corner,
+                axis: Dir(z),
+                radius: mm(len("radius")?),
+                height: mm(len("height")?),
+                operation: op,
+                references: Vec::new(),
+            },
             Some("cone") if whole("angle", TAU) => FeatureKind::Cone {
                 base: corner,
                 axis: Dir(z),
@@ -396,6 +437,105 @@ impl Builder {
         let id = self.add(kind, name)?;
         self.named(id, made);
         Ok(id)
+    }
+
+    /// The regions FreeCAD makes faces of: a loop inside another is a hole, one inside that
+    /// a region again (even-odd). All the sketch's profiles when none is nested in another.
+    fn even_odd(&self, sketch: u64) -> ProfileSel {
+        let Ok(sk) = self.doc.sketch(sketch) else { return ProfileSel::All };
+        let profiles = solidcraft_doc::sketch::find_profiles(sk);
+        let outer_area = |p: &solidcraft_doc::sketch::Profile| p.region.outer.signed_area().abs();
+        let keep: Vec<&solidcraft_doc::sketch::Profile> = profiles
+            .iter()
+            .filter(|p| {
+                let Some(on) = p.region.outer.polyline(1e-3).first().copied() else { return true };
+                let depth = profiles.iter().filter(|q| outer_area(q) > outer_area(p) && q.region.outer.contains(on)).count();
+                depth % 2 == 0
+            })
+            .collect();
+        if keep.len() == profiles.len() {
+            return ProfileSel::All;
+        }
+        let whole = keep
+            .iter()
+            .map(|p| p.whole_curve_boundaries().map(|(outer, holes)| solidcraft_doc::WholeProfileBoundary { outer, holes }))
+            .collect::<Option<Vec<_>>>();
+        match whole {
+            Some(profiles) if !profiles.is_empty() => ProfileSel::WholeBoundaries { profiles },
+            _ => ProfileSel::All,
+        }
+    }
+
+    /// A Mirrored, LinearPattern or PolarPattern of features: their copies, replayed.
+    /// `axis`: the origin axis the pattern names, when it names one (see [`Arenas::pattern_axes`]).
+    fn pattern(&mut self, d: &Value, name: &str, body: Option<&str>, axis: Option<&(Vec3, Vec3)>) -> Result<u64, String> {
+        if body.is_none_or(|b| !self.bodies.contains_key(b)) {
+            return Err(format!("{name}: a pattern outside a body is not rebuilt yet"));
+        }
+        let mut features = Vec::new();
+        for seed in d.get("seeds").and_then(Value::as_array).into_iter().flatten() {
+            let made = (s(seed, "kind") == Some("feature")).then(|| s(seed, "value")).flatten().and_then(|f| self.made.get(f));
+            features.push(solidcraft_doc::FeatureId(*made.ok_or_else(|| format!("{name}: it copies something that was not rebuilt"))?));
+        }
+        if features.is_empty() {
+            return Err(format!("{name}: nothing to copy"));
+        }
+        let p = d.get("pattern").ok_or_else(|| format!("{name}: no pattern"))?;
+        let count = |k: &str| p.get(k).and_then(Value::as_u64).filter(|n| (1..=10_000).contains(n)).ok_or_else(|| format!("{name}: no count"));
+        let kind = match s(p, "kind") {
+            Some("mirror") => {
+                let origin = apply(&self.frame, vec3(p.get("plane_origin")).ok_or_else(|| format!("{name}: no mirror plane"))?);
+                let normal = rotate(&self.frame, vec3(p.get("plane_normal")).ok_or_else(|| format!("{name}: no mirror plane"))?);
+                let plane = Plane::from_normal(origin, normal).ok_or_else(|| format!("{name}: a degenerate mirror plane"))?;
+                FeatureKind::Mirror { features, plane: PlaneRef::Custom { plane }, bodies: Vec::new(), combine: false, placements: Vec::new() }
+            }
+            Some("linear") if p.get("second").is_none_or(Value::is_null) => {
+                let dir = axis.map(|a| a.1).or_else(|| vec3(p.get("direction")));
+                let dir = dir.map(|d| rotate(&self.frame, d)).and_then(Vec3::normalized).ok_or_else(|| format!("{name}: no direction"))?;
+                FeatureKind::Pattern {
+                    features,
+                    pattern: solidcraft_doc::PatternKind::Rectangular {
+                        dir1: Dir(dir),
+                        count1: Expr::from(count("count")?.to_string().as_str()),
+                        spacing1: mm(f(p, "spacing").ok_or_else(|| format!("{name}: no spacing"))?),
+                        dir2: None,
+                        count2: None,
+                        spacing2: None,
+                        alignment: Default::default(),
+                        alignment2: Default::default(),
+                        reversed: false,
+                        reversed2: false,
+                    },
+                    bodies: Vec::new(),
+                }
+            }
+            Some("circular") => {
+                let (at, along) = match axis {
+                    Some((at, along)) => (Some(*at), Some(*along)),
+                    None => (vec3(p.get("axis_origin")), vec3(p.get("axis_dir"))),
+                };
+                let origin = apply(&self.frame, at.ok_or_else(|| format!("{name}: no axis"))?);
+                let axis = along.map(|d| rotate(&self.frame, d)).and_then(Vec3::normalized).ok_or_else(|| format!("{name}: no axis"))?;
+                FeatureKind::Pattern {
+                    features,
+                    pattern: solidcraft_doc::PatternKind::Circular {
+                        origin: solidcraft_doc::point_expr(origin),
+                        axis: Dir(axis),
+                        count: Expr::from(count("count")?.to_string().as_str()),
+                        // cadmpeg's angle runs from the first copy to the last, as ours does for
+                        // less than a whole turn.
+                        angle: deg(f(p, "angle").ok_or_else(|| format!("{name}: no angle"))?),
+                        alignment: Default::default(),
+                        reversed: false,
+                        axis_ref: None,
+                        axis_feature: None,
+                    },
+                    bodies: Vec::new(),
+                }
+            }
+            other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),
+        };
+        self.add(kind, name)
     }
 
     fn revolve(&mut self, d: &Value, name: &str, body: Option<&str>) -> Result<u64, String> {
@@ -431,9 +571,10 @@ impl Builder {
         let sign = if dir.cross(radial).dot(plane.normal()) < 0.0 { -1.0 } else { 1.0 };
         let (first, second) = (first * sign, second.map(|a| a * sign));
         let (operation, targets, made) = self.operation(s(d, "op").unwrap_or("join"), name, body)?;
+        let profiles = self.even_odd(sketch);
         let kind = FeatureKind::Revolve {
             sketch: SketchId(sketch),
-            profiles: ProfileSel::All,
+            profiles,
             axis: AxisRef::Line { origin: solidcraft_doc::point_expr(origin), dir: Dir(dir) },
             angle: deg(first),
             operation,
@@ -479,6 +620,10 @@ impl Builder {
                     style: Default::default(),
                     fit: Default::default(),
                     corner: Default::default(),
+                    setbacks: Vec::new(),
+                    turn: Default::default(),
+                    // As the commands pick an edge: round its whole tangent chain.
+                    tangent_chain: true,
                 }
             } else {
                 let spec = g.get("spec").ok_or_else(|| format!("{name}: no size"))?;
@@ -496,6 +641,7 @@ impl Builder {
                     angle,
                     flip: d.get("flip_direction").and_then(Value::as_bool).unwrap_or(false),
                     body: Some(body.into()),
+                    tangent_chain: true,
                 }
             };
             let label = if groups.len() > 1 { format!("{name} {}", i + 1) } else { name.to_string() };
