@@ -19,6 +19,10 @@
     "Close this draft to report the new problem.": "新しい問題を報告するには、この下書きを閉じてください。",
     "Restore what you typed before": "前回の入力を復元"
   },
+  "vi": {
+    "Close this draft to report the new problem.": "Hãy đóng bản nháp này để báo cáo sự cố mới.",
+    "Restore what you typed before": "Khôi phục nội dung bạn đã nhập trước đó"
+  },
   "zh": {
     "Close this draft to report the new problem.": "关闭此草稿以报告新问题。",
     "Restore what you typed before": "恢复之前输入的内容"
