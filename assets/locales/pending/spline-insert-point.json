@@ -1,0 +1,14 @@
+{
+  "en": {
+    "cmd.sketch_spline_insert_point": "Add Spline Point"
+  },
+  "de": {
+    "cmd.sketch_spline_insert_point": "Splinepunkt hinzufügen"
+  },
+  "ja": {
+    "cmd.sketch_spline_insert_point": "スプライン点を追加"
+  },
+  "zh": {
+    "cmd.sketch_spline_insert_point": "添加样条曲线点"
+  }
+}

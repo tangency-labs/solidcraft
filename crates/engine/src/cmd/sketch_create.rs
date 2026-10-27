@@ -79,6 +79,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("spline_cv")
         .enabled(in_sketch)
         .params(concat!("points: control points (2…500), degree 5", created_doc!())),
+    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", spline_insert_point)
+        .icon("spline")
+        .enabled(in_sketch)
+        .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
     CommandSpec::new("sketch.conic", "Conic Curve", conic)
         .at("SKETCH", "CREATE")
         .icon("conic")
@@ -676,6 +680,28 @@ fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
     spline(s, p, "sketch.spline.control_point_5", true, 5)
+}
+
+fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.insert_point";
+    let at = req_vec2(cmd, p, "at")?;
+    let end = match p.get("end") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(e)) if e == "start" => Some(true),
+        Some(Value::String(e)) if e == "end" => Some(false),
+        Some(_) => return Err(bad(cmd, "`end` must be start or end")),
+    };
+    let (point, info) = edit(s, p, cmd, false, |sk, _| {
+        let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
+        let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let new = match end {
+            None => sk.insert_spline_point(c, at),
+            Some(at_start) => sk.extend_spline(c, at, at_start),
+        }
+        .map_err(|e| bad(cmd, e.to_string()))?;
+        sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))
+    })?;
+    Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
 }
 
 fn conic(s: &mut Session, p: &Value) -> Result<Value> {

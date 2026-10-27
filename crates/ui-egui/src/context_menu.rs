@@ -1046,6 +1046,17 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
     }
+    // #6533: a fit point on a fit point spline, where the menu was opened over it.
+    if let [curve] = curves.as_slice()
+        && ss
+            .sketch
+            .curve_index(curve)
+            .and_then(|i| ss.sketch.curves.get(i))
+            .is_some_and(|c| matches!(c.kind, CurveKind::Spline { control: false, .. }))
+        && let Some(at) = menu_sketch_point(app, &ss.plane)
+    {
+        v.push(cmd(app, "sketch.spline.insert_point", "Add Spline Point").with(json!({"curve": curve, "at": [at.x, at.y]})));
+    }
     v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
     // The clipboard beside Delete, as in every menu.
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
@@ -1105,6 +1116,14 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.extend(c);
     }
     v
+}
+
+/// Where on the active sketch's plane the viewport menu was opened (sketch coordinates).
+fn menu_sketch_point(app: &SolveApp, plane: &solidcraft_engine::geom::Plane) -> Option<solidcraft_engine::geom::Vec2> {
+    let (at, _) = app.menu.opened?;
+    let proj = crate::viewport::projection(app, app.viewport.rect?);
+    let (o, d) = proj.ray(at);
+    Some(plane.to_local(plane.intersect_ray(o, d)?))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2351,6 +2370,61 @@ mod tests {
         let remaining = sk.shape(sk.curve_index(&output).unwrap()).unwrap();
         assert!(matches!(remaining, Shape::Line { a, b } if (a.dist(b) - 10.0).abs() < 1e-6), "{remaining:?}");
         assert!(remaining.dist(cut) > 1.0);
+    }
+
+    /// #6533: a right-click on a fit point spline offers Add Spline Point at the clicked spot, and
+    /// the item puts a fit point there. A control point spline is not offered it.
+    #[test]
+    fn spline_context_menu_adds_a_fit_point_where_it_was_clicked() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let fit = h.app.run("sketch.spline.fit_point", json!({"points":[[0,0],[10,8],[20,0],[30,6]],"connect":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let control = h.app.run("sketch.spline.control_point", json!({"points":[[0,-12],[10,-4],[20,-12]],"connect":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let sid = h.app.session.active_sketch.unwrap();
+        let spot = |h: &crate::scenario::Harness, id: &str, piece: usize| {
+            let state = h.app.session.world_state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            sk.exact_segs(sk.curve_index(id).unwrap()).unwrap()[piece].point_at(0.5)
+        };
+        let count = |h: &crate::scenario::Harness, id: &str| {
+            let state = h.app.session.world_state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
+        };
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.settle();
+
+        let c = spot(&h, &control, 0);
+        h.step(&json!({"click":{"world":[c.x,c.y,0]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: control.clone(), sketch: None }]);
+        assert!(items(&h.app, &Target::Viewport).iter().all(|item| item.id != "sketch.spline.insert_point"));
+        close(&mut h.app);
+
+        let at = spot(&h, &fit, 1);
+        h.step(&json!({"click":{"world":[at.x,at.y,0]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: fit.clone(), sketch: None }]);
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|item| item.id == "sketch.spline.insert_point").expect("a fit spline offers Add Spline Point");
+        assert_eq!(item.label, "Add Spline Point");
+        assert!(item.enabled);
+        let p = item.params.clone().unwrap();
+        assert_eq!(p["curve"], json!(fit));
+        let clicked = solidcraft_engine::geom::Vec2::new(p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap());
+        assert!(clicked.dist(at) < 0.5, "the item carries the clicked spot: {clicked:?} for {at:?}");
+        h.step(&json!({"click":{"handle":"menu:sketch.spline.insert_point"}})).unwrap();
+        assert_eq!(count(&h, &fit), 5);
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let added = sk.point(sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids()[2]).unwrap();
+        assert!(added.dist(at) < 0.5, "the new fit point is where the menu was opened: {added:?}");
     }
 
     #[test]

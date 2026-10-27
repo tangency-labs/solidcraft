@@ -36,6 +36,7 @@ mod profiles;
 pub mod profiling;
 mod shape;
 mod solver;
+mod spline_points;
 mod text;
 mod thin;
 mod union_find;
