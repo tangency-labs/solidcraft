@@ -15,17 +15,18 @@ use solidcraft_sketch::Sketch;
 use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
-/// measured.
+/// measured, face surfaces classified for a hole's direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
     pub joint_faces: usize,
     pub measures: usize,
+    pub surfaces: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0 }) };
+    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0, surfaces: 0 }) };
 }
 
 pub(super) fn count(f: impl FnOnce(&mut Counts)) {
@@ -473,4 +474,51 @@ fn placed_bodies_taken_as_before_keep_their_measure() {
     let centroid = before.bodies[0].measure().unwrap().centroid;
     let again = world_state_reusing(&doc, &state, &mut cache);
     assert_eq!(counted(|| assert_eq!(again.bodies[0].measure().unwrap().centroid, centroid)).measures, 0);
+}
+
+#[test]
+fn a_hole_skips_the_parts_its_line_cannot_reach() {
+    use solidcraft_geom::Aabb3;
+    let unit = Aabb3 { min: Vec3::ZERO, max: Vec3::new(1.0, 1.0, 1.0) };
+    // Down through the box, from above and from below (the line runs both ways).
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, -5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Beside it, parallel to a side: a zero direction component keeps the line out of the slab.
+    assert!(!super::line_meets_box(Vec3::new(2.0, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Slanted past a corner, and slanted through it.
+    assert!(!super::line_meets_box(Vec3::new(3.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(-1.0, -1.0, 0.5), Vec3::new(1.0, 1.0, 0.0), &unit));
+    // Touching a face counts; an empty box never meets.
+    assert!(super::line_meets_box(Vec3::new(1.0, 0.5, 9.0), Vec3::new(0.0, 0.0, 1.0), &unit));
+    assert!(!super::line_meets_box(Vec3::new(0.5, 0.5, 0.5), Vec3::new(0.0, 0.0, 1.0), &Aabb3::EMPTY));
+}
+
+#[test]
+fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
+    // Forty separate cylinders, three faces each. A hole placed on the top of one drills down,
+    // and finding that out reads the nearest face only: it used to classify every face of every
+    // body first, which in an assembly of hundreds of imported parts took seconds per hole.
+    let mut doc = Document::new("hole direction work");
+    for k in 0..40 {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(10.0 * f64::from(k), 0.0, 0.0)),
+            axis: Dir(Vec3::Z),
+            radius: "2".into(),
+            height: "10".into(),
+            operation: Operation::NewBody,
+        };
+        doc.add_feature(kind, None).unwrap();
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 40);
+    let mut dir = None;
+    let work = counted(|| dir = super::hole_direction_at(&st, Vec3::new(250.5, 0.5, 10.0)));
+    let dir = dir.unwrap();
+    assert!((dir - Vec3::new(0.0, 0.0, -1.0)).len() < 1e-9, "drills down into the top: {dir:?}");
+    assert!(work.surfaces <= 2, "classified {} face surfaces for one hole", work.surfaces);
+    // A point on a side wall drills into that wall.
+    let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0)).unwrap();
+    assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
 }
