@@ -757,6 +757,114 @@ fn the_timelines_delete_checks_off_the_window_thread() {
     assert!((volume(&mut h) - block_with_hole()).abs() < 1.0);
 }
 
+#[test]
+fn deleting_several_features_warns_about_their_shared_future_dependent() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"name":name,"body_name":name})).unwrap();
+    }
+    h.app.run("solid.scale", json!({"bodies":["A","B"],"factor":2,"name":"ScaleBoth"})).unwrap();
+    h.app.run("timeline.rollback", json!({"position":2})).unwrap();
+    let ids = feature_ids(&h).into_iter().take(2).collect::<Vec<_>>();
+    let before = h.app.session.doc.clone();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    crate::timeline::delete_features(&mut h.app, ids);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc, before, "the warning must precede any deletion");
+    assert!(format!("{:?}", h.app.dialog).contains("ScaleBoth"), "the future dependent is reported");
+    assert!(
+        matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ConfirmDelete { fail, unchecked, .. })
+        if fail.is_empty() && unchecked == &["ScaleBoth"]),
+        "an unchecked feature must not be described as a known failure"
+    );
+}
+
+#[test]
+fn delete_key_defers_rolled_back_features_and_keeps_that_policy_when_confirmed() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"name":name,"body_name":name})).unwrap();
+    }
+    h.app.run("solid.scale", json!({"bodies":["A","B"],"factor":2,"name":"Later"})).unwrap();
+    h.app.run("timeline.rollback", json!({"position":2})).unwrap();
+    h.app.session.selection = feature_ids(&h).into_iter().take(2).map(|id| solidcraft_engine::Sel::Feature { id }).collect();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    let params = crate::delete::selection_params(&h.app);
+    crate::delete::request(&mut h.app, params);
+    until_settled(&mut h);
+    let pending = h.app.menu.confirm.as_ref().expect("warn about unchecked future history");
+    assert_eq!(pending.report["unchecked"], json!(["Later"]));
+    assert_eq!(pending.report["would_fail"], json!([]));
+    assert_eq!(pending.params["check_future"], false);
+    assert!(h.app.session.doc.find_feature("A").is_some());
+    assert!(crate::delete::confirm(&mut h.app, true));
+    assert!(h.app.session.doc.find_feature("A").is_none());
+    assert!(h.app.session.doc.find_feature("B").is_none());
+    let later = h.app.session.doc.find_feature("Later").unwrap().id;
+    assert!(h.app.session.model.result(later).unwrap().skipped);
+}
+
+#[test]
+fn a_failed_timeline_delete_check_never_deletes_the_selection() {
+    let mut h = block_boss_hole();
+    let boss = feature_ids(&h)[1];
+    let before = h.app.session.doc.clone();
+    h.app.check_delete(vec![("timeline.dependents".into(), json!({"features":[boss,"missing"]}))], crate::deferred::AfterCheck::Timeline(vec![boss]));
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc, before);
+    assert!(h.app.dialog.is_none());
+    assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "the check failure is reported");
+}
+
+#[test]
+fn unchecked_delete_warning_can_be_dismissed_without_hiding_known_consequences() {
+    for timeline in [false, true] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"A"})).unwrap();
+        let id = feature_ids(&h)[0];
+        let params = json!({"items":[{"type":"feature","id":id}],"check_future":false});
+        let report = json!({"deleted":["A"],"deleted_with_it":[],"would_fail":[],"unchecked":["Later"]});
+        if timeline {
+            crate::timeline::delete_checked_features(&mut h.app, vec![id], &[report]);
+        } else {
+            crate::delete::checked(&mut h.app, params.clone(), Ok(report));
+        }
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"delete:hide_future_warning"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.preferences.warn_unchecked_deletion, "the choice is saved only when deletion is confirmed");
+        h.step(&json!({"click":{"handle":"dialog:Delete"}})).unwrap();
+        until_settled(&mut h);
+        assert!(!h.app.preferences.warn_unchecked_deletion);
+        assert!(h.app.session.doc.feature(id).is_none());
+        let saved = serde_json::to_value(&h.app.preferences).unwrap();
+        let prefs: crate::prefs::Prefs = serde_json::from_value(saved).unwrap();
+        assert!(!prefs.warn_unchecked_deletion, "the choice survives a settings reload");
+
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"B"})).unwrap();
+        let id = feature_ids(&h)[0];
+        let params = json!({"items":[{"type":"feature","id":id}],"check_future":false});
+        let report = json!({"deleted":["B"],"deleted_with_it":[],"would_fail":["Known failure"],"unchecked":["Later"]});
+        if timeline {
+            crate::timeline::delete_checked_features(&mut h.app, vec![id], &[report]);
+            assert!(h.app.dialog.is_some(), "known failures still require confirmation");
+            h.app.dialog = None;
+            crate::timeline::delete_checked_features(&mut h.app, vec![id], &[json!({"unchecked":["Later"]})]);
+        } else {
+            crate::delete::checked(&mut h.app, params.clone(), Ok(report));
+            assert!(h.app.menu.confirm.is_some(), "known failures still require confirmation");
+            h.app.menu.confirm = None;
+            crate::delete::checked(&mut h.app, params, Ok(json!({"deleted":["B"],"unchecked":["Later"]})));
+        }
+        until_settled(&mut h);
+        assert!(h.app.dialog.is_none() && h.app.menu.confirm.is_none());
+        assert!(h.app.session.doc.feature(id).is_none(), "the unchecked-only warning stays dismissed");
+    }
+}
+
 /// Delete on the selection (the Delete key) runs its dry run off the window thread too.
 #[test]
 fn delete_on_the_selection_checks_off_the_window_thread() {

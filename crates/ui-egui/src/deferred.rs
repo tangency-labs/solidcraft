@@ -73,7 +73,7 @@ pub struct DeleteCheck {
 /// What a delete does once its check is in.
 #[derive(Clone, Debug)]
 pub(crate) enum AfterCheck {
-    /// The timeline's Delete of these features (a `timeline.dependents` report for each).
+    /// The timeline's Delete of these features (one report for the complete selection).
     Timeline(Vec<u64>),
     /// Delete with these `selection.delete` parameters (the report of its dry run).
     Selection(Value),
@@ -96,10 +96,10 @@ impl AfterCheck {
     /// Carry on with the check's replies.
     fn finish(self, app: &mut SolveApp, replies: Vec<Result<Value, String>>) {
         match self {
-            AfterCheck::Timeline(ids) => {
-                let reports: Vec<Value> = replies.into_iter().map(Result::unwrap_or_default).collect();
-                crate::timeline::delete_checked_features(app, ids, &reports);
-            }
+            AfterCheck::Timeline(ids) => match replies.into_iter().collect::<Result<Vec<_>, _>>() {
+                Ok(reports) => crate::timeline::delete_checked_features(app, ids, &reports),
+                Err(error) => app.set_status(error, true),
+            },
             AfterCheck::Selection(params) => {
                 let report = replies.into_iter().next().unwrap_or_else(|| Err("the delete was not checked".into()));
                 crate::delete::checked(app, params, report);

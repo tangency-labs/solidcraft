@@ -15,6 +15,7 @@ const MAX_LISTED: usize = 20;
 pub struct Pending {
     pub params: Value,
     pub report: Value,
+    pub hide_future_warning: bool,
 }
 
 /// What Delete acts on now: the selection (bodies not locked), plus the components picked in
@@ -97,7 +98,8 @@ fn joint_delete_blocked(app: &SolveApp) -> Option<&'static str> {
 /// Delete `params` (as `selection.delete` takes them): at once, or after a confirmation when
 /// other features go with it or would fail. The dry run that finds out evaluates the history
 /// after what is deleted, so it may compute off the window thread (#2678).
-pub fn request(app: &mut SolveApp, params: Value) {
+pub fn request(app: &mut SolveApp, mut params: Value) {
+    params["check_future"] = json!(false);
     let joints: Vec<u64> = params.get("joints").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
     if !joints.is_empty() {
         // Deleting just the joint Edit Joint edits closes the dialog first, as its Cancel does.
@@ -134,9 +136,10 @@ pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, S
         params.get("items").and_then(Value::as_array).map_or(0, |a| a.iter().filter(|i| i["type"] == "feature" || i["type"] == "plane").count());
     let extra = report["deleted"].as_array().map_or(0, Vec::len) > asked;
     let fails = report["would_fail"].as_array().is_some_and(|a| !a.is_empty());
+    let unchecked = report["unchecked"].as_array().is_some_and(|a| !a.is_empty());
     let shared = shared_occurrences(app, &params);
-    if extra || fails || shared {
-        app.menu.confirm = Some(Pending { params, report });
+    if extra || fails || (unchecked && app.preferences.warn_unchecked_deletion) || shared {
+        app.menu.confirm = Some(Pending { params, report, hide_future_warning: false });
     } else {
         run(app, &params);
     }
@@ -160,6 +163,9 @@ fn run(app: &mut SolveApp, params: &Value) {
 pub fn confirm(app: &mut SolveApp, accept: bool) -> bool {
     let Some(p) = app.menu.confirm.take() else { return false };
     if accept {
+        if p.hide_future_warning {
+            app.preferences.warn_unchecked_deletion = false;
+        }
         run(app, &p.params);
     }
     true
@@ -173,6 +179,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let (deleted, fails) = (list("deleted"), list("would_fail"));
     let shared = shared_occurrences(app, &p.params);
+    let mut hide_future_warning = p.hide_future_warning;
     let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_delete_confirm"), "delete", crate::i18n::tr_label("Delete"))
         .tone(ui_kit::Tone::Danger)
         .actions("Delete", "Cancel", None)
@@ -183,6 +190,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::i18n::tr_label("This child is shared. Deleting it removes it from every copy of its parent."),
                     ui_kit::Text::Report("shared", false),
                 );
+            }
+            if p.report["unchecked"].as_array().is_some_and(|a| !a.is_empty()) && app.preferences.warn_unchecked_deletion {
+                future_warning(ui, &mut hide_future_warning);
             }
             for (key, heading, names, error) in
                 [("deleted", "These features will be deleted:", &deleted, false), ("fails", "These features will fail:", &fails, true)]
@@ -204,10 +214,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
+    if let Some(pending) = &mut app.menu.confirm {
+        pending.hide_future_warning = hide_future_warning;
+    }
     match action {
         ui_kit::Action::Ok => drop(confirm(app, true)),
         ui_kit::Action::Cancel => drop(confirm(app, false)),
         _ if closed => drop(confirm(app, false)),
         _ => {}
     }
+}
+
+/// The optional warning concerns only future checks; known failures still require confirmation.
+pub(crate) fn future_warning(ui: &mut egui::Ui, never: &mut bool) {
+    ui_kit::text(ui, crate::i18n::tr("delete.future_unchecked"), ui_kit::Text::Report("unchecked", false));
+    let response = ui_kit::checkbox(ui, crate::i18n::tr("delete.hide_future_warning"), never);
+    crate::scenario::publish_rect("delete:hide_future_warning", response.rect);
+    crate::scenario::publish_handle("delete:hide_future_warning", response.rect.center());
 }

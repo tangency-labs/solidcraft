@@ -496,6 +496,8 @@ macro_rules! preference_settings {
 preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// Warn before deleting with unchecked features beyond the history marker.
+    warn_unchecked_deletion: bool = true, PAGE_DESIGN => check_tr("delete.warn_unchecked_setting");
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.

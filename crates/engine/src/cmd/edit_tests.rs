@@ -712,6 +712,68 @@ fn the_dependents_check_leaves_the_delete_its_results() {
     assert!((volume - (12000.0 - std::f64::consts::PI * 4.0 * 10.0)).abs() < 1.0, "{volume}");
 }
 
+#[test]
+fn dependents_checks_the_whole_selection_including_the_rolled_back_history() {
+    let mut s = Session::default();
+    for (name, x) in [("Keep", 0), ("A", 30), ("B", 60)] {
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"name":name,"body_name":name}));
+    }
+    run(&mut s, "solid.scale", json!({"bodies":["A","B"],"factor":2,"name":"ScaleBoth"}));
+    run(&mut s, "timeline.rollback", json!({"position":3}));
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let state = s.model.state();
+    let report = run(&mut s, "timeline.dependents", json!({"features":["A","B","A"]}));
+    assert_eq!(report, json!({"deleted_with_it":[],"would_fail":["ScaleBoth"]}));
+    assert_eq!(s.doc, before, "checking never edits the design or history marker");
+    assert_eq!(s.undo.len(), undo);
+    assert!(std::sync::Arc::ptr_eq(&state, &s.model.state()));
+    // The report describes deleting the complete selection, including what fails after
+    // the current marker, rather than the union of several independent hypothetical deletes.
+    let mut actual = s.scratch();
+    run(&mut actual, "timeline.delete", json!({"features":["A","B"]}));
+    actual.doc_mut().marker = None;
+    actual.refresh();
+    let broken: Vec<_> = actual.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect();
+    assert_eq!(json!(broken), report["would_fail"]);
+    for params in [json!({"features":[]}), json!({"features":["A","Missing"]}), json!({"feature":"A","features":["B"]})] {
+        assert!(s.execute("timeline.dependents", &params).is_err(), "{params}");
+        assert_eq!(s.doc, before);
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+#[test]
+fn deletion_can_report_unchecked_future_without_running_its_booleans() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 10)] {
+        run(&mut s, "solid.sphere", json!({"radius":10,"center":[x,0,0],"name":name,"body_name":name}));
+    }
+    run(&mut s, "solid.combine", json!({"target":"A","tools":["B"],"name":"Overlap"}));
+    run(&mut s, "timeline.rollback", json!({"position":2}));
+    // Drop future results, as on opening a rolled-back design without a saved model.
+    s.model = solidcraft_doc::Model::new();
+    s.refresh();
+    let before = s.doc.clone();
+    let a = s.doc.find_feature("A").unwrap().id;
+    for (command, params) in [
+        ("timeline.dependents", json!({"features":[a],"check_future":false})),
+        ("selection.delete", json!({"items":[{"type":"feature","id":a}],"dry_run":true,"check_future":false})),
+    ] {
+        let (result, times) = solidcraft_kernel::profile::capture(|| s.execute(command, &params));
+        let report = result.unwrap();
+        assert_eq!(report["unchecked"], json!(["Overlap"]));
+        assert_eq!(report["would_fail"], json!([]));
+        assert_eq!(times.boolean_ms, 0., "{command}: no future Boolean just to ask about deletion");
+        assert_eq!(s.doc, before);
+    }
+    run(&mut s, "selection.delete", json!({"items":[{"type":"feature","id":a}],"check_future":false}));
+    assert!(s.doc.feature(a).is_none());
+    assert!(s.model.result(s.doc.find_feature("Overlap").unwrap().id).unwrap().skipped);
+    run(&mut s, "timeline.roll_to", json!({"position":"end"}));
+    assert!(s.model.result(s.doc.find_feature("Overlap").unwrap().id).unwrap().error.is_some());
+}
+
 fn suppressed(s: &Session, name: &str) -> bool {
     s.doc.find_feature(name).unwrap().suppressed
 }

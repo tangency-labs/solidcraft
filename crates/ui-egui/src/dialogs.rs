@@ -347,6 +347,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 features: Vec<u64>,
                 with: Vec<String>,
                 fail: Vec<String>,
+                unchecked: Vec<String>,
             },
             /// Pick what the agent chat's next message is about (#2286): elements, features and bodies.
             /// OK hands the picks to the chat (`agent_chat::pick_done`); nothing is run.
@@ -1077,11 +1078,11 @@ impl Dialog {
 
     #[cfg(test)]
     pub fn confirm_delete(feature: u64, with: Vec<String>, fail: Vec<String>) -> Dialog {
-        Dialog::confirm_delete_many(vec![feature], with, fail)
+        Dialog::confirm_delete_many(vec![feature], with, fail, Vec::new())
     }
 
-    pub fn confirm_delete_many(features: Vec<u64>, with: Vec<String>, fail: Vec<String>) -> Dialog {
-        Dialog::new(Kind::ConfirmDelete { features, with, fail }, vec![])
+    pub fn confirm_delete_many(features: Vec<u64>, with: Vec<String>, fail: Vec<String>, unchecked: Vec<String>) -> Dialog {
+        Dialog::new(Kind::ConfirmDelete { features, with, fail, unchecked }, vec![])
     }
 
     pub fn edit_param(s: &Session, name: &str) -> Dialog {
@@ -2810,8 +2811,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
-    if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
+    if let Kind::ConfirmDelete { with, fail, unchecked, .. } = &d.kind {
         let detail = with.join(" · ");
+        let mut hide_future_warning = d.extra.get("hide_future_warning").and_then(Value::as_bool).unwrap_or(false);
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new(("sc_dialog", title(&d.kind))), "delete", &heading)
             .tone(crate::ui_kit::Tone::Danger)
             .actions("Delete", "Cancel", None)
@@ -2823,7 +2825,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 if !fail.is_empty() {
                     crate::ui_kit::text(ui, &format!("{}: {}", tr("Will fail"), fail.join(", ")), crate::ui_kit::Text::Report("will_fail", true));
                 }
+                if !unchecked.is_empty() && app.preferences.warn_unchecked_deletion {
+                    crate::delete::future_warning(ui, &mut hide_future_warning);
+                }
             });
+        d.extra.insert("hide_future_warning".into(), json!(hide_future_warning));
         ok = action == crate::ui_kit::Action::Ok;
         cancel = closed || action == crate::ui_kit::Action::Cancel;
         app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
@@ -3506,6 +3512,9 @@ fn section_turns_off(s: &Session, inputs: &[selection::SelInput]) -> bool {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
+    if matches!(d.kind, Kind::ConfirmDelete { .. }) && d.extra.get("hide_future_warning").and_then(Value::as_bool) == Some(true) {
+        app.preferences.warn_unchecked_deletion = false;
+    }
     if let Kind::ViewDxf { dashed, tolerance } = &d.kind {
         return crate::dialogs_view_dxf::run(app, *dashed, *tolerance);
     }

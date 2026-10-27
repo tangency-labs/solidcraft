@@ -201,19 +201,21 @@ pub(crate) fn delete_feature(app: &mut SolveApp, id: u64) {
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
 /// while, #2678), then delete them or ask first.
 pub(crate) fn delete_features(app: &mut SolveApp, ids: Vec<u64>) {
-    let checks = ids.iter().map(|id| ("timeline.dependents".to_string(), json!({ "feature": id }))).collect();
+    // Check the deletion that will actually run, once for the whole selection. Checking
+    // each feature separately can rebuild the complete future history for every item.
+    let checks = vec![("timeline.dependents".to_string(), json!({ "features": ids, "check_future": false }))];
     app.check_delete(checks, crate::deferred::AfterCheck::Timeline(ids));
 }
 
-/// [`delete_features`] once each feature's `timeline.dependents` report is in.
+/// [`delete_features`] once the selection's `timeline.dependents` report is in.
 pub(crate) fn delete_checked_features(app: &mut SolveApp, ids: Vec<u64>, reports: &[Value]) {
-    // Each report is about one feature alone, so it names the others being deleted too: those
-    // go anyway and are left out of the confirmation.
+    // Selected features go anyway and are left out of the confirmation.
     let deleting: Vec<&str> = ids.iter().filter_map(|id| app.session.doc.feature(*id)).map(|f| f.name.as_str()).collect();
     let mut with = std::collections::BTreeSet::new();
     let mut fail = std::collections::BTreeSet::new();
+    let mut unchecked = std::collections::BTreeSet::new();
     for deps in reports {
-        for (key, output) in [("deleted_with_it", &mut with), ("would_fail", &mut fail)] {
+        for (key, output) in [("deleted_with_it", &mut with), ("would_fail", &mut fail), ("unchecked", &mut unchecked)] {
             output.extend(
                 deps.get(key)
                     .and_then(|value| value.as_array())
@@ -225,10 +227,15 @@ pub(crate) fn delete_checked_features(app: &mut SolveApp, ids: Vec<u64>, reports
             );
         }
     }
-    if with.is_empty() && fail.is_empty() {
+    if with.is_empty() && fail.is_empty() && (unchecked.is_empty() || !app.preferences.warn_unchecked_deletion) {
         let _ = app.run_heavy("timeline.delete", json!({ "features": ids }));
     } else {
-        app.dialog = Some(crate::dialogs::Dialog::confirm_delete_many(ids, with.into_iter().collect(), fail.into_iter().collect()));
+        app.dialog = Some(crate::dialogs::Dialog::confirm_delete_many(
+            ids,
+            with.into_iter().collect(),
+            fail.into_iter().collect(),
+            unchecked.into_iter().collect(),
+        ));
     }
 }
 

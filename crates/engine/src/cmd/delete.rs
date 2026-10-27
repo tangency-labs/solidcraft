@@ -13,7 +13,7 @@ use crate::params::{bad, bool_};
 use crate::{EngineError, Result, Sel, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", delete).icon("delete").params(
-    "items?: [selection items]; components?, occurrences?, canvases?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
+    "items?: [selection items]; components?, occurrences?, canvases?, joints?: [ids or names]; dry_run?: bool; check_future?: bool (default true; false leaves rolled-back features unevaluated and lists them in unchecked) → deleted, deleted_joints, would_fail, unchecked?, skipped (one undo step)",
 )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
@@ -45,6 +45,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
+    let check_future = super::edit::check_future(p, cmd)?;
     let items: Vec<Sel> = match p.get("items") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) if a.len() <= 10_000 => {
@@ -192,9 +193,12 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     s.refresh();
     let deleted: Vec<&String> = features_before.iter().filter(|(id, _)| s.doc.feature(*id).is_none()).map(|(_, n)| n).collect();
     // Features after a rolled-back marker count too (#3471).
-    let would_fail: Vec<String> =
-        super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    Ok(json!({ "deleted": deleted, "deleted_joints": joints, "bodies": bodies, "would_fail": would_fail, "skipped": skipped }))
+    let (would_fail, unchecked) = super::edit::deletion_checks(&before_doc, &before, &s.doc, &s.model, check_future);
+    let mut report = json!({ "deleted": deleted, "deleted_joints": joints, "bodies": bodies, "would_fail": would_fail, "skipped": skipped });
+    if !check_future {
+        report["unchecked"] = json!(unchecked);
+    }
+    Ok(report)
 }
 
 #[cfg(test)]

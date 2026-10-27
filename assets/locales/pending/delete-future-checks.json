@@ -1,0 +1,7 @@
+{
+  "en": {
+    "delete.future_unchecked": "Later features have not been checked. They will be checked when you move the history marker forward.",
+    "delete.hide_future_warning": "Don't show this warning again",
+    "delete.warn_unchecked_setting": "Warn when deleting before unchecked later features"
+  }
+}

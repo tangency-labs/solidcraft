@@ -58,6 +58,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         setting::hide_origin(app, ui);
         ui_kit::text(ui, app.tr("ui.hide_origin_note"), ui_kit::Text::Hint("hide_origin"));
     });
+    ui_kit::settings_section(ui, "delete", crate::i18n::tr_label("Delete"), |ui| {
+        setting::warn_unchecked_deletion(app, ui);
+    });
     // The Hole command's own settings, under its name.
     ui_kit::settings_section(ui, "create_hole", crate::i18n::tr_label("Create Hole"), |ui| {
         setting::hole_snaps(app, ui);

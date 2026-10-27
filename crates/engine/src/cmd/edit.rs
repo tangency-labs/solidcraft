@@ -53,7 +53,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place)"),
     CommandSpec::new("timeline.dependents", "Feature Dependents", dependents).icon("graph")
         .noundo()
-        .params("feature: id|name → features deleted with it, and features that would fail without it"),
+        .params("feature: id|name | features: [id|name]; check_future?: bool (default true; false leaves rolled-back features unevaluated and lists them in unchecked) → deleted_with_it, would_fail, unchecked?"),
     CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).icon("suppress").params(
         "feature: id|name | features: [id|name] (one undo step), suppressed?: bool (default toggles: several features are all \
          suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]), suppressed",
@@ -1191,6 +1191,37 @@ pub(super) fn newly_broken_in_history(
     newly_broken(&whole(before_doc, before), &whole(after_doc, after))
 }
 
+pub(super) fn check_future(p: &Value, cmd: &str) -> Result<bool> {
+    match p.get("check_future") {
+        None => Ok(true),
+        Some(value) => value.as_bool().ok_or_else(|| bad(cmd, "`check_future` must be a boolean")),
+    }
+}
+
+/// A UI deletion may leave the rolled-back history unevaluated. Report that explicitly;
+/// unchecked features are never described as known to work or known to fail.
+pub(super) fn deletion_checks(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+    check_future: bool,
+) -> (Vec<String>, Vec<String>) {
+    let broken = if check_future { newly_broken_in_history(before_doc, before, after_doc, after) } else { newly_broken(before, after) };
+    let unchecked = if check_future {
+        Vec::new()
+    } else {
+        after_doc
+            .features
+            .iter()
+            .skip(after_doc.marker.unwrap_or(after_doc.features.len()))
+            .filter(|f| !f.suppressed)
+            .map(|f| f.name.clone())
+            .collect()
+    };
+    (broken.into_iter().map(|(name, _)| name).collect(), unchecked)
+}
+
 fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -1558,17 +1589,36 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn dependents(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.dependents";
-    let id = feature_id(s, p.get("feature"), cmd)?;
+    let check_future = check_future(p, cmd)?;
+    let ids = if p.get("features").is_some() {
+        if p.get("feature").is_some() {
+            return Err(bad(cmd, "give `feature` or `features`, not both"));
+        }
+        group_features(s, p, true, cmd)?
+    } else {
+        vec![feature_id(s, p.get("feature"), cmd)?]
+    };
     let mut next = (*s.doc).clone();
-    let gone = next.delete_feature(id)?;
+    let mut gone = Vec::new();
+    for id in &ids {
+        // An earlier selected feature may already have taken this dependent with it.
+        if next.feature(*id).is_some() {
+            gone.extend(next.delete_feature(*id)?);
+        }
+    }
     // On a copy of the session's model, which shares its evaluation cache (#2678): the features
     // before this one are reused rather than recomputed, and the delete that usually follows
     // finds the ones after it already computed.
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let names = |ids: &[u64]| -> Vec<String> { ids.iter().filter(|x| **x != id).filter_map(|x| s.doc.feature(*x).map(|f| f.name.clone())).collect() };
-    let broken: Vec<String> = newly_broken_in_history(&s.doc, &s.model, &next, &after).into_iter().map(|(n, _)| n).collect();
-    Ok(json!({"deleted_with_it": names(&gone), "would_fail": broken}))
+    let selected: std::collections::BTreeSet<_> = ids.into_iter().collect();
+    let deleted: Vec<_> = gone.iter().filter(|id| !selected.contains(id)).filter_map(|id| s.doc.feature(*id).map(|f| f.name.clone())).collect();
+    let (broken, unchecked) = deletion_checks(&s.doc, &s.model, &next, &after, check_future);
+    let mut report = json!({"deleted_with_it": deleted, "would_fail": broken});
+    if !check_future {
+        report["unchecked"] = json!(unchecked);
+    }
+    Ok(report)
 }
 
 #[cfg(test)]
