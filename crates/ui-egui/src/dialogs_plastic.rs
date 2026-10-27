@@ -454,10 +454,7 @@ pub(crate) fn handle_move(app: &SolveApp, d: &mut crate::dialogs::Dialog, hits: 
     use crate::place_gizmo::{angle_of, dir_at};
     let s = &app.session;
     let turned = handle_frame(app, d).and_then(|(_, n)| d.extra.get("along").and_then(crate::dialogs::vec3_of).map(|a| angle_of(a, n)));
-    let snap = d.face_snap(s, hits);
-    let Some(to) = hits.iter().find_map(|h| d.candidate_on(s, h, snap.as_ref()).filter(|c| matches!(c, Sel::Face { .. }))) else {
-        return false;
-    };
+    let Some(to) = crate::place_gizmo::face_pick(d, s, hits) else { return false };
     if let Sel::Face { body, index, .. } = &to
         && let Some((_, nn)) = crate::dialogs::planar_face(s, body, *index)
     {

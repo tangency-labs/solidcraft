@@ -9,7 +9,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
-use super::{Place, Spec, circle, len};
+use super::{Place, Spec, circle, face_pick, len, vec3_of};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::viewport::Hit;
@@ -27,27 +27,33 @@ pub(super) static SPEC: Spec = Spec {
     turn: None,
 };
 
-/// The holes placed so far, each at its face place, growing into the face.
+/// The holes placed so far, each at its face place with the face's outward normal. A hole being
+/// edited whose face is gone keeps its place and the `direction` the edit restored, as a Rest's
+/// frame does, so it still has a marker.
 fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
     let s = &app.session;
     crate::hole_place::places(s, d)
         .into_iter()
         .filter_map(|(key, base)| {
             let Some(Sel::Face { body, index, .. }) = d.inputs.first()?.items.get(key) else { return None };
-            let (_, n) = crate::dialogs::planar_face(s, body, *index)?;
+            let n = crate::dialogs::planar_face(s, body, *index)
+                .map(|(_, n)| n)
+                .or_else(|| d.extra.get("direction").and_then(vec3_of))
+                .and_then(|n| n.normalized())?;
             Some(Place { key, base, n })
         })
         .collect()
 }
 
 /// The hole at `key` moved to the face place a click with `hits` would take (snapped as the
-/// pick is), unless that face already has another hole.
+/// pick is), unless that face already has another hole. Only while the face input is the active
+/// one: the hits were picked by the active input's rules.
 fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
-    let s = &app.session;
-    let snap = d.face_snap(s, hits);
-    let Some(to) = hits.iter().find_map(|h| d.candidate_on(s, h, snap.as_ref()).filter(|c| matches!(c, Sel::Face { .. }))) else {
+    if d.active != 0 {
         return false;
-    };
+    }
+    let s = &app.session;
+    let Some(to) = face_pick(d, s, hits) else { return false };
     crate::hole_place::move_place(d, s, key, to)
 }
 
