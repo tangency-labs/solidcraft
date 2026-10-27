@@ -872,3 +872,36 @@ fn a_point_beside_a_pole_is_one_within_its_reach() {
     assert_eq!(sphere.pole_within(near, 1e-7), [false, false]);
     assert_eq!(sphere.pole_within([0.3, 0.2], 1e-3), [false, false]);
 }
+
+/// The analytic surfaces' partials up to the fourth order agree with their first and second
+/// derivatives and are each the derivative of the order below (central differences).
+#[test]
+fn analytic_partials_are_the_derivatives_of_the_order_below() {
+    use crate::tess::partials::MAX_PARTIAL_ORDER;
+    let f = Frame { origin: [1., 2., 3.], x_axis: [0.6, 0.8, 0.], y_axis: [0., 0., 1.] };
+    let surfaces = [
+        Surface::Cylinder { frame: f.clone(), radius: 3. },
+        Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: 0.3 },
+        Surface::Sphere { frame: f.clone(), radius: 4. },
+        Surface::Torus { frame: f.clone(), major_radius: 5., minor_radius: 1.5 },
+    ];
+    let (u, v, h) = (0.8, 0.4, 1e-4);
+    let close = |a: crate::Vec3, b: crate::Vec3, tol: f64| a.dist(b) <= tol * (1.0 + a.len().max(b.len()));
+    for s in &surfaces {
+        let e = eval::SurfaceEval::new(s).unwrap();
+        let d = e.partials(u, v).unwrap();
+        let (p, su, sv) = e.derivs(u, v).unwrap();
+        let (suu, suv, svv) = e.second(u, v).unwrap();
+        for (a, b) in [(d[0][0], p), (d[1][0], su), (d[0][1], sv), (d[2][0], suu), (d[1][1], suv), (d[0][2], svv)] {
+            assert!(close(a, b, 1e-12), "{s:?}: {a:?} vs {b:?}");
+        }
+        let (up, um, vp, vm) =
+            (e.partials(u + h, v).unwrap(), e.partials(u - h, v).unwrap(), e.partials(u, v + h).unwrap(), e.partials(u, v - h).unwrap());
+        for i in 0..MAX_PARTIAL_ORDER {
+            for j in 0..MAX_PARTIAL_ORDER - i {
+                assert!(close((up[i][j] - um[i][j]) * (0.5 / h), d[i + 1][j], 1e-6), "{s:?} d/du ({i},{j})");
+                assert!(close((vp[i][j] - vm[i][j]) * (0.5 / h), d[i][j + 1], 1e-6), "{s:?} d/dv ({i},{j})");
+            }
+        }
+    }
+}

@@ -15,6 +15,7 @@ pub mod eval;
 pub mod form;
 pub mod geometry;
 pub mod history;
+pub mod normal_section;
 pub mod part;
 pub mod pcurve;
 pub mod placement;
