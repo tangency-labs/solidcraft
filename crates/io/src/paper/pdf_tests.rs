@@ -112,40 +112,146 @@ fn the_same_scene_gives_the_same_bytes_and_dates_come_only_from_output_time() {
     assert!(file.contains("(D:99991231235959Z)") && !file.contains("/Title"), "{file}");
 }
 
+/// Check this writer's single xref subsection using byte positions, never decoded text.
+/// This intentionally checks our emitted layout, not arbitrary third-party PDFs.
+fn check_xref(bytes: &[u8]) -> std::result::Result<usize, String> {
+    let marker = b"startxref\n";
+    let at = bytes.windows(marker.len()).rposition(|w| w == marker).ok_or("missing startxref")? + marker.len();
+    let number = bytes.get(at..).ok_or("missing xref offset")?.split(|b| b.is_ascii_whitespace()).next().ok_or("missing xref offset")?;
+    let start: usize = std::str::from_utf8(number).map_err(|_| "xref offset is not ASCII")?.parse().map_err(|_| "invalid xref offset")?;
+    let tail = bytes.get(start..).ok_or("xref offset outside file")?;
+    let table = tail.strip_prefix(b"xref\n0 6\n").ok_or("xref offset is not the expected subsection")?;
+    let entries = table.get(..120).ok_or("truncated xref entries")?;
+    for (n, entry) in entries.as_chunks::<20>().0.iter().enumerate() {
+        if ![&b" \n"[..], &b"\r\n"[..]].contains(&&entry[18..]) {
+            return Err(format!("entry {n} does not occupy 20 bytes"));
+        }
+        if n == 0 {
+            if &entry[..18] != b"0000000000 65535 f" {
+                return Err("invalid free entry".into());
+            }
+            continue;
+        }
+        if &entry[10..18] != b" 00000 n" {
+            return Err(format!("object {n} is not in use"));
+        }
+        let offset: usize =
+            std::str::from_utf8(&entry[..10]).map_err(|_| "object offset is not ASCII")?.parse().map_err(|_| "invalid object offset")?;
+        let expected = format!("{n} 0 obj\n");
+        if offset >= start || !bytes.get(offset..).is_some_and(|tail| tail.starts_with(expected.as_bytes())) {
+            return Err(format!("object {n} does not start at byte {offset}"));
+        }
+    }
+    Ok(start)
+}
+
+/// Geometry/paint use the 10 nm grid; the one unit transform has its own accuracy.
+/// Expectations are independent of the writer's constants and formatting helper.
+fn check_number_grid(content: &str) -> std::result::Result<(), String> {
+    let spaced = content.replace('[', " [ ").replace(']', " ] ");
+    let mut operands = Vec::new();
+    let mut transforms = 0;
+    for token in spaced.split_whitespace() {
+        if let Ok(value) = token.parse::<f64>() {
+            if !value.is_finite() || token.contains(['e', 'E']) || (value == 0.0 && token.starts_with('-')) {
+                return Err(format!("invalid emitted number {token}"));
+            }
+            operands.push((token, value));
+        } else if token != "[" && token != "]" {
+            let decimals = if token == "cm" { 9 } else { 5 };
+            if operands.iter().any(|(raw, _)| raw.split_once('.').is_some_and(|(_, fraction)| fraction.len() > decimals)) {
+                return Err(format!("too many decimals for {token}: {operands:?}"));
+            }
+            if token == "cm" {
+                transforms += 1;
+                let values: Vec<_> = operands.iter().map(|(_, n)| *n).collect();
+                let [sx, xy, yx, sy, tx, ty] = values.as_slice() else { return Err("cm needs six numbers".into()) };
+                if sx != sy || [*xy, *yx, *tx, *ty] != [0.0; 4] {
+                    return Err("the page transform must be one uniform scale, without a flip or translation".into());
+                }
+                // 72 / 25.4 = 360 / 127. Across 5,000 mm the written scale may
+                // contribute at most 1e-6 mm; this does not certify a viewer or printer.
+                if (sx * 127.0 / 360.0 - 1.0).abs() * 5000.0 > 1e-6 {
+                    return Err("the written millimetre-to-point scale is insufficiently accurate".into());
+                }
+            }
+            operands.clear();
+        }
+    }
+    if transforms != 1 || !operands.is_empty() {
+        return Err("expected exactly one complete page transform".into());
+    }
+    Ok(())
+}
+
 /// The trailer's `startxref` points at the table, and each entry at its `N 0 obj`.
 #[test]
 fn every_cross_reference_points_at_its_object() {
     let sheet = scene(p(420.0, 297.0), vec![stroke(Loop2::circle(p(100.0, 100.0), 40.0).segs, true, 0.7, None)]);
-    let bytes = pdf(&sheet, &PdfOptions { title: Some("Ç".into()), output_time: Some(0) });
-    let file = text(&bytes);
-    let start: usize = file.rsplit("startxref").next().unwrap().split_whitespace().next().unwrap().parse().unwrap();
-    assert!(file[start..].starts_with("xref\n0 6\n"), "{}", &file[start..start + 20]);
-    let entries = &file[start + "xref\n0 6\n".len()..];
-    for (n, entry) in entries.as_bytes().chunks(20).take(6).enumerate().skip(1) {
-        let entry = std::str::from_utf8(entry).unwrap();
-        let offset: usize = entry[..10].parse().unwrap();
-        assert!(entry[10..].starts_with(" 00000 n"), "{entry:?}");
-        assert!(file[offset..].starts_with(&format!("{n} 0 obj")), "object {n} at {offset}");
+    for title in ["ASCII", "\u{00c7}", "\u{65e5}\u{672c}\u{1f642}", "(sheet 1) \\ title"] {
+        let bytes = pdf(&sheet, &PdfOptions { title: Some(title.into()), output_time: Some(0) });
+        assert!(check_xref(&bytes).is_ok(), "{title:?}: {:?}", check_xref(&bytes));
     }
 }
 
-/// Arcs are cubics within a ten-thousandth of a millimetre, from a 0.5 mm radius to 2 m, and a
-/// parabola is its cubic; every number has at most five decimals.
+#[test]
+fn the_byte_offset_oracle_refuses_shifted_or_corrupted_references() {
+    let bytes = pdf(&scene(p(420.0, 297.0), vec![]), &PdfOptions { title: Some("\u{00c7}".into()), output_time: None });
+    let start = check_xref(&bytes).unwrap();
+    let mut shifted = bytes.clone();
+    shifted.insert(9, b' ');
+    assert!(check_xref(&shifted).is_err(), "inserting a byte must invalidate the old offsets");
+    let mut wrong = bytes;
+    let first_object = start + b"xref\n0 6\n".len() + 20;
+    wrong[first_object..first_object + 10].copy_from_slice(b"0000000001");
+    assert!(check_xref(&wrong).is_err(), "an object offset into the header must fail");
+}
+
+#[test]
+fn the_number_oracle_separates_page_scale_from_the_coordinate_grid() {
+    let prefix = "q 2.834645669 0 0 2.834645669 0 0 cm ";
+    let valid = format!("{prefix}0.35 w [4.2 1.05] 0.5 d 0 0 m 4999.12345 5000 l S Q");
+    assert!(check_number_grid(&valid).is_ok());
+    for bad in [
+        valid.replace("4999.12345", "4999.123456"),
+        valid.replace("0.35 w", "0.350001 w"),
+        valid.replace("4.2 1.05", "4.200001 1.05"),
+        valid.replace("2.834645669", "2.83465"),
+        valid.replace("0.35 w", "3.5e-1 w"),
+        valid.replace("0.35 w", "NaN w"),
+        valid.replace("0 0 m", "-0 0 m"),
+        format!("{prefix}{valid}"),
+        "q 0 0 m 1 1 l S Q".into(),
+    ] {
+        assert!(check_number_grid(&bad).is_err(), "fault escaped the oracle: {bad}");
+    }
+}
+
+/// Arcs are cubics within a ten-thousandth of a millimetre, from a 0.5 mm radius to 5 m, and a
+/// parabola is its cubic; geometry/paint have five decimals, and the page scale is checked separately.
 #[test]
 fn arcs_are_cubics_within_a_ten_thousandth_of_a_millimetre() {
-    for (radius, sweep) in [(0.5, TAU), (40.0, TAU), (300.0, 2.5), (2000.0, 0.3)] {
-        let c = p(2500.0, 2500.0);
-        let arc = scene(p(5000.0, 5000.0), vec![stroke(vec![Seg2::Arc { center: c, radius, start: 0.4, sweep }], false, 0.35, None)]);
+    for (c, radius, start, sweep) in [
+        (p(2500.0, 2500.0), 0.5, 0.4, TAU),
+        (p(2500.0, 2500.0), 40.0, 0.4, TAU),
+        (p(2500.0, 2500.0), 300.0, 0.4, 2.5),
+        (p(2500.0, 2500.0), 2000.0, 0.4, 0.3),
+        (p(2500.0, 2500.0), 40.0, 0.4, -2.5),
+        (p(0.0, 0.0), 5000.0, 0.0, FRAC_PI_2),
+    ] {
+        let arc = scene(p(5000.0, 5000.0), vec![stroke(vec![Seg2::Arc { center: c, radius, start, sweep }], false, 0.35, None)]);
         let content = content(&pdf(&arc, &NONE));
         let cubics = cubics(&content);
-        assert!(cubics.len() >= (sweep / FRAC_PI_2).ceil() as usize, "{radius}: {}", cubics.len());
+        assert!(cubics.len() >= (sweep.abs() / FRAC_PI_2).ceil() as usize, "{radius}: {}", cubics.len());
+        assert!(cubics.first().unwrap()[0].dist(c + Vec2::from_angle(start) * radius) <= 1e-5);
+        assert!(cubics.last().unwrap()[3].dist(c + Vec2::from_angle(start + sweep) * radius) <= 1e-5);
         for cubic in &cubics {
             for k in 0..=64 {
                 let off = (bezier(*cubic, f64::from(k) / 64.0).dist(c) - radius).abs();
-                assert!(off <= ARC_TOLERANCE_MM, "r {radius}: {off} mm off at {k}/64");
+                assert!(off <= 1e-4, "r {radius}: {off} mm off at {k}/64");
             }
         }
-        assert!(content.split_whitespace().all(|t| t.split('.').nth(1).is_none_or(|d| d.len() <= 5)), "{content}");
+        assert!(check_number_grid(&content).is_ok(), "{:?}: {content}", check_number_grid(&content));
     }
     let parabola = scene(
         p(100.0, 100.0),
