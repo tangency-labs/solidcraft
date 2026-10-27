@@ -526,7 +526,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let exists = feature.is_some();
     let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
     let suppressed = feature.is_some_and(|f| f.suppressed);
-    vec![
+    let mut items = vec![
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
         act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
         act("ui.rename", "Rename", "rename").with(json!({"feature":id})).on(exists),
@@ -537,7 +537,12 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(exists),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
-    ]
+    ];
+    // With the history in the browser its rows put features in timeline folders (#7221).
+    if app.preferences.history_in_browser {
+        items.push(act("ui.newTimelineFolder", "Add to New Folder", "folder").with(json!({"feature":id})).on(exists));
+    }
+    items
 }
 
 /// The canvas menus put Repeat on
@@ -1363,6 +1368,19 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
                 crate::browser::reveal_body(app, b);
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
+            }
+        }
+        "ui.newTimelineFolder" => {
+            // The picked features, or the one the menu is for.
+            let mut features = crate::timeline::selected_feature_ids(app);
+            if let Some(f) = id_of(&p, "feature").filter(|f| !features.contains(f)) {
+                features = vec![f];
+            }
+            if let Ok(result) = app.run("timeline.group", json!({"features": features}))
+                && let Some(group) = result.get("group").and_then(Value::as_u64)
+            {
+                app.tree.collapsed.remove(&format!("timeline_group:{group}"));
+                start_rename(app, RenameWhat::TimelineGroup(group), at);
             }
         }
         "ui.findTimeline" => {

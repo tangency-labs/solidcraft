@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::history_rows::{HistoryFeature, HistoryRows};
+use solidcraft_engine::doc::TimelineGroup;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Reveal {
@@ -116,8 +117,36 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     // first rolled back) and below the last.
     let mut slots: Vec<(f32, usize)> = Vec::new();
     let mut marker_resp = None;
+    // The timeline folders as the vertical History has them (#7221): a header row before the
+    // first row in each, its rows one level in, and nothing of a closed folder but its header.
+    let folders = app.session.doc.timeline_groups.clone();
+    let closed = |app: &SolveApp, folder: u64| app.tree.collapsed.contains(&folder_key(folder));
+    // The folders around the previous row, outermost first; their headers are drawn.
+    let mut around: Vec<u64> = Vec::new();
     for row in &plan.rows {
         let index = global(row.index);
+        let chain = folder_chain(&folders, row.feature);
+        let kept = around.iter().zip(&chain).take_while(|(a, b)| a == b).count();
+        around.truncate(kept);
+        let mut hidden = around.iter().any(|folder| closed(app, *folder));
+        for &folder in chain.get(kept..).unwrap_or_default() {
+            if !hidden {
+                if marker_resp.is_none() && index >= marker {
+                    marker_resp = Some(marker_row(app, ui, depth + 1));
+                }
+                // A drop above the header rolls back the whole folder.
+                slots.push((ui.cursor().min.y, global(row.slot)));
+                if let Some(folder) = folders.iter().find(|f| f.id == folder) {
+                    folder_row(app, ui, &folders, folder, depth + 1 + around.len());
+                }
+                hidden = closed(app, folder);
+            }
+            around.push(folder);
+        }
+        if hidden {
+            continue;
+        }
+        let depth = depth + around.len();
         if marker_resp.is_none() && index >= marker {
             marker_resp = Some(marker_row(app, ui, depth + 1));
         }
@@ -141,6 +170,83 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         slots.push((ui.cursor().min.y, global(indices.len())));
     }
     drag_marker(app, ui, &resp, &slots, marker);
+}
+
+/// The fold of a timeline folder, the one the vertical History uses.
+fn folder_key(folder: u64) -> String {
+    format!("timeline_group:{folder}")
+}
+
+/// The timeline folders around `feature`, outermost first.
+fn folder_chain(folders: &[TimelineGroup], feature: u64) -> Vec<u64> {
+    let mut chain = Vec::new();
+    let mut current = folders.iter().find(|folder| folder.features.contains(&feature));
+    while let Some(folder) = current {
+        // A parent loop in a hostile design ends here.
+        if chain.contains(&folder.id) || chain.len() > folders.len() {
+            break;
+        }
+        chain.push(folder.id);
+        current = folder.parent.and_then(|parent| folders.iter().find(|f| f.id == parent));
+    }
+    chain.reverse();
+    chain
+}
+
+/// A timeline folder's header: its fold, picking it, renaming it with a double-click, and the
+/// vertical History's folder menu.
+fn folder_row(app: &mut SolveApp, ui: &mut egui::Ui, folders: &[TimelineGroup], folder: &TimelineGroup, depth: usize) {
+    let key = folder_key(folder.id);
+    let open = !app.tree.collapsed.contains(&key);
+    let selected = app.tree.picked_timeline_groups.contains(&folder.id);
+    let r = draw_row(
+        ui,
+        ui.id().with(("browser_history_folder", folder.id)),
+        &Row { depth, fold: Some(open), icon: "folder", label: &folder.name, selected, ..Default::default() },
+    );
+    if let Some(rect) = r.rect {
+        crate::scenario::publish_handle(&format!("browser-history-folder:{}", folder.name), rect.center());
+    }
+    if r.fold {
+        if open {
+            app.tree.collapsed.insert(key);
+        } else {
+            app.tree.collapsed.remove(&key);
+        }
+    } else if r.double {
+        let at = r.rect.map_or(Pos2::ZERO, |rect| rect.left_bottom());
+        crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at);
+    } else if r.clicked || (r.secondary.is_some() && !selected) {
+        pick_folder(app, ui, folder.id);
+    }
+    if let Some(resp) = &r.resp {
+        crate::ui_kit::Menu::context(resp, |ui| {
+            if crate::context_menu::button(ui, "Rename Folder", "rename").clicked() {
+                let at = r.rect.map_or(Pos2::ZERO, |rect| rect.left_bottom());
+                crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at);
+                ui.close();
+            }
+            ui.separator();
+            crate::timeline_left::selection_actions(app, ui, folders);
+        });
+    }
+}
+
+/// Picks a folder as the vertical History does: on its own, or added with Ctrl.
+fn pick_folder(app: &mut SolveApp, ui: &egui::Ui, folder: u64) {
+    let mods = ui.input(|i| i.modifiers);
+    if mods.command || mods.ctrl {
+        if let Some(at) = app.tree.picked_timeline_groups.iter().position(|id| *id == folder) {
+            app.tree.picked_timeline_groups.remove(at);
+        } else {
+            app.tree.picked_timeline_groups.push(folder);
+        }
+        return;
+    }
+    app.tree.picked_joints.clear();
+    app.tree.picked_timeline_groups.clear();
+    app.tree.picked_timeline_groups.push(folder);
+    let _ = app.run("select.clear", json!({}));
 }
 
 /// Where a history row is drawn: its component and placement.
@@ -243,6 +349,9 @@ fn feature_row(
         }
         app.edit_feature(id);
     } else if r.clicked {
+        if !ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+            app.tree.picked_timeline_groups.clear();
+        }
         click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
     }
     if let Some(at) = r.secondary {
@@ -792,5 +901,56 @@ mod tests {
         h.step(&json!({"click": {"handle": "eye:Two"}})).unwrap();
         h.frames(2);
         assert!(!shown(&h), "and hides it again");
+    }
+
+    /// #7221: the history in the browser shows the timeline folders as the vertical History
+    /// does: a header with the folder's features under it, closed with the same fold, and a
+    /// drop of the marker above the header rolls the whole folder back.
+    #[test]
+    fn browser_history_mode_shows_timeline_folders() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"First","body_name":"A"})).unwrap();
+        let second =
+            h.app.run("solid.box", json!({"length":6,"width":6,"height":6,"name":"Second","body_name":"B"})).unwrap()["feature"].as_u64().unwrap();
+        let third =
+            h.app.run("solid.box", json!({"length":7,"width":7,"height":7,"name":"Third","body_name":"C"})).unwrap()["feature"].as_u64().unwrap();
+        let folder = h.app.run("timeline.group", json!({"features":[second, third],"name":"Holes"})).unwrap()["group"].as_u64().unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        assert_eq!(fold_of("Holes"), Some(true), "the folder is a header row, open");
+        let rows = drawn_rows();
+        let top = |label: &str| rows.iter().find(|(l, ..)| l == label).map(|row| row.1.top()).unwrap();
+        assert!(top("First") < top("Holes") && top("Holes") < top("Second") && top("Second") < top("Third"), "{rows:?}");
+
+        h.step(&json!({"click": {"handle": "fold:Holes"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.tree.collapsed.contains(&folder_key(folder)), "the vertical History's fold");
+        assert_eq!((count("Second"), count("Third")), (0, 0), "a closed folder shows only its header");
+        assert_eq!(fold_of("Holes"), Some(false));
+
+        let header = crate::scenario::handle_at("browser-history-folder:Holes").unwrap();
+        h.step(&json!({"drag":[{"handle":"browser:rollback"},[header.x, header.y - 8.0]]})).unwrap();
+        settle_heavy(&mut h);
+        assert_eq!(h.app.session.doc.marker, h.app.session.doc.feature_index(second), "the whole folder is rolled back");
+
+        h.step(&json!({"click": {"handle": "browser-history-folder:Holes"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.tree.picked_timeline_groups, [folder], "a click picks the folder");
+    }
+
+    /// #7221: a feature row's menu in the browser's history puts the feature in a new folder.
+    #[test]
+    fn browser_history_feature_menu_adds_a_new_folder() {
+        let mut h = Harness::new();
+        let first =
+            h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"First","body_name":"A"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(2);
+        let items = crate::context_menu::items(&h.app, &Target::Feature { id: first });
+        let item = items.iter().find(|item| item.id == "ui.newTimelineFolder").expect("Add to New Folder");
+        crate::context_menu::run_item(&mut h.app, item, Pos2::ZERO);
+        assert_eq!(h.app.session.doc.timeline_groups.len(), 1);
+        assert_eq!(h.app.session.doc.timeline_groups[0].features, [first]);
+        assert!(h.app.menu.rename.is_some(), "the new folder's name is edited right away");
     }
 }
