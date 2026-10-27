@@ -4714,8 +4714,8 @@ mod glass_tests {
         let Some((_, device, queue)) = crate::open_headless().ok() else { return };
         let depth = crate::depth_format(&device, true);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false };
-        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false };
+        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false, oit: false };
         let limit = device.limits().max_texture_dimension_2d;
         let red = |pixels: &[u8]| pixels.get((32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 4).is_some_and(|p| p[0] > 200 && p[1] < 60 && p[2] < 60);
         // Supersampled 4× (a wide, flat viewport) and at the viewport's own size: each frame is
