@@ -135,6 +135,8 @@ pub struct TreeState {
     /// The bodies a row at the top of the history lights this frame (`history_rows`), for the
     /// browser, drawn after it, to keep.
     history_hover: Vec<String>,
+    /// The plane a row at the top of the history lights this frame, kept the same way (#6975).
+    history_plane: Option<String>,
     /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
     /// normal), so the eye can bring it back (#822).
     pub hidden_section: Option<(solidcraft_engine::geom::Vec3, solidcraft_engine::geom::Vec3)>,
@@ -1181,7 +1183,7 @@ pub(crate) fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         folder_rows_at(app, ui, component, path.as_deref(), "bodies", 0, &mut acts, &bodies);
-        origin_rows(app, ui, 0, &acts);
+        origin_rows(app, ui, 0, &mut acts);
     });
     app.tree.reveal = reveal;
     // The browser's own rows reuse these order slots (`TreeState::remember`).
@@ -1189,6 +1191,8 @@ pub(crate) fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     DRAWN.with(|d| d.borrow_mut().truncate(drawn));
     app.viewport.hover_bodies = acts.hover_bodies.clone();
     app.tree.history_hover = acts.hover_bodies;
+    app.viewport.hover_plane = acts.hover_plane.clone();
+    app.tree.history_plane = acts.hover_plane;
     if let Some(d) = acts.drop {
         apply_drop(app, d);
     }
@@ -1205,7 +1209,8 @@ fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, mut acts: Actions) {
     // The history's rows, drawn before the browser, light bodies too (`history_rows`).
     let history = std::mem::take(&mut app.tree.history_hover);
     app.viewport.hover_bodies = if acts.hover_bodies.is_empty() { history } else { acts.hover_bodies };
-    app.viewport.hover_plane = acts.hover_plane;
+    let history_plane = app.tree.history_plane.take();
+    app.viewport.hover_plane = acts.hover_plane.or(history_plane);
     if let Some(d) = acts.drop {
         apply_drop(app, d);
     }
