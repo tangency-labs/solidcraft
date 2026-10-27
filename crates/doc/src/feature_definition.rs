@@ -40,13 +40,17 @@ pub struct Definition {
     pub omitted: Vec<(&'static str, &'static str)>,
 }
 
+/// The derived fields, each with its test that a change of it is only what evaluation or Update
+/// Links write (`self` after, the argument before).
+const DERIVED: [(&str, fn(&Feature, &Feature) -> bool); 2] = [("body_names", Feature::pinned_from), ("link_faces", Feature::relinked_from)];
+
 impl Feature {
     /// What saved field `field` of this feature is.
     pub fn field_role(&self, field: &str) -> FieldRole {
         match field {
             "id" | "type" | "name" | "suppressed" => FieldRole::Identity,
             "param_names" | "edge_refs" | "edge_names" | "face_names" => FieldRole::Bookkeeping,
-            "body_names" | "link_faces" => FieldRole::Derived,
+            _ if DERIVED.iter().any(|(k, _)| *k == field) => FieldRole::Derived,
             _ => self.heavy_fields().iter().find(|(k, _)| *k == field).map_or(FieldRole::Input, |(_, what)| FieldRole::Heavy(what)),
         }
     }
@@ -62,7 +66,28 @@ impl Feature {
         Ok(Definition { fields, omitted })
     }
 
+    /// Whether derived field `field` differs from `before`'s only as evaluation and Update Links
+    /// write it. False for any other field.
+    pub fn only_written_back(&self, before: &Feature, field: &str) -> bool {
+        DERIVED.iter().find(|(k, _)| *k == field).is_some_and(|(_, written_back)| written_back(self, before))
+    }
+
+    /// Pinning keeps every name that was set, and fills an empty slot only with a name
+    /// evaluation hands out (`Body3`, or `Ribs (4)` after the first name): a person's own name
+    /// there is a rename.
+    fn pinned_from(&self, before: &Feature) -> bool {
+        let given = |name: &str| name.trim().is_empty() || crate::is_counted_body_name(name) || crate::eval::split_piece_of(name).is_some();
+        let kept = before.body_names.iter().enumerate().all(|(k, name)| name.trim().is_empty() || self.body_names.get(k) == Some(name));
+        kept && self.body_names.iter().enumerate().all(|(k, name)| before.body_names.get(k).is_some_and(|b| !b.trim().is_empty()) || given(name))
+    }
+
+    /// Update Links writes a linked design's face names with its new STEP text.
+    fn relinked_from(&self, before: &Feature) -> bool {
+        matches!((&self.kind, &before.kind), (FeatureKind::Import { step: a, .. }, FeatureKind::Import { step: b, .. }) if a != b)
+    }
+
     /// The heavy fields of this kind of feature, in the order `timeline.inspect` lists them.
+    /// [`Feature::without_heavy`] and [`Feature::heavy_differs`] name the same fields.
     fn heavy_fields(&self) -> &'static [(&'static str, &'static str)] {
         match self.kind {
             FeatureKind::Sketch { .. } => &[("sketch", "the sketch geometry (sketch.inspect; edit it with the sketch commands)")],
@@ -70,5 +95,65 @@ impl Feature {
             FeatureKind::MeshImport { .. } => &[("meshes", "the imported meshes")],
             _ => &[],
         }
+    }
+
+    /// This feature with its heavy fields emptied: cheap to copy and serialise. Compare those
+    /// with [`Feature::heavy_differs`].
+    pub(crate) fn without_heavy(&self) -> Feature {
+        let kind = match &self.kind {
+            FeatureKind::Sketch { plane, .. } => FeatureKind::Sketch { plane: plane.clone(), sketch: Default::default() },
+            FeatureKind::Import { file, skip, .. } => {
+                FeatureKind::Import { file: file.clone(), step: "".into(), components: Vec::new(), skip: skip.clone() }
+            }
+            FeatureKind::MeshImport { file, .. } => FeatureKind::MeshImport { file: file.clone(), meshes: Vec::new() },
+            kind => kind.clone(),
+        };
+        let Feature {
+            id,
+            name,
+            suppressed,
+            body_names,
+            param_names,
+            component,
+            edge_refs,
+            edge_names,
+            face_names,
+            participants,
+            shell_piece_order,
+            kernel_piece_order,
+            inserted,
+            link_faces,
+            kind: _,
+        } = self;
+        Feature {
+            id: *id,
+            name: name.clone(),
+            suppressed: *suppressed,
+            body_names: body_names.clone(),
+            param_names: param_names.clone(),
+            component: *component,
+            edge_refs: edge_refs.clone(),
+            edge_names: edge_names.clone(),
+            face_names: face_names.clone(),
+            participants: participants.clone(),
+            shell_piece_order: *shell_piece_order,
+            kernel_piece_order: *kernel_piece_order,
+            inserted: *inserted,
+            link_faces: link_faces.clone(),
+            kind,
+        }
+    }
+
+    /// The heavy fields that differ from `other`'s, compared where they are.
+    pub(crate) fn heavy_differs(&self, other: &Feature) -> Vec<&'static str> {
+        let fields = match (&self.kind, &other.kind) {
+            (FeatureKind::Sketch { sketch: a, .. }, FeatureKind::Sketch { sketch: b, .. }) => vec![("sketch", a != b)],
+            (FeatureKind::Import { step: a, components: c, .. }, FeatureKind::Import { step: b, components: d, .. }) => {
+                vec![("step", !std::sync::Arc::ptr_eq(a, b) && a != b), ("components", c != d)]
+            }
+            (FeatureKind::MeshImport { meshes: a, .. }, FeatureKind::MeshImport { meshes: b, .. }) => vec![("meshes", a != b)],
+            _ => Vec::new(),
+        };
+        fields.into_iter().filter_map(|(field, differs)| differs.then_some(field)).collect()
     }
 }

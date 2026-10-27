@@ -626,7 +626,43 @@ pub struct Assembly {
     pub exploded: Vec<crate::motion::ExplodedView>,
 }
 
+impl Joint {
+    /// The joint as a person defined it: the offset, angle and values its expressions drive,
+    /// which are worked out again whenever the design changes, set to zero (#5184).
+    pub fn as_defined(&self) -> Joint {
+        let mut j = self.clone();
+        j.forget_driven();
+        j
+    }
+
+    fn forget_driven(&mut self) {
+        if self.exprs.offset.is_some() {
+            self.offset = 0.0;
+        }
+        if self.exprs.angle.is_some() {
+            self.angle = 0.0;
+        }
+        for (i, v) in self.values.iter_mut().enumerate() {
+            if self.exprs.value(i).is_some() {
+                *v = 0.0;
+            }
+        }
+    }
+}
+
 impl Assembly {
+    /// The assembly as people defined it: each joint [`Joint::as_defined`], and a coupled
+    /// link's ratio and lift, worked out again from its coupling, left out. Copies the assembly.
+    pub fn as_defined(&self) -> Assembly {
+        let mut a = self.clone();
+        a.joints.iter_mut().for_each(Joint::forget_driven);
+        for l in a.links.iter_mut().filter(|l| l.coupling.is_some()) {
+            l.ratio = 0.0;
+            l.lift.clear();
+        }
+        a
+    }
+
     /// Every expression the joints and motion links keep, with the joint (or the driven joint of
     /// a link) and what it sets: `offset`, `angle`, a value's name, or a coupling's length.
     pub fn exprs(&self) -> Vec<(u64, String, &str)> {
