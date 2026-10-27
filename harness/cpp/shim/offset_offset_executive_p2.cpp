@@ -83,12 +83,15 @@ void interval(double a, double b, bool strict) {
 struct Spec {
     int kind = 0;
     std::array<double, 15> v{};
-    int64_t faces() const { return kind == 3 ? 1 : kind == 4 ? 6 : 0; }
+    int64_t faces() const {
+        return kind == 3 ? 1 : kind == 4 ? 6 : kind == 5 ? 3 : kind == 6 ? 1 : 0;
+    }
 };
 Spec read_spec(Reader& rd) {
     Spec s;
-    s.kind = (int)rd.integer(0, 4);
-    int n = s.kind == 2 ? 10 : s.kind == 3 ? 15 : s.kind == 4 ? 6 : 0;
+    s.kind = (int)rd.integer(0, 6);
+    int n = s.kind == 2 ? 10 : s.kind == 3 ? 15 : s.kind == 4 ? 6 : s.kind == 5 ? 5
+        : s.kind == 6 ? 4 : 0;
     for (int i=0; i<n; ++i) s.v[i] = rd.number();
     const auto& v = s.v;
     if (s.kind == 2) {
@@ -110,6 +113,12 @@ Spec read_spec(Reader& rd) {
         finite(v[10]*v[12]); finite(v[10]*v[14]);
     } else if (s.kind == 4) {
         for (int i=0; i<3; ++i) { finite(v[i]+v[i+3]); finite(v[i+3]*v[i+3]); }
+    } else if (s.kind == 5 || s.kind == 6) {
+        // Cylinder (origin, radius, height) or sphere (origin, radius): every
+        // coordinate plus or minus the radius (and the top) stays finite.
+        for (int i=0; i<3; ++i) { finite(v[i]+v[3]); finite(v[i]-v[3]); }
+        finite(v[3]*v[3]);
+        if (s.kind == 5) finite(v[2]+v[4]);
     }
     return s;
 }
@@ -254,6 +263,16 @@ SmBrep* build(const Spec& s, SmContext& ctx, double tolerance) {
         result->GetVertices(vertices);
         // Tiny / far-translated boxes come back as an EMPTY B-rep (0 faces): a
         // defined native result, not a crash, so it is built and compared as is.
+        result->SetTolerance(tolerance, FALSE);
+        return result;
+    }
+    if (s.kind == 5 || s.kind == 6) {
+        // The real primitive constructors (compared in primitive.api_primitives),
+        // then the fixture tolerance, as for the box.
+        SmVector3d origin(v[0], v[1], v[2]);
+        if (s.kind == 5) constructed(SmApiCreateCylinder(origin, v[3], v[4], result));
+        else constructed(SmApiCreateSphere(origin, v[3], result));
+        if (!result) throw std::runtime_error("successful primitive constructor returned null");
         result->SetTolerance(tolerance, FALSE);
         return result;
     }

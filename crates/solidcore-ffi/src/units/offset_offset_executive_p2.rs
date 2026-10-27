@@ -209,14 +209,32 @@ pub enum Fixture {
         /// Length, width, height; nonpositive dimensions reach native rejection.
         size: [f64; 3],
     },
+    /// Three-face cylinder built by the actual `SmApiCreateCylinder` constructor
+    /// (`SmBrep*&` overload): the side face is closed along a seam edge.
+    Cylinder {
+        /// Centre of the base circle.
+        origin: [f64; 3],
+        /// Radius; degenerate radii reach native rejection.
+        radius: f64,
+        /// Height along Z.
+        height: f64,
+    },
+    /// One-face sphere built by the actual `SmApiCreateSphere` constructor.
+    Sphere {
+        /// Centre.
+        origin: [f64; 3],
+        /// Radius; degenerate radii reach native rejection.
+        radius: f64,
+    },
 }
 
 impl Fixture {
     fn face_count(&self) -> usize {
         match self {
             Self::EmptyBrep | Self::Wire { .. } => 0,
-            Self::PlaneSheet { .. } => 1,
+            Self::PlaneSheet { .. } | Self::Sphere { .. } => 1,
             Self::Box { .. } => 6,
+            Self::Cylinder { .. } => 3,
         }
     }
 }
@@ -476,6 +494,33 @@ fn pack_fixture(fixture: Option<&Fixture>, out: &mut Vec<f64>) -> Result<(), Ffi
             out.extend_from_slice(origin);
             out.extend_from_slice(size);
         }
+        Fixture::Cylinder {
+            origin,
+            radius,
+            height,
+        } => {
+            primitive_finite(origin, *radius)?;
+            finite(&[*height, origin[2] + height])?;
+            out.push(5.0);
+            out.extend_from_slice(origin);
+            out.extend_from_slice(&[*radius, *height]);
+        }
+        Fixture::Sphere { origin, radius } => {
+            primitive_finite(origin, *radius)?;
+            out.push(6.0);
+            out.extend_from_slice(origin);
+            out.push(*radius);
+        }
+    }
+    Ok(())
+}
+
+/// The shim's finiteness checks of a cylinder or sphere fixture.
+fn primitive_finite(origin: &[f64; 3], radius: f64) -> Result<(), FfiError> {
+    finite(origin)?;
+    finite(&[radius, radius * radius])?;
+    for a in origin {
+        finite(&[a + radius, a - radius])?;
     }
     Ok(())
 }
