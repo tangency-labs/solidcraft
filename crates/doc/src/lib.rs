@@ -28,6 +28,8 @@ pub mod drawing;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
+mod feature_definition;
+pub use feature_definition::{Definition, FieldRole};
 mod feature_geometry;
 mod feature_refs;
 pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
