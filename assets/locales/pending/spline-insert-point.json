@@ -2,8 +2,14 @@
   "en": {
     "cmd.sketch_spline_insert_point": "Add Spline Point"
   },
+  "ar": {
+    "cmd.sketch_spline_insert_point": "إضافة نقطة إلى المنحنى الشريحي"
+  },
   "de": {
     "cmd.sketch_spline_insert_point": "Splinepunkt hinzufügen"
+  },
+  "he": {
+    "cmd.sketch_spline_insert_point": "הוספת נקודה לספליין"
   },
   "ja": {
     "cmd.sketch_spline_insert_point": "スプライン点を追加"
