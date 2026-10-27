@@ -14,10 +14,11 @@ name = "solidcraft-web"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["smlib"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
-# Link SMLib into the kernel (solidcraft-engine/smlib): needs scripts/fetch-smlib.sh and wasi-sdk in
-# WASI_SDK_PATH (crates/smlib/build.rs). Off by default until CI has wasi-sdk.
+# Link SMLib into the kernel (solidcraft-engine/smlib; needs scripts/fetch-smlib.sh
+# wasm32-unknown-unknown, or the sources and wasi-sdk in WASI_SDK_PATH, crates/smlib/build.rs). SMLib
+# is the only kernel, so without it the web app models nothing.
 smlib = ["solidcraft-engine/smlib"]
 
 [dependencies]

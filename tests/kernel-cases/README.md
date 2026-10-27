@@ -10,8 +10,8 @@ cargo xtask kernel-cases --cli target/release/solidcraft-cli --out /tmp/run   # 
 cargo run -p solidcraft-cli --features smlib -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
 ```
 
-The CLI needs `--features smlib` (after `scripts/fetch-smlib.sh`); without it every operation
-answers that SMLib is not built. The run's output folder (`--out`, default `target/kernel-cases`)
+The CLI links SMLib by default (`scripts/fetch-smlib.sh` fetches the prebuilt library first);
+built with `--no-default-features`, every operation answers that SMLib is not built. The run's output folder (`--out`, default `target/kernel-cases`)
 gets `results.json`, every case's full result, and `dumps/<area>-<case>/`: the inputs of each
 SMLib call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig always passes).
 

@@ -20,10 +20,11 @@ name = "solvecraft-cli"
 path = "src/alias.rs"
 
 [features]
-default = ["raytrace-cpu"]
+default = ["raytrace-cpu", "smlib"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
-# Link SMLib into the kernel, for the regression rig's smlib runs (tests/kernel-cases).
+# Link SMLib into the kernel (solidcraft-engine/smlib; needs scripts/fetch-smlib.sh). SMLib is the
+# only kernel, so without it the command line models nothing.
 smlib = ["solidcraft-engine/smlib"]
 
 [dependencies]
