@@ -199,6 +199,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
                 .collect();
             let r = ffi::sequence(&ops).map_err(herr)?;
             Ok(Output::new()
+                .int("n_results", r.results.len() as i64)
                 .ints("results", r.results)
                 .ints("last_add", r.last_add)
                 .ints("elems", r.elems))
@@ -331,6 +332,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             }
             let elems: Vec<i64> = arr.reports().iter().flat_map(report_ints).collect();
             Ok(Output::new()
+                .int("n_results", results.len() as i64)
                 .ints("results", results)
                 .ints("last_add", last_add)
                 .ints("elems", elems))

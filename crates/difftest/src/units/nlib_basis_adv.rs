@@ -21,8 +21,9 @@
 //! Known vacuous fixtures: the `inc_mult` fixtures taken from Bezier-form knot vectors
 //! (`vNN_..._inc_mult_t*` whose vector has no interior knot, e.g. `DropCurveCurve.smc`)
 //! succeed on both sides with an empty knot list, since upstream inserts only copies of
-//! interior knots. There is no value to record, so they are left as status-only checks;
-//! the generator avoids such inputs.
+//! interior knots. There is no value to record, so the output also carries the count of
+//! inserted knots (`n`, an exact integer from each side), which is 0 for them; the
+//! generator still avoids such inputs.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -158,7 +159,11 @@ fn cpp(i: Inputs) -> Result<Output, HarnessError> {
             ffi::insert(&r, i32_of(p)?, &x).map(|s| Output::new().values("s", s))
         }
         Inputs::IncMult { u, p, t } => {
-            ffi::inc_mult(&u, i32_of(p)?, i64_of(t)?).map(|x| Output::new().values("x", x))
+            ffi::inc_mult(&u, i32_of(p)?, i64_of(t)?).map(|x| {
+                Output::new()
+                    .int("n", x.len() as i64)
+                    .values("x", x)
+            })
         }
         Inputs::DerivsArray {
             knots,
@@ -199,7 +204,11 @@ fn rust(i: Inputs) -> Result<Output, HarnessError> {
             ba::insert_knots(&r, p, &x).map(|s| Output::new().values("s", s))
         }
         Inputs::IncMult { u, p, t } => {
-            ba::increase_knot_mult(&u, p, t).map(|x| Output::new().values("x", x))
+            ba::increase_knot_mult(&u, p, t).map(|x| {
+                Output::new()
+                    .int("n", x.len() as i64)
+                    .values("x", x)
+            })
         }
         Inputs::DerivsArray {
             knots,

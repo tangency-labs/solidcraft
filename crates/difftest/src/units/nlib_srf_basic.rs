@@ -270,6 +270,9 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
             out = out.values("equal", take(flat, &mut at, 1)?.to_vec());
         }
         Inputs::RatCompatible { surfaces } => {
+            // The record length is each side's own output; it keeps an empty
+            // surface list (no dumps at all) from being a vacuous comparison.
+            out = out.int("record_len", flat.len() as i64);
             for k in 0..surfaces.len() {
                 out = split_dump(flat, &mut at, &format!("s{k}_"), out)?;
             }
