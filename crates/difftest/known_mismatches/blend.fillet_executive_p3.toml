@@ -6,11 +6,6 @@
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
-case = "sweep5-bague-e4-r1.0"
-why = "C++ TrimRailCurves fails (1001, body kept); Rust's rail of the closed edge has natural interval (0, 63.507) against C++ (0, 31.940), so Rust fillets (16,24,8) and its mass fails (plan/findings/blend.fillet_executive_p3--sweep5-bague-e4-rail-length.md)"
-
-[[mismatch]]
-unit = "blend.fillet_executive_p3"
 case = "sweep5-letter_g-e10-r1.0"
 why = "mass area 855.6511940507597 vs 855.6495364737889; topology and geometry agree; the fillet face's UV trims are shifted by 5.7e-14 in u, which the adaptive area integration amplifies (plan/findings/blend.fillet_executive_p3--sweep5-mass-on-mate-held-uv-trims--addendum-2026-10-27-nurb-box1-resolved.md)"
 
