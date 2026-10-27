@@ -610,6 +610,8 @@ struct Actions {
     menu: Option<(Pos2, Target)>,
     hover_bodies: Vec<String>,
     hovered: bool,
+    /// The plane whose row is under the pointer, lit in the view (#6975).
+    hover_plane: Option<String>,
     drop: Option<DropAction>,
     /// What the selection and the 3D view's pointer light in the tree.
     lit: Lit,
@@ -1203,6 +1205,7 @@ fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, mut acts: Actions) {
     // The history's rows, drawn before the browser, light bodies too (`history_rows`).
     let history = std::mem::take(&mut app.tree.history_hover);
     app.viewport.hover_bodies = if acts.hover_bodies.is_empty() { history } else { acts.hover_bodies };
+    app.viewport.hover_plane = acts.hover_plane;
     if let Some(d) = acts.drop {
         apply_drop(app, d);
     }
@@ -1582,7 +1585,7 @@ fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
     ]
 }
 
-fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actions) {
+fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let key = "origin";
     let open = is_open(app, key, false);
     let lit = |thing: &Option<Thing>| thing.as_ref().map_or((false, false), |t| acts.lit.thing(t));
@@ -1648,6 +1651,9 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &Actio
             && icon == "plane"
         {
             crate::context_menu::open_for(app, p, Target::OriginPlane { name: k.into() });
+        }
+        if r.hovered && icon == "plane" {
+            acts.hover_plane = Some(k.into());
         }
         if r.clicked
             && let Some(x) = sel
@@ -2515,6 +2521,11 @@ fn entry_row(
     }
     if r.hovered && !e.bodies.is_empty() {
         acts.hover(e.bodies.iter());
+    }
+    if r.hovered
+        && let Thing::Plane(name) = &e.thing
+    {
+        acts.hover_plane = Some(name.clone());
     }
     if let Some(p) = r.secondary
         && let Some(t) = e.target.clone()
