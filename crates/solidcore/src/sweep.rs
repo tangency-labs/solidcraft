@@ -5,6 +5,7 @@
 //! `SmRotationalSweepGeometry`, `SmTopologySweep` in `source/SMLib`, and the sweep
 //! entry points of `SM_API/SmApiBrep` and `SM_API/SmApiSurfaces`.
 
+pub mod analytic_revolution;
 pub mod api_brep;
 pub mod api_surfaces;
 pub mod rotational_sweep_geometry;
