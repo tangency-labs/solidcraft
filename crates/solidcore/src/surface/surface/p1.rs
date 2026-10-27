@@ -1801,7 +1801,7 @@ impl Surface {
         }
         // (no GetTree: the continuity arrays are empty unless the cache's tree was built)
         let cache = continuity_surface_cache(k, self, handle, context)?;
-        self.domain_with_continuity_using(min_continuity, uv, uv_vector, &cache)
+        self.domain_with_continuity_using(k, min_continuity, uv, uv_vector, &cache)
     }
 
     /// [`Surface::domain_with_continuity`] over a caller-held surface cache
@@ -1814,6 +1814,7 @@ impl Surface {
     /// `InvalidInput` for an unknown knot position.
     pub fn domain_with_continuity_from_cache<O: Copy + PartialEq>(
         &self,
+        k: &Kernel,
         min_continuity: ContinuityType,
         uv: Point2,
         uv_vector: Vec2,
@@ -1822,11 +1823,12 @@ impl Surface {
         if let SurfaceKind::Step(s) = self.kind() {
             return s.domain_with_continuity();
         }
-        self.domain_with_continuity_using(min_continuity, uv, uv_vector, cache)
+        self.domain_with_continuity_using(k, min_continuity, uv, uv_vector, cache)
     }
 
     fn domain_with_continuity_using<O: Copy + PartialEq>(
         &self,
+        k: &Kernel,
         min_continuity: ContinuityType,
         uv: Point2,
         uv_vector: Vec2,
@@ -1848,7 +1850,7 @@ impl Surface {
         // For each dimension
         {
             let knots = self
-                .knots(SurfParamType::U, None)
+                .knots_with_nurb(k, SurfParamType::U, None)
                 .map_or_else(|_| Vec::new(), |k| k.0);
             let u_conts = cache.u_continuities();
             let n = u_conts.len();
@@ -1885,7 +1887,7 @@ impl Surface {
 
         {
             let knots = self
-                .knots(SurfParamType::V, None)
+                .knots_with_nurb(k, SurfParamType::V, None)
                 .map_or_else(|_| Vec::new(), |k| k.0);
             let v_conts = cache.v_continuities();
             let n = v_conts.len();
@@ -2730,16 +2732,22 @@ impl Surface {
     }
 
     /// `uv_original` with each coordinate moved to the nearest knot closer than
-    /// `uv_snap_tolerance` (`SnapToKnots`).
+    /// `uv_snap_tolerance` (`SnapToKnots`). Its virtual `GetKnots` makes a lazy
+    /// surface's NURB first ([`Surface::knots_with_nurb`]).
     ///
     /// # Errors
     ///
     /// Those of the knot queries.
-    pub fn snap_to_knots(&self, uv_original: Point2, uv_snap_tolerance: f64) -> Result<Point2> {
+    pub fn snap_to_knots(
+        &self,
+        k: &Kernel,
+        uv_original: Point2,
+        uv_snap_tolerance: f64,
+    ) -> Result<Point2> {
         let mut uv_snapped = uv_original;
 
         let mut min_snap_dist = BIG_DOUBLE;
-        for &knot in &self.knots(SurfParamType::U, None)?.0 {
+        for &knot in &self.knots_with_nurb(k, SurfParamType::U, None)?.0 {
             let snap_dist = (knot - uv_original.x).abs();
             if snap_dist < min_snap_dist && snap_dist < uv_snap_tolerance {
                 uv_snapped.x = knot;
@@ -2748,7 +2756,7 @@ impl Surface {
         }
 
         min_snap_dist = BIG_DOUBLE;
-        for &knot in &self.knots(SurfParamType::V, None)?.0 {
+        for &knot in &self.knots_with_nurb(k, SurfParamType::V, None)?.0 {
             let snap_dist = (knot - uv_original.y).abs();
             if snap_dist < min_snap_dist && snap_dist < uv_snap_tolerance {
                 uv_snapped.y = knot;
@@ -4229,7 +4237,7 @@ mod tests {
         assert_eq!(
             s.domain_with_continuity(k, ContinuityType::G1, uv, dir)
                 .unwrap(),
-            s.domain_with_continuity_from_cache(ContinuityType::G1, uv, dir, &cache)
+            s.domain_with_continuity_from_cache(k, ContinuityType::G1, uv, dir, &cache)
                 .unwrap()
         );
     }
@@ -4371,7 +4379,9 @@ mod tests {
     #[test]
     fn snap_and_seams() {
         let s = bilinear();
-        let p = s.snap_to_knots(Point2::new(0.999, 0.4), 0.01).unwrap();
+        let p = s
+            .snap_to_knots(&Kernel::default(), Point2::new(0.999, 0.4), 0.01)
+            .unwrap();
         assert_eq!(p, Point2::new(1.0, 0.4));
         let d = s.natural_uv_domain();
         // bilinear: never a seam

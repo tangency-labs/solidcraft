@@ -1795,7 +1795,10 @@ pub fn is_topological(
             .surface
             .as_ref()
             .ok_or_else(|| null("IsTopological: face without surface"))?;
-        Ok((f, s.clone()))
+        // Upstream reads `pFace->GetSurface()` itself. An evaluation copy keeps the
+        // face owner, whose tolerance `IsPlanar`'s pseudo box is expanded by; a plain
+        // clone drops it, so a curved B-spline face could pass as planar.
+        Ok((f, s.clone_for_evaluation()?))
     };
     // 1st edgeuse locals
     let (face1, surf1) = face_of(eu_a)?;

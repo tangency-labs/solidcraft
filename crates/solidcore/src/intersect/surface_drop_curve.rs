@@ -1382,7 +1382,7 @@ impl<'s> SurfaceDropCurve<'s> {
                 }
 
                 // see if working curve interval drops to Surface isoParameterCurve with the same parameterization
-                uv = surface.snap_to_knots(uv, EFF_ZERO_SQRT / 100.0)?;
+                uv = surface.snap_to_knots(k, uv, EFF_ZERO_SQRT / 100.0)?;
                 let drop = match drop_iso_curve(k, surface, &uv_domain, curve, &ivl, uv, approx_tol)
                 {
                     Ok(d) => d,
@@ -1739,6 +1739,7 @@ impl<'s> SurfaceDropCurve<'s> {
             // let WorkingDomain = Surface G1 continuous SubDomain that contains the StartPoint
             self.working_uv_domain = match cache {
                 Some(cache) => surface.domain_with_continuity_from_cache(
+                    k,
                     ContinuityType::G1,
                     start_pnt.curve_uv[0],
                     start_pnt.curve_uv[1],

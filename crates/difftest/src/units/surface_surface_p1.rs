@@ -628,7 +628,7 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         OpIn::Snap { uv, tol } => {
             let s = run()?;
             let mut o = Vec::new();
-            sub(&mut o, s.snap_to_knots(p2(*uv), *tol), |o, p| {
+            sub(&mut o, s.snap_to_knots(&k, p2(*uv), *tol), |o, p| {
                 o.extend([p.x, p.y]);
             })
             .map(|()| o)

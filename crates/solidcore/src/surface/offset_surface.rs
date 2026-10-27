@@ -2323,12 +2323,13 @@ impl SurfaceEvaluate for OffsetEval<'_> {
 
     fn knots(
         &self,
+        k: &Kernel,
         param: SurfParamType,
         ivl: Option<&Extent1d>,
     ) -> Result<(Vec<f64>, Vec<usize>)> {
         self.with_extension(|ext| match ext.current() {
-            Some(e) => e.knots(param, ivl),
-            None => self.off.surface.knots(param, ivl),
+            Some(e) => e.knots_with_nurb(k, param, ivl),
+            None => self.off.surface.knots_with_nurb(k, param, ivl),
         })
     }
 

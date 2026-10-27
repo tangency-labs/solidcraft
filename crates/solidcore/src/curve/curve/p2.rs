@@ -1889,8 +1889,8 @@ impl Curve {
             // cases where there are a large number of knots.
             do_precise = true;
             let num_knots1 = self.number_natural_knots(k)?;
-            let num_knots2 = surface_knot_count(surface, false)?;
-            let num_knots3 = surface_knot_count(surface, true)?;
+            let num_knots2 = surface_knot_count(k, surface, false)?;
+            let num_knots3 = surface_knot_count(k, surface, true)?;
             num_samples = 22 + num_knots1 + num_knots2 + num_knots3;
         }
 
@@ -2400,13 +2400,13 @@ fn surface_is_plane<S: SurfaceEvaluate>(surface: &S) -> Result<bool> {
 }
 
 /// The number of unique `v` (or `u`) knots of `surface` (`SmSurface::GetKnots`).
-fn surface_knot_count<S: SurfaceEvaluate>(surface: &S, v: bool) -> Result<usize> {
+fn surface_knot_count<S: SurfaceEvaluate>(k: &Kernel, surface: &S, v: bool) -> Result<usize> {
     let param = if v {
         SurfParamType::V
     } else {
         SurfParamType::U
     };
-    Ok(surface.knots(param, None)?.0.len())
+    Ok(surface.knots(k, param, None)?.0.len())
 }
 
 /// `SmSurface::DropPoint`: the surface parameters and distance of the drop, `None`

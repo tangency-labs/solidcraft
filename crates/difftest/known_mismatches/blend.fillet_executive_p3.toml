@@ -1,0 +1,30 @@
+# Real-solid file-source fillets from the fillet executive p1 round-4 stub sweep
+# (fixtures/blend.fillet_executive_p3/sweep_round4.json). Investigation is a follow-up.
+
+# Round-5 sweep representatives (fixtures/blend.fillet_executive_p3/sweep_round5.json):
+# one case per root-cause group of the Fillet/*.smb probe sweep.
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "sweep5-bague-e4-r1.0"
+why = "C++ TrimRailCurves fails (1001, body kept); Rust's rail of the closed edge has natural interval (0, 63.507) against C++ (0, 31.940), so Rust fillets (16,24,8) and its mass fails (plan/findings/blend.fillet_executive_p3--sweep5-bague-e4-rail-length.md)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "sweep5-letter_g-e10-r1.0"
+why = "mass area 855.6511940507597 vs 855.6495364737889; topology and geometry agree; the fillet face's UV trims are shifted by 5.7e-14 in u, which the adaptive area integration amplifies (plan/findings/blend.fillet_executive_p3--sweep5-mass-on-mate-held-uv-trims--addendum-2026-10-27-nurb-box1-resolved.md)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "sweep5-sphere_diff_3cylinders-e29-r1.0"
+why = "one result vertex tolerance differs (C++ 9.1005e-5, Rust 9.3047e-5); everything else agrees (plan/findings/blend.fillet_executive_p3--sweep5-sphere-diff-e29-vertex-tolerance.md)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "sweep5-ext_w_hole-e15-r1.0"
+why = "one face's tolerance (5.2976e-5 vs 4e-5) and UV domain minimum ((0, 0.5869) vs (2.5, 7.5)) differ, so its surface samples do; topology agrees (plan/findings/blend.fillet_executive_p3--sweep5-ext-w-hole-e15-face-domain.md)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "sweep5-ext_w_hole-e14-r1.0"
+why = "one near-zero vertex coordinate differs (C++ 1.4453956777755315e-15, Rust 3.6012056774890033e-16); everything else agrees (plan/findings/blend.fillet_executive_p3--sweep5-ext-w-hole-e14-near-zero-vertex.md)"

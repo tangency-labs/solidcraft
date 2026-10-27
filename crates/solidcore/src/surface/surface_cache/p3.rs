@@ -688,7 +688,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 (uv_max.y - uv_min.y) / 4.0,
             )
         };
-        let snapped = sub.snap_to_knots(orig, snap_dist)?;
+        let snapped = sub.snap_to_knots(k, orig, snap_dist)?;
         let split_param = if direction == SurfParamType::U {
             snapped.x
         } else {

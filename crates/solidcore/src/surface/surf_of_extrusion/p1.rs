@@ -2652,6 +2652,53 @@ mod tests {
         assert!(mults.iter().all(|&m| m == degree + 1), "{mults:?}");
     }
 
+    /// The virtual `GetKnots` of `SurfaceMaxDistanceBetween` (through `SurfaceEvaluate`),
+    /// `SnapToKnots` and `GetDomainWithContinuity` make a lazy extrusion's NURB first
+    /// instead of failing on the NURB-less base.
+    #[test]
+    fn lazy_extrusion_knot_callers_make_the_nurb() {
+        use crate::geom::geom_utility::p2::ContinuityType;
+        use crate::math::Vec2;
+        use crate::surface::surface::p2::SurfaceEvaluate;
+        use crate::surface::surface::Surface;
+        let k = k();
+        let lazy = SurfOfExtrusion::new(
+            &k,
+            arc_gen(),
+            Point3::ZERO,
+            Vec3::new(0.0, 0.0, 2.0),
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            false,
+        )
+        .unwrap();
+        assert!(lazy.base().gw_nurb().is_none());
+        let made = lazy.base_with_nurb(&k).unwrap().into_owned();
+        let surf = Surface::from(lazy.clone_exact());
+        for param in [SurfParamType::U, SurfParamType::V] {
+            assert!(surf.knots(param, None).is_err(), "the stored base has none");
+            let want = made.knots(param, None).unwrap();
+            assert_eq!(
+                SurfaceEvaluate::knots(&surf, &k, param, None).unwrap(),
+                want
+            );
+        }
+        let (u_knots, _) = made.knots(SurfParamType::U, None).unwrap();
+        let first = u_knots[0];
+        let snapped = surf
+            .snap_to_knots(&k, Point2::new(first + 1e-12, 0.5), 1e-9)
+            .unwrap();
+        assert_eq!(snapped.x, first);
+        let dom = surf
+            .domain_with_continuity(
+                &k,
+                ContinuityType::G1,
+                Point2::new(0.5, 0.5),
+                Vec2::new(1.0, 0.0),
+            )
+            .unwrap();
+        assert!(dom.min().x <= 0.5 && dom.max().x >= 0.5, "{dom:?}");
+    }
+
     #[test]
     fn seam_drop_keeps_the_inward_end() {
         let k = k();
