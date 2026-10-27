@@ -51,6 +51,30 @@ pub fn extract(s: &Session) -> Result<ProductScene> {
     Ok(scene)
 }
 
+/// For each of `scene`'s meshes, the shared mesh it is drawn from and the placement that moves
+/// it there (column-major, as the document's placements): a part placed by several occurrences
+/// is the same definition mesh moved, and any other body is its own mesh, unmoved. A renderer
+/// that draws one copy of the triangles at many placements can use it; the scene's own
+/// world-space meshes stay authoritative. `None` for a mesh that is not, or no longer, the
+/// body's mesh.
+pub fn placements(s: &Session, scene: &ProductScene) -> Vec<Option<(std::sync::Arc<crate::geom::Mesh>, crate::doc::Mat)>> {
+    let world = s.world_state();
+    let bodies: std::collections::HashMap<&str, &crate::doc::ModelBody> = world.bodies.iter().map(|b| (b.name.as_str(), b)).collect();
+    scene
+        .meshes
+        .iter()
+        .map(|m| {
+            let body = bodies.get(m.name.as_str())?;
+            // Only the mesh this body has (made once and kept): a scene from another state
+            // names other meshes.
+            if !body.cached_mesh().is_some_and(|mesh| std::sync::Arc::ptr_eq(&mesh, &m.mesh)) {
+                return None;
+            }
+            Some(body.mesh_in_place())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -59,6 +83,37 @@ mod tests {
     use crate::render::*;
     use serde_json::json;
     use std::sync::Arc;
+
+    /// A part placed twice is two product meshes moved from one shared mesh; a body of the root
+    /// is its own mesh, unmoved, and a mesh from another state names nothing.
+    #[test]
+    fn placements_name_the_shared_mesh_of_placed_copies() {
+        let mut s = Session::default();
+        let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+        s.execute("component.activate", &json!({"component":0})).unwrap();
+        s.execute("occurrence.copy", &json!({"component":part["component"],"translate":[30,0,0]})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence":part["occurrence"],"translate":[10,0,0]})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[0,40,0],"body_name":"Root"})).unwrap();
+        let scene = extract(&s).unwrap();
+        let placed = placements(&s, &scene);
+        assert_eq!(placed.len(), scene.meshes.len());
+        let copies: Vec<_> = scene.meshes.iter().zip(&placed).filter(|(m, _)| !m.name.starts_with("Root")).collect();
+        assert_eq!(copies.len(), 2);
+        let sources: Vec<_> = copies.iter().map(|(_, p)| p.as_ref().map(|(source, _)| source.clone()).expect("a placed copy")).collect();
+        assert!(Arc::ptr_eq(&sources[0], &sources[1]), "both placements share one mesh");
+        for (m, p) in &copies {
+            let (source, transform) = p.as_ref().unwrap();
+            let moved = crate::doc::apply_point(transform, source.positions[0]);
+            assert!(moved.dist(m.mesh.positions[0]) < 1e-9, "the shared mesh moved is the product mesh");
+        }
+        let root = scene.meshes.iter().position(|m| m.name.starts_with("Root")).unwrap();
+        let (own, unmoved) = placed[root].as_ref().unwrap();
+        assert!(Arc::ptr_eq(own, &scene.meshes[root].mesh) && crate::doc::is_identity(unmoved), "a root body is its own mesh, unmoved");
+        let mut other = scene.clone();
+        other.meshes[0].mesh = Arc::new((*other.meshes[0].mesh).clone());
+        assert!(placements(&s, &other)[0].is_none(), "another mesh under the same name");
+    }
 
     #[test]
     fn product_scene_keeps_placed_appearances_and_meshes_without_design_overlays() {

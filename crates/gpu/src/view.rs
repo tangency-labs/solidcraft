@@ -432,6 +432,9 @@ pub enum InstanceLook {
     Faded,
     /// With the see-through bodies ([`GpuScene::glass`]): far sides, then near sides.
     Glass,
+    /// An opaque PBR surface (the product preview's), its placement's palette entry naming its
+    /// material ([`Palette::materials`]). Smooth meshes only.
+    Pbr,
 }
 
 /// Triangles drawn at several places: a part placed by many occurrences keeps one copy of its
@@ -580,7 +583,7 @@ impl GpuScene {
         }
         for m in std::mem::take(&mut self.instanced) {
             match m.look {
-                InstanceLook::Opaque => m.expand_into(&mut out.tris),
+                InstanceLook::Opaque | InstanceLook::Pbr => m.expand_into(&mut out.tris),
                 InstanceLook::Faded => m.expand_into(&mut out.trans),
                 InstanceLook::Glass => m.expand_into(&mut out.glass),
             }
@@ -2134,6 +2137,8 @@ pub struct Renderer {
     /// `pbr` for built triangles whose palette entries name their materials (the product
     /// preview's blocks, [`TriClass::Pbr`]).
     pbr_palette: wgpu::RenderPipeline,
+    /// `pbr_palette` for placements of a shared smooth mesh ([`InstanceLook::Pbr`]).
+    pbr_instanced: wgpu::RenderPipeline,
     trans: wgpu::RenderPipeline,
     /// Glass: far sides (front faces culled), then near sides (back faces culled).
     glass_far: wgpu::RenderPipeline,
@@ -3017,6 +3022,27 @@ impl Renderer {
             (
                 pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None),
                 pipeline("sc_pbr_palette", "vs_pbr_palette", "fs_pbr", tri_layout(), opaque(), None),
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("sc_pbr_instanced"),
+                    layout: Some(&layout),
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some("vs_pbr_inst"),
+                        buffers: &[Some(shared_layout()), Some(instance_layout())],
+                        compilation_options: Default::default(),
+                    },
+                    primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                    depth_stencil: opaque(),
+                    multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &module,
+                        entry_point: Some("fs_pbr"),
+                        targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                        compilation_options: Default::default(),
+                    }),
+                    multiview_mask: None,
+                    cache: None,
+                }),
             )
         };
         let lines = || {
@@ -3066,7 +3092,7 @@ impl Renderer {
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_reset, section_clear) = resets.join();
-            let (pbr, pbr_palette) = pbr.join();
+            let (pbr, pbr_palette, pbr_instanced) = pbr.join();
             let oit = oit.join();
             Renderer {
                 ao: ao.join(),
@@ -3127,6 +3153,7 @@ impl Renderer {
                 tri_hl_instanced_flat,
                 pbr,
                 pbr_palette,
+                pbr_instanced,
                 trans,
                 glass_far,
                 glass_near,
@@ -3851,6 +3878,9 @@ impl Renderer {
             res.clouds.paint(pass, &res.cloud_pipes, tally);
         }
         block_class(pass, &res.pbr_palette, TriClass::Pbr);
+        for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Pbr) {
+            d.draw(pass, &res.pbr_instanced, &res.pbr_instanced, tally);
+        }
         // Whole-body tints first, so a face or an edge highlighted over the body (in `h.tris`
         // and `h.lines`) keeps its own colour, as it did when the body's triangles were built
         // into the same list before them.

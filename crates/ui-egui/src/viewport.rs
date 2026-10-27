@@ -1557,7 +1557,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         let alpha = match look {
             crate::gpu::InstanceLook::Faded => col[3],
             crate::gpu::InstanceLook::Glass => (opacity.clamp(0.05, 1.0) * 255.0).round() as u8,
-            crate::gpu::InstanceLook::Opaque => 255,
+            crate::gpu::InstanceLook::Opaque | crate::gpu::InstanceLook::Pbr => 255,
         };
         set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);
         let instanced = (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look)).flatten();
