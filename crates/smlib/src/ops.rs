@@ -55,6 +55,13 @@ fn pick_error((s, at): ffi::ops::PickError) -> Error {
     }
 }
 
+fn setback_error((s, at, corner): ffi::ops::SetbackError) -> Error {
+    match corner {
+        Some(corner) => Error::CornerRefused { corner },
+        None => pick_error((s, at)),
+    }
+}
+
 /// One edge round an opened corner's hole ([`Brep::blend_setback_open`]): its index in the
 /// sheet's edge order, the face beside it in its face order, and whether that face, run
 /// counter-clockwise about its outward normal, runs the edge from its start vertex to its end.
@@ -214,7 +221,7 @@ impl Brep {
             Blend::Chord => ffi::ops::BLEND_CHORD,
             Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
         };
-        ffi::ops::blend_setback(kind, &self.0, edges, sizes, corners, setbacks, tolerance).map(Brep).map_err(pick_error)
+        ffi::ops::blend_setback(kind, &self.0, edges, sizes, corners, setbacks, tolerance).map(Brep).map_err(setback_error)
     }
 
     /// [`Brep::blend_setback`] with each set-back corner left open: SMLib's patch between the
@@ -247,7 +254,7 @@ impl Brep {
             Blend::Chord => ffi::ops::BLEND_CHORD,
             Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
         };
-        let (h, values) = ffi::ops::blend_setback_open(kind, &self.0, edges, sizes, corners, setbacks, tolerance).map_err(pick_error)?;
+        let (h, values) = ffi::ops::blend_setback_open(kind, &self.0, edges, sizes, corners, setbacks, tolerance).map_err(setback_error)?;
         // A buffer that does not read as the C API documents it is a buffer error.
         let holes = holes(&values, corners.len()).ok_or_else(|| error(ffi::ERR_BUFFER))?;
         Ok((Brep(h), holes))

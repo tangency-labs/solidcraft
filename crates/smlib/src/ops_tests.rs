@@ -403,6 +403,9 @@ fn a_setback_corner_left_open_returns_its_hole() {
         assert_eq!(end(h, true), end(next, false), "edge {k} ends where the next starts");
         assert!(h.face < 9);
     }
-    // A corner where an edge is not rounded builds no setback.
-    assert!(matches!(b.blend_setback_open(Blend::Round, &edges[..2], &[5.0; 2], &[[60.0, 40.0, 20.0]], &[8.0], 0.1), Err(Error::Unsupported)));
+    // A corner where an edge is not rounded builds no setback, and the refusal names it.
+    let refused = b.blend_setback_open(Blend::Round, &edges[..2], &[5.0; 2], &[[60.0, 40.0, 20.0]], &[8.0], 0.1);
+    assert!(matches!(refused, Err(Error::CornerRefused { corner: 0 })), "{refused:?}");
+    let refused = b.blend_setback(Blend::Round, &edges[..2], &[5.0; 2], &[[60.0, 40.0, 20.0]], &[8.0], 0.1);
+    assert!(matches!(refused, Err(Error::CornerRefused { corner: 0 })), "{refused:?}");
 }

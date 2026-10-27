@@ -58,6 +58,9 @@ pub enum Error {
     WallsTouch,
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
+    /// SMLib does not set back the corner of corner point `corner`: SMLib sets back a corner
+    /// only where every edge meeting it is blended and they are all convex or all concave.
+    CornerRefused { corner: usize },
     /// SMLib reported success but the operation did nothing: a blend that made no face, a face
     /// move or draft that moved no face.
     NoEffect,
@@ -89,6 +92,11 @@ impl std::fmt::Display for Error {
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
+            Error::CornerRefused { corner } => write!(
+                f,
+                "not supported yet: SMLib does not set back corner {}: it sets back a corner only where every edge meeting it is blended, all convex or all concave",
+                corner + 1
+            ),
             Error::NoEffect => write!(f, "SMLib made no change: it reported success, but the operation did nothing"),
             Error::NotExact => write!(f, "SMLib cannot build this exactly in the input's geometry"),
             Error::Corner { why, at } => {

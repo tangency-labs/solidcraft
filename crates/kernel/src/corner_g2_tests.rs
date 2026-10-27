@@ -189,7 +189,10 @@ fn a_concave_corner_takes_the_g2_patch_too() {
     let (m, mb) = (measure(&g2).unwrap(), measure(&ball).unwrap());
     let (_, clear, n) = corner_seams(&g2, 0.15);
     let (_, ball_clear, _) = corner_seams(&ball, 0.15);
-    eprintln!("concave G2 corner: {} faces (ball {}), volume {:.4} (ball {:.4}), jump clear of the corners {clear:.3e} ({n} stations), ball's {ball_clear:.3e}", m.faces, mb.faces, m.volume, mb.volume);
+    eprintln!(
+        "concave G2 corner: {} faces (ball {}), volume {:.4} (ball {:.4}), jump clear of the corners {clear:.3e} ({n} stations), ball's {ball_clear:.3e}",
+        m.faces, mb.faces, m.volume, mb.volume
+    );
     assert_eq!(m.faces, mb.faces);
     assert!(clear <= CURVATURE_SHARE / 5.0 && ball_clear > 0.19, "{clear} {ball_clear}");
 }
@@ -203,5 +206,6 @@ fn a_mixed_convexity_corner_is_refused() {
     assert!(fillet(&body, &edges, 5.0).is_ok());
     let err = fillet_g2_corners(&body, &edges, 5.0, &[]).unwrap_err().to_string();
     eprintln!("mixed corner: {err}");
-    assert!(err.contains("not supported yet"), "{err}");
+    // The refusal names the corner and why: its rounds are not all of one convexity.
+    assert!(err.contains("not supported yet") && err.contains("(60.000, 20.000, 10.000)") && err.contains("all convex or all concave"), "{err}");
 }

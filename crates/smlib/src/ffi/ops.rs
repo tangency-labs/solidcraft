@@ -43,6 +43,19 @@ pub enum Pick {
 /// or several things (only for `ERR_PICK_*`).
 pub type PickError = (i32, Option<usize>);
 
+/// A failed blend with corner setbacks: the status, the index of the edge point that selected
+/// nothing or several edges (only for `ERR_PICK_*`), and the index of the corner point whose
+/// corner SMLib refused to set back (only for `ERR_UNSUPPORTED`).
+pub type SetbackError = (i32, Option<usize>, Option<usize>);
+
+/// The [`SetbackError`] of status `s`, given what the C call wrote to its failed indices.
+#[cfg(feature = "native")]
+fn setback_error(s: i32, failed: i64, failed_corner: i64) -> SetbackError {
+    let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
+    let corner = (s == ERR_UNSUPPORTED).then(|| usize::try_from(failed_corner).ok()).flatten();
+    (s, at, corner)
+}
+
 #[cfg(feature = "native")]
 type PickFn = unsafe extern "C" fn(*const RawBrep, *const f64, i64, f64, f64, *mut *mut RawBrep, *mut i64) -> i32;
 
@@ -308,11 +321,11 @@ pub fn blend_setback(
     corners: &[[f64; 3]],
     setbacks: &[f64],
     tolerance: f64,
-) -> Result<Handle, PickError> {
-    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None))?;
-    let nc = i64::try_from(corners.len()).map_err(|_| (ERR_ARG, None))?;
+) -> Result<Handle, SetbackError> {
+    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None, None))?;
+    let nc = i64::try_from(corners.len()).map_err(|_| (ERR_ARG, None, None))?;
     if sizes.len() != points.len() || setbacks.len() != corners.len() {
-        return Err((ERR_ARG, None));
+        return Err((ERR_ARG, None, None));
     }
     let flat = points.as_ptr().cast::<f64>();
     let flat_corners = corners.as_ptr().cast::<f64>();
@@ -333,15 +346,12 @@ pub fn blend_setback(
             &mut failed_corner,
         )
     })
-    .map_err(|s| {
-        let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
-        (s, at)
-    })
+    .map_err(|s| setback_error(s, failed, failed_corner))
 }
 
 #[cfg(not(feature = "native"))]
-pub fn blend_setback(_: i32, _: &Handle, _: &[[f64; 3]], _: &[f64], _: &[[f64; 3]], _: &[f64], _: f64) -> Result<Handle, PickError> {
-    Err((NOT_BUILT, None))
+pub fn blend_setback(_: i32, _: &Handle, _: &[[f64; 3]], _: &[f64], _: &[[f64; 3]], _: &[f64], _: f64) -> Result<Handle, SetbackError> {
+    Err((NOT_BUILT, None, None))
 }
 
 /// `smlib_blend_setback_open`: the sheet and the holes' values as the C function writes them
@@ -356,17 +366,17 @@ pub fn blend_setback_open(
     corners: &[[f64; 3]],
     setbacks: &[f64],
     tolerance: f64,
-) -> Result<(Handle, Vec<i64>), PickError> {
-    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None))?;
-    let nc = i64::try_from(corners.len()).map_err(|_| (ERR_ARG, None))?;
+) -> Result<(Handle, Vec<i64>), SetbackError> {
+    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None, None))?;
+    let nc = i64::try_from(corners.len()).map_err(|_| (ERR_ARG, None, None))?;
     if sizes.len() != points.len() || setbacks.len() != corners.len() {
-        return Err((ERR_ARG, None));
+        return Err((ERR_ARG, None, None));
     }
     let flat = points.as_ptr().cast::<f64>();
     let flat_corners = corners.as_ptr().cast::<f64>();
     let mut holes = vec![0i64; corners.len().saturating_mul(1 + 3 * 64)];
     for _ in 0..2 {
-        let cap = i64::try_from(holes.len()).map_err(|_| (ERR_ARG, None))?;
+        let cap = i64::try_from(holes.len()).map_err(|_| (ERR_ARG, None, None))?;
         let (mut failed, mut failed_corner, mut len) = (-1i64, -1i64, -1i64);
         let made = new_brep(|out| unsafe {
             smlib_blend_setback_open(
@@ -389,22 +399,27 @@ pub fn blend_setback_open(
         });
         match made {
             Ok(h) => {
-                holes.truncate(usize::try_from(len).map_err(|_| (ERR_BUFFER, None))?);
+                holes.truncate(usize::try_from(len).map_err(|_| (ERR_BUFFER, None, None))?);
                 return Ok((h, holes));
             }
-            Err(ERR_BUFFER) if len > cap => holes.resize(usize::try_from(len).map_err(|_| (ERR_BUFFER, None))?, 0),
-            Err(s) => {
-                let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
-                return Err((s, at));
-            }
+            Err(ERR_BUFFER) if len > cap => holes.resize(usize::try_from(len).map_err(|_| (ERR_BUFFER, None, None))?, 0),
+            Err(s) => return Err(setback_error(s, failed, failed_corner)),
         }
     }
-    Err((ERR_BUFFER, None))
+    Err((ERR_BUFFER, None, None))
 }
 
 #[cfg(not(feature = "native"))]
-pub fn blend_setback_open(_: i32, _: &Handle, _: &[[f64; 3]], _: &[f64], _: &[[f64; 3]], _: &[f64], _: f64) -> Result<(Handle, Vec<i64>), PickError> {
-    Err((NOT_BUILT, None))
+pub fn blend_setback_open(
+    _: i32,
+    _: &Handle,
+    _: &[[f64; 3]],
+    _: &[f64],
+    _: &[[f64; 3]],
+    _: &[f64],
+    _: f64,
+) -> Result<(Handle, Vec<i64>), SetbackError> {
+    Err((NOT_BUILT, None, None))
 }
 
 /// `smlib_fillet_variable`.

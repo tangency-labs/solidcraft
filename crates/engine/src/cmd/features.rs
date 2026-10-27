@@ -3248,6 +3248,16 @@ mod corner_tests {
         assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "round"})).is_err());
         assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "g2", "type": "chord"})).is_err());
         assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "g2", "fit": "reduce"})).is_err());
+        // A corner where convex and concave rounds meet (the top of a notch's inner edge, two
+        // convex rounds and the concave one) is refused, the message naming it and why.
+        let mut s = Session::default();
+        run(&mut s, "solid.box", &json!({"length": 60, "width": 40, "height": 20, "body_name": "B"}));
+        run(&mut s, "solid.box", &json!({"corner": [40, 20, 10], "length": 30, "width": 30, "height": 20, "body_name": "N"}));
+        run(&mut s, "solid.combine", &json!({"target": "B", "tools": ["N"], "operation": "cut"}));
+        let mixed = json!({"edges": [[40, 20, 15], [50, 20, 20], [40, 30, 20]], "radius": 3, "corner": "g2"});
+        let err = s.execute("solid.fillet", &mixed).unwrap_err().to_string();
+        eprintln!("mixed corner g2: {err}");
+        assert!(err.contains("not supported yet") && err.contains("(40.000, 20.000, 20.000)") && err.contains("all convex or all concave"), "{err}");
     }
 }
 #[cfg(test)]

@@ -217,7 +217,9 @@ mod imp {
         let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
         let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
         let tol = pick_tolerance(body);
-        run(body, what, &picked.edges, |b| b.blend_setback(Blend::Round, &picked.points, sizes, &corners, &distances, tol))
+        let at: Vec<Vec3> = setbacks.iter().map(|(p, _)| *p).collect();
+        run_with(body, what, &picked.edges, &at, |b| b.blend_setback(Blend::Round, &picked.points, sizes, &corners, &distances, tol).map(|r| (r, ())))
+            .map(|(out, (), _)| out)
     }
 
     /// [`blend_setback`] with the set-back corners left open (`super::OpenCorners`).
@@ -234,9 +236,10 @@ mod imp {
         let picked = resolve(body, edges)?;
         let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
         let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
+        let at: Vec<Vec3> = setbacks.iter().map(|(p, _)| *p).collect();
         let tol = pick_tolerance(body);
         let (sheet, holes, order) =
-            run_with(body, what, &picked.edges, |b| b.blend_setback_open(Blend::Round, &picked.points, sizes, &corners, &distances, tol))?;
+            run_with(body, what, &picked.edges, &at, |b| b.blend_setback_open(Blend::Round, &picked.points, sizes, &corners, &distances, tol))?;
         // SMLib's indices in the sheet's own orders.
         let place = |list: &[usize], i: usize| if list.is_empty() { Some(i) } else { list.get(i).copied() };
         let renumber = |hole: &solidcraft_smlib::Hole| -> Result<Vec<(usize, bool)>> {
@@ -302,15 +305,18 @@ mod imp {
 
     /// `op` on `body` in SMLib, tagged as operand 0, checked, decoded, with its history.
     fn run(body: &Body, what: &str, edges: &[usize], op: impl FnOnce(&Brep) -> solidcraft_smlib::Result<Brep>) -> Result<Body> {
-        run_with(body, what, edges, |b| op(b).map(|r| (r, ()))).map(|(out, (), _)| out)
+        run_with(body, what, edges, &[], |b| op(b).map(|r| (r, ()))).map(|(out, (), _)| out)
     }
 
     /// [`run`] for an `op` that also gives something of its own, with where SMLib's faces and
     /// edges of the result are in the body's orders.
+    /// `corners`: the corner points of a blend with setbacks, in the order `op` gives them to
+    /// SMLib, so a refused corner is named by its place.
     fn run_with<T>(
         body: &Body,
         what: &str,
         edges: &[usize],
+        corners: &[Vec3],
         op: impl FnOnce(&Brep) -> solidcraft_smlib::Result<(Brep, T)>,
     ) -> Result<(Body, T, Option<solidcraft_smlib::history::Order>)> {
         guard(what, || {
@@ -318,6 +324,15 @@ mod imp {
             let tagged = sb.tagged(0).map_err(|e| failed(what, "tag", e))?;
             let (r, extra) = op(&tagged).map_err(|e| match e {
                 SmError::Unsupported => super::unsupported(&format!("this {what}, which SMLib cannot build exactly")),
+                SmError::CornerRefused { corner } => match corners.get(corner) {
+                    // The same words as `super::unsupported`, the reason after them.
+                    Some(p) => KernelError::Invalid(format!(
+                        "not supported yet: setting back the corner at ({:.3}, {:.3}, {:.3}) with the SMLib kernel (a G2 corner is set \
+                         back): SMLib sets back a corner only where every edge meeting it is rounded and they are all convex or all concave",
+                        p.x, p.y, p.z
+                    )),
+                    None => failed(what, "operation", SmError::CornerRefused { corner }),
+                },
                 SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {what} reported success but built no face")),
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 e => failed(what, "operation", e),
