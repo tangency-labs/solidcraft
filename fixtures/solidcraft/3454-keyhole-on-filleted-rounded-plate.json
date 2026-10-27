@@ -1,0 +1,827 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3454",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3465",
+ "test": "The issue's reproduction (kh-rr-8.0.json and its variants). Its truck fix, draft PR #3465 (exact arcs in splitface::with_wall_arcs around prism_local's splits), is unmerged and paused, so there is no merged SolidCraft test yet",
+ "summary": "A keyhole cut from the back of a 60 x 30 x 5 plate whose outline is a rounded rectangle (corner radius 4) and whose top edge is filleted R1, which puts torus faces at the corners. The keyhole is an 8 mm entry hole at (30, 10) and a 3.2 mm neck slot to (30, 20), cut 3.3 mm deep from z = 0, then an 8 mm wide head slot over the same centres from z = 1.5, 1.8 deep. The head slot's round end is coaxial with the entry hole and has its radius. On truck the head slot cut fails ('no result'). It works without the fillet, on a plain filleted rectangle, and with an 8.2 mm entry. Steps follow the issue's commands: the entry circle and neck slot (one sketch, all profiles) are one tool, as their union. Volumes are closed form: the fillet's straight runs and torus corners by Pappus, the cuts layer by layer from disc, slot and circular-segment areas (checked against grid integration). Tolerances are 0.1 % of the fillet's removed volume (36.853), well inside the 5.83 between the 8.0 and 8.2 entries.",
+ "cases": [
+  {
+   "name": "filleted_entry_8_0",
+   "note": "The failing configuration: head slot's round end coaxial with the 8.0 mm entry hole, same radius, on the filleted plate. On truck the head slot cut fails ('no result').",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "plate",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        4,
+        0
+       ],
+       "to": [
+        56,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 270,
+       "end_deg": 360
+      },
+      {
+       "kind": "line",
+       "from": [
+        60,
+        4
+       ],
+       "to": [
+        60,
+        26
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        26
+       ],
+       "radius": 4,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        56,
+        30
+       ],
+       "to": [
+        4,
+        30
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        26
+       ],
+       "radius": 4,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        26
+       ],
+       "to": [
+        0,
+        4
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 180,
+       "end_deg": 270
+      }
+     ],
+     "distance": 5
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "plate",
+     "edges": [
+      [
+       30,
+       0,
+       5
+      ],
+      [
+       30,
+       30,
+       5
+      ],
+      [
+       0,
+       15,
+       5
+      ],
+      [
+       60,
+       15,
+       5
+      ],
+      [
+       1.1715728752538097,
+       1.1715728752538097,
+       5
+      ],
+      [
+       58.82842712474619,
+       1.1715728752538097,
+       5
+      ],
+      [
+       1.1715728752538097,
+       28.82842712474619,
+       5
+      ],
+      [
+       58.82842712474619,
+       28.82842712474619,
+       5
+      ]
+     ],
+     "radius": 1
+    },
+    {
+     "op": "extrude",
+     "id": "entry",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        30,
+        10
+       ],
+       "radius": 4.0
+      }
+     ],
+     "distance": 3.3
+    },
+    {
+     "op": "extrude",
+     "id": "neck",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        31.6,
+        10.0
+       ],
+       "to": [
+        31.6,
+        20.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        20.0
+       ],
+       "radius": 1.6,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        28.4,
+        20.0
+       ],
+       "to": [
+        28.4,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        10.0
+       ],
+       "radius": 1.6,
+       "start_deg": 180,
+       "end_deg": 360
+      }
+     ],
+     "distance": 3.3
+    },
+    {
+     "op": "union",
+     "id": "entry_and_neck",
+     "a": "entry",
+     "b": "neck"
+    },
+    {
+     "op": "difference",
+     "id": "keyed",
+     "a": "rounded",
+     "b": "entry_and_neck"
+    },
+    {
+     "op": "extrude",
+     "id": "head",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        34.0,
+        10.0
+       ],
+       "to": [
+        34.0,
+        20.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        20.0
+       ],
+       "radius": 4.0,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        26.0,
+        20.0
+       ],
+       "to": [
+        26.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        10.0
+       ],
+       "radius": 4.0,
+       "start_deg": 180,
+       "end_deg": 360
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      1.5
+     ],
+     "distance": 1.8
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "keyed",
+     "b": "head"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8549.240993234407,
+     "tol": 0.036853,
+     "formula": "plate - fillet - cut(entry r 4); plate = 60*30*5 - (4-pi)*4^2*5; fillet = (1-pi/4)*(2*52+2*22) + 4*(1-pi/4)*(pi/2)*(4-d), d = (1/2 - (pi/4)*(1-4/(3pi)))/(1-pi/4) (Pappus); cut = 1.5*A_lo + 1.8*A_hi; A_lo = disc(entry) U neck slot (r 1.6), A_hi = head slot (r 4) U disc(entry) (tol: 0.1 % of the fillet's removed volume)"
+    }
+   }
+  },
+  {
+   "name": "unfilleted_entry_8_0",
+   "note": "Control: the same keyhole without the fillet (worked on truck: 8586.08).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "plate",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        4,
+        0
+       ],
+       "to": [
+        56,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 270,
+       "end_deg": 360
+      },
+      {
+       "kind": "line",
+       "from": [
+        60,
+        4
+       ],
+       "to": [
+        60,
+        26
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        26
+       ],
+       "radius": 4,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        56,
+        30
+       ],
+       "to": [
+        4,
+        30
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        26
+       ],
+       "radius": 4,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        26
+       ],
+       "to": [
+        0,
+        4
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 180,
+       "end_deg": 270
+      }
+     ],
+     "distance": 5
+    },
+    {
+     "op": "extrude",
+     "id": "entry",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        30,
+        10
+       ],
+       "radius": 4.0
+      }
+     ],
+     "distance": 3.3
+    },
+    {
+     "op": "extrude",
+     "id": "neck",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        31.6,
+        10.0
+       ],
+       "to": [
+        31.6,
+        20.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        20.0
+       ],
+       "radius": 1.6,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        28.4,
+        20.0
+       ],
+       "to": [
+        28.4,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        10.0
+       ],
+       "radius": 1.6,
+       "start_deg": 180,
+       "end_deg": 360
+      }
+     ],
+     "distance": 3.3
+    },
+    {
+     "op": "union",
+     "id": "entry_and_neck",
+     "a": "entry",
+     "b": "neck"
+    },
+    {
+     "op": "difference",
+     "id": "keyed",
+     "a": "plate",
+     "b": "entry_and_neck"
+    },
+    {
+     "op": "extrude",
+     "id": "head",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        34.0,
+        10.0
+       ],
+       "to": [
+        34.0,
+        20.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        20.0
+       ],
+       "radius": 4.0,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        26.0,
+        20.0
+       ],
+       "to": [
+        26.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        10.0
+       ],
+       "radius": 4.0,
+       "start_deg": 180,
+       "end_deg": 360
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      1.5
+     ],
+     "distance": 1.8
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "keyed",
+     "b": "head"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8586.094411922686,
+     "tol": 0.036853,
+     "formula": "plate - cut(entry r 4); plate = 60*30*5 - (4-pi)*4^2*5; cut = 1.5*A_lo + 1.8*A_hi; A_lo = disc(entry) U neck slot (r 1.6), A_hi = head slot (r 4) U disc(entry)"
+    }
+   }
+  },
+  {
+   "name": "filleted_entry_8_2",
+   "note": "The workaround: an 8.2 mm entry, so the round end no longer coincides (worked on truck: 8543.35).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "plate",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        4,
+        0
+       ],
+       "to": [
+        56,
+        0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 270,
+       "end_deg": 360
+      },
+      {
+       "kind": "line",
+       "from": [
+        60,
+        4
+       ],
+       "to": [
+        60,
+        26
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        56,
+        26
+       ],
+       "radius": 4,
+       "start_deg": 0,
+       "end_deg": 90
+      },
+      {
+       "kind": "line",
+       "from": [
+        56,
+        30
+       ],
+       "to": [
+        4,
+        30
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        26
+       ],
+       "radius": 4,
+       "start_deg": 90,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        26
+       ],
+       "to": [
+        0,
+        4
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        4,
+        4
+       ],
+       "radius": 4,
+       "start_deg": 180,
+       "end_deg": 270
+      }
+     ],
+     "distance": 5
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "plate",
+     "edges": [
+      [
+       30,
+       0,
+       5
+      ],
+      [
+       30,
+       30,
+       5
+      ],
+      [
+       0,
+       15,
+       5
+      ],
+      [
+       60,
+       15,
+       5
+      ],
+      [
+       1.1715728752538097,
+       1.1715728752538097,
+       5
+      ],
+      [
+       58.82842712474619,
+       1.1715728752538097,
+       5
+      ],
+      [
+       1.1715728752538097,
+       28.82842712474619,
+       5
+      ],
+      [
+       58.82842712474619,
+       28.82842712474619,
+       5
+      ]
+     ],
+     "radius": 1
+    },
+    {
+     "op": "extrude",
+     "id": "entry",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        30,
+        10
+       ],
+       "radius": 4.1
+      }
+     ],
+     "distance": 3.3
+    },
+    {
+     "op": "extrude",
+     "id": "neck",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        31.6,
+        10.0
+       ],
+       "to": [
+        31.6,
+        20.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        20.0
+       ],
+       "radius": 1.6,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        28.4,
+        20.0
+       ],
+       "to": [
+        28.4,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        10.0
+       ],
+       "radius": 1.6,
+       "start_deg": 180,
+       "end_deg": 360
+      }
+     ],
+     "distance": 3.3
+    },
+    {
+     "op": "union",
+     "id": "entry_and_neck",
+     "a": "entry",
+     "b": "neck"
+    },
+    {
+     "op": "difference",
+     "id": "keyed",
+     "a": "rounded",
+     "b": "entry_and_neck"
+    },
+    {
+     "op": "extrude",
+     "id": "head",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        34.0,
+        10.0
+       ],
+       "to": [
+        34.0,
+        20.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        20.0
+       ],
+       "radius": 4.0,
+       "start_deg": 0,
+       "end_deg": 180
+      },
+      {
+       "kind": "line",
+       "from": [
+        26.0,
+        20.0
+       ],
+       "to": [
+        26.0,
+        10.0
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        30.0,
+        10.0
+       ],
+       "radius": 4.0,
+       "start_deg": 180,
+       "end_deg": 360
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      1.5
+     ],
+     "distance": 1.8
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "keyed",
+     "b": "head"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8543.410661253425,
+     "tol": 0.036853,
+     "formula": "plate - fillet - cut(entry r 4.1); A_hi adds the entry disc's half annulus below y = 10 and its segment beyond |x - 30| = 4; plate = 60*30*5 - (4-pi)*4^2*5; fillet = (1-pi/4)*(2*52+2*22) + 4*(1-pi/4)*(pi/2)*(4-d), d = (1/2 - (pi/4)*(1-4/(3pi)))/(1-pi/4) (Pappus); cut = 1.5*A_lo + 1.8*A_hi; A_lo = disc(entry) U neck slot (r 1.6), A_hi = head slot (r 4) U disc(entry)"
+    }
+   }
+  }
+ ]
+}
