@@ -302,6 +302,84 @@ fn feature_context(feature: &solidcraft_engine::doc::Feature) -> String {
     format!("Feature {}: {}\n{}", feature.id, debug(&feature.name, 160), block(&json_context(&feature.kind, 2000)))
 }
 
+/// Messages and feature errors listed in a report (#7348), each entry cut to `MAX_ENTRY_CHARS`.
+const REPORT_MESSAGES: usize = 8;
+const REPORT_FAILURES: usize = 10;
+const MAX_ENTRY_CHARS: usize = 300;
+
+/// The user's home folder as text, for [`report_text`]; a bare root is never replaced.
+fn home_text() -> Option<String> {
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
+    let home = home.to_string_lossy().trim_end_matches(['/', '\\']).to_string();
+    (home.chars().count() > 1).then_some(home)
+}
+
+/// Untrusted text (messages, feature errors) as one quoted line: the home folder shown as `~`,
+/// cut to `MAX_ENTRY_CHARS` characters.
+fn report_text(text: &str, home: Option<&str>) -> String {
+    let mut text = limited(text, MAX_ENTRY_CHARS * 8);
+    if let Some(home) = home.filter(|h| h.chars().count() > 1) {
+        text = text.replace(home, "~");
+    }
+    if text.chars().count() > MAX_ENTRY_CHARS {
+        text = format!("{}…", text.chars().take(MAX_ENTRY_CHARS).collect::<String>());
+    }
+    format!("{text:?}")
+}
+
+/// How long ago `at` was, at `now` (both ms), in English like the rest of the report.
+fn report_ago(now: f64, at: f64) -> String {
+    let s = ((now - at) / 1000.0).max(0.0);
+    let s = if s.is_finite() { s.floor() } else { 0.0 };
+    if s < 60.0 {
+        format!("{s:.0} s ago")
+    } else if s < 3600.0 {
+        format!("{:.0} min ago", (s / 60.0).floor())
+    } else {
+        format!("{:.0} h ago", (s / 3600.0).floor())
+    }
+}
+
+/// The last messages of the Messages log, oldest first.
+fn messages_context(messages: &crate::messages::Messages, now: f64, home: Option<&str>) -> String {
+    let all = messages.iter();
+    let total = all.len();
+    if total == 0 {
+        return "\nMessages: none\n".into();
+    }
+    let shown = total.min(REPORT_MESSAGES);
+    let mut out = format!("\nMessages (last {shown} of {total}):\n");
+    for m in all.skip(total.saturating_sub(shown)) {
+        let level = if m.error { "error" } else { "info" };
+        let repeats = if m.count > 1 { format!(" (×{})", m.count) } else { String::new() };
+        out.push_str(&format!("    {} {level}: {}{repeats}\n", report_ago(now, m.at), report_text(&m.text, home)));
+    }
+    out
+}
+
+/// Every feature whose result has an error, in timeline order, not only the selected or latest one.
+fn failures_context(app: &SolveApp, home: Option<&str>) -> String {
+    let mut failing = app.session.doc.features.iter().filter_map(|f| app.session.model.result(f.id)?.error.as_deref().map(|e| (f, e)));
+    let mut out = String::new();
+    let mut count = 0usize;
+    for (feature, error) in failing.by_ref().take(REPORT_FAILURES) {
+        count += 1;
+        out.push_str(&format!(
+            "    Feature {} {} ({}): {}\n",
+            feature.id,
+            report_text(&feature.name, home),
+            feature.kind.type_name(),
+            report_text(error, home)
+        ));
+    }
+    let more = failing.count();
+    match (count, more) {
+        (0, _) => "\nFailing features: none\n".into(),
+        (n, 0) => format!("\nFailing features ({n}):\n{out}"),
+        (n, more) => format!("\nFailing features (first {n} of {}):\n{out}", n + more),
+    }
+}
+
 /// Read-only context excludes whole documents, sketch geometry and imported file contents.
 pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option<&str>) -> Draft {
     let mut context = String::new();
@@ -339,6 +417,9 @@ pub fn draft_for(app: &SolveApp, dialog: Option<&dialogs::Dialog>, error: Option
             context.push_str(&format!("Feature error: {}\n", debug(&e, 1000)));
         }
     }
+    let home = home_text();
+    context.push_str(&failures_context(app, home.as_deref()));
+    context.push_str(&messages_context(&app.messages, crate::now_ms(), home.as_deref()));
     let actual = error.map(|e| debug(&e, 4000)).unwrap_or_else(|| "No command error was recorded.".into());
     let image_state = if error.is_some() {
         "A failed preview may display the last valid geometry; that geometry is not evidence that the failed operation succeeded."
@@ -831,6 +912,73 @@ mod tests {
             assert!(draft.body.contains(expected), "missing {expected}: {}", draft.body);
         }
         assert_eq!(before, (app.session.doc.to_json(), app.session.revision, app.session.undo.len(), app.session.redo.len(), app.cam));
+    }
+
+    /// The sample with Fillet1 failing (the plate made narrower than its fillets).
+    fn failing_sample() -> SolveApp {
+        let mut s = Session::default();
+        s.run_script(&solidcraft_engine::sample::script()).unwrap();
+        s.execute("parameters.change", &json!({"name": "width", "expression": "5 mm"})).unwrap();
+        SolveApp::new(s, Default::default())
+    }
+
+    #[test]
+    fn issue_report_lists_the_last_messages_and_a_failing_feature_that_is_not_the_latest() {
+        let mut app = failing_sample();
+        let fillet = app.session.doc.features.iter().find(|f| f.name == "Fillet1").unwrap();
+        let error = app.session.model.result(fillet.id).and_then(|r| r.error.clone()).unwrap();
+        let latest = app.session.doc.features.iter().rev().find(|f| reportable(f)).unwrap();
+        assert_ne!(latest.id, fillet.id, "Fillet1 must not be the latest operation");
+        assert!(app.session.selection.is_empty());
+        let at = crate::now_ms() - 125_000.0;
+        for i in 0..12 {
+            app.messages.push(&format!("message number {i:02}"), i % 2 == 0, at);
+        }
+        app.messages.push("message number 11", false, at);
+        let draft = draft_for(&app, None, None);
+        let line = format!("Feature {} \"Fillet1\" (FilletFeature): {:?}", fillet.id, error);
+        assert!(draft.body.contains("Failing features (1):") && draft.body.contains(&line), "missing {line}: {}", draft.body);
+        assert!(draft.body.contains("Messages (last 8 of 12):"), "{}", draft.body);
+        for i in 0..4 {
+            assert!(!draft.body.contains(&format!("message number {i:02}")), "only the last 8 messages: {}", draft.body);
+        }
+        assert!(draft.body.contains("2 min ago error: \"message number 10\"\n"), "{}", draft.body);
+        assert!(draft.body.contains("2 min ago info: \"message number 11\" (×2)\n"), "{}", draft.body);
+        let latest = draft.body.find("Latest modeling operation").unwrap();
+        assert!(latest < draft.body.find("Failing features").unwrap() && latest < draft.body.find("Messages (").unwrap());
+        assert!(draft.body.find("Messages (").unwrap() < draft.body.find("## Environment").unwrap());
+    }
+
+    #[test]
+    fn issue_report_messages_and_feature_errors_hide_the_home_folder_and_stay_bounded() {
+        assert_eq!(report_text("Could not write /home/sample/Designs/part.step", Some("/home/sample")), "\"Could not write ~/Designs/part.step\"");
+        assert_eq!(report_text("/home/sample", Some("/")), "\"/home/sample\"", "a bare root is never replaced");
+        let mut app = app();
+        if let Some(home) = home_text() {
+            app.messages.push(&format!("Export failed: {home}/Designs/part.step is read-only"), true, crate::now_ms());
+            let draft = draft_for(&app, None, None);
+            assert!(draft.body.contains("error: \"Export failed: ~/Designs/part.step is read-only\""), "{}", draft.body);
+            assert!(!draft.body.contains(&home), "the home folder leaks: {}", draft.body);
+        }
+        for i in 0..12 {
+            app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":format!("Box{i}")})).unwrap();
+        }
+        let hostile = "錯誤 ```\n## fake section 🚀".repeat(50_000);
+        for result in &mut app.session.model.results {
+            result.error = Some(hostile.clone());
+        }
+        app.messages.push(&hostile, true, f64::NAN);
+        let draft = draft_for(&app, None, None);
+        assert!(draft.body.len() <= MAX_BODY);
+        assert!(draft.body.contains("Failing features (first 10 of 12):"), "{}", draft.body);
+        assert!(!draft.body.contains("\n## fake section"), "untrusted text stays on one quoted line");
+        let section = draft.body.split("Failing features").nth(1).unwrap();
+        let section = section.split("\n## Environment").next().unwrap();
+        assert_eq!(section.lines().filter(|l| l.contains("錯誤")).count(), 11, "ten features and one message");
+        for line in section.lines() {
+            assert!(line.chars().count() < 2 * MAX_ENTRY_CHARS, "an entry is bounded: {} characters", line.chars().count());
+        }
+        assert!(section.contains("0 s ago error: \"錯誤"), "a broken time still reads: {section}");
     }
 
     #[test]
