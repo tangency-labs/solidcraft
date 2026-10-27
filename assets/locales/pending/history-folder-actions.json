@@ -13,12 +13,33 @@
     "timeline.delete_folders_with_features_tip": "Löscht die Ordner mit allen Features darin und ihren Unterordnern",
     "timeline.suppress_folders_tip": "Unterdrückt alle Features in den Ordnern und ihren Unterordnern oder hebt die Unterdrückung auf"
   },
+  "ar": {
+    "Delete Folders and Features…": "حذف المجلدات مع ميزاتها…",
+    "Suppress Selected Folders": "تعطيل المجلدات المحددة",
+    "Unsuppress Selected Folders": "إلغاء تعطيل المجلدات المحددة",
+    "timeline.delete_folders_with_features_tip": "حذف المجلدات مع كل الميزات التي فيها والمجلدات المتداخلة فيها",
+    "timeline.suppress_folders_tip": "تعطيل كل الميزات في المجلدات والمجلدات المتداخلة فيها أو إلغاء تعطيلها"
+  },
+  "he": {
+    "Delete Folders and Features…": "מחיקת תיקיות עם הפיצ'רים שבהן…",
+    "Suppress Selected Folders": "השבתת התיקיות שנבחרו",
+    "Unsuppress Selected Folders": "ביטול השבתת התיקיות שנבחרו",
+    "timeline.delete_folders_with_features_tip": "מחיקת התיקיות עם כל הפיצ'רים שבהן והתיקיות המקוננות בהן",
+    "timeline.suppress_folders_tip": "השבתה או ביטול השבתה של כל הפיצ'רים בתיקיות ובתיקיות המקוננות בהן"
+  },
   "ja": {
     "Delete Folders and Features…": "フォルダーとフィーチャーを削除…",
     "Suppress Selected Folders": "選択したフォルダーを抑制",
     "Unsuppress Selected Folders": "選択したフォルダーの抑制を解除",
     "timeline.delete_folders_with_features_tip": "フォルダーを、中のすべてのフィーチャーと入れ子のフォルダーごと削除します",
     "timeline.suppress_folders_tip": "フォルダーと入れ子のフォルダー内のすべてのフィーチャーを抑制、または抑制を解除します"
+  },
+  "vi": {
+    "Delete Folders and Features…": "Xóa thư mục cùng các tính năng…",
+    "Suppress Selected Folders": "Bỏ kích hoạt các thư mục đã chọn",
+    "Unsuppress Selected Folders": "Kích hoạt lại các thư mục đã chọn",
+    "timeline.delete_folders_with_features_tip": "Xóa các thư mục cùng mọi tính năng trong đó và các thư mục lồng bên trong",
+    "timeline.suppress_folders_tip": "Bỏ kích hoạt hoặc kích hoạt lại mọi tính năng trong các thư mục và các thư mục lồng bên trong"
   },
   "zh": {
     "Delete Folders and Features…": "删除文件夹及其特征…",
