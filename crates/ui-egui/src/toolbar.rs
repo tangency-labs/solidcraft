@@ -1227,7 +1227,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 overflow.push((*panel, menu_commands(&cmds, &shown)));
                 continue;
             }
-            let collapsed = plan.fit == Fit::Collapsed;
+            // A panel left with no buttons (all removed from the toolbar, or saved buttons that no
+            // longer exist) is drawn collapsed too: one button that opens its drop-down, so its
+            // commands never vanish from the toolbar (#7166). Both are COLLAPSED_WIDTH wide.
+            let collapsed = plan.fit == Fit::Collapsed || (shown.is_empty() && !cmds.is_empty());
             let trimmed = plan.shown < plan.widths.len();
             let finish = tab == "SKETCH" && *panel == "FINISH SKETCH";
             let pinned = finish || (tab == "RENDER" && *panel == "IMAGE");
@@ -3488,6 +3491,29 @@ mod fill_width_tests {
                 );
             }
         }
+    }
+
+    /// #7166: a panel whose buttons were all removed keeps one button, its first command's icon,
+    /// which opens the panel's drop-down: New Sketch stays reachable from the Model tab instead of
+    /// leaving an empty Sketch panel. It takes the room an empty panel took before.
+    #[test]
+    fn a_panel_without_buttons_keeps_one_that_opens_its_menu() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":900}));
+        crate::toolbar_custom::remove(&mut h.app, "MODEL", "sketch.create");
+        assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "sketch.create").is_none());
+        h.frames(3);
+        assert!(crate::scenario::handle_at("button:sketch.create").is_none(), "New Sketch is no longer a full button");
+        let panel = crate::scenario::rect_of("panel:MODEL:SKETCH").unwrap();
+        assert_eq!(panel.width(), COLLAPSED_WIDTH, "the panel takes a collapsed panel's room");
+        let button = crate::scenario::handle_at("collapsed:MODEL:SKETCH").expect("the Sketch panel keeps a button");
+        assert!(panel.contains(button));
+        h.step(&json!({"click":[button.x, button.y]})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toolbar_dropdown").is_some(), "the button opens the panel's drop-down");
+        h.step(&json!({"click":{"handle":"dropdown:sketch.create"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)), "New Sketch starts from it");
     }
 }
 
