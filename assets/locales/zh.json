@@ -1411,6 +1411,7 @@
   "cmd.drawing_fill_edit": "编辑图纸填充",
   "cmd.drawing_fill_inspect": "检查图纸填充",
   "cmd.drawing_fill_profiles": "列出填充轮廓",
+  "cmd.drawing_hole_callout": "孔标注",
   "cmd.drawing_image_add": "添加图像",
   "cmd.drawing_inspect": "检查绘图",
   "cmd.drawing_list": "列出绘图",
