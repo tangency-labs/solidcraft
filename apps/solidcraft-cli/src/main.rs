@@ -36,6 +36,7 @@ mod kernel_cases;
 mod logger;
 mod oracle;
 mod preview;
+mod profiling;
 mod recipe;
 mod render;
 mod spatial;
@@ -58,13 +59,13 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]\n  solidcraft-cli run --in <design.solidcraft|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors]\n  solidcraft-cli run --in <design.solidcraft|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
-const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--json-out FILE]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.solidcraft|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n";
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.solidcraft|part.step> [--in design.solidcraft|part.step] [--json-out FILE] [--profile] [--profile-out trace.json]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.solidcraft|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile and --profile-out as for run)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.solidcraft|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `bench-open`'s lines in the usage.
-const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only] [--save OUT.solidcraft] [--display LEVEL [--edit NAME EXPR]] [--ops script.json]\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
+const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.solidcraft | part.step> [--parse-only] [--save OUT.solidcraft] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] [--profile] [--profile-out trace.json]\n      (--profile and --profile-out as for run)\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
 const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--save design.solidcraft] [--script-out script.json]\n";
 /// `bench-assistant`'s lines in the usage.
@@ -136,6 +137,19 @@ const COMMANDS: &[Command] = &[
 fn main() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     logger::init(&mut args);
+    // `--profile` / `--profile-out` (run, eval, bench-open) or SOLIDCRAFT_PROFILE (any command):
+    // record from here, and print the table when the command ends.
+    let profiling = match args.first().map(String::as_str) {
+        Some("run" | "eval" | "inspect" | "bench-open") => profiling::start(&args[1..]),
+        _ => profiling::start(&[]),
+    };
+    let profiling = match profiling {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let r = match args.first().map(String::as_str) {
         // Asked-for help is not an error: the command's usage on stdout, exit 0. It is read
         // before the command runs, so `--help` never starts a run (a fuzz run, a server).
@@ -201,6 +215,11 @@ fn main() -> ExitCode {
             Ok(())
         }
         _ => Err(usage()),
+    };
+    // The table also when the command failed: where it spent its time before failing.
+    let r = match (r, profiling.map(profiling::Profiling::finish)) {
+        (Ok(()), Some(Err(e))) => Err(e),
+        (r, _) => r,
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -314,6 +333,16 @@ fn positional(args: &[String]) -> Option<&String> {
     None
 }
 
+/// Is `path` a command script (or a recipe), not a design: JSON that is no saved design.
+fn is_script(path: &str) -> bool {
+    let Ok(bytes) = solidcraft_engine::io::vfs::read(path, solidcraft_engine::io::MAX_DESIGN_BYTES) else { return false };
+    if solidcraft_engine::io::is_design_container(&bytes) {
+        return false;
+    }
+    serde_json::from_slice::<Value>(&bytes)
+        .is_ok_and(|v| !v.get("format").and_then(Value::as_str).is_some_and(|f| solidcraft_engine::doc::format::version_of(f).is_some()))
+}
+
 /// `--json-out FILE`: where the JSON a command prints goes instead of stdout.
 fn json_out(args: &[String]) -> Result<Option<&str>, String> {
     if !args.iter().any(|a| a == "--json-out") {
@@ -345,15 +374,23 @@ fn print_json(v: &Value, file: Option<&str>) -> Result<(), String> {
 fn cmd_run(args: &[String]) -> Result<(), String> {
     install_renderer();
     let json_out = json_out(args)?;
-    known_args("run", args, &["--in", "--out", "--save", "--json-out"], &["--quiet", "--results", "--timings", "--profile", "--allow-errors"], true)?;
+    known_args(
+        "run",
+        args,
+        &["--in", "--out", "--save", "--json-out", "--profile-out"],
+        &["--quiet", "--results", "--timings", "--profile", "--allow-errors"],
+        true,
+    )?;
     let base = flag(args, "--in");
     let path = positional(args);
     if path.is_none() && base.is_none() {
         return Err(usage());
     }
     let want_results = args.iter().any(|a| a == "--results");
-    // `--profile` times each command and splits out its kernel time; it implies `--timings`.
-    let profile = args.iter().any(|a| a == "--profile");
+    // `--profile` records the profiler's spans (the table goes to stderr, `profiling.rs`); for a
+    // script it also times each command and splits out its kernel time, implying `--timings`.
+    let script = path.is_some_and(|p| is_script(p));
+    let profile = script && args.iter().any(|a| a == "--profile" || a == "--profile-out");
     let timings = profile || args.iter().any(|a| a == "--timings");
     let (mut s, results) = if want_results || timings {
         // Collect every command's result or time (scripts only), then process requested files too.
@@ -450,7 +487,7 @@ fn timeline_ok(s: &Session) -> Result<(), String> {
 
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
-    known_args("eval", args, &["--in", "--json-out"], &[], true)?;
+    known_args("eval", args, &["--in", "--json-out", "--profile-out"], &["--profile"], true)?;
     let mut s = open(flag(args, "--in"), positional(args))?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;

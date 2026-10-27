@@ -21,8 +21,6 @@
 
 use std::time::Duration;
 
-use serde_json::{Value, json};
-
 /// The profiler is compiled into this build.
 pub const COMPILED: bool = cfg!(any(feature = "enabled", test));
 
@@ -122,40 +120,6 @@ impl Report {
             events: self.events.saturating_sub(earlier.events),
             dropped: self.dropped.saturating_sub(earlier.dropped),
         }
-    }
-
-    /// The report as JSON, with the `top` rows of most self time (0: all of them):
-    /// `{compiled, enabled, wall_ms, spans, dropped, by_category: [{category, self_ms, share}],
-    /// rows: [{category, name, count, total_ms, self_ms, max_ms}], rows_total}`.
-    pub fn to_json(&self, top: usize) -> Value {
-        let sorted = self.sorted();
-        let all: f64 = self.rows.iter().map(|r| r.self_time.as_secs_f64()).sum();
-        let by_category: Vec<Value> = self
-            .by_category()
-            .into_iter()
-            .map(|(c, d)| {
-                let share = if all > 0.0 { (d.as_secs_f64() / all * 1000.0).round() / 1000.0 } else { 0.0 };
-                json!({"category": c, "self_ms": ms(d), "share": share})
-            })
-            .collect();
-        let n = if top == 0 { sorted.len() } else { top.min(sorted.len()) };
-        let rows: Vec<Value> = sorted
-            .iter()
-            .take(n)
-            .map(|r| {
-                json!({"category": r.category, "name": r.name, "count": r.count, "total_ms": ms(r.total), "self_ms": ms(r.self_time), "max_ms": ms(r.max)})
-            })
-            .collect();
-        json!({
-            "compiled": self.compiled,
-            "enabled": self.enabled,
-            "wall_ms": ms(self.wall),
-            "spans": self.events as u64 + self.dropped,
-            "dropped": self.dropped,
-            "by_category": by_category,
-            "rows": rows,
-            "rows_total": sorted.len(),
-        })
     }
 
     /// The report as a text table with the `top` rows of most self time (0: all of them).

@@ -45,6 +45,7 @@ pub(crate) fn edge_points(b: &Brep, e: u32) -> Vec<Vec3> {
 /// result comes from those of `body` as SMLib's history says (a merged face from every face
 /// merged into it), over `[body]`.
 pub(crate) fn heal(body: &Body, keep: &[Vec<Vec3>]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "heal");
     let record = crate::native::brep_record(body)?;
     // Each edge along a split line, by the point halfway along it.
     let mut kept: Vec<[f64; 3]> = Vec::new();

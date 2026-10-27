@@ -207,6 +207,7 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
 
 /// [`step_import_feature`], with the bodies named after `names`.
 pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> Result<StepFeature> {
+    let _span = solidcraft_profile::span("import", "step_import_feature_named");
     if bytes.len() > MAX_STEP_BYTES {
         return Err(IoError::Invalid(format!("STEP file too large ({} MB, limit {} MB)", bytes.len() >> 20, MAX_STEP_BYTES >> 20)));
     }
@@ -264,6 +265,7 @@ pub struct MeshFeature {
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
+    let _span = solidcraft_profile::span("import", "mesh_import_feature");
     if is_gltf_path(file) {
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
@@ -541,6 +543,7 @@ pub fn export_with_quality(
     meta: &Metadata,
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "export_with_quality");
     let sel: Vec<&solidcraft_doc::ModelBody> = state.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)).collect();
     if sel.is_empty() {
         return Err(IoError::Empty);
@@ -620,6 +623,7 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
 /// part, built where the file placed it) is taken into its component's frame by that offset,
 /// as the world placement does, so the occurrences above it place it only once.
 pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "step_assembly");
     use solidcraft_kernel::{ExportBody, ExportProduct};
     let mut index: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
     index.insert(0, 0);
@@ -652,6 +656,7 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
 
 /// Read a design file's bytes.
 pub fn read_design(bytes: &[u8]) -> Result<Document> {
+    let _span = solidcraft_profile::span("io", "read_design");
     if bytes.len() > MAX_DESIGN_BYTES {
         return Err(IoError::Invalid("design file too large".into()));
     }

@@ -53,6 +53,7 @@ const ACCURACY: f64 = 1e-4;
 /// and its box is SMLib's exact box; a body SMLib cannot measure is an error. A mesh body is
 /// measured from its triangles, exactly.
 pub fn measure(b: &Body) -> Result<BodyMeasure> {
+    let _span = solidcraft_profile::span("kernel", "measure");
     if let Some((pos, tris)) = b.triangle_mesh() {
         // Exact for a mesh body; topology counts are facets, sides and vertices.
         let m = b.mesh(&crate::MeshTolerance::chord(1.0))?;
@@ -94,6 +95,7 @@ pub fn measure(b: &Body) -> Result<BodyMeasure> {
 /// [`measure`]'s volume, area, centre and box alone (for callers that need no topology counts,
 /// such as an interference check).
 pub fn measure_mass(b: &Body) -> Result<MassMeasure> {
+    let _span = solidcraft_profile::span("kernel", "measure_mass");
     if b.triangle_mesh().is_some() {
         let m = measure(b)?;
         return Ok(MassMeasure { volume: m.volume, area: m.area, centroid: m.centroid, bbox: m.bbox, measured_by: m.measured_by, notes: m.notes });

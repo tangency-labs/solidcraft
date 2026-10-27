@@ -90,9 +90,6 @@ fn a_mark_reports_only_what_came_after_it() {
     let r = m.report();
     assert_eq!(r.rows.len(), 1, "{r:?}");
     assert_eq!(row(&r, "after").count, 2);
-    let j = r.to_json(5);
-    assert_eq!(j["rows"][0]["name"], "after");
-    assert_eq!(j["rows_total"], 1);
 }
 
 #[test]
@@ -106,7 +103,7 @@ fn spans_on_other_threads_get_their_own_track() {
     set_enabled(false);
     let mut out = Vec::new();
     write_chrome_trace(&mut out).unwrap();
-    let v: Value = serde_json::from_slice(&out).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     let events = v["traceEvents"].as_array().unwrap();
     let tid = |name: &str| events.iter().find(|e| e["name"] == name).map(|e| e["tid"].clone()).unwrap();
     assert_ne!(tid("main"), tid("on_worker"));

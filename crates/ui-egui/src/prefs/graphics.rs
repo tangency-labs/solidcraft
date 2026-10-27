@@ -163,6 +163,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
                         .on_hover_text(app.tr("settings.frame_rate_details_note"));
                 });
+                setting::profile_operations(app, left).on_hover_text(app.tr("prefs.profile_operations_note"));
                 setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
                 setting::sketch_halo(app, left);
             }

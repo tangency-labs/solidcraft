@@ -59,6 +59,7 @@ pub(super) fn workers() -> usize {
 }
 
 fn prepare(ex: &Exchange, job: &Job) -> Prepared {
+    let _span = solidcraft_profile::span("import", "step.body");
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
@@ -66,9 +67,10 @@ fn prepare(ex: &Exchange, job: &Job) -> Prepared {
             (Arc::new(part), Some(read))
         }
     };
-    let body = placed(&part.body, &job.placement).map_err(|e| Failure { read: false, msg: e.to_string() })?;
+    let body = solidcraft_profile::scope("import", "step.place", || placed(&part.body, &job.placement))
+        .map_err(|e| Failure { read: false, msg: e.to_string() })?;
     // Counted on the part (a placement meshes the same faces).
-    let missing = if job.check_mesh { part.body.unmeshed_faces() } else { 0 };
+    let missing = if job.check_mesh { solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces()) } else { 0 };
     Ok(Made { body, missing, part, read })
 }
 
@@ -85,8 +87,10 @@ fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// and brought back as a body: the part SMLib made of the file. A solid the reader or SMLib
 /// refuses is not imported, with the reason.
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<String>), Failure> {
-    let solid = solidcraft_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibTrims)
-        .map_err(|msg| Failure { read: true, msg })?;
+    let solid = solidcraft_profile::scope("import", "step.read_solid", || {
+        solidcraft_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibTrims)
+    })
+    .map_err(|msg| Failure { read: true, msg })?;
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
     let (brep, smlib_order) = crate::native::smlib_record_ordered(&solid.brep).map_err(failed)?;
     let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;

@@ -48,6 +48,7 @@ fn edge_frame(rec: &Faces, e: usize) -> Result<EdgeFrame> {
 
 /// Fillet one straight edge with radius `r0` at its end nearest `start` and `r1` at the other.
 pub fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, r0: f64, r1: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_variable");
     fillet_variable_points(body, edge_at, start, &[(0.0, r0), (1.0, r1)], false)
 }
 
@@ -182,6 +183,7 @@ impl RadiusSpline {
 /// positions 0 (the end nearest `start`) to 1 (the other end) and any between, the radius
 /// straight between them or `smooth`. One end's radius may be zero.
 pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &[(f64, f64)], smooth: bool) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_variable_points");
     if points.len() < 2 || points.len() > 100 {
         return Err(KernelError::Invalid("a variable radius needs 2…100 points".into()));
     }
@@ -201,6 +203,7 @@ pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &
 /// `start`. One end's radius may be zero. A law whose round would leave the faces beside the
 /// edge is SMLib's refusal ([`KernelError::TooLarge`]).
 pub fn fillet_variable_spline(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_variable_spline");
     body.require_brep("fillet")?;
     spline.check()?;
     if !(edge_at.is_finite() && start.is_finite()) {
@@ -438,6 +441,7 @@ pub fn taper(body: &Body, edge_at: Vec3, radius: f64) -> Result<Taper> {
 /// on alone gets a [`taper`], and the rest the constant radius. The result and the taper of each
 /// edge (in `edges`' order; None where the radius is constant).
 pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Option<Taper>>)> {
+    let _span = solidcraft_profile::span("kernel", "fillet_tapered");
     let why = match crate::fillet(body, edges, radius) {
         Err(KernelError::TooLarge(why)) => why,
         other => return other.map(|b| (b, vec![None; edges.len()])),
@@ -473,6 +477,7 @@ pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body,
 /// to contact at every station (SMLib's constant-chord round), its radius following the face
 /// angle along the edge.
 pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_chord");
     body.require_brep("fillet")?;
     if !(chord.is_finite() && chord > 1e-6 && chord < 1e6) {
         return Err(KernelError::Invalid("the chord length must be positive".into()));

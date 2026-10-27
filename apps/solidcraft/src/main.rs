@@ -679,6 +679,8 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
+    // SOLIDCRAFT_PROFILE=1: the profiler records from the start (diagnostics.profile reads it).
+    solidcraft_engine::timing::profile_from_env();
     // Validate before legacy adoption, crash markers or any user preference read.
     let settings = settings_dir().map_err(|error| eframe::Error::AppCreation(error.into()))?;
     if std::env::var_os("SOLIDCRAFT_SETTINGS_DIR").is_none() {

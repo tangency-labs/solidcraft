@@ -45,6 +45,7 @@ fn invalid(detail: impl std::fmt::Display) -> KernelError {
 /// body's own record and what it carries. Failure is a cache miss at the IO boundary, never a
 /// failed document save.
 pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("kernel", "encode_native_body");
     guard("encode native B-rep", || {
         for source in body.face_sources.iter().flat_map(|s| s.iter()).flatten() {
             let mut at = source;
@@ -81,6 +82,7 @@ pub fn encode_native_body(body: &Body) -> Result<Vec<u8>> {
 /// The schema 4 record of a solid body, in canonical order with its pcurves: the body itself.
 /// Mesh bodies have none.
 pub fn brep_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
+    let _span = solidcraft_profile::span("kernel", "brep_record");
     if body.mesh.is_some() {
         return Err(invalid("mesh bodies are source blobs, not B-rep"));
     }
@@ -89,12 +91,14 @@ pub fn brep_record(body: &Body) -> Result<solidcraft_geom::brep::Brep> {
 
 /// The body in SMLib (see [`Body::smlib`]), as an owned copy.
 pub fn smlib_body(body: &Body) -> Result<solidcraft_smlib::Brep> {
+    let _span = solidcraft_profile::span("kernel", "smlib_body");
     body.smlib()?.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
 }
 
 /// Decode bounded untrusted data. Validate indices before topology extraction.
 /// Only a caller that has checked who produced the data may treat it as evaluated geometry.
 pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "decode_native_body");
     if bytes.len() > MAX_BYTES || bytes.get(..8) != Some(MAGIC.as_slice()) {
         return Err(invalid("version or size"));
     }
@@ -124,12 +128,14 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
 /// An SMLib body as a kernel body: SMLib's export mapped by `solidcraft_smlib` (canonical order,
 /// radians, pcurves) is the body's record, and the SMLib body is kept with it.
 pub fn body_from_smlib(brep: &solidcraft_smlib::Brep) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "body_from_smlib");
     body_from_smlib_ordered(brep).map(|(body, _)| body)
 }
 
 /// [`body_from_smlib`], with where each of SMLib's faces and edges is in the body's face and
 /// edge order ([`crate::history`]).
 pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(Body, Option<solidcraft_smlib::history::Order>)> {
+    let _span = solidcraft_profile::span("kernel", "body_from_smlib_ordered");
     let (record, order) = brep.to_native_ordered().map_err(|e| KernelError::Failed(e.to_string()))?;
     let handle = brep.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
     Ok((Body::from_smlib_record(handle, record)?, Some(order)))
@@ -148,6 +154,7 @@ pub(crate) fn smlib_body_ordered(body: &Body) -> Result<(solidcraft_smlib::Brep,
 pub(crate) fn smlib_record_ordered(
     record: &solidcraft_geom::brep::Brep,
 ) -> Result<(solidcraft_smlib::Brep, Option<solidcraft_smlib::history::Order>)> {
+    let _span = solidcraft_profile::span("kernel", "smlib_record_ordered");
     let brep = solidcraft_smlib::Brep::from_record(record, true).map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
     let order = numbering(record, &brep);
     Ok((brep, order))

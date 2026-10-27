@@ -48,6 +48,7 @@ pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
 pub use solidcraft_io as io;
 pub use solidcraft_kernel as kernel;
+pub use solidcraft_profile as profile;
 pub use solidcraft_render as render;
 pub use solidcraft_sketch as sketch;
 
@@ -1118,6 +1119,8 @@ impl Session {
     /// the model up to date before anything reads it.
     pub fn execute(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
+        // The command, the evaluation it causes and the refresh after it: one profiler span.
+        let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
         let host_jobs = self.render_jobs.host.clone();
         let additional_jobs = self.render_jobs.additional.clone();

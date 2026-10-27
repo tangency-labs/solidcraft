@@ -66,6 +66,7 @@ pub(crate) fn frame_ok(plane: &Plane) -> bool {
 
 /// Extrude each region from `start` to `end` along the plane normal (offsets in mm, `end > start`).
 pub fn extrude(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "extrude");
     extrude_with(plane, regions, start, end, false)
 }
 
@@ -75,6 +76,7 @@ pub fn extrude(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Resu
 /// history lists every piece under it. For the Extrude feature; other builders (sheet metal's
 /// flat pattern, tools) keep a face per segment.
 pub fn extrude_whole_sides(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "extrude_whole_sides");
     extrude_with(plane, regions, start, end, true)
 }
 
@@ -129,6 +131,7 @@ pub fn canonical_revolve_axis(plane: &Plane, region: &Region2, axis_origin: Vec2
 /// Revolve each region about the sketch axis by `angle` radians.
 /// This legacy API preserves its historical sweep sign behavior.
 pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve");
     revolved(plane, regions, axis_origin, axis_dir, angle)
 }
 
@@ -136,6 +139,7 @@ pub fn revolve(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: 
 /// face whole (#726): SMLib's revolution makes one face of each profile segment and of each
 /// cap, so this is [`revolve`].
 pub fn revolve_whole(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec2, angle: f64) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "revolve_whole");
     revolved(plane, regions, axis_origin, axis_dir, angle)
 }
 
@@ -198,6 +202,7 @@ fn revolved(plane: &Plane, regions: &[Region2], axis_origin: Vec2, axis_dir: Vec
 
 /// Axis-aligned box between two corners.
 pub fn box_solid(a: Vec3, b: Vec3) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "box_solid");
     let (lo, hi) = (a.min(b), a.max(b));
     let s = hi - lo;
     if !(s.x > 1e-6 && s.y > 1e-6 && s.z > 1e-6 && s.is_finite() && s.len() < 1e7) {
@@ -245,6 +250,7 @@ pub(crate) const SEAM_ANGLE: f64 = 0.6131;
 
 /// Cylinder with base centre `base`, axis direction `axis`, radius and height.
 pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "cylinder");
     let plane = Plane::from_normal(base, axis).ok_or_else(|| KernelError::Invalid("cylinder axis".into()))?;
     let radius = finite(radius, "radius")?;
     if radius <= 1e-6 {
@@ -260,6 +266,7 @@ pub fn cylinder(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<Body
 /// Sphere: SMLib's own (smlib_make_sphere), each face swept from the arc (segment 0) of the half
 /// disc a sphere revolves.
 pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sphere");
     let radius = finite(radius, "radius")?;
     if radius <= 1e-6 || !center.is_finite() || center.len() >= 1e7 {
         return Err(KernelError::Invalid("radius must be positive".into()));
@@ -269,6 +276,7 @@ pub fn sphere(center: Vec3, radius: f64) -> Result<Body> {
 
 /// Torus about the Z axis through `center`.
 pub fn torus(center: Vec3, major: f64, minor: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "torus");
     let (major, minor) = (finite(major, "major radius")?, finite(minor, "minor radius")?);
     if !(minor > 1e-6 && major > minor) {
         return Err(KernelError::Invalid("torus needs major > minor > 0".into()));
@@ -755,6 +763,7 @@ const MEET_SAMPLES: usize = 48;
 /// (radians; positive grows the profile), its sharp corners closed by `corner`
 /// ([`crate::draft_corners`] says what each rule gives at each corner).
 pub fn extrude_tapered(plane: &Plane, region: &Region2, length: f64, dir_sign: f64, taper: f64, corner: DraftCorner) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "extrude_tapered");
     extrude_tapered_between(plane, region, 0.0, length, 0.0, dir_sign, taper, corner)
 }
 
@@ -775,6 +784,7 @@ pub fn extrude_tapered_between(
     taper: f64,
     corner: DraftCorner,
 ) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "extrude_tapered_between");
     let (from, to, foot, taper) = (finite(from, "start")?, finite(to, "distance")?, finite(foot, "foot")?, finite(taper, "taper")?);
     if to - from <= 1e-6 {
         return Err(KernelError::Invalid("extrude distance is zero".into()));
@@ -897,6 +907,7 @@ pub fn planar_face_record(plane: &Plane, r: &Region2) -> Result<solidcraft_geom:
 /// Ruled loft through two or more planar sections (outer loops only). The sections and the
 /// same sections in reverse order give the same body.
 pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft");
     loft_with_rails(sections, &[], RailFit::Scale)
 }
 
@@ -904,6 +915,7 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_with_rails");
     let reversed = loft_reversed(sections)?;
     let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
     let loops = loft_numbered_loops(&numbered, reversed)?;
@@ -920,6 +932,7 @@ pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: Ra
 /// Holes are paired by their positions relative to the outline, independently of sketch
 /// curve order. A hole cannot appear or disappear partway through a loft.
 pub fn loft_regions(sections: &[(Plane, Region2)]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_regions");
     if !(2..=50).contains(&sections.len()) {
         return Err(KernelError::Invalid("a loft needs 2…50 sections".into()));
     }
@@ -1291,11 +1304,13 @@ pub fn path_polyline(path: &[PathSeg]) -> Result<Vec<Vec3>> {
 /// [`sweep`] with sweep options. The default options are exactly [`sweep`]; a twist, an end
 /// scale, guide rails or an orientation direction place the profile at stations along the path.
 pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &crate::SweepControl) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_with");
     smlib_sweep(plane, region, path, ctl)
 }
 
 /// Sweep a planar region along a chain of path segments, keeping the profile perpendicular to
 /// the path; at sharp corners the walls meet in mitres.
 pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep");
     smlib_sweep(plane, region, path, &crate::SweepControl::default())
 }

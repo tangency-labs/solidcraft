@@ -1751,6 +1751,7 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        let _span = solidcraft_profile::span("doc", "evaluate");
         let (vals, perr) = evaluation_values(doc);
         self.param_errors = perr;
         self.frame_bodies.lock().unwrap_or_else(|e| e.into_inner()).next_generation();
@@ -1877,6 +1878,8 @@ impl Model {
                 continue;
             }
             recomputed += 1;
+            // Each feature computed is a profiler span named after its kind.
+            let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
             let before = state.clone();
             let t0 = now();
             let mut next = (*state).clone();

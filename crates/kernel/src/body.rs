@@ -915,7 +915,7 @@ impl Body {
     /// watertight wherever the B-rep is. A mesh body gives its own triangles. A face the planner
     /// cannot mesh is an error that names it and why.
     pub fn mesh(&self, t: &MeshTolerance) -> Result<Mesh> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, || self.mesh_untimed(t))
+        crate::profile::timed(crate::profile::Kind::Tessellate, "mesh", || self.mesh_untimed(t))
     }
 
     fn mesh_untimed(&self, t: &MeshTolerance) -> Result<Mesh> {
@@ -942,7 +942,7 @@ impl Body {
     /// edge sampled once so faces meet exactly. For an evaluator of its own (the GPU viewport);
     /// [`Body::mesh_of`] gives its mesh without planning again.
     pub fn mesh_plan(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {
-        crate::profile::timed(crate::profile::Kind::Tessellate, || self.mesh_plan_untimed(t))
+        crate::profile::timed(crate::profile::Kind::Tessellate, "mesh_plan", || self.mesh_plan_untimed(t))
     }
 
     fn mesh_plan_untimed(&self, t: &MeshTolerance) -> Result<solidcraft_geom::tess::TessPlan> {

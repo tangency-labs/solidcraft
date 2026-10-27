@@ -63,6 +63,7 @@ impl TriMesh {
 /// A mesh body from triangles (`positions` in mm). Coincident vertices are merged, degenerate
 /// triangles dropped, and a closed mesh with inward winding is turned outward.
 pub fn mesh_body(positions: &[Vec3], triangles: &[[u32; 3]]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "mesh_body");
     if triangles.len() > MAX_TRIANGLES {
         return Err(KernelError::Invalid(format!("mesh with {} triangles (limit {MAX_TRIANGLES})", triangles.len())));
     }

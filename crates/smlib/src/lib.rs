@@ -137,7 +137,25 @@ fn c_path(p: &Path) -> Result<CString> {
     CString::new(p.to_string_lossy().as_bytes()).map_err(|_| Error::Argument)
 }
 
+/// One C API call's log line, `smlib_fn(args) -> status (1.234 ms)`: the function and the time
+/// the C API measured for it (inside its lock, so waiting for another thread's call is not in it).
+fn call_time(line: &str) -> Option<(&str, std::time::Duration)> {
+    let name = line.get(..line.find('(')?)?;
+    if !name.starts_with("smlib_") || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return None;
+    }
+    let tail = line.strip_suffix(" ms)")?;
+    let ms: f64 = tail.get(tail.rfind(" (")? + 2..)?.parse().ok()?;
+    (ms.is_finite() && ms >= 0.0).then(|| (name, std::time::Duration::from_secs_f64(ms / 1000.0)))
+}
+
 fn log_line(level: i32, text: String) {
+    // Every call's log line carries the C API's own timing: the profiler's SMLib spans.
+    if solidcraft_profile::enabled()
+        && let Some((name, took)) = call_time(&text)
+    {
+        solidcraft_profile::record("smlib", solidcraft_profile::intern(name), took);
+    }
     if level == 0 {
         log::debug!(target: "smlib", "{text}");
     } else {

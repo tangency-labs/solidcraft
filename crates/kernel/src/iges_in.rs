@@ -1312,6 +1312,7 @@ fn write_shell(o: &mut Out, sw: &Sewer, faces: &[FaceB], styles: &mut Vec<(u64, 
 /// This was the one importer stage outside every panic guard, so a panic here reached the CLI
 /// and the wasm build, where nothing catches it.
 pub fn iges_to_step(text: &str) -> std::result::Result<(String, Vec<String>), String> {
+    let _span = solidcraft_profile::span("import", "iges.to_step");
     crate::guard("IGES import", || translate(text).map_err(crate::KernelError::Invalid)).map_err(|e| match e {
         crate::KernelError::Invalid(m) => m,
         other => other.to_string(),
@@ -1322,7 +1323,7 @@ fn translate(text: &str) -> std::result::Result<(String, Vec<String>), String> {
     if text.len() > MAX_IGES_BYTES {
         return Err("IGES file too large".into());
     }
-    let f = parse(text)?;
+    let f = solidcraft_profile::scope("import", "iges.parse", || parse(text))?;
     let tol = (f.resolution * f.unit).clamp(1e-6, 0.05).max(1e-5);
     let mut t = Tr {
         f: &f,
@@ -1871,6 +1872,7 @@ fn brep_edge(t: &mut Tr, sw: &mut Sewer, list: i64, ndx: i64, xf: &Xf) -> R<(usi
 
 /// Read IGES text: its solids, or its surfaces sewn into shells, as the STEP reader gives them.
 pub fn iges_import(text: &str) -> crate::Result<crate::StepImport> {
+    let _span = solidcraft_profile::span("import", "iges.import");
     let (step, warnings) = iges_to_step(text).map_err(crate::KernelError::Invalid)?;
     let mut imp = crate::step_import(&step)?;
     imp.warnings.splice(0..0, warnings);

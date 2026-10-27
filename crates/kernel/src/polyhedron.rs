@@ -187,12 +187,14 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
 /// Hollow a body: walls of `thickness` inside, open at the faces under `open` (SMLib's shell).
 /// The result's history is over `[b]`: the inner walls are offsets of the faces they line.
 pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "shell");
     crate::offset_backend::shell(b, open, thickness)
 }
 
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
 /// lean in (positive angle) going along `pull` (SMLib's draft).
 pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcraft_geom::Plane, pull: Vec3, angle: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "draft");
     b.require_brep("draft")?;
     crate::offset_backend::draft(b, faces, neutral, pull, angle)
 }
@@ -200,6 +202,7 @@ pub fn draft(b: &Body, faces: &[Vec3], neutral: &solidcraft_geom::Plane, pull: V
 /// Move the faces at the given points along their outward normals by `distance` (negative: into
 /// the body), SMLib's offset of faces: the faces around them are extended or trimmed to meet them.
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "offset_faces");
     b.require_brep("offset faces")?;
     if !distance.is_finite() || distance.abs() > 1e6 {
         return Err(KernelError::Invalid("offset distance".into()));

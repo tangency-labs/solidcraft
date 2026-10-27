@@ -10,3 +10,4 @@ workspace = true
 
 [dependencies]
 solidcraft-geom = { workspace = true }
+solidcraft-profile = { workspace = true }

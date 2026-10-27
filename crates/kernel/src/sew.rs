@@ -727,6 +727,7 @@ fn arc_curve(a: Vec3, b: Vec3, mid: Vec3) -> Result<(b::Curve, [f64; 2])> {
 
 /// Sew the faces into a closed solid.
 pub fn sew(faces: &[FaceSpec]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sew");
     sew_impl(faces, false, None).map(|(body, _)| body)
 }
 
@@ -737,6 +738,7 @@ pub fn sew(faces: &[FaceSpec]) -> Result<Body> {
 /// own; and a face whose loops meet at a vertex (a hole's corner on its face's outline) has them
 /// as one loop through it (see [`join_touching_loops`]).
 pub fn sew_touching(faces: &[FaceSpec]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sew_touching");
     sew_impl(faces, true, None).map(|(body, _)| body)
 }
 
@@ -1329,6 +1331,7 @@ pub(crate) struct Assembled {
 /// shells (sheets) in the infinite region; everything in canonical order and validated.
 /// `solid`: every shell must be closed.
 pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
+    let _span = solidcraft_profile::span("kernel", "assemble");
     let fail = |m: String| KernelError::Invalid(format!("sew: {m}"));
     let Parts { vertices, edges, faces, tolerance: tol } = parts;
     let nf = faces.len();

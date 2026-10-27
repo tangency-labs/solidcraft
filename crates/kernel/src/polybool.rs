@@ -28,7 +28,7 @@ fn failed(what: &str) -> KernelError {
 /// no edges): a face of the result lies on faces of `a` or on triangles of `b`; an edge where
 /// `a` meets the mesh meets the triangles of the face it lies along.
 pub fn faceted_boolean(a: &Body, b: &Mesh, op: BoolOp, tol: f64) -> Result<Option<Body>> {
-    crate::profile::timed(crate::profile::Kind::Boolean, || faceted_boolean_untimed(a, b, op, tol))
+    crate::profile::timed(crate::profile::Kind::Boolean, "faceted_boolean", || faceted_boolean_untimed(a, b, op, tol))
 }
 
 fn faceted_boolean_untimed(a: &Body, b: &Mesh, op: BoolOp, tol: f64) -> Result<Option<Body>> {

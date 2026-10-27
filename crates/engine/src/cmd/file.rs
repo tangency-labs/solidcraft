@@ -141,7 +141,12 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
 
 /// Add an Import feature for a STEP file to the session's design, in a new component named
 /// after the file (#1386).
+///
+/// While the profiler records, the reply's `profile` is the import's share of it (reading,
+/// building the solids in SMLib, placing, meshing and evaluating them), as
+/// `diagnostics.profile` reports it.
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
+    let profiled = solidcraft_profile::enabled().then(solidcraft_profile::mark);
     let sf = read_step(path, options.names)?;
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
@@ -159,6 +164,10 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     placed.report(&mut out);
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
+    }
+    if let Some(mark) = profiled {
+        let report = crate::schema::diagnostics::ProfileReport::new(&mark.report(), 20);
+        out["profile"] = serde_json::to_value(report).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     }
     Ok(out)
 }
@@ -834,6 +843,32 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// While the profiler records, a STEP import's reply carries its own profile: the import's
+    /// stages and SMLib's calls, as diagnostics.profile reports them.
+    #[cfg(feature = "smlib")]
+    #[test]
+    fn a_step_import_reports_its_profile_while_the_profiler_records() {
+        let _serial = crate::schema::diagnostics::PROFILE_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-profile-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("block.step").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap();
+        s.execute("file.export", &json!({"path": path})).unwrap();
+        // The first read of the file (a second one finds it in the import cache).
+        solidcraft_profile::set_enabled(true);
+        let out = Session::default().execute("file.insert_step", &json!({"path": path})).unwrap();
+        solidcraft_profile::set_enabled(false);
+        let plain = Session::default().execute("file.insert_step", &json!({"path": path})).unwrap();
+        assert!(plain.get("profile").is_none(), "nothing recorded, nothing reported: {plain}");
+        let p = &out["profile"];
+        let rows = p["rows"].as_array().unwrap();
+        let has = |cat: &str| rows.iter().any(|r| r["category"] == cat);
+        assert!(has("import") && has("smlib"), "{p}");
+        assert!(p["by_category"].as_array().is_some_and(|c| !c.is_empty()) && p["wall_ms"].as_f64().is_some_and(|w| w > 0.0), "{p}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// #4747: a mesh export's `quality` follows curved faces more closely. A 3 mm hole in a
     /// 200 mm plate gets more triangles at fine and more again at finest, in STL and 3MF alike

@@ -100,6 +100,7 @@ fn position(asm: &Assembly, moved: &HashMap<u32, Vec3>, v: u32) -> Result<Vec3> 
 /// Delete faces (indices in the body's face order, as in its mesh's `tri_face`) and heal the
 /// gap by extending the neighbouring planes. The result's history is over `[body]`.
 pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "delete_faces");
     body.require_brep("Delete Face")?;
     let rec = crate::native::brep_record(body)?;
     let n = rec.faces.len();

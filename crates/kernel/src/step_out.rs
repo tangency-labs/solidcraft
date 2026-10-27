@@ -73,6 +73,7 @@ fn rigid_frame(m: &[[f64; 4]; 4]) -> Result<([f64; 3], [f64; 3], [f64; 3])> {
 
 /// STEP text (AP242) for products with bodies and assembly placements; `root` is the top product.
 pub fn step_export_products(products: &[ExportProduct], root: usize, header: &StepHeader) -> Result<String> {
+    let _span = solidcraft_profile::span("kernel", "step_export_products");
     if products.is_empty() || root >= products.len() {
         return Err(KernelError::Invalid("nothing to export".into()));
     }
@@ -290,6 +291,7 @@ fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32) -> u64 {
 
 /// STEP text for bodies of one part (names `Body1`…).
 pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<String> {
+    let _span = solidcraft_profile::span("kernel", "step_export_bodies");
     let name = if header.file_name.is_empty() {
         "Part".to_string()
     } else {

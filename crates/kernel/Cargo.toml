@@ -17,6 +17,7 @@ smlib = ["solidcraft-smlib/native"]
 [dependencies]
 solidcraft-geom = { workspace = true }
 solidcraft-smlib = { workspace = true }
+solidcraft-profile = { workspace = true }
 solidcraft-step = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,4 +30,5 @@ web-time = { workspace = true }
 rayon = { workspace = true }
 
 [dev-dependencies]
+solidcraft-profile = { workspace = true, features = ["enabled"] }
 proptest = { version = "1", default-features = false, features = ["std"] }

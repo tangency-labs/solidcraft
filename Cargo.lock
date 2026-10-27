@@ -4122,6 +4122,7 @@ dependencies = [
  "solidcraft-derive",
  "solidcraft-geom",
  "solidcraft-kernel",
+ "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
  "thiserror 2.0.21",
@@ -4142,6 +4143,7 @@ dependencies = [
  "solidcraft-geom",
  "solidcraft-io",
  "solidcraft-kernel",
+ "solidcraft-profile",
  "solidcraft-render",
  "solidcraft-sketch",
  "thiserror 2.0.21",
@@ -4198,6 +4200,7 @@ dependencies = [
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-kernel",
+ "solidcraft-profile",
  "thiserror 2.0.21",
  "zip",
 ]
@@ -4212,6 +4215,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-geom",
+ "solidcraft-profile",
  "solidcraft-smlib",
  "solidcraft-step",
  "spade",
@@ -4270,6 +4274,7 @@ dependencies = [
  "log",
  "serde_json",
  "solidcraft-geom",
+ "solidcraft-profile",
  "web-time",
 ]
 
@@ -4285,6 +4290,7 @@ name = "solidcraft-step"
 version = "0.24.0"
 dependencies = [
  "solidcraft-geom",
+ "solidcraft-profile",
 ]
 
 [[package]]

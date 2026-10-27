@@ -15,6 +15,7 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
 /// its attitude relative to the axis, as a screw motion does: SMLib's screw sweep, one wall per
 /// profile segment.
 pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_helix");
     let (k, profile) = helix_profile(plane, region, axis_origin, axis, pitch, turns)?;
     crate::smlib_sweeps::screw(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns)
 }
@@ -32,6 +33,7 @@ pub fn sweep_helix_radial(
     turns: f64,
     law: &[(f64, f64)],
 ) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_helix_radial");
     if law.is_empty() {
         return sweep_helix(plane, region, axis_origin, axis, pitch, turns);
     }
@@ -78,6 +80,7 @@ fn helix_profile(
 /// wound outward: `stations` sections per turn, flat end caps. Watertight by construction, for
 /// faceted booleans (modelled threads).
 pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64, stations: usize) -> Result<Mesh> {
+    let _span = solidcraft_profile::span("kernel", "sweep_helix_mesh");
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
     let m = polygon.len();
     if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && (3..=64).contains(&m) && (8..=720).contains(&stations)) {
@@ -116,6 +119,7 @@ pub fn sweep_helix_mesh(plane: &Plane, polygon: &[Vec2], axis_origin: Vec3, axis
 /// A solid from a planar loop of straight segments to an apex point off its plane (a pyramid):
 /// SMLib's loft to a point.
 pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_to_point");
     if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
         return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
     }

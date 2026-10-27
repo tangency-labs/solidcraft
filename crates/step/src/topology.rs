@@ -305,6 +305,8 @@ fn read_with<'a>(
     let p = e.params();
     let name = p.first().and_then(Param::as_str).unwrap_or("").to_string();
     let mut b = Builder::new(ex, reader, tolerance(&context), budget, trims);
+    // The file's faces, edges, vertices and their geometry read into the builder.
+    let topology = solidcraft_profile::span("import", "step.topology");
     let (shells, kind) = match e.name() {
         "MANIFOLD_SOLID_BREP" => (vec![b.shell(rid(p.get(1), "outer shell")?)?], Kind::Solid),
         "BREP_WITH_VOIDS" => {
@@ -331,6 +333,7 @@ fn read_with<'a>(
         }
         n => return Err(unsupported(n)),
     };
+    drop(topology);
     b.finish(item, name, shells, kind)
 }
 
@@ -689,6 +692,7 @@ impl<'b, 'a> Builder<'b, 'a> {
 
     /// Pcurves, outer loops, domains and the canonical order: the finished record.
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
+        let _span = solidcraft_profile::span("import", "step.solid_record");
         let mut notes = Vec::new();
         let seams = self.add_seams()?;
         if seams > 0 {
@@ -980,6 +984,7 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// outer loop runs clockwise about the natural normal on a surface where that cannot be a
     /// face's outer boundary.
     fn face_pcurves(&mut self, fi: usize) -> R<(Vec<Vec<Curve2>>, [[f64; 2]; 2], bool, Option<BSurface>)> {
+        let _span = solidcraft_profile::span("import", "step.face_pcurves");
         let face = self.faces.get(fi).ok_or("face reference")?;
         let label = face.surface.clone();
         let edge_loops: Vec<Vec<(u32, bool)>> = face
@@ -1107,6 +1112,7 @@ impl Builder<'_, '_> {
         edge_loops: &[Vec<(u32, bool)>],
         exact: Vec<Vec<Option<Curve2>>>,
     ) -> R<TrimFace<'s>> {
+        let _span = solidcraft_profile::span("import", "step.trim_face");
         let (mut edge_at, mut vertex_at) = (HashMap::new(), HashMap::new());
         let (mut edges, mut vertices) = (Vec::new(), Vec::new());
         let mut loops = Vec::with_capacity(edge_loops.len());

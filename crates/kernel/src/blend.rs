@@ -173,6 +173,7 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
 /// lines the round of `radius` has (zero curvature at the contacts on planar faces), not a
 /// circle. A configuration SMLib cannot blend so is refused, never given a circular round.
 pub fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_g2");
     body.require_brep("G2 fillet")?;
     if !(radius.is_finite() && radius > 1e-6 && radius < 1e6) {
         return Err(KernelError::Invalid("G2 fillet size must be positive and finite".into()));
@@ -208,6 +209,7 @@ fn closed(input: &Body, b: Body) -> Result<Body> {
 /// faces around the edges is refused with [`KernelError::TooLarge`] ([`fillet_max`] finds the
 /// largest that works).
 pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet");
     body.require_brep("fillet")?;
     crate::blend_smlib::fillet(body, edges, radius).and_then(|b| closed(body, b))
 }
@@ -221,6 +223,7 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
 /// where some edge is not rounded is refused as not supported, a setback as long as an edge at
 /// its corner as too large.
 pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_setback");
     body.require_brep("fillet")?;
     crate::blend_smlib::fillet_setback(body, edges, radius, setbacks).and_then(|b| closed(body, b))
 }
@@ -229,6 +232,7 @@ pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec
 /// corners are a sphere or a Coons patch that meets the rounds tangentially, so this is refused
 /// rather than quietly given those corners; [`fillet`] (the default) is unchanged.
 pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_g2_corners");
     body.require_brep("fillet")?;
     if !(radius.is_finite() && radius > 0.0) {
         return Err(KernelError::Invalid("the blend radius must be finite and positive".into()));
@@ -249,6 +253,7 @@ fn radius_step(radius: f64) -> f64 {
 /// ([`KernelError::TooLarge`]) narrows the search: any other failure of a candidate is the
 /// search's error, since a smaller radius would not be the largest that fits.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(f64, Body)>> {
+    let _span = solidcraft_profile::span("kernel", "fillet_max");
     if !(radius.is_finite() && radius > 1e-6) {
         return Ok(None);
     }
@@ -283,6 +288,7 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(f6
 /// up to 16 fillets, and this runs in the live preview). Any failure other than a refusal as too
 /// large is the error.
 pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(Vec<f64>, Body)>> {
+    let _span = solidcraft_profile::span("kernel", "fillet_max_each");
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
     let one = || -> Result<Option<(Vec<f64>, Body)>> { Ok(fillet_max(body, edges, radius)?.map(|(r, b)| (vec![r; edges.len()], b))) };
@@ -319,6 +325,7 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Optio
 /// The fillet of each edge at its own radius (`radii` in `edges`' order), all in one SMLib
 /// blend.
 pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "fillet_each");
     if radii.len() != edges.len() {
         return Err(KernelError::Invalid("one radius per edge".into()));
     }
@@ -365,6 +372,7 @@ fn interacting_groups(body: &Body, pts: &[Vec3]) -> Option<Vec<Vec<usize>>> {
 /// Equal-distance chamfer of the edges nearest to the given points, `distance` back along each
 /// face, neighbouring chamfers meeting in a mitre.
 pub fn chamfer(body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "chamfer");
     body.require_brep("chamfer")?;
     if !(distance.is_finite() && distance > 1e-6 && distance < 1e6) {
         return Err(KernelError::Invalid("chamfer size must be positive".into()));
@@ -386,6 +394,7 @@ pub enum ChamferSide {
 /// A chamfer with different setbacks on the two faces of each edge: `d1` along the first face
 /// (the one facing up most, the other with `flip`), the second side by distance or angle.
 pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "chamfer_sides");
     body.require_brep("chamfer")?;
     let ok = |x: f64| x.is_finite() && x > 1e-6 && x < 1e6;
     let valid = ok(d1)

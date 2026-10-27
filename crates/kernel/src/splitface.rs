@@ -455,6 +455,7 @@ pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Bod
 
 /// Like [`split_faces`], with the body face each face of the result came from (in face order).
 pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
+    let _span = solidcraft_profile::span("kernel", "split_faces_with_map");
     let (b, map, made) = split(body, faces, tool)?;
     if let Some((missed, _)) = faces.iter().zip(&made).find(|(_, m)| **m == 0) {
         return Err(invalid(format!("the tool does not cross face {missed}")));
@@ -538,6 +539,7 @@ fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {
 /// face order. A body the tool misses comes back whole. Each part's history is over `[body]`:
 /// its faces the body's (or pieces of them), the section new.
 pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "split_body");
     const NAME: &str = "split body";
     body.require_brep(NAME)?;
     let reach = reach_of(body);

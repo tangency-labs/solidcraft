@@ -231,6 +231,7 @@ pub fn write_design_container_with_thumbnail(
     geometry: Option<&solidcraft_doc::SavedModel>,
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
     write_container(doc, compression, preview, geometry, thumbnail, MAX_DESIGN_BYTES)
 }
 
@@ -654,6 +655,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// keeps one seekable file handle instead of buffering the complete archive. JSON continues
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+    let _span = solidcraft_profile::span("io", "read_design_file");
     #[cfg(not(target_arch = "wasm32"))]
     let mut source = {
         crate::vfs::check(path).map_err(invalid)?;

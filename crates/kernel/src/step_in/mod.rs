@@ -1045,6 +1045,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
 }
 
 fn step_import_with_workers(text: &str, workers: usize) -> Result<StepImport> {
+    let _span = solidcraft_profile::span("import", "step.import");
     let mut reading = StepReading::with_workers(text, workers)?;
     while reading.step() {}
     reading.finish()
@@ -1071,10 +1072,12 @@ impl StepReading {
     }
 
     fn with_workers(text: &str, workers: usize) -> Result<StepReading> {
+        let _span = solidcraft_profile::span("import", "step.read_structure");
         let key = text_key(text);
         let watch = crate::watch::current();
         let cancelled = || watch.as_ref().is_some_and(|w| w.cancelled());
-        let ex = match p21::parse(text) {
+        let parsed = solidcraft_profile::scope("import", "step.parse", || p21::parse(text));
+        let ex = match parsed {
             Ok(ex) => Arc::new(ex),
             Err(_) if cancelled() => return Err(crate::watch::cancelled_error("STEP import")),
             Err(e) => return Err(KernelError::Invalid(e)),
@@ -1086,7 +1089,7 @@ impl StepReading {
             .filter(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
             .count();
         rd.watch = watch.clone();
-        rd.index();
+        solidcraft_profile::scope("import", "step.index", || rd.index());
         // Roots: product definitions that are nobody's component.
         let child_pds: HashSet<u64> =
             rd.children.values().flatten().filter_map(|n| ex.get(*n).and_then(|e| e.params().get(4)).and_then(Param::as_ref_id)).collect();
@@ -1128,6 +1131,7 @@ impl StepReading {
     /// Convert the next solid (or batch of solids); false once all are converted (or the
     /// watch cancelled the import).
     pub fn step(&mut self) -> bool {
+        let _span = solidcraft_profile::span("import", "step.convert_batch");
         self.rd.convert_next(self.single)
     }
 
@@ -1139,6 +1143,7 @@ impl StepReading {
     /// The import, once [`Self::step`] has converted every solid.
     pub fn finish(mut self) -> Result<StepImport> {
         while self.step() {}
+        let _span = solidcraft_profile::span("import", "step.finish");
         let rd = &mut self.rd;
         // Cancelled: what was read so far is dropped here, not cached.
         if rd.cancelled || rd.watch.as_ref().is_some_and(|w| w.cancelled()) {

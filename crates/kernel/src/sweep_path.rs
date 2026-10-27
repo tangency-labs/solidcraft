@@ -403,11 +403,13 @@ pub(crate) fn rail_frame(along: Vec3, across: Vec3, along_to: Vec3, across_to: V
 /// Sweep a planar region along a 3D polyline path. The profile keeps its relation to the path
 /// (it need not touch it); the path should start near the profile.
 pub fn sweep_path(plane: &Plane, region: &Region2, path: &[Vec3]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_path");
     sweep_path_with(plane, region, path, &SweepControl::default())
 }
 
 /// [`sweep_path`] with sweep options: orientation, twist and end scale.
 pub fn sweep_path_with(plane: &Plane, region: &Region2, path: &[Vec3], ctl: &SweepControl) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "sweep_path_with");
     ctl.check()?;
     smlib_sweep_points(plane, region, &crate::PointPath::polyline(path.to_vec()), ctl)
 }

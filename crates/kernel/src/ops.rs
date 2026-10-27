@@ -23,7 +23,7 @@ pub enum BoolOp {
 /// The result carries its exact history ([`Body::history`]) over the operands `[a, b]`, from
 /// SMLib's own tags, or none where a body's order cannot be matched to SMLib's.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
-    crate::profile::timed(crate::profile::Kind::Boolean, || {
+    crate::profile::timed(crate::profile::Kind::Boolean, "boolean", || {
         let r = guard("SMLib boolean", || crate::smlib_boolean::smlib_boolean(a, b, op));
         with_operand_roles(a, b, op, r)
     })
@@ -36,7 +36,7 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
 /// what the operands' faces stood for (their regularization protection and the planar roles on
 /// supports it kept).
 pub fn union_all(bodies: &[&Body]) -> Result<Body> {
-    crate::profile::timed(crate::profile::Kind::Boolean, || {
+    crate::profile::timed(crate::profile::Kind::Boolean, "union_all", || {
         if bodies.is_empty() {
             return Err(KernelError::Invalid("a union of no bodies".into()));
         }
@@ -61,7 +61,7 @@ fn with_operand_roles(a: &Body, b: &Body, op: BoolOp, r: Result<Option<Body>>) -
 /// [`join_apart`]); `None` when fewer than two are given, one is a mesh, or two of them are not
 /// apart (their exact boxes, grown by the bodies' tolerances, overlap).
 pub fn union_apart(bodies: &[Body]) -> Result<Option<Body>> {
-    crate::profile::timed(crate::profile::Kind::Boolean, || {
+    crate::profile::timed(crate::profile::Kind::Boolean, "union_apart", || {
         if bodies.len() < 2 || bodies.len() > 10_000 || bodies.iter().any(Body::is_mesh) {
             return Ok(None);
         }
@@ -132,6 +132,7 @@ fn joined(bodies: &[Body]) -> Result<(Body, part::Part)> {
 /// other matrix goes through SMLib's transform. Either way the result's faces and edges are
 /// the body's, in its history.
 pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "transform_matrix");
     if m.iter().flatten().any(|x| !x.is_finite()) {
         return Err(KernelError::Invalid("non-finite transform".into()));
     }
@@ -196,6 +197,7 @@ pub fn transform(body: &Body, translate: Vec3, origin: Vec3, axis: Vec3, angle: 
 /// Split a body with a plane: the parts on the positive and the negative side of the plane
 /// (only the non-empty ones).
 pub fn split_by_plane(body: &Body, plane: &solidcraft_geom::Plane) -> Result<Vec<Body>> {
+    let _span = solidcraft_profile::span("kernel", "split_by_plane");
     let mut out = Vec::new();
     for positive in [true, false] {
         out.extend(half_space(body, plane, positive)?.0);
@@ -208,6 +210,7 @@ pub fn split_by_plane(body: &Body, plane: &solidcraft_geom::Plane) -> Result<Vec
 /// carries, over the body and the box. The box's face in the plane, the part's cut face, is its
 /// start cap on the positive side and its end cap on the negative side.
 pub fn half_space(body: &Body, plane: &solidcraft_geom::Plane, positive: bool) -> Result<(Option<Body>, Body)> {
+    let _span = solidcraft_profile::span("kernel", "half_space");
     // The box's own construction roles describe no face of the design: the cut face has none.
     let tool = half_box(body, plane, positive)?.with_face_sources(None);
     Ok((boolean(body, &tool, BoolOp::Intersect)?, tool))

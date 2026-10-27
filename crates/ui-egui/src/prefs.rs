@@ -602,6 +602,9 @@ preference_settings! {
     supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("ui.supersampling_adaptive");
     /// Show the frame rate in the view's corner (the view then redraws every frame).
     show_frame_rate: bool = false, PAGE_GRAPHICS => check_id("ui.frame_rate");
+    /// Record where the time goes (SMLib's calls, kernel operations, features, commands, imports)
+    /// for `diagnostics.profile` (docs/perf.md). Off by default: nothing is recorded.
+    profile_operations: bool = false, PAGE_GRAPHICS => check_tr("prefs.profile_operations");
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
@@ -830,6 +833,9 @@ pub struct PrefsWindow {
     snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
+    /// The Profile operations preference the profiler last followed: applied when it changes,
+    /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
+    applied_profile: Option<bool>,
     /// The search text of the interface font list.
     font_filter: String,
     /// Search text on the Plugins page.
@@ -1096,6 +1102,15 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
+    // The profiler records while the preference is on (switched when it changes; at start-up only
+    // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
+    let profile = app.preferences.profile_operations;
+    if app.prefs_window.applied_profile != Some(profile) {
+        if profile || app.prefs_window.applied_profile.is_some() {
+            solidcraft_engine::profile::set_enabled(profile);
+        }
+        app.prefs_window.applied_profile = Some(profile);
+    }
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -2389,6 +2404,24 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    /// Profile operations switches the profiler when it changes, and only then: an agent's
+    /// diagnostics.profile in between is not undone next frame.
+    #[test]
+    fn the_profile_preference_switches_the_profiler_when_it_changes() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.frames(1);
+        h.call("ui.prefs", json!({"profile_operations": true}));
+        h.frames(2);
+        assert!(solidcraft_engine::profile::enabled());
+        h.app.session.execute("diagnostics.profile", &json!({"enabled": false})).unwrap();
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled(), "the command's choice stands");
+        h.call("ui.prefs", json!({"profile_operations": false}));
+        h.frames(2);
+        assert!(!solidcraft_engine::profile::enabled());
+    }
+
     #[test]
     fn the_ghost_position_defaults_round_trips_and_reads_tolerantly() {
         use super::SpaceMouseGhost::{LeftViewport as Current, LeftWindow as Left, RightViewport as Right};
