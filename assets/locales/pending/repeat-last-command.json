@@ -23,6 +23,10 @@
     "cmd.edit_repeat": "마지막 명령 반복",
     "ui.repeat_nothing": "아직 반복할 것이 없습니다. 먼저 도구나 대화 상자를 시작하세요."
   },
+  "vi": {
+    "cmd.edit_repeat": "Lặp lại lệnh trước",
+    "ui.repeat_nothing": "Chưa có gì để lặp lại: hãy bắt đầu một công cụ hoặc hộp thoại trước."
+  },
   "zh": {
     "cmd.edit_repeat": "重复上一个命令",
     "ui.repeat_nothing": "还没有可重复的操作：请先启动一个工具或对话框。"
