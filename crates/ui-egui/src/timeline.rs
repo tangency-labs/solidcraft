@@ -641,10 +641,17 @@ fn branch_rename_id() -> egui::Id {
     egui::Id::new("sc_history_branch_rename")
 }
 
+/// The name being typed into the History's branch field, while the field was drawn last frame.
+/// A History that stops drawing (hidden, docked left, Home) ends the rename on its own.
+fn branch_rename(ctx: &egui::Context) -> Option<String> {
+    let now = ctx.cumulative_frame_nr();
+    ctx.data(|d| d.get_temp::<(String, u64)>(branch_rename_id())).filter(|(_, frame)| frame.saturating_add(1) >= now).map(|(name, _)| name)
+}
+
 /// The History's branch name field is open: keys belong to it, not to shortcuts, even on a
 /// frame where egui has dropped its focus (Escape).
 pub(crate) fn renaming_branch(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<String>(branch_rename_id()).is_some())
+    branch_rename(ctx).is_some()
 }
 
 /// The branch the History shows, as a button left of the features. Its menu switches to
@@ -667,19 +674,21 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     // Renaming: the button is a name field until Enter renames the open branch, or Escape or a
     // click elsewhere leaves the name as it was. An empty name changes nothing.
     let rename_id = branch_rename_id();
-    if let Some(mut name) = ui.data(|d| d.get_temp::<String>(rename_id)) {
+    if let Some(mut name) = branch_rename(ui.ctx()) {
         let enter = crate::ui_kit::focused_text_field(&mut child, &mut name, &open);
         let field = child.min_rect();
         crate::scenario::publish_rect("history:branch", field);
+        crate::scenario::publish_handle("history:branch", field.center());
         let (escape, elsewhere) =
             ui.input(|i| (i.key_pressed(egui::Key::Escape), i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !field.contains(p))));
         if enter || escape || elsewhere {
-            ui.data_mut(|d| d.remove::<String>(rename_id));
+            ui.data_mut(|d| d.remove::<(String, u64)>(rename_id));
             // The key ends the rename only: an open dialog drawn later neither applies nor cancels.
             ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             app.esc_handled |= escape;
         } else {
-            ui.data_mut(|d| d.insert_temp(rename_id, name.clone()));
+            let now = ui.ctx().cumulative_frame_nr();
+            ui.data_mut(|d| d.insert_temp(rename_id, (name.clone(), now)));
         }
         if enter
             && !name.trim().is_empty()
@@ -727,7 +736,8 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     crate::scenario::publish_rect("history:branch", response.rect);
     let width = response.rect.width();
     if rename {
-        ui.data_mut(|d| d.insert_temp(rename_id, String::new()));
+        let now = ui.ctx().cumulative_frame_nr();
+        ui.data_mut(|d| d.insert_temp(rename_id, (String::new(), now)));
     }
     match chosen {
         Some(("version.graph", _)) => app.start("version.graph"),
@@ -1256,5 +1266,14 @@ mod tests {
             h.app.dialog = None;
             h.frames(2);
         }
+        // A History that stops drawing mid-rename gives the keys back to shortcuts.
+        h.step(&json!({"click": {"handle": "history:branch"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "history:branch_rename"}})).unwrap();
+        h.frames(2);
+        assert!(super::renaming_branch(&h.ctx));
+        h.app.ui.show_timeline = false;
+        h.frames(2);
+        assert!(!super::renaming_branch(&h.ctx));
     }
 }
