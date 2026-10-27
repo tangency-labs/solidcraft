@@ -56,6 +56,12 @@ from then on. The choice is kept across designs and restarts. With **Pressing a 
 again switches its mode** on (Preferences › Sketch), pressing the key again before the first
 click steps to the family's next variant.
 
+A sketch and the model keep their keys apart. In a sketch, a key runs the sketch tool bound to
+it, and a model command's key (F, Fillet) does nothing. Outside a sketch, a sketch tool's key
+opens Create Sketch and starts the tool in the new sketch. Measure, the views and the file
+commands work in both. One key can be bound to a sketch tool and to a model command at once;
+each runs where it belongs.
+
 Keys handled by the window itself:
 
 | Key | Action |

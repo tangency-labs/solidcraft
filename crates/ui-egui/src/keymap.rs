@@ -377,16 +377,18 @@ pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
 }
 
 /// Where a command's shortcut works: in a sketch (the SKETCH tab's tools), in the model (the
-/// other tabs), or everywhere (commands on no tab: undo, views, files).
+/// other tabs), or everywhere (commands on no tab: undo, views, files; and inspecting, views and
+/// files wherever their buttons sit). A sketch and the model are separate: a key runs only a
+/// command of the one the view is in, or one that works everywhere.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Scope {
+pub(crate) enum Scope {
     Render,
     Sketch,
     Model,
     Everywhere,
 }
 
-fn scope(id: &str) -> Scope {
+pub(crate) fn scope(id: &str) -> Scope {
     if id.starts_with("render.") || matches!(id, "appearance.paint" | "appearance.pick_up") {
         return Scope::Render;
     }
@@ -394,6 +396,7 @@ fn scope(id: &str) -> Scope {
         Some("SKETCH") => Scope::Sketch,
         Some(tab) if tab.starts_with("RENDER") => Scope::Render,
         Some("") | None => Scope::Everywhere,
+        Some(_) if ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p)) => Scope::Everywhere,
         Some(_) => Scope::Model,
     }
 }
@@ -406,7 +409,8 @@ fn clash(a: &str, b: &str) -> bool {
 }
 
 /// The enabled command a key press runs, if any: one of the mode the view is in (a sketch tool
-/// while a sketch is open, a model command otherwise) before any other.
+/// while a sketch is open, a model command otherwise), else one that works everywhere. A model
+/// command's key pressed in a sketch (F, Fillet) runs nothing, nor a sketch tool's in the model.
 pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     let here = if crate::render_workspace::active(app) {
         Scope::Render
@@ -423,7 +427,8 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
                 && solidcraft_engine::find_command(id).is_some_and(|c| crate::render_workspace::interactive_command_info(app, c).enabled)
         })
         .collect();
-    enabled.iter().find(|id| scope(id) == here).or(enabled.first()).copied()
+    // In Render any enabled command is the fallback, as before.
+    enabled.iter().find(|id| scope(id) == here).or_else(|| enabled.iter().find(|id| here == Scope::Render || scope(id) == Scope::Everywhere)).copied()
 }
 
 /// Run a shortcut key: its enabled command; outside a sketch, a sketch tool's key opens Create

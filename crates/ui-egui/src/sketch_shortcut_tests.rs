@@ -219,6 +219,33 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     assert!(h.app.tree.occurrence_move.is_none(), "M must not open component Move while editing its sketch");
 }
 
+/// Sketches and the model have their own keys: with M bound to Move/Copy Sketch Entities too, M
+/// is Move outside a sketch and Move/Copy Sketch Entities in one; F (Fillet) does nothing in a
+/// sketch; Measure's key works in both; and a key only clashes with commands that work in the
+/// same place.
+#[test]
+fn sketch_and_model_keys_are_kept_apart() {
+    use crate::keymap::{Scope, bind, command_for, scope};
+    let mut h = Harness::new();
+    assert_eq!(scope("sketch.move"), Scope::Sketch);
+    assert_eq!(scope("solid.fillet"), Scope::Model);
+    assert_eq!(scope("inspect.measure"), Scope::Everywhere);
+    bind(&mut h.app, "sketch.move", "M", false).unwrap();
+    assert_eq!(command_for(&h.app, "M"), Some("solid.move"));
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.settle();
+    assert_eq!(command_for(&h.app, "M"), Some("sketch.move"));
+    assert_eq!(command_for(&h.app, "F"), None, "no model tool from a key pressed in a sketch");
+    press(&mut h, "F");
+    assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_some(), "F left the sketch alone");
+    assert_eq!(command_for(&h.app, "I"), Some("inspect.measure"), "Measure's key works in a sketch too");
+    // A sketch command may take a model command's key, but not another sketch command's.
+    bind(&mut h.app, "sketch.fillet", "F", false).unwrap();
+    assert_eq!(command_for(&h.app, "F"), Some("sketch.fillet"));
+    let e = bind(&mut h.app, "sketch.fillet", "L", false).unwrap_err();
+    assert!(e.contains("already used"), "{e}");
+}
+
 /// #2459: by default a tool's shortcut pressed again starts the tool again, in the mode the key
 /// is bound to; the preference is off.
 #[test]
