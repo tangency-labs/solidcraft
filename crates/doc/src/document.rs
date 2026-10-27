@@ -3505,7 +3505,9 @@ impl Document {
         let id = f.id;
         let insertion_group = self.marker.and_then(|marker| self.timeline_group_at_insertion(marker));
         match self.marker {
-            Some(m) if m < self.features.len() => {
+            // A marker right after the last feature moves on past a feature added there, or the
+            // new feature would be added rolled back (#7741).
+            Some(m) if m <= self.features.len() => {
                 self.features.insert(m, f);
                 self.marker = Some(m + 1);
             }
