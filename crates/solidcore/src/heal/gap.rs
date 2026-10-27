@@ -736,17 +736,6 @@ fn trim_curve_uv(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, t: f64) -> Result<
     }
 }
 
-/// `pEdgeuse->GetOrCreateUVTrimCurve(pUVTrimCurve)` (both optional outputs `NULL`,
-/// `bUVSpaceOkay` `TRUE`; the returned status is not tested by `GetGapEndPoints`): the
-/// attached UV trim curve of the edge use or its mate, built first when missing. A
-/// failed build leaves `NULL` (`None`). [`SolidError::Unported`] and the null
-/// dereferences propagate.
-fn get_or_create_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<Option<Curve>> {
-    let _ =
-        crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?;
-    Ok(eu1::uv_trim_curve(b, eu)?.0.cloned())
-}
-
 /// The end points `GetGapEndPoints` found: the first two it set (`SM_UNDEF_DOUBLE`
 /// where it set none) and how many it found (upstream fails unless two).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1041,6 +1030,10 @@ impl Gap {
     /// `GetGapEndPoints` without the final count check: the points as upstream leaves
     /// them and their count.
     ///
+    /// UV trim curves are created when missing, then evaluated in place on their
+    /// edge use or mate. Copy construction can normalize close knots and change the
+    /// stored curve's parameterization, so endpoint evaluation must not copy it.
+    ///
     /// # Errors
     ///
     /// As [`Gap::gap_end_points`] but `SM_ERR`.
@@ -1116,13 +1109,18 @@ impl Gap {
         if uv_trim_curve_t != UNDEF_DOUBLE {
             let eu = edgeuse0
                 .ok_or_else(|| null("GetGapEndPoints: a UVTrimCurve without an Edgeuse"))?;
-            let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
+            // GetOrCreate's ordinary status is ignored upstream. Finish its mutable
+            // work before borrowing the stored curve and surface for evaluation.
+            let _ = crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
+                k, b, eu, false, false, true,
+            )?;
+            let uv_curve = eu1::uv_trim_curve(b, eu)?.0;
             let surface = match face {
                 Some(f) => b.face(f)?.surface.as_ref(),
                 None => None,
             };
             // (a missing curve leaves `sPtUV` at its constructed `SM_UNDEF_DOUBLE`s)
-            let pt_uv = match uv_curve.as_ref() {
+            let pt_uv = match uv_curve {
                 Some(c) => point_or_undef(c.evaluate_point(k, uv_trim_curve_t))?,
                 None => Vec3::UNDEF,
             };

@@ -19,6 +19,7 @@
 //! | `Sample`    | `this(3) tu tv other(3) ou ov drop tol` | `sample length this_param(0) this_param(1) other_param(0) other_param(1)` |
 //! | `GapArray`  | `na len* nb len*` | per array `size max_index max_length`, then `b`'s lengths with `>` / `<` of neighbours, then the size after `ReSet` |
 //! | `Topo`      | B-rep block (as [`super::topology_vertexuse`]) `kind sel0 sel1 t0 t1 u v has_uv` | `0 gap is_init edge_t0 edge_t1 uvt face_uv(2) vertex vertexuse edge0 edge1 edgeuse0 edgeuse1 face type end_status p1(3) p2(3) cached_gap`, `-2` (upstream dereferences null) or `-1 status` (no B-rep) |
+//! | `RawTrimGap` | `edge_gap mate raw_knots t n p m cpts knots` | gap length, face UV, endpoint count, endpoints, cached length |
 //!
 //! A sample is `drop this(3) other(3) tol_point(3) this_param(2) other_param(2) xtol
 //! in_tol`. Topology indices are the export's traversal order (`-1` null).
@@ -57,6 +58,7 @@ pub enum Op {
     Sample = 3,
     GapArray = 4,
     Topo = 5,
+    RawTrimGap = 6,
 }
 
 mod sys {
@@ -372,6 +374,24 @@ fn check(op: Op, input: &[f64]) -> Result<(), FfiError> {
                 for _ in 0..n {
                     rd.finite()?;
                 }
+            }
+        }
+        Op::RawTrimGap => {
+            rd.flag()?;
+            rd.flag()?;
+            rd.flag()?;
+            rd.finite()?;
+            // Keep all positive spans above native EFF_ZERO (UB266); unlike the
+            // constructor/copy fixup, this guard never merges or changes knots.
+            let n = input.get(4).copied().unwrap_or(-1.0);
+            nurb_curve(&mut rd, 2)?;
+            let start = 7 + 4 * (n as usize + 1);
+            let knots = input.get(start..).ok_or_else(|| bad("missing raw trim knots"))?;
+            if knots.iter().zip(knots.iter().skip(1)).any(|(a, b)| {
+                let span = b - a;
+                span > 0.0 && span <= 1e-12
+            }) {
+                return Err(bad("raw trim positive span must exceed EFF_ZERO (UB266)"));
             }
         }
         Op::Topo => return Err(bad("use topo()")),

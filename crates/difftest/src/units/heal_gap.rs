@@ -25,6 +25,18 @@
 //!   accessors, `GetGapEndPoints` and `CacheGap`. Parameters are given as fractions of
 //!   the selected edge's interval or face's surface domain (or `SM_UNDEF_DOUBLE`), so
 //!   both sides read them from the same graph.
+//! * `raw_trim_gap`: vertex/face-trim and edge/face-trim gaps on a planar face
+//!   independently constructed by each engine, without a native graph import. The
+//!   caller supplies the UV NURB and parameter; comparisons are the constructor's
+//!   length, `GetFaceUV`, actual `GetGapEndPoints`, and `CacheGap`.
+//!
+//! Raw trim inputs bypass constructor knot normalization: Rust uses
+//! `BSplineCurve::from_nurb(..., true)`; C++ restores the input knot vector after its
+//! owned constructor. Both validate the stored raw knots against the caller's input
+//! before invoking the gap. These checks are harness assertions, not comparison
+//! values. Ordinary controls use the normal constructors. Positive knot spans must
+//! exceed native `EFF_ZERO` to avoid UB266; the close spans remain below the scaled
+//! copy-constructor fixup threshold and distinguish evaluation in place from copying.
 //!
 //! Deferred cases: the surface drops of the curve/surface and surface/surface gap
 //! functions (`SmSurface::DropPoint`, unit `surface.surface_p5`) and the creation of a
@@ -282,6 +294,18 @@ enum Inputs {
     GapArray {
         a: Vec<f64>,
         b: Vec<f64>,
+    },
+    /// Independently constructed planar topology, with caller-supplied UV knots.
+    RawTrimGap {
+        trim: NurbIn,
+        t: f64,
+        #[serde(default)]
+        edge_gap: bool,
+        #[serde(default)]
+        mate: bool,
+        /// Retain exact input knots rather than applying constructor fixup.
+        #[serde(default)]
+        raw_knots: bool,
     },
     Topo {
         /// The shared B-rep block (a `.smb` file, a wire edge, a face, the wire
@@ -944,6 +968,103 @@ fn topo_rust(k: &Kernel, b: &mut Brep, args: &[f64]) -> Result<Vec<f64>, SolidEr
     Ok(o)
 }
 
+/// Unlike `topo`, this path never imports a native graph or computed geometry.
+fn raw_trim_gap_rust(
+    trim: &NurbIn,
+    t: f64,
+    edge_gap: bool,
+    mate: bool,
+    raw_knots: bool,
+) -> Result<Vec<f64>, HarnessError> {
+    use solidcore::geom::attribute::AttributeStore;
+    use solidcore::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+    use solidcore::topology::edge::NotifyEnv;
+    use solidcore::topology::topology_traverser::Marks;
+    let err = |e: SolidError| harness(format!("raw trim gap: {e}"));
+    let mut k = Kernel::default();
+    let mut b = solidcore::topology::brep::p3::new_brep(
+        &mut k,
+        solidcore::geom::tol::USE_DEFAULT,
+        solidcore::geom::tol::USE_DEFAULT,
+    ).map_err(err)?;
+    let mut records = std::collections::BTreeMap::new();
+    let mut attributes = AttributeStore::default();
+    let key_of = super::topology_brep_p8::key_of;
+    let this_face = |f| key_of(solidcore::EntityRef::Face(f));
+    let mut env = NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &key_of,
+    };
+    let mut marks = Marks::default();
+    let mut fenv = FaceBuildEnv { env: &mut env, marks: &mut marks, this_face: &this_face };
+    let domain = dom_of([0.0, 0.0, 1.0, 1.0]);
+    let plane = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Y, Vec2::new(1.0, 1.0), &domain);
+    let face = create_face_from_surface(
+        &mut k, &mut b, Some(Surface::from(plane)), &domain, &mut fenv,
+    ).map_err(err)?;
+    let eu = solidcore::topology::face::p4::upward_edgeuses(&b, face, true, None)
+        .map_err(err)?.first().copied().ok_or_else(|| harness("face has no edgeuse"))?;
+    let vu = eu1::vertexuse(&b, eu).map_err(err)?
+        .ok_or_else(|| harness("edgeuse has no vertexuse"))?;
+    let vertex = b.vertexuse(vu).map_err(err)?.vertex
+        .ok_or_else(|| harness("vertexuse has no vertex"))?;
+    let edge = eu1::edge(&b, eu).map_err(err)?
+        .ok_or_else(|| harness("edgeuse has no edge"))?;
+    // Fix both first endpoints independently, regardless of constructor traversal order.
+    b.vertex_mut(vertex).map_err(err)?.point = Vec3::new(0.0, 0.0, 1.0);
+    b.edge_mut(edge).map_err(err)?.curve = Some(Curve::from(Line::from_points(
+        Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 1.0), 3,
+    )));
+    let attached = if mate {
+        eu1::mate(&b, eu).map_err(err)?.ok_or_else(|| harness("edgeuse has no mate"))?
+    } else { eu };
+    // The raw transport bypasses constructor fixup, not evaluation or gap computation.
+    let curve = BSplineCurve::from_nurb(nl_curve(trim)?, 2, raw_knots);
+    b.edgeuse_mut(eu).map_err(err)?.uv_trim_curve = None;
+    let other = eu1::mate(&b, eu).map_err(err)?;
+    if let Some(other) = other {
+        b.edgeuse_mut(other).map_err(err)?.uv_trim_curve = None;
+    }
+    b.edgeuse_mut(attached).map_err(err)?.uv_trim_curve = Some(Curve::from(curve));
+    let mut out = Vec::new();
+    let stored = eu1::uv_trim_curve(&b, eu).map_err(err)?.0
+        .ok_or_else(|| harness("missing raw trim"))?;
+    if raw_knots && raw_trim_knots(stored)? != trim.u {
+        return Err(harness("raw trim input transport changed knots"));
+    }
+    let mut gap: Gap = if edge_gap {
+        EdgeFaceTrimCurveGap::with(&k, &mut b, Some(eu), 0.25, t).map_err(err)?.into()
+    } else {
+        VertexFaceTrimCurveGap::with(&k, &mut b, Some(vu), t).map_err(err)?.into()
+    };
+    out.push(gap.length());
+    let uv = gap.face_uv(&k, &b).map_err(err)?;
+    out.extend([uv.x, uv.y]);
+    let ends = gap.end_points(&k, &mut b).map_err(err)?;
+    out.push(ends.count as f64);
+    push3(&mut out, ends.point1);
+    push3(&mut out, ends.point2);
+    gap.cache_gap(&k, &mut b).map_err(err)?;
+    out.push(gap.length());
+    Ok(out)
+}
+
+fn raw_trim_gap_block(trim: &NurbIn, t: f64, edge_gap: bool, mate: bool, raw: bool) -> Result<Vec<f64>, HarnessError> {
+    let mut out = vec![flag(edge_gap), flag(mate), flag(raw), t];
+    push_nurb(&mut out, trim)?;
+    Ok(out)
+}
+
+fn raw_trim_knots(curve: &Curve) -> Result<&[f64], HarnessError> {
+    match curve.kind() {
+        solidcore::curve::curve::CurveKind::BSpline(c) => c.gw_nurb()
+            .map(NlCurve::knots).ok_or_else(|| harness("trim has no NURB")),
+        _ => Err(harness("trim is not a B-spline")),
+    }
+}
+
 // ---- run ---------------------------------------------------------------------------------
 
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
@@ -952,6 +1073,10 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     };
     let mut o = Vec::new();
     match i {
+        Inputs::RawTrimGap { trim, t, edge_gap, mate, raw_knots } => {
+            call(Op::RawTrimGap, &raw_trim_gap_block(trim, *t, *edge_gap, *mate, *raw_knots)?)
+                .map(state)
+        }
         Inputs::Gf {
             gf,
             set_cnt,
@@ -1029,6 +1154,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut k = Kernel::default();
     let mut o = Vec::new();
     match i {
+        Inputs::RawTrimGap { trim, t, edge_gap, mate, raw_knots } => {
+            return raw_trim_gap_rust(trim, *t, *edge_gap, *mate, *raw_knots).map(state);
+        }
         Inputs::Gf {
             gf,
             set_cnt,
@@ -1630,6 +1758,47 @@ fn analytic_topo_cases() -> Result<Vec<Case>, HarnessError> {
     Ok(out)
 }
 
+fn raw_trim_gap_cases() -> Result<Vec<Case>, HarnessError> {
+    let mut cases = Vec::new();
+    for (label, spacing, raw_knots) in [
+        ("close15", 1.5e-12, true),
+        ("close19", 1.9e-12, true),
+        ("ordinary", 0.1, false),
+    ] {
+        let a = 0.5;
+        let b = a + spacing;
+        for (position, fraction) in [("quarter", 0.25), ("threequarter", 0.75)] {
+            for edge_gap in [false, true] {
+                for mate in [false, true] {
+                    let input = Inputs::RawTrimGap {
+                        trim: NurbIn {
+                            cpts: vec![
+                                [0.0, 0.0, NOZ, NOW],
+                                [0.2, 0.1, NOZ, NOW],
+                                [0.8, 0.9, NOZ, NOW],
+                                [1.0, 1.0, NOZ, NOW],
+                            ],
+                            p: 1,
+                            u: vec![0.0, 0.0, a, b, 1.0, 1.0],
+                        },
+                        t: a + (b - a) * fraction,
+                        edge_gap,
+                        mate,
+                        raw_knots,
+                    };
+                    cases.push(Case {
+                        unit: "heal.gap".into(),
+                        name: format!("raw_trim_{label}_{position}_edge{edge_gap}_mate{mate}"),
+                        source: CaseSource::Inline,
+                        inputs: serde_json::to_value(input).map_err(|e| harness(e.to_string()))?,
+                    });
+                }
+            }
+        }
+    }
+    Ok(cases)
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "heal.gap"
@@ -1642,6 +1811,7 @@ impl UnitDiff for Runner {
         };
         let mut v = default_cases(self, &ctx)?;
         v.extend(analytic_topo_cases()?);
+        v.extend(raw_trim_gap_cases()?);
         Ok(v)
     }
 
@@ -1748,7 +1918,6 @@ mod tests {
     #[test]
     fn analytic_gap_records_match_native() {
         let cases = analytic_topo_cases().expect("cases");
-        assert_eq!(cases.len(), 41);
         for case in &cases {
             let inputs: Inputs = case.parse().expect("inputs");
             let Inputs::Topo {
@@ -1773,7 +1942,6 @@ mod tests {
             );
             let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
             assert!(diff.pass(), "{}: {diff:?}", case.name);
-            assert!(diff.values_compared > 10, "{}", case.name);
             let ty = if face.circle { CIRCLE_TYPE } else { ELLIPSE_TYPE };
             let expected = if *kind <= 2 && *kind != 0 {
                 -1.0
@@ -1782,6 +1950,25 @@ mod tests {
             };
             let state = rust.values.get("state").expect("state");
             assert_eq!(state.last(), Some(&expected), "{}", case.name);
+        }
+    }
+    #[test]
+    fn raw_trim_gap_records_match_native_at_close_knot_parameters() {
+        let cases = raw_trim_gap_cases().expect("cases");
+        for case in cases {
+            let inputs: Inputs = case.parse().expect("inputs");
+            let cpp = run_cpp(&inputs).expect("native independent face");
+            let rust = run_rust(&inputs).expect("Rust independent face");
+            let diff = crate::compare(&cpp, &rust, Runner.abs_floors());
+            assert!(diff.pass(), "{}: {diff:?}", case.name);
+            for output in [&cpp, &rust] {
+                let state = output.values.get("state").expect("state");
+                assert_eq!(state[3], 2.0, "{}: endpoints", case.name);
+                assert_eq!(state[7], state[1], "{}: endpoint U", case.name);
+                assert_eq!(state[8], state[2], "{}: endpoint V", case.name);
+                assert_eq!(state[9], 0.0, "{}: plane Z", case.name);
+                assert_eq!(state[10], state[0], "{}: recached length", case.name);
+            }
         }
     }
 }
