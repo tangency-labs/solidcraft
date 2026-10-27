@@ -3,8 +3,8 @@
 
 A record is `<SERIES>-<N>--<slug>.md` (e.g. `WR-262--extrusion-drop-point-fast.md`); its ID is
 `<SERIES>-<N>`. New records are numbered by the PR that adds them, and the k-th record of a
-series in one PR (k >= 2) is `<SERIES>-<N>.<k>--<slug>.md` with ID `<SERIES>-<N>.<k>`.
-An addendum is `<SERIES>-<N>[.<k>]--addendum-<YYYY-MM-DD>-<slug>.md` and must name
+series in one PR (k >= 2) is `<SERIES>-<N>-<k>--<slug>.md` with ID `<SERIES>-<N>-<k>`.
+An addendum is `<SERIES>-<N>[-<k>]--addendum-<YYYY-MM-DD>-<slug>.md` and must name
 the ID of an existing record. Names without a numeric ID (`UB-new--`, `UB-unnumbered--`,
 `HANG-unnumbered--`, `UNNUMBERED--`) and README.md are not checked.
 
@@ -21,8 +21,8 @@ from collections import defaultdict
 from pathlib import Path
 
 ISSUES = Path("plan/upstream-issues")
-RECORD = re.compile(r"^([A-Z]+-[0-9]+(?:\.[2-9]|\.[1-9][0-9]+)?)--(.+)\.md$")
-ADDENDUM = re.compile(r"^([A-Z]+-[0-9]+(?:\.[2-9]|\.[1-9][0-9]+)?)--addendum-[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$")
+RECORD = re.compile(r"^([A-Z]+-[0-9]+(?:-[2-9]|-[1-9][0-9]+)?)--(.+)\.md$")
+ADDENDUM = re.compile(r"^([A-Z]+-[0-9]+(?:-[2-9]|-[1-9][0-9]+)?)--addendum-[0-9]{4}-[0-9]{2}-[0-9]{2}-.+\.md$")
 ADDENDUM_LIKE = re.compile(r"--addendum")
 
 # Records sharing an ID when this check was added (2026-10-26). The `--dupN` names come from
@@ -94,7 +94,7 @@ def check(names, legacy=None):
         new = [f for f in files if f not in legacy.get(rid, set())]
         errors.append(
             f"{rid} is used by {len(files)} records: {', '.join(files)}. "
-            f"Give {', '.join(new)} an ID that is not in use (the number of the PR that adds it, `.2`, `.3`, ... for more records in that PR); to update a record, "
+            f"Give {', '.join(new)} an ID that is not in use (the number of the PR that adds it, `-2`, `-3`, ... for more records in that PR); to update a record, "
             "add an addendum file instead."
         )
     for name, rid in addenda:

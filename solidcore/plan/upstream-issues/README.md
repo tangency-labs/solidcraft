@@ -7,14 +7,15 @@ archive). The site (`site/build.py`) renders every file here, in name order.
 - **Name:** `<ID>--<short-slug>.md`, e.g. `WR-1255--extrusion-drop-point-fast.md`. The
   series is `UB-`, `HANG-`, `ND-`, `WR-` or `DOC-`. **The number is the number of the PR
   that adds the record.** A second record of the same series in the same PR is
-  `WR-1255.2--other-slug.md`, a third `WR-1255.3--...`, and so on (the first has no
-  suffix). Open the draft PR first (the workflow does), then name the file.
+  `WR-1255-2--other-slug.md`, a third `WR-1255-3--...`, and so on (the first has no
+  suffix). Prefer one record per PR; use `-2`, `-3` only when records genuinely belong
+  together. Open the draft PR first (the workflow does), then name the file.
   - *Why:* "the next free number" made parallel PRs pick the same one, and the later PR
     had to renumber the record and every citation of it (code comments, kernel field
     docs, known mismatches, findings). A PR number is unique and known before the record
     is written, so two PRs can never collide.
-  - *Citing:* cite the full id (`WR-1255`, `WR-1255.2`) exactly as in the file name and
-    the `#### ` heading, which reads `#### WR-1255.2. One-line title`.
+  - *Citing:* cite the full id (`WR-1255`, `WR-1255-2`) exactly as in the file name and
+    the `#### ` heading, which reads `#### WR-1255-2. One-line title`.
   - *Existing records* keep their ids and are never renamed, so numbers up to about
     `WR-469` come from the old scheme and gaps are normal. The legacy duplicate ids
     (section below) stay as they are.

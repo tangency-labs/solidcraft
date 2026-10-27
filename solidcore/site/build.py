@@ -596,7 +596,7 @@ def parse_issue_files():
         if head is None:
             continue
         title = lines[head][5:].strip()
-        m = re.match(r"([A-Z]+)-(\d+)(\.[2-9]|\.[1-9]\d+)?\.\s*(.*)$", title)
+        m = re.match(r"([A-Z]+)-(\d+)(-[2-9]|-[1-9]\d+)?\.\s*(.*)$", title)
         header, i = {}, head + 1
         while i < len(lines):
             f = re.match(r"^- \*\*(Severity|Area):\*\*\s*(.*)$", lines[i])
