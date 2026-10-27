@@ -67,6 +67,18 @@ impl Sketch {
         output(&arc.id) && self.curves.iter().enumerate().any(|(k, other)| k != curve && other.kind.uses(centre) && !output(&other.id))
     }
 
+    /// A circle an offset made round its source (#5301). Its radius is the source's less the
+    /// offset distance, which the solve does not see: as an unknown of its own it was the one
+    /// freedom left in a sketch whose source was fully constrained. It is held while the sketch
+    /// solves, as an offset line's ends are, and rebuilt from the source after the solve.
+    pub(crate) fn offset_circle_follows_source(&self, curve: usize) -> bool {
+        if self.offsets.is_empty() {
+            return false;
+        }
+        let Some(circle) = self.curves.get(curve) else { return false };
+        matches!(circle.kind, CurveKind::Circle { .. }) && self.offsets.iter().any(|o| o.owns_output(&circle.id))
+    }
+
     /// Endpoints of a normal-distance annotation, evaluated from its source curve.
     pub fn offset_dimension_points(&self, output: &str) -> Option<(Vec2, Vec2)> {
         let (source, forward, distance) = self
