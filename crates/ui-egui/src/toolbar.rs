@@ -199,9 +199,29 @@ fn menu_commands(
     out
 }
 
-/// Room for the version between Report a bug and the caption buttons.
+/// Room for the version between Report a bug and the caption buttons, at the least.
 const RIGHT_GROUP: f32 = 60.0;
 const CLUSTER_BUTTONS: f32 = 108.0;
+
+/// The least room the document tabs keep when a long version takes its extra width: one tab and
+/// the + button ([`crate::documents::layout`]).
+const TABS_KEPT: f32 = 124.0;
+
+/// The room right of Report a bug for the version (`version_width`, measured), or None where the
+/// bar shows none. The version sits 12 points from the caption buttons with a gap before the
+/// button, so a longer one (`v0.21.0-rc.1`) moves the button left instead of covering it. Its
+/// width over [`RIGHT_GROUP`] comes only from the document tabs' spare room: where it would leave
+/// them less than [`TABS_KEPT`], the version is hidden, as it is on a narrow bar.
+fn version_room(bar: Rect, captions: f32, tabs_start: f32, version_width: f32) -> Option<f32> {
+    if bar.width() < 640.0 {
+        return None;
+    }
+    let need = 12.0 + version_width + 8.0;
+    let room = RIGHT_GROUP.max(need);
+    // The tabs end 8 points before the cluster, with Report a bug as an icon at the least.
+    let tabs = bar.right() - captions - room - 28.0 - CLUSTER_BUTTONS - 8.0 - tabs_start;
+    (need <= RIGHT_GROUP || tabs >= TABS_KEPT).then_some(room)
+}
 
 /// The centre of Help, between Settings and Report a bug.
 fn help_x(report: Rect) -> f32 {
@@ -209,9 +229,9 @@ fn help_x(report: Rect) -> f32 {
 }
 
 /// The Report a bug button: labelled when there is room for its text (`label_width`, measured in
-/// the current language), otherwise just the icon.
-fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32) -> (Rect, bool) {
-    let right = bar.right() - captions - if bar.width() < 640.0 { 8.0 } else { RIGHT_GROUP };
+/// the current language), otherwise just the icon. `version_width` is the measured version.
+fn report_rect(bar: Rect, captions: f32, tabs_start: f32, label_width: f32, version_width: f32) -> (Rect, bool) {
+    let right = bar.right() - captions - version_room(bar, captions, tabs_start, version_width).unwrap_or(8.0);
     // Icon, text and a margin that mirrors the icon side.
     let full = REPORT_TEXT_X + label_width + 11.0;
     let labeled = right - CLUSTER_BUTTONS - tabs_start >= 216.0 + full;
@@ -405,7 +425,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let report_text = crate::i18n::tr("ui.report_a_bug");
         let report_font = FontId::proportional(t.font_button);
         let label_width = ui.painter().layout_no_wrap(report_text.to_string(), report_font.clone(), t.app_bar_text).size().x;
-        let (report, report_label) = report_rect(r, captions, tabs_start, label_width);
+        // The version links to its release notes; measured here so Report a bug leaves it room.
+        let version =
+            ui.painter().layout_no_wrap(format!("v{}", crate::update::current_version()), FontId::proportional(t.font_small), t.app_bar_text);
+        let (report, report_label) = report_rect(r, captions, tabs_start, label_width, version.size().x);
         // Assistant, Settings, Help and Report a bug form the right-hand cluster.
         if click(ui, help_x(report), "help", app.tr("ui.help"), true) {
             app.help.menu = !app.help.menu;
@@ -461,10 +484,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         if gresp.on_hover_text(prefs_tip).clicked() {
             crate::prefs::open_at(app, 0);
         }
-        if r.width() >= 640.0 {
-            // The version links to its release notes.
-            let galley =
-                ui.painter().layout_no_wrap(format!("v{}", crate::update::current_version()), FontId::proportional(t.font_small), t.app_bar_text);
+        if version_room(r, captions, tabs_start, version.size().x).is_some() {
+            let galley = version;
             let vrect = Align2::RIGHT_CENTER.anchor_size(pos2(r.right() - 12.0 - captions, r.center().y), galley.size());
             let vresp = ui.interact(
                 vrect.expand2(vec2(2.0, 4.0)).intersect(Rect::everything_right_of(report.right())),
@@ -2785,7 +2806,7 @@ mod header_report_tests {
                 for captions in [0.0, crate::titlebar::WIDTH] {
                     // The English label, and a longer one (Russian is about 125 px).
                     for label_width in [80.0, 125.0] {
-                        let (report, labeled) = report_rect(bar, captions, 354.0, label_width);
+                        let (report, labeled) = report_rect(bar, captions, 354.0, label_width, 40.0);
                         assert!(bar.contains_rect(report));
                         let prefs = Rect::from_center_size(pos2(report.left() - 52.0, APP_BAR_HEIGHT / 2.0), vec2(32.0, 32.0));
                         let help = Rect::from_center_size(pos2(help_x(report), APP_BAR_HEIGHT / 2.0), vec2(32.0, 32.0));
@@ -2794,7 +2815,7 @@ mod header_report_tests {
                         let full = REPORT_TEXT_X + label_width + 11.0;
                         assert_eq!(
                             labeled,
-                            width - captions - if width < 640.0 { 8.0 } else { RIGHT_GROUP } - CLUSTER_BUTTONS - 354.0 >= 216.0 + full
+                            width - captions - version_room(bar, captions, 354.0, 40.0).unwrap_or(8.0) - CLUSTER_BUTTONS - 354.0 >= 216.0 + full
                         );
                         if labeled {
                             assert!(REPORT_TEXT_X + label_width < report.width(), "{label_width}: the text overruns its button");
@@ -2864,8 +2885,13 @@ mod header_report_tests {
             h.call("ui.resize", json!({"width":1400.0,"height":720}));
             h.frames(3);
             let center = crate::scenario::handle_at("titlebar:report").expect("the report button is drawn");
+            let t = Tokens::get();
+            let version = format!("v{}", crate::update::current_version());
+            let version = h.ctx.fonts_mut(|f| f.layout_no_wrap(version, FontId::proportional(t.font_small), t.app_bar_text).size().x);
             // The button's right edge is fixed; its width is twice the distance to its centre.
-            2.0 * (1400.0 - crate::titlebar::WIDTH - RIGHT_GROUP - center.x)
+            let bar = Rect::from_min_size(egui::Pos2::ZERO, vec2(1400.0, APP_BAR_HEIGHT));
+            let room = version_room(bar, crate::titlebar::WIDTH, 354.0, version).unwrap_or(8.0);
+            2.0 * (1400.0 - crate::titlebar::WIDTH - room - center.x)
         };
         let (en, ru) = (width_in("en"), width_in("ru"));
         assert!((en - 114.34375).abs() < 0.05, "Plex Sans report button width: {en}");
@@ -2881,10 +2907,46 @@ mod header_report_tests {
             h.app.custom_titlebar = true;
             h.call("ui.resize", json!({"width":width,"height":720}));
             h.frames(3);
-            let version = crate::scenario::handle_at("titlebar:version").expect("the version is drawn as a link");
+            // A long version (a release candidate's) gives way to the document tabs on a narrow bar.
+            let Some(version) = crate::scenario::handle_at("titlebar:version") else {
+                assert!(width < 900.0, "the version is drawn as a link at {width}");
+                continue;
+            };
             let report = crate::scenario::handle_at("titlebar:report").expect("the report button is drawn");
             // Its click area starts where the report button ends, so a click on that button reaches the report.
             assert!(version.x > report.x, "width {width}");
+        }
+    }
+
+    /// A release candidate's version is wider than a release's: the button moves left for it
+    /// instead of lying under it, and where that would crowd out the document tabs the version is
+    /// hidden, as on a narrow bar (#5621).
+    #[test]
+    fn a_longer_version_moves_the_report_button_instead_of_covering_it() {
+        let h = crate::scenario::Harness::new();
+        let t = Tokens::get();
+        let measure = |text: &str| h.ctx.fonts_mut(|f| f.layout_no_wrap(text.into(), FontId::proportional(t.font_small), t.app_bar_text).size().x);
+        let (release, candidate) = (measure("v0.25.1"), measure("v0.21.0-rc.1"));
+        assert!(candidate > release + 15.0, "{release} {candidate}");
+        for width in [700.0, 900.0, 1400.0] {
+            let bar = Rect::from_min_size(egui::Pos2::ZERO, vec2(width, APP_BAR_HEIGHT));
+            for captions in [0.0, crate::titlebar::WIDTH] {
+                // A release keeps the button where it always was.
+                assert_eq!(version_room(bar, captions, 354.0, release), Some(RIGHT_GROUP), "{width} {captions}");
+                for (k, version_width) in [release, candidate, 2.0 * candidate].into_iter().enumerate() {
+                    let (report, _) = report_rect(bar, captions, 354.0, 80.0, version_width);
+                    let shown = version_room(bar, captions, 354.0, version_width).is_some();
+                    if shown {
+                        let version_left = bar.right() - 12.0 - captions - version_width;
+                        assert!(report.right() + 8.0 <= version_left + 0.01, "{width} {captions} {version_width}: {report:?}");
+                    } else {
+                        assert_eq!(report.right(), bar.right() - captions - 8.0, "{width} {captions} {version_width}: the narrow bar's margin");
+                    }
+                    if k == 1 {
+                        assert_eq!(shown, width >= 900.0, "{width} {captions}: the release candidate's version");
+                    }
+                }
+            }
         }
     }
 
