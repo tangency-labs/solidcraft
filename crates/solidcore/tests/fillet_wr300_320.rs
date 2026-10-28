@@ -1,4 +1,4 @@
-//! Opt-in fixes of the fork's fillet defects (`Kernel::fixes`): WR-300 (#1023), WR-301
+//! Opt-in fixes of the fork's fillet defects (`Kernel::fixes`): WR-300 (#1023, #421), WR-301
 //! (#485), WR-302 (#841, #1024), WR-303 (#841) and WR-320 (#879). Each case runs with the
 //! field off (SMLib's behaviour) and on.
 #![allow(
@@ -14,13 +14,14 @@ use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::Point3;
+use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::edge;
+use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::topology::EdgeId;
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, Kernel, SolidError};
 
 fn kernel(set: impl FnOnce(&mut UpstreamFixes)) -> Kernel {
     let mut k = Kernel::default();
@@ -271,6 +272,81 @@ fn retry_rail_search_holds_the_radius_as_the_first_does() {
         let mut k = kernel(both);
         assert_eq!(round_into_a_rounded_corner(&mut k, 5.0, r1), off);
     }
+}
+
+/// [`round_into_a_rounded_corner`] with the box first turned 180 degrees about z onto
+/// itself, so the top back edge runs from the corner round's arc (x = 55) to x = 0 and
+/// the law 5 to 1 along it is the same r1 at x = 0 to r5 at x = 55; the variable round's
+/// `DoFillet` result, the body and its face and edge counts.
+fn reversed_round_into_a_rounded_corner(k: &mut Kernel) -> (Result<(), SolidError>, Brep) {
+    let mut b = create_box(k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
+    api_rotate(
+        k,
+        Some(TransformObject::Brep(&mut b)),
+        Point3::new(30.0, 20.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+        180.0,
+    )
+    .unwrap();
+    let e = edge_between(k, &b, [60.0, 40.0, 0.0], [60.0, 40.0, 20.0]);
+    assert!(matches!(
+        fillet(k, &mut b, &[e], 5.0, 1),
+        Outcome::Built { .. }
+    ));
+    let e = edge_between(k, &b, [0.0, 40.0, 20.0], [55.0, 40.0, 20.0]);
+    let curve = edge::curve(&b, e).unwrap().unwrap();
+    let start = curve
+        .evaluate_point(k, edge::interval(&b, e).unwrap().min())
+        .unwrap();
+    assert!(near(start.x, 55.0, 1e-6), "the edge starts at {start:?}");
+    let result = {
+        let mut session = FilletSession::new(k, &mut b).unwrap();
+        session
+            .prepare_variable_radius_edges(k, &[e], 5.0, FilletLaw::linear(5.0, 1.0, None), 1, 1)
+            .unwrap();
+        session.do_fillet(k)
+    };
+    if result.is_ok() {
+        stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()).unwrap();
+    }
+    (result, b)
+}
+
+/// tangency-labs/solidcore#421: the same round with its edge running from the corner
+/// round's arc. SMLib's retry rail search again finds the arc's end at the held radius 5;
+/// that point is now the trace's first, which `DoPointIntersection` cannot start from, so
+/// nothing is traced and `DoFillet` fails with `SM_ERR` (1001), where the forward edge
+/// builds the 3.8 mm3 too small body. WR-300's fields build the same body as forward.
+#[test]
+fn retry_rail_search_holds_the_radius_from_either_end() {
+    let mut k = Kernel::default();
+    let (result, _) = reversed_round_into_a_rounded_corner(&mut k);
+    assert!(
+        matches!(result, Err(SolidError::Upstream { code: 1001, .. })),
+        "{result:?}"
+    );
+
+    let both = |f: &mut UpstreamFixes| {
+        f.fillet_retry_radius_as_first = true;
+        f.fillet_nx1_end_rib_global_merge = true;
+    };
+    let mut k = kernel(both);
+    let Outcome::Built {
+        volume: forward, ..
+    } = round_into_a_rounded_corner(&mut k, 1.0, 5.0)
+    else {
+        panic!("forward: refused");
+    };
+    let mut k = kernel(both);
+    let (result, mut b) = reversed_round_into_a_rounded_corner(&mut k);
+    result.unwrap();
+    assert!(is_manifold_solid(&b).unwrap());
+    assert_eq!((b.face_list().len(), b.edge_list().len()), (8, 18));
+    let v = volume(&k, &mut b);
+    assert!(
+        near(v, forward, 1e-6 * forward),
+        "reversed {v}, forward {forward}"
+    );
 }
 
 /// `FilletErrorType::NoRoom`, the fork's error type for a blend larger than its faces.
