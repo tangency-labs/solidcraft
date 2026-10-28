@@ -16,7 +16,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("timeline.paste", "Paste Features", paste).icon("paste").params(
         "translate?: [x,y,z] (moves the copies' geometry); component?: where the copies go (default: the active one), \
          component_path?: its placement (default: the active one, else its only one); the copies go at the marker, each where \
-         its original is in the world (copies into their own component keep its coordinates)",
+         its original is in the world (copies into their own component keep its coordinates); body transfers are left out",
     ),
 ];
 
@@ -62,7 +62,13 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z]"))?),
         None => None,
     };
-    let feats = s.clipboard.clone();
+    // A body transfer records which component bodies moved to, but the copies go into the
+    // component they are pasted into: a copy of the transfer would move nothing that is there, and
+    // it would belong to its destination rather than to the target. It is left out.
+    let (transfers, feats): (Vec<_>, Vec<_>) = s.clipboard.iter().cloned().partition(|f| matches!(f.kind, FeatureKind::BodyTransfer { .. }));
+    if feats.is_empty() {
+        return Err(bad(cmd, "body transfers are not pasted: the copies go into the component they are pasted into"));
+    }
     let comp = match p.get("component") {
         None => s.active_component,
         Some(v) => {
@@ -86,7 +92,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
     let mut bodies: BTreeMap<String, String> = BTreeMap::new();
     let mut used: std::collections::BTreeSet<String> = s.model.state().bodies.iter().map(|body| body.name.clone()).collect();
-    let mut notices = Vec::new();
+    let mut notices: Vec<String> = transfers.iter().map(|f| format!("{} is a body transfer and was not pasted", f.name)).collect();
     // The placement the copies are authored in: the one named, the active one (into the active
     // component, as before), else the target's only (or active) placement.
     let author_path = match given_path {
@@ -624,5 +630,31 @@ mod tests {
         // (one moved 50 mm), which the boolean and the measure each round in their own way:
         // a few 1e-6 mm³ on 5000.
         assert!((v("Plate") - v("Plate (2)")).abs() < 1e-8 * v("Plate"), "each plate carries one spring: {} vs {}", v("Plate"), v("Plate (2)"));
+    }
+
+    /// A copied body transfer is left out of a paste: the copies go into the component they are
+    /// pasted into. A pasted transfer belonged to that component and not to its destination, and
+    /// the saved design no longer loaded.
+    #[test]
+    fn a_copied_body_transfer_is_left_out_of_the_paste() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base", "body_name": "Block"}));
+        let a = run(&mut s, "component.create", json!({"name": "A", "activate": false}))["component"].as_u64().unwrap_or_default();
+        run(&mut s, "component.move_bodies", json!({"bodies": ["Block"], "component": "A"}));
+        let transfer = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::BodyTransfer { .. })).map(|f| f.name.clone());
+        let transfer = transfer.unwrap_or_default();
+        run(&mut s, "timeline.copy", json!({"features": ["Base", transfer]}));
+        let r = run(&mut s, "timeline.paste", json!({"translate": [20, 0, 0]}));
+        assert_eq!(r["pasted"].as_array().map(Vec::len), Some(1), "{r}");
+        assert_eq!(r["notices"], json!([format!("{transfer} is a body transfer and was not pasted")]), "{r}");
+        let state = s.model.state();
+        assert_eq!(state.body("Block").map(|b| s.doc.model_body_component(b)), Some(a));
+        assert_eq!(state.body("Block (2)").map(|b| s.doc.model_body_component(b)), Some(0), "the copy is in the root, where it was pasted");
+        if let Err(e) = solidcraft_doc::Document::from_json(&s.doc.to_json()) {
+            panic!("the design loads back: {e}");
+        }
+        run(&mut s, "timeline.copy", json!({"features": [transfer]}));
+        let err = s.execute("timeline.paste", &json!({})).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(err.contains("body transfers are not pasted"), "{err}");
     }
 }
