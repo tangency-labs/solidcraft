@@ -2215,7 +2215,7 @@ fn patch_dialog_takes_continuity_and_points_and_brings_them_back() {
     d.inputs[0].items = rim;
     d.inputs[1].items = vec![Sel::Vertex { body: "Tube".into(), point: Vec3::new(0.0, 0.0, 36.0) }];
     if let Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity }) = &mut d.kind {
-        *continuity = 1;
+        *continuity = solidcraft_engine::kernel::Continuity::G1;
     }
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!((id.as_str(), &p["continuity"], &p["points"]), ("surface.patch", &json!("g1"), &json!([[0.0, 0.0, 36.0]])), "{p}");
@@ -2225,7 +2225,7 @@ fn patch_dialog_takes_continuity_and_points_and_brings_them_back() {
     // Edit Feature: G1 again, and the point (on no face) kept as it was.
     let fid = app.session.doc.features.last().unwrap().id;
     let back = crate::dialogs::for_feature(&app, fid, None).unwrap();
-    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity: 1 })));
+    assert!(matches!(back.kind, Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity: solidcraft_engine::kernel::Continuity::G1 })));
     let (_, p) = apply_commands(&app, &back).unwrap().remove(0);
     assert_eq!((&p["params"]["continuity"], &p["params"]["points"]), (&json!("g1"), &json!([[0.0, 0.0, 36.0]])), "{p}");
 }
@@ -2244,10 +2244,10 @@ fn patch_dialog_rows_are_translated() {
         assert!(h.widget(through).is_some(), "{lang}: the points input must show {through:?}");
         // The continuity in the language too, in words (the code is in the hover text).
         if let Some(crate::dialogs::Dialog { kind: Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity }), .. }) = h.app.dialog.as_mut() {
-            *continuity = 1;
+            *continuity = solidcraft_engine::kernel::Continuity::G1;
         }
         h.frames(2);
-        assert!(h.widget(tangent).is_some(), "{lang}: the Tangent segment must show {tangent:?}");
+        assert!(h.widget(tangent).is_some(), "{lang}: the Tangent choice must show {tangent:?}");
     }
 }
 

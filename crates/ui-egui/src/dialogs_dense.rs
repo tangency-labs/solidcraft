@@ -2,6 +2,7 @@
 use super::*;
 use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
+use solidcraft_engine::kernel::Continuity;
 
 pub(super) fn command(kind: &Kind) -> Option<&'static str> {
     match kind {
@@ -107,10 +108,9 @@ const FILLET_TYPES: [(&str, &str); 5] = [
     ("Spline", "spline"),
 ];
 
-/// What fills a fillet's corners where three or more rounded edges meet (labels and hover texts,
-/// in the order of the `corner` words `rolling` and `g2`).
-const FILLET_CORNERS: [(&str, &str); 2] =
-    [("ui.fillet_corner_ball", "ui.fillet_corner_ball_tip"), ("ui.fillet_corner_patch", "ui.fillet_corner_patch_tip")];
+/// How a fillet's corners where three or more rounded edges meet continue the rounds: tangent (a
+/// rolling ball, the `corner` default) or curvature continuous (`corner: g2`, a smooth patch).
+const FILLET_CORNERS: [Continuity; 2] = [Continuity::G1, Continuity::G2];
 
 /// A fillet's Corners row (`corner`) and, with a smooth patch, its Setback (`setbacks`, one
 /// distance for every corner). Shown only while the edges have a corner where three or more
@@ -131,19 +131,15 @@ fn fillet_corner_rows(
     let exact = extra.get("fit").and_then(Value::as_str).is_none_or(|fit| fit == "exact");
     let mut enter = false;
     ui.add_enabled_ui(rtype == 0 && exact, |ui| {
-        form_row(ui, "ui.corners", |ui| {
-            let mut choice = usize::from(patch);
-            let response = ui_kit::dropdown(ui, "fi_corner", &mut choice, &FILLET_CORNERS.map(|(label, _)| label));
-            if choice != usize::from(patch) {
-                if choice == 1 {
-                    extra.insert("corner".into(), json!("g2"));
-                } else {
-                    extra.remove("corner");
-                }
+        let mut corner = if patch { Continuity::G2 } else { Continuity::G1 };
+        ui_kit::continuity_row(ui, "ui.corners", "fi_corner", &mut corner, &FILLET_CORNERS);
+        if (corner == Continuity::G2) != patch {
+            if corner == Continuity::G2 {
+                extra.insert("corner".into(), json!(Continuity::G2.as_str()));
+            } else {
+                extra.remove("corner");
             }
-            response
-        })
-        .on_hover_text(FILLET_CORNERS.map(|(_, tip)| tr(tip)).join("\n"));
+        }
         if extra.get("corner").and_then(Value::as_str) == Some("g2") {
             ui.scope(|ui| {
                 let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", "1.5")]);
@@ -1169,9 +1165,9 @@ mod tests {
         h.frames(3);
     }
 
-    /// Corners shows only once three rounded edges meet at a corner; Smooth patch then writes
+    /// Corners shows only once three rounded edges meet at a corner; Curvature (a smooth patch) writes
     /// `corner: g2`, its Setback (empty for the command's 1.5 × radius) goes to that corner as
-    /// `setbacks`, and Ball writes neither.
+    /// `setbacks`, and Tangent (a rolling ball) writes neither.
     #[test]
     fn corners_row_follows_the_selection_and_maps_to_corner_and_setbacks() {
         let mut h = fillet_harness();
@@ -1186,7 +1182,7 @@ mod tests {
         assert!(scenario::handle_at("dialog:ui.corners").is_some(), "three rounded edges meet at (10, 0, 5)");
         assert!(scenario::handle_at("dialog:ui.fillet_setback").is_none(), "Setback goes with a smooth patch");
         assert!(parameters(&h).get("corner").is_none(), "Ball is the default and writes nothing");
-        choose(&mut h, "ui.corners", "ui.fillet_corner_patch");
+        choose(&mut h, "ui.corners", Continuity::G2.label_id());
         let p = parameters(&h);
         assert_eq!(p["corner"], json!("g2"));
         assert!(p.get("setbacks").is_none(), "an empty Setback leaves the command's default: {p}");
@@ -1195,12 +1191,12 @@ mod tests {
             *setback = "3 mm".into();
         }
         assert_eq!(parameters(&h)["setbacks"], json!([{"vertex": [10.0, 0.0, 5.0], "distance": "3 mm"}]));
-        choose(&mut h, "ui.corners", "ui.fillet_corner_ball");
+        choose(&mut h, "ui.corners", Continuity::G1.label_id());
         let p = parameters(&h);
         assert!(p.get("corner").is_none() && p.get("setbacks").is_none(), "{p}");
         assert!(scenario::handle_at("dialog:ui.fillet_setback").is_none());
         // Another type clears the patch; the row stays, disabled, saying why in its hover text.
-        choose(&mut h, "ui.corners", "ui.fillet_corner_patch");
+        choose(&mut h, "ui.corners", Continuity::G2.label_id());
         choose(&mut h, "Type", "Chord length");
         let p = parameters(&h);
         assert!(p.get("corner").is_none() && p.get("setbacks").is_none(), "{p}");
@@ -1212,15 +1208,15 @@ mod tests {
     #[test]
     fn fillet_labels_use_words_not_continuity_codes() {
         let coded = |text: &str| ["G0", "G1", "G2", "G3"].iter().any(|code| text.contains(code));
-        for label in FILLET_TYPES.map(|(label, _)| label).into_iter().chain(FILLET_CORNERS.map(|(label, _)| label)) {
+        for label in FILLET_TYPES.map(|(label, _)| label).into_iter().chain(FILLET_CORNERS.map(Continuity::label_id)) {
             assert!(!coded(crate::i18n::tr_label(label)), "{label}: {}", crate::i18n::tr_label(label));
         }
-        for tip in FILLET_CORNERS.map(|(_, tip)| tip) {
+        for tip in FILLET_CORNERS.map(Continuity::tip_id) {
             assert!(coded(crate::i18n::tr(tip)), "the hover text keeps the code for those who know it: {tip}");
         }
         let mut h = fillet_harness();
         set_edges(&mut h, 3);
-        choose(&mut h, "ui.corners", "ui.fillet_corner_patch");
+        choose(&mut h, "ui.corners", Continuity::G2.label_id());
         for section in ["Variable Radius", "Advanced"] {
             h.step(&json!({"click":{"handle":format!("dialog:section:{section}")}})).unwrap();
         }
@@ -1228,7 +1224,7 @@ mod tests {
         assert!(scenario::handle_at("dialog:ui.fillet_setback").is_some() && scenario::handle_at("dialog:Radius Fit").is_some());
         let tree = h.output.accesskit_update.as_ref().unwrap();
         let labels: Vec<String> = tree.nodes.iter().flat_map(|(_, node)| [node.label(), node.value()]).flatten().map(str::to_string).collect();
-        assert!(labels.iter().any(|l| l == "Smooth patch"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "Curvature"), "{labels:?}");
         let shown: Vec<&String> = labels.iter().filter(|l| coded(l)).collect();
         assert!(shown.is_empty(), "labels with a continuity code: {shown:?}");
     }

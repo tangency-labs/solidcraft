@@ -47,7 +47,7 @@ fn edges_at_each_end_make_a_blend_and_come_back_in_an_edit() {
     d.inputs[0].items = vec![from];
     d.inputs[1].items = vec![to];
     let Kind::Surface(Surf::Blend { continuity, bulge, .. }) = &mut d.kind else { panic!("{:?}", d.kind) };
-    *continuity = [2, 1];
+    *continuity = [Continuity::G2, Continuity::G1];
     *bulge = [0.5, 0.0];
     ok(&mut h);
     let name = h.app.session.doc.features.last().unwrap().name.clone();
@@ -69,7 +69,7 @@ fn edges_at_each_end_make_a_blend_and_come_back_in_an_edit() {
     h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
     h.frames(8);
     let d = h.app.dialog.as_mut().unwrap();
-    assert!(matches!(d.kind, Kind::Surface(Surf::Blend { continuity: [2, 1], stitch: false, .. })), "{:?}", d.kind);
+    assert!(matches!(d.kind, Kind::Surface(Surf::Blend { continuity: [Continuity::G2, Continuity::G1], stitch: false, .. })), "{:?}", d.kind);
     assert_eq!((d.inputs[0].items.len(), d.inputs[1].items.len()), (1, 1), "{:?}", d.inputs);
     let Kind::Surface(Surf::Blend { stitch, .. }) = &mut d.kind else { panic!() };
     *stitch = true;
