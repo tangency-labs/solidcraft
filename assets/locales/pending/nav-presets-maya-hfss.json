@@ -1,0 +1,58 @@
+{
+  "ar": {
+    "nav.hfss.help": "Alt مع السحب بالزر الأيسر يُزيح العرض، وShift+Alt مع الأيسر يكبّره، وCtrl مع السحب بالأيسر من مساحة فارغة يدوّره",
+    "nav.maya.help": "Alt مع السحب بالزر الأيسر يدوّر العرض، وAlt مع الأوسط يُزيحه، وAlt مع الأيمن يكبّره؛ والسحب بالزر الأوسط يُزيح أيضًا"
+  },
+  "da": {
+    "nav.hfss.help": "Alt+træk med venstre museknap panorerer, Shift+Alt+venstre zoomer, Ctrl+træk med venstre fra et tomt område roterer visningen",
+    "nav.maya.help": "Alt+træk med venstre museknap roterer visningen, Alt+midterste panorerer, Alt+højre zoomer; træk med midterste museknap panorerer også"
+  },
+  "de": {
+    "nav.hfss.help": "Alt+Linksziehen verschiebt, Umschalt+Alt+Linksziehen zoomt, Strg+Linksziehen auf leerer Fläche dreht",
+    "nav.maya.help": "Alt+Linksziehen dreht, Alt+Mitte verschiebt, Alt+Rechtsziehen zoomt; mittleres Ziehen verschiebt ebenfalls"
+  },
+  "en": {
+    "nav.hfss.help": "Alt+left drag pans, Shift+Alt+left zooms, Ctrl+left drag on empty space orbits",
+    "nav.maya.help": "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans"
+  },
+  "fr": {
+    "nav.hfss.help": "Alt+glisser gauche fait un panoramique, Maj+Alt+gauche zoome, Ctrl+glisser gauche sur un espace vide fait orbiter",
+    "nav.maya.help": "Alt+glisser gauche fait orbiter, Alt+milieu fait un panoramique, Alt+droit zoome ; glisser avec le milieu fait aussi un panoramique"
+  },
+  "he": {
+    "nav.hfss.help": "Alt וגרירה שמאלית מזיזים, Shift+Alt וגרירה שמאלית מבצעים זום, Ctrl וגרירה שמאלית משטח ריק מסובבים",
+    "nav.maya.help": "Alt וגרירה שמאלית מסובבים, Alt וגרירה אמצעית מזיזים, Alt וגרירה ימנית מבצעים זום; גם גרירה אמצעית מזיזה"
+  },
+  "ja": {
+    "nav.hfss.help": "Alt+左ドラッグでパン、Shift+Alt+左ドラッグでズーム、何もない所からの Ctrl+左ドラッグで回転。",
+    "nav.maya.help": "Alt+左ドラッグで回転、Alt+中ドラッグでパン、Alt+右ドラッグでズーム。中ドラッグでもパン。"
+  },
+  "ko": {
+    "nav.hfss.help": "Alt+왼쪽 드래그는 이동, Shift+Alt+왼쪽 드래그는 확대/축소, 빈 공간에서 Ctrl+왼쪽 드래그는 회전입니다",
+    "nav.maya.help": "Alt+왼쪽 드래그는 회전, Alt+가운데 드래그는 이동, Alt+오른쪽 드래그는 확대/축소입니다. 가운데 드래그로도 이동합니다"
+  },
+  "nb": {
+    "nav.hfss.help": "Alt+venstredrag panorerer, Shift+Alt+venstredrag zoomer, Ctrl+venstredrag fra tomt område roterer",
+    "nav.maya.help": "Alt+venstredrag roterer, Alt+midtdrag panorerer, Alt+høyredrag zoomer; midtdrag panorerer også"
+  },
+  "pt-BR": {
+    "nav.hfss.help": "Alt+arrastar com o esquerdo desloca, Shift+Alt+esquerdo aplica zoom, Ctrl+arrastar com o esquerdo em área vazia orbita",
+    "nav.maya.help": "Alt+arrastar com o esquerdo orbita, Alt+meio desloca, Alt+direito aplica zoom; arrastar com o meio também desloca"
+  },
+  "tr": {
+    "nav.hfss.help": "Alt+sol sürükleme kaydırır, Shift+Alt+sol yakınlaştırır, boş alanda Ctrl+sol sürükleme döndürür",
+    "nav.maya.help": "Alt+sol sürükleme döndürür, Alt+orta kaydırır, Alt+sağ yakınlaştırır; orta sürükleme ayrıca kaydırır"
+  },
+  "uk": {
+    "nav.hfss.help": "Alt+ліва панорамує, Shift+Alt+ліва масштабує, Ctrl+ліва з порожнього місця обертає",
+    "nav.maya.help": "Alt+ліва обертає, Alt+середня панорамує, Alt+права масштабує; середня також панорамує"
+  },
+  "vi": {
+    "nav.hfss.help": "Alt+kéo chuột trái để trượt, Shift+Alt+chuột trái để thu phóng, Ctrl+kéo chuột trái từ vùng trống để xoay",
+    "nav.maya.help": "Alt+kéo chuột trái để xoay, Alt+chuột giữa để trượt, Alt+chuột phải để thu phóng; kéo chuột giữa cũng trượt"
+  },
+  "zh": {
+    "nav.hfss.help": "Alt+左键拖动平移，Shift+Alt+左键拖动缩放，在空白处 Ctrl+左键拖动旋转",
+    "nav.maya.help": "Alt+左键拖动旋转，Alt+中键拖动平移，Alt+右键拖动缩放；中键拖动也可平移"
+  }
+}
