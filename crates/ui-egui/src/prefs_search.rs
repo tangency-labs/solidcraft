@@ -258,6 +258,7 @@ pub(crate) fn begin_page(ui: &Ui, index: usize, label: &str) {
         state.page = label.to_string();
         state.page_shown = false;
         state.section.clear();
+        state.key.clear();
         state.section_matches = false;
         state.section_shown.clear();
         state.heading_open = false;
@@ -270,6 +271,8 @@ pub(crate) fn begin_section(ui: &Ui, title: &str) {
         state.section = title.to_string();
         state.section_matches = matches || state.force > 0;
         state.section_shown.clear();
+        // A dropdown with no row of its own must not store its value under the last row's key.
+        state.key.clear();
         state.heading_open = false;
     });
 }
