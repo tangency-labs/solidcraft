@@ -1,0 +1,110 @@
+{
+  "en": {
+    "parts.family.bearing": "Deep groove ball bearing (envelope)",
+    "parts.family.dowel_pin": "Parallel pin (dowel)",
+    "parts.family.hex_bolt": "Hex head bolt / screw",
+    "parts.family.hex_nut": "Hex nut",
+    "parts.family.set_screw": "Hex socket set screw, flat point",
+    "parts.family.socket_head_cap_screw": "Socket head cap screw",
+    "parts.family.washer": "Plain washer"
+  },
+  "ar": {
+    "parts.family.bearing": "محمل كريات أخدودي عميق (الغلاف)",
+    "parts.family.dowel_pin": "مسمار توجيه أسطواني",
+    "parts.family.hex_bolt": "برغي سداسي الرأس",
+    "parts.family.hex_nut": "صامولة سداسية",
+    "parts.family.set_screw": "برغي تثبيت بتجويف سداسي، طرف مسطح",
+    "parts.family.socket_head_cap_screw": "برغي برأس أسطواني بتجويف سداسي",
+    "parts.family.washer": "حلقة مسطحة"
+  },
+  "de": {
+    "parts.family.bearing": "Rillenkugellager (Hüllform)",
+    "parts.family.dowel_pin": "Zylinderstift",
+    "parts.family.hex_bolt": "Sechskantschraube",
+    "parts.family.hex_nut": "Sechskantmutter",
+    "parts.family.set_screw": "Gewindestift mit Innensechskant und Kegelstumpf",
+    "parts.family.socket_head_cap_screw": "Zylinderschraube mit Innensechskant",
+    "parts.family.washer": "Unterlegscheibe"
+  },
+  "es": {
+    "parts.family.bearing": "Rodamiento rígido de bolas (envolvente)",
+    "parts.family.dowel_pin": "Pasador cilíndrico",
+    "parts.family.hex_bolt": "Tornillo de cabeza hexagonal",
+    "parts.family.hex_nut": "Tuerca hexagonal",
+    "parts.family.set_screw": "Prisionero con hexágono interior, punta plana",
+    "parts.family.socket_head_cap_screw": "Tornillo cilíndrico con hexágono interior",
+    "parts.family.washer": "Arandela plana"
+  },
+  "fr": {
+    "parts.family.bearing": "Roulement à billes à gorge profonde (enveloppe)",
+    "parts.family.dowel_pin": "Goupille cylindrique",
+    "parts.family.hex_bolt": "Vis à tête hexagonale",
+    "parts.family.hex_nut": "Écrou hexagonal",
+    "parts.family.set_screw": "Vis sans tête à six pans creux, bout plat",
+    "parts.family.socket_head_cap_screw": "Vis à tête cylindrique à six pans creux",
+    "parts.family.washer": "Rondelle plate"
+  },
+  "he": {
+    "parts.family.bearing": "מסב כדורי חריץ עמוק (מעטפת)",
+    "parts.family.dowel_pin": "פין גלילי",
+    "parts.family.hex_bolt": "בורג ראש משושה",
+    "parts.family.hex_nut": "אום משושה",
+    "parts.family.set_screw": "בורג אלן ללא ראש, קצה שטוח",
+    "parts.family.socket_head_cap_screw": "בורג ראש גלילי עם משושה פנימי",
+    "parts.family.washer": "דסקית שטוחה"
+  },
+  "it": {
+    "parts.family.bearing": "Cuscinetto radiale a sfere (ingombro)",
+    "parts.family.dowel_pin": "Spina cilindrica",
+    "parts.family.hex_bolt": "Vite a testa esagonale",
+    "parts.family.hex_nut": "Dado esagonale",
+    "parts.family.set_screw": "Grano a esagono incassato, punta piana",
+    "parts.family.socket_head_cap_screw": "Vite a testa cilindrica con esagono incassato",
+    "parts.family.washer": "Rondella piana"
+  },
+  "ja": {
+    "parts.family.bearing": "深溝玉軸受（外形）",
+    "parts.family.dowel_pin": "平行ピン",
+    "parts.family.hex_bolt": "六角ボルト",
+    "parts.family.hex_nut": "六角ナット",
+    "parts.family.set_screw": "六角穴付き止めねじ 平先",
+    "parts.family.socket_head_cap_screw": "六角穴付きボルト",
+    "parts.family.washer": "平座金"
+  },
+  "ko": {
+    "parts.family.bearing": "깊은 홈 볼 베어링 (외형)",
+    "parts.family.dowel_pin": "평행 핀",
+    "parts.family.hex_bolt": "육각 볼트",
+    "parts.family.hex_nut": "육각 너트",
+    "parts.family.set_screw": "육각 구멍붙이 멈춤나사, 평형 끝",
+    "parts.family.socket_head_cap_screw": "육각 구멍붙이 볼트",
+    "parts.family.washer": "평와셔"
+  },
+  "vi": {
+    "parts.family.bearing": "Ổ bi cầu rãnh sâu (bao ngoài)",
+    "parts.family.dowel_pin": "Chốt trụ",
+    "parts.family.hex_bolt": "Bu lông đầu lục giác",
+    "parts.family.hex_nut": "Đai ốc lục giác",
+    "parts.family.set_screw": "Vít trí lục giác chìm, đầu bằng",
+    "parts.family.socket_head_cap_screw": "Bu lông lục giác chìm đầu trụ",
+    "parts.family.washer": "Vòng đệm phẳng"
+  },
+  "zh": {
+    "parts.family.bearing": "深沟球轴承（外形）",
+    "parts.family.dowel_pin": "圆柱销",
+    "parts.family.hex_bolt": "六角头螺栓",
+    "parts.family.hex_nut": "六角螺母",
+    "parts.family.set_screw": "内六角平端紧定螺钉",
+    "parts.family.socket_head_cap_screw": "内六角圆柱头螺钉",
+    "parts.family.washer": "平垫圈"
+  },
+  "zh-TW": {
+    "parts.family.bearing": "深溝滾珠軸承（外形）",
+    "parts.family.dowel_pin": "圓柱銷",
+    "parts.family.hex_bolt": "六角頭螺栓",
+    "parts.family.hex_nut": "六角螺帽",
+    "parts.family.set_screw": "內六角平端止付螺絲",
+    "parts.family.socket_head_cap_screw": "內六角圓柱頭螺絲",
+    "parts.family.washer": "平墊圈"
+  }
+}
