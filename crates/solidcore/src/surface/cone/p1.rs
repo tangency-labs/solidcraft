@@ -106,7 +106,9 @@
 //!   call does) and `ReadFromDB` in [`SurfOfRevolution::read_from_db`].
 //! - **NURB.** The queries expect the NURB made ([`Cone::make_nurb`], as the
 //!   `CreateCanonical` functions do); upstream's `GetNaturalUVDomain` makes a missing
-//!   one through the `const` object, here its domain is then `[0, 0] x [0, 0]`.
+//!   one through the `const` object. A bare cone's domain is then `[0, 0] x [0, 0]`;
+//!   a cone in a [`crate::surface::surface::Surface`] makes it and keeps it there
+//!   (`Surface::kind_with_nurb`, `Surface::natural_uv_domain_with_nurb`), as upstream.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
 use crate::curve::curve::p2::{CIRCLE_TYPE, LINE_TYPE};

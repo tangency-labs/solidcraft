@@ -976,43 +976,15 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let bspline: Option<std::borrow::Cow<'_, BSplineSurface>> = match self.surface().kind() {
             SurfaceKind::BSpline(b) => Some(std::borrow::Cow::Borrowed(b)),
             SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),
-            // GetOrCreateGwNurbPointer: SmSurfOfRevolution::MakeNurb when it has none
-            SurfaceKind::Cone(s) => {
-                if s.rev().base().gw_nurb().is_some() {
-                    Some(std::borrow::Cow::Borrowed(s.rev().base()))
-                } else {
-                    let mut tmp = s.as_ref().clone();
-                    tmp.make_nurb(k)?;
-                    Some(std::borrow::Cow::Owned(tmp.rev().base().clone()))
-                }
-            }
-            SurfaceKind::Sphere(s) => {
-                if s.base().base().gw_nurb().is_some() {
-                    Some(std::borrow::Cow::Borrowed(s.base().base()))
-                } else {
-                    let mut tmp = s.as_ref().clone();
-                    tmp.make_nurb(k)?;
-                    Some(std::borrow::Cow::Owned(tmp.base().base().clone()))
-                }
-            }
-            SurfaceKind::Torus(s) => {
-                if s.base().base().gw_nurb().is_some() {
-                    Some(std::borrow::Cow::Borrowed(s.base().base()))
-                } else {
-                    let mut tmp = s.as_ref().clone();
-                    tmp.make_nurb(k)?;
-                    Some(std::borrow::Cow::Owned(tmp.base().base().clone()))
-                }
-            }
-            SurfaceKind::SurfOfRevolution(s) => {
-                if s.base().gw_nurb().is_some() {
-                    Some(std::borrow::Cow::Borrowed(s.base()))
-                } else {
-                    let mut tmp = (**s).clone();
-                    tmp.make_nurb(k)?;
-                    Some(std::borrow::Cow::Owned(tmp.base().clone()))
-                }
-            }
+            // GetOrCreateGwNurbPointer: SmSurfOfRevolution::MakeNurb when it has none,
+            // kept on the surface (`Surface::kind_with_nurb`, status ignored)
+            SurfaceKind::Cone(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_)
+            | SurfaceKind::SurfOfRevolution(_) => self
+                .surface()
+                .revolution_base_with_nurb(k)?
+                .map(std::borrow::Cow::Borrowed),
             SurfaceKind::SurfOfExtrusion(s) => {
                 if s.base().gw_nurb().is_some() {
                     Some(std::borrow::Cow::Borrowed(s.base()))

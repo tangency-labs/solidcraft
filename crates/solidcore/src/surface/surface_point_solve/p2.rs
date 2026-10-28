@@ -65,7 +65,7 @@ use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
 use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQ, EFF_ZERO_SQRT};
-use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::surface::surface::p2::SurfaceEval;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -1267,18 +1267,8 @@ pub(crate) fn with_out_of_bounds_enabled_in_place<R>(
     surface: &Surface,
     f: impl FnOnce() -> Result<R>,
 ) -> Result<R> {
-    let base = match surface.kind() {
-        SurfaceKind::BSpline(b) => b,
-        SurfaceKind::Plane(p) => p.base(),
-        SurfaceKind::Cone(s) => s.rev().base(),
-        SurfaceKind::Sphere(s) => s.base().base(),
-        SurfaceKind::Torus(s) => s.base().base(),
-        SurfaceKind::SurfOfRevolution(s) => s.base(),
-        SurfaceKind::SurfOfExtrusion(s) => s.base(),
-        SurfaceKind::CurveBounded(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::OffsetSurface(_)
-        | SurfaceKind::SrfInVolume(_) => return f(),
+    let Some(base) = out_of_bounds_base(surface) else {
+        return f();
     };
     if base.is_out_of_bounds_enabled() {
         return f();
@@ -1287,7 +1277,31 @@ pub(crate) fn with_out_of_bounds_enabled_in_place<R>(
     base.set_out_of_bounds_enabled_in_place(true);
     let result = f();
     base.set_out_of_bounds_enabled_in_place(false);
+    // a NURB a cone, sphere, torus or surface of revolution made inside `f` is kept as
+    // a made kind copied while the flag was set (`Surface::kind_with_nurb`); upstream
+    // restores the flag on that one object, so restore it on the made kind too
+    if let Some(made) = out_of_bounds_base(surface) {
+        made.set_out_of_bounds_enabled_in_place(false);
+    }
     result
+}
+
+/// The `SmBSplineSurface` part whose `m_bOutOfBoundsEnabled` an evaluation of `surface`
+/// reads, `None` for the kinds not derived from it.
+fn out_of_bounds_base(surface: &Surface) -> Option<&BSplineSurface> {
+    match surface.kind() {
+        SurfaceKind::BSpline(b) => Some(b),
+        SurfaceKind::Plane(p) => Some(p.base()),
+        SurfaceKind::Cone(s) => Some(s.rev().base()),
+        SurfaceKind::Sphere(s) => Some(s.base().base()),
+        SurfaceKind::Torus(s) => Some(s.base().base()),
+        SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
+        SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => None,
+    }
 }
 
 /// `pSurf->EvaluatePoint(uv, rPt)` with its status ignored: `prev` on failure.
@@ -2086,7 +2100,6 @@ mod tests {
     use super::*;
     use crate::geom::global_solver::SolutionRequested;
     use crate::geom::solution_array::ObjectKind;
-    use crate::nurbs::b_spline_surface::BSplineSurface;
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     struct Srf;

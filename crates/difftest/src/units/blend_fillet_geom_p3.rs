@@ -302,6 +302,28 @@ struct Target {
     brep: Brep,
 }
 
+/// The Rust side's case: the source read by the Rust reader or built by the Rust kernel
+/// in the shim's traversal order ([`crate::own_reader::edgeuse_graph_brep`]), never
+/// imported from the C++ export; `Err(output)` when the Rust build fails, as
+/// [`target`] reports the shim's failed build.
+fn own_target(brep: &BrepIn) -> Result<Result<Target, Output>, HarnessError> {
+    let path = path_of(Some(brep))?;
+    let block = brep_block_of(Some(brep), false, false)?;
+    let brep = match crate::own_reader::edgeuse_graph_brep(&mut Kernel::default(), brep)? {
+        Ok(b) => b,
+        Err(e) => return Ok(Err(match Output::unported(&e) {
+            Some(o) => o,
+            None => Output::new().values("flat", vec![1.0, crate::own_builder::build_status(&e)]),
+        })),
+    };
+    Ok(Ok(Target {
+        path,
+        block,
+        counts: crate::own_builder::counts(&brep),
+        brep,
+    }))
+}
+
 /// Builds the target on both sides; `Err(output)` when it cannot be built.
 fn target(brep: &BrepIn) -> Result<Result<Target, Output>, HarnessError> {
     let path = path_of(Some(brep))?;
@@ -980,7 +1002,7 @@ fn shim_corners(m: &RustModel) -> Result<Vec<FilletCorner>, HarnessError> {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut tg = match target(&i.brep)? {
+    let mut tg = match own_target(&i.brep)? {
         Ok(t) => t,
         Err(out) => return Ok(out),
     };

@@ -560,7 +560,7 @@ const fn is_b_spline_kind(c: &Curve) -> bool {
 
 /// `SM_CAST_PTR(SmBSplineSurface, ..)`: the B-spline net of a B-spline surface, a
 /// plane or a surface of revolution.
-const fn b_spline_net(s: &Surface) -> Option<&BSplineSurface> {
+fn b_spline_net(s: &Surface) -> Option<&BSplineSurface> {
     match s.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),

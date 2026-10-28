@@ -1083,6 +1083,26 @@ impl Map<'_> {
     }
 }
 
+/// The renumbered second edge use of edge use `id`'s cached CCW gap
+/// (`m_sEdgeCCWEdgeGap3d.m_pEdgeuse1`, `edgeuse1`). A gap stays cached after
+/// `SmBrep::SqueezeEdge` takes its CCW neighbour out of the loop and deletes it
+/// (`ReadFromFile`'s healer on `Fillet/open_shell.smb`: the C++ gap then names a freed
+/// edge use, the Rust one an unlinked arena record). No live entity corresponds, so
+/// such a reference takes the convention of the C++ export import, which carries only
+/// the gap's `IsInit` flag: the edge use's own CCW edge use (itself without one). Every
+/// other unreached reference is still a renumbering error.
+fn stale_ccw_gap_edgeuse(
+    m: &Map<'_>,
+    edgeuse1: Option<EdgeuseId>,
+    ccw: Option<EdgeuseId>,
+    id: EdgeuseId,
+) -> Result<Option<EdgeuseId>, HarnessError> {
+    match edgeuse1 {
+        Some(x) if m.edgeuse(x).is_err() => Ok(Some(m.edgeuse(ccw.unwrap_or(id))?)),
+        _ => opt(edgeuse1, |x| m.edgeuse(x)),
+    }
+}
+
 fn opt<T, F: Fn(T) -> Result<T, HarnessError>>(
     x: Option<T>,
     f: F,
@@ -1294,7 +1314,8 @@ pub(crate) fn renumber_with(src: &Brep, conv: &Conventions<'_>) -> Result<Brep, 
         max_edge_face_gap.edgeuse = opt(max_edge_face_gap.edgeuse, |x| m.edgeuse(x))?;
         let mut edge_ccw_edge_gap = e.edge_ccw_edge_gap;
         edge_ccw_edge_gap.edgeuse0 = opt(edge_ccw_edge_gap.edgeuse0, |x| m.edgeuse(x))?;
-        edge_ccw_edge_gap.edgeuse1 = opt(edge_ccw_edge_gap.edgeuse1, |x| m.edgeuse(x))?;
+        edge_ccw_edge_gap.edgeuse1 =
+            stale_ccw_gap_edgeuse(&m, edge_ccw_edge_gap.edgeuse1, e.ccw, id)?;
         b.add_edgeuse_record(Edgeuse {
             edge: opt(e.edge, |x| m.edge(x))?,
             owner: match e.owner {

@@ -98,3 +98,122 @@ fn read_bytes(k: &mut Kernel, bytes: Vec<u8>, rebuild: bool) -> SolidResult<Brep
 pub(crate) fn read_file_or_fail(k: &mut Kernel, path: &str) -> Result<Brep, HarnessError> {
     read_file(k, path)?.map_err(|e| HarnessError::new(format!("rust read {path}: {e}")))
 }
+
+/// The Rust B-rep of a `sc_edgeuse_graph.h` source as the shim's `build` makes it,
+/// in the shim's traversal order: an `.smb` file source read by [`read_file_rebuild`]
+/// (`ReadFromFile` into `new SmBrep(ctx)`) and renumbered by
+/// [`own_builder::finish`](crate::own_builder::finish), every other source built by
+/// [`own_builder::build_with`](crate::own_builder::build_with). Selector indices taken
+/// modulo the result's [`counts`](crate::own_builder::counts) then name the entities
+/// the shim's export order names.
+///
+/// # Errors
+///
+/// A harness error when the file cannot be opened, the source is malformed or the
+/// renumbering finds a dangling reference.
+pub(crate) fn brep_in_order(
+    k: &mut Kernel,
+    src: &crate::units::topology_edgeuse_p1::BrepIn,
+    validate_only: bool,
+    init_gaps: bool,
+    conv: &crate::own_builder::Conventions<'_>,
+) -> Result<crate::own_builder::Built, HarnessError> {
+    use crate::units::topology_edgeuse_p1::{path_of, BrepIn};
+    if let Some(b) = crate::own_builder::build_with(k, src, validate_only, init_gaps, conv)? {
+        return Ok(b);
+    }
+    let rebuild = matches!(src, BrepIn::File { rebuild: true, .. });
+    let path = path_of(Some(src))?;
+    file_in_order(k, &path, rebuild, validate_only, init_gaps, conv)
+}
+
+/// The `.smb` file at `path` read by [`read_file_rebuild`] and renumbered into the shim's
+/// traversal order under `conv` ([`own_builder::finish`](crate::own_builder::finish)),
+/// for runners with their own source types.
+///
+/// # Errors
+///
+/// As [`brep_in_order`].
+pub(crate) fn file_in_order(
+    k: &mut Kernel,
+    path: &str,
+    rebuild: bool,
+    validate_only: bool,
+    init_gaps: bool,
+    conv: &crate::own_builder::Conventions<'_>,
+) -> Result<crate::own_builder::Built, HarnessError> {
+    let raw = read_file_rebuild(k, path, rebuild)?;
+    crate::own_builder::finish(k, raw, validate_only, init_gaps, conv)
+}
+
+/// [`brep_in_order`] under [`Conventions::EDGEUSE_GRAPH`](crate::own_builder::Conventions::EDGEUSE_GRAPH)
+/// (no `m_bValidateOnly`, no gap walk), the build's own error kept: the Rust B-rep of
+/// the blend runners' `sc_edgeuse_graph.h` sources.
+///
+/// # Errors
+///
+/// As [`brep_in_order`].
+pub(crate) fn edgeuse_graph_brep(
+    k: &mut Kernel,
+    src: &crate::units::topology_edgeuse_p1::BrepIn,
+) -> Result<SolidResult<Brep>, HarnessError> {
+    use crate::own_builder::{Built, Conventions};
+    Ok(
+        match brep_in_order(k, src, false, false, &Conventions::EDGEUSE_GRAPH)? {
+            Built::Brep(b) => Ok(*b),
+            Built::Failed(e) => Err(e),
+        },
+    )
+}
+
+/// An [`edgeuse_case`]: the entity counts (the export header's order), the B-rep and its
+/// geometry types.
+pub(crate) type EdgeuseCase = (
+    [usize; 10],
+    Brep,
+    crate::units::topology_edgeuse_p1::ImportTypes,
+);
+
+/// A `sc_edgeuse_graph.h` case's entity counts, B-rep and geometry types, or the output
+/// of a failed build (`brep_build_status_<status>`, or the deferral of an unported
+/// callee). With `own` (a runner's Rust side) the B-rep is [`brep_in_order`]'s and every
+/// geometry is held exactly; else (a runner's C++ side, which resolves its selectors on
+/// the B-rep the shim builds) it is imported from the shim's export.
+///
+/// # Errors
+///
+/// As [`brep_in_order`]; a harness error when the C++ export fails.
+pub(crate) fn edgeuse_case(
+    src: &crate::units::topology_edgeuse_p1::BrepIn,
+    validate_only: bool,
+    init_gaps: bool,
+    own: bool,
+) -> Result<Result<EdgeuseCase, crate::Output>, HarnessError> {
+    use crate::own_builder::{counts, failed_output, Built, Conventions};
+    use crate::units::topology_edgeuse_p1::{
+        brep_block_of, import_with_types, path_of, ImportTypes,
+    };
+    use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
+    if own {
+        let conv = &Conventions::EDGEUSE_GRAPH;
+        let k = &mut Kernel::default();
+        return Ok(
+            match brep_in_order(k, src, validate_only, init_gaps, conv)? {
+                Built::Brep(b) => Ok((counts(&b), *b, ImportTypes::default())),
+                Built::Failed(e) => Err(failed_output(&e)),
+            },
+        );
+    }
+    let path = path_of(Some(src))?;
+    let block = brep_block_of(Some(src), validate_only, init_gaps)?;
+    let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
+        ffi1::eval(ffi1::Op::Export, &path, &block)
+    })
+    .map_err(|e| HarnessError::new(format!("c++ export: {e}")))?;
+    let Some(c) = ffi1::counts(&ex) else {
+        let st = ex.get(1).copied().unwrap_or(0.0);
+        return Ok(Err(crate::Output::err(format!("brep_build_status_{st}"))));
+    };
+    let (b, types) = import_with_types(&ex)?;
+    Ok(Ok((c, b, types)))
+}

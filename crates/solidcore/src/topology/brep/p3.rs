@@ -3491,29 +3491,23 @@ fn squeeze_loops(
 /// Whether `s` is a kind of `SmBSplineSurface` (`SM_CAST_PTR(SmBSplineSurface, ..)`).
 /// The B-spline part of a B-spline kind surface with its NURB
 /// (`GetOrCreateGwNurbPointer`, which calls the kind's virtual `MakeNurb` when the
-/// NURB is missing): borrowed when present, else made on a copy (upstream caches it
-/// on the surface; nothing observable differs). A `MakeNurb` that fails leaves the
+/// NURB is missing): borrowed when present; else a cone's, sphere's, torus's or surface
+/// of revolution's is made and kept on the surface, as upstream keeps it, and an
+/// extrusion's is made on a copy (nothing observable differs). A `MakeNurb` that fails leaves the
 /// NULL NURB, as upstream's ignored status does; `None` for another kind.
 ///
 /// # Errors
 ///
 /// [`SolidError::Unported`] from a surface of revolution's `MakeNurb`.
 fn with_nurb<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSplineSurface>>> {
+    // a cone, sphere, torus or surface of revolution makes its NURB on the surface and
+    // keeps it (`Surface::kind_with_nurb`, status ignored)
+    if let Some(base) = s.revolution_base_with_nurb(k)? {
+        return Ok(Some(Cow::Borrowed(base)));
+    }
     Ok(match s.kind() {
         SurfaceKind::BSpline(x) => Some(Cow::Borrowed(x)),
         SurfaceKind::Plane(x) => Some(x.base_for_query()),
-        SurfaceKind::SurfOfRevolution(x) => {
-            if x.base().gw_nurb().is_some() {
-                Some(Cow::Borrowed(x.base()))
-            } else {
-                let mut tmp = x.as_ref().clone();
-                match tmp.make_nurb(k) {
-                    Err(e) if e.is_unported() => return Err(e),
-                    Ok(()) | Err(_) => {}
-                }
-                Some(Cow::Owned(tmp.base().clone()))
-            }
-        }
         SurfaceKind::SurfOfExtrusion(x) => {
             if x.base().gw_nurb().is_some() {
                 Some(Cow::Borrowed(x.base()))
@@ -3526,47 +3520,11 @@ fn with_nurb<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSplineSur
                 Some(Cow::Owned(tmp.base().clone()))
             }
         }
-        SurfaceKind::Cone(x) => {
-            if x.rev().base().gw_nurb().is_some() {
-                Some(Cow::Borrowed(x.rev().base()))
-            } else {
-                let mut tmp = x.as_ref().clone();
-                match tmp.make_nurb(k) {
-                    Err(e) if e.is_unported() => return Err(e),
-                    Ok(()) | Err(_) => {}
-                }
-                Some(Cow::Owned(tmp.rev().base().clone()))
-            }
-        }
-        SurfaceKind::Torus(x) => {
-            if x.base().base().gw_nurb().is_some() {
-                Some(Cow::Borrowed(x.base().base()))
-            } else {
-                let mut tmp = x.as_ref().clone();
-                match tmp.make_nurb(k) {
-                    Err(e) if e.is_unported() => return Err(e),
-                    Ok(()) | Err(_) => {}
-                }
-                Some(Cow::Owned(tmp.base().base().clone()))
-            }
-        }
-        SurfaceKind::Sphere(x) => {
-            if x.base().base().gw_nurb().is_some() {
-                Some(Cow::Borrowed(x.base().base()))
-            } else {
-                let mut tmp = x.as_ref().clone();
-                match tmp.make_nurb(k) {
-                    Err(e) if e.is_unported() => return Err(e),
-                    Ok(()) | Err(_) => {}
-                }
-                Some(Cow::Owned(tmp.base().base().clone()))
-            }
-        }
         _ => None,
     })
 }
 
-const fn as_bspline_surface(s: &Surface) -> Option<&BSplineSurface> {
+fn as_bspline_surface(s: &Surface) -> Option<&BSplineSurface> {
     match s.kind() {
         SurfaceKind::BSpline(x) => Some(x),
         SurfaceKind::Plane(x) => Some(x.base()),

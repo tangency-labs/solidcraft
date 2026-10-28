@@ -2,7 +2,9 @@
 // difftest shim for unit `surface.cone_p1`.
 // Wraps the SmCone / SmCylinder members owned by the unit (source/SMLib/src/SmCone.cpp,
 // source/SMLib/src/SmCylinder.cpp): the constructors (protected ones through a derived
-// class) with MakeNurb, both SmCone::CreateCanonical overloads and
+// class) with MakeNurb (or without it, op 19: a const GetNaturalUVDomain then makes the
+// NURB, GetOrCreateGwNurbPointer, before Copy and Transform), both SmCone::CreateCanonical
+// overloads and
 // SmCylinder::CreateCanonical, Copy, operator==, AdjustSTEPUVDomain, GetApex,
 // CreateIsoParametricCurve, CreateIsoCircleFromPoint, the STEP/NURB parameter
 // conversions, Evaluate, EvaluatePoint, EvaluateSTEP, EvaluateSTEPPoint, GetHeight,
@@ -295,8 +297,9 @@ void put_vec(std::vector<double>& o, const SmVector3d& v)
 }
 
 // A surface block `mode oob O[3] X[3] Y[3] p[8]`. Writes the construction status; NULL on
-// failure.
-SmCone* read_cone(Rd& rd, const SmContext& ctx, std::vector<double>& o)
+// failure. Without `make`, the constructor modes (3-6) skip their MakeNurb, leaving the
+// cone as its constructor does (lazy, op 19).
+SmCone* read_cone(Rd& rd, const SmContext& ctx, std::vector<double>& o, bool make = true)
 {
     int64_t mode = rd.idx();
     bool oob = rd.flag();
@@ -332,22 +335,22 @@ SmCone* read_cone(Rd& rd, const SmContext& ctx, std::vector<double>& o)
     case BM_CONE_UNBOUNDED:
         c = new (ctx) ConePeek(org, x, y, p[0], p[1], p[2] != 0.0 ? TRUE : FALSE,
                                p[3] != 0.0 ? TRUE : FALSE);
-        stt = c->MakeNurb();
+        if (make) stt = c->MakeNurb();
         break;
     case BM_CONE_BOUNDED:
         c = new (ctx) ConePeek(org, x, y, p[0], p[1], p[2], p[3], p[4], p[5] != 0.0 ? TRUE : FALSE,
                                p[6] != 0.0 ? TRUE : FALSE, p[7] != 0.0 ? TRUE : FALSE);
-        stt = c->MakeNurb();
+        if (make) stt = c->MakeNurb();
         break;
     case BM_CYL_BOUNDED:
         c = new (ctx) SmCylinder(org, x, y, p[0], p[1], p[2], p[3], p[4] != 0.0 ? TRUE : FALSE,
                                  p[5] != 0.0 ? TRUE : FALSE, p[6] != 0.0 ? TRUE : FALSE, &ctx);
-        stt = c->MakeNurb();
+        if (make) stt = c->MakeNurb();
         break;
     case BM_CYL_UNBOUNDED:
         c = new (ctx) CylPeek(org, x, y, p[0], p[1] != 0.0 ? TRUE : FALSE,
                               p[2] != 0.0 ? TRUE : FALSE);
-        stt = c->MakeNurb();
+        if (make) stt = c->MakeNurb();
         break;
     default: stt = SC_ERR_ARG; break;
     }
@@ -526,6 +529,47 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         o.push_back(SM_SUCCESS);
         put_vec(o, eval.Pos()); put_vec(o, eval.Su()); put_vec(o, eval.Sv());
         put_vec(o, eval.Suu()); put_vec(o, eval.Suv()); put_vec(o, eval.Svv());
+        break;
+    }
+    case 19: // a const query makes a lazy cone's NURB, which the cone keeps
+             // (GetOrCreateGwNurbPointer), then the copy constructor and Transform
+    {
+        const SmSurface* cs = s;
+        o.push_back(SM_SUCCESS);
+        o.push_back(flg(s->GetGwNurbPointer() != NULL));
+        const SmExtent2d d = cs->GetNaturalUVDomain();
+        o.push_back(d.GetMin().x); o.push_back(d.GetMin().y);
+        o.push_back(d.GetMax().x); o.push_back(d.GetMax().y);
+        o.push_back(flg(s->GetGwNurbPointer() != NULL));
+        o.push_back(flg(s->HavePolarConversion()));
+        SmPoint3d p(0.0, 0.0, 0.0);
+        SmStatus st = cs->EvaluatePoint(d.Evaluate(0.3, 0.6), p);
+        o.push_back((double)st);
+        if (st == SM_SUCCESS) put_vec(o, p);
+        SmSurface* cp = NULL;
+        st = cs->Copy(ctx, cp);
+        o.push_back((double)st);
+        if (st == SM_SUCCESS && cp)
+        {
+            o.push_back(flg(static_cast<SmBSplineSurface*>(cp)->GetGwNurbPointer() != NULL));
+            o.push_back(flg(*cp == *cs));
+            SmPoint3d q(0.0, 0.0, 0.0);
+            SmStatus qs = cp->EvaluatePoint(d.Evaluate(0.7, 0.2), q);
+            o.push_back((double)qs);
+            if (qs == SM_SUCCESS) put_vec(o, q);
+        }
+        delete cp;
+        const SmAxis2Placement rot(SmPoint3d(1.0, 2.0, 3.0), SmVector3d(0.0, 1.0, 0.0),
+                                   SmVector3d(-1.0, 0.0, 0.0));
+        st = s->Transform(rot, NULL);
+        o.push_back((double)st);
+        o.push_back(flg(s->GetGwNurbPointer() != NULL));
+        const SmExtent2d t = cs->GetNaturalUVDomain();
+        o.push_back(t.GetMin().x); o.push_back(t.GetMin().y);
+        o.push_back(t.GetMax().x); o.push_back(t.GetMax().y);
+        st = cs->EvaluatePoint(t.Evaluate(0.3, 0.6), p);
+        o.push_back((double)st);
+        if (st == SM_SUCCESS) put_vec(o, p);
         break;
     }
     case 17:
@@ -892,7 +936,7 @@ SC_EXPORT int32_t sc_surface_cone_p1_eval(int32_t op, const double* in, int64_t 
     }
     else
     {
-        SmCone* s = read_cone(rd, ctx, o);
+        SmCone* s = read_cone(rd, ctx, o, op != 19);
         if (s)
         {
             if (op == 100 || op == 101 || op >= 1000)

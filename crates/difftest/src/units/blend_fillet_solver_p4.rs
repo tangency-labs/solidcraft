@@ -62,7 +62,6 @@ use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_solver_p4::{self as ffi};
 
 use super::surface_surf_of_revolution_p1 as rev;
-use super::topology_edgeuse_p1::import;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::util::{p2, v3};
@@ -719,10 +718,56 @@ fn rust_point_case(k: &Kernel, i: &PointCase) -> Result<Output, Fail> {
         .values("offsets", offsets))
 }
 
+/// The shim's `p4_rectangle` built by the Rust kernel: `CreateRectangle(ctx, tol, w, h,
+/// SmAxis2Placement())`, with `uv_curves` then `CreateUVTrimCurves(FALSE, ...)` on each
+/// face in traversal order (status ignored), renumbered into the shim's export traversal
+/// order ([`crate::own_builder::finish`]). No C++ state reaches the Rust side.
+///
+/// # Errors
+///
+/// The Rust build's error (an unported callee stays visible); a harness error when the
+/// renumbering fails.
+pub(crate) fn own_rectangle(
+    w: f64,
+    h: f64,
+    tol: f64,
+    uv_curves: bool,
+) -> Result<Result<Brep, SolidError>, HarnessError> {
+    use crate::own_builder::{finish, walk, Built, Conventions};
+    let mut k = Kernel::default();
+    let raw = (|| -> Result<Brep, SolidError> {
+        let mut b = solidcore::primitive::primitive_creation::p1::create_rectangle(
+            &mut k,
+            tol,
+            w,
+            h,
+            &solidcore::geom::axis2_placement::Axis2Placement::default(),
+        )?;
+        if uv_curves {
+            for f in walk(&b)?.faces.items {
+                // status ignored, as the shim; an unported callee stays visible
+                if let Err(e) =
+                    solidcore::topology::face::p3::create_uv_trim_curves(&k, &mut b, f, false, None)
+                {
+                    if e.is_unported() {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Ok(b)
+    })();
+    Ok(
+        match finish(&mut k, raw, false, false, &Conventions::EDGEUSE_GRAPH)? {
+            Built::Brep(b) => Ok(*b),
+            Built::Failed(e) => Err(e),
+        },
+    )
+}
+
 fn rust_calc_case(k: &Kernel, c: &CalcCase) -> Result<Output, Fail> {
-    let ex = ffi::calc_target(c.w, c.h, c.tol, c.uv_curves)
-        .map_err(|e| harness(format!("C++ target: {e}")))?;
-    let mut target = import(&ex)?;
+    let mut target = own_rectangle(c.w, c.h, c.tol, c.uv_curves)?
+        .map_err(|e| harness(format!("rust target: {e}")))?;
     let edge_id = EdgeId::from_index(u32::try_from(c.edge).map_err(|_| harness("edge"))?);
     let edge = target
         .edge(edge_id)

@@ -1466,7 +1466,7 @@ fn join_curves(k: &Kernel, this: &mut Curve, other: &mut Curve) -> Result<()> {
 }
 
 /// `SM_CAST_PTR(SmOffsetSurface, surface) != NULL`.
-const fn is_offset_surface(surface: &Surface) -> bool {
+fn is_offset_surface(surface: &Surface) -> bool {
     matches!(surface.kind(), SurfaceKind::OffsetSurface(_))
 }
 

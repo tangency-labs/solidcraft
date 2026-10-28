@@ -2886,6 +2886,10 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        if case.inputs.get("common_const_make").is_some() {
+            let value = case.inputs.get("common_cone").ok_or_else(|| HarnessError::new("missing common_cone"))?;
+            return super::surface_cone_p1::const_make_cpp(value.clone());
+        }
         if let Some(value) = case.inputs.get("common_cone") {
             return super::surface_cone_p1::common_cpp(
                 value.clone(),
@@ -2909,6 +2913,10 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let k = &Kernel::default();
+        if case.inputs.get("common_const_make").is_some() {
+            let value = case.inputs.get("common_cone").ok_or_else(|| HarnessError::new("missing common_cone"))?;
+            return super::surface_cone_p1::const_make_rust(value.clone());
+        }
         if let Some(value) = case.inputs.get("common_cone") {
             return super::surface_cone_p1::common_rust(
                 value.clone(),

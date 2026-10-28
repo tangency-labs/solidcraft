@@ -5,7 +5,6 @@
 //! multi-interval process path evaluates binormals on a wire, then compares the
 //! null-surface return. Post-call state,
 //! including caller-seeded duplicate adjusted corners, is compared on every pass.
-use super::topology_edgeuse_p1::import;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -318,7 +317,10 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
         FilletGeomType::from_code(i64::from(i.kind)).ok_or_else(|| harness("kind"))?,
     )
     .map_err(harness)?;
-    let mut target = import(&ffi::target().map_err(harness)?)?;
+    // the shim's `CreateRectangle(ctx, 1e-5, 1.0, 1.0, SmAxis2Placement())`, built by the
+    // Rust kernel in the shim's traversal order (no C++ state reaches the Rust side)
+    let mut target = super::blend_fillet_solver_p4::own_rectangle(1.0, 1.0, 1e-5, false)?
+        .map_err(harness)?;
     let face = target.faces().ids().next();
     let region = fb
         .brep_mut()

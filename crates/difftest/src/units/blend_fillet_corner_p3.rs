@@ -307,29 +307,48 @@ fn eu_vertex(b: &Brep, eu: EdgeuseId) -> Option<VertexId> {
     b.vertexuse(vu).ok()?.vertex
 }
 
+/// The case's B-rep and its resolved selectors. With `own` (the Rust side) the B-rep is
+/// read by the Rust reader or built by the Rust kernel in the shim's traversal order
+/// ([`crate::own_reader::brep_in_order`]); else (the C++ side, to resolve its
+/// selectors) it is imported from the C++ export.
 fn create_setup(
     brep: &BrepIn,
     validate_only: bool,
     init_gaps: bool,
     eu: i64,
     more: &[i64],
+    own: bool,
 ) -> Result<Result<CreateSetup, Output>, HarnessError> {
     let path = path_of(Some(brep))?;
     let block = brep_block_of(Some(brep), validate_only, init_gaps)?;
-    let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
-        ffi1::eval(ffi1::Op::Export, &path, &block)
-    })
-    .map_err(|e| harness(format!("c++ export: {e}")))?;
-    let Some(c) = ffi1::counts(&ex) else {
-        let st = ex.get(1).copied().unwrap_or(0.0);
-        return Ok(Err(Output::err(format!("brep_build_status_{st}"))));
+    let (c, built) = if own {
+        use crate::own_builder::{counts, failed_output, Built, Conventions};
+        let conv = &Conventions::EDGEUSE_GRAPH;
+        let k = &mut Kernel::default();
+        match crate::own_reader::brep_in_order(k, brep, validate_only, init_gaps, conv)? {
+            Built::Brep(b) => (counts(&b), Ok(*b)),
+            Built::Failed(e) => return Ok(Err(failed_output(&e))),
+        }
+    } else {
+        let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
+            ffi1::eval(ffi1::Op::Export, &path, &block)
+        })
+        .map_err(|e| harness(format!("c++ export: {e}")))?;
+        let Some(c) = ffi1::counts(&ex) else {
+            let st = ex.get(1).copied().unwrap_or(0.0);
+            return Ok(Err(Output::err(format!("brep_build_status_{st}"))));
+        };
+        (c, Err(ex))
     };
     let n_eu = c.get(6).copied().unwrap_or(0);
     let s = sel(eu, n_eu);
     if s < 0 {
         return Ok(Err(Output::err("no_edge_use")));
     }
-    let (b, types) = import_with_types(&ex)?;
+    let (b, types) = match built {
+        Ok(b) => (b, ImportTypes::default()),
+        Err(ex) => import_with_types(&ex)?,
+    };
     let start = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     let Some(vertex) = eu_vertex(&b, start) else {
         return Ok(Err(Output::err("start_edge_use_without_vertex")));
@@ -426,7 +445,7 @@ fn create_cpp(
     more: &[i64],
     solvers: &[SolverIn],
 ) -> Result<Output, HarnessError> {
-    let s = match create_setup(brep, validate_only, init_gaps, eu, more)? {
+    let s = match create_setup(brep, validate_only, init_gaps, eu, more, false)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
@@ -510,7 +529,7 @@ fn create_rust(
     more: &[i64],
     solvers: &[SolverIn],
 ) -> Result<Output, HarnessError> {
-    let mut s = match create_setup(brep, validate_only, init_gaps, eu, more)? {
+    let mut s = match create_setup(brep, validate_only, init_gaps, eu, more, true)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };

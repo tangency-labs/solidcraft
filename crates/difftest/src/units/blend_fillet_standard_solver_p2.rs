@@ -63,7 +63,6 @@ use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{Brep, EdgeuseId};
 use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_standard_solver_p2::{self as ffi, Op};
-use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
 use super::blend_fillet_standard_solver_p1::put_default_geom;
 use super::blend_fillet_geom_p1::{
@@ -72,7 +71,7 @@ use super::blend_fillet_geom_p1::{
     RustModel, Srf, VertexIn,
 };
 use super::topology_edgeuse_p1::{
-    brep_block_of, gen_brep, import_with_types, path_of, sel, BrepIn, FILES,
+    brep_block_of, gen_brep, path_of, sel, BrepIn, FILES,
 };
 use super::topology_edgeuse_p2::{inexact_geometry, put_eu_state, Setup};
 
@@ -492,24 +491,23 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 // ---- the edge-use constructor ------------------------------------------------------
 
-/// The case's B-rep: the C++ export, the imported Rust B-rep and the selected edge
-/// use; `Err(output)` when the B-rep cannot be built or has no edge use (as unit
+/// The case's B-rep (the C++ side's imported from the shim's export, the Rust side's
+/// read or built by the Rust kernel) and the selected edge use; `Err(output)` when the B-rep cannot be built or has no edge use (as unit
 /// `topology.edgeuse_p3`'s runner).
-fn eu_setup(brep: &BrepIn, eu: i64) -> Result<Result<Setup, Output>, HarnessError> {
+fn eu_setup(brep: &BrepIn, eu: i64, own: bool) -> Result<Result<Setup, Output>, HarnessError> {
     let path = path_of(Some(brep))?;
     let block = brep_block_of(Some(brep), false, false)?;
-    let ex = ffi1::eval(ffi1::Op::Export, &path, &block)
-        .map_err(|e| harness(format!("c++ export: {e}")))?;
-    let Some(c) = ffi1::counts(&ex) else {
-        let st = ex.get(1).copied().unwrap_or(0.0);
-        return Ok(Err(Output::err(format!("brep_build_status_{st}"))));
+    // with `own` (the Rust side) the B-rep is read or built by the Rust kernel, never
+    // imported (`crate::own_reader::edgeuse_case`)
+    let (c, brep, types) = match crate::own_reader::edgeuse_case(brep, false, false, own)? {
+        Ok(x) => x,
+        Err(o) => return Ok(Err(o)),
     };
     let n_eu = c.get(6).copied().unwrap_or(0);
     let s = sel(eu, n_eu);
     if s < 0 {
         return Ok(Err(Output::err("no_entity_of_that_kind")));
     }
-    let (brep, types) = import_with_types(&ex)?;
     let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
     Ok(Ok(Setup {
         path,
@@ -546,7 +544,7 @@ fn cpp_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(harness("not the edge-use op"));
     };
-    let s = match eu_setup(brep, *eu)? {
+    let s = match eu_setup(brep, *eu, false)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
@@ -708,7 +706,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(harness("not the edge-use op"));
     };
-    let mut s = match eu_setup(brep, *eu)? {
+    let mut s = match eu_setup(brep, *eu, true)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
@@ -762,7 +760,7 @@ fn cpp_cr_eu(i: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(harness("not the edge-use initial-values op"));
     };
-    let s = match eu_setup(brep, *eu)? {
+    let s = match eu_setup(brep, *eu, false)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
@@ -892,7 +890,7 @@ fn rust_cr_eu(i: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(harness("not the edge-use initial-values op"));
     };
-    let mut s = match eu_setup(brep, *eu)? {
+    let mut s = match eu_setup(brep, *eu, true)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };

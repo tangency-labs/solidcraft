@@ -210,7 +210,7 @@ pub(super) fn invalid(operation: &'static str, reason: &'static str) -> SolidErr
 /// `SM_CAST_PTR(SmBSplineSurface, surface)` for callers that run only non-virtual
 /// `SmBSplineSurface` members: an `SmPlane` gives its B-spline part. Callers that
 /// reach a virtual member deal with planes first.
-pub(super) const fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
+pub(super) fn bspline_of(surface: &Surface) -> Option<&BSplineSurface> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),

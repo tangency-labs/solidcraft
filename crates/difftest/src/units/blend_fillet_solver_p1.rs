@@ -368,7 +368,8 @@ fn push_surfs(o: &mut Vec<f64>, s: &Surfs) -> Result<(), HarnessError> {
 
 // ---- B-rep cases -------------------------------------------------------------------------
 
-/// The case's B-rep: the C++ export's counts and the imported Rust B-rep.
+/// The case's B-rep: its counts and B-rep (the C++ side's from the export, the Rust
+/// side's from [`own_case`]).
 struct BrepCase {
     path: String,
     block: Vec<f64>,
@@ -393,6 +394,25 @@ fn brep_case(brep: &BrepIn) -> Result<Result<BrepCase, Output>, HarnessError> {
         path,
         block,
         counts,
+        brep,
+    }))
+}
+
+/// The Rust side's B-rep case: the source read by the Rust reader or built by the Rust
+/// kernel in the shim's traversal order ([`crate::own_reader::edgeuse_graph_brep`]),
+/// never imported from the C++ export; `Err(output)` when the Rust build fails, as
+/// [`brep_case`] reports the shim's failed build.
+fn own_case(brep: &BrepIn) -> Result<Result<BrepCase, Output>, HarnessError> {
+    let path = path_of(Some(brep))?;
+    let block = brep_block_of(Some(brep), false, false)?;
+    let brep = match crate::own_reader::edgeuse_graph_brep(&mut Kernel::default(), brep)? {
+        Ok(b) => b,
+        Err(e) => return Ok(Err(crate::own_builder::failed_output(&e))),
+    };
+    Ok(Ok(BrepCase {
+        path,
+        block,
+        counts: crate::own_builder::counts(&brep),
         brep,
     }))
 }
@@ -1264,7 +1284,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let mut o = Vec::new();
     if i.static_op().is_some() {
         let res = if let Some(brep) = i.brep() {
-            let mut c = match brep_case(brep)? {
+            let mut c = match own_case(brep)? {
                 Ok(c) => c,
                 Err(out) => return Ok(out),
             };

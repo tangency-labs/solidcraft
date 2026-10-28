@@ -79,32 +79,32 @@ pub(super) fn cpp(i: &TopoIn) -> Result<Output, HarnessError> {
 }
 
 pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
-    let (path, blk) = p4::block(&i.brep)?;
-    let f = solidcore_ffi::units::topology_topology_traverser::export(&path, &blk)
-        .map_err(|e| err(&e.to_string()))?;
-    if solidcore_ffi::units::topology_vertexuse::counts(&f.graph).is_none() {
-        return Ok(Output::new());
-    }
-    let mut b = p4::import(&f)?;
+    use crate::own_builder::{build_as, Built, Conventions};
+    let (path, _) = p4::block(&i.brep)?;
+    // The fixture B-rep made by the Rust kernel in the shim's traversal order (an `.smb`
+    // file by the Rust reader), geometry owned under the arena identities
+    // `p4::own_surfaces` gives; no C++ state reaches the Rust side.
+    let mut k = Kernel::default();
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    let built = match &i.brep {
+        BrepIn::File { rebuild, .. } => {
+            crate::own_reader::file_in_order(&mut k, &path, *rebuild, false, false, conv)?
+        }
+        src => build_as(&mut k, src, false, false, conv)?
+            .ok_or_else(|| err("source not built by the Rust kernel"))?,
+    };
+    let mut b = match built {
+        Built::Brep(b) => *b,
+        // the C++ side reports a fixture that does not build as rejected
+        Built::Failed(e) => return Ok(Output::unported(&e).unwrap_or_default()),
+    };
     p4::own_surfaces(&mut b)?;
-    // the face surfaces' cache states as the C++ file read left them (see the
-    // `topology.brep_p4` runner)
-    if let BrepIn::File { .. } = &i.brep {
-        use super::super::topology_edgeuse_p1 as eu1;
-        let file = eu1::BrepIn::File {
-            file: String::new(),
-            rebuild: false,
-        };
-        let blk = eu1::brep_block_of(Some(&file), false, false)?;
-        eu1::seed_cache_tree_states(&b, &path, &blk)?;
-    }
     b.set_editing_enabled(i.editing);
     let edges: Vec<Option<EdgeId>> = i
         .edges
         .iter()
         .map(|&e| u32::try_from(e).ok().map(EdgeId::from_index))
         .collect();
-    let mut k = Kernel::default();
     let status = match remove_topo_edges(&mut k, &mut b, &edges) {
         Ok(()) => 0.0,
         Err(e) => {

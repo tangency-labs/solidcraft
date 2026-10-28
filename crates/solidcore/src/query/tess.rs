@@ -609,42 +609,13 @@ impl TessSrfCache {
                     Some(b) => b.into_owned(),
                     None => p.base().clone(),
                 }),
-                SurfaceKind::Cone(s) => Some(if s.rev().base().gw_nurb().is_some() {
-                    s.rev().base().clone()
-                } else {
-                    let mut c = s.as_ref().clone();
-                    match ignore(c.make_nurb(k))? {
-                        Some(()) => c.rev().base().clone(),
-                        None => s.rev().base().clone(),
-                    }
-                }),
-                SurfaceKind::Sphere(s) => Some(if s.base().base().gw_nurb().is_some() {
-                    s.base().base().clone()
-                } else {
-                    let mut c = s.as_ref().clone();
-                    match ignore(c.make_nurb(k))? {
-                        Some(()) => c.base().base().clone(),
-                        None => s.base().base().clone(),
-                    }
-                }),
-                SurfaceKind::Torus(s) => Some(if s.base().base().gw_nurb().is_some() {
-                    s.base().base().clone()
-                } else {
-                    let mut c = s.as_ref().clone();
-                    match ignore(c.make_nurb(k))? {
-                        Some(()) => c.base().base().clone(),
-                        None => s.base().base().clone(),
-                    }
-                }),
-                SurfaceKind::SurfOfRevolution(s) => Some(if s.base().gw_nurb().is_some() {
-                    s.base().clone()
-                } else {
-                    let mut c = s.as_ref().clone();
-                    match ignore(c.make_nurb(k))? {
-                        Some(()) => c.base().clone(),
-                        None => s.base().clone(),
-                    }
-                }),
+                // (kept on the surface: `Surface::kind_with_nurb`, status ignored)
+                SurfaceKind::Cone(_)
+                | SurfaceKind::Sphere(_)
+                | SurfaceKind::Torus(_)
+                | SurfaceKind::SurfOfRevolution(_) => {
+                    self.base().surface().revolution_base_with_nurb(k)?.cloned()
+                }
                 SurfaceKind::SurfOfExtrusion(s) => Some(if s.base().gw_nurb().is_some() {
                     s.base().clone()
                 } else {

@@ -89,7 +89,6 @@ use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{Brep, EdgeuseId, VertexId};
 use solidcore_ffi::units::blend_fillet_corner_p2 as ffi;
 use solidcore_ffi::units::blend_fillet_corner_p3::Op as CornerOp;
-use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
 use super::blend_fillet_corner_p1 as p1;
 use super::blend_fillet_corner_p3::{
@@ -101,7 +100,7 @@ use super::blend_fillet_geom_p1::{Crv, Model};
 use super::blend_fillet_corner_p1::{
     eu_vertex, gen_topo_brep, inexact, rust_err, Topo, CORNER_FILES,
 };
-use super::topology_edgeuse_p1::{brep_block_of, harness, import_with_types, path_of, sel, BrepIn};
+use super::topology_edgeuse_p1::{brep_block_of, harness, path_of, sel, BrepIn};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -325,20 +324,19 @@ fn corner_walk(b: &Brep, start: EdgeuseId) -> Option<Vec<EdgeuseId>> {
 
 /// Builds and imports the B-rep and resolves the vertex and edge uses: `args` is
 /// `v eu..`. `Err(output)` when the case ends before the op, the same on both sides.
-fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
+fn topo(i: &Inputs, own: bool) -> Result<Result<Topo, Output>, HarnessError> {
     let Inputs::FindConcave { brep, v, eus, walk } = i else {
         return Err(harness("not a find_concave case"));
     };
     let path = path_of(Some(brep))?;
     let block = brep_block_of(Some(brep), false, false)?;
-    let ex = ffi1::eval(ffi1::Op::Export, &path, &block)
-        .map_err(|e| harness(format!("c++ export: {e}")))?;
-    let Some(c) = ffi1::counts(&ex) else {
-        let st = ex.get(1).copied().unwrap_or(0.0);
-        return Ok(Err(Output::err(format!("brep_build_status_{st}"))));
+    // the Rust side's B-rep is read or built by the Rust kernel, never imported
+    // (`crate::own_reader::edgeuse_case`)
+    let (c, b, types) = match crate::own_reader::edgeuse_case(brep, false, false, own)? {
+        Ok(x) => x,
+        Err(o) => return Ok(Err(o)),
     };
     let (n_eu, n_v) = (c[6], c[9]);
-    let (b, types) = import_with_types(&ex)?;
     let vv = sel(*v, n_v);
     if vv < 0 {
         return Ok(Err(Output::err("no_vertex")));
@@ -475,7 +473,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     {
         return corner_cpp(*method, model, corner, *split);
     }
-    let t = match topo(i)? {
+    let t = match topo(i, false)? {
         Ok(t) => t,
         Err(o) => return Ok(o),
     };
@@ -514,7 +512,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     {
         return corner_rust(&Kernel::default(), *method, model, corner, *split);
     }
-    let mut t = match topo(i)? {
+    let mut t = match topo(i, true)? {
         Ok(t) => t,
         Err(o) => return Ok(o),
     };

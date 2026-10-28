@@ -49,7 +49,8 @@
 //!   non-finite height recurses without bound); here that construction's error is
 //!   returned.
 //! - **NURB.** As in `surface::cone::p1`, the cone is expected to have its NURB
-//!   ([`Cone::make_nurb`]); upstream makes a missing one inside `const` queries.
+//!   ([`Cone::make_nurb`]); upstream makes a missing one inside `const` queries, which
+//!   the port does (and keeps) at the `Surface` level (`Surface::kind_with_nurb`).
 //!   `Notify` (attribute copying in the recogniser) has no equivalent.
 //! - **Cylinder rebuild (#713, WR-385).** With the opt-in
 //!   `Kernel::fixes.cylinder_rebuild_mean_radius`, an `SmCylinder` keeps a zero

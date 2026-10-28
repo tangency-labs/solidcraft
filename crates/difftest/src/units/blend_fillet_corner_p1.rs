@@ -56,7 +56,6 @@ use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_corner_p1::{self as ffi, CornerOp as FfiCornerOp, Op};
-use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
 
 use super::blend_fillet_geom_p1::{
     curve_of as model_curve_of, gen_curve as model_gen_curve, gen_model, push_model,
@@ -65,7 +64,7 @@ use super::blend_fillet_geom_p1::{
 
 use super::topology_edgeuse_p1::{
     brep_block_of, bspline_of, domain, flag, gen_brep, gen_curve, gen_surface, harness,
-    import_with_types, path_of, push_curve, push_surface, sel, surface_of, BrepIn, CrvIn,
+    path_of, push_curve, push_surface, sel, surface_of, BrepIn, CrvIn,
     ImportTypes, SrfIn,
 };
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -533,7 +532,7 @@ fn pick(s: i64, ring: &[i64], n: usize) -> i64 {
 /// Builds and imports the B-rep and resolves the selectors of `i`; `Err(output)` when the
 /// case ends before the op (the B-rep cannot be built, a required entity is missing),
 /// with the same output on both sides.
-fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
+fn topo(i: &Inputs, own: bool) -> Result<Result<Topo, Output>, HarnessError> {
     let (Inputs::G1 { brep, .. }
     | Inputs::FaceByTwo { brep, .. }
     | Inputs::Tangential { brep, .. }
@@ -544,14 +543,13 @@ fn topo(i: &Inputs) -> Result<Result<Topo, Output>, HarnessError> {
     };
     let path = path_of(Some(brep))?;
     let block = brep_block_of(Some(brep), false, false)?;
-    let ex = ffi1::eval(ffi1::Op::Export, &path, &block)
-        .map_err(|e| harness(format!("c++ export: {e}")))?;
-    let Some(c) = ffi1::counts(&ex) else {
-        let st = ex.get(1).copied().unwrap_or(0.0);
-        return Ok(Err(Output::err(format!("brep_build_status_{st}"))));
+    // the Rust side's B-rep is read or built by the Rust kernel, never imported
+    // (`crate::own_reader::edgeuse_case`)
+    let (c, b, types) = match crate::own_reader::edgeuse_case(brep, false, false, own)? {
+        Ok(x) => x,
+        Err(o) => return Ok(Err(o)),
     };
     let (n_eu, n_e, n_v) = (c[6], c[7], c[9]);
-    let (b, types) = import_with_types(&ex)?;
 
     // the edge uses starting at `v`, the edges ending at `v` (export order)
     let ring_eus = |v: i64| -> Vec<i64> {
@@ -787,7 +785,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
         }
         Inputs::Corner { .. } => corner_cpp(i),
         _ => {
-            let t = match topo(i)? {
+            let t = match topo(i, false)? {
                 Ok(t) => t,
                 Err(o) => return Ok(o),
             };
@@ -870,7 +868,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         Inputs::Corner { .. } => corner_rust(i),
         _ => {
-            let mut t = match topo(i)? {
+            let mut t = match topo(i, true)? {
                 Ok(t) => t,
                 Err(o) => return Ok(o),
             };
@@ -3155,7 +3153,7 @@ mod tests {
                     // selectors
                     let mut resolved = String::new();
                     if let Ok(i) = serde_json::from_value::<Inputs>(case.inputs.clone()) {
-                        if let Ok(Ok(t)) = topo(&i) {
+                        if let Ok(Ok(t)) = topo(&i, true) {
                             let vid = t.args.first().and_then(|&v| u32::try_from(v).ok());
                             let ring: Vec<u32> = t
                                 .brep

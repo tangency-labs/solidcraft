@@ -703,6 +703,22 @@ pub fn lazy_cone(s: &Build, uv: [f64; 2]) -> Result<Vec<f64>, FfiError> {
     call(14, &input)
 }
 
+/// The cone as its constructor leaves it (constructor modes skip their `MakeNurb`), then:
+/// has-NURB, the `const` `GetNaturalUVDomain` (which makes the NURB and keeps it),
+/// has-NURB, `HavePolarConversion`, `EvaluatePoint` at the domain's `(0.3, 0.6)`, `Copy`
+/// (status, the copy's has-NURB, `*copy == *cone`, its `EvaluatePoint` at `(0.7, 0.2)`),
+/// then `Transform` by a fixed rotation and move (status, has-NURB, the natural domain and
+/// `EvaluatePoint` at its `(0.3, 0.6)`).
+///
+/// # Errors
+///
+/// Exactly the constructor guards of [`cone_op`].
+pub fn const_make(s: &Build) -> Result<Vec<f64>, FfiError> {
+    let mut input = Vec::new();
+    push_build(&mut input, s)?;
+    call(19, &input)
+}
+
 /// Native common degeneracy, normal and normal-box queries, with optional interior subdomain.
 ///
 /// # Errors
