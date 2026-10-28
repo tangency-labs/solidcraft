@@ -334,8 +334,9 @@ impl ModelBody {
         self.mesh.get().cloned()
     }
 
-    /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way across
-    /// the face, exact and cut to its trims ([`kernel::iso_grid`]), their points at the chord
+    /// The isoparametric curves of face `face` for Isocurve Analysis: spaced by `count` on the
+    /// face's surface (so faces on one surface share them), exact and cut to its trims
+    /// ([`kernel::iso_grid`]), their points at the chord
     /// tolerance of the viewport's display quality. Worked out once per face, count and display
     /// quality, and shared by every clone of this body (timeline snapshots, world states). A mesh
     /// body has no surfaces, so none.
