@@ -85,6 +85,7 @@ fn toolbar_finish_and_other_feature_edit_leave_the_sketch() {
 
 /// Leaving a sketch any way leaves the camera exactly where it is; entering still faces the plane.
 mod exit_keeps_view {
+    use crate::prefs::SketchExitView;
     use crate::scenario::Harness;
     use serde_json::json;
     use solidcraft_engine::render::Camera;
@@ -92,6 +93,7 @@ mod exit_keeps_view {
     /// Start a sketch on XY from the iso view, then orbit and pan into a 3D view of the user's own.
     fn sketching_in_3d() -> (Harness, Camera) {
         let mut h = Harness::new();
+        h.app.preferences.sketch_exit_view = SketchExitView::Keep;
         h.call("ui.view", json!({"view": "iso"}));
         h.frames(3);
         h.step(&json!({"start": "sketch.create"})).unwrap();
@@ -150,6 +152,7 @@ mod exit_keeps_view {
     #[test]
     fn editing_a_sketch_faces_it_and_finishing_leaves_the_view() {
         let mut app = crate::test_support::sample_app();
+        app.preferences.sketch_exit_view = SketchExitView::Keep;
         let id = super::first_sketch(&app);
         let before = app.cam;
         app.edit_sketch(id);
@@ -240,7 +243,7 @@ mod view_corner {
 }
 
 /// The "When a sketch ends" preference (#7038): back to the view from before the sketch, or back
-/// only when the sketch view was panned or zoomed and not turned. Keep, the default, is above.
+/// only when the sketch view was panned or zoomed and not turned. Previous, the default, is above.
 mod exit_view_preference {
     use crate::prefs::SketchExitView;
     use crate::scenario::Harness;
@@ -275,8 +278,13 @@ mod exit_view_preference {
     }
 
     #[test]
-    fn keep_is_the_default() {
-        assert_eq!(crate::prefs::Prefs::default().sketch_exit_view, SketchExitView::Keep);
+    fn previous_is_the_default_and_restores_after_a_turn() {
+        assert_eq!(crate::prefs::Prefs::default().sketch_exit_view, SketchExitView::Previous);
+        let (mut h, iso) = sketching(SketchExitView::default());
+        h.app.cam.orbit(60.0, -40.0);
+        h.app.cam_anim = None;
+        finish(&mut h);
+        assert_eq!(h.app.cam, iso);
     }
 
     #[test]

@@ -498,9 +498,9 @@ pub enum OrbitAround {
 #[serde(rename_all = "snake_case")]
 pub enum SketchExitView {
     /// Back to the view from before the sketch opened.
-    Previous,
-    /// The view stays where it is (the default since #4909).
     #[default]
+    Previous,
+    /// The view stays where it is (the previous default since #4909).
     Keep,
     /// Back to the view from before the sketch, unless the sketch view was turned: a view only
     /// panned or zoomed goes back, a turned one stays.
@@ -995,7 +995,8 @@ preference_settings! {
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
-    /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
+    /// Where the view goes when a sketch ends (#7038). Previous (the default) returns to the
+    /// view from before the sketch; Keep leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
