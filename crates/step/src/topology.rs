@@ -266,7 +266,7 @@ fn read_solids_in(ex: &Exchange, trims: Option<&dyn Trims>) -> Solids {
             (Reader::new(ex, c.units), c)
         });
         let context = *context;
-        match read_with(ex, reader, item, context, &mut budget, trims) {
+        match read_with(ex, reader, item, context, &mut budget, trims, &HashSet::new()) {
             Ok(mut s) => {
                 s.product = index.product.get(&item).cloned();
                 if s.name.is_empty()
@@ -286,14 +286,33 @@ fn read_solids_in(ex: &Exchange, trims: Option<&dyn Trims>) -> Solids {
 pub fn read_solid(ex: &Exchange, item: u64, context: units::Context) -> R<Solid> {
     let mut reader = Reader::new(ex, context.units);
     let mut budget = MAX_FILE_FACES;
-    read_with(ex, &mut reader, item, context, &mut budget, None)
+    read_with(ex, &mut reader, item, context, &mut budget, None, &HashSet::new())
 }
 
 /// [`read_solid`], with `trims` making the pcurves of uses that have no closed form.
 pub fn read_solid_with(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims) -> R<Solid> {
     let mut reader = Reader::new(ex, context.units);
     let mut budget = MAX_FILE_FACES;
-    read_with(ex, &mut reader, item, context, &mut budget, Some(trims))
+    read_with(ex, &mut reader, item, context, &mut budget, Some(trims), &HashSet::new())
+}
+
+/// [`read_solid_with`] with the faces `left_out` (file face entities: the ADVANCED_FACE or
+/// FACE_SURFACE, or the ORIENTED_FACE a shell lists) left out of their shells: what is left of a
+/// solid that cannot be read or made whole, its faces still sharing their edges. With any face
+/// left out it is a surface model of open shells (`sheet`), none of them bounding a region.
+pub fn read_solid_without(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims, left_out: &HashSet<u64>) -> R<Solid> {
+    let mut reader = Reader::new(ex, context.units);
+    let mut budget = MAX_FILE_FACES;
+    read_with(ex, &mut reader, item, context, &mut budget, Some(trims), left_out)
+}
+
+/// The file face a refusal of the reader names first (its "face #id"), if it names one.
+pub fn named_face(message: &str) -> Option<u64> {
+    message.match_indices("face #").find_map(|(at, m)| {
+        let rest = message.get(at + m.len()..)?;
+        let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+        rest.get(..digits)?.parse().ok()
+    })
 }
 
 /// The base tolerance of a context.
@@ -308,6 +327,7 @@ fn read_with<'a>(
     context: units::Context,
     budget: &mut usize,
     trims: Option<&dyn Trims>,
+    left_out: &HashSet<u64>,
 ) -> R<Solid> {
     let e = entity(ex, item)?;
     let name = e.params().first().and_then(Param::as_str).unwrap_or("").to_string();
@@ -316,11 +336,14 @@ fn read_with<'a>(
     let topology = solidcraft_profile::span("import", "step.topology");
     let (ids, kind) = item_shells(e)?;
     let mut shells = Vec::with_capacity(ids.len());
+    let mut skipped = false;
     for s in ids {
-        shells.push(b.shell(s)?);
+        let (faces, any) = b.shell(s, left_out)?;
+        skipped |= any;
+        shells.push(faces);
     }
     drop(topology);
-    b.finish(item, name, shells, kind)
+    b.finish(item, name, shells, if skipped { Kind::Open } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -417,6 +440,8 @@ enum Kind {
     Solid,
     Voids,
     Model,
+    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets only.
+    Open,
 }
 
 /// A curve the edge can be read on, and how its parameter relates to its vertices.
@@ -838,14 +863,32 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok(ext)
     }
 
-    fn shell(&mut self, id: u64) -> R<Vec<(u32, bool)>> {
+    /// The faces of shell `id` but those `left_out`, and whether any was left out.
+    fn shell(&mut self, id: u64, left_out: &HashSet<u64>) -> R<(Vec<(u32, bool)>, bool)> {
         let (faces, flip) = shell_faces(self.ex, id)?;
         let mut out = Vec::with_capacity(faces.len());
+        let mut skipped = false;
         for f in faces {
+            if !left_out.is_empty() && (left_out.contains(&f) || left_out.contains(&self.face_entity(f, 0)?)) {
+                skipped = true;
+                continue;
+            }
             let (face, forward) = self.face(f, 0)?;
             out.push((face, forward != flip));
         }
-        Ok(out)
+        Ok((out, skipped))
+    }
+
+    /// The ADVANCED_FACE or FACE_SURFACE a shell's face `id` is (through its ORIENTED_FACEs).
+    fn face_entity(&self, id: u64, depth: usize) -> R<u64> {
+        if depth > MAX_NESTING {
+            return Err("oriented faces nested too deeply".into());
+        }
+        let e = entity(self.ex, id)?;
+        if e.name() == "ORIENTED_FACE" {
+            return self.face_entity(rid(e.params().get(2), "oriented face element")?, depth + 1);
+        }
+        Ok(id)
     }
 
     /// Pcurves, outer loops, domains and the canonical order: the finished record.
@@ -923,9 +966,13 @@ impl<'b, 'a> Builder<'b, 'a> {
         if flipped > 0 {
             notes.push(format!("{flipped} faces turned over: their loops disagree with their same_sense"));
         }
+        // What is left of a solid with faces left out is a sheet whose faces face their surfaces'
+        // natural normals: SMLib holds both sides of a sheet's faces and gives each back on that
+        // side, so the record is the one SMLib's body of it numbers alike.
+        let open = kind == Kind::Open;
         let shells: Vec<Vec<(u32, bool)>> = shells
             .into_iter()
-            .map(|s| s.into_iter().map(|(f, fwd)| (f, if turned.get(f as usize).copied().unwrap_or(false) { !fwd } else { fwd })).collect())
+            .map(|s| s.into_iter().map(|(f, fwd)| (f, open || if turned.get(f as usize).copied().unwrap_or(false) { !fwd } else { fwd })).collect())
             .collect();
 
         // Regions: which shells are closed (every edge used at least twice among its faces).
@@ -942,6 +989,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
+            Kind::Open => regions[0].shells = (0..index(shells.len())?).collect(),
             Kind::Model => {
                 regions[0].shells = (0..index(shells.len())?).collect();
                 for (k, c) in closed.iter().enumerate() {
@@ -951,7 +999,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 }
             }
         }
-        let sheet = !closed.iter().any(|c| *c);
+        let sheet = kind == Kind::Open || !closed.iter().any(|c| *c);
 
         // Canonical order: faces walking regions → shells → oriented faces.
         let nf = self.faces.len();

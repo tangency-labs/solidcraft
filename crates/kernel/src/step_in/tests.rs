@@ -2164,14 +2164,10 @@ fn a_patch_side_shrunk_within_its_vertexs_tolerance_is_a_pole_of_the_loop() {
     assert!(rel(m.area, area) < 1e-6, "{} vs {area}", m.area);
 }
 
-/// A solid no B-rep can be made of is still shown: a cup whose wall, a cylinder face, has one
-/// bound (the rim it shares with its bottom) and no far one is refused, as Poppy Humanoid's
-/// stock head is. Each face is read and meshed on its own instead: the bottom shows, as a mesh
-/// body that says why the solid was refused; the wall, which cannot be read on its own either,
-/// is left out and named. Modelling operations refuse the mesh body.
-#[test]
-fn a_refused_solid_is_shown_as_a_mesh_of_the_faces_that_read() {
-    let text = format!(
+/// A can of radius 5 and height 10: its bottom, its wall, and its lid on the plane `lid_z`
+/// (10 where the lid's rim lies on it).
+fn can_with_its_lid_at(lid_z: f64) -> String {
+    format!(
         "{HEAD}
 #1=CARTESIAN_POINT('',(0.,0.,0.));
 #2=DIRECTION('',(0.,0.,1.));
@@ -2190,34 +2186,63 @@ fn a_refused_solid_is_shown_as_a_mesh_of_the_faces_that_read() {
 #15=ADVANCED_FACE('Bottom',(#13),#14,.T.);
 #16=ORIENTED_EDGE('',*,*,#10,.T.);
 #17=EDGE_LOOP('',(#16));
-#18=FACE_OUTER_BOUND('',#17,.T.);
+#18=FACE_BOUND('',#17,.T.);
 #19=CYLINDRICAL_SURFACE('',#5,5.);
-#20=ADVANCED_FACE('Wall',(#18),#19,.T.);
-#21=CLOSED_SHELL('',(#15,#20));
-#22=MANIFOLD_SOLID_BREP('Cup',#21);
+#20=ADVANCED_FACE('Wall',(#18,#37),#19,.T.);
+#30=CARTESIAN_POINT('',(0.,0.,10.));
+#31=AXIS2_PLACEMENT_3D('',#30,#2,#3);
+#32=CARTESIAN_POINT('',(5.,0.,10.));
+#33=VERTEX_POINT('',#32);
+#34=CIRCLE('',#31,5.);
+#35=EDGE_CURVE('',#33,#33,#34,.T.);
+#36=ORIENTED_EDGE('',*,*,#35,.F.);
+#37=FACE_BOUND('',#38,.T.);
+#38=EDGE_LOOP('',(#36));
+#39=ORIENTED_EDGE('',*,*,#35,.T.);
+#40=EDGE_LOOP('',(#39));
+#41=FACE_OUTER_BOUND('',#40,.T.);
+#42=CARTESIAN_POINT('',(0.,0.,{lid_z:?}));
+#43=AXIS2_PLACEMENT_3D('',#42,#2,#3);
+#44=PLANE('',#43);
+#45=ADVANCED_FACE('Lid',(#41),#44,.T.);
+#21=CLOSED_SHELL('',(#15,#20,#45));
+#22=MANIFOLD_SOLID_BREP('Can',#21);
 #23=SHAPE_REPRESENTATION('',(#22),$);
 {TAIL}"
-    );
-    let imp = step_import(&text).unwrap();
+    )
+}
+
+/// A solid no B-rep can be made of comes in as an open surface body of its exact faces, the
+/// faces that make it refused left out and named, as Poppy Humanoid's stock head (a face around
+/// an open surface of revolution with one bound) and Congé19 (an edge further off its face than
+/// any tolerance SMLib takes) do. A can whose lid lies 1.5 mm off its rim: the lid is left out,
+/// the bottom and the wall come in sharing their rim, and the existing surface tools close the
+/// can again (the rim patched, the patch stitched on): a solid with the can's volume.
+#[test]
+fn a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read() {
+    let pi = std::f64::consts::PI;
+    let whole = step_import(&can_with_its_lid_at(10.0)).unwrap();
+    assert_eq!(whole.bodies.len(), 1, "{:?}", whole.warnings);
+    assert!(whole.bodies[0].closed && whole.bodies[0].refused.is_none(), "{:?}", whole.warnings);
+    assert!(rel(measure(&whole.bodies[0].body).unwrap().volume, 250.0 * pi) < 1e-6);
+
+    let imp = step_import(&can_with_its_lid_at(11.5)).unwrap();
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    let cup = &imp.bodies[0];
-    assert!(cup.body.is_mesh(), "{:?}", imp.warnings);
-    let why = cup.shown_as_mesh.as_deref().unwrap_or_default();
-    assert!(why.contains("face #20: a face around an open surface of revolution with one bound"), "{why}");
-    assert_eq!(cup.file_faces, 2);
-    // The report keeps the refusal and names the face left out.
-    assert!(imp.warnings.iter().any(|w| w.contains("'Cup': shown as a mesh: ") && w.contains(why)), "{:?}", imp.warnings);
-    assert!(imp.warnings.iter().any(|w| w.contains("'Cup': not shown: face #20: ")), "{:?}", imp.warnings);
-    // The bottom, a 5 mm disk facing down.
-    let m = measure(&cup.body).unwrap();
-    assert!(rel(m.area, std::f64::consts::PI * 25.0) < 1e-2, "area {}", m.area);
-    let (positions, triangles) = cup.body.triangle_mesh().unwrap();
-    assert!(positions.iter().all(|p| p.z.abs() < 1e-9 && p.x.hypot(p.y) <= 5.0 + 1e-6), "the bottom only");
-    let down = triangles
-        .iter()
-        .map(|t| (positions[t[1] as usize] - positions[t[0] as usize]).cross(positions[t[2] as usize] - positions[t[0] as usize]).z)
-        .sum::<f64>();
-    assert!(down < 0.0, "the bottom faces out of the cup: {down}");
-    let refused = fillet(&cup.body, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(refused.contains("needs a solid body"), "{refused}");
+    let can = &imp.bodies[0];
+    assert!(!can.body.is_mesh() && can.body.is_surface() && !can.closed, "{:?}", imp.warnings);
+    let why = can.refused.as_deref().unwrap_or_default();
+    assert!(why.contains("face #45") && why.contains("off the face's surface"), "{why}");
+    assert_eq!((can.file_faces, can.body.face_count()), (3, 2));
+    assert_eq!(can.face_origin, [15, 20]);
+    // The report keeps the refusal and names the face left out; no "open body" warning on top.
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': imported as surfaces: ") && w.contains(why)), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': left out: ") && w.contains("face #45")), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("open body")), "{:?}", imp.warnings);
+    // Exact: the bottom's disk and the wall's 10 mm of cylinder.
+    assert!(rel(measure(&can.body).unwrap().area, 125.0 * pi) < 1e-6, "{}", measure(&can.body).unwrap().area);
+    // Closed again with the existing tools.
+    let lid = crate::patch_edges(&can.body, &[Vec3::new(0.0, 5.0, 10.0)]).unwrap();
+    let back = crate::stitch(&[&can.body, &lid], 0.0).unwrap();
+    assert!(!back.is_surface(), "closed");
+    assert!(rel(measure(&back).unwrap().volume, 250.0 * pi) < 1e-6, "{}", measure(&back).unwrap().volume);
 }
