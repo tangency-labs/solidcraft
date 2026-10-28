@@ -35,6 +35,7 @@
 
 #include <vector>
 
+#include "sc_const_make.h"
 #include "sc_sm.h"
 
 using sc::flg;
@@ -59,6 +60,7 @@ enum : int32_t
     OP_TRIM_DOMAIN = 10,
     OP_ISECT_PLANE = 11,
     OP_GLOBAL = 12,
+    OP_CONST_MAKE = 20, // the constructor with no MakeNurb, then sc::put_const_make
 };
 
 // Reads the protected members through pointers to members named in a derived class.
@@ -95,7 +97,7 @@ struct Rd
 // A torus block `O[3] X[3] Y[3] major minor swap inside_out has_dom D[4] has_circle
 // [c[3] x[3] y[3] d0 d1 r]`: SmTorus::CreateCanonical(SmAxis2Placement(O, X, Y), ..).
 // Writes the status; NULL on failure.
-SmTorus* read_torus(Rd& rd, const SmContext& ctx, std::vector<double>& o)
+SmTorus* read_torus(Rd& rd, const SmContext& ctx, std::vector<double>& o, bool lazy = false)
 {
     SmPoint3d org = rd.vec();
     SmVector3d x = rd.vec();
@@ -124,9 +126,19 @@ SmTorus* read_torus(Rd& rd, const SmContext& ctx, std::vector<double>& o)
             rd.num();
     }
     SmTorus* t = NULL;
-    SmStatus stt = SmTorus::CreateCanonical(ctx, SmAxis2Placement(org, x, y), major, minor, t,
-                                            swap ? TRUE : FALSE, inside ? TRUE : FALSE, circle,
-                                            has_dom ? &dom : NULL);
+    SmStatus stt = SM_SUCCESS;
+    if (lazy)
+    {
+        // the constructor alone (CreateCanonical's MakeNurb skipped); the FFI guards the
+        // radii (the constructor asserts on a non-positive one)
+        t = new (ctx) SmTorus(org, x, y, has_dom ? dom : SmExtent2d(0.0, 0.0, 360.0, 360.0),
+                              major, minor, swap ? TRUE : FALSE, inside ? TRUE : FALSE, circle,
+                              NULL);
+    }
+    else
+        stt = SmTorus::CreateCanonical(ctx, SmAxis2Placement(org, x, y), major, minor, t,
+                                       swap ? TRUE : FALSE, inside ? TRUE : FALSE, circle,
+                                       has_dom ? &dom : NULL);
     o.push_back(st(stt));
     if (stt != SM_SUCCESS || t == NULL)
     {
@@ -496,10 +508,13 @@ SC_EXPORT int32_t sc_surface_torus_eval(int32_t op, const double* in, int64_t n_
     SmContext ctx;
     std::vector<double> o;
     Rd rd{in, 0};
-    SmTorus* s = read_torus(rd, ctx, o);
+    SmTorus* s = read_torus(rd, ctx, o, op == OP_CONST_MAKE);
     if (s)
     {
-        torus_op(op, rd, ctx, s, o);
+        if (op == OP_CONST_MAKE)
+            sc::put_const_make(ctx, s, o);
+        else
+            torus_op(op, rd, ctx, s, o);
         delete s;
     }
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);

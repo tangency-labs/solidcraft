@@ -337,6 +337,11 @@ const SC_ERR_ARG: f64 = -1002.0;
 
 /// Builds the torus; `Ok(Err(e))` when the construction fails.
 fn rust_torus(k: &Kernel, t: &TorusIn) -> Result<solidcore::Result<Torus>, HarnessError> {
+    rust_torus_made(k, t, true)
+}
+
+/// [`rust_torus`]; `make` false is the constructor alone (no `MakeNurb`).
+fn rust_torus_made(k: &Kernel, t: &TorusIn, make: bool) -> Result<solidcore::Result<Torus>, HarnessError> {
     let circle = match &t.circle {
         None => None,
         Some(c) => {
@@ -356,16 +361,29 @@ fn rust_torus(k: &Kernel, t: &TorusIn) -> Result<solidcore::Result<Torus>, Harne
     };
     let frame = Axis2Placement::new(v3(t.origin), v3(t.x), v3(t.y));
     let dom = t.dom.map(|[a, b, c, d]| Extent2d::from_bounds(a, b, c, d));
+    let opts = TorusOptions {
+        swap_uv: t.swap,
+        inside_out: t.inside_out,
+        circle_nurb: circle,
+    };
+    if !make {
+        return Ok(Torus::new(
+            k,
+            v3(t.origin),
+            v3(t.x),
+            v3(t.y),
+            dom.unwrap_or(Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0)),
+            t.major,
+            t.minor,
+            opts,
+        ));
+    }
     Ok(Torus::create_canonical(
         k,
         &frame,
         t.major,
         t.minor,
-        TorusOptions {
-            swap_uv: t.swap,
-            inside_out: t.inside_out,
-            circle_nurb: circle,
-        },
+        opts,
         dom.as_ref(),
     ))
 }
@@ -1163,6 +1181,57 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
     }
+}
+
+// ---- lazy NURB (`surface.surface_p2` `common_const_make` cases) ------------------------
+
+/// The native side of a torus `common_const_make` case.
+pub(super) fn const_make_cpp(value: Value) -> Result<Output, HarnessError> {
+    let t: TorusIn = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
+    let flat = ffi::const_make(&ffi_torus(&t)).map_err(|e| harness(e.to_string()))?;
+    super::surface_cone_p1::const_make_nurb_cpp(&flat)
+}
+
+/// The Rust side: the torus as its constructor leaves it (no NURB), then the shared
+/// const-query, `Copy`, `==` and `Transform` sequence.
+pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
+    let t: TorusIn = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
+    let k = Kernel::default();
+    let built = rust_torus_made(&k, &t, false)?.map(Surface::from);
+    super::surface_cone_p1::const_make_nurb_rust(&k, built)
+}
+
+/// `common_const_make` cases for the torus: swap and inside-out flags, partial domains,
+/// a minor radius equal to and above the major radius (the inside-out, self-intersecting
+/// shapes) and an explicit generator.
+pub(super) fn const_make_cases() -> Vec<Case> {
+    type Shape = (&'static str, f64, f64, Option<[f64; 4]>, Option<CircleIn>);
+    let mut cases = Vec::new();
+    let shapes: [Shape; 8] = [
+        ("full", 3.0, 1.0, None, None),
+        ("part", 3.0, 1.0, Some([30.0, 20.0, 250.0, 300.0]), None),
+        ("minor_eq_major", 2.0, 2.0, None, None),
+        ("minor_gt_major", 1.0, 2.5, None, None),
+        ("minor_gt_major_part", 1.0, 2.5, Some([0.0, 100.0, 270.0, 260.0]), None),
+        ("tiny_minor", 3.0, 1e-3, None, None),
+        ("wide_minor_part", 0.5, 4.0, Some([0.0, 0.0, 180.0, 360.0]), None),
+        ("gen", 3.0, 1.0, None, Some(CircleIn { c: [3.5, -1.0, 2.0], x: [1.0, 0.0, 0.0], y: [0.0, 0.0, 1.0], d: [0.0, 360.0], r: 1.0 })),
+    ];
+    for swap in [false, true] {
+        for inside_out in [false, true] {
+            for (name, major, minor, dom, circle) in &shapes {
+                let torus = TorusIn { origin: [0.5, -1.0, 2.0], x: [1.0, 0.0, 0.0], y: [0.0, 1.0, 0.0], major: *major, minor: *minor, swap, inside_out, dom: *dom, circle: circle.clone() };
+                let Ok(torus) = serde_json::to_value(&torus) else { continue };
+                cases.push(Case {
+                    unit: "surface.surface_p2".into(),
+                    name: format!("common_const_make_torus_{name}_{swap}_{inside_out}"),
+                    source: crate::case::CaseSource::Generated { seed: 76 },
+                    inputs: serde_json::json!({"common_const_make": true, "common_torus": torus}),
+                });
+            }
+        }
+    }
+    cases
 }
 
 #[cfg(test)]

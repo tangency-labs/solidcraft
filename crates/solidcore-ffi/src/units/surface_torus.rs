@@ -392,3 +392,38 @@ pub fn torus_op(t: &TorusIn, op: &Op) -> Result<Vec<f64>, FfiError> {
         }
     })
 }
+
+/// The torus as its constructor leaves it (no `MakeNurb`; radii above `SM_EFF_ZERO`, the
+/// constructor asserts on others, a minor radius at or above the major one is allowed),
+/// then the shim's `sc::put_const_make` sequence: has-NURB, the `const`
+/// `GetNaturalUVDomain` (which makes the NURB and keeps it), has-NURB, the NURB,
+/// `HavePolarConversion`, `EvaluatePoint` at the domain's `(0.3, 0.6)`, `Copy` (status,
+/// the copy's has-NURB and NURB, `*copy == *this`, its `EvaluatePoint` at `(0.7, 0.2)`) and
+/// `Transform` by a fixed rotation and move (status, has-NURB, NURB, the natural domain,
+/// `EvaluatePoint`). The record starts with the construction status.
+///
+/// # Errors
+///
+/// Exactly the constructor guards of [`torus_op`], and radii not above `SM_EFF_ZERO`.
+pub fn const_make(t: &TorusIn) -> Result<Vec<f64>, FfiError> {
+    if !(t.major > 1e-12 && t.minor > 1e-12) {
+        return Err(bad("const_make: radii not positive"));
+    }
+    let mut input = Vec::new();
+    push_torus(&mut input, t)?;
+    call_with_buffer(16384, |buf, len| {
+        // SAFETY: input holds exactly the torus block the shim reads for op 20 (built and
+        // validated by `push_torus`); buf is valid for buf.len() writes and the shim
+        // honours the capacity; len is valid.
+        unsafe {
+            sys::sc_surface_torus_eval(
+                20,
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}

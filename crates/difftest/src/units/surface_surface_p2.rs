@@ -2882,10 +2882,18 @@ impl UnitDiff for Runner {
         };
         let mut cases = default_cases(self, &ctx)?;
         cases.extend(super::surface_cone_p1::common_cases(&ctx)?);
+        cases.extend(super::surface_sphere::const_make_cases());
+        cases.extend(super::surface_torus::const_make_cases());
+        cases.extend(super::surface_surf_of_revolution_p1::const_make_cases());
         Ok(cases)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        if case.inputs.get("common_const_make").is_some() {
+            if let Some(v) = case.inputs.get("common_sphere") { return super::surface_sphere::const_make_cpp(v.clone()); }
+            if let Some(v) = case.inputs.get("common_torus") { return super::surface_torus::const_make_cpp(v.clone()); }
+            if let Some(v) = case.inputs.get("common_revolution") { return super::surface_surf_of_revolution_p1::const_make_cpp(v.clone()); }
+        }
         if case.inputs.get("common_const_make").is_some() {
             let value = case.inputs.get("common_cone").ok_or_else(|| HarnessError::new("missing common_cone"))?;
             return super::surface_cone_p1::const_make_cpp(value.clone());
@@ -2913,6 +2921,11 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let k = &Kernel::default();
+        if case.inputs.get("common_const_make").is_some() {
+            if let Some(v) = case.inputs.get("common_sphere") { return super::surface_sphere::const_make_rust(v.clone()); }
+            if let Some(v) = case.inputs.get("common_torus") { return super::surface_torus::const_make_rust(v.clone()); }
+            if let Some(v) = case.inputs.get("common_revolution") { return super::surface_surf_of_revolution_p1::const_make_rust(v.clone()); }
+        }
         if case.inputs.get("common_const_make").is_some() {
             let value = case.inputs.get("common_cone").ok_or_else(|| HarnessError::new("missing common_cone"))?;
             return super::surface_cone_p1::const_make_rust(value.clone());

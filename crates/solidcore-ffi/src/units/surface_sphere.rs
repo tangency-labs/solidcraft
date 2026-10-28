@@ -702,3 +702,38 @@ pub fn sphere_op(s: &SphereIn, op: &Op) -> Result<Vec<f64>, FfiError> {
         }
     })
 }
+
+/// The sphere as its constructor leaves it (no `MakeNurb`; `mode` must be
+/// [`Mode::Ctor`]),
+/// then the shim's `sc::put_const_make` sequence: has-NURB, the `const`
+/// `GetNaturalUVDomain` (which makes the NURB and keeps it), has-NURB, the NURB,
+/// `HavePolarConversion`, `EvaluatePoint` at the domain's `(0.3, 0.6)`, `Copy` (status,
+/// the copy's has-NURB and NURB, `*copy == *this`, its `EvaluatePoint` at `(0.7, 0.2)`) and
+/// `Transform` by a fixed rotation and move (status, has-NURB, NURB, the natural domain,
+/// `EvaluatePoint`). The record starts with the construction status.
+///
+/// # Errors
+///
+/// Exactly the constructor guards of [`sphere_op`], and a canonical `mode`.
+pub fn const_make(s: &SphereIn) -> Result<Vec<f64>, FfiError> {
+    if s.mode != Mode::Ctor {
+        return Err(bad("const_make: constructor mode required"));
+    }
+    let mut input = Vec::new();
+    push_sphere(&mut input, s)?;
+    call_with_buffer(16384, |buf, len| {
+        // SAFETY: input holds exactly the sphere block the shim reads for op 20 (built and
+        // validated by `push_sphere`); buf is valid for buf.len() writes and the shim
+        // honours the capacity; len is valid.
+        unsafe {
+            sys::sc_surface_sphere_eval(
+                20,
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}

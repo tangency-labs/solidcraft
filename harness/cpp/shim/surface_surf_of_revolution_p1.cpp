@@ -39,6 +39,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "sc_const_make.h"
 #include "sc_sm.h"
 
 using sc::flg;
@@ -60,6 +61,7 @@ enum : int32_t
     OP_EQ = 7,
     OP_PLANE = 8,
     OP_ISO_CIRCLES = 20,
+    OP_CONST_MAKE = 21, // the BM_CTOR constructor with no MakeNurb, then sc::put_const_make
 };
 
 // Generator kinds.
@@ -198,7 +200,8 @@ SmBSplineCurve* read_gen(Rd& rd, const SmContext& ctx)
 
 // A surface block `mode gen oob swap` then for BM_CANONICAL `P[3] A[3]`, for BM_CTOR
 // `O[3] X[3] Y[3] D[4]`. Writes the construction status; NULL on failure.
-SmSurfOfRevolution* read_surface(Rd& rd, const SmContext& ctx, std::vector<double>& o)
+SmSurfOfRevolution* read_surface(Rd& rd, const SmContext& ctx, std::vector<double>& o,
+                                 bool lazy = false)
 {
     int64_t mode = rd.idx();
     SmBSplineCurve* gen = read_gen(rd, ctx);
@@ -219,7 +222,8 @@ SmSurfOfRevolution* read_surface(Rd& rd, const SmContext& ctx, std::vector<doubl
         SmVector3d y = rd.vec();
         SmExtent2d d = rd.domain();
         s = new (ctx) Peek(gen, org, x, y, d, swap ? TRUE : FALSE);
-        stt = s->MakeNurb();
+        if (!lazy)
+            stt = s->MakeNurb();
     }
     o.push_back(st(stt));
     if (stt != SM_SUCCESS)
@@ -574,10 +578,13 @@ SC_EXPORT int32_t sc_surface_surf_of_revolution_p1_eval(int32_t op, const double
     }
     else
     {
-        SmSurfOfRevolution* s = read_surface(rd, ctx, o);
+        SmSurfOfRevolution* s = read_surface(rd, ctx, o, op == OP_CONST_MAKE);
         if (s)
         {
-            surface_op(op, rd, ctx, s, o);
+            if (op == OP_CONST_MAKE)
+                sc::put_const_make(ctx, s, o);
+            else
+                surface_op(op, rd, ctx, s, o);
             delete s;
         }
     }

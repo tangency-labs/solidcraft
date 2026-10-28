@@ -460,6 +460,11 @@ const SC_ERR_ARG: f64 = -1002.0;
 
 /// Builds a sphere; `Ok(Err(e))` when the construction fails.
 fn rust_sphere(k: &Kernel, s: &SphereIn) -> Result<solidcore::Result<Sphere>, HarnessError> {
+    rust_sphere_made(k, s, true)
+}
+
+/// [`rust_sphere`]; `make` false leaves the constructor-mode sphere without its NURB.
+fn rust_sphere_made(k: &Kernel, s: &SphereIn, make: bool) -> Result<solidcore::Result<Sphere>, HarnessError> {
     let frame = Axis2Placement::new(v3(s.origin), v3(s.x), v3(s.y));
     if s.mode == 0 {
         return Ok(Sphere::create_canonical(k, &frame, s.radius));
@@ -500,6 +505,9 @@ fn rust_sphere(k: &Kernel, s: &SphereIn) -> Result<solidcore::Result<Sphere>, Ha
         },
     );
     Ok(built.and_then(|mut sp| {
+        if !make {
+            return Ok(sp);
+        }
         sp.make_nurb(k)?;
         if sp.base().base().gw_nurb().is_none() {
             return Err(SolidError::sm_err("difftest::surface_sphere"));
@@ -1565,6 +1573,67 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
     }
+}
+
+// ---- lazy NURB (`surface.surface_p2` `common_const_make` cases) ------------------------
+
+/// A constructor-mode sphere of a `common_const_make` case.
+fn const_make_input(value: Value) -> Result<SphereIn, HarnessError> {
+    let s: SphereIn = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
+    if s.mode == 0 {
+        return Err(harness("const_make: constructor mode required"));
+    }
+    Ok(s)
+}
+
+/// The native side of a sphere `common_const_make` case.
+pub(super) fn const_make_cpp(value: Value) -> Result<Output, HarnessError> {
+    let s = const_make_input(value)?;
+    let flat = ffi::const_make(&ffi_sphere(&s)).map_err(|e| harness(e.to_string()))?;
+    super::surface_cone_p1::const_make_nurb_cpp(&flat)
+}
+
+/// The Rust side: the sphere as its constructor leaves it (no NURB), then the shared
+/// const-query, `Copy`, `==` and `Transform` sequence.
+pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
+    let s = const_make_input(value)?;
+    let k = Kernel::default();
+    let built = rust_sphere_made(&k, &s, false)?.map(Surface::from);
+    super::surface_cone_p1::const_make_nurb_rust(&k, built)
+}
+
+/// `common_const_make` cases for the sphere: the constructor's sphere with no NURB, in
+/// the swap and inside-out flags, partial domains, caps ending at a pole and an explicit
+/// generator.
+pub(super) fn const_make_cases() -> Vec<Case> {
+    type Shape = (&'static str, Option<[f64; 4]>, Option<CircleIn>);
+    let mut cases = Vec::new();
+    let frame = |origin: [f64; 3]| (origin, [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let shapes: [Shape; 7] = [
+        ("full", None, None),
+        ("part", Some([30.0, -60.0, 200.0, 45.0]), None),
+        ("north_cap", Some([0.0, 60.0, 360.0, 90.0]), None),
+        ("south_cap", Some([0.0, -90.0, 360.0, -60.0]), None),
+        ("hemi", Some([-90.0, 0.0, 90.0, 90.0]), None),
+        ("wrap", Some([-180.0, -90.0, 180.0, 90.0]), None),
+        ("gen", None, Some(CircleIn { c: [0.5, -1.0, 2.0], x: [0.0, 0.0, 1.0], y: [0.0, 1.0, 0.0], d: [-90.0, 90.0], r: 2.0 })),
+    ];
+    for swap in [false, true] {
+        for inside_out in [false, true] {
+            for (name, dom, circle) in &shapes {
+                let (origin, x, y) = frame([0.5, -1.0, 2.0]);
+                let sphere = SphereIn { mode: 1, origin, x, y, radius: 2.0, swap, inside_out, dom: *dom, circle: circle.clone() };
+                let Ok(sphere) = serde_json::to_value(&sphere) else { continue };
+                cases.push(Case {
+                    unit: "surface.surface_p2".into(),
+                    name: format!("common_const_make_sphere_{name}_{swap}_{inside_out}"),
+                    source: crate::case::CaseSource::Generated { seed: 76 },
+                    inputs: serde_json::json!({"common_const_make": true, "common_sphere": sphere}),
+                });
+            }
+        }
+    }
+    cases
 }
 
 #[cfg(test)]

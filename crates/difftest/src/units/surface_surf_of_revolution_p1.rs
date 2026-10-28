@@ -485,6 +485,15 @@ pub(crate) fn rust_surf(
     k: &Kernel,
     s: &SurfIn,
 ) -> Result<solidcore::Result<SurfOfRevolution>, HarnessError> {
+    rust_surf_made(k, s, true)
+}
+
+/// [`rust_surf`]; `make` false leaves a constructor-mode surface without its NURB.
+fn rust_surf_made(
+    k: &Kernel,
+    s: &SurfIn,
+    make: bool,
+) -> Result<solidcore::Result<SurfOfRevolution>, HarnessError> {
     let gen = rust_gen(k, &s.gen)?;
     let built = match &s.build {
         BuildIn::Canonical { point, axis } => {
@@ -506,7 +515,12 @@ pub(crate) fn rust_surf(
                 Extent2d::from_bounds(a, b, c, d),
                 s.swap,
             )
-            .and_then(|mut r| r.make_nurb(k).map(|()| r))
+            .and_then(|mut r| {
+                if make {
+                    r.make_nurb(k)?;
+                }
+                Ok(r)
+            })
         }
     };
     Ok(built.map(|mut r| {
@@ -1262,6 +1276,82 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
     }
+}
+
+// ---- lazy NURB (`surface.surface_p2` `common_const_make` cases) ------------------------
+
+/// The constructor-built surface of a `common_const_make` case.
+fn const_make_input(value: Value) -> Result<SurfIn, HarnessError> {
+    let s: SurfIn = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
+    if !matches!(s.build, BuildIn::Ctor { .. }) {
+        return Err(harness("const_make: constructor build required"));
+    }
+    Ok(s)
+}
+
+/// The native side of a surface of revolution `common_const_make` case.
+pub(super) fn const_make_cpp(value: Value) -> Result<Output, HarnessError> {
+    let s = const_make_input(value)?;
+    let flat = ffi::const_make(&ffi_surf(&s)?).map_err(|e| harness(e.to_string()))?;
+    super::surface_cone_p1::const_make_nurb_cpp(&flat)
+}
+
+/// The Rust side: the surface as its constructor leaves it (no NURB), then the shared
+/// const-query, `Copy`, `==` and `Transform` sequence.
+pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
+    let s = const_make_input(value)?;
+    let k = Kernel::default();
+    let built = rust_surf_made(&k, &s, false)?.map(solidcore::surface::surface::p2::Surface::from);
+    super::surface_cone_p1::const_make_nurb_rust(&k, built)
+}
+
+/// `common_const_make` cases for the surface of revolution: lines, circles and a B-spline
+/// generator, including ones that touch or cross the axis (an apex, a tangent circle), a
+/// partial sweep and the swap flag.
+pub(super) fn const_make_cases() -> Vec<Case> {
+    let mut cases = Vec::new();
+    let o = [0.5, -1.0, 2.0];
+    let at = |p: [f64; 3]| [p[0] + o[0], p[1] + o[1], p[2] + o[2]];
+    let circle = |c: [f64; 3], d: [f64; 2], r: f64| GenIn::Circle { c: at(c), x: [1.0, 0.0, 0.0], y: [0.0, 0.0, 1.0], d, r };
+    let line = |a: [f64; 3], b: [f64; 3]| GenIn::Line { a: at(a), b: at(b) };
+    let arc = GenIn::BSpline(InlineCrv {
+        cpts: vec![at([1.0, 0.0, 0.0]), at([2.0, 0.0, 1.0]), at([1.0, 0.0, 2.0])],
+        weights: Some(vec![1.0, 0.7, 1.0]),
+        p: 2,
+        u: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+    });
+    let shapes: Vec<(&str, GenIn, [f64; 4])> = vec![
+        ("line_frustum", line([1.0, 0.0, 0.0], [2.0, 0.0, 2.0]), [0.0, 0.0, 360.0, 1.0]),
+        ("line_cyl", line([1.5, 0.0, -1.0], [1.5, 0.0, 2.0]), [0.0, 0.0, 360.0, 1.0]),
+        ("line_apex", line([0.0, 0.0, 0.0], [2.0, 0.0, 2.0]), [0.0, 0.0, 360.0, 1.0]),
+        ("line_apex_end", line([2.0, 0.0, 0.0], [0.0, 0.0, 2.0]), [0.0, 0.0, 360.0, 1.0]),
+        ("line_cross", line([-1.0, 0.0, -1.0], [2.0, 0.0, 2.0]), [0.0, 0.0, 360.0, 1.0]),
+        ("line_part", line([1.0, 0.0, 0.0], [2.0, 0.0, 2.0]), [45.0, 0.2, 200.0, 0.9]),
+        ("circle_tangent", circle([1.5, 0.0, 0.0], [0.0, 360.0], 1.5), [0.0, 0.0, 360.0, 360.0]),
+        ("circle_cross", circle([1.5, 0.0, 0.0], [0.0, 360.0], 2.0), [0.0, 0.0, 360.0, 360.0]),
+        ("circle_half", circle([1.0, 0.0, 0.0], [90.0, 270.0], 1.0), [0.0, 90.0, 360.0, 270.0]),
+        ("circle_arc", circle([3.0, 0.0, 0.5], [30.0, 200.0], 1.0), [0.0, 30.0, 360.0, 200.0]),
+        ("circle_part", circle([3.0, 0.0, 0.5], [30.0, 200.0], 1.0), [45.0, 30.0, 200.0, 200.0]),
+        ("bspline_arc", arc, [0.0, 0.0, 360.0, 1.0]),
+    ];
+    for swap in [false, true] {
+        for (name, gen, domain) in &shapes {
+            let surf = SurfIn {
+                gen: gen.clone(),
+                build: BuildIn::Ctor { origin: o, x: [1.0, 0.0, 0.0], y: [0.0, 1.0, 0.0], domain: *domain },
+                oob: false,
+                swap,
+            };
+            let Ok(surf) = serde_json::to_value(&surf) else { continue };
+            cases.push(Case {
+                unit: "surface.surface_p2".into(),
+                name: format!("common_const_make_revolution_{name}_{swap}"),
+                source: crate::case::CaseSource::Generated { seed: 76 },
+                inputs: serde_json::json!({"common_const_make": true, "common_revolution": surf}),
+            });
+        }
+    }
+    cases
 }
 
 #[cfg(test)]

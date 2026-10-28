@@ -1266,6 +1266,125 @@ pub(super) fn const_make_rust(value: Value) -> Result<Output, HarnessError> {
     const_make_output(&out)
 }
 
+/// The Rust side of a sphere, torus or surface of revolution `common_const_make` case
+/// (the shim's `sc::put_const_make`): the same sequence on a `Surface` holding the
+/// surface as its constructor leaves it (`built`, no NURB), with the NURB data dumped
+/// after the const query, on the copy and after the transform.
+pub(super) fn const_make_nurb_rust(k: &Kernel, built: solidcore::Result<solidcore::surface::surface::p2::Surface>) -> Result<Output, HarnessError> {
+    use solidcore::surface::surface::{Surface, SurfaceKind};
+    fn nurb(s: &Surface) -> Option<&solidcore::nurbs::srf_basic::Surface> {
+        match s.kind() {
+            SurfaceKind::Cone(c) => c.rev().base().gw_nurb(),
+            SurfaceKind::Sphere(x) => x.base().base().gw_nurb(),
+            SurfaceKind::Torus(x) => x.base().base().gw_nurb(),
+            SurfaceKind::SurfOfRevolution(r) => r.base().gw_nurb(),
+            _ => None,
+        }
+    }
+    fn polar(s: &Surface) -> bool {
+        match s.kind() {
+            SurfaceKind::Cone(c) => c.rev().have_polar_conversion(),
+            SurfaceKind::Sphere(x) => x.base().have_polar_conversion(),
+            SurfaceKind::Torus(x) => x.base().have_polar_conversion(),
+            SurfaceKind::SurfOfRevolution(r) => r.have_polar_conversion(),
+            _ => false,
+        }
+    }
+    fn put_nurb(s: &Surface, out: &mut Vec<f64>) {
+        let sur = nurb(s);
+        out.push(flag(sur.is_some()));
+        let Some(sur) = sur else { return };
+        let ix = sur.indices();
+        out.extend([ix.p, ix.q, ix.n + 1, ix.m + 1].map(|x| x as f64));
+        for row in sur.rows() {
+            for p in row {
+                out.extend([p.x, p.y, p.z, p.w]);
+            }
+        }
+        out.push(sur.u_knots().len() as f64);
+        out.extend_from_slice(sur.u_knots());
+        out.push(sur.v_knots().len() as f64);
+        out.extend_from_slice(sur.v_knots());
+    }
+    fn eval(k: &Kernel, s: &Surface, uv: Point2, out: &mut Vec<f64>) -> solidcore::Result<()> {
+        match s.evaluate_point(k, uv) {
+            Ok(p) => { out.push(SUCCESS); push_v(out, p); }
+            Err(e) if e.is_unported() => return Err(e),
+            Err(e) => out.push(status(&e)),
+        }
+        Ok(())
+    }
+    fn dom(d: &Extent2d, out: &mut Vec<f64>) {
+        out.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
+    }
+    let mut surface = match built {
+        Ok(s) => s,
+        Err(e) if e.is_unported() => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+        Err(e) => return nurb_output(&[status(&e)]),
+    };
+    let mut out = vec![0.0];
+    let result = (|| -> solidcore::Result<()> {
+        out.push(flag(nurb(&surface).is_some()));
+        let d = surface.natural_uv_domain_with_nurb(k)?;
+        dom(&d, &mut out);
+        out.push(flag(nurb(&surface).is_some()));
+        put_nurb(&surface, &mut out);
+        out.push(flag(polar(&surface)));
+        eval(k, &surface, d.evaluate(0.3, 0.6), &mut out)?;
+        for c in 0..4_u8 {
+            let uv = d.evaluate(f64::from(c & 1), f64::from(c >> 1));
+            eval(k, &surface, uv, &mut out)?;
+            match surface.evaluate_normal(k, uv, Side::Left, Side::Left) {
+                Ok(n) => { out.push(SUCCESS); push_v(&mut out, n); }
+                Err(e) if e.is_unported() => return Err(e),
+                Err(e) => out.push(status(&e)),
+            }
+        }
+        match surface.copy(k) {
+            Ok(copy) => {
+                out.push(SUCCESS);
+                out.push(flag(nurb(&copy).is_some()));
+                put_nurb(&copy, &mut out);
+                out.push(flag(copy.approx_eq(k, &surface)?));
+                eval(k, &copy, d.evaluate(0.7, 0.2), &mut out)?;
+            }
+            Err(e) if e.is_unported() => return Err(e),
+            Err(e) => out.push(status(&e)),
+        }
+        let rot = Axis2Placement::new(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(-1.0, 0.0, 0.0));
+        match surface.transform(k, &rot, None) {
+            Ok(()) => out.push(SUCCESS),
+            Err(e) if e.is_unported() => return Err(e),
+            Err(e) => out.push(status(&e)),
+        }
+        out.push(flag(nurb(&surface).is_some()));
+        put_nurb(&surface, &mut out);
+        let t = surface.natural_uv_domain_with_nurb(k)?;
+        dom(&t, &mut out);
+        eval(k, &surface, t.evaluate(0.3, 0.6), &mut out)?;
+        Ok(())
+    })();
+    if let Err(e) = result { return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))); }
+    nurb_output(&out)
+}
+
+/// The native side of a sphere, torus or surface of revolution `common_const_make` case:
+/// the shim record (`const_make_output` splits off the build status).
+pub(super) fn const_make_nurb_cpp(flat: &[f64]) -> Result<Output, HarnessError> {
+    nurb_output(flat)
+}
+
+/// A sphere, torus or revolution `common_const_make` record: the build status (`0` =
+/// success: those shims write `st(status)`), then the sequence's values.
+fn nurb_output(flat: &[f64]) -> Result<Output, HarnessError> {
+    let (b, rest) = flat.split_first().ok_or_else(|| harness("empty record"))?;
+    let out = Output::new().values("build", vec![*b]);
+    if *b != 0.0 {
+        return Ok(out);
+    }
+    Ok(out.values("out", rest.to_vec()))
+}
+
 pub(super) fn common_rust(value: Value, database: Option<&Value>, lazy: bool, subdomain: bool, queries: bool) -> Result<Output, HarnessError> {
     use solidcore::surface::surface::{Surface, SurfaceKind};
     let i: Inputs = serde_json::from_value(value).map_err(|e| harness(e.to_string()))?;
