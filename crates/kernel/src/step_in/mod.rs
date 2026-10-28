@@ -764,27 +764,24 @@ impl Reader {
         let first = self.converted;
         // The next solids, across instances and parts, converted together: parts still to
         // orient are shared out between the workers. A part that comes back within the window
-        // waits for the next one, which places the orientation its first instance found.
-        let mut last = first + 1;
-        if !single {
-            let mut fresh: HashSet<u64> = self.plan.get(first).map(|p| p.item).into_iter().collect();
-            while let Some(p) = self.plan.get(last)
-                && last - first < MAX_WINDOW
-            {
-                if !self.oriented.contains_key(&p.item) && !fresh.insert(p.item) {
-                    break;
-                }
-                last += 1;
-            }
-        }
+        // is placed once its first instance is read, from the orientation that instance found.
+        let last = if single { first + 1 } else { (first + MAX_WINDOW).min(self.plan.len()) };
         self.converted = last;
         let ex = self.ex.clone();
+        // Each planned solid of the window, with its job (`None`: a later instance of a part an
+        // earlier job of the window reads, placed after it).
         let mut sources = Vec::new();
         let mut jobs = Vec::new();
+        let mut reading = HashSet::new();
         for i in first..last {
             self.made.push(None);
             let Some(p) = self.plan.get(i) else { continue };
             let (item, units) = (p.item, p.units);
+            let placement = self.batches.get(p.batch).map_or(IDENTITY, |b| b.m);
+            if reading.contains(&item) {
+                sources.push((i, item, placement, None));
+                continue;
+            }
             if let Some(again) = self.unreadable.get(&item) {
                 if let Some(msg) = again.clone() {
                     let label = self.label(item);
@@ -794,15 +791,42 @@ impl Reader {
             }
             let source = match self.oriented.get(&item) {
                 Some(part) => parallel::Source::Oriented(part.clone()),
-                None => parallel::Source::Item { item, units },
+                None => {
+                    reading.insert(item);
+                    parallel::Source::Item { item, units }
+                }
             };
-            let placement = self.batches.get(p.batch).map_or(IDENTITY, |b| b.m);
-            sources.push((i, item));
+            sources.push((i, item, placement, Some(jobs.len())));
             jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
         }
         // Reading and orienting new parts is shared out between the workers.
-        let prepared = parallel::bodies(&ex, &jobs, self.workers);
-        for ((i, item), made) in sources.into_iter().zip(prepared) {
+        let mut prepared: Vec<Option<_>> = parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect();
+        for (i, item, placement, job) in sources {
+            let made = match job {
+                Some(j) => match prepared.get_mut(j).and_then(Option::take) {
+                    Some(made) => made,
+                    None => continue,
+                },
+                // A later instance of a part read in this window: as it would be in the next
+                // window, after its first instance.
+                None => {
+                    if let Some(again) = self.unreadable.get(&item) {
+                        if let Some(msg) = again.clone() {
+                            let label = self.label(item);
+                            self.warn(format!("{label}: not imported: {msg}"));
+                        }
+                        continue;
+                    }
+                    let source = match self.oriented.get(&item) {
+                        Some(part) => parallel::Source::Oriented(part.clone()),
+                        None => match self.plan.get(i) {
+                            Some(p) => parallel::Source::Item { item, units: p.units },
+                            None => continue,
+                        },
+                    };
+                    parallel::prepare(&ex, &parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) })
+                }
+            };
             let Some(e) = ex.get(item) else { continue };
             let Some(batch) = self.plan.get(i).and_then(|p| self.batches.get(p.batch)) else { continue };
             let (m, path, product, instance) = (batch.m, batch.path.clone(), batch.product.clone(), batch.instance.clone());
