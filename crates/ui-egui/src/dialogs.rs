@@ -3239,7 +3239,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let enter_applies = enter_applies(&d);
     let report_active = app.issue_report.draft.is_some();
     let confirm = std::mem::take(&mut d.confirm);
-    if !preset_prompt && !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused) || confirm) {
+    if !preset_prompt
+        && !report_active
+        && enter_applies
+        && app.applying.is_none()
+        && (enter || canvas_enter || (enter_free && nothing_focused) || confirm)
+    {
         ok = true;
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled {

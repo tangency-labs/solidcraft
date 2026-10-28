@@ -118,5 +118,15 @@
     "dialog.right_click_pick": "請先選擇{input}",
     "ui.right_click_confirms": "右鍵確認對話方塊輸入",
     "ui.right_click_confirms_tip": "對話方塊開啟時，在視圖中按右鍵會轉到下一個空白輸入，在最後一個輸入上執行 OK"
+  },
+  "ar": {
+    "dialog.right_click_pick": "اختر {input} أولاً",
+    "ui.right_click_confirms": "النقر بزر الماوس الأيمن يؤكد مدخلات مربع الحوار",
+    "ui.right_click_confirms_tip": "عندما يكون مربع حوار مفتوحاً، ينتقل النقر بزر الماوس الأيمن في العرض إلى المدخل الفارغ التالي، وعند المدخل الأخير ينفّذ موافق"
+  },
+  "he": {
+    "dialog.right_click_pick": "יש לבחור תחילה {input}",
+    "ui.right_click_confirms": "לחיצה ימנית מאשרת קלטים בתיבת דו-שיח",
+    "ui.right_click_confirms_tip": "כאשר תיבת דו-שיח פתוחה, לחיצה ימנית בתצוגה עוברת לקלט הריק הבא, ובקלט האחרון מבצעת אישור"
   }
 }
