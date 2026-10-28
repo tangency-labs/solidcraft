@@ -2522,6 +2522,10 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. })) && app.preview.error.is_some() && d.error.is_none() {
         d.error = app.preview.error.clone();
     }
+    let shown_id = egui::Id::new("sc_dialog_refusal_shown");
+    if d.error.is_none() && app.preview.error.is_none() {
+        ui.data_mut(|m| m.remove::<String>(shown_id));
+    }
     if let Some(error) = d.error.as_ref().or(app.preview.error.as_ref()).cloned() {
         // "Select the curves to offset first" is not a failure: nothing is picked yet. The header hint
         // and the disabled OK already say so, so it is not drawn as a red error with an issue button.
@@ -2530,18 +2534,29 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         }
         // Other dialogs say so on OK ("select a plane first", "pick an axis"): that is what is
         // left to pick, not a failure, so it is shown plainly, with no Create Issue (#3292, #3773).
-        if missing_pick(&error) {
-            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick"));
-            return;
+        let rect = if missing_pick(&error) {
+            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick")).rect
+        } else {
+            ui.vertical(|ui| {
+                crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
+                let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
+                crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
+                if response.clicked() {
+                    crate::issue_report::begin(app, ctx, Some(d), Some(&error));
+                }
+            })
+            .response
+            .rect
+        };
+        // The refusal comes last in the dialog, under the fold when the fields fill it: only its
+        // first line showed, or none, and no Create Issue (#8454). The dialog scrolls a new one
+        // into view once: on OK at once, a preview's once no field is being typed in (so the
+        // field never moves away while it is typed in).
+        let typing = ui.ctx().memory(|m| m.focused().is_some());
+        if (d.error.as_ref() == Some(&error) || !typing) && ui.data(|m| m.get_temp::<String>(shown_id)).as_ref() != Some(&error) {
+            ui.scroll_to_rect(rect, None);
+            ui.data_mut(|m| m.insert_temp(shown_id, error));
         }
-        ui.vertical(|ui| {
-            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
-            let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
-            crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
-            if response.clicked() {
-                crate::issue_report::begin(app, ctx, Some(d), Some(&error));
-            }
-        });
     }
 }
 
@@ -6394,6 +6409,47 @@ mod awaiting_selection_tests {
         let d = h.app.dialog.as_ref().expect("the dialog stays open");
         assert_eq!(d.error.as_deref(), Some("select a plane first"));
         assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "no Create Issue for a missing pick");
+    }
+
+    /// A long refusal sits under the fold of a dialog its fields fill, so only its first line
+    /// showed, or none, and no Create Issue (#8454). The dialog scrolls it into view: a preview's
+    /// once no field is typed in, a refusal on OK at once.
+    #[test]
+    fn a_long_refusal_scrolls_into_view_with_its_issue_button() {
+        let reason = "boolean Cut: the operation failed: no result; the operation failed: not supported yet: the exact fallback for \
+                      where the bodies meet (faces that touch, or cross at a shallow angle) takes planar faces only, and the target \
+                      has 24 curved faces (cylinder, torus) and the tool has 8 curved faces (cylinder); "
+            .repeat(3);
+        let in_view = |what: &str| {
+            let viewport = crate::scenario::rect_of("dialog:body:viewport").expect("the dialog's fields");
+            let issue = crate::scenario::handle_at("dialog:create_issue").expect("Create Issue");
+            let error = crate::scenario::rect_of("dialog:report:error").expect("the refusal");
+            assert!(viewport.contains(issue) && viewport.contains_rect(error), "{what}: {error:?} and Create Issue at {issue:?} in {viewport:?}");
+        };
+        let open = || {
+            let mut h = crate::scenario::Harness::new();
+            h.step(&serde_json::json!({"start":"solid.extrude"})).unwrap();
+            h.frames(2);
+            h
+        };
+        let mut h = open();
+        h.app.preview.error = Some(reason.clone());
+        h.frames(6);
+        in_view("a preview's error");
+        // While a field is typed in, a preview's error waits; a refusal on OK doesn't.
+        let mut h = open();
+        let field = crate::scenario::rect_of("dialog:control:Distance").expect("the Distance field").center();
+        h.step(&serde_json::json!({"click": [field.x, field.y]})).unwrap();
+        h.app.preview.error = Some(reason.clone());
+        h.frames(6);
+        assert!(h.ctx.memory(|m| m.focused().is_some()), "the Distance field is typed in");
+        assert_eq!(crate::scenario::count_of("dialog:body:scroll_y"), Some(0.0), "the field stays where it is");
+        h.app.preview.error = None;
+        if let Some(d) = h.app.dialog.as_mut() {
+            d.error = Some(reason);
+        }
+        h.frames(6);
+        in_view("a refusal on OK");
     }
 
     /// A missing-pick hint reads in the user's language: the dialogs return it as English text,
