@@ -977,7 +977,7 @@ fn rectangular_pattern_distance_type_per_direction() {
     assert_eq!(labels.last(), Some(&"To Object 2"), "{labels:?}");
     assert!(!labels.contains(&"To Object"), "{labels:?}");
     assert_eq!(d.active, d.inputs.len() - 1);
-    assert_eq!(d.inputs.last().map(|i| i.accept), Some(EXTRUDE_OBJECTS), "what an extrude's To Object takes (#8527)");
+    assert_eq!(d.inputs.last().map(|i| i.accept), Some(OBJECT_PICKS), "what an extrude's To Object takes (#8527)");
     assert_eq!(sent(&h).unwrap_err(), "select the face or point Direction 2 runs to");
     // A plane is sent as the reference, so the copies follow it.
     let last = h.app.dialog.as_ref().unwrap().inputs.len() - 1;

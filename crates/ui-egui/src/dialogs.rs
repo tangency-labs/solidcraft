@@ -3816,7 +3816,7 @@ pub(crate) fn pattern_runs_to_object(d: &Dialog, index: usize) -> bool {
 /// was picked for it, as `solid.extrude` takes its `to` (a place, or a reference).
 fn pattern_to_object(app: &SolveApp, d: &Dialog, index: usize) -> Result<(bool, Option<Value>), String> {
     let [_, _, _, object, ..] = PATTERN_DISTANCE[index.min(1)];
-    Ok((pattern_runs_to_object(d, index), extrude_object(app, &d.inputs, object)?))
+    Ok((pattern_runs_to_object(d, index), object_value(app, &d.inputs, object)?))
 }
 
 /// The pick input an extent of To Object adds (a face, vertex or point to go to).
@@ -6497,7 +6497,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         let [_, _, key, object, ..] = PATTERN_DISTANCE[index];
                         if let Some(to) = to {
                             d.extra.insert(key.into(), json!("to_object"));
-                            set_extrude_object(&mut d.inputs, &mut d.active, object, true);
+                            set_object_input(&mut d.inputs, &mut d.active, object, true);
                             // A reference reopens as what was picked (the sketch point, the plane…).
                             let point = solidcraft_engine::doc::apply_point(&frame, to.0);
                             let sel = reference.as_ref().and_then(|g| extent_ref_sel(s, g));

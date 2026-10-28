@@ -142,7 +142,7 @@ fn pattern_direction_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, ind
     }
     let ty = form_row(ui, label, |ui| extra_choice(ui, &mut d.extra, id, key, &PATTERN_DISTANCE_TYPES));
     // It takes what an extrude's To Object takes (#8527).
-    set_extrude_object(&mut d.inputs, &mut d.active, object, ty == 2);
+    set_object_input(&mut d.inputs, &mut d.active, object, ty == 2);
     if ty == 2 {
         input_row(d, ui, &app.session, app.preferences.origin_plane_names, object);
     }

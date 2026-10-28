@@ -6669,17 +6669,8 @@ fn pattern_reach(
     let tst = state_in_frame(doc, st, component);
     let centre = seed_centre(doc, &tst, features, bodies).ok_or_else(|| DocError::Invalid("To Object: what the pattern copies has no geometry to measure from".into()))?;
     let plane = Plane::from_normal(centre, d).ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
-    let reach = match g {
-        Some(g) => match reference_end(&extent_target(doc, vals, &tst, g)?, &plane, centre, to)? {
-            ReferenceEnd::Height(h) => h,
-            // A plane at an angle: where the line from the middle along `d` meets it.
-            ReferenceEnd::Slanted(pl) => {
-                let pn = pl.normal();
-                (pl.origin - centre).dot(pn) / d.dot(pn)
-            }
-        },
-        None => height_at(&tst, object_face(&tst, name, to, Some(d)), &plane, centre, to),
-    };
+    // A plane at an angle: where the line from the middle along `d` meets it.
+    let (reach, _) = object_end(doc, vals, &tst, &plane, centre, to, name, g)?;
     if !reach.is_finite() || reach.abs() < 1e-9 {
         return Err(DocError::Invalid("the To object is where the pattern starts: pick one further along the direction".into()));
     }
