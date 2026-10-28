@@ -31,6 +31,10 @@ semver = { workspace = true }
 sha2 = { workspace = true }
 minisign-verify = "0.3"
 zip = { workspace = true }
+# Updates: unpack a Linux .tar.gz release over the installed folder (MIT OR Apache-2.0).
+# flate2 is already in the tree through zip.
+tar = "0.4"
+flate2 = "1"
 # Rasterises the icon SVGs (assets/icons/ui/design/svg) at the size they are drawn.
 tiny-skia = { workspace = true }
 

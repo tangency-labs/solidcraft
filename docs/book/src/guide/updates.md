@@ -32,7 +32,8 @@ Where SolidCraft can replace itself safely, the window also has **Update now**:
 | Windows installer (`.msi`) | **Install (closes SolidCraft)**: downloads and verifies the `.msi`, closes SolidCraft (asking about unsaved designs first) and starts the installer |
 | Windows portable `.zip` or `.exe` | Downloads and verifies the package, swaps in the new `solidcraft.exe` (and `solidcraft-cli.exe`) and offers **Restart now**; the old file is removed at the next start |
 | macOS | **Download and open**: downloads and verifies the `.dmg` and opens it; drag SolidCraft to Applications to replace the old copy |
-| Flatpak, Snap, `.deb`, `.rpm`, `.tar.gz` | Nothing: your package manager updates these (the window shows the command), or you unpack the new archive |
+| `.tar.gz` | Downloads the new archive, verifies it, unpacks it over the installed folder and offers **Restart now**. The previous folder is kept beside it as `<name>.old` until the next start. A folder you can't write fails with a message, and **Download** is the way to update it |
+| Flatpak, Snap, `.deb`, `.rpm` | Nothing: your package manager updates these (the window shows the command) |
 
 Every download is verified before anything changes: its SHA-256 must match the release's
 `SHA256SUMS.txt`, fetched over HTTPS from the same release, and, once the project signs its
@@ -43,8 +44,9 @@ still gets the package for a manual install. On macOS SolidCraft opens the disk 
 replacing the app itself, because the app is ad-hoc signed and not notarized: replacing it in the
 background would install code macOS can't vouch for without you seeing it.
 
-Update now needs write access to the installed file: an AppImage in a folder you can't write to
-fails with a message, and **Download** is the way to update it.
+Update now needs write access to the installed file (or, for a `.tar.gz`, to its folder): an
+AppImage or archive in a folder you can't write to fails with a message, and **Download** is the
+way to update it.
 
 ## Updating from 0.11 to 0.14
 
@@ -103,7 +105,7 @@ and SolidCraft picks the one matching how it was installed:
 | Snap from a downloaded file | `SNAP_REVISION` starts with `x` | `solidcraft-linux-<arch>.snap` | `sudo snap install --dangerous ./solidcraft-linux-<arch>.snap` |
 | `.deb` | under `/usr`, dpkg knows `solidcraft` | `solidcraft-linux-<arch>.deb` | `sudo apt install ./solidcraft-linux-<arch>.deb` |
 | `.rpm` | under `/usr`, an rpm database exists | `solidcraft-linux-<arch>.rpm` | `sudo dnf install ./solidcraft-linux-<arch>.rpm` |
-| `.tar.gz` | anywhere else on Linux | `solidcraft-<version>-linux-<arch>.tar.gz` | Unpack over the old copy |
+| `.tar.gz` | anywhere else on Linux | `solidcraft-<version>-linux-<arch>.tar.gz` | **Update now** unpacks it over the old copy |
 | Windows installer | under Program Files, or in the folder the installer recorded | `solidcraft-windows-<arch>.msi` | Run the installer |
 | Windows portable | `solidcraft-cli.exe` beside it | `solidcraft-windows-<arch>-portable.zip` | Unzip over the old copy |
 | Windows `.exe` | anywhere else on Windows | `SolidCraft-<version>-windows-x64.exe` | Replace the old `.exe` |
