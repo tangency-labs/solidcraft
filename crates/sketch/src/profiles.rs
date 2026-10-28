@@ -608,9 +608,11 @@ pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
     if sk.links.iter().all(|l| l.kind == crate::LinkKind::Text) {
         return find_profiles(sk);
     }
+    let intersect_links: std::collections::HashSet<&str> =
+        sk.links.iter().filter(|link| link.kind == crate::LinkKind::Intersect).map(|link| link.id.as_str()).collect();
     let mut d = sk.clone();
     for (ci, c) in d.curves.iter_mut().enumerate() {
-        if c.link.is_some() && !sk.is_text_curve(ci) {
+        if c.link.as_ref().is_some_and(|link| !intersect_links.contains(link.as_str())) && !sk.is_text_curve(ci) {
             c.construction = true;
         }
     }

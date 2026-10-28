@@ -102,6 +102,40 @@ fn create_sketch_uses_card_and_still_starts_immediately_on_plane_pick() {
 }
 
 #[test]
+fn intersect_dialog_filters_faces_or_whole_bodies_and_controls_projection_link() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Post".into() }];
+    h.app.start("sketch.intersect");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Intersect opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchIntersect { bodies: true, projection_link: true }));
+    assert_eq!(d.inputs[0].accept, super::BODIES);
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Post".into() }]);
+    assert!(scenario::rect_of("dialog:row:ui.sketch_intersect_geometry").is_some());
+    assert!(scenario::handle_at("dialog:Selection Filter:Faces").is_some());
+    assert!(scenario::handle_at("dialog:Selection Filter:Bodies").is_some());
+    assert!(scenario::rect_of("dialog:row:Projection Link").is_some());
+
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Faces"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].accept, super::FACES);
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Bodies"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].accept, super::BODIES);
+    h.step(&json!({"click":{"handle":"dialog:Projection Link"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchIntersect { projection_link: false, .. }));
+
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Post".into() }];
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.intersect".into(), json!({"refs":[{"body":"Post"}],"projection_link":false}))]);
+}
+
+#[test]
 fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
     for command in ["sketch.offset", "sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {
         let mut h = fixture();

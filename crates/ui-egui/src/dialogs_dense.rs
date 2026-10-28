@@ -19,6 +19,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::ViewDxf { .. } => Some("file.export_view_dxf"),
         Kind::InsertDrawing(p) => Some(if p.command.ends_with("dxf") { "sketch.insert_dxf" } else { "sketch.insert_svg" }),
         Kind::Sketch => Some("sketch.create"),
+        Kind::SketchIntersect { .. } => Some("sketch.intersect"),
         Kind::SketchModify(k) => Some(crate::sketch_modify_ui::command(k)),
         Kind::Text(_) => Some("sketch.edit_text"),
         Kind::TextMove(_) => Some("sketch.move"),
@@ -211,6 +212,18 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     d.extra.insert("fixed_plane".into(), json!(true));
                 }
             }
+        }
+        Kind::SketchIntersect { bodies, projection_link } => {
+            let mut selected = if *bodies { 1 } else { 0 };
+            let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
+                ui_kit::segmented(ui, &mut selected, &[tr("Faces"), tr("Bodies")], Default::default())
+            });
+            if changed && let Some(input) = d.inputs.first_mut() {
+                *bodies = selected == 1;
+                input.accept = if *bodies { BODIES } else { FACES };
+                input.items.clear();
+            }
+            ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
         }
         Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc),
         Kind::Text(k) => enter |= crate::sketch_text::rows(ui, k, &mut d.inputs, &mut d.active),

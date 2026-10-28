@@ -1,0 +1,27 @@
+{
+  "en": {
+    "ui.sketch_intersect_geometry": "Geometry",
+    "ui.sketch_intersect_selection_filter": "Selection Filter",
+    "ui.sketch_intersect_projection_link": "Projection Link"
+  },
+  "ja": {
+    "ui.sketch_intersect_geometry": "ジオメトリ",
+    "ui.sketch_intersect_selection_filter": "選択フィルター",
+    "ui.sketch_intersect_projection_link": "投影リンク"
+  },
+  "zh": {
+    "ui.sketch_intersect_geometry": "几何体",
+    "ui.sketch_intersect_selection_filter": "选择过滤器",
+    "ui.sketch_intersect_projection_link": "投影链接"
+  },
+  "de": {
+    "ui.sketch_intersect_geometry": "Geometrie",
+    "ui.sketch_intersect_selection_filter": "Auswahlfilter",
+    "ui.sketch_intersect_projection_link": "Projektionsverknüpfung"
+  },
+  "ko": {
+    "ui.sketch_intersect_geometry": "형상",
+    "ui.sketch_intersect_selection_filter": "선택 필터",
+    "ui.sketch_intersect_projection_link": "투영 링크"
+  }
+}

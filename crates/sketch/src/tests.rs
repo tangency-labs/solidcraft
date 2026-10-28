@@ -831,17 +831,19 @@ fn text_beside_other_curves_is_drawn_geometry() {
     }
     assert_areas(&sorted_areas(&find_drawn_profiles(&sk)), vec![13.5557, 600.0]);
     // Projected reference geometry still doesn't count as drawn.
-    let square = |s: f64| {
+    let square = |x: f64, s: f64| {
         vec![
-            LinkGeom::Line(v(100.0, 0.0), v(100.0 + s, 0.0)),
-            LinkGeom::Line(v(100.0 + s, 0.0), v(100.0 + s, s)),
-            LinkGeom::Line(v(100.0 + s, s), v(100.0, s)),
-            LinkGeom::Line(v(100.0, s), v(100.0, 0.0)),
+            LinkGeom::Line(v(x, 0.0), v(x + s, 0.0)),
+            LinkGeom::Line(v(x + s, 0.0), v(x + s, s)),
+            LinkGeom::Line(v(x + s, s), v(x, s)),
+            LinkGeom::Line(v(x, s), v(x, 0.0)),
         ]
     };
-    sk.add_link(LinkKind::Project, LinkSource::Origin, &square(5.0)).unwrap();
+    sk.add_link(LinkKind::Project, LinkSource::Origin, &square(100.0, 5.0)).unwrap();
     assert_eq!(find_profiles(&sk).len(), 3);
     assert_areas(&sorted_areas(&find_drawn_profiles(&sk)), vec![13.5557, 600.0]);
+    sk.add_link(LinkKind::Intersect, LinkSource::Origin, &square(110.0, 7.0)).unwrap();
+    assert_areas(&sorted_areas(&find_drawn_profiles(&sk)), vec![13.5557, 49.0, 600.0]);
 }
 
 #[test]

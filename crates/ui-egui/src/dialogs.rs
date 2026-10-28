@@ -388,6 +388,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Sketch-space modify tools: scale and offset, and later fillet, chamfer, the patterns,
             /// mirror and move (`sketch_modify_ui`).
             SketchModify(crate::sketch_modify_ui::Mod),
+            SketchIntersect {
+                bodies: bool,
+                projection_link: bool,
+            },
         }
     }
 }
@@ -797,6 +801,13 @@ impl Dialog {
         let has_bodies = !s.world_state().bodies.is_empty();
         let mut d = match id {
             "sketch.create" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
+            "sketch.intersect" => {
+                let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
+                Dialog::new(
+                    Kind::SketchIntersect { bodies, projection_link: true },
+                    vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { FACES }, true)],
+                )
+            }
             "solid.extrude" => Dialog::new(
                 Kind::Extrude {
                     distance: length_default(s, "10"),
@@ -2122,6 +2133,7 @@ fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
 fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
+        Kind::SketchIntersect { .. } => "INTERSECT",
         Kind::Extrude { .. } => "EXTRUDE",
         Kind::Revolve { .. } => "REVOLVE",
         Kind::Fillet { chamfer: false, .. } => "FILLET",
@@ -4752,6 +4764,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
+        Kind::SketchIntersect { projection_link, .. } => {
+            need(0, "faces or bodies")?;
+            let refs = sels(d, 0)
+                .iter()
+                .map(|sel| match sel {
+                    Sel::Body { name } => Ok(json!({"body": name})),
+                    Sel::Face { body, point, .. } => Ok(json!({"face": [point.x, point.y, point.z], "body": body})),
+                    _ => Err("select faces or bodies".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link}))
+        }
         Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),

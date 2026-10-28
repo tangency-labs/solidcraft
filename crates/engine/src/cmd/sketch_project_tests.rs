@@ -873,3 +873,19 @@ fn intersect_on_a_top_face_gives_its_outline() {
     ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(ends, vec![[0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 0.0, 0.0], [40.0, 0.0, 40.0, 30.0], [40.0, 30.0, 0.0, 30.0]]);
 }
+
+#[test]
+fn intersect_whole_body_can_create_unlinked_section_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Post"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+
+    let result = run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Post"}], "projection_link": false}));
+    assert_eq!(result["links"][0]["link"], Value::Null, "{result}");
+    assert_eq!(result["links"][0]["curves"].as_array().unwrap().len(), 4, "{result}");
+
+    let sketch = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(sketch.links.is_empty(), "projection links were disabled");
+    assert_eq!(sketch.curves.len(), 4, "the whole body's section remains as normal sketch geometry");
+    assert!(s.execute("sketch.intersect", &json!({"refs": [{"body": "Post"}], "projection_link": "false"})).is_err());
+}
