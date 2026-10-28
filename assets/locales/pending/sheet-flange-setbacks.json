@@ -1,0 +1,17 @@
+{
+  "en": {
+    "End Set-back": "End Set-back",
+    "Start Set-back": "Start Set-back",
+    "the same on every edge": "the same on every edge"
+  },
+  "ja": {
+    "End Set-back": "終端のセットバック",
+    "Start Set-back": "始端のセットバック",
+    "the same on every edge": "すべてのエッジで同じ"
+  },
+  "zh": {
+    "End Set-back": "终点退缩",
+    "Start Set-back": "起点退缩",
+    "the same on every edge": "每条边相同"
+  }
+}

@@ -26,6 +26,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
          the relief at the corners these flanges make (default: the rule's); \
          then?: [{angle?, height, flip?}] further bends (at most 16), each a flange on the far edge of the one before, flip: true turns that bend the other way (edge only); \
+         start_setback? and end_setback? (lengths, default 0): how far each flange stops short of the start and of the end of its edge (the edge \
+         runs the way its panel's outline does, counter-clockwise seen from the top face: the start is the end met first with the sheet on the left; \
+         the sheet is notched and relieved there, edge flanges only); \
          type?: base|edge|contour (default from the inputs); name?, body_name? (the new body). \
          Thickness, K-factor and bend radius come from the rule (sheet.manage_rules); passing them here is refused, \
          and so is the corner relief on a base or contour flange",
@@ -230,6 +233,11 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     if ty != "edge" && p.get("then").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`then` (further bends) is only for edge flanges"));
     }
+    if ty != "edge"
+        && let Some(key) = ["start_setback", "end_setback"].iter().find(|k| p.get(**k).is_some_and(|v| !v.is_null()))
+    {
+        return Err(bad(cmd, format!("`{key}` is only for edge flanges")));
+    }
     match ty.as_str() {
         "base" => {
             let sketch = feature_sketch(s, p, cmd)?;
@@ -305,6 +313,14 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(c) = &corner_relief {
                 check_expr(s, c, Kind::Length, cmd, "corner_relief")?;
             }
+            // How far the flanges stop short of the start and of the end of their edges.
+            let start_setback = expr(p, "start_setback");
+            let end_setback = expr(p, "end_setback");
+            for (key, value) in [("start_setback", &start_setback), ("end_setback", &end_setback)] {
+                if let Some(v) = value {
+                    check_expr(s, v, Kind::Length, cmd, key)?;
+                }
+            }
             let flip = bool_(p, "flip").unwrap_or(false);
             let mut made = add_feature(
                 s,
@@ -320,6 +336,8 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     corner_relief_shape,
                     corner_relief,
                     height_from: height_from.clone(),
+                    start_setback,
+                    end_setback,
                 },
             )?;
             // Each further bend stands on the far edge of the flange before it.
@@ -340,6 +358,8 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief_shape: None,
                         corner_relief: None,
                         height_from: height_from.clone(),
+                        start_setback: None,
+                        end_setback: None,
                     },
                 )?;
             }
