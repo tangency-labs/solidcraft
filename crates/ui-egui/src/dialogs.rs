@@ -2598,6 +2598,9 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         // An operation on a part the kernel refuses: the part, what is wrong with it, and what
         // to do, instead of the kernel's words and an issue report.
         if let Some(part) = refused_operand(app, d) {
+            if let Some(face) = part.face {
+                crate::refused_part::ring(app, &part.body, face);
+            }
             let operation =
                 dialog_commands(app, d).ok().and_then(|c| c.iter().find_map(|(_, p)| p.get("operation").and_then(Value::as_str).map(str::to_string)));
             ui.vertical(|ui| {

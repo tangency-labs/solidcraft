@@ -1925,6 +1925,15 @@ impl SolveApp {
         self.pending_fit = request;
     }
 
+    /// Frame `bounds` as Fit frames the selection, leaving the selection as it is.
+    pub(crate) fn frame_bounds(&mut self, bounds: solidcraft_engine::geom::Aabb3) {
+        let from = self.cam;
+        let to = self.fitted_bounds(from, &bounds);
+        self.pending_fit = None;
+        self.animate_to(to);
+        self.pending_fit = Some((from, bounds, true));
+    }
+
     /// Move the viewport to the camera a command asked for (`view.apply`): animated like a view
     /// change, or at once (control requests, so a screenshot right after shows it).
     pub fn follow_view_request(&mut self, animate: bool) {
@@ -1976,6 +1985,7 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         frame_watch::begin(self);
+        refused_part::next_frame(self, ctx);
         file_picker::tick(self, ctx);
         dialogs_save_mesh::tick_wait(self, ctx);
         easyprint_ui::tick(self, ctx);

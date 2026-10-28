@@ -2387,6 +2387,14 @@ fn entry_row(
             ..Default::default()
         },
     );
+    // A part that needs repair, under the pointer: its refused face is ringed in the view.
+    if r.hovered
+        && folder == "bodies"
+        && let Some(Sel::Body { name }) = &e.sel
+        && let Some(face) = app.session.model.state().body(&e.key).and_then(|b| b.body.smlib_refused()).and_then(|r| r.face)
+    {
+        crate::refused_part::ring(app, name, face);
+    }
     if r.fold
         && let Some(key) = pattern_key
     {

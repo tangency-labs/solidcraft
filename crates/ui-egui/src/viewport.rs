@@ -50,6 +50,12 @@ pub enum NavMode {
 
 #[derive(Default)]
 pub struct ViewportState {
+    /// The faces the modelling kernel refuses that the window points at (a failed operation's
+    /// message, a "needs repair" row under the pointer): ringed in the error colour. What this
+    /// frame asks for ([`crate::refused_part::ring`]) is drawn from the next one on, so the ring
+    /// goes when nothing asks for it any more.
+    pub(crate) refused_ring: Vec<(String, usize)>,
+    pub(crate) refused_ring_next: Vec<(String, usize)>,
     /// A drag on the handles of the drawing being placed (Insert SVG / DXF).
     pub(crate) insert_drag: Option<crate::insert_handles::Drag>,
     /// A drag on the handles of the Transform window's box.
@@ -3030,6 +3036,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     crate::theme_files::color_key(&Tokens::get()).hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
+    app.viewport.refused_ring.hash(&mut h);
     app.origin_visible().hash(&mut h);
     app.picking_plane().hash(&mut h);
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
@@ -3338,6 +3345,22 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         let r = size * 0.04;
         for d in [Vec3::X, Vec3::Y, Vec3::Z] {
             sc.line((p - d * r).to_f32(), (p + d * r).to_f32(), construction, 2.0, true);
+        }
+    }
+    // A face the modelling kernel refuses, while the window points at it: a ring round its edges
+    // in the error colour, over the shading (and dimmed where the model hides it), like the
+    // selection's outline.
+    for (body, face) in &app.viewport.refused_ring {
+        let Some(b) = st.body(body).filter(|_| app.session.body_visible(body)) else { continue };
+        let m = drawn_mesh(app, b);
+        let hidden = sc.color(c4(t.error.gamma_multiply(0.45)));
+        for (ei, e) in m.edges.iter().enumerate() {
+            if m.edge_faces.get(ei).is_some_and(|f| f.iter().any(|x| *x as usize == *face)) && m.edge_pickable(ei) {
+                edge_lines(&mut sc, e, t.error, t.error.gamma_multiply(0.5), 3.0, &edge_normals(&m, e));
+                for p in e.windows(2) {
+                    sc.hidden_line(p[0].to_f32(), p[1].to_f32(), hidden, 1.4);
+                }
+            }
         }
     }
     // Reference widgets follow zoom; the often much larger world-space feedback does not.

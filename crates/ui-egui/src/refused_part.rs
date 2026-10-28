@@ -86,6 +86,22 @@ fn why_key(part: &RefusedPart) -> &'static str {
     }
 }
 
+/// Ring `body`'s refused `face` in the viewport while this is called each frame.
+pub(crate) fn ring(app: &mut SolveApp, body: &str, face: usize) {
+    if !app.viewport.refused_ring_next.iter().any(|(b, f)| b == body && *f == face) {
+        app.viewport.refused_ring_next.push((body.to_string(), face));
+    }
+}
+
+/// The faces asked for last frame are the ones ringed now; a change is drawn at once.
+pub(crate) fn next_frame(app: &mut SolveApp, ctx: &egui::Context) {
+    let next = std::mem::take(&mut app.viewport.refused_ring_next);
+    if next != app.viewport.refused_ring {
+        app.viewport.refused_ring = next;
+        ctx.request_repaint();
+    }
+}
+
 /// Repair the part (the command says when it cannot yet).
 pub(crate) fn repair(app: &mut SolveApp, body: &str) {
     if let Err(e) = app.run(REPAIR, json!({ "body": body })) {
@@ -93,20 +109,17 @@ pub(crate) fn repair(app: &mut SolveApp, body: &str) {
     }
 }
 
-/// Select the face the kernel refuses and frame it.
+/// Frame the face the kernel refuses (ringed while the message shows). The selection is left
+/// as it is: in a dialog it would become the dialog's pick.
 pub(crate) fn show_face(app: &mut SolveApp, part: &RefusedPart) {
     let Some(face) = part.face else { return };
     let world = crate::open_meshing::session_world(&app.session);
     let Some(b) = world.body(&part.body) else { return };
     let mesh = b.mesh();
-    let point = mesh.tri_face.iter().zip(&mesh.triangles).find(|(f, _)| **f as usize == face).and_then(|(_, t)| {
-        let [a, b, c] = t.map(|i| mesh.positions.get(i as usize).copied());
-        Some((a? + b? + c?) / 3.0)
-    });
-    let Some(point) = point else { return };
-    let item = json!({"type": "face", "body": part.body, "index": face, "point": [point.x, point.y, point.z]});
-    if app.run("select.set", json!({ "items": [item] })).is_ok() {
-        let _ = app.run("view.fit", json!({}));
+    let corners = mesh.tri_face.iter().zip(&mesh.triangles).filter(|(f, _)| **f as usize == face).flat_map(|(_, t)| t.iter());
+    let bounds: solidcraft_engine::geom::Aabb3 = corners.filter_map(|i| mesh.positions.get(*i as usize).copied()).collect();
+    if !bounds.is_empty() {
+        app.frame_bounds(bounds);
     }
 }
 
