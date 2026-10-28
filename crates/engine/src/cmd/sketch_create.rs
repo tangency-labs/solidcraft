@@ -56,17 +56,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("slot_center")
         .enabled(in_sketch)
-        .params(concat!("center: slot centre, end: one arc centre, width", created_doc!())),
+        .params(concat!("center: slot centre, end: one arc centre, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", created_doc!())),
     CommandSpec::new("sketch.slot.arc_three_point", "Three Point Arc Slot", arc_slot_three)
         .at("SKETCH", "CREATE")
         .icon("arc_slot")
         .enabled(in_sketch)
-        .params(concat!("start, through, end: points on the centre arc, width", created_doc!())),
+        .params(concat!("start, through, end: points on the centre arc, width; returns centre_arc and middle (the point held halfway along it)", created_doc!())),
     CommandSpec::new("sketch.slot.arc_center", "Center Point Arc Slot", arc_slot_center)
         .at("SKETCH", "CREATE")
         .icon("arc_slot_center")
         .enabled(in_sketch)
-        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
+        .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc and middle (the point held halfway along it)", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
         "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
@@ -1083,6 +1083,11 @@ fn slot_center_point(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Arc slot around `o` (centre-line radius `r`) from angle `t0` sweeping `sweep` (> 0).
+///
+/// Its middle (#7908) is the middle of the construction centre arc: a point on that arc with
+/// construction chords to both cap centres held equal, so it stays halfway along the arc however
+/// the slot is edited or dragged. On the arc's circle equal chords leave two places (the middle
+/// and the point opposite); the solver keeps the one it is drawn at. The middle adds no freedom.
 fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, sweep: f64, w: f64) -> Result<Value> {
     let h = w / 2.0;
     if h >= r {
@@ -1094,6 +1099,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
     let t1 = t0 + sweep;
     let at = |t: f64, rr: f64| o + Vec2::from_angle(t) * rr;
     let mut centre_arc = None;
+    let mut middle = None;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
@@ -1115,10 +1121,21 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
             cons.push(add_c(sk, ConstraintKind::Tangent { a, b })?);
         }
+        let mid = sk.add_point(at(t0 + sweep / 2.0, r), None)?;
+        cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: mid, c: centre })?);
+        let (to_s, to_e) = (sk.add_line_pts(mid, ps, None)?, sk.add_line_pts(mid, pe, None)?);
+        for l in [to_s, to_e] {
+            if let Some(c) = sk.curves.get_mut(l) {
+                c.construction = true;
+            }
+        }
+        cons.push(add_c(sk, ConstraintKind::Equal { a: to_s, b: to_e })?);
+        middle = sk.points.get(mid).map(|q| q.id.clone());
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
     let mut out = result(out, info);
     out["centre_arc"] = json!(centre_arc);
+    out["middle"] = json!(middle);
     Ok(out)
 }
 
