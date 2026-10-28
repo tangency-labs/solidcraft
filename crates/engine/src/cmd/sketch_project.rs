@@ -382,8 +382,7 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// Any body's edges work, a mirrored or patterned copy's too; the link keeps the edge's
 /// persistent name, so the constraint follows the edge through rebuilds.
 pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&str]) -> Result<Value> {
-    let model = |v: &Value| v.get("edge").is_some() || v.get("vertex").is_some();
-    if !keys.iter().any(|k| p.get(*k).is_some_and(model)) {
+    if !keys.iter().any(|k| p.get(*k).is_some_and(model_ref)) {
         return Ok(p.clone());
     }
     let id = sketch_store::target(s, p, cmd)?;
@@ -392,20 +391,59 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
     refresh(s, &doc, id, &mut sk);
     let mut out = p.clone();
     for key in keys {
-        let Some(v) = p.get(*key).filter(|v| model(v)) else { continue };
-        let src = source(s, v, cmd)?;
-        let what = src.describe();
-        let link = add_link(s, &doc, id, &mut sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-        // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
-        let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
-        let entity = curve
-            .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
-            .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))?;
-        out[*key] = json!(entity);
+        let Some(v) = p.get(*key).filter(|v| model_ref(v)) else { continue };
+        out[*key] = json!(project_ref(s, &doc, id, &mut sk, v, cmd)?);
     }
     sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     Ok(out)
+}
+
+/// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
+/// `{vertex: [x,y,z], body?}`.
+fn model_ref(v: &Value) -> bool {
+    v.get("edge").is_some() || v.get("vertex").is_some()
+}
+
+/// Project one model reference into the sketch and report the entity it stands for: an edge's
+/// projected curve (a point when it is seen end on) or a vertex's projected point.
+fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Value, cmd: &str) -> Result<String> {
+    let src = source(s, v, cmd)?;
+    let what = src.describe();
+    let link = add_link(s, doc, id, sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+    // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
+    let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
+    curve
+        .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
+        .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))
+}
+
+/// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
+/// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,
+/// and stands for the projected curve (or point) in the entities returned.
+pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let Some(Value::Array(entities)) = p.get("entities") else { return Ok(p.clone()) };
+    if !entities.iter().any(model_ref) {
+        return Ok(p.clone());
+    }
+    let id = super::sketch::target_sketch(s, p, cmd)?;
+    let mut doc = (*s.doc).clone();
+    let mut sk = doc.sketch(id)?.clone();
+    refresh(s, &doc, id, &mut sk);
+    let mut out = entities.clone();
+    for entity in out.iter_mut() {
+        if !model_ref(entity) {
+            continue;
+        }
+        *entity = json!(project_ref(s, &doc, id, &mut sk, entity, cmd)?);
+    }
+    let mut params = p.clone();
+    if let Some(o) = params.as_object_mut() {
+        o.insert("entities".into(), Value::Array(out));
+    }
+    *doc.sketch_mut(id)? = sk;
+    *s.doc_mut() = doc;
+    Ok(params)
 }
 
 /// Add one link from `src` to the active sketch and report it.

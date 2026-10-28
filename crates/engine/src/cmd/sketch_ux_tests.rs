@@ -1983,3 +1983,23 @@ fn a_changed_length_dimension_keeps_its_first_point() {
     run(&mut s, "parameters.change", json!({"name": width, "expression": "60 mm"}));
     assert!((at(&s, "p1").x + 30.0).abs() < 1e-6 && (at(&s, "p2").x - 30.0).abs() < 1e-6, "{:?} {:?}", at(&s, "p1"), at(&s, "p2"));
 }
+
+/// #7912: a dimension can measure a model edge: the edge is projected into the sketch and the
+/// dimension measures the distance from the sketch's point to it.
+#[test]
+fn a_dimension_measures_a_model_edge() {
+    let mut s = Session::default();
+    // A sheet-metal base flange: a 100 x 50 plate whose front edge runs along y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Flange"}));
+    // A sketch with a point 25 above the flange's front edge.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Near"}));
+    let point = run(&mut s, "sketch.point", json!({"point": [50, 25]}))["point"].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.dimension", json!({"entities": [point, {"edge": [50, 0, 0], "body": "Flange"}]}));
+    assert!((out["measured"].as_f64().unwrap() - 25.0).abs() < 1e-6, "the distance to the edge: {out}");
+    // The edge is projected into the sketch, and the dimension measures that projection.
+    let sk = sketch(&s);
+    assert_eq!(sk.links.len(), 1, "{:?}", sk.links);
+}

@@ -396,6 +396,15 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     }
                     _ => None,
                 })
+            }).or_else(|| {
+                // With nothing of the sketch under the cursor, a body's edge or vertex may be
+                // measured too (#7912): the command projects it into the sketch. An edge is a
+                // length of its own; a vertex waits for the entity it is measured against.
+                hits.iter().find_map(|h| match h {
+                    Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
+                    Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                    _ => None,
+                })
             });
             let fresh = |tool: &Tool, id: &String| !tool.picks.contains(id) && tool.picks.len() < 2;
             // Before a new dimension is under way, a click on an existing one edits its value;
