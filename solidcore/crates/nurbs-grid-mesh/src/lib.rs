@@ -40,6 +40,7 @@
 #![forbid(unsafe_code)]
 
 mod deviation;
+mod earcut;
 mod error;
 mod grid;
 mod planar;

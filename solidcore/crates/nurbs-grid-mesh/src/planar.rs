@@ -114,6 +114,61 @@ fn same_position(a: Uv, b: Uv, tolerance: f64) -> bool {
 }
 
 impl PlanarBody {
+    /// Triangulates one face with earcut, preserving every loop vertex.
+    fn earcut_face(
+        &self,
+        face: usize,
+        coordinates: &[Uv],
+        expected: f64,
+        area_epsilon: f64,
+    ) -> Option<Vec<[usize; 3]>> {
+        let outer = self.faces.get(face)?;
+        if outer.len() < 3 {
+            return None;
+        }
+        let mut data = Vec::new();
+        let mut map = Vec::new();
+        let mut hole_starts = Vec::new();
+        for (loop_index, loop_points) in self.loops(face).enumerate() {
+            if loop_index > 0 {
+                hole_starts.push(map.len());
+            }
+            for &index in loop_points {
+                let point = coordinates.get(index)?;
+                data.push(point.x);
+                data.push(point.y);
+                map.push(index);
+            }
+        }
+        let flat = crate::earcut::earcut(&data, &hole_starts, 2);
+        if flat.is_empty() {
+            return None;
+        }
+        let mut triangles = Vec::with_capacity(flat.len() / 3);
+        for triangle in flat.chunks_exact(3) {
+            let a = *map.get(triangle[0])?;
+            let b = *map.get(triangle[1])?;
+            let c = *map.get(triangle[2])?;
+            if a != b && b != c && c != a {
+                triangles.push([a, b, c]);
+            }
+        }
+        if triangles.len() < 3 {
+            return None;
+        }
+        let sq = |a: Uv, b: Uv, c: Uv| 0.5 * cross2(b.sub(a), c.sub(a)).abs();
+        let actual: f64 = triangles
+            .iter()
+            .map(|[a, b, c]| sq(coordinates[*a], coordinates[*b], coordinates[*c]))
+            .sum();
+        if actual.is_finite() && (actual - expected).abs() <= expected.abs() * 1.0e-9 + area_epsilon
+        {
+            Some(triangles)
+        } else {
+            None
+        }
+    }
+
     /// Triangulates one face, honoring its holes.
     pub fn face_triangles(&self, face: usize) -> Result<Vec<[usize; 3]>, String> {
         let outer = self
@@ -191,6 +246,15 @@ impl PlanarBody {
             holes.push(hole);
         }
 
+        let expected = outer_area
+            - holes
+                .iter()
+                .map(|hole| signed_area(hole, &uv).abs())
+                .sum::<f64>();
+        if let Some(triangles) = self.earcut_face(face, &coordinates, expected, area_epsilon) {
+            return Ok(triangles);
+        }
+
         let mut ring = outer.clone();
         for hole in &holes {
             ring = bridge_hole(&ring, hole, &holes, &uv, tolerance, face)?;
@@ -198,11 +262,6 @@ impl PlanarBody {
         let mut triangles = Vec::new();
         ear_clip(&ring, &uv, tolerance, area_epsilon, &mut triangles, face)?;
 
-        let expected = outer_area
-            - holes
-                .iter()
-                .map(|hole| signed_area(hole, &uv).abs())
-                .sum::<f64>();
         let actual = triangles
             .iter()
             .map(|[a, b, c]| 0.5 * cross2(uv(*b).sub(uv(*a)), uv(*c).sub(uv(*a))).abs())
@@ -578,6 +637,87 @@ mod tests {
             triangulate_planar(&points, &[0, 1, 2, 3], &[vec![4, 5, 6, 7]]).expect("triangulates");
         assert_eq!(triangles.len(), 8);
         assert!((area(&points, &triangles) - (400.0 - 64.0)).abs() < 1e-9);
+    }
+
+    fn polygon_area_2d(points: &[[f64; 3]], loop_indices: &[usize]) -> f64 {
+        let mut area = 0.0;
+        for i in 0..loop_indices.len() {
+            let a = points[loop_indices[i]];
+            let b = points[loop_indices[(i + 1) % loop_indices.len()]];
+            area += a[0] * b[1] - b[0] * a[1];
+        }
+        area * 0.5
+    }
+
+    #[test]
+    fn earcut_preserves_a_dense_hole_boundary() {
+        let mut points = vec![
+            [-10.0, -10.0, 0.0],
+            [10.0, -10.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [-10.0, 10.0, 0.0],
+        ];
+        let hole_start = points.len();
+        for i in 0..90 {
+            let angle = std::f64::consts::TAU * i as f64 / 90.0;
+            points.push([4.0 * angle.cos(), 4.0 * angle.sin(), 0.0]);
+        }
+        let hole: Vec<usize> = (hole_start..points.len()).collect();
+        let triangles = triangulate_planar(&points, &[0, 1, 2, 3], &[hole.clone()])
+            .expect("dense holed cap triangulates");
+        let expected = 400.0 - polygon_area_2d(&points, &hole).abs();
+        assert!((area(&points, &triangles).abs() - expected).abs() < 1.0e-9);
+
+        // Every hole boundary edge must be used by exactly one triangle. A fan that
+        // ignored the hole, or a bridge that dropped vertices, fails this.
+        let mut edge_uses = std::collections::BTreeMap::new();
+        for [a, b, c] in &triangles {
+            for (u, v) in [(*a, *b), (*b, *c), (*c, *a)] {
+                let key = if u < v { (u, v) } else { (v, u) };
+                *edge_uses.entry(key).or_insert(0) += 1;
+            }
+        }
+        for i in 0..hole.len() {
+            let a = hole[i];
+            let b = hole[(i + 1) % hole.len()];
+            let key = if a < b { (a, b) } else { (b, a) };
+            assert_eq!(
+                edge_uses.get(&key),
+                Some(&1),
+                "hole edge {key:?} is not preserved"
+            );
+        }
+    }
+
+    #[test]
+    fn earcut_handles_two_holes_and_keeps_them_open() {
+        let mut points = vec![
+            [-10.0, -10.0, 0.0],
+            [10.0, -10.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [-10.0, 10.0, 0.0],
+        ];
+        let mut holes = Vec::new();
+        for center in [[-4.0, 0.0], [4.0, 0.0]] {
+            let start = points.len();
+            for i in 0..24 {
+                let angle = std::f64::consts::TAU * i as f64 / 24.0;
+                points.push([
+                    center[0] + 2.5 * angle.cos(),
+                    center[1] + 2.5 * angle.sin(),
+                    0.0,
+                ]);
+            }
+            holes.push((start..points.len()).collect::<Vec<_>>());
+        }
+        let triangles =
+            triangulate_planar(&points, &[0, 1, 2, 3], &holes).expect("two-holed cap triangulates");
+        let expected = 400.0
+            - holes
+                .iter()
+                .map(|hole| polygon_area_2d(&points, hole).abs())
+                .sum::<f64>();
+        assert!((area(&points, &triangles).abs() - expected).abs() < 1.0e-9);
     }
 
     #[test]
