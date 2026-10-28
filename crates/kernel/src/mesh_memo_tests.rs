@@ -73,7 +73,8 @@ fn a_placed_copy_is_planned_as_its_original_moved() {
     let (angle, shift) = (0.7f64, Vec3::new(50.0, -20.0, 5.0));
     let (c, s) = (angle.cos(), angle.sin());
     let t = [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [shift.x, shift.y, shift.z, 1.]];
-    let copies: Vec<Body> = (0..2).map(|_| crate::transform(&part, shift, Vec3::ZERO, Vec3::Z, angle).unwrap().with_display_share(&share, t)).collect();
+    let copies: Vec<Body> =
+        (0..2).map(|_| crate::transform(&part, shift, Vec3::ZERO, Vec3::Z, angle).unwrap().with_display_share(&share, t)).collect();
     let tol = crate::MeshTolerance::display_of(part.size());
     let original = part.mesh_plan(&tol).unwrap().evaluate();
     for copy in &copies {

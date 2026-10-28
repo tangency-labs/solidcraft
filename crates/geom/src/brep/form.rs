@@ -8,7 +8,9 @@
 //! frame therefore has the same parameter at the same angle, whatever quarters it spans: a circle
 //! edge's form and its cylinder's form agree along it, so its pcurve is a straight line in (u, v).
 //! A form spans the quarters its interval needs (at most five for one turn), so an arc across the
-//! frame's x axis has a form like any other.
+//! frame's x axis has a form like any other. A face of five would cover part of its surface twice:
+//! its frame is turned about its axis first ([`turned`], [`turn_quarters`]), so that it starts on
+//! a quarter line and its form spans four.
 //!
 //! A circle or ellipse is the arcs (an ellipse scaled by its radii, which keeps it exact: its
 //! parameter is the eccentric angle). A cylinder or cone is the arcs times a degree-1 line along the
@@ -151,16 +153,13 @@ pub fn surface(s: &Surface, domain: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]
     surface_within(s, domain, 0.0)
 }
 
-/// [`surface`] for a face whose boundary lies within `tolerance` (mm) of its surface: where the
-/// domain ends within `tolerance` of a quarter's end (the angle that far along the widest circle
-/// of the face in that direction), the form ends there too. A face's box is the extent of its
-/// boundary's points ([`extent`]), which may run past a quarter's end by as much as its edges lie
-/// off the surface; the form then covers no quarter for that alone (a torus face of half a tube
-/// would otherwise go round the whole tube).
-pub fn surface_within(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+/// The angles `tolerance` (mm) makes along a face's two directions ([`surface_within`]): on the
+/// widest circle of the face about the axis (over `v`, the height of a cylinder or cone), and on
+/// a sphere's meridian or a torus's tube.
+fn reaches(s: &Surface, v: [f64; 2], tolerance: f64) -> (f64, f64) {
     // The angle `tolerance` makes on a circle of `radius`.
     let reach = |radius: f64| if tolerance > 0.0 && radius > 0.0 && radius.is_finite() { tolerance / radius } else { 0.0 };
-    let (reach_u, reach_v) = match s {
+    match s {
         Surface::Cylinder { radius, .. } => (reach(radius.abs()), 0.0),
         Surface::Cone { radius_at_origin, half_angle, .. } => {
             let slope = half_angle.tan();
@@ -169,7 +168,53 @@ pub fn surface_within(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Opt
         Surface::Sphere { radius, .. } => (reach(radius.abs()), reach(radius.abs())),
         Surface::Torus { major_radius, minor_radius, .. } => (reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())),
         _ => (0.0, 0.0),
+    }
+}
+
+/// How many quarters a cylinder, cone, sphere or torus face over `[u, v]` (its box on the label,
+/// as for [`surface_within`]) spans about the axis on its frame's quarter grid: four for a whole
+/// turn, up to five for less, when the face does not start on a quarter line and more than three
+/// quarters are left to it, so that its form runs past one turn (a NURBS that covers part of its
+/// surface twice). [`turned`] puts its start on a quarter line. `None` for another surface.
+pub fn turn_quarters(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<usize> {
+    if !matches!(s, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
+        return None;
+    }
+    Some(face_quarters(u, reaches(s, v, tolerance).0)?.0.1)
+}
+
+/// A cylinder, cone, sphere or torus with its frame turned by `angle` about its own axis (its x
+/// and y axes turned right-handed about z): the same surface, its angle parameter `angle` less at
+/// every point. `None` for another surface.
+pub fn turned(s: &Surface, angle: f64) -> Option<Surface> {
+    let turn = |f: &Frame| -> Option<Frame> {
+        let (o, x, _, z) = axes(f)?;
+        let (sin, cos) = angle.sin_cos();
+        let nx = x * cos + z.cross(x) * sin;
+        let ny = z.cross(nx);
+        Some(Frame { origin: [o.x, o.y, o.z], x_axis: [nx.x, nx.y, nx.z], y_axis: [ny.x, ny.y, ny.z] })
     };
+    Some(match s {
+        Surface::Cylinder { frame, radius } => Surface::Cylinder { frame: turn(frame)?, radius: *radius },
+        Surface::Cone { frame, radius_at_origin, half_angle } => {
+            Surface::Cone { frame: turn(frame)?, radius_at_origin: *radius_at_origin, half_angle: *half_angle }
+        }
+        Surface::Sphere { frame, radius } => Surface::Sphere { frame: turn(frame)?, radius: *radius },
+        Surface::Torus { frame, major_radius, minor_radius } => {
+            Surface::Torus { frame: turn(frame)?, major_radius: *major_radius, minor_radius: *minor_radius }
+        }
+        _ => return None,
+    })
+}
+
+/// [`surface`] for a face whose boundary lies within `tolerance` (mm) of its surface: where the
+/// domain ends within `tolerance` of a quarter's end (the angle that far along the widest circle
+/// of the face in that direction), the form ends there too. A face's box is the extent of its
+/// boundary's points ([`extent`]), which may run past a quarter's end by as much as its edges lie
+/// off the surface; the form then covers no quarter for that alone (a torus face of half a tube
+/// would otherwise go round the whole tube).
+pub fn surface_within(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+    let (reach_u, reach_v) = reaches(s, v, tolerance);
     let (grid, fu) = face_quarters(u, reach_u)?;
     let (u_knots, ring) = arcs(grid.0, grid.1);
     // The ring of arcs times a profile `(control, weight)` mapped to (radial, axial) about the

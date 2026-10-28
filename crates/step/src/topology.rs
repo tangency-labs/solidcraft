@@ -50,6 +50,7 @@ use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
 
+mod frames;
 mod seams;
 mod swept;
 
@@ -510,6 +511,8 @@ struct FaceB {
     outer: Option<usize>,
     /// The face's normal is the surface's natural normal.
     forward: bool,
+    /// A round face's box on its label (`brep::form::extent`), once measured.
+    extent: Option<[[f64; 2]; 2]>,
 }
 
 struct Builder<'b, 'a> {
@@ -869,7 +872,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
         }
         let i = index(self.faces.len())?;
-        self.faces.push(FaceB { step: id, surface, loops, outer, forward: sense });
+        self.faces.push(FaceB { step: id, surface, loops, outer, forward: sense, extent: None });
         Ok((i, sense))
     }
 
@@ -948,6 +951,9 @@ impl<'b, 'a> Builder<'b, 'a> {
         if self.sense_mismatches > 0 {
             notes.push(format!("{} edges run against their same_sense (read by their vertices)", self.sense_mismatches));
         }
+        // Round faces whose forms would run past one turn start on a quarter line of their
+        // frames, before their edges are labelled on them.
+        self.turn_frames()?;
         // Each edge's label and NURBS form: a circle about a revolved face's axis labelled on that
         // face's frame, so its form lies on the face's quarter grid.
         let mut frames: Vec<Vec<brep::Frame>> = vec![Vec::new(); self.edges.len()];
@@ -1234,6 +1240,23 @@ impl<'b, 'a> Builder<'b, 'a> {
         std::iter::once(outer).chain((0..face.loops.len()).filter(|l| *l != outer)).collect()
     }
 
+    /// A face's box on its label over its edge loops (`brep::form::extent`); `None` where the
+    /// boundary does not project onto it.
+    fn face_extent(&self, fi: usize) -> R<Option<[[f64; 2]; 2]>> {
+        let face = self.faces.get(fi).ok_or("face reference")?;
+        let mut boundary = Vec::with_capacity(face.loops.len());
+        for l in &face.loops {
+            let LoopB::Edges(es) = l else { continue };
+            let mut b = Vec::with_capacity(es.len());
+            for &(e, forward) in es {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                b.push((&edge.curve, edge.interval, forward));
+            }
+            boundary.push(b);
+        }
+        Ok(brep::form::extent(&face.surface, &boundary))
+    }
+
     /// The pcurves of a face's edge loops (in its edge-loop order), its domain, whether it was
     /// turned over, and its NURBS form. Picks the outer loop when the file
     /// marks none (or marks one that another loop encloses), and turns the face over when its
@@ -1258,16 +1281,11 @@ impl<'b, 'a> Builder<'b, 'a> {
         // boundary on its label; then every pcurve on the forms.
         let form = match brep::form::frame_of(&label) {
             Some(_) => {
-                let mut boundary = Vec::with_capacity(edge_loops.len());
-                for l in &edge_loops {
-                    let mut b = Vec::with_capacity(l.len());
-                    for &(e, forward) in l {
-                        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
-                        b.push((&edge.curve, edge.interval, forward));
-                    }
-                    boundary.push(b);
-                }
-                let extent = brep::form::extent(&label, &boundary).ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
+                let extent = match face.extent {
+                    Some(e) => Some(e),
+                    None => self.face_extent(fi)?,
+                };
+                let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
                 Some(brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
             }
             None => None,

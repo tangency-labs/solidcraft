@@ -2331,3 +2331,149 @@ fn a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read() {
     assert!(!back.is_surface(), "closed");
     assert!(rel(measure(&back).unwrap().volume, 250.0 * pi) < 1e-6, "{}", measure(&back).unwrap().volume);
 }
+
+/// A sector of a cylinder (radius 5, height 10) about z, `sweep` radians from `start` on the
+/// wall's frame: a pie slice of the cylinder, its two sides through the axis.
+fn cylinder_sector(start: f64, sweep: f64) -> String {
+    let (r, h) = (5.0, 10.0);
+    let p = |x: f64, y: f64, z: f64| format!("({x:.17},{y:.17},{z:.17})");
+    let (a0, a1) = (start, start + sweep);
+    let (c0, s0, c1, s1) = (a0.cos(), a0.sin(), a1.cos(), a1.sin());
+    let line = |id: u32, from: (f64, f64, f64), to: (f64, f64, f64)| {
+        let d = Vec3::new(to.0 - from.0, to.1 - from.1, to.2 - from.2);
+        let u = d.normalized().unwrap();
+        format!(
+            "#{id}=LINE('',#{},#{});\n#{}=CARTESIAN_POINT('',{});\n#{}=VECTOR('',#{},{:.17});\n#{}=DIRECTION('',{});\n",
+            id + 1,
+            id + 2,
+            id + 1,
+            p(from.0, from.1, from.2),
+            id + 2,
+            id + 3,
+            d.len(),
+            id + 3,
+            p(u.x, u.y, u.z)
+        )
+    };
+    let (a_0, a_1, p0, p1, q0, q1) =
+        ((0.0, 0.0, 0.0), (0.0, 0.0, h), (r * c0, r * s0, 0.0), (r * c0, r * s0, h), (r * c1, r * s1, 0.0), (r * c1, r * s1, h));
+    let mut lines = String::new();
+    for (id, from, to) in [(100, a_0, a_1), (110, a_0, p0), (120, a_0, q0), (130, a_1, p1), (140, a_1, q1), (150, p0, p1), (160, q0, q1)] {
+        lines.push_str(&line(id, from, to));
+    }
+    format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=DIRECTION('',(0.,0.,-1.));
+#5=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#6=AXIS2_PLACEMENT_3D('',#1,#4,#3);
+#7=CARTESIAN_POINT('',(0.,0.,{h:?}));
+#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);
+#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',{});
+#12=VERTEX_POINT('',#13);
+#13=CARTESIAN_POINT('',{});
+#14=VERTEX_POINT('',#15);
+#15=CARTESIAN_POINT('',{});
+#16=VERTEX_POINT('',#17);
+#17=CARTESIAN_POINT('',{});
+#18=VERTEX_POINT('',#19);
+#19=CARTESIAN_POINT('',{});
+#20=VERTEX_POINT('',#21);
+#21=CARTESIAN_POINT('',{});
+{lines}#30=CIRCLE('',#5,{r:?});
+#31=CIRCLE('',#8,{r:?});
+#40=EDGE_CURVE('',#10,#12,#100,.T.);
+#41=EDGE_CURVE('',#10,#14,#110,.T.);
+#42=EDGE_CURVE('',#10,#18,#120,.T.);
+#43=EDGE_CURVE('',#12,#16,#130,.T.);
+#44=EDGE_CURVE('',#12,#20,#140,.T.);
+#45=EDGE_CURVE('',#14,#16,#150,.T.);
+#46=EDGE_CURVE('',#18,#20,#160,.T.);
+#47=EDGE_CURVE('',#14,#18,#30,.T.);
+#48=EDGE_CURVE('',#16,#20,#31,.T.);
+#50=CYLINDRICAL_SURFACE('',#5,{r:?});
+#51=EDGE_LOOP('',(#200,#201,#202,#203));
+#200=ORIENTED_EDGE('',*,*,#47,.T.);
+#201=ORIENTED_EDGE('',*,*,#46,.T.);
+#202=ORIENTED_EDGE('',*,*,#48,.F.);
+#203=ORIENTED_EDGE('',*,*,#45,.F.);
+#52=FACE_OUTER_BOUND('',#51,.T.);
+#53=ADVANCED_FACE('Wall',(#52),#50,.T.);
+#54=PLANE('',#6);
+#55=EDGE_LOOP('',(#204,#205,#206));
+#204=ORIENTED_EDGE('',*,*,#42,.T.);
+#205=ORIENTED_EDGE('',*,*,#47,.F.);
+#206=ORIENTED_EDGE('',*,*,#41,.F.);
+#56=FACE_OUTER_BOUND('',#55,.T.);
+#57=ADVANCED_FACE('Bottom',(#56),#54,.T.);
+#58=PLANE('',#8);
+#59=EDGE_LOOP('',(#207,#208,#209));
+#207=ORIENTED_EDGE('',*,*,#43,.T.);
+#208=ORIENTED_EDGE('',*,*,#48,.T.);
+#209=ORIENTED_EDGE('',*,*,#44,.F.);
+#60=FACE_OUTER_BOUND('',#59,.T.);
+#61=ADVANCED_FACE('Top',(#60),#58,.T.);
+#62=DIRECTION('',{});
+#63=AXIS2_PLACEMENT_3D('',#1,#62,#2);
+#64=PLANE('',#63);
+#65=EDGE_LOOP('',(#210,#211,#212,#213));
+#210=ORIENTED_EDGE('',*,*,#41,.T.);
+#211=ORIENTED_EDGE('',*,*,#45,.T.);
+#212=ORIENTED_EDGE('',*,*,#43,.F.);
+#213=ORIENTED_EDGE('',*,*,#40,.F.);
+#66=FACE_OUTER_BOUND('',#65,.T.);
+#67=ADVANCED_FACE('Start',(#66),#64,.T.);
+#68=DIRECTION('',{});
+#69=AXIS2_PLACEMENT_3D('',#1,#68,#2);
+#70=PLANE('',#69);
+#71=EDGE_LOOP('',(#214,#215,#216,#217));
+#214=ORIENTED_EDGE('',*,*,#40,.T.);
+#215=ORIENTED_EDGE('',*,*,#44,.T.);
+#216=ORIENTED_EDGE('',*,*,#46,.F.);
+#217=ORIENTED_EDGE('',*,*,#42,.F.);
+#72=FACE_OUTER_BOUND('',#71,.T.);
+#73=ADVANCED_FACE('End',(#72),#70,.T.);
+#80=CLOSED_SHELL('',(#53,#57,#61,#67,#73));
+#81=MANIFOLD_SOLID_BREP('Sector',#80);
+#82=SHAPE_REPRESENTATION('',(#81),$);
+{TAIL}",
+        p(a_0.0, a_0.1, a_0.2),
+        p(a_1.0, a_1.1, a_1.2),
+        p(p0.0, p0.1, p0.2),
+        p(p1.0, p1.1, p1.2),
+        p(q0.0, q0.1, q0.2),
+        p(q1.0, q1.1, q1.2),
+        p(s0, -c0, 0.0),
+        p(-s1, c1, 0.0),
+    )
+}
+
+/// A round face of less than one turn that does not start on a quarter line of its frame (a
+/// 300° sector of a cylinder from 75°, or 350° from 200°) needed a fifth quarter on the frame's quarter grid, so its
+/// form ran past one turn and SMLib refused the solid (it came in as surfaces, an edge "12 mm off
+/// the face's surface"). Its frame is turned about its axis to start on a quarter line: the same
+/// cylinder, a form of four quarters, and the solid with its exact volume and area. One that fits
+/// in four quarters as it is (300° from 37°) keeps its frame.
+#[test]
+fn a_round_face_off_its_frames_quarter_lines_is_formed_within_one_turn() {
+    for (start, sweep) in
+        [(75f64.to_radians(), 300f64.to_radians()), (37f64.to_radians(), 300f64.to_radians()), (200f64.to_radians(), 350f64.to_radians())]
+    {
+        let imp = step_import(&cylinder_sector(start, sweep)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        let b = &imp.bodies[0];
+        assert!(b.closed && b.refused.is_none(), "{start} {sweep}: {:?} {:?}", b.refused, imp.warnings);
+        let wall = b.face_origin.iter().position(|f| *f == 53).unwrap();
+        let Some(solidcraft_geom::brep::Surface::RationalSpline { u_knots, .. }) = &b.body.record().faces[wall].nurbs else {
+            panic!("the wall's form")
+        };
+        assert!(u_knots[u_knots.len() - 1] - u_knots[0] <= 4.0, "{start}: the wall's form spans {u_knots:?}");
+        let m = measure(&b.body).unwrap();
+        let (volume, area) = (0.5 * sweep * 25.0 * 10.0, sweep * 25.0 + sweep * 5.0 * 10.0 + 2.0 * 5.0 * 10.0);
+        assert!(rel(m.volume, volume) < 1e-6, "{start}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-6, "{start}: area {} vs {area}", m.area);
+    }
+}
