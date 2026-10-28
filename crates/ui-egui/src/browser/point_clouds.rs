@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, byte, label_color};
 use solidcraft_engine::view::POINT_CLOUDS_FOLDER;
 
-use super::{Actions, Row, draw_row, is_open, panel_pos, toggle, toggle_folder};
+use super::{Actions, Row, draw_row, is_open, panel_pos, rows_start_open, toggle, toggle_folder};
 use crate::SolveApp;
 use crate::context_menu::{Item, Target};
 use crate::ui_kit;
@@ -189,7 +189,9 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         return;
     }
     let key = "point_clouds";
-    let open = is_open(app, key, true);
+    // Like the other folders, it starts closed unless the Browser's rows start open.
+    let start_open = rows_start_open(app);
+    let open = is_open(app, key, start_open);
     // The folder's eye is its own: each cloud keeps its eye while the folder hides them all.
     let shown = !app.session.folder_hidden(POINT_CLOUDS_FOLDER);
     let r = draw_row(
@@ -198,7 +200,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         &Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Point Clouds", dim: !shown, ..Default::default() },
     );
     if r.fold || r.clicked {
-        toggle(app, key, true);
+        toggle(app, key, start_open);
     }
     if r.eye {
         toggle_folder(app, POINT_CLOUDS_FOLDER);

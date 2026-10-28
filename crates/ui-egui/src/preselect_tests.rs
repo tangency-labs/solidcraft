@@ -2796,6 +2796,8 @@ fn combine_takes_bodies_clicked_in_the_browser_in(layout: &str, control: bool) {
     h.frames(2);
     h.app.run("solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
     h.app.run("solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "body_name": "Cutter"})).unwrap();
+    // The Bodies folder starts closed.
+    h.app.tree.expanded.insert("c0/bodies".into());
     h.app.session.selection.clear();
     h.app.start("solid.combine");
     h.frames(2);

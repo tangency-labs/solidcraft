@@ -251,6 +251,16 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             }
                         });
                     });
+                    // Whether a pick in the 3D view finds its body in the Browser (#3005).
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::browser_follows_view(app, ui).on_hover_text(app.tr("prefs.browser_follows_view_note"));
+                        crate::scenario::publish_target("prefs:browser_follows_view", check.rect);
+                    });
+                    // Whether the Browser's placements and folders start open.
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::browser_rows_start_open(app, ui).on_hover_text(app.tr("prefs.browser_rows_start_open_note"));
+                        crate::scenario::publish_target("prefs:browser_rows_start_open", check.rect);
+                    });
                     // Where command dialogs open (#6707).
                     ui_kit::row(ui, app.tr("prefs.dialogs"), |ui| {
                         use crate::dialog_column::DialogPlace;

@@ -229,9 +229,9 @@ mod tests {
         let r = h.app.run("pointcloud.insert", serde_json::json!({"path": path.to_string_lossy(), "point_size": 3})).unwrap();
         let id = r["cloud"].as_u64().unwrap();
         h.app.run("browser.collapse_all", serde_json::json!({})).unwrap();
-        assert!(!crate::browser::is_open(&h.app, "point_clouds", true));
+        assert!(!crate::browser::is_open(&h.app, "point_clouds", false), "it starts closed, and Collapse All keeps it so");
         h.app.run("browser.expand_all", serde_json::json!({})).unwrap();
-        assert!(crate::browser::is_open(&h.app, "point_clouds", true));
+        assert!(crate::browser::is_open(&h.app, "point_clouds", false));
         let first = gpu_clouds(&h.app, &h.ctx);
         assert_eq!(first.len(), 1);
         let size = solidcraft_gpu::view::DOT_SIZE;

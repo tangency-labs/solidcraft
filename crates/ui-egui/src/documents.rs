@@ -188,6 +188,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     }
     app.ui.ribbon_context = None;
     app.ui.tab = "MODEL".into();
+    crate::browser::forget_found(app);
     crate::workspace::sync_context(app);
     out
 }

@@ -22,6 +22,8 @@ fn harness() -> Harness {
     h.app
         .run("joint.create", json!({"type": "rigid", "name": "Glue", "a": {"occurrence": "A:1", "face": [20, 10, 5]}, "b": {"occurrence": "C:1", "face": [60, 10, 5]}}))
         .unwrap();
+    // The Joints folder starts closed.
+    h.app.tree.expanded.insert("c0/joints".into());
     h.frames(3);
     h
 }
@@ -134,6 +136,7 @@ mod delete {
                 )
                 .unwrap();
         }
+        h.app.tree.expanded.insert("c0/joints".into());
         h.frames(3);
         h
     }

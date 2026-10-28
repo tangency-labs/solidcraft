@@ -1,0 +1,50 @@
+{
+  "en": {
+    "prefs.browser_follows_view": "Browser follows the 3D view",
+    "prefs.browser_follows_view_note": "A body picked in the 3D view opens the Browser down to its row, and the rows above what is selected or under the pointer are marked. When off, Find in Browser in a body's menu finds it there.",
+    "prefs.browser_rows_start_open": "Browser rows start open",
+    "prefs.browser_rows_start_open_note": "Placements and folders in the Browser start open, as in earlier versions. When off, they start closed: a design with many components shows its top-level rows, and each opens with its arrow, Find in Browser or Expand All."
+  },
+  "ar": {
+    "prefs.browser_follows_view": "المستعرض يتبع العرض ثلاثي الأبعاد",
+    "prefs.browser_follows_view_note": "عند اختيار جسم في العرض ثلاثي الأبعاد، يُفتح المستعرض حتى صفّه، وتُعلَّم الصفوف التي فوق العنصر المحدد أو الموجود تحت المؤشر. عند إيقافه، يجد «البحث في المستعرض» في قائمة الجسم الجسمَ هناك.",
+    "prefs.browser_rows_start_open": "صفوف المستعرض تبدأ مفتوحة",
+    "prefs.browser_rows_start_open_note": "تبدأ المواضع والمجلدات في المستعرض مفتوحة، كما في الإصدارات السابقة. عند إيقافه تبدأ مغلقة: يعرض التصميم الذي يضم مكونات كثيرة صفوفه العليا، ويُفتح كل صف بسهمه أو بـ«البحث في المستعرض» أو «توسيع الكل»."
+  },
+  "de": {
+    "prefs.browser_follows_view": "Browser folgt der 3D-Ansicht",
+    "prefs.browser_follows_view_note": "Ein in der 3D-Ansicht gewählter Körper öffnet den Browser bis zu seiner Zeile, und die Zeilen über dem Gewählten oder dem Element unter dem Zeiger werden markiert. Ist es aus, findet „Im Browser suchen“ im Menü eines Körpers ihn dort.",
+    "prefs.browser_rows_start_open": "Browser-Zeilen beginnen geöffnet",
+    "prefs.browser_rows_start_open_note": "Platzierungen und Ordner im Browser beginnen geöffnet, wie in früheren Versionen. Ist es aus, beginnen sie geschlossen: Ein Entwurf mit vielen Komponenten zeigt seine obersten Zeilen, und jede öffnet sich mit ihrem Pfeil, „Im Browser suchen“ oder „Alle ausklappen“."
+  },
+  "he": {
+    "prefs.browser_follows_view": "עץ התכן עוקב אחר התצוגה התלת־ממדית",
+    "prefs.browser_follows_view_note": "גוף שנבחר בתצוגה התלת־ממדית פותח את עץ התכן עד לשורה שלו, והשורות שמעל הפריט הנבחר או הפריט שמתחת לסמן מסומנות. כשהאפשרות כבויה, „איתור בעץ התכן” בתפריט של גוף מאתר אותו שם.",
+    "prefs.browser_rows_start_open": "שורות עץ התכן נפתחות מראש",
+    "prefs.browser_rows_start_open_note": "מיקומים ותיקיות בעץ התכן מוצגים פתוחים, כמו בגרסאות קודמות. כשהאפשרות כבויה הם מוצגים סגורים: תכן עם רכיבים רבים מציג את השורות העליונות שלו, וכל שורה נפתחת בחץ שלה, ב„איתור בעץ התכן” או ב„הרחבת הכול”."
+  },
+  "ja": {
+    "prefs.browser_follows_view": "ブラウザーを3Dビューに追従させる",
+    "prefs.browser_follows_view_note": "3Dビューでボディを選ぶと、ブラウザーがその行まで開き、選択中またはポインター下の項目の上位の行に印が付きます。オフのときは、ボディのメニューの「ブラウザで検索」でブラウザー内のボディを見つけます。",
+    "prefs.browser_rows_start_open": "ブラウザーの行を開いた状態で始める",
+    "prefs.browser_rows_start_open_note": "ブラウザーの配置とフォルダーを、以前のバージョンと同じく開いた状態で表示します。オフのときは閉じた状態で始まり、多数のコンポーネントを含むデザインでは最上位の行だけが表示されます。各行は矢印、「ブラウザで検索」または「すべて展開」で開きます。"
+  },
+  "ko": {
+    "prefs.browser_follows_view": "브라우저가 3D 뷰를 따라가기",
+    "prefs.browser_follows_view_note": "3D 뷰에서 바디를 고르면 브라우저가 그 행까지 열리고, 선택한 항목이나 포인터 아래 항목의 상위 행이 표시됩니다. 끄면 바디 메뉴의 '브라우저에서 찾기'로 브라우저에서 찾습니다.",
+    "prefs.browser_rows_start_open": "브라우저 행을 펼친 상태로 시작",
+    "prefs.browser_rows_start_open_note": "브라우저의 배치와 폴더가 이전 버전처럼 펼친 상태로 시작합니다. 끄면 접힌 상태로 시작하여, 컴포넌트가 많은 디자인은 최상위 행만 보여 주고, 각 행은 화살표, '브라우저에서 찾기' 또는 '모두 펼치기'로 엽니다."
+  },
+  "vi": {
+    "prefs.browser_follows_view": "Cây thư mục đi theo khung nhìn 3D",
+    "prefs.browser_follows_view_note": "Khi chọn một thân khối trong khung nhìn 3D, cây thư mục mở xuống tới dòng của nó, và các dòng phía trên mục đang chọn hoặc mục dưới con trỏ được đánh dấu. Khi tắt, dùng “Tìm trong cây đối tượng” trong menu của thân khối để tìm nó trong cây.",
+    "prefs.browser_rows_start_open": "Các dòng trong cây thư mục mở sẵn",
+    "prefs.browser_rows_start_open_note": "Vị trí đặt và thư mục trong cây thư mục được mở sẵn, như ở các phiên bản trước. Khi tắt, chúng bắt đầu ở trạng thái đóng: thiết kế có nhiều thành phần chỉ hiện các dòng cấp trên cùng, và mỗi dòng mở bằng mũi tên của nó, “Tìm trong cây đối tượng” hoặc “Mở rộng tất cả”."
+  },
+  "zh": {
+    "prefs.browser_follows_view": "浏览器跟随 3D 视图",
+    "prefs.browser_follows_view_note": "在 3D 视图中选取实体时，浏览器会展开到该实体所在的行，并标记所选项或指针下项目的上级行。关闭时，可用实体菜单中的“在浏览器中查找”在浏览器中找到它。",
+    "prefs.browser_rows_start_open": "浏览器中的行默认展开",
+    "prefs.browser_rows_start_open_note": "浏览器中的放置和文件夹默认展开，与早期版本相同。关闭时它们默认折叠：包含大量组件的设计只显示顶层行，每一行可通过其箭头、“在浏览器中查找”或“全部展开”打开。"
+  }
+}

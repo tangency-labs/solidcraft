@@ -248,9 +248,15 @@
   }
  },
  {
+  "note": "The placement's lone body sits straight under it, with no Bodies row (#4217)."
+ },
+ {
   "expect": {
    "browser_has": [
     "Body3"
+   ],
+   "browser_lacks": [
+    "Body2"
    ],
    "browser_selected": false
   }
@@ -269,13 +275,46 @@
   }
  },
  {
-  "note": "Folders that start open close with their arrow, and open again."
+  "note": "Every other folder starts closed too: its arrow opens it, and closes it again."
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Body2"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Bodies"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body2"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Body1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Group1 (1)"
+  }
  },
  {
   "expect": {
    "browser_has": [
     "Body1"
-   ]
+   ],
+   "browser_selected": false
   }
  },
  {
@@ -293,35 +332,22 @@
  },
  {
   "click": {
-   "chevron": "Group1 (1)"
+   "chevron": "Bodies"
   }
  },
  {
   "expect": {
-   "browser_has": [
-    "Body1"
+   "browser_lacks": [
+    "Body2"
    ],
    "browser_selected": false
-  }
- },
- {
-  "expect": {
-   "browser_has": [
-    "Sketch1"
-   ]
-  }
- },
- {
-  "click": {
-   "chevron": "Sketches"
   }
  },
  {
   "expect": {
    "browser_lacks": [
     "Sketch1"
-   ],
-   "browser_selected": false
+   ]
   }
  },
  {
@@ -338,10 +364,36 @@
   }
  },
  {
+  "click": {
+   "chevron": "Sketches"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Sketch1"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Plane1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Construction"
+  }
+ },
+ {
   "expect": {
    "browser_has": [
     "Plane1"
-   ]
+   ],
+   "browser_selected": false
   }
  },
  {
@@ -358,21 +410,8 @@
   }
  },
  {
-  "click": {
-   "chevron": "Construction"
-  }
- },
- {
   "expect": {
-   "browser_has": [
-    "Plane1"
-   ],
-   "browser_selected": false
-  }
- },
- {
-  "expect": {
-   "browser_has": [
+   "browser_lacks": [
     "Canvas1"
    ]
   }
@@ -384,7 +423,7 @@
  },
  {
   "expect": {
-   "browser_lacks": [
+   "browser_has": [
     "Canvas1"
    ],
    "browser_selected": false
@@ -397,41 +436,8 @@
  },
  {
   "expect": {
-   "browser_has": [
-    "Canvas1"
-   ],
-   "browser_selected": false
-  }
- },
- {
-  "expect": {
-   "browser_has": [
-    "Body2"
-   ]
-  }
- },
- {
-  "click": {
-   "chevron": "Bodies"
-  }
- },
- {
-  "expect": {
    "browser_lacks": [
-    "Body2"
-   ],
-   "browser_selected": false
-  }
- },
- {
-  "click": {
-   "chevron": "Bodies"
-  }
- },
- {
-  "expect": {
-   "browser_has": [
-    "Body2"
+    "Canvas1"
    ],
    "browser_selected": false
   }
@@ -482,7 +488,7 @@
  },
  {
   "expect": {
-   "browser_lacks": [
+   "browser_has": [
     "Sketch1"
    ]
   }
@@ -494,7 +500,7 @@
  },
  {
   "expect": {
-   "browser_has": [
+   "browser_lacks": [
     "Sketch1"
    ]
   }
