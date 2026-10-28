@@ -1704,6 +1704,19 @@ impl SolveApp {
         {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
+        if id == "sketch.project"
+            && self.preferences.project_options_dialog
+            && let Some(mut d) = dialogs::Dialog::for_command(self, id)
+        {
+            if let Some(sketch) = finished_sketch {
+                d.take_sketch_profile(&self.session, sketch);
+            }
+            if d.wants_picks() && !self.session.selection.is_empty() {
+                let _ = self.session.execute("select.clear", &json!({}));
+            }
+            self.dialog = Some(d);
+            return;
+        }
         if let Some(mut t) = tools::Tool::for_command(id) {
             let state = self.session.world_state();
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);

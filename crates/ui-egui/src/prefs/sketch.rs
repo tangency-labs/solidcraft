@@ -11,6 +11,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if ui_kit::checkbox(ui, crate::i18n::tr_label("Project face edges into new sketches"), &mut auto).changed() {
             let _ = app.run("sketch.auto_project", json!({"value": auto}));
         }
+        ui_kit::checkbox(ui, app.tr("prefs.project_options_dialog"), &mut app.preferences.project_options_dialog)
+            .on_hover_text(app.tr("prefs.project_options_dialog_note"));
         ui_kit::checkbox(ui, crate::i18n::tr_label("Pressing a tool's shortcut again switches its mode"), &mut app.preferences.shortcut_cycles_modes)
             .on_hover_text(crate::i18n::tr_label(
                 "Before the first point, pressing a sketch tool's shortcut again steps through its creation modes. Off: it starts the tool again.",

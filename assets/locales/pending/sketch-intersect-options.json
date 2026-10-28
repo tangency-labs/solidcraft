@@ -1,27 +1,42 @@
 {
   "en": {
+    "prefs.project_options_dialog": "Project options dialog",
+    "prefs.project_options_dialog_note": "On: choose Geometry or Bodies and Projection Link before projecting. Off: keep the previous direct-pick workflow.",
     "ui.sketch_intersect_geometry": "Geometry",
     "ui.sketch_intersect_selection_filter": "Selection Filter",
-    "ui.sketch_intersect_projection_link": "Projection Link"
+    "ui.sketch_intersect_projection_link": "Projection Link",
+    "ui.sketch_project_geometry": "Geometry"
   },
   "ja": {
+    "prefs.project_options_dialog": "Projectのオプションダイアログ",
+    "prefs.project_options_dialog_note": "オン: 投影前に「ジオメトリ」または「ボディ」と「投影リンク」を選択します。オフ: 従来の直接選択方式を使用します。",
     "ui.sketch_intersect_geometry": "ジオメトリ",
     "ui.sketch_intersect_selection_filter": "選択フィルター",
-    "ui.sketch_intersect_projection_link": "投影リンク"
+    "ui.sketch_intersect_projection_link": "投影リンク",
+    "ui.sketch_project_geometry": "ジオメトリ"
   },
   "zh": {
+    "prefs.project_options_dialog": "Project 选项对话框",
+    "prefs.project_options_dialog_note": "开启：投影前选择“几何体”或“实体”以及“投影链接”。关闭：保留原有的直接选择工作流。",
     "ui.sketch_intersect_geometry": "几何体",
     "ui.sketch_intersect_selection_filter": "选择过滤器",
-    "ui.sketch_intersect_projection_link": "投影链接"
+    "ui.sketch_intersect_projection_link": "投影链接",
+    "ui.sketch_project_geometry": "几何体"
   },
   "de": {
+    "prefs.project_options_dialog": "Project-Optionendialog",
+    "prefs.project_options_dialog_note": "Ein: Vor dem Projizieren Geometrie oder Körper und die Projektionsverknüpfung auswählen. Aus: Den bisherigen Direktwahl-Ablauf beibehalten.",
     "ui.sketch_intersect_geometry": "Geometrie",
     "ui.sketch_intersect_selection_filter": "Auswahlfilter",
-    "ui.sketch_intersect_projection_link": "Projektionsverknüpfung"
+    "ui.sketch_intersect_projection_link": "Projektionsverknüpfung",
+    "ui.sketch_project_geometry": "Geometrie"
   },
   "ko": {
+    "prefs.project_options_dialog": "Project 옵션 대화상자",
+    "prefs.project_options_dialog_note": "켜기: 투영 전에 지오메트리 또는 바디와 투영 링크를 선택합니다. 끄기: 기존 직접 선택 작업 흐름을 유지합니다.",
     "ui.sketch_intersect_geometry": "형상",
     "ui.sketch_intersect_selection_filter": "선택 필터",
-    "ui.sketch_intersect_projection_link": "투영 링크"
+    "ui.sketch_intersect_projection_link": "투영 링크",
+    "ui.sketch_project_geometry": "형상"
   }
 }

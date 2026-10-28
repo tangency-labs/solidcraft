@@ -21,7 +21,9 @@ macro_rules! refs_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(concat!(refs_doc!(), created_doc!())),
+    CommandSpec::new("sketch.project", "Project", project_cmd).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).params(
+        concat!(refs_doc!(), "; projection_link?: bool (default true)", created_doc!()),
+    ),
     CommandSpec::new("sketch.intersect", "Intersect", intersect_cmd).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).params(
         concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true)", created_doc!()),
     ),
@@ -329,7 +331,7 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
             match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
                 Ok(Some(l)) => {
                     let mut result = link_json(sk, &l);
-                    if kind == LinkKind::Intersect && !projection_link {
+                    if !projection_link {
                         result["link"] = Value::Null;
                         sk.break_link(&l)?;
                     }
@@ -353,7 +355,12 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
 }
 
 fn project_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    run_links(s, p, "sketch.project", LinkKind::Project, true)
+    let projection_link = match p.get("projection_link") {
+        None => true,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad("sketch.project", "`projection_link` must be a boolean")),
+    };
+    run_links(s, p, "sketch.project", LinkKind::Project, projection_link)
 }
 
 fn intersect_cmd(s: &mut Session, p: &Value) -> Result<Value> {

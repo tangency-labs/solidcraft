@@ -97,6 +97,8 @@ const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
+const PROJECT_GEOMETRY: Accept =
+    EDGES | FACES | selection::VERTICES | PLANES | AXES | selection::SKETCH_LINES | selection::EXTERNAL_POINTS | selection::ORIGIN;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
 
@@ -389,6 +391,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// mirror and move (`sketch_modify_ui`).
             SketchModify(crate::sketch_modify_ui::Mod),
             SketchIntersect {
+                bodies: bool,
+                projection_link: bool,
+            },
+            SketchProject {
                 bodies: bool,
                 projection_link: bool,
             },
@@ -806,6 +812,13 @@ impl Dialog {
                 Dialog::new(
                     Kind::SketchIntersect { bodies, projection_link: true },
                     vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { FACES }, true)],
+                )
+            }
+            "sketch.project" => {
+                let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
+                Dialog::new(
+                    Kind::SketchProject { bodies, projection_link: true },
+                    vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
                 )
             }
             "solid.extrude" => Dialog::new(
@@ -2134,6 +2147,7 @@ fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
         Kind::SketchIntersect { .. } => "INTERSECT",
+        Kind::SketchProject { .. } => "PROJECT",
         Kind::Extrude { .. } => "EXTRUDE",
         Kind::Revolve { .. } => "REVOLVE",
         Kind::Fillet { chamfer: false, .. } => "FILLET",
@@ -4775,6 +4789,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link}))
+        }
+        Kind::SketchProject { projection_link, .. } => {
+            need(0, "geometry or bodies")?;
+            let refs =
+                crate::tools::projection_preselection(sels(d, 0)).ok_or_else(|| "select geometry or bodies that can be projected".to_string())?;
+            ("sketch.project", json!({"refs": refs, "projection_link": projection_link}))
         }
         Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),

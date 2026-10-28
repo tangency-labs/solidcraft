@@ -217,6 +217,20 @@ fn project_edges_bodies_sketches_and_origin() {
 }
 
 #[test]
+fn project_whole_body_can_create_unlinked_geometry() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    let sketch = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    let body = s.model.state().bodies[0].name.clone();
+    let r = run(&mut s, "sketch.project", json!({"refs":[{"body":body}],"projection_link":false}));
+    assert_eq!(r["links"][0]["link"], Value::Null);
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.links.is_empty());
+    assert_eq!(sk.curves.len(), 4);
+    assert!(s.execute("sketch.project", &json!({"refs":[{"body":body}],"projection_link":"false"})).is_err());
+}
+
+#[test]
 fn intersect_cuts_a_body_with_the_sketch_plane() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 7, "height": 30}));

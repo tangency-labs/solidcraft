@@ -136,6 +136,48 @@ fn intersect_dialog_filters_faces_or_whole_bodies_and_controls_projection_link()
 }
 
 #[test]
+fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Plate".into() }];
+    h.app.start("sketch.project");
+    h.frames(4);
+
+    let d = h.app.dialog.as_ref().expect("Project opens an options dialog");
+    assert!(matches!(d.kind, Kind::SketchProject { bodies: true, projection_link: true }));
+    assert_eq!(d.inputs[0].accept, super::BODIES);
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Plate".into() }]);
+    assert!(scenario::handle_at("dialog:Selection Filter").is_some());
+    assert!(scenario::rect_of("dialog:row:Projection Link").is_some());
+
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
+    assert!(scenario::handle_at("dialog:Selection Filter:Geometry").is_some());
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Geometry"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].accept, super::PROJECT_GEOMETRY);
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty());
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Selection Filter:Bodies"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Projection Link"}})).unwrap();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { projection_link: false, .. }));
+
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: "Plate".into() }];
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"body":"Plate"}],"projection_link":false}))]);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none());
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = h.app.session.world_state();
+    let sketch = &state.sketch(sketch).unwrap().sketch;
+    assert!(sketch.links.is_empty());
+    assert!(!sketch.curves.is_empty());
+}
+
+#[test]
 fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
     for command in ["sketch.offset", "sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {
         let mut h = fixture();
