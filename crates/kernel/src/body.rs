@@ -441,15 +441,11 @@ impl SurfaceKind {
 
 impl Body {
     /// A body with `record` and nothing else set.
-    fn bare(record: Brep, smlib: Option<solidcraft_smlib::Brep>, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
+    fn bare(record: Brep, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
         let size = span_of(&record);
-        let cell = std::sync::OnceLock::new();
-        if let Some(handle) = smlib {
-            let _ = cell.set(Ok(handle));
-        }
         Body {
             record: std::sync::Arc::new(record),
-            smlib: std::sync::Arc::new(cell),
+            smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             mesh,
@@ -468,18 +464,21 @@ impl Body {
     /// structure (budgets, references, loops, regions, canonical order). Its faces face as the
     /// record says.
     pub(crate) fn from_record(record: Brep) -> Result<Body> {
-        Ok(Body::bare(solid_record(record)?, None, None))
+        Ok(Body::bare(solid_record(record)?, None))
     }
 
-    /// The body of an SMLib B-rep and its record (SMLib's export, in canonical order), keeping
-    /// the SMLib body so later operations need not build it again.
-    pub(crate) fn from_smlib_record(handle: solidcraft_smlib::Brep, record: Brep) -> Result<Body> {
-        Ok(Body::bare(solid_record(record)?, Some(handle), None))
+    /// The body of SMLib's export of a B-rep (its record, in canonical order). The SMLib body
+    /// the export came from is not kept: the export is not exact to the bit (its parameters,
+    /// radians, pcurves), so that body measures and operates a little differently from the
+    /// record's import, and a body evaluated afresh would then differ from the same body read
+    /// back from a file. Every operation starts from the record's import ([`Body::smlib`]).
+    pub(crate) fn from_smlib_record(record: Brep) -> Result<Body> {
+        Ok(Body::bare(solid_record(record)?, None))
     }
 
     /// A mesh body of `mesh`.
     pub(crate) fn of_mesh(mesh: crate::meshbody::TriMesh) -> Body {
-        Body::bare(empty_record(), None, Some(std::sync::Arc::new(mesh)))
+        Body::bare(empty_record(), Some(std::sync::Arc::new(mesh)))
     }
 
     /// The body's record: faces, edges and vertices in the body's own order. Empty for a mesh body.
