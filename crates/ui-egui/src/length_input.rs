@@ -108,7 +108,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
             lengths
         }
         D::Shell { thickness } => vec![thickness],
-        D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
+        D::PatternRect { spacing, spacing2, to_offset, to_offset2, .. } => vec![spacing, spacing2, to_offset, to_offset2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
         D::MeshConvert { tolerance } => vec![tolerance],

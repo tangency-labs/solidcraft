@@ -1294,3 +1294,28 @@ fn rectangular_pattern_of_a_join_on_a_hollow_part_copies_the_whole_boss() {
     );
     assert!(rel(volume(&mut s), 79500.0) < 1e-6, "patterned copy lost material");
 }
+
+/// To Object as an extrude's (#7780): a face running along the direction (the stop's top) is
+/// reached where it begins, not at the pick on it, and To Offset moves the end, negative short.
+#[test]
+fn rectangular_to_object_face_along_the_direction_and_offset() {
+    let mut s = feature_pattern_plate();
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5,"corner":[100,130,0],"name":"Stop","body_name":"Stop"}));
+    // Picked far along the top (x = 115): the copies still end at its near edge, x = 100.
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[115,135,5],"name":"Pattern"}),
+    );
+    for x in [60.0, 80.0, 100.0] {
+        assert!(hole_at(&s, x, 60.0), "hole at x = {x}");
+    }
+    // 10 mm short of it: 30 mm in two steps.
+    run(&mut s, "timeline.redefine", json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[115,135,5],"to_offset1":"-10 mm"}}));
+    for x in [60.0, 75.0, 90.0] {
+        assert!(hole_at(&s, x, 60.0), "hole at x = {x} with the offset");
+    }
+    assert!(!hole_at(&s, 100.0, 60.0));
+    assert!(s.doc.to_json().contains("\"to_offset1\""));
+}
