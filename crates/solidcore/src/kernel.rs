@@ -301,6 +301,8 @@ pub struct UpstreamFixes {
     pub sphere_small_circle_not_touching: bool,
     /// `SmAdvSurfaceIntersector::FindInteriorCurves` seeds a Newton search for isolated tangential contact points (zeros of `S1 - S2` with parallel normals, 4x4 system with the exact Jacobian) from the leaf pairs it cannot trace (normals within 5 or 2 degrees, no local intersection), plus the poles, and adds each contact with a numerically zero gap and normals within 1e-4 rad that is not on a curve already found as a degenerate `TOUCHING` curve (WR-74, #394; the fork's tangency-labs/smlib@c26edbc). Higher-order contacts (equal curvature) are not found.
     pub ssi_tangent_contact_points: bool,
+    /// `SmSurfaceIntersector` traces an open tangent curve once: `AddStartPoint` keeps one start point per cluster of tangent boundary start points (`IsSameTangentCluster`), a finished trace removes the clusters at its ends (`DoIntersection`), `TraceCurve` runs its "already traced" test on a first step that snapped onto another start point, and a near-tangent trace stops at the free end of a curve already found instead of running over it (WR-76, #392; the SolidCraft fork's tangency-labs/smlib@0ce09f2).
+    pub ssi_trace_tangent_curves_once: bool,
 }
 
 /// Options for [`Kernel::new`].

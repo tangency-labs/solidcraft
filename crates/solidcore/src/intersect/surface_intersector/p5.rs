@@ -50,6 +50,12 @@
 //! - **Bounded loops.** The start point loop pops one start point per pass; no pass
 //!   adds start points (`TraceCurve` adds none), so it ends after at most as many
 //!   passes as `FindBoundaryStartPoints` made points.
+//! - **Opt-in fix (WR-76, #392).** With
+//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
+//!   a traced curve removes, before it is flushed, the start points left in a tangent
+//!   cluster with either of its ends (`SurfaceIntersector::remove_end_tangent_clusters`);
+//!   the SolidCraft fork's tangency-labs/smlib@0ce09f2. Off by default (upstream
+//!   behaviour).
 //! - **Not ported here.** The `SM_DEBUG_CODE` blocks (graphics, dumps, the start
 //!   point reordering experiment), `SmCacheCheckOutIn` (the caches are owned by the
 //!   caller), the unused context argument and the `SM_ASSERT`s.
@@ -704,6 +710,13 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     // restore the curve direction (upstream multiplies by 1.0)
                     self.base.curve_trace_direction *= 1.0;
                     self.base.reverse_curve_direction()?;
+                }
+
+                // opt-in fix (WR-76, #392): a traced curve that ends on a boundary
+                // inside a tangential contact consumes the start points of that
+                // contact's boundary cluster
+                if k.fixes.ssi_trace_tangent_curves_once {
+                    self.base.remove_end_tangent_clusters(k)?;
                 }
 
                 // create the curves from the points in m_vCurvePoints

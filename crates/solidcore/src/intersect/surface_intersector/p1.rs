@@ -30,6 +30,7 @@
 //! | [`SurfaceIntersector::test_span_accuracy`], [`SpanAccuracy`] | `TestSpanAccuracy`                    |
 //! | [`SurfaceIntersector::add_point_to_curve`]        | `AddPointToCurve`                                |
 //! | [`SurfaceIntersector::add_start_point`]           | `AddStartPoint`                                  |
+//! | [`SurfaceIntersector::is_same_tangent_cluster`], [`IntersectionPointType::is_tangent_type`], `tangent_start_rank` (private) | the SolidCraft fork's `IsSameTangentCluster`, `sm_IsTangentType`, `sm_TangentStartRank` (opt-in, WR-76) |
 //! | [`SurfaceIntersector::add_through_point`]         | `AddThroughPoint`                                |
 //! | [`SurfaceIntersector::reverse_curve_direction`]   | `ReverseCurveDirection`                          |
 //! | [`SurfaceIntersector::is_point_on_curve`]         | `IsPointOnCurve`                                 |
@@ -69,6 +70,13 @@
 //! - **`AddStartPoint`** keeps upstream's "replace a bounded start point by the exact
 //!   one" branch, which only reassigns a local pointer: the exact candidate is
 //!   dropped and the bounded point stays.
+//! - **Opt-in fix (WR-76, #392).** With
+//!   [`UpstreamFixes::ssi_trace_tangent_curves_once`](crate::kernel::UpstreamFixes::ssi_trace_tangent_curves_once)
+//!   `AddStartPoint` keeps one start point per tangent cluster
+//!   ([`SurfaceIntersector::is_same_tangent_cluster`]): a candidate in a cluster
+//!   replaces the start point it clusters with when it ranks better and is dropped
+//!   otherwise (the SolidCraft fork's tangency-labs/smlib@0ce09f2). Off by default
+//!   (upstream behaviour).
 //! - **Surface calls.** `SmSurface::IsClosed`, `SmSurface::EvaluateNormal` and
 //!   `SmSurface::Evaluate1stDerivatives` go through `surface::surface::p7` (the
 //!   last co-ported there from unit `surface.surface_p1`).
@@ -93,7 +101,7 @@ use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, PI};
+use crate::math::{max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::knots::Side;
@@ -143,6 +151,16 @@ pub enum IntersectionPointType {
 }
 
 impl IntersectionPointType {
+    /// A tangent point, tangent curve or coincidence point (the fork's
+    /// `sm_IsTangentType`, opt-in fix WR-76, #392).
+    #[must_use]
+    pub const fn is_tangent_type(self) -> bool {
+        matches!(
+            self,
+            Self::TangentPoint | Self::TangentCurve | Self::Coincidence
+        )
+    }
+
     /// The upstream enum value.
     #[must_use]
     pub const fn code(self) -> i32 {
@@ -1148,6 +1166,28 @@ impl<'s> SurfaceIntersector<'s> {
         let scaled_zero = EFF_ZERO * 100.0 * (1.0 + start.srf_pos(SrfIndex::First).max_dimension());
         let bounded_start = start.is_bounded_start(scaled_zero);
 
+        // opt-in fix (WR-76, #392): keep one start point per tangent cluster, the
+        // tangent-curve point with the smallest deviation
+        if k.fixes.ssi_trace_tangent_curves_once && start.point_type.is_tangent_type() {
+            for i in 0..self.start_points.len() {
+                let Some(&tid) = self.start_points.get(i) else {
+                    break;
+                };
+                let target = self.point(tid)?.clone();
+                if !self.is_same_tangent_cluster(k, &start, &target, false)? {
+                    continue;
+                }
+                if tangent_start_rank(&start) < tangent_start_rank(&target) {
+                    // the new point is the better representative: it takes the
+                    // target's place
+                    if let Some(slot) = self.start_points.get_mut(i) {
+                        *slot = id;
+                    }
+                }
+                return Ok(());
+            }
+        }
+
         // check every StartPoint for a match to input point
         for &tid in &self.start_points {
             let tsp = self.point(tid)?;
@@ -1259,6 +1299,110 @@ impl<'s> SurfaceIntersector<'s> {
                 self.start_points.push(id);
             } else {
                 self.start_points.insert(0, id);
+            }
+        }
+        Ok(())
+    }
+
+    /// True when two tangent-type boundary start points are two samples of one
+    /// tangential contact crossing a boundary, not two intersection branches
+    /// (`IsSameTangentCluster`, opt-in fix WR-76, #392; the SolidCraft fork's
+    /// tangency-labs/smlib@0ce09f2): they lie on a common boundary side of both
+    /// surfaces, within `10 sqrt(this_approx_tol_3d (1 + size))` of each other, and
+    /// the surfaces stay within `this_approx_tol_3d` of each other at three points of
+    /// the boundary between them. `any_type_a` lets `a` be of any type (a traced
+    /// curve's end).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the surface evaluations; other failures read as
+    /// `false`, as the fork ignores their statuses.
+    pub fn is_same_tangent_cluster(
+        &self,
+        k: &Kernel,
+        a: &TsectPnt,
+        b: &TsectPnt,
+        any_type_a: bool,
+    ) -> Result<bool> {
+        if (!a.point_type.is_tangent_type() && !any_type_a) || !b.point_type.is_tangent_type() {
+            return Ok(false);
+        }
+        // both on a common boundary side of each surface
+        for srf in [SrfIndex::First, SrfIndex::Second] {
+            let same_u = a.u_param_type(srf) != ExtentPointType::Inside
+                && a.u_param_type(srf) == b.u_param_type(srf)
+                && (a.uv_pos(srf).x - b.uv_pos(srf).x).abs() < EFF_ZERO_SQRT;
+            let same_v = a.v_param_type(srf) != ExtentPointType::Inside
+                && a.v_param_type(srf) == b.v_param_type(srf)
+                && (a.uv_pos(srf).y - b.uv_pos(srf).y).abs() < EFF_ZERO_SQRT;
+            if !same_u && !same_v {
+                return Ok(false);
+            }
+        }
+        // near each other: a contact of order n smears the boundary solution over
+        // ~ tol^(1/n); stay within a few sqrt(tol) (order 2) of each other
+        let size = 1.0 + a.srf_pos(SrfIndex::First).max_dimension();
+        let radius = 10.0 * sqrt(self.this_approx_tol_3d * size);
+        if a.srf_pos(SrfIndex::First)
+            .distance(b.srf_pos(SrfIndex::First))
+            > radius
+        {
+            return Ok(false);
+        }
+        // the surfaces stay within tolerance along the boundary in between
+        let dom1 = self.uv_domains[1];
+        for i in 1..4 {
+            let t = 0.25 * f64::from(i);
+            let uv0 = a.uv_pos(SrfIndex::First)
+                + t * (b.uv_pos(SrfIndex::First) - a.uv_pos(SrfIndex::First));
+            let uv1 = a.uv_pos(SrfIndex::Second)
+                + t * (b.uv_pos(SrfIndex::Second) - a.uv_pos(SrfIndex::Second));
+            let Some(p0) = crate::error::ignored(self.surfaces[0].evaluate_point(k, uv0))? else {
+                return Ok(false);
+            };
+            let opts = crate::surface::surface::p5::DropPointOptions {
+                guess_uv: Some(uv1),
+                ..Default::default()
+            };
+            let dropped = crate::error::ignored(
+                self.surfaces[1]
+                    .drop_point::<crate::surface::surface::p4::NoObject>(k, p0, &dom1, &opts),
+            )?;
+            match dropped {
+                Some(d) if d.success && d.gap <= self.this_approx_tol_3d => {}
+                _ => return Ok(false),
+            }
+        }
+        Ok(true)
+    }
+
+    /// Removes the start points in a tangent cluster
+    /// ([`SurfaceIntersector::is_same_tangent_cluster`], the end of any type) with the
+    /// first or the last curve point, when those differ: the trace reaches the
+    /// boundary within tolerance but not necessarily at the cluster's representative
+    /// start point, which would otherwise be traced again from that end (the
+    /// SolidCraft fork's `DoIntersection` block before `FlushCurve`, opt-in fix
+    /// WR-76, #392; tangency-labs/smlib@0ce09f2).
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceIntersector::is_same_tangent_cluster`].
+    pub(crate) fn remove_end_tangent_clusters(&mut self, k: &Kernel) -> Result<()> {
+        let (Some(&first), Some(&last)) = (self.curve_points.first(), self.curve_points.last())
+        else {
+            return Ok(());
+        };
+        if first == last {
+            return Ok(());
+        }
+        for end in [first, last] {
+            let end = self.point(end)?.clone();
+            let left = self.start_points.clone();
+            for q in left {
+                let candidate = self.point(q)?.clone();
+                if self.is_same_tangent_cluster(k, &end, &candidate, true)? {
+                    self.start_points.retain(|&id| id != q);
+                }
             }
         }
         Ok(())
@@ -1894,6 +2038,17 @@ fn surface_global_point_solve(
         .iter()
         .map(|s| Ok([s.param(0)?, s.param(1)?]))
         .collect()
+}
+
+/// The rank of a tangent start point as a cluster's representative, lower is better:
+/// a traceable tangent-curve point first, then the smallest deviation (the fork's
+/// `sm_TangentStartRank`, opt-in fix WR-76, #392).
+fn tangent_start_rank(tsp: &TsectPnt) -> f64 {
+    (if tsp.point_type == IntersectionPointType::TangentCurve {
+        0.0
+    } else {
+        1.0
+    }) + min2(tsp.deviation, 0.5)
 }
 
 /// `crSurface.DropPoint(point, domain, guess, ..)`: the UV point and its gap.
