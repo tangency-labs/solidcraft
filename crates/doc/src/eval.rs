@@ -1865,6 +1865,14 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, tool);
             }
         }
+        // A pattern of bodies copies them along its directions or about its axis in its own
+        // component's frame, so it follows where each body it copies is placed relative to that
+        // frame: copies of a root block, patterned in a component, move with the component.
+        FeatureKind::Pattern { bodies, .. } if !bodies.is_empty() => {
+            for b in bodies {
+                reads.placed_body(st, &b.0);
+            }
+        }
         // Joins, cuts and intersects meet their targets where those are placed (#3383).
         kind if drawn_tools_change_bodies(kind) => reads.drawn_targets(st, f),
         FeatureKind::Sketch { plane, sketch } => {

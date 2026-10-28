@@ -1481,3 +1481,29 @@ fn join_extrude_to_a_body_of_another_component_leaves_that_body_alone() {
     assert!((volume("Shell") - 8000.0).abs() < 1e-3, "the shell is unchanged: {}", volume("Shell"));
     assert!((volume("Connector") - (pi * 36.0 * 10.0 + pi * 16.0 * 10.0)).abs() < 1.0, "the connector took the boss: {}", volume("Connector"));
 }
+
+/// A pattern of bodies made in a component copies them about its own component's axis, so
+/// moving that component's occurrence moves the copies of a body that lives elsewhere. The model
+/// kept between edits must show them where a fresh evaluation does: a root block patterned four
+/// times about the Z axis of component Part, then Part moved.
+#[test]
+fn a_pattern_of_another_components_body_follows_its_own_component_when_moved() {
+    let boxes = |st: &solidcraft_doc::ModelState| -> Vec<String> {
+        st.bodies
+            .iter()
+            .map(|b| {
+                let bb = b.body.outline_bounds();
+                format!("{} [{:.6} {:.6} {:.6}]..[{:.6} {:.6} {:.6}]", b.name, bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z)
+            })
+            .collect()
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-4, -27, 0], "length": 20, "width": 13, "height": 4}));
+    created(&mut s, "Part");
+    run(&mut s, "solid.pattern.circular", json!({"axis": "Z", "bodies": ["Body1"], "count": 4}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [6, -14, -3]}));
+    let mut fresh = solidcraft_doc::Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&s.doc);
+    assert_eq!(boxes(&s.model.state()), boxes(&fresh.state()), "the kept model against a fresh evaluation");
+}
