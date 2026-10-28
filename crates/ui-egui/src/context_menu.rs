@@ -668,6 +668,11 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
             v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": b })));
         }
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "body": b })));
+        // A part the modelling kernel refuses can be repaired.
+        if crate::open_meshing::session_world(&app.session).body(&b).is_some_and(|m| m.body.smlib_refused().is_some()) {
+            v.push(Item::sep());
+            v.push(cmd(app, crate::refused_part::REPAIR, "Repair Part").with(json!({ "body": b })));
+        }
     }
     v
 }

@@ -1982,12 +1982,13 @@ impl Entry {
             key: b.name.clone(),
             row_key: format!("b:{world}"),
             patterns: None,
-            label: b.name.clone(),
+            // A part the modelling kernel refuses says so (Repair Part is in its menu).
+            label: if b.body.smlib_refused().is_some() { crate::i18n::format("browser.needs_repair", &[("name", &b.name)]) } else { b.name.clone() },
             // An open shell is a surface body, not a solid.
             icon: if b.is_surface() { "surface" } else { "body" },
             visible: !app.session.visibility.hidden_bodies.contains(&world),
             selected: app.session.selection.iter().any(|s| matches!(s, Sel::Body { name } if name == &world)),
-            color: None,
+            color: b.body.smlib_refused().map(|_| Tokens::get().warning),
             locked: app.session.visibility.locked_bodies.contains(&world),
             sel: Some(Sel::Body { name: world.clone() }),
             target: Some(Target::Body { name: world.clone() }),
@@ -2386,6 +2387,14 @@ fn entry_row(
             ..Default::default()
         },
     );
+    // A part that needs repair, under the pointer: its refused face is ringed in the view.
+    if r.hovered
+        && folder == "bodies"
+        && let Some(Sel::Body { name }) = &e.sel
+        && let Some(face) = app.session.model.state().body(&e.key).and_then(|b| b.body.smlib_refused()).and_then(|r| r.face)
+    {
+        crate::refused_part::ring(app, name, face);
+    }
     if r.fold
         && let Some(key) = pattern_key
     {

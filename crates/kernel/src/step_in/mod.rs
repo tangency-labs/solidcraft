@@ -107,6 +107,8 @@ pub enum IssueKind {
     OpenBody,
     /// Faces of the part could not be meshed and are not shown.
     FacesNotShown,
+    /// SMLib refuses the part: modelling operations on it fail until it is repaired.
+    NeedsRepair,
     /// Something was repaired on the way (edges split at a pole, faces turned, gaps covered).
     Repaired,
     /// The file as a whole: its assembly structure, its limits, its entity ids.
@@ -288,6 +290,8 @@ struct Reader {
     visits: usize,
     /// Items whose meshing was checked.
     unmeshed_checked: HashSet<u64>,
+    /// Items sent into SMLib as an operation would send them, to say which need repair.
+    modelling_checked: HashSet<u64>,
     bodies: Vec<ImportedBody>,
     /// Solids the walk found, in file order, to be converted into bodies afterwards (so the
     /// conversion, the long part, can be done a piece at a time: [`StepReading`]).
@@ -329,6 +333,7 @@ impl Reader {
             node_items: HashSet::new(),
             visits: 0,
             unmeshed_checked: HashSet::new(),
+            modelling_checked: HashSet::new(),
             bodies: Vec::new(),
             plan: Vec::new(),
             batches: Vec::new(),
@@ -868,6 +873,15 @@ impl Reader {
                         }
                         None => body,
                     };
+                    // A part SMLib refuses cannot be modelled on: found now (its first instance,
+                    // sent as an operation would send it), not at the first operation.
+                    if self.modelling_checked.insert(item)
+                        && let Some(refused) = body.smlib_refusal()
+                    {
+                        let at = refused.face.map(|f| format!(" (face {})", f + 1)).unwrap_or_default();
+                        let msg = format!("solid '{name}': needs repair before it can be modelled: {}{at}", refused.why);
+                        self.note(IssueKind::NeedsRepair, Some(item), usize::from(refused.face.is_some()), msg);
+                    }
                     self.bodies.push(ImportedBody {
                         name,
                         body,
