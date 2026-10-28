@@ -163,6 +163,45 @@ fn feature_mirror_and_patterns_reopen_as_feature_replays_even_for_body_creators(
     }
 }
 
+/// #8207: a Mirror of bodies reopens with its bodies and its Operation (Join or New Body), and OK
+/// keeps it so, also when the editor opens with the feature selected in the timeline (which
+/// otherwise turns a pattern's objects into features). A body pattern reopens with bodies too.
+#[test]
+fn a_body_mirror_reopens_with_its_bodies_and_operation() {
+    for (combine, from_timeline) in [(true, false), (true, true), (false, true)] {
+        let mut app = app_with(json!([
+            {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
+        ]));
+        let body = app.session.world_state().bodies[0].name.clone();
+        app.session.execute("solid.mirror", &json!({"bodies":[body],"plane":"YZ","combine":combine})).unwrap();
+        let feature = app.session.doc.features.last().unwrap().clone();
+        app.session = Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
+        if from_timeline {
+            app.session.selection = vec![Sel::Feature { id: feature.id }];
+        }
+        let at = format!("combine {combine}, from the timeline {from_timeline}");
+        let d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+        assert_eq!(d.inputs[0].accept, crate::selection::BODIES, "{at}: the Object Type stays Bodies");
+        assert_eq!(d.inputs[0].items, vec![Sel::Body { name: body.clone() }], "{at}");
+        assert_eq!(d.extra.get("combine"), Some(&json!(combine)), "{at}: the Operation stays as it was made");
+        let (edit, p) = apply_commands(&app, &d).unwrap().remove(0);
+        assert_eq!(edit, "timeline.redefine");
+        assert_eq!(p["params"]["bodies"], json!([body]), "{at}");
+        app.session.execute(&edit, &p).unwrap();
+        assert_eq!(app.session.doc.feature(feature.id).unwrap().kind, feature.kind, "{at}: accepting the reopened editor preserves it");
+    }
+    let mut app = app_with(json!([
+        {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
+    ]));
+    let body = app.session.world_state().bodies[0].name.clone();
+    app.session.execute("solid.pattern.rectangular", &json!({"bodies":[body],"dir1":[1,0,0],"count1":3,"spacing1":5})).unwrap();
+    let feature = app.session.doc.features.last().unwrap().clone();
+    app.session.selection = vec![Sel::Feature { id: feature.id }];
+    let d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES, "a body pattern reopens with bodies");
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: body }]);
+}
+
 /// #3567: an Offset Plane built on a face reopened with its Plane input empty when the face's
 /// plane origin lay off the face (here the world origin's foot, beside the box), so OK asked to
 /// pick a plane first. It reopens with the face, and OK keeps the plane on it.

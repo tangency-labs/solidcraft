@@ -5653,12 +5653,17 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Mirror { features, plane, bodies, placements, .. } => {
+        FeatureKind::Mirror { features, plane, bodies, placements, combine } => {
             let mut d = start("solid.mirror")?;
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             // Replay references stay features, including features that created a body.
             let as_features = !features.is_empty();
             if let Some(inp) = d.inputs.get_mut(0) {
+                if !as_features {
+                    // Bodies, though the editor opened with this feature selected in the timeline (#8207).
+                    inp.accept = BODIES;
+                    inp.label = objects_label(inp.accept);
+                }
                 if !bodies.is_empty() {
                     // Each body as the placement it was mirrored at shows it (an instance by its world name).
                     let own = s.model.state();
@@ -5677,6 +5682,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = plane_sel(s, plane).into_iter().collect();
+            }
+            // Body copies are a new body or joined to their source; a feature replay keeps its own operation.
+            if !as_features {
+                d.extra.insert("combine".into(), json!(combine));
             }
             d
         }
@@ -5755,6 +5764,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.label = objects_label(inp.accept);
                     inp.items = ids.iter().map(|id| Sel::Feature { id: *id }).collect();
                 } else {
+                    inp.accept = BODIES;
+                    inp.label = objects_label(inp.accept);
                     inp.items = bodies;
                 }
             }
