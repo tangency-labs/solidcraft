@@ -462,8 +462,6 @@ fn per_edge_continuity_and_hostile_specs() {
     check_face("pentagon, two edges g1/g2", &open, &fill);
     let bad = |spec: PatchSpec| patch_edges_report(&open, &rim, &spec).is_err();
     let g1 = PatchSpec { continuity: Continuity::G1, ..PatchSpec::default() };
-    assert!(bad(PatchSpec { continuity: Continuity::G3, ..g1.clone() }));
-    assert!(bad(PatchSpec { edges: vec![(rim[0], Continuity::G3)], ..g1.clone() }));
     assert!(bad(PatchSpec { edges: vec![(Vec3::new(0.0, 0.0, 40.0), Continuity::G1)], ..g1.clone() }), "an edge off the loop");
     assert!(bad(PatchSpec { edges: vec![(Vec3::new(f64::NAN, 0.0, 0.0), Continuity::G1)], ..g1.clone() }));
     assert!(bad(PatchSpec { points: vec![Vec3::new(f64::INFINITY, 0.0, 0.0)], ..g1.clone() }));
@@ -491,4 +489,90 @@ fn per_edge_continuity_and_hostile_specs() {
     let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
     let top = [Vec3::new(5.0, 0.0, 10.0), Vec3::new(10.0, 5.0, 10.0), Vec3::new(5.0, 10.0, 10.0), Vec3::new(0.0, 5.0, 10.0)];
     assert!(patch_edges_report(&b, &top, &PatchSpec { continuity: Continuity::G1, ..PatchSpec::default() }).is_err());
+}
+
+/// The seams between `fill` and the faces of `open` beside its edges, in the middle of each
+/// edge (30 % to 70 %): per seam, the largest normal angle (degrees) and jumps of `H₂`, `H₃` and
+/// `H₄` along the direction across the seam (`solidcraft_geom::linkage`), read off the two
+/// faces' own surfaces: the normal curvature, its rate of change and that rate's.
+fn seam_jumps(open: &Body, fill: &Body) -> Vec<[f64; 4]> {
+    use solidcraft_geom::linkage::surface_jet;
+    let (ro, rf) = (open.record(), fill.record());
+    let normal = |s: &SurfaceEval, uv: [f64; 2]| {
+        let (_, su, sv) = s.derivs(uv[0], uv[1]).unwrap();
+        su.cross(sv).normalized().unwrap()
+    };
+    let mut out = Vec::new();
+    for e in &rf.edges {
+        let curve = CurveEval::new(e.parameters()).unwrap();
+        let [t0, t1] = e.interval;
+        let on_fill = SurfaceEval::new(rf.faces[e.uses[0].face as usize].parameters()).unwrap();
+        // The face of `open` whose own free edge this is.
+        let mid = curve.point(0.5 * (t0 + t1)).unwrap();
+        let near = |x: &b::Edge| {
+            let c = CurveEval::new(x.parameters()).unwrap();
+            (0..=32).map(|k| c.point(x.interval[0] + (x.interval[1] - x.interval[0]) * k as f64 / 32.0).unwrap().dist(mid)).fold(f64::MAX, f64::min)
+        };
+        let beside = ro.edges.iter().filter(|x| x.uses.len() == 1).min_by(|a, b| near(a).total_cmp(&near(b))).unwrap();
+        let on_open = SurfaceEval::new(ro.faces[beside.uses[0].face as usize].parameters()).unwrap();
+        let mut worst = [0.0f64; 4];
+        for i in 0..=20 {
+            let (p, d) = curve.derivs(t0 + (t1 - t0) * (0.3 + 0.4 * i as f64 / 20.0)).unwrap();
+            let (ua, ub) = (on_fill.project(p, None, f64::INFINITY).unwrap(), on_open.project(p, None, f64::INFINITY).unwrap());
+            let na = normal(&on_fill, ua);
+            let nb = normal(&on_open, ub) * normal(&on_open, ub).dot(na).signum();
+            let w = na.cross(d.normalized().unwrap()).normalized().unwrap();
+            let (ja, jb) = (surface_jet(&on_fill, ua, na, w, 4).unwrap(), surface_jet(&on_open, ub, nb, w, 4).unwrap());
+            worst[0] = worst[0].max(na.dot(nb).clamp(-1.0, 1.0).acos().to_degrees());
+            for k in 2..=4 {
+                worst[k - 1] = worst[k - 1].max((ja.form(k, [0.0, 1.0]).unwrap() - jb.form(k, [0.0, 1.0]).unwrap()).abs());
+            }
+        }
+        out.push(worst);
+    }
+    out
+}
+
+/// A box's corner where a round of 8 up the vertical edge meets the rounds of 4 along the top
+/// (one blend face rolls the top round over the vertical one); that face taken off, and the hole
+/// patched G2 and G3 to the rounds and the top around it. Read off the faces themselves in the
+/// middle of each seam: both meet the tangent planes and the curvature; the G3 patch also meets
+/// the curvature's rate of change, which the G2 patch leaves many times larger. G3 to an edge
+/// between two faces is refused.
+#[test]
+fn a_corner_of_three_rounds_patched_g3_holds_the_curvature_change_a_g2_patch_does_not() {
+    let solid = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 30.0)).unwrap();
+    let up = crate::fillet(&solid, &[Vec3::new(40.0, 40.0, 15.0)], 8.0).unwrap();
+    // The top edges and the arc between them over the vertical round: one tangent chain.
+    let arc = Vec3::new(32.0, 32.0, 30.0) + Vec3::new(1.0, 1.0, 0.0) * (8.0 / 2f64.sqrt());
+    let rounded = crate::fillet(&up, &[Vec3::new(40.0, 20.0, 30.0), arc, Vec3::new(20.0, 40.0, 30.0)], 4.0).unwrap();
+    // The blend face at the corner: the one face neither plane nor cylinder there.
+    let corner = Vec3::new(37.79, 36.155, 28.43);
+    let faces = Faces::of(&rounded);
+    let (k, _, _) = faces.nearest(corner);
+    let open = crate::remove_faces(&rounded, &[k]).unwrap();
+    assert!(open.is_surface());
+    let hole = [Vec3::new(34.828, 34.828, 30.0), Vec3::new(37.657, 37.657, 26.0), Vec3::new(38.828, 32.0, 28.828), Vec3::new(32.0, 38.828, 28.828)];
+    let mut read = Vec::new();
+    for g in [Continuity::G2, Continuity::G3] {
+        let name = format!("three-round corner {}", g.as_str());
+        let (fill, r) = patch_edges_report(&open, &hole, &spec(g)).unwrap();
+        report(&name, &r);
+        let seams = seam_jumps(&open, &fill);
+        eprintln!("{name}: jumps of the fill's report {:?}; read off the faces, per seam [angle°, H2, H3, H4] {seams:?}", r.jumps);
+        assert_eq!(seams.len(), 4, "{name}: four seams");
+        for s in &seams {
+            assert!(s[0] < PATCH_ANGLE_TOL_DEG, "{name}: the tangent planes meet: {s:?}");
+            assert!(s[1] < 1e-3, "{name}: the curvature meets: {s:?}");
+        }
+        read.push(seams);
+    }
+    for (g2, g3) in read[0].iter().zip(&read[1]) {
+        assert!(g3[2] < 1e-2, "G3 meets the curvature change: {g3:?}");
+        assert!(g2[2] > 20.0 * g3[2].max(1e-6), "G2 leaves the curvature change: {g2:?} vs G3 {g3:?}");
+    }
+    // A closed box's top edges lie between two faces: there is no one face to meet G3.
+    let top = [Vec3::new(5.0, 0.0, 10.0), Vec3::new(10.0, 5.0, 10.0), Vec3::new(5.0, 10.0, 10.0), Vec3::new(0.0, 5.0, 10.0)];
+    let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    assert!(patch_edges_report(&b, &top, &spec(Continuity::G3)).is_err());
 }
