@@ -117,3 +117,23 @@ fn center_rectangle_draws_both_diagonals_like_fusion() {
         assert_eq!(si["curves"].as_array().map(Vec::len), Some(4), "{k}: {si}");
     }
 }
+
+#[test]
+fn equal_parameter_makes_rectangles_square_with_one_dimension() {
+    for k in KINDS {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let (cmd, params) = match k {
+            "center" => ("sketch.rectangle.center", json!({"center": [3, 2], "corner": [13, 9], "equal": true})),
+            "two" => ("sketch.rectangle.two_point", json!({"p0": [1, 1], "p1": [21, 15], "equal": true})),
+            _ => ("sketch.rectangle.three_point", json!({"p0": [1, 1], "p1": [21, 1], "p2": [21, 13], "equal": true, "connect": false})),
+        };
+        let r = run(&mut s, "sketch.draw.dimensioned", json!({"command": cmd, "params": params, "dimensions": {"width": 16}}));
+        assert_eq!(ids(&r["curves"]).len(), 4, "{k}: {r}");
+        let dof = healthy(&mut s, &format!("{k} equal square"));
+        assert_eq!(dof, if k == "three" { 3 } else { 2 }, "{k}");
+        let si = run(&mut s, "sketch.inspect", json!({}));
+        let area = si["profiles"][0]["area_mm2"].as_f64().unwrap();
+        assert!((area - 256.0).abs() < 1e-6, "{k}: area {area}");
+    }
+}

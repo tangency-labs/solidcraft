@@ -10,5 +10,15 @@
   {"expect": {"query": {"command": "sketch.inspect", "path": ["constraints", 4, "type"], "value": "coincident"}}},
   {"expect": {"query": {"command": "sketch.inspect", "path": ["constraints", 5], "value": null}}},
   {"key": "Z", "cmd": true},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 0], "value": null}}},
+  {"note": "Alt on the final click creates an Equal constraint: only the square's size remains free. Undo removes the whole square."},
+  {"start": "sketch.rectangle.two_point"},
+  {"click": {"sketch": [0, 0]}},
+  {"move": {"sketch": [30, 20]}, "alt": true},
+  {"click": {"sketch": [30, 20]}, "alt": true},
+  {"key": "Escape"},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["dof"], "value": 1}}},
+  {"expect": {"query": {"command": "sketch.inspect", "path": ["constraints", 4, "type"], "value": "equal"}}},
+  {"key": "Z", "cmd": true},
   {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 0], "value": null}}}
 ]

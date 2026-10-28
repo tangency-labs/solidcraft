@@ -176,6 +176,8 @@ thread_local! {
     static MANIPULATOR_FREE: Cell<bool> = const { Cell::new(false) };
     /// Shift while sketching forces midpoint targeting (see [`ModAction::TargetMidpoint`]).
     static TARGET_MIDPOINT: Cell<bool> = const { Cell::new(false) };
+    /// Alt while drawing a rectangle constrains its sides to be equal (see [`ModAction::SquareRectangle`]).
+    static SQUARE_RECTANGLE: Cell<bool> = const { Cell::new(false) };
     /// True while a canvas / gizmo manipulator drag is active this frame (or last frame until cleared).
     static MANIPULATOR_DRAGGING: Cell<bool> = const { Cell::new(false) };
 }
@@ -203,6 +205,16 @@ pub fn target_midpoint() -> bool {
     TARGET_MIDPOINT.with(Cell::get)
 }
 
+/// Set whether rectangle tools should constrain sides to a square this frame.
+pub fn set_square_rectangle(on: bool) {
+    SQUARE_RECTANGLE.with(|c| c.set(on));
+}
+
+/// Whether rectangle tools should constrain sides to a square this frame.
+pub fn square_rectangle() -> bool {
+    SQUARE_RECTANGLE.with(Cell::get)
+}
+
 /// Set whether a manipulator (arrow / gizmo) drag is active.
 pub fn set_manipulator_dragging(on: bool) {
     MANIPULATOR_DRAGGING.with(|c| c.set(on));
@@ -227,6 +239,7 @@ pub enum ModAction {
     TextSingleLetter = 7,
     TextHandleConstrain = 8,
     IsoCurveAlternate = 9,
+    SquareRectangle = 10,
 }
 
 impl ModAction {
@@ -241,6 +254,7 @@ impl ModAction {
         Self::TextSingleLetter,
         Self::TextHandleConstrain,
         Self::IsoCurveAlternate,
+        Self::SquareRectangle,
     ];
 
     pub const fn id(self) -> &'static str {
@@ -255,6 +269,7 @@ impl ModAction {
             Self::TextSingleLetter => "text_single_letter",
             Self::TextHandleConstrain => "text_handle_constrain",
             Self::IsoCurveAlternate => "isocurve_alternate",
+            Self::SquareRectangle => "square_rectangle",
         }
     }
 
@@ -623,6 +638,17 @@ mod tests {
         assert!(set.contains(ModAction::IsoCurveAlternate));
         let bare = resolve(&[], None, held, Trigger::Press);
         assert!(!bare.contains(ModAction::IsoCurveAlternate));
+    }
+
+    #[test]
+    fn rectangle_alt_resolves_square_rectangle_via_descriptor() {
+        let held = Held { alt: true, ..Default::default() };
+        for id in ["sketch.rectangle.two_point", "sketch.rectangle.center", "sketch.rectangle.rounded", "sketch.rectangle.three_point"] {
+            let set = resolve(&[Scope::SketchDraw], descriptor(id), held, Trigger::Live);
+            assert!(set.contains(ModAction::SquareRectangle), "{id}");
+        }
+        let line = resolve(&[Scope::SketchDraw], descriptor("sketch.line"), held, Trigger::Live);
+        assert!(!line.contains(ModAction::SquareRectangle));
     }
 
     #[test]

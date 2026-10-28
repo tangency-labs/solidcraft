@@ -58,22 +58,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("rect")
         .key("R")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: opposite corners [x,y]; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y]; equal?: bool; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", rect_three_point)
         .at("SKETCH", "CREATE")
         .icon("rect3")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: first edge; p2: point on the opposite edge; construction?: bool", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: first edge; p2: point on the opposite edge; equal?: bool; construction?: bool", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.rounded", "Rounded Rectangle", rect_rounded)
         .at("SKETCH", "CREATE")
         .icon("rect_rounded")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: opposite corners [x,y]; radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y]; radius: expr (the corner radius, less than half the shorter side); equal?: bool; construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", rect_center)
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
-        .params(concat!("center, corner; construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("center, corner; equal?: bool; construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", circle_center)
         .at("SKETCH", "CREATE")
         .icon("circle")
@@ -1021,13 +1021,16 @@ fn polygon_lines(sk: &mut Sketch, corners: &[Vec2]) -> Result<(Vec<usize>, Vec<u
     Ok((lines, pts))
 }
 
-fn rect_constraints(sk: &mut Sketch, l: &[usize]) -> Result<Vec<String>> {
+fn rect_constraints(sk: &mut Sketch, l: &[usize], p: &Value) -> Result<Vec<String>> {
     let mut cons = Vec::new();
     if let [a, b, c, d] = l[..] {
         cons.push(add_c(sk, ConstraintKind::Horizontal { l: a })?);
         cons.push(add_c(sk, ConstraintKind::Horizontal { l: c })?);
         cons.push(add_c(sk, ConstraintKind::Vertical { l: b })?);
         cons.push(add_c(sk, ConstraintKind::Vertical { l: d })?);
+        if bool_(p, "equal").unwrap_or(false) {
+            cons.push(add_c(sk, ConstraintKind::Equal { a, b })?);
+        }
     }
     Ok(cons)
 }
@@ -1131,7 +1134,7 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])?;
-        let mut cons = rect_constraints(sk, &l)?;
+        let mut cons = rect_constraints(sk, &l, p)?;
         mark_construction(sk, &l, p);
         cons.extend(connect_points(sk, first, p)?);
         drop_implied_axes(sk, &mut cons);
@@ -1157,6 +1160,7 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     let mut rect = p.clone();
     if let Some(o) = rect.as_object_mut() {
         o.remove("radius");
+        o.remove("equal");
     }
     let mut scratch = s.scratch();
     let mut out = scratch.execute("sketch.rectangle.two_point", &rect)?;
@@ -1182,6 +1186,15 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         fillet["sketch"] = sketch.clone();
     }
     let rounded = scratch.execute("sketch.fillet", &fillet)?;
+    let equal = if bool_(p, "equal").unwrap_or(false) {
+        let mut eq = json!({"a": out["sides"]["bottom"], "b": out["sides"]["right"]});
+        if let Some(sketch) = p.get("sketch") {
+            eq["sketch"] = sketch.clone();
+        }
+        Some(scratch.execute("sketch.constraint.equal", &eq)?)
+    } else {
+        None
+    };
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
@@ -1194,10 +1207,13 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let (Some(Value::Array(cons)), Some(Value::Array(extra))) = (o.get_mut("constraints"), rounded.get("constraints")) {
             cons.extend(extra.iter().cloned());
+            if let Some(eq) = equal.as_ref().and_then(|v| v.get("constraint")).filter(|v| v.is_string()) {
+                cons.push(eq.clone());
+            }
         }
         o.insert("arcs".into(), arcs);
         o.insert("param".into(), rounded.get("param").cloned().unwrap_or(Value::Null));
-        if let Some(info) = rounded.get("sketch") {
+        if let Some(info) = equal.as_ref().and_then(|v| v.get("sketch")).or_else(|| rounded.get("sketch")) {
             o.insert("sketch".into(), info.clone());
         }
     }
@@ -1214,7 +1230,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[c - h, Vec2::new(c.x + h.x, c.y - h.y), c + h, Vec2::new(c.x - h.x, c.y + h.y)])?;
-        let mut cons = rect_constraints(sk, &l)?;
+        let mut cons = rect_constraints(sk, &l, p)?;
         // Both diagonals (construction), the centre at their crossing. Only the first carries
         // the midpoint constraint: diagonals of a parallelogram bisect each other, so a second
         // one would be redundant (over-constrained).
@@ -1253,6 +1269,9 @@ fn rect_three_point(s: &mut Session, p: &Value) -> Result<Value> {
             cons.push(add_c(sk, ConstraintKind::Perpendicular { a: l0, b: l1 })?);
             cons.push(add_c(sk, ConstraintKind::Parallel { a: l0, b: l2 })?);
             cons.push(add_c(sk, ConstraintKind::Parallel { a: l1, b: l3 })?);
+            if bool_(p, "equal").unwrap_or(false) {
+                cons.push(add_c(sk, ConstraintKind::Equal { a: l0, b: l1 })?);
+            }
         }
         mark_construction(sk, &l, p);
         Ok((ids_of(sk, &l), cons))

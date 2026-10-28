@@ -146,3 +146,19 @@ fn typed_width_and_height_measure_the_whole_rounded_rectangle() {
     assert!((area - want).abs() < 1e-6, "area {area}, want {want}: {si}");
     assert_eq!(si["dof"], 2, "only the position is free: {si}");
 }
+
+#[test]
+fn equal_parameter_makes_rounded_rectangle_square_with_one_dimension() {
+    let mut s = sketch();
+    let r = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command": "sketch.rectangle.rounded", "params": {"p0": [1, 1], "p1": [31, 21], "radius": 4, "equal": true}, "dimensions": {"width": 30}}),
+    );
+    assert_eq!(ids(&r["curves"]).len(), 8, "{r}");
+    let si = run(&mut s, "sketch.inspect", json!({}));
+    let area = si["profiles"][0]["area_mm2"].as_f64().unwrap();
+    let want = 30.0 * 30.0 - (4.0 - std::f64::consts::PI) * 16.0;
+    assert!((area - want).abs() < 1e-6, "area {area}, want {want}: {si}");
+    assert_eq!(si["dof"], 2, "only the position is free: {si}");
+}

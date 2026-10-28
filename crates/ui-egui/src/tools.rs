@@ -6,18 +6,26 @@ use serde_json::{Value, json};
 use solidcraft_engine::geom::Vec2;
 
 use crate::SolveApp;
-use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
+use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
 
 const DRAW_SCOPES: &[Scope] = &[Scope::SketchDraw, Scope::SketchDrag];
 
+const RECT_SQUARE: &[Binding] = &[Binding {
+    action: ModAction::SquareRectangle,
+    defaults: &[ModifierCombo::ALT],
+    matching: Match::AtLeast,
+    trigger: Trigger::Live,
+    rebindable: true,
+}];
+
 /// Per-tool modifier descriptors owned by this host file (coordinator seeds / audits these).
 pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.line", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
-    ToolModifiers { tool: "sketch.rectangle.two_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
-    ToolModifiers { tool: "sketch.rectangle.center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
-    ToolModifiers { tool: "sketch.rectangle.rounded", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
-    ToolModifiers { tool: "sketch.rectangle.three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.two_point", scopes: DRAW_SCOPES, bindings: RECT_SQUARE, audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.center", scopes: DRAW_SCOPES, bindings: RECT_SQUARE, audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.rounded", scopes: DRAW_SCOPES, bindings: RECT_SQUARE, audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.rectangle.three_point", scopes: DRAW_SCOPES, bindings: RECT_SQUARE, audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.center", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.two_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.circle.three_point", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
@@ -91,6 +99,8 @@ pub struct Tool {
     pub dim_history: Vec<crate::sketch_dims::DimBox>,
     pub dims_stage: usize,
     pub dims_focus: bool,
+    /// Latched when a rectangle dimension is typed while `ModAction::SquareRectangle` is held.
+    pub square: bool,
 }
 
 impl Tool {
@@ -138,6 +148,7 @@ impl Tool {
             dim_history: Vec::new(),
             dims_stage: usize::MAX,
             dims_focus: false,
+            square: false,
         })
     }
 }
@@ -531,7 +542,7 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
     let p = &t.pts;
     let d = |a: usize, b: usize| p[a].0.dist(p[b].0);
     let sides = crate::sketch_dims::locked_value(app, t, "Sides").map_or(6, |v| v as usize);
-    let params = match t.cmd {
+    let mut params = match t.cmd {
         "sketch.rectangle.two_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1])}),
         "sketch.rectangle.center" => json!({"center": xy(&p[0]), "corner": xy(&p[1])}),
         "sketch.rectangle.rounded" => {
@@ -589,6 +600,9 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
         },
         _ => return Err(format!("drawing {} is not supported", t.cmd)),
     };
+    if t.cmd.starts_with("sketch.rectangle.") && crate::sketch_dims::equal_sides(app, t) {
+        params["equal"] = json!(true);
+    }
     let result = draw(app, t, params)?;
     Ok(result["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect())
 }
@@ -1164,6 +1178,17 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                 [Vec2::new(c.x - d.x, c.y - d.y), Vec2::new(c.x + d.x, c.y - d.y), Vec2::new(c.x + d.x, c.y + d.y), Vec2::new(c.x - d.x, c.y + d.y)];
             for i in 0..4 {
                 line(k[i], k[(i + 1) % 4]);
+            }
+        }
+        ("sketch.rectangle.three_point", [a, b]) => {
+            if let Some(d) = (*b - *a).normalized() {
+                let n = d.perp() * (h - *a).dot(d.perp());
+                let k = [*a, *b, *b + n, *a + n];
+                for i in 0..4 {
+                    line(k[i], k[(i + 1) % 4]);
+                }
+            } else {
+                line(*a, *b);
             }
         }
         (_, [a]) => line(*a, h),

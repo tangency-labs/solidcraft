@@ -393,6 +393,21 @@ IDs under `created` and omit only identical top-level `points`, `curves`,
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
 
+## Square rectangles
+
+The four `sketch.rectangle.*` commands accept `equal: true` to add an Equal constraint
+between adjacent sides. The default is false. To size a square with one dimension, use
+`sketch.draw.dimensioned` with only `width` or `height`:
+
+```json
+{"command":"sketch.draw.dimensioned","params":{"command":"sketch.rectangle.two_point","params":{"p0":[0,0],"p1":[20,20],"equal":true},"dimensions":{"width":30}}}
+```
+
+The same option works with center, three-point and rounded rectangles. In the app, hold
+Alt while placing the final corner to preview and create a square. Typing a size while
+Alt is held keeps the square option active when Alt is released. Two explicitly typed,
+unequal dimensions take precedence and create a rectangle without the Equal constraint.
+
 ## Demo: an enclosure built over MCP
 
 `examples/demo/enclosure_mcp.py` is a small MCP client. It drives a running app (`solidcraft

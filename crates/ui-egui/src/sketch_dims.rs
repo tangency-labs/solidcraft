@@ -83,10 +83,29 @@ fn sign(x: f64) -> f64 {
     if x < 0.0 { -1.0 } else { 1.0 }
 }
 
+/// Whether the active rectangle tool is squaring its sides (`ModAction::SquareRectangle`, Alt by default).
+pub fn square_rectangle(t: &Tool) -> bool {
+    (t.square || crate::tool_modifiers::square_rectangle())
+        && matches!(
+            (t.cmd, t.pts.len()),
+            ("sketch.rectangle.two_point" | "sketch.rectangle.rounded" | "sketch.rectangle.center", 1) | ("sketch.rectangle.three_point", 2)
+        )
+}
+
+/// Whether a completed rectangle should receive an `Equal` constraint on adjacent sides.
+pub fn equal_sides(app: &SolveApp, t: &Tool) -> bool {
+    (t.square || crate::tool_modifiers::square_rectangle())
+        && match (locked(app, t, "Width"), locked(app, t, "Height")) {
+            (Some(w), Some(h)) => (w - h).abs() <= 1e-9,
+            _ => true,
+        }
+}
+
 /// The next point the tool would place for the cursor at `h`, honouring locked values.
 pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     let Some(a) = t.pts.last().map(|p| p.0) else { return h };
     let lk = |l: &str| locked(app, t, l);
+    let square = square_rectangle(t);
     match (t.cmd, t.pts.len()) {
         ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
             let v = h - a;
@@ -104,11 +123,29 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
         }
         ("sketch.rectangle.two_point" | "sketch.rectangle.rounded", 1) => {
             let d = h - a;
-            Vec2::new(a.x + lk("Width").map_or(d.x, |w| w * sign(d.x)), a.y + lk("Height").map_or(d.y, |hh| hh * sign(d.y)))
+            let (mut wx, mut hy) = (lk("Width"), lk("Height"));
+            if square {
+                let s = wx.or(hy).unwrap_or_else(|| d.x.abs().max(d.y.abs()));
+                wx = wx.or(Some(s));
+                hy = hy.or(Some(s));
+            }
+            Vec2::new(a.x + wx.map_or(d.x, |w| w * sign(d.x)), a.y + hy.map_or(d.y, |hh| hh * sign(d.y)))
         }
         ("sketch.rectangle.center", 1) => {
             let d = h - a;
-            Vec2::new(a.x + lk("Width").map_or(d.x, |w| w * 0.5 * sign(d.x)), a.y + lk("Height").map_or(d.y, |hh| hh * 0.5 * sign(d.y)))
+            let (mut wx, mut hy) = (lk("Width"), lk("Height"));
+            if square {
+                let s = wx.or(hy).unwrap_or_else(|| 2.0 * d.x.abs().max(d.y.abs()));
+                wx = wx.or(Some(s));
+                hy = hy.or(Some(s));
+            }
+            Vec2::new(a.x + wx.map_or(d.x, |w| w * 0.5 * sign(d.x)), a.y + hy.map_or(d.y, |hh| hh * 0.5 * sign(d.y)))
+        }
+        ("sketch.rectangle.three_point", 2) if square => {
+            let p0 = t.pts.first().map(|p| p.0).unwrap_or(a);
+            let edge = a - p0;
+            let n = dir_or_x(edge).perp();
+            a + n * (edge.len() * sign((h - p0).dot(n)))
         }
         ("sketch.circle.center", 1) => a + dir_or_x(h - a) * lk("Diameter").map_or((h - a).len(), |d| d * 0.5),
         ("sketch.circle.two_point", 1) => a + dir_or_x(h - a) * lk("Diameter").unwrap_or((h - a).len()),
@@ -147,8 +184,8 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
 /// sketch geometry stays there, and one on a curve slides along it to where the axis crosses.
 pub fn placed(app: &SolveApp, t: &Tool, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
     let line = t.cmd == "sketch.line";
-    // A typed length or angle wins over every snap.
-    if t.dims.iter().any(|b| b.locked) {
+    // A typed length or angle (or a squared rectangle) wins over every snap.
+    if t.dims.iter().any(|b| b.locked) || square_rectangle(t) {
         return (effective(app, t, p.0), None);
     }
     // A line snapped through a circle's centre stays on that radial line. The axis snap would
@@ -352,6 +389,7 @@ pub fn reset(t: &mut Tool) {
     t.dim_history.clear();
     t.dims_stage = usize::MAX;
     t.dims_focus = false;
+    t.square = false;
 }
 
 pub fn has_locked(t: &Tool, label: &str) -> bool {
@@ -531,6 +569,9 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
                     completed |= changed && source == Some(i);
                     if r.changed() || changed {
                         b.locked = true;
+                        if crate::tool_modifiers::square_rectangle() {
+                            t.square = true;
+                        }
                     }
                     if focus && i == 0 {
                         r.request_focus();

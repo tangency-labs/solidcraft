@@ -3882,18 +3882,19 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_modifiers::set_manipulator_dragging(false);
     {
         let held = crate::tool_modifiers::Held::from_modifiers(mods);
-        let mid = if let Some(cmd) = app.tool.as_ref().map(|t| t.cmd) {
+        let (mid, square) = if let Some(cmd) = app.tool.as_ref().map(|t| t.cmd) {
             let live = crate::tool_modifiers::resolve(
                 &[crate::tool_modifiers::Scope::SketchDraw, crate::tool_modifiers::Scope::SketchDrag],
                 crate::tool_modifiers::descriptor(cmd),
                 held,
                 crate::tool_modifiers::Trigger::Live,
             );
-            live.contains(crate::tool_modifiers::ModAction::TargetMidpoint)
+            (live.contains(crate::tool_modifiers::ModAction::TargetMidpoint), live.contains(crate::tool_modifiers::ModAction::SquareRectangle))
         } else {
-            false
+            (false, false)
         };
         crate::tool_modifiers::set_target_midpoint(mid);
+        crate::tool_modifiers::set_square_rectangle(square);
         app.preview.rolled_back = preview_should_roll_back(app, held, manipulator_dragging);
     }
     let proj = projection(app, rect);

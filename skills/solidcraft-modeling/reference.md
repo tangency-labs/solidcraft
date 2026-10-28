@@ -30,6 +30,7 @@ These are the shapes of the commands a part build needs, so an agent rarely has 
 - **Curves:** `l1`, `c1`, `a1`.
 - **Points:** `p1`, `l1.start`, `l1.end`, `c1.center`, `a1.center`, and the sketch origin `"origin"`.
 - **Rectangles:** `sketch.rectangle.*` also returns `sides {bottom,right,top,left}` and `corners {bottom_left,...}`.
+  - `equal: true` adds an Equal constraint between adjacent sides, making a square (also for `rectangle.rounded`). Default: false. One width or height dimension then sizes both sides.
   - `rectangle.center` adds 2 construction diagonals, so each corner joins 3 lines. Its centre point is `p5`.
   - `sketch.fillet {point}` therefore fails on its corners. Use `{a:"l1", b:"l4", radius}` or the 3D `solid.fillet`.
 - **Slots:** `sketch.slot.overall` and `sketch.slot.center_to_center` create 2 lines, 2 arcs and 4 points, plus `a1.center` and `a2.center`. The ids count on from what the sketch already has: in an empty sketch `l1, a1, l2, a2` and `p1`-`p4`, after a `rectangle.two_point` `l5, a1, l6, a2` and `p5`-`p8`.
