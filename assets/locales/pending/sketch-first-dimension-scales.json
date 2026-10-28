@@ -1,0 +1,14 @@
+{
+  "en": {
+    "ui.first_dimension_scales": "The first dimension scales the drawing",
+    "ui.first_dimension_scales_tip": "On: a sketch's first length dimension scales the drawing it measures, so its shape stays the same. Off: the dimension sizes only what it measures."
+  },
+  "ja": {
+    "ui.first_dimension_scales": "最初の寸法で図形全体をスケールする",
+    "ui.first_dimension_scales_tip": "オン: スケッチの最初の長さ寸法で、測定する図形全体をスケールし、形を保ちます。オフ: 寸法は測定する対象のサイズだけを変えます。"
+  },
+  "zh": {
+    "ui.first_dimension_scales": "第一个尺寸缩放整个图形",
+    "ui.first_dimension_scales_tip": "开启：草图的第一个长度尺寸会缩放它所测量的图形，保持其形状不变。关闭：尺寸只改变所测量对象的大小。"
+  }
+}

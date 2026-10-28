@@ -344,6 +344,31 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
     }
 }
 
+/// With the Sketch preference off, the first dimension sizes only what it measures (#4109).
+#[test]
+fn the_first_dimension_scales_the_drawing_unless_the_preference_is_off() {
+    for (scales, side) in [true, false].into_iter().flat_map(|s| [2., 30., 500.].map(|v| (s, v))) {
+        let mut h = Harness::new();
+        crate::dim_view::cancel();
+        assert!(h.app.preferences.first_dimension_scales, "on by default (#1365)");
+        h.app.preferences.first_dimension_scales = scales;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.;
+        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 5., 0.);
+        h.settle();
+        place(&mut h, &[[10., 0.]], [10., -5.]);
+        type_value(&mut h, &format!("{side} mm"));
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state();
+        let area = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().profiles[0].area;
+        // On: 20 × 10 scales to side × side / 2. Off: only the side changes, side × 10.
+        let want = if scales { side * side / 2. } else { side * 10. };
+        assert!((area - want).abs() < 1e-6 * want.max(1.), "scales: {scales}, side {side}, area {area}");
+    }
+}
+
 #[test]
 fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
     use solidcraft_engine::geom::Vec2;

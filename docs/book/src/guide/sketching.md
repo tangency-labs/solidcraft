@@ -234,6 +234,11 @@ in one step. While you type, the dimension text follows the cursor, and Enter pl
 it there (or in its default place if you haven't moved the cursor) as one undo step. Esc
 cancels the dimension.
 
+The first length dimension of a sketch with nothing sized yet scales the drawing it measures
+to its value, so the shape stays as drawn; separate shapes that nothing joins keep their
+size. To have the first dimension size only what it measures, turn off **The first dimension
+scales the drawing** in Preferences › Sketch.
+
 You can still place the text first. Before you type, a click on empty sketch space puts the
 text there and keeps the value box focused; a click on another point or line makes the
 dimension a distance or angle instead; Tab leaves the picks waiting for a click to place the
