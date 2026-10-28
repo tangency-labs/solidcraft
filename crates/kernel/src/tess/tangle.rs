@@ -33,10 +33,10 @@ impl Chord {
 /// another, each once and in order. On a closed surface the boundary crosses itself where any
 /// copies of two chords, whole periods apart, cross; chords ending on a pole, where the
 /// parameter along the pole is free, are left out. Adjacent chords of a loop share a node and
-/// never cross.
-pub(crate) fn crossing(s: &EvalSurface, loops: &[seam::Loop]) -> Vec<(usize, usize)> {
+/// never cross. `reach`: how near a pole a node is taken as one (see [`uv::degenerate_within`]).
+pub(crate) fn crossing(s: &EvalSurface, reach: f64, loops: &[seam::Loop]) -> Vec<(usize, usize)> {
     let dom = uv::domain(s);
-    let pole = |q: [f64; 2]| (0..2).any(|d| uv::degenerate(s, q, d));
+    let pole = |q: [f64; 2]| (0..2).any(|d| uv::degenerate_within(s, &dom, q, d, reach));
     let mut chords: Vec<Chord> = Vec::new();
     for (li, l) in loops.iter().enumerate() {
         let n = l.uv.len();

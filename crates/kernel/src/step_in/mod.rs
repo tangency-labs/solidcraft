@@ -55,6 +55,10 @@ pub struct ImportedBody {
     pub closed: bool,
     /// Faces read from the file (each body face is one of them: `face_origin`).
     pub file_faces: usize,
+    /// No B-rep could be made of the solid: `body` is a mesh body of the faces that could be
+    /// read and meshed on their own, shown so the solid is not lost, and this is why the solid
+    /// was refused (the import's warnings say so too).
+    pub shown_as_mesh: Option<String>,
 }
 
 /// One product occurrence in the file's assembly tree.
@@ -715,10 +719,13 @@ impl Reader {
                     // What the read of the item found, reported once.
                     if let Some(failed) = read {
                         let label = self.label(item);
+                        if let Some(why) = &part.refused {
+                            self.warn(format!("{label}: shown as a mesh: {why}"));
+                        }
                         for f in &failed {
                             self.warn(format!("{label}: {f}"));
                         }
-                        if !part.closed {
+                        if !part.closed && part.refused.is_none() {
                             self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }
@@ -773,6 +780,7 @@ impl Reader {
                         file_faces,
                         source_item: item,
                         face_origin,
+                        shown_as_mesh: part.refused.clone(),
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {

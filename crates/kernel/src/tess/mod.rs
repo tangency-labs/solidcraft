@@ -18,9 +18,10 @@
 //!    named in the plan's stats ([`PlanStats::lenient`], with why it was refused) so it is
 //!    reported and fixed there; it is filled leniently in (u, v) (the sides crossing one already
 //!    kept are left out, see [`Lenient`]) so the display has no hole. A face that refuses even
-//!    that (its loops do not close in (u, v), or wind round a seam or pole), or whose pcurves do
-//!    not lie on its edges, is an error naming the face (and the edge) and why; there is no
-//!    other mesher to fall back to.
+//!    that (its loops do not close in (u, v), or wind round a seam or pole) is left out of the
+//!    plan with no triangles and named in [`PlanStats::unmeshed`], and the rest of the body is
+//!    meshed; there is no other mesher to fall back to. A face whose pcurves do not lie on its edges is an error naming the face and
+//!    the edge, as is a body none of whose faces can be planned.
 
 pub(crate) mod cdt;
 pub(crate) mod collar;
@@ -64,12 +65,15 @@ pub struct PlanStats {
     pub delaunay: usize,
     /// Faces every method refused, filled leniently in (u, v) (see [`Lenient`]) so the display
     /// has no hole: each still a defect upstream, in its pcurves or seams.
-    pub lenient: Vec<LenientFace>,
+    pub lenient: Vec<RefusedFace>,
+    /// Faces even the lenient fill refused: left out of the plan (no triangles), so the rest of
+    /// the body is still meshed, each with why it could not be planned.
+    pub unmeshed: Vec<RefusedFace>,
 }
 
-/// A face filled leniently: its index in the record and why the strict plan refused it.
+/// A face a method refused: its index in the record and why.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LenientFace {
+pub struct RefusedFace {
     pub face: usize,
     pub reason: String,
 }
@@ -198,7 +202,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
             return Err(unsupported(format!("face {fi}: missing")));
         };
         let refused = tangled.iter().find(|(f, _)| *f == fi).map(|(_, why)| why.as_str());
-        let (fp, stats) = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, refused)?;
+        let (fp, stats) = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, fb.reach, refused)?;
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
@@ -206,15 +210,30 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     });
     let mut plan = TessPlan::default();
     let mut stats = PlanStats::default();
-    for (r, eval) in planned.into_iter().zip(evals) {
-        let (fp, s) = r?;
+    // A face no method plans is left out, named in the stats, and the rest of the body is
+    // meshed; a body none of whose faces plan is the first face's error.
+    let mut first_error: Option<KernelError> = None;
+    for (fi, (r, eval)) in planned.into_iter().zip(evals).enumerate() {
         let surface = u32::try_from(plan.surfaces.len()).map_err(|_| unsupported("too many faces"))?;
         plan.surfaces.push(eval);
+        let (fp, s) = match r {
+            Ok(done) => done,
+            Err(e) => {
+                stats.unmeshed.push(RefusedFace { face: fi, reason: e.to_string() });
+                first_error.get_or_insert(e);
+                (FacePlan { face: u32::try_from(fi).unwrap_or(u32::MAX), ..FacePlan::default() }, PlanStats::default())
+            }
+        };
         plan.faces.push(FacePlan { surface: Some(surface), ..fp });
         stats.planar += s.planar;
         stats.structured += s.structured;
         stats.delaunay += s.delaunay;
         stats.lenient.extend(s.lenient);
+    }
+    if let Some(e) = first_error
+        && stats.unmeshed.len() == faces.len()
+    {
+        return Err(e);
     }
     plan.edges = nodes.into_iter().map(|n| n.points).collect();
     plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
@@ -226,7 +245,8 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
 /// at the node's curve parameter. A seam edge's two uses on one face have their own pcurves, so
 /// its two sides are told apart. A pcurve runs on continuously; where one edge meets the next, a
 /// pcurve that starts a whole period along from where the previous one ended is moved back by
-/// it, except in a direction the meeting point is a pole of: there the parameter is free, and
+/// it, except in a direction the meeting point is a pole of (or lies on a patch side collapsed
+/// to within its vertex's tolerance, see [`Boundary::reach`]): there the parameter is free, and
 /// the two pcurves' own values are where the face's boundary runs along the pole from and to
 /// (a meridian revolved half a turn meets the other at the pole half a period away; unwrapped,
 /// its loop would wind round the surface). Each loop then starts at a node off every pole whose
@@ -251,7 +271,21 @@ fn boundary(
 ) -> Result<Boundary> {
     let dom = uv::domain(s);
     let fail = |e: u32, why: String| unsupported(format!("face {fi} ({}): edge {e}: {why}", kind(&face.surface)));
-    let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()) };
+    // How near a pole a node is one: the tolerance of a vertex of the face that lies on a patch
+    // side collapsed to within it, not to a point, as the record check takes a loop's pole; at
+    // most the chord tolerance, finer than which the mesh resolves nothing (a vertex tolerance
+    // as large as the surface's features would make a pole of every node near one).
+    let mut reach: f64 = 0.0;
+    for oe in face_edges(face) {
+        let (Some(edge), Some([p0, p1])) = (b.edges.get(oe.edge as usize), oe.pcurve.interval()) else { continue };
+        let tol = edge.vertices.get(usize::from(!oe.forward)).and_then(|v| b.vertices.get(*v as usize)).map_or(0.0, |v| v.tolerance.min(rules.tol));
+        let Some(q) = oe.pcurve.eval(if oe.forward { p0 } else { p1 }).map(|q| map.to_eval(q)) else { continue };
+        if tol.is_finite() && tol > reach && (0..2).any(|d| uv::degenerate_within(s, &dom, q, d, tol)) {
+            reach = tol;
+        }
+    }
+    let pole_along = |q: [f64; 2], d: usize| uv::degenerate_within(s, &dom, q, d, reach);
+    let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()), reach };
     // Each vertex's parameters, from the first edge use of the face to start there.
     let mut at_vertex: std::collections::HashMap<u32, [f64; 2]> = std::collections::HashMap::new();
     for l in &face.loops {
@@ -290,7 +324,7 @@ fn boundary(
             if let (Some(e), Some(&start)) = (end, eq.first()) {
                 for d in 0..2 {
                     let Some(per) = dom.period[d] else { continue };
-                    if !(uv::degenerate(s, e, d) || uv::degenerate(s, start, d)) {
+                    if !(pole_along(e, d) || pole_along(start, d)) {
                         shift[d] = per * ((e[d] - start[d]) / per).round();
                     }
                 }
@@ -321,7 +355,7 @@ fn boundary(
             uvs.extend(eq);
         }
         let n = uvs.len();
-        let pole = |q: &[f64; 2]| (0..2).any(|d| uv::degenerate(s, *q, d));
+        let pole = |q: &[f64; 2]| (0..2).any(|d| pole_along(*q, d));
         if let Some(k) = (0..n).find(|&k| uvs.get(k).is_some_and(|q| !pole(q)) && uvs.get((k + n - 1) % n).is_some_and(|q| !pole(q))) {
             uvs.rotate_left(k);
             pts.rotate_left(k);
@@ -336,10 +370,13 @@ fn boundary(
 }
 
 /// A face's boundary loops, and for each loop node the edge segment that starts there: the
-/// edge, and the segment's place along it from its start vertex.
+/// edge, and the segment's place along it from its start vertex. `reach`: how near a pole a
+/// point of the face is taken as one (see [`uv::degenerate_within`]): the tolerance of a vertex
+/// of it on a patch side collapsed to within that tolerance, else 0.
 struct Boundary {
     loops: Vec<seam::Loop>,
     segments: Vec<Vec<(u32, u32)>>,
+    reach: f64,
 }
 
 /// Edges are sampled to the chord tolerance each on its own, so where two curves of one face
@@ -360,7 +397,7 @@ fn untangle(
 ) -> Result<Vec<(usize, String)>> {
     let crossing = |fi: usize, fb: &Boundary| -> Vec<(u32, u32)> {
         let Some(s) = evals.get(fi) else { return Vec::new() };
-        tangle::crossing(s, &fb.loops).into_iter().filter_map(|(l, k)| fb.segments.get(l)?.get(k).copied()).collect()
+        tangle::crossing(s, fb.reach, &fb.loops).into_iter().filter_map(|(l, k)| fb.segments.get(l)?.get(k).copied()).collect()
     };
     let indexed: Vec<usize> = (0..boundaries.len()).collect();
     let curved = evals.iter().filter(|e| !matches!(e, EvalSurface::Plane { .. })).count();
@@ -499,9 +536,9 @@ fn area2(uv: &[[f64; 2]]) -> f64 {
 /// unchanged across the pole. Across a pole it may jump by any amount, so the run from the
 /// second pole back to the first is moved one period along, whichever way keeps the loop
 /// within one period with a positive area: the seam's two uses then lie a period apart.
-fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
+fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, reach: f64, l: &mut seam::Loop) {
     let n = l.uv.len();
-    let poles: Vec<usize> = (0..n).filter(|&k| l.uv.get(k).is_some_and(|q| (0..2).any(|d| uv::degenerate(s, *q, d)))).collect();
+    let poles: Vec<usize> = (0..n).filter(|&k| l.uv.get(k).is_some_and(|q| (0..2).any(|d| uv::degenerate_within(s, dom, *q, d, reach)))).collect();
     let [p0, p1] = poles.as_slice() else { return };
     for d in 0..2 {
         let Some(per) = dom.period[d] else { continue };
@@ -547,11 +584,11 @@ fn open_pole_to_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
 
 /// The poles of a loop where it turns straight back along a seam: the nodes either side have
 /// the same parameters.
-fn turning_poles(s: &EvalSurface, per: f64, uv: &[[f64; 2]]) -> Vec<usize> {
+fn turning_poles(s: &EvalSurface, dom: &uv::Domain, reach: f64, per: f64, uv: &[[f64; 2]]) -> Vec<usize> {
     let n = uv.len();
     let near = |a: Option<&[f64; 2]>, b: Option<&[f64; 2]>| a.zip(b).is_some_and(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()) <= 1e-9 * per);
     (0..n)
-        .filter(|&k| uv.get(k).is_some_and(|q| (0..2).any(|d| uv::degenerate(s, *q, d))))
+        .filter(|&k| uv.get(k).is_some_and(|q| (0..2).any(|d| uv::degenerate_within(s, dom, *q, d, reach))))
         .filter(|&k| near(uv.get((k + n - 1) % n), uv.get((k + 1) % n)))
         .collect()
 }
@@ -564,7 +601,7 @@ fn turning_poles(s: &EvalSurface, per: f64, uv: &[[f64; 2]]) -> Vec<usize> {
 /// to the pole, and starts at the node before it: the seam's uses then bound the face's parameter box on either side, and share
 /// their nodes as every other edge does. Kept as it was unless the opened loop spans at most a
 /// period with a positive area.
-fn open_at_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
+fn open_at_pole(s: &EvalSurface, dom: &uv::Domain, reach: f64, l: &mut seam::Loop) {
     let n = l.uv.len();
     if n < 4 || l.pts.len() != n {
         return;
@@ -574,7 +611,7 @@ fn open_at_pole(s: &EvalSurface, dom: &uv::Domain, l: &mut seam::Loop) {
         if (seam::drift(l, d, per).abs() - per).abs() > per * 1e-6 {
             continue;
         }
-        let [pole] = turning_poles(s, per, &l.uv)[..] else { continue };
+        let [pole] = turning_poles(s, dom, reach, per, &l.uv)[..] else { continue };
         // From the node after the pole round to the pole, unwrapped along the way.
         let order: Vec<usize> = (1..=n).map(|i| (pole + i) % n).collect();
         let mut uv: Vec<[f64; 2]> = Vec::with_capacity(n);
@@ -633,9 +670,10 @@ fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
 /// One face, planned by [`plan_face`]; a face it refuses because its loops cross in (u, v) is
 /// planned once more leniently (see [`Lenient`]) and named in the stats with the first refusal,
 /// so the defect upstream is still reported. When the lenient fill refuses too, the first
-/// refusal is the error. `refused`: a face whose boundary still crosses itself after
-/// [`untangle`] (two edges meeting tangentially at a cusp, whose chords cross however often
-/// they are halved), filled leniently straight away with that reason.
+/// refusal is the error (and [`plan`] leaves the face out, named). `refused`: a face whose
+/// boundary still crosses itself after [`untangle`] (two edges meeting tangentially at a cusp,
+/// whose chords cross however often they are halved), filled leniently straight away with that
+/// reason.
 fn plan_or_fill(
     fi: usize,
     kind: &str,
@@ -643,20 +681,21 @@ fn plan_or_fill(
     loops: &[seam::Loop],
     rules: &size::Rules,
     size: (f64, [f64; 2]),
+    reach: f64,
     refused: Option<&str>,
 ) -> Result<(FacePlan, PlanStats)> {
     let mut stats = PlanStats::default();
     let strict = match refused {
         Some(why) => Err(unsupported(why.to_string())),
-        None => plan_face(fi, kind, s, loops, rules, size, &mut stats, Lenient::No),
+        None => plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::No),
     };
     match strict {
         Ok(fp) => Ok((fp, stats)),
         Err(first) => {
             let mut stats = PlanStats::default();
-            match plan_face(fi, kind, s, loops, rules, size, &mut stats, Lenient::Yes) {
+            match plan_face(fi, kind, s, loops, rules, size, reach, &mut stats, Lenient::Yes) {
                 Ok(fp) => {
-                    stats.lenient.push(LenientFace { face: fi, reason: first.to_string() });
+                    stats.lenient.push(RefusedFace { face: fi, reason: first.to_string() });
                     Ok((fp, stats))
                 }
                 Err(_) => Err(first),
@@ -667,7 +706,8 @@ fn plan_or_fill(
 
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
-/// `lenient`: the last resort for a face no method could plan (see [`Lenient`]).
+/// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
+/// for a face no method could plan (see [`Lenient`]).
 #[allow(clippy::too_many_arguments)]
 fn plan_face(
     fi: usize,
@@ -676,6 +716,7 @@ fn plan_face(
     loops: &[seam::Loop],
     rules: &size::Rules,
     size: (f64, [f64; 2]),
+    reach: f64,
     stats: &mut PlanStats,
     lenient: Lenient,
 ) -> Result<FacePlan> {
@@ -689,7 +730,7 @@ fn plan_face(
     // A loop that runs up a seam from a pole and straight back down it (a half sphere bounded
     // by its rim and its seam used both ways) winds once as projected: it is opened at the pole.
     for l in projected.iter_mut() {
-        open_at_pole(s, &dom, l);
+        open_at_pole(s, &dom, reach, l);
     }
     let wound: Vec<usize> = (0..2).filter(|&d| dom.period[d].is_some_and(|per| seam::winds(&projected, d, per))).collect();
     // A face cut along a seam is a long winding strip whose sides are the cut lines and the
@@ -708,7 +749,7 @@ fn plan_face(
     // kernel writes it) projects onto one parameter line: its second run is a period along.
     if !seamed {
         for l in projected.iter_mut() {
-            open_pole_to_pole(s, &dom, l);
+            open_pole_to_pole(s, &dom, reach, l);
         }
         holes_beside_outer(&dom, &mut projected);
     }
@@ -723,7 +764,7 @@ fn plan_face(
             // At a pole the parameter along the degenerate direction is free: one copy with
             // the previous node's value, one with the next node's.
             let (prev, next) = (luv.get((k + n - 1) % n).copied(), luv.get((k + 1) % n).copied());
-            let pole = (0..2).find(|&d| uv::degenerate(s, *q, d));
+            let pole = (0..2).find(|&d| uv::degenerate_within(s, &dom, *q, d, reach));
             match (pole, prev, next) {
                 (Some(d), Some(a), Some(b)) => {
                     let mut qa = *q;
@@ -875,7 +916,7 @@ fn plan_face(
     all.extend(extra);
     // Whatever the layout, no triangle leaves the surface by more than the tolerance.
     if !planar {
-        sag::refine(s, tol, &fixed, &mut all, &mut triangles, MAX_REFINE);
+        sag::refine(s, tol, reach, &fixed, &mut all, &mut triangles, MAX_REFINE);
     }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {

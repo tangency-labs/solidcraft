@@ -310,39 +310,106 @@ fn read_with<'a>(
     trims: Option<&dyn Trims>,
 ) -> R<Solid> {
     let e = entity(ex, item)?;
-    let p = e.params();
-    let name = p.first().and_then(Param::as_str).unwrap_or("").to_string();
+    let name = e.params().first().and_then(Param::as_str).unwrap_or("").to_string();
     let mut b = Builder::new(ex, reader, tolerance(&context), budget, trims);
     // The file's faces, edges, vertices and their geometry read into the builder.
     let topology = solidcraft_profile::span("import", "step.topology");
-    let (shells, kind) = match e.name() {
-        "MANIFOLD_SOLID_BREP" => (vec![b.shell(rid(p.get(1), "outer shell")?)?], Kind::Solid),
+    let (ids, kind) = item_shells(e)?;
+    let mut shells = Vec::with_capacity(ids.len());
+    for s in ids {
+        shells.push(b.shell(s)?);
+    }
+    drop(topology);
+    b.finish(item, name, shells, kind)
+}
+
+/// A face of a solid read on its own ([`read_faces_with`]).
+#[derive(Clone, Debug)]
+pub struct FaceRead {
+    /// The face's entity in the file (the ADVANCED_FACE or FACE_SURFACE, or the ORIENTED_FACE
+    /// the shell lists when it could not be read).
+    pub face: u64,
+    /// The face as a one-face surface body, facing as its shell uses it; else why it could not
+    /// be read (naming the face).
+    pub record: R<Brep>,
+}
+
+/// Each face of a solid item read on its own, as a one-face surface body: what can still be
+/// shown of a solid that cannot be read whole, or whose body the kernel refuses. A face is read
+/// as [`read_solid_with`] reads it, with its own edges and vertices (so its tolerances cover its
+/// own gaps only); a face that cannot be read on its own says why and the others are still read.
+pub fn read_faces_with(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims) -> R<Vec<FaceRead>> {
+    let (shells, _) = item_shells(entity(ex, item)?)?;
+    let mut reader = Reader::new(ex, context.units);
+    let mut budget = MAX_FILE_FACES;
+    let mut out = Vec::new();
+    for s in shells {
+        let (faces, flip) = shell_faces(ex, s)?;
+        for f in faces {
+            if out.len() >= MAX_FACES {
+                return Err(format!("more than {MAX_FACES} faces"));
+            }
+            let mut b = Builder::new(ex, &mut reader, tolerance(&context), &mut budget, Some(trims));
+            let read = b.face(f, 0).and_then(|(face, forward)| b.finish(item, String::new(), vec![vec![(face, forward != flip)]], Kind::Model));
+            let named = |m: String| if m.starts_with(&format!("face #{f}")) { m } else { format!("face #{f}: {m}") };
+            out.push(match read {
+                Ok(s) => FaceRead { face: s.face_origin.first().copied().unwrap_or(f), record: Ok(s.brep) },
+                Err(m) => FaceRead { face: f, record: Err(named(m)) },
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// The shells of a solid item (the outer shell first, then its voids), and what kind it is.
+fn item_shells(e: &Entity) -> R<(Vec<u64>, Kind)> {
+    let p = e.params();
+    match e.name() {
+        "MANIFOLD_SOLID_BREP" => Ok((vec![rid(p.get(1), "outer shell")?], Kind::Solid)),
         "BREP_WITH_VOIDS" => {
-            let mut shells = vec![b.shell(rid(p.get(1), "outer shell")?)?];
+            let mut shells = vec![rid(p.get(1), "outer shell")?];
             let voids = refs(p.get(2), "voids")?;
             if voids.len() >= brep::MAX_SHELLS {
                 return Err(format!("{} voids", voids.len()));
             }
-            for v in voids {
-                shells.push(b.shell(v)?);
-            }
-            (shells, Kind::Voids)
+            shells.extend(voids);
+            Ok((shells, Kind::Voids))
         }
         "SHELL_BASED_SURFACE_MODEL" => {
             let ids = refs(p.get(1), "surface model shells")?;
             if ids.is_empty() || ids.len() > brep::MAX_SHELLS {
                 return Err(format!("a surface model with {} shells", ids.len()));
             }
-            let mut shells = Vec::with_capacity(ids.len());
-            for s in ids {
-                shells.push(b.shell(s)?);
-            }
-            (shells, Kind::Model)
+            Ok((ids, Kind::Model))
         }
-        n => return Err(unsupported(n)),
+        n => Err(unsupported(n)),
+    }
+}
+
+/// The faces a shell lists, and whether the shell turns them over (an oriented shell used
+/// against its faces).
+fn shell_faces(ex: &Exchange, id: u64) -> R<(Vec<u64>, bool)> {
+    let e = entity(ex, id)?;
+    let p = e.params();
+    let (faces, flip) = match e.name() {
+        "CLOSED_SHELL" | "OPEN_SHELL" => (refs(p.get(1), "shell faces")?, false),
+        "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => {
+            let inner = rid(p.get(2), "oriented shell element")?;
+            let inner_e = entity(ex, inner)?;
+            if !matches!(inner_e.name(), "CLOSED_SHELL" | "OPEN_SHELL") {
+                return Err(format!("#{inner}: {}", unsupported(format!("shell {}", inner_e.name()))));
+            }
+            (refs(inner_e.params().get(1), "shell faces")?, !flag(p.get(3), "oriented shell orientation")?)
+        }
+        n => return Err(format!("#{id}: {}", unsupported(format!("shell {n}")))),
     };
-    drop(topology);
-    b.finish(item, name, shells, kind)
+    if faces.is_empty() {
+        return Err(format!("shell #{id} has no faces"));
+    }
+    if faces.len() > MAX_FACES {
+        return Err(format!("shell #{id} with {} faces", faces.len()));
+    }
+    Ok((faces, flip))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -772,26 +839,7 @@ impl<'b, 'a> Builder<'b, 'a> {
     }
 
     fn shell(&mut self, id: u64) -> R<Vec<(u32, bool)>> {
-        let e = entity(self.ex, id)?;
-        let p = e.params();
-        let (faces, flip) = match e.name() {
-            "CLOSED_SHELL" | "OPEN_SHELL" => (refs(p.get(1), "shell faces")?, false),
-            "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => {
-                let inner = rid(p.get(2), "oriented shell element")?;
-                let inner_e = entity(self.ex, inner)?;
-                if !matches!(inner_e.name(), "CLOSED_SHELL" | "OPEN_SHELL") {
-                    return Err(format!("#{inner}: {}", unsupported(format!("shell {}", inner_e.name()))));
-                }
-                (refs(inner_e.params().get(1), "shell faces")?, !flag(p.get(3), "oriented shell orientation")?)
-            }
-            n => return Err(format!("#{id}: {}", unsupported(format!("shell {n}")))),
-        };
-        if faces.is_empty() {
-            return Err(format!("shell #{id} has no faces"));
-        }
-        if faces.len() > MAX_FACES {
-            return Err(format!("shell #{id} with {} faces", faces.len()));
-        }
+        let (faces, flip) = shell_faces(self.ex, id)?;
         let mut out = Vec::with_capacity(faces.len());
         for f in faces {
             let (face, forward) = self.face(f, 0)?;
@@ -1168,10 +1216,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         // its domain.
         let natural = surface.natural();
         // At a pole (where the surface collapses to a point across a direction, to within the
-        // tolerance, as the pcurves closed the loop there) a loop may jump in that direction: the
-        // seam's two uses meet there a period apart.
+        // tolerance of the vertex the two uses meet at) a loop may jump in that direction: the
+        // seam's two uses meet there a period apart, and a side collapsed to within the vertex's
+        // tolerance (a corner patch with one side shrunk to a few µm) is run along between them,
+        // its boundary iso line. As the record check (`brep::geometry`) takes it.
         let poles = SurfaceEval::new(&surface).ok();
-        let at_pole = |uv: [f64; 2]| poles.as_ref().is_some_and(|e| e.pole_within(uv, tol).iter().any(|p| *p));
+        let at_pole = |uv: [f64; 2], reach: f64| poles.as_ref().is_some_and(|e| e.pole_within(uv, reach).iter().any(|p| *p));
         for (l, pc) in edge_loops.iter().zip(&pcs) {
             let mut ends = Vec::with_capacity(l.len());
             for (&(_, forward), c) in l.iter().zip(pc) {
@@ -1181,7 +1231,11 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             for k in 0..ends.len() {
                 let (Some((start, _)), Some((_, end))) = (ends.get(k), ends.get(if k == 0 { ends.len() - 1 } else { k - 1 })) else { continue };
-                if at_pole(*start) || at_pole(*end) {
+                // The vertex use k starts at, where the one before it ends.
+                let &(e, forward) = l.get(k).ok_or("edge use")?;
+                let v = self.edges.get(e as usize).ok_or("edge reference")?.vertices[if forward { 0 } else { 1 }];
+                let reach = self.vertices.get(v as usize).ok_or("vertex reference")?.tolerance.max(tol);
+                if at_pole(*start, reach) || at_pole(*end, reach) {
                     continue;
                 }
                 for d in 0..2 {
@@ -1191,7 +1245,21 @@ impl<'b, 'a> Builder<'b, 'a> {
                         continue;
                     }
                     if !((start[d] - end[d]).abs() <= 0.5 * (b - a)) {
-                        return Err(unsupported("a loop across a closed spline surface's seam without a seam edge"));
+                        // Whether the surface closes across `d` there: its two boundaries meet.
+                        let ends_at = |x: f64| {
+                            let mut q = *start;
+                            q[d] = x;
+                            poles.as_ref().and_then(|s| s.point(q))
+                        };
+                        let closed = matches!((ends_at(*a), ends_at(*b)), (Some(p), Some(q)) if p.dist(q) <= reach);
+                        return Err(unsupported(if closed {
+                            "a loop across a closed spline surface's seam without a seam edge".to_string()
+                        } else {
+                            format!(
+                                "a loop that jumps across its spline surface's {} range where the surface neither closes nor collapses to a point",
+                                if d == 0 { "u" } else { "v" }
+                            )
+                        }));
                     }
                 }
             }

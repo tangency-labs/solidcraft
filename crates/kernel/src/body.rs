@@ -878,7 +878,8 @@ impl Body {
     }
 
     /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
-    /// a body share the measurement. `None` when the body cannot be meshed.
+    /// a body share the measurement. `None` when the body cannot be meshed, or a face of it was
+    /// left out of the mesh (an open mesh has no volume).
     pub fn volume_at(&self, tol: f64) -> Option<f64> {
         let key = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let key = key.to_bits();
@@ -889,7 +890,11 @@ impl Body {
         {
             return Some(volume);
         }
-        let volume = self.mesh(&MeshTolerance::chord(f64::from_bits(key))).ok()?.measure().volume;
+        let mesh = self.mesh(&MeshTolerance::chord(f64::from_bits(key))).ok()?;
+        if self.faces_without_triangles(&mesh) > 0 {
+            return None;
+        }
+        let volume = mesh.measure().volume;
         if let Some(cell) = &self.volume
             && let Ok(mut slot) = cell.lock()
         {
@@ -913,7 +918,8 @@ impl Body {
     /// joins, protected creases). Triangles carry their face index and the edges their polylines,
     /// in the record's order; neighbouring faces share every boundary node, so the mesh is
     /// watertight wherever the B-rep is. A mesh body gives its own triangles. A face the planner
-    /// cannot mesh is an error that names it and why.
+    /// cannot mesh is left out (logged with why; [`Body::unmeshed_faces`] counts it) and the rest
+    /// meshed; a body none of whose faces mesh is an error that names the first and why.
     pub fn mesh(&self, t: &MeshTolerance) -> Result<Mesh> {
         crate::profile::timed(crate::profile::Kind::Tessellate, "mesh", || self.mesh_untimed(t))
     }
@@ -955,6 +961,10 @@ impl Body {
         // it is reported, never silent.
         for f in &stats.lenient {
             log::warn!("display plan: face {} filled leniently in (u, v), a defect in its pcurves or seams: {}", f.face, f.reason);
+        }
+        // A face no method plans is left out (no triangles; `unmeshed_faces` counts it) and named.
+        for f in &stats.unmeshed {
+            log::warn!("display plan: face {} left out of the mesh: {}", f.face, f.reason);
         }
         Ok(plan)
     }
@@ -1047,6 +1057,14 @@ impl Body {
             return 0;
         }
         let Ok(m) = self.mesh(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
+        self.faces_without_triangles(&m)
+    }
+
+    /// Faces of the body with no triangles in its mesh `m` (left out by the mesher).
+    fn faces_without_triangles(&self, m: &Mesh) -> usize {
+        if self.is_mesh() {
+            return 0;
+        }
         let mut has = vec![false; self.face_count()];
         for f in &m.tri_face {
             if let Some(h) = has.get_mut(*f as usize) {
