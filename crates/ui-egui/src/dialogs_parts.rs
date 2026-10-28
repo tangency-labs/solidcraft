@@ -179,7 +179,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         && let Some(o) = row.as_object()
     {
         for (key, v) in o.iter().filter(|(key, _)| key.as_str() != "size") {
-            form_row(ui, &key.replace('_', " "), |ui| {
+            let label = dimension_label(key).map_or_else(|| key.replace('_', " "), str::to_string);
+            form_row(ui, &label, |ui| {
                 crate::ui_kit::text(
                     ui,
                     &v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_else(|| v.to_string()),
@@ -210,6 +211,27 @@ pub fn commands(app: &SolveApp, k: &Pt, inputs: &[SelInput]) -> Result<Vec<(Stri
     // The toolbar's command when the engine has it (same parameters).
     let id = if solidcraft_engine::find_command("parts.fastener").is_some() { "parts.fastener" } else { "parts.insert" };
     Ok(vec![(id.into(), p)])
+}
+
+/// The message a size's dimension is labelled with, by its key in the library: "Head height",
+/// not `head_height`. A key the library adds later shows as it is until it has one here.
+fn dimension_label(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "across_flats" => "parts.dimension.across_flats",
+        "bore" => "parts.dimension.bore",
+        "d" => "parts.dimension.d",
+        "head_diameter" => "parts.dimension.head_diameter",
+        "head_height" => "parts.dimension.head_height",
+        "height" => "parts.dimension.height",
+        "inner" => "parts.dimension.inner",
+        "outer" => "parts.dimension.outer",
+        "pitch" => "parts.dimension.pitch",
+        "socket" => "parts.dimension.socket",
+        "socket_depth" => "parts.dimension.socket_depth",
+        "thickness" => "parts.dimension.thickness",
+        "width" => "parts.dimension.width",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -248,5 +270,25 @@ mod tests {
         assert_eq!(p["name"], "Front bearing");
         assert!(p.get("length").is_none());
         assert!(insert_params(&[], &k, None).is_err());
+    }
+
+    /// Every dimension the library gives for a size is labelled in words, in each family.
+    #[test]
+    fn every_library_dimension_has_a_label_in_words() {
+        let mut s = solidcraft_engine::Session::default();
+        let l = families(&s.execute("parts.library", &json!({})).unwrap());
+        assert!(l.len() >= 7, "{}", l.len());
+        for f in &l {
+            for (size, row) in &f.sizes {
+                for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| k.as_str() != "size") {
+                    let label = dimension_label(key).map(crate::i18n::tr);
+                    assert!(
+                        label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),
+                        "{} {size}: {key} is labelled {label:?}",
+                        f.name
+                    );
+                }
+            }
+        }
     }
 }

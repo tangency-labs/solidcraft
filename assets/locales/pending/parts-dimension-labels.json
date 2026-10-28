@@ -1,0 +1,265 @@
+{
+  "en": {
+    "parts.dimension.across_flats": "Across flats",
+    "parts.dimension.bore": "Bore",
+    "parts.dimension.d": "Nominal diameter",
+    "parts.dimension.head_diameter": "Head diameter",
+    "parts.dimension.head_height": "Head height",
+    "parts.dimension.height": "Height",
+    "parts.dimension.inner": "Inner diameter",
+    "parts.dimension.outer": "Outer diameter",
+    "parts.dimension.pitch": "Pitch",
+    "parts.dimension.socket": "Socket size",
+    "parts.dimension.socket_depth": "Socket depth",
+    "parts.dimension.thickness": "Thickness",
+    "parts.dimension.width": "Width"
+  },
+  "ar": {
+    "parts.dimension.across_flats": "مقاس المفتاح",
+    "parts.dimension.bore": "قطر الثقب",
+    "parts.dimension.d": "القطر الاسمي",
+    "parts.dimension.head_diameter": "قطر الرأس",
+    "parts.dimension.head_height": "ارتفاع الرأس",
+    "parts.dimension.height": "الارتفاع",
+    "parts.dimension.inner": "القطر الداخلي",
+    "parts.dimension.outer": "القطر الخارجي",
+    "parts.dimension.pitch": "الخطوة",
+    "parts.dimension.socket": "مقاس السداسي",
+    "parts.dimension.socket_depth": "عمق السداسي",
+    "parts.dimension.thickness": "السماكة",
+    "parts.dimension.width": "العرض"
+  },
+  "cs": {
+    "parts.dimension.height": "Výška",
+    "parts.dimension.thickness": "Tloušťka",
+    "parts.dimension.width": "Šířka"
+  },
+  "da": {
+    "parts.dimension.d": "Nominel diameter",
+    "parts.dimension.height": "Højde",
+    "parts.dimension.pitch": "Stigning",
+    "parts.dimension.thickness": "Tykkelse",
+    "parts.dimension.width": "Bredde"
+  },
+  "de": {
+    "parts.dimension.across_flats": "Schlüsselweite",
+    "parts.dimension.bore": "Bohrung",
+    "parts.dimension.d": "Nenndurchmesser",
+    "parts.dimension.head_diameter": "Kopfdurchmesser",
+    "parts.dimension.head_height": "Kopfhöhe",
+    "parts.dimension.height": "Höhe",
+    "parts.dimension.inner": "Innendurchmesser",
+    "parts.dimension.outer": "Außendurchmesser",
+    "parts.dimension.pitch": "Steigung",
+    "parts.dimension.socket": "Innensechskant",
+    "parts.dimension.socket_depth": "Sechskanttiefe",
+    "parts.dimension.thickness": "Dicke",
+    "parts.dimension.width": "Breite"
+  },
+  "es": {
+    "parts.dimension.across_flats": "Entrecaras",
+    "parts.dimension.bore": "Diámetro interior",
+    "parts.dimension.head_diameter": "Diámetro cabeza",
+    "parts.dimension.head_height": "Altura cabeza",
+    "parts.dimension.height": "Altura",
+    "parts.dimension.inner": "Diámetro interior",
+    "parts.dimension.outer": "Diámetro exterior",
+    "parts.dimension.socket": "Hexágono interior",
+    "parts.dimension.socket_depth": "Profundidad hexágono",
+    "parts.dimension.thickness": "Espesor",
+    "parts.dimension.width": "Anchura"
+  },
+  "fr": {
+    "parts.dimension.across_flats": "Sur plats",
+    "parts.dimension.bore": "Alésage",
+    "parts.dimension.d": "Diamètre nominal",
+    "parts.dimension.head_diameter": "Diamètre de tête",
+    "parts.dimension.head_height": "Hauteur de tête",
+    "parts.dimension.height": "Hauteur",
+    "parts.dimension.inner": "Diamètre intérieur",
+    "parts.dimension.outer": "Diamètre extérieur",
+    "parts.dimension.pitch": "Pas",
+    "parts.dimension.socket": "Empreinte",
+    "parts.dimension.socket_depth": "Profondeur empreinte",
+    "parts.dimension.thickness": "Épaisseur",
+    "parts.dimension.width": "Largeur"
+  },
+  "gl": {
+    "parts.dimension.height": "Altura",
+    "parts.dimension.thickness": "Espesor",
+    "parts.dimension.width": "Largura"
+  },
+  "he": {
+    "parts.dimension.across_flats": "מידת מפתח",
+    "parts.dimension.bore": "קוטר קדח",
+    "parts.dimension.d": "קוטר נומינלי",
+    "parts.dimension.head_diameter": "קוטר הראש",
+    "parts.dimension.head_height": "גובה הראש",
+    "parts.dimension.height": "גובה",
+    "parts.dimension.inner": "קוטר פנימי",
+    "parts.dimension.outer": "קוטר חיצוני",
+    "parts.dimension.pitch": "פסיעה",
+    "parts.dimension.socket": "מידת השקע",
+    "parts.dimension.socket_depth": "עומק השקע",
+    "parts.dimension.thickness": "עובי",
+    "parts.dimension.width": "רוחב"
+  },
+  "hu": {
+    "parts.dimension.height": "Magasság",
+    "parts.dimension.thickness": "Vastagság",
+    "parts.dimension.width": "Szélesség"
+  },
+  "id": {
+    "parts.dimension.height": "Tinggi",
+    "parts.dimension.thickness": "Ketebalan",
+    "parts.dimension.width": "Lebar"
+  },
+  "it": {
+    "parts.dimension.across_flats": "Apertura chiave",
+    "parts.dimension.bore": "Foro",
+    "parts.dimension.d": "Diametro nominale",
+    "parts.dimension.head_diameter": "Diametro testa",
+    "parts.dimension.head_height": "Altezza testa",
+    "parts.dimension.height": "Altezza",
+    "parts.dimension.inner": "Diametro interno",
+    "parts.dimension.outer": "Diametro esterno",
+    "parts.dimension.pitch": "Passo",
+    "parts.dimension.socket": "Esagono incassato",
+    "parts.dimension.socket_depth": "Profondità esagono",
+    "parts.dimension.thickness": "Spessore",
+    "parts.dimension.width": "Larghezza"
+  },
+  "ja": {
+    "parts.dimension.across_flats": "二面幅",
+    "parts.dimension.bore": "内径",
+    "parts.dimension.d": "呼び径",
+    "parts.dimension.head_diameter": "頭部径",
+    "parts.dimension.head_height": "頭部高さ",
+    "parts.dimension.height": "高さ",
+    "parts.dimension.inner": "内径",
+    "parts.dimension.outer": "外径",
+    "parts.dimension.pitch": "ピッチ",
+    "parts.dimension.socket": "六角穴の二面幅",
+    "parts.dimension.socket_depth": "六角穴の深さ",
+    "parts.dimension.thickness": "厚さ",
+    "parts.dimension.width": "幅"
+  },
+  "ko": {
+    "parts.dimension.across_flats": "대변 거리",
+    "parts.dimension.bore": "내경",
+    "parts.dimension.d": "호칭 지름",
+    "parts.dimension.head_diameter": "머리 지름",
+    "parts.dimension.head_height": "머리 높이",
+    "parts.dimension.height": "높이",
+    "parts.dimension.inner": "내경",
+    "parts.dimension.outer": "외경",
+    "parts.dimension.pitch": "피치",
+    "parts.dimension.socket": "육각 구멍 크기",
+    "parts.dimension.socket_depth": "육각 구멍 깊이",
+    "parts.dimension.thickness": "두께",
+    "parts.dimension.width": "너비"
+  },
+  "ms": {
+    "parts.dimension.height": "Ketinggian",
+    "parts.dimension.thickness": "Ketebalan",
+    "parts.dimension.width": "Lebar"
+  },
+  "nb": {
+    "parts.dimension.d": "Nominell diameter",
+    "parts.dimension.height": "Høyde",
+    "parts.dimension.pitch": "Stigning",
+    "parts.dimension.thickness": "Tykkelse",
+    "parts.dimension.width": "Bredde"
+  },
+  "nl": {
+    "parts.dimension.height": "Hoogte",
+    "parts.dimension.thickness": "Dikte",
+    "parts.dimension.width": "Breedte"
+  },
+  "pl": {
+    "parts.dimension.d": "Średnica nominalna",
+    "parts.dimension.height": "Wysokość",
+    "parts.dimension.pitch": "Skok",
+    "parts.dimension.thickness": "Grubość",
+    "parts.dimension.width": "Szerokość"
+  },
+  "pt-BR": {
+    "parts.dimension.d": "Diâmetro nominal",
+    "parts.dimension.height": "Altura",
+    "parts.dimension.pitch": "Passo",
+    "parts.dimension.thickness": "Espessura",
+    "parts.dimension.width": "Largura"
+  },
+  "ro": {
+    "parts.dimension.height": "Înălțime",
+    "parts.dimension.thickness": "Grosime",
+    "parts.dimension.width": "Lățime"
+  },
+  "ru": {
+    "parts.dimension.height": "Высота",
+    "parts.dimension.thickness": "Толщина",
+    "parts.dimension.width": "Ширина"
+  },
+  "sv": {
+    "parts.dimension.height": "Höjd",
+    "parts.dimension.thickness": "Tjocklek",
+    "parts.dimension.width": "Bredd"
+  },
+  "tr": {
+    "parts.dimension.d": "Nominal çap",
+    "parts.dimension.height": "Yükseklik",
+    "parts.dimension.pitch": "Adım",
+    "parts.dimension.thickness": "Kalınlık",
+    "parts.dimension.width": "Genişlik"
+  },
+  "uk": {
+    "parts.dimension.d": "Номінальний діаметр",
+    "parts.dimension.height": "Висота",
+    "parts.dimension.pitch": "Крок",
+    "parts.dimension.thickness": "Товщина",
+    "parts.dimension.width": "Ширина"
+  },
+  "vi": {
+    "parts.dimension.across_flats": "Cỡ cờ lê",
+    "parts.dimension.bore": "Đường kính lỗ",
+    "parts.dimension.d": "Đường kính danh nghĩa",
+    "parts.dimension.head_diameter": "Đường kính đầu",
+    "parts.dimension.head_height": "Chiều cao đầu",
+    "parts.dimension.height": "Chiều cao",
+    "parts.dimension.inner": "Đường kính trong",
+    "parts.dimension.outer": "Đường kính ngoài",
+    "parts.dimension.pitch": "Bước ren",
+    "parts.dimension.socket": "Cỡ lục giác",
+    "parts.dimension.socket_depth": "Độ sâu lục giác",
+    "parts.dimension.thickness": "Độ dày",
+    "parts.dimension.width": "Bề rộng"
+  },
+  "zh": {
+    "parts.dimension.across_flats": "对边宽度",
+    "parts.dimension.bore": "内径",
+    "parts.dimension.d": "公称直径",
+    "parts.dimension.head_diameter": "头部直径",
+    "parts.dimension.head_height": "头部高度",
+    "parts.dimension.height": "高度",
+    "parts.dimension.inner": "内径",
+    "parts.dimension.outer": "外径",
+    "parts.dimension.pitch": "螺距",
+    "parts.dimension.socket": "内六角对边",
+    "parts.dimension.socket_depth": "内六角深度",
+    "parts.dimension.thickness": "厚度",
+    "parts.dimension.width": "宽度"
+  },
+  "zh-TW": {
+    "parts.dimension.across_flats": "對邊寬度",
+    "parts.dimension.bore": "內徑",
+    "parts.dimension.head_diameter": "頭部直徑",
+    "parts.dimension.head_height": "頭部高度",
+    "parts.dimension.height": "高度",
+    "parts.dimension.inner": "內徑",
+    "parts.dimension.outer": "外徑",
+    "parts.dimension.socket": "內六角對邊",
+    "parts.dimension.socket_depth": "內六角深度",
+    "parts.dimension.thickness": "厚度",
+    "parts.dimension.width": "寬度"
+  }
+}
