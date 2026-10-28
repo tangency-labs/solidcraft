@@ -1,0 +1,74 @@
+{
+  "en": {
+    "add a key for a joint first": "add a key for a joint first",
+    "no motion study yet": "no motion study yet",
+    "no such joint": "no such joint",
+    "select a point on a component": "select a point on a component"
+  },
+  "ar": {
+    "add a key for a joint first": "أضف أولًا مفتاحًا لمفصل",
+    "no motion study yet": "لا توجد دراسة حركة بعد",
+    "no such joint": "لا يوجد مفصل بهذا الاسم",
+    "select a point on a component": "اختر نقطة على مكوّن"
+  },
+  "de": {
+    "add a key for a joint first": "zuerst einen Schlüssel für ein Gelenk hinzufügen",
+    "no motion study yet": "noch keine Bewegungsuntersuchung",
+    "no such joint": "kein solches Gelenk",
+    "select a point on a component": "einen Punkt auf einer Komponente auswählen"
+  },
+  "es": {
+    "add a key for a joint first": "añade primero una clave para una unión",
+    "no motion study yet": "todavía no hay ningún estudio de movimiento",
+    "no such joint": "no existe esa unión",
+    "select a point on a component": "selecciona un punto en un componente"
+  },
+  "fr": {
+    "add a key for a joint first": "ajouter d'abord une clé pour une liaison",
+    "no motion study yet": "pas encore d'étude de mouvement",
+    "no such joint": "liaison introuvable",
+    "select a point on a component": "sélectionner un point sur un composant"
+  },
+  "he": {
+    "add a key for a joint first": "יש להוסיף תחילה מפתח למפרק",
+    "no motion study yet": "אין עדיין חקר תנועה",
+    "no such joint": "אין מפרק כזה",
+    "select a point on a component": "יש לבחור נקודה על רכיב"
+  },
+  "it": {
+    "add a key for a joint first": "aggiungi prima una chiave per un giunto",
+    "no motion study yet": "ancora nessuno studio del movimento",
+    "no such joint": "giunto inesistente",
+    "select a point on a component": "seleziona un punto su un componente"
+  },
+  "ja": {
+    "add a key for a joint first": "先にジョイントのキーを追加してください",
+    "no motion study yet": "モーション スタディがまだありません",
+    "no such joint": "そのジョイントはありません",
+    "select a point on a component": "コンポーネント上の点を選択してください"
+  },
+  "ko": {
+    "add a key for a joint first": "먼저 관절의 키를 추가하세요",
+    "no motion study yet": "아직 운동 연구가 없습니다",
+    "no such joint": "해당 관절이 없습니다",
+    "select a point on a component": "구성요소 위의 점을 선택하세요"
+  },
+  "vi": {
+    "add a key for a joint first": "hãy thêm một khóa cho khớp trước",
+    "no motion study yet": "chưa có nghiên cứu chuyển động",
+    "no such joint": "không có khớp này",
+    "select a point on a component": "chọn một điểm trên một thành phần"
+  },
+  "zh": {
+    "add a key for a joint first": "请先为接头添加关键帧",
+    "no motion study yet": "尚无运动分析",
+    "no such joint": "没有这个接头",
+    "select a point on a component": "选择组件上的一个点"
+  },
+  "zh-TW": {
+    "add a key for a joint first": "請先為接頭新增關鍵影格",
+    "no motion study yet": "尚無運動研究",
+    "no such joint": "沒有這個接頭",
+    "select a point on a component": "選取元件上的一個點"
+  }
+}

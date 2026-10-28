@@ -196,7 +196,7 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
                 Some(why) => (why, t.warning),
                 None => (crate::i18n::format("trace.points", &[("count", &v["samples"].to_string())]), t.text_dim),
             },
-            Err(e) => (e.clone(), t.text_dim),
+            Err(e) => (crate::i18n::tr_label(e).to_string(), t.text_dim),
         };
         form_row(ui, "", |ui| {
             ui.add(egui::Label::new(RichText::new(text).color(colour)).wrap());
