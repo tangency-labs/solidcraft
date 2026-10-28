@@ -146,9 +146,40 @@ int32_t setback_fillet_edges(SmBrep* body,SmTArray<SmEdge*>& selected,
 // `curve_sih` > 0 fillets with curve_sih_fillet_edges at that step-back factor; a
 // non-null `end_radius` runs SmApiVariableRadiusFillet from fillet[0] to *end_radius
 // (thumbweight fillet[3] must be 1.0, the variable-radius API takes none).
+// `law` (validated by the Rust binding): degree, radius count, radii, unique knot count,
+// knots, multiplicities, edge map min/max; SetFilletParameters(SM_FS_VARIABLE_RADIUS)
+// with an SmBSplineFilletLaw over that curve, laid out as SmApiVariableRadiusFillet.
+SmStatus law_fillet_edges(SmBrep* body,SmTArray<SmEdge*>& edges,double radius,ULONG xsect,
+    ULONG continuity,const double* law) {
+    const SmContext* ctx=SmApiGetOrCreateContext();
+    const ULONG degree=ULONG(law[0]), points=ULONG(law[1]);
+    const double* radii=law+2;
+    const ULONG knots=ULONG(law[2+points]);
+    const double* knot=law+3+points;
+    const double* mult=knot+knots;
+    const double* map=mult+knots;
+    SmTArray<SmPoint3d> control; SmTArray<double> unique; SmTArray<ULONG> mults;
+    for (ULONG i=0; i<points; ++i) control.Add(SmPoint3d(radii[i],0,0));
+    for (ULONG i=0; i<knots; ++i) { unique.Add(knot[i]); mults.Add(ULONG(mult[i])); }
+    SmBSplineCurve* curve=nullptr;
+    SER(SmBSplineCurve::CreateCanonical(*ctx,3,degree,control,SM_CF_UNSPECIFIED,mults,unique,
+        SM_KT_UNSPECIFIED,NULL,NULL,curve));
+    SmBSplineFilletLaw sLaw(curve,SmExtent1d(map[0],map[1]));
+    SmFilletSurfaceGeneratorType eFSGType=SM_FSG_CIRCULAR;
+    if (xsect == 0) eFSGType=SM_FSG_LINEAR;
+    else if (xsect == 2) eFSGType=SM_FSG_BLEND_CURVE;
+    SmFilletExecutive sFilExec(*ctx,body);
+    sFilExec.SetDoGlobalMerge(TRUE);
+    SER(sFilExec.SetFilletParameters(body,edges,eFSGType,SM_FS_VARIABLE_RADIUS,radius,&sLaw,
+        -1.0,-1.0,-1.0,-1.0,continuity));
+    SER(sFilExec.DoFillet());
+    body->StitchAndOrient();
+    return SM_SUCCESS;
+}
+
 int32_t fillet_and_record(SmBrep* body,const double* fillet,int64_t n,std::vector<double>& values,
     bool piecewise=false,double curve_sih=0.0,const double* end_radius=nullptr,
-    const double* setback=nullptr) {
+    const double* setback=nullptr,const double* law=nullptr) {
     if (n < 5) return SC_ERR_ARG;
     if (end_radius && (!std::isfinite(*end_radius) || fillet[3] != 1.0)) return SC_ERR_ARG;
     const double ulong_limit=std::ldexp(1.0,std::numeric_limits<ULONG>::digits);
@@ -177,6 +208,8 @@ int32_t fillet_and_record(SmBrep* body,const double* fillet,int64_t n,std::vecto
     if(setback) {
         const auto rc=setback_fillet_edges(body,selected,fillet,setback,result);
         if(rc!=SC_OK)return rc;
+    } else if(law) {
+        result=law_fillet_edges(body,selected,fillet[0],ULONG(fillet[1]),ULONG(fillet[2]),law);
     } else {
     result=end_radius
         ? SmApiVariableRadiusFillet(body,selected,fillet[0],*end_radius,ULONG(fillet[1]),ULONG(fillet[2]))
@@ -212,7 +245,7 @@ int32_t fillet_and_record(SmBrep* body,const double* fillet,int64_t n,std::vecto
 namespace fillet_real_solid {
 int32_t real_solid(const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len,
     bool piecewise, double curve_sih=0.0, const double* end_radius=nullptr,
-    const double* setback=nullptr) {
+    const double* setback=nullptr, const double* law=nullptr) {
     if (!input || n < 9) return SC_ERR_ARG;
     for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
     for (int i=0; i<3; ++i) if (input[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
@@ -223,7 +256,7 @@ int32_t real_solid(const double* input, int64_t n, double* out, int64_t cap, int
     if (setup != SM_SUCCESS || !raw) return SC_ERR_ARG;
     std::unique_ptr<SmBrep> body(raw);
     std::vector<double> values;
-    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+3,n-3,values,piecewise,curve_sih,end_radius,setback);
+    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+3,n-3,values,piecewise,curve_sih,end_radius,setback,law);
     if (rc != SC_OK) return rc;
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
@@ -238,6 +271,23 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_variable_solid(
     const double* input, int64_t n, double end_radius,
     double* out, int64_t cap, int64_t* out_len) {
     return fillet_real_solid::real_solid(input,n,out,cap,out_len,false,0.0,&end_radius);
+}
+
+// The box wire of sc_blend_fillet_executive_p3_real_solid, filleted with a B-spline
+// radius law (fillet_real_solid::law_fillet_edges); the binding validates `law`.
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_law_solid(
+    const double* input, int64_t n, const double* law, int64_t law_n,
+    double* out, int64_t cap, int64_t* out_len) {
+    if(!law || law_n<5 || n<7 || input[6]!=1.0)return SC_ERR_ARG;
+    for(int64_t i=0;i<law_n;++i)if(!std::isfinite(law[i]))return SC_ERR_ARG;
+    // Block lengths only; the binding checks the values.
+    if(law[1]<0||law[1]>64||std::floor(law[1])!=law[1])return SC_ERR_ARG;
+    const int64_t points=int64_t(law[1]);
+    if(2+points>=law_n)return SC_ERR_ARG;
+    const double knots=law[2+points];
+    if(knots<0||knots>64||std::floor(knots)!=knots)return SC_ERR_ARG;
+    if(law_n!=3+points+2*int64_t(knots)+2)return SC_ERR_ARG;
+    return fillet_real_solid::real_solid(input,n,out,cap,out_len,false,0.0,nullptr,nullptr,law);
 }
 
 // The legacy box wire is unchanged. The separate block is exactly XYZ and the

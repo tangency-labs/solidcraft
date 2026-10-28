@@ -112,6 +112,15 @@ extern "C" {
         cap: i64,
         len: *mut i64,
     ) -> i32;
+    fn sc_blend_fillet_executive_p3_real_law_solid(
+        input: *const f64,
+        n: i64,
+        law: *const f64,
+        law_n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
     fn sc_blend_fillet_executive_p3_real_solid_setback(
         input: *const f64,
         n: i64,
@@ -198,6 +207,79 @@ pub fn real_variable_solid(input: &[f64], end_radius: f64) -> Result<Vec<f64>, F
             input.as_ptr(),
             input.len() as i64,
             end_radius,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// Largest degree and control-point count of a fixture radius law.
+const LAW_MAX_DEGREE: f64 = 3.0;
+const LAW_MAX_POINTS: usize = 64;
+
+/// Validate the unchanged real-box wire (default thumbweight) and a B-spline radius
+/// law block: degree, radius count, the radii (control points `(r, 0, 0)`), unique
+/// knot count, the strictly increasing knots, their multiplicities (`degree + 1` at
+/// the ends, `1..=degree` inside, summing to radii + degree + 1), then the edge map's
+/// min and max. Every value finite. These bounds define the fixture format: within
+/// them `SmBSplineCurve::CreateCanonical` builds the curve on both sides.
+pub fn validate_real_law_solid(input: &[f64], law: &[f64]) -> Result<(), FfiError> {
+    validate_real_solid(input)?;
+    let bad = |what: &str| FfiError::InvalidArgument(format!("radius law: {what}"));
+    if input.get(6) != Some(&1.0) {
+        return Err(bad("default thumbweight required"));
+    }
+    if law.iter().any(|value| !value.is_finite()) {
+        return Err(bad("non-finite value"));
+    }
+    let mut r = Cursor::new(law);
+    let degree = r.num()?;
+    if degree.fract() != 0.0 || !(1.0..=LAW_MAX_DEGREE).contains(&degree) {
+        return Err(bad("degree outside 1..=3"));
+    }
+    let degree = degree as usize;
+    let points = r.index(LAW_MAX_POINTS)?;
+    if points <= degree {
+        return Err(bad("fewer radii than degree + 1"));
+    }
+    r.slice(points)?;
+    let knots = r.index(LAW_MAX_POINTS)?;
+    if knots < 2 {
+        return Err(bad("fewer than two knots"));
+    }
+    let values = r.slice(knots)?;
+    if values.iter().zip(values.iter().skip(1)).any(|(a, b)| a >= b) {
+        return Err(bad("knots not strictly increasing"));
+    }
+    let mut total = 0;
+    for i in 0..knots {
+        let end = i == 0 || i + 1 == knots;
+        let mult = r.index(degree + 1)?;
+        if (end && mult != degree + 1) || (!end && !(1..=degree).contains(&mult)) {
+            return Err(bad("invalid knot multiplicity"));
+        }
+        total += mult;
+    }
+    if total != points + degree + 1 {
+        return Err(bad("multiplicities do not match the radius count"));
+    }
+    r.slice(2)?;
+    r.done()
+}
+
+/// `SetFilletParameters(SM_FS_VARIABLE_RADIUS)` with an `SmBSplineFilletLaw` built
+/// from the law block, then `DoFillet` and `StitchAndOrient`, as
+/// `SmApiVariableRadiusFillet` does with its linear law. Uses the same complete
+/// result record as [`real_solid`].
+pub fn real_law_solid(input: &[f64], law: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_real_law_solid(input, law)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_real_law_solid(
+            input.as_ptr(),
+            input.len() as i64,
+            law.as_ptr(),
+            law.len() as i64,
             out.as_mut_ptr(),
             out.len() as i64,
             len,
