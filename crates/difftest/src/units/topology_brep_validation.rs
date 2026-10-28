@@ -1,10 +1,8 @@
 //! Differential checks of B-rep pointer reports and coincidence pairs against the
 //! unchanged c9c5979 C++ reference. The Rust side builds a [`BrepIn`] source itself
-//! ([`crate::own_builder`]) and reads an `.smb` file with the Rust reader
-//! ([`crate::own_reader::brep_in_order`]), both under this runner's conventions. Only
-//! the `SmBrepConstructor` sheet grids (`grid_faces`, `shared_boundaries`), whose
-//! constructor is not ported, still export their topology, geometry ownership and
-//! global list order for the Rust side to import. Post-call curve samples compare the
+//! ([`crate::own_builder`], and the shim's `SmBrepConstructor` sheet grids through
+//! [`sheet_grid`], in the shim's call order) and reads an `.smb` file with the Rust reader
+//! ([`crate::own_reader::brep_in_order`]), both under this runner's conventions. Post-call curve samples compare the
 //! reversal repairs and lazily created UV curves made by the checks themselves.
 use super::topology_edgeuse_p1::{brep_block_of, import_raw_with_types, path_of, BrepIn};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -14,10 +12,25 @@ use solidcore::geom::assert_array::{AssertArray, ObjectKey as ReportKey};
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
 use solidcore::topology::brep::validation;
+use solidcore::curve::curve::Curve;
+use solidcore::curve::line::Line;
+use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::extent2d::Extent2d;
+use solidcore::geom::vector2d::{Point2, Vec2};
+use solidcore::geom::vector3d::Vec3;
+use solidcore::math::Point3;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::surface::plane::Plane;
+use solidcore::surface::surface::Surface;
+use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+use solidcore::topology::edgeuse::p1 as eu1p;
+use solidcore::topology::shell::{ShellMembers, ShellType};
 use solidcore::topology::{
-    Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopuseId, NamingScheme, VertexId,
+    Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
+    LoopId, Loopuse, LoopuseId, LoopuseStart, NamingScheme, Shell, ShellId, Vertex, VertexId,
+    Vertexuse, VertexuseId, VertexuseOwner,
 };
-use solidcore::{EntityRef, Kernel};
+use solidcore::{EntityRef, Kernel, SolidError};
 use solidcore_ffi::units::topology_brep_validation as ffi;
 
 /// Native B-rep validation runner.
@@ -278,39 +291,45 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     edgeuse_owner: &own_edgeuse_owner,
 };
 /// The Rust B-rep of a [`BrepIn`] source built by the Rust kernel
-/// ([`crate::own_builder`]) or, for an `.smb` file, read by the Rust reader and
-/// renumbered into the shim's traversal order ([`crate::own_reader::brep_in_order`]):
-/// native lists, face uses and geometry owners under [`CONVENTIONS`], `Notify` naming as
-/// [`imported`] sets it. A failed build is the shim's failed construction; a failed
-/// read is a Rust divergence, reported as an error. `None` for the sources still
-/// imported from the shim's export: the `SmBrepConstructor` sheet grids (`grid_faces`,
-/// `shared_boundaries`), whose constructor is not ported.
+/// ([`crate::own_builder`], and the `SmBrepConstructor` sheet grids `grid_faces` and
+/// `shared_boundaries` through [`sheet_grid`], in the shim's call order) or, for an `.smb`
+/// file, read by the Rust reader and renumbered into the shim's traversal order
+/// ([`crate::own_reader::brep_in_order`]): native lists, face uses and geometry owners
+/// under [`CONVENTIONS`], `Notify` naming as [`imported`] sets it. A failed build is the
+/// shim's failed construction; a failed read is a Rust divergence, reported as an error.
 fn own_brep(i: &Inputs) -> Result<Option<Result<Brep, Output>>, HarnessError> {
-    use crate::own_builder::Built;
-    if i.grid_faces.is_some() || i.shared_boundaries.is_some() {
-        return Ok(None);
-    }
-    let file = matches!(i.brep, BrepIn::File { .. });
+    use crate::own_builder::{finish, in_new_brep, Built};
     let mut k = Kernel::default();
-    Ok(Some(
-        match crate::own_reader::brep_in_order(&mut k, &i.brep, false, false, &CONVENTIONS)? {
-            Built::Brep(b) => {
-                let mut b = *b;
-                b.set_naming(NamingScheme::Notify);
-                Ok(b)
+    // the sheet grids (`shared_boundaries` first, as the shim's dispatch reads it)
+    let grid = match (i.shared_boundaries, i.grid_faces) {
+        (Some(mode), _) => Some((2, mode)),
+        (None, Some(count)) => Some((count, 0)),
+        (None, None) => None,
+    };
+    let file = matches!(i.brep, BrepIn::File { .. });
+    let built = match grid {
+        Some((count, shared)) => {
+            let raw = in_new_brep(&mut k, |k, b| sheet_grid(k, b, count, shared))?;
+            finish(&mut k, raw, false, false, &CONVENTIONS)?
+        }
+        None => crate::own_reader::brep_in_order(&mut k, &i.brep, false, false, &CONVENTIONS)?,
+    };
+    Ok(Some(match built {
+        Built::Brep(b) => {
+            let mut b = *b;
+            b.set_naming(NamingScheme::Notify);
+            Ok(b)
+        }
+        Built::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
+            if file {
+                Output::err(format!("rust read failed: {e}"))
+            } else {
+                Output::rejected("native fixture construction failed")
             }
-            Built::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
-                if file {
-                    Output::err(format!("rust read failed: {e}"))
-                } else {
-                    Output::rejected("native fixture construction failed")
-                }
-            })),
-        },
-    ))
+        })),
+    }))
 }
-fn orient(v: f64) -> solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType {
-    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+fn orient(v: f64) -> OrientType {
     match v as u8 {
         1 => OrientType::Same,
         2 => OrientType::Opposite,
@@ -622,6 +641,489 @@ impl UnitDiff for Runner {
         })
         .ok()
     }
+}
+
+// ---- the sheet grids: the shim's `sheet_grid` through `SmBrepConstructor` ----------------------
+
+/// `SmBrepConstructor`'s state between calls (`SmBrepData.cpp`), for the calls the shim's
+/// `sheet_grid` makes on an open shell in the infinite region (no `StartRegion`, so no
+/// inner shell): the records each call makes, linked as upstream links them.
+struct Constructor {
+    outer_shell: Option<ShellId>,
+    face: Option<FaceId>,
+    loop_: Option<LoopId>,
+    loop_surface_orientation: OrientType,
+    edge: Option<EdgeId>,
+    edgeuse: Option<EdgeuseId>,
+}
+
+fn sm_err(op: &'static str) -> SolidError {
+    SolidError::sm_err(op)
+}
+
+fn opt_err<T>(x: Option<T>, op: &'static str) -> Result<T, SolidError> {
+    x.ok_or_else(|| sm_err(op))
+}
+
+impl Constructor {
+    /// `StartBrep` (the B-rep is the caller's new one).
+    fn new() -> Self {
+        Self {
+            outer_shell: None,
+            face: None,
+            loop_: None,
+            loop_surface_orientation: OrientType::Unknown,
+            edge: None,
+            edgeuse: None,
+        }
+    }
+
+    /// `StartShell` without a region: one face-use shell posted into the infinite region.
+    fn start_shell(&mut self, b: &mut Brep) -> Result<ShellId, SolidError> {
+        const OP: &str = "difftest::brep_validation::start_shell";
+        if self.outer_shell.is_some() {
+            return Err(sm_err(OP));
+        }
+        let region = opt_err(b.infinite_region(), OP)?;
+        let shell = b.add_shell_record(Shell {
+            region: Some(region),
+            shell_type: ShellType::Faceuse,
+            members: ShellMembers::Faceuses(Vec::new()),
+            ..Shell::default()
+        })?;
+        b.region_mut(region)?.shells.push(shell);
+        self.outer_shell = Some(shell);
+        Ok(shell)
+    }
+
+    /// `StartFace(SM_OT_SAME)`: the face (B-rep tolerance) and its up (`SAME`) and down
+    /// (`OPPOSITE`) face uses, both posted into the outer shell.
+    fn start_face(&mut self, b: &mut Brep) -> Result<FaceId, SolidError> {
+        const OP: &str = "difftest::brep_validation::start_face";
+        let shell = opt_err(self.outer_shell, OP)?;
+        let tolerance = b.tolerance();
+        let face = b.add_face_record(Face {
+            tolerance,
+            ..Face::new(shell)
+        })?;
+        let fu1 = b.add_faceuse_record(Faceuse {
+            face: Some(face),
+            orientation: OrientType::Same,
+            ..Faceuse::default()
+        })?;
+        let fu2 = b.add_faceuse_record(Faceuse {
+            face: Some(face),
+            mate: Some(fu1),
+            orientation: OrientType::Opposite,
+            ..Faceuse::default()
+        })?;
+        b.faceuse_mut(fu1)?.mate = Some(fu2);
+        b.face_mut(face)?.faceuse = Some(fu1);
+        for fu in [fu1, fu2] {
+            b.faceuse_mut(fu)?.shell = Some(shell);
+            match &mut b.shell_mut(shell)?.members {
+                ShellMembers::Faceuses(v) => v.push(fu),
+                _ => return Err(sm_err(OP)),
+            }
+        }
+        b.shell_mut(shell)?.faces.push(face);
+        self.face = Some(face);
+        Ok(face)
+    }
+
+    /// `SetFaceSurface(surface, surface->GetNaturalUVDomain())` of a surface without
+    /// owner: the face owns it.
+    fn set_face_surface(
+        &mut self,
+        b: &mut Brep,
+        mut surface: Surface,
+        uv_domain: Extent2d,
+    ) -> Result<(), SolidError> {
+        const OP: &str = "difftest::brep_validation::set_face_surface";
+        let face = opt_err(self.face, OP)?;
+        surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
+        let f = b.face_mut(face)?;
+        f.surface = Some(surface);
+        f.uv_domain = uv_domain;
+        b.sync_face_surface_tolerance(face)
+    }
+
+    /// `StartLoop(SM_OT_SAME)`: the loop and its loop uses on the up and down face uses
+    /// (the first loop of a face use outer, `SAME`).
+    fn start_loop(&mut self, b: &mut Brep) -> Result<LoopId, SolidError> {
+        const OP: &str = "difftest::brep_validation::start_loop";
+        let face = opt_err(self.face, OP)?;
+        self.edge = None;
+        let fu1 = opt_err(b.face(face)?.faceuse, OP)?;
+        let fu2 = opt_err(b.faceuse(fu1)?.mate, OP)?;
+        let l = b.add_loop_record(Loop {
+            face,
+            edges: Vec::new(),
+            loopuse: None,
+        })?;
+        let lu1 = b.add_loopuse_record(Loopuse {
+            faceuse: Some(fu1),
+            loop_: Some(l),
+            ..Loopuse::default()
+        })?;
+        let lu2 = b.add_loopuse_record(Loopuse {
+            faceuse: Some(fu2),
+            loop_: Some(l),
+            mate: Some(lu1),
+            ..Loopuse::default()
+        })?;
+        b.faceuse_mut(fu1)?.loopuses.push(lu1);
+        b.faceuse_mut(fu2)?.loopuses.push(lu2);
+        b.loop_mut(l)?.loopuse = Some(lu1);
+        b.face_mut(face)?.loops.push(l);
+        self.loop_surface_orientation = OrientType::Same;
+        let orientation = if b.faceuse(fu1)?.loopuses.len() == 1 {
+            OrientType::Same
+        } else {
+            OrientType::Opposite
+        };
+        b.loopuse_mut(lu1)?.orientation = orientation;
+        b.loopuse_mut(lu2)?.orientation = orientation;
+        b.loopuse_mut(lu1)?.mate = Some(lu2);
+        self.loop_ = Some(l);
+        Ok(l)
+    }
+
+    /// `StartEdge(SM_OT_SAME, existing_edge, start_vertex, end_vertex)`.
+    fn start_edge(
+        &mut self,
+        b: &mut Brep,
+        existing_edge: Option<EdgeId>,
+        mut start_vertex: Option<VertexId>,
+        mut end_vertex: Option<VertexId>,
+    ) -> Result<EdgeId, SolidError> {
+        const OP: &str = "difftest::brep_validation::start_edge";
+        let l = opt_err(self.loop_, OP)?;
+        let edge = match existing_edge {
+            None => {
+                let tolerance = b.tolerance();
+                b.add_edge_record(Edge {
+                    vertices: [VertexId::from_index(0), VertexId::from_index(0)],
+                    edgeuses: Vec::new(),
+                    interval: Extent1d::new(),
+                    tolerance,
+                    curve: None,
+                })?
+            }
+            Some(e) => e,
+        };
+        let eu1 = b.add_edgeuse_record(Edgeuse::default())?;
+        let eu2 = b.add_edgeuse_record(Edgeuse::default())?;
+        let vu1 = b.add_vertexuse_record(Vertexuse {
+            owner: VertexuseOwner::Edgeuse(Some(eu1)),
+            ..Vertexuse::default()
+        })?;
+        let vu2 = b.add_vertexuse_record(Vertexuse {
+            owner: VertexuseOwner::Edgeuse(Some(eu2)),
+            ..Vertexuse::default()
+        })?;
+        b.edgeuse_mut(eu1)?.vertexuse = Some(vu1);
+        b.edgeuse_mut(eu2)?.vertexuse = Some(vu2);
+        // the shim's edges are SAME in a SAME loop
+        if OrientType::Same == self.loop_surface_orientation {
+            b.edgeuse_mut(eu1)?.orientation = OrientType::Same;
+            b.edgeuse_mut(eu2)?.orientation = OrientType::Opposite;
+        } else {
+            b.edgeuse_mut(eu1)?.orientation = OrientType::Opposite;
+            b.edgeuse_mut(eu2)?.orientation = OrientType::Same;
+            std::mem::swap(&mut start_vertex, &mut end_vertex);
+        }
+        // the loop uses
+        let lu1 = opt_err(b.loop_(l)?.loopuse, OP)?;
+        let lu2 = opt_err(b.loopuse(lu1)?.mate, OP)?;
+        b.edgeuse_mut(eu1)?.owner = EdgeuseOwner::Loopuse(Some(lu1));
+        b.loopuse_mut(lu1)?.start = LoopuseStart::Edgeuse(Some(eu1));
+        b.edgeuse_mut(eu2)?.owner = EdgeuseOwner::Loopuse(Some(lu2));
+        b.loopuse_mut(lu2)?.start = LoopuseStart::Edgeuse(Some(eu2));
+        // CCW and CW
+        if self.edge.is_none() {
+            for eu in [eu1, eu2] {
+                let r = b.edgeuse_mut(eu)?;
+                r.ccw = Some(eu);
+                r.cw = Some(eu);
+            }
+        } else if self.loop_surface_orientation == OrientType::Same {
+            let prev1 = opt_err(self.edgeuse, OP)?;
+            let prev2 = opt_err(eu1p::mate(b, prev1)?, OP)?;
+            let prev1_ccw = opt_err(b.edgeuse(prev1)?.ccw, OP)?;
+            b.edgeuse_mut(eu1)?.ccw = Some(prev1_ccw);
+            b.edgeuse_mut(prev1_ccw)?.cw = Some(eu1);
+            b.edgeuse_mut(prev1)?.ccw = Some(eu1);
+            b.edgeuse_mut(eu1)?.cw = Some(prev1);
+            let prev2_cw = opt_err(b.edgeuse(prev2)?.cw, OP)?;
+            b.edgeuse_mut(eu2)?.cw = Some(prev2_cw);
+            b.edgeuse_mut(prev2_cw)?.ccw = Some(eu2);
+            b.edgeuse_mut(prev2)?.cw = Some(eu2);
+            b.edgeuse_mut(eu2)?.ccw = Some(prev2);
+        } else {
+            // (the shim's loops are all SAME)
+            return Err(sm_err(OP));
+        }
+        // connect edge and edge uses: the first edge use has the edge's orientation
+        if existing_edge.is_none() {
+                if let Some(v) = start_vertex {
+                    post_insert_vertexuse(b, v, vu1)?;
+                }
+                if let Some(v) = end_vertex {
+                    post_insert_vertexuse(b, v, vu2)?;
+                }
+                let order = if b.edgeuse(eu1)?.orientation == OrientType::Same {
+                    [eu1, eu2]
+                } else {
+                    [eu2, eu1]
+                };
+                for eu in order {
+                    b.edge_mut(edge)?.edgeuses.push(eu);
+                    b.edgeuse_mut(eu)?.edge = Some(edge);
+                }
+        } else {
+                let eu = opt_err(eu1p::primary_edgeuse(b, edge)?, OP)?;
+                let eu_mate = opt_err(eu1p::mate(b, eu)?, OP)?;
+                let eu_vu = opt_err(b.edgeuse(eu)?.vertexuse, OP)?;
+                let mate_vu = opt_err(b.edgeuse(eu_mate)?.vertexuse, OP)?;
+                let (to_eu_vertex, to_mate_vertex) =
+                    if b.edgeuse(eu)?.orientation == b.edgeuse(eu1)?.orientation {
+                        (vu1, vu2)
+                    } else {
+                        (vu2, vu1)
+                    };
+                if let Some(v) = b.vertexuse(eu_vu)?.vertex {
+                    post_insert_vertexuse(b, v, to_eu_vertex)?;
+                }
+                if let Some(v) = b.vertexuse(mate_vu)?.vertex {
+                    post_insert_vertexuse(b, v, to_mate_vertex)?;
+                }
+                // the radial sector: the primary's mate of a lamina edge (the shim's
+                // shared edges join one face to another, never a third)
+                if !solidcore::topology::edge::is_lamina(b, edge)? {
+                    return Err(sm_err(OP));
+                }
+                solidcore::topology::edge::add_oriented_eu_pair(b, edge, eu1, eu2, Some(eu_mate))?;
+        }
+        self.edge = Some(edge);
+        self.edgeuse = Some(eu1);
+        Ok(edge)
+    }
+
+    /// `SetEdgeCurve(curve, FALSE)`: the 3D curve of an edge without one, owned by it.
+    fn set_edge_curve(&mut self, b: &mut Brep, mut curve: Curve) -> Result<(), SolidError> {
+        const OP: &str = "difftest::brep_validation::set_edge_curve";
+        let edge = opt_err(self.edge, OP)?;
+        opt_err(self.edgeuse, OP)?;
+        if b.edge(edge)?.curve.is_some() {
+            return Err(sm_err(OP));
+        }
+        let _ = curve.set_owner(
+            Some(arena_identity(CacheObject::Edge(edge))),
+            Some(arena_identity(CacheObject::Brep)),
+        );
+        b.edge_mut(edge)?.curve = Some(curve);
+        Ok(())
+    }
+
+    /// `SetLimits(SmVertexNode(min), SmVertexNode(max))`: parameter nodes, so the
+    /// interval is set directly.
+    fn set_limits(&mut self, b: &mut Brep, min: f64, max: f64) -> Result<(), SolidError> {
+        const OP: &str = "difftest::brep_validation::set_limits";
+        let edge = opt_err(self.edge, OP)?;
+        if b.edge(edge)?.curve.is_none() {
+            return Err(sm_err(OP));
+        }
+        b.edge_mut(edge)?.interval.set_min_max(min, max)
+    }
+
+    /// `EndEdge`.
+    fn end_edge(&mut self) -> Result<(), SolidError> {
+        opt_err(self.edge, "difftest::brep_validation::end_edge").map(|_| ())
+    }
+
+    /// `EndLoop`: a vertex for every vertex use of the up loop use (shared through the
+    /// mate's CCW neighbour, the radial's CCW neighbour, or a closed edge's radial),
+    /// and the down loop use's vertex uses hooked to the same vertices.
+    fn end_loop(&mut self, k: &Kernel, b: &mut Brep) -> Result<(), SolidError> {
+        const OP: &str = "difftest::brep_validation::end_loop";
+        let l = opt_err(self.loop_, OP)?;
+        let lu = opt_err(b.loop_(l)?.loopuse, OP)?;
+        let vertexuses = solidcore::topology::loopuse::vertexuses(b, lu, None)?;
+        for vu in vertexuses {
+            let vu = opt_err(vu, OP)?;
+            let VertexuseOwner::Edgeuse(Some(eu)) = b.vertexuse(vu)?.owner else {
+                return Err(sm_err(OP));
+            };
+            let e = opt_err(b.edgeuse(eu)?.edge, OP)?;
+            let mate = opt_err(eu1p::mate(b, eu)?, OP)?;
+            let mate_ccw = opt_err(b.edgeuse(mate)?.ccw, OP)?;
+            let vu_mate_ccw = opt_err(b.edgeuse(mate_ccw)?.vertexuse, OP)?;
+            let radial = eu1p::radial(b, eu)?;
+            let vu_radial_ccw = match radial {
+                Some(r) if r != mate => {
+                    let r_ccw = opt_err(b.edgeuse(r)?.ccw, OP)?;
+                    b.edgeuse(r_ccw)?.vertexuse
+                }
+                _ => None,
+            };
+            let v = if let Some(v) = b.vertexuse(vu)?.vertex {
+                v
+            } else {
+                let mut v = b.vertexuse(vu_mate_ccw)?.vertex;
+                if v.is_none() {
+                    if let Some(x) = vu_radial_ccw {
+                        v = b.vertexuse(x)?.vertex;
+                    }
+                }
+                if v.is_none() {
+                    if let Some(r) = radial {
+                        let r_vu = opt_err(b.edgeuse(r)?.vertexuse, OP)?;
+                        if let Some(rv) = b.vertexuse(r_vu)?.vertex {
+                            let edge = b.edge(e)?;
+                            let curve = opt_err(edge.curve.as_ref(), OP)?;
+                            if curve.is_closed(k, &edge.interval, edge.tolerance)? {
+                                v = Some(rv);
+                            }
+                        }
+                    }
+                }
+                let v = if let Some(v) = v {
+                    v
+                } else {
+                        let tolerance = b.tolerance();
+                        let v = b.add_vertex_record(Vertex {
+                            tolerance,
+                            ..Vertex::default()
+                        })?;
+                        let edge = b.edge(e)?;
+                        let t = if b.edgeuse(eu)?.orientation == OrientType::Opposite {
+                            edge.interval.max()
+                        } else {
+                            edge.interval.min()
+                        };
+                        let p = opt_err(edge.curve.as_ref(), OP)?.evaluate_point(k, t)?;
+                        b.vertex_mut(v)?.point = p;
+                        v
+                };
+                post_insert_vertexuse(b, v, vu)?;
+                v
+            };
+            // the vertex use on the bottom loop use
+            if b.vertexuse(vu_mate_ccw)?.vertex.is_none() {
+                post_insert_vertexuse(b, v, vu_mate_ccw)?;
+            }
+            let cw = opt_err(b.edgeuse(eu)?.cw, OP)?;
+            if eu1p::mate(b, cw)? != Some(mate_ccw) {
+                return Err(sm_err(OP));
+            }
+        }
+        self.loop_ = None;
+        self.edge = None;
+        self.loop_surface_orientation = OrientType::Unknown;
+        Ok(())
+    }
+
+    /// `EndFace`.
+    fn end_face(&mut self) -> Result<(), SolidError> {
+        const OP: &str = "difftest::brep_validation::end_face";
+        if self.face.is_none() || self.loop_.is_some() {
+            return Err(sm_err(OP));
+        }
+        self.face = None;
+        Ok(())
+    }
+
+    /// `EndShell(FALSE)` (no stitching).
+    fn end_shell(&mut self) -> Result<(), SolidError> {
+        const OP: &str = "difftest::brep_validation::end_shell";
+        if self.outer_shell.is_none() || self.face.is_some() {
+            return Err(sm_err(OP));
+        }
+        self.outer_shell = None;
+        Ok(())
+    }
+
+    /// `EndBrep`.
+    fn end_brep(&self) -> Result<(), SolidError> {
+        if self.outer_shell.is_some() || self.face.is_some() || self.loop_.is_some() {
+            return Err(sm_err("difftest::brep_validation::end_brep"));
+        }
+        Ok(())
+    }
+}
+
+/// `pVertex->PostInsert(pVU)`: `vu` appended to the vertex's use list.
+fn post_insert_vertexuse(b: &mut Brep, v: VertexId, vu: VertexuseId) -> Result<(), SolidError> {
+    b.vertex_mut(v)?.vertexuses.push(vu);
+    b.vertexuse_mut(vu)?.vertex = Some(v);
+    Ok(())
+}
+
+/// The shim's `sheet_grid(count, status, shared)`: `count` unit-square plane faces at
+/// `x = 4 i` (`shared` 0), or two at `x = 0` whose second face reuses the first's edges
+/// (`shared` 1) or new edges between the first's vertices (`shared` 2), in the shim's
+/// `SmBrepConstructor` call order.
+fn sheet_grid(k: &mut Kernel, b: &mut Brep, count: usize, shared: u8) -> Result<(), SolidError> {
+    let mut builder = Constructor::new();
+    builder.start_shell(b)?;
+    let mut first_edges: [Option<EdgeId>; 4] = [None; 4];
+    for i in 0..count {
+        let x = if shared != 0 { 0.0 } else { i as f64 * 4.0 };
+        builder.start_face(b)?;
+        let surface = Surface::from(Plane::new(
+            Point3::new(x, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0)),
+        ));
+        let dom = surface.natural_uv_domain_with_nurb(k)?;
+        builder.set_face_surface(b, surface, dom)?;
+        builder.start_loop(b)?;
+        let p = [
+            Point3::new(x, 0.0, 0.0),
+            Point3::new(x + 1.0, 0.0, 0.0),
+            Point3::new(x + 1.0, 1.0, 0.0),
+            Point3::new(x, 1.0, 0.0),
+        ];
+        for j in 0..4 {
+            let kk = (j + 1) % 4;
+            let original = if i != 0 && shared != 0 {
+                first_edges.get(j).copied().flatten()
+            } else {
+                None
+            };
+            let (start, end) = match original {
+                Some(o) if shared == 2 => {
+                    let v = solidcore::topology::edge::vertex(b, o)?;
+                    (v, solidcore::topology::edge::other_vertex(b, o, v)?)
+                }
+                _ => (None, None),
+            };
+            let edge = builder.start_edge(b, if shared == 1 { original } else { None }, start, end)?;
+            if i == 0 {
+                if let Some(slot) = first_edges.get_mut(j) {
+                    *slot = Some(edge);
+                }
+            }
+            if original.is_some() && shared == 1 {
+                builder.end_edge()?;
+                continue;
+            }
+            let a = *p.get(kk).ok_or_else(|| sm_err("sheet_grid"))?;
+            let c = *p.get((kk + 1) % 4).ok_or_else(|| sm_err("sheet_grid"))?;
+            let curve = Curve::from(Line::from_points(a, c, 3));
+            let ivl = curve.natural_interval();
+            builder.set_edge_curve(b, curve)?;
+            builder.set_limits(b, ivl.min(), ivl.max())?;
+            builder.end_edge()?;
+        }
+        builder.end_loop(k, b)?;
+        builder.end_face()?;
+    }
+    builder.end_shell()?;
+    builder.end_brep()
 }
 
 #[cfg(test)]
