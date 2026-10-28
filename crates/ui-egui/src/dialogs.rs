@@ -6382,6 +6382,27 @@ mod awaiting_selection_tests {
         assert_eq!(d.error.as_deref(), Some("select a plane first"));
         assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "no Create Issue for a missing pick");
     }
+
+    /// A missing-pick hint reads in the user's language: the dialogs return it as English text,
+    /// and the dialog translates it as it shows it.
+    #[test]
+    fn missing_pick_hints_read_in_the_users_language() {
+        for (command, english) in [
+            ("solid.move", "select bodies first"),
+            ("sheet.flange", "select a profile, edges or sketch lines first"),
+            ("plastic.lip", "select the rim face first"),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.step(&serde_json::json!({"start":command})).unwrap();
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.dialog.as_ref().and_then(|d| d.error.as_deref()), Some(english), "{command}");
+            let _japanese = crate::i18n::scope("ja");
+            let shown = super::shown_error(english);
+            assert!(shown != english && !shown.is_ascii(), "{command} shows {shown:?}");
+        }
+    }
 }
 
 #[cfg(test)]
