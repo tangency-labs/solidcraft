@@ -3812,11 +3812,11 @@ pub(crate) fn pattern_runs_to_object(d: &Dialog, index: usize) -> bool {
     d.extra.get(key).and_then(Value::as_str) == Some("to_object")
 }
 
-/// A rectangular pattern direction's To Object (`index` 0 or 1): whether it is chosen, and the
-/// point picked for it.
-fn pattern_to_object(d: &Dialog, index: usize) -> (bool, Option<Value>) {
+/// A rectangular pattern direction's To Object (`index` 0 or 1): whether it is chosen, and what
+/// was picked for it, as `solid.extrude` takes its `to` (a place, or a reference).
+fn pattern_to_object(app: &SolveApp, d: &Dialog, index: usize) -> Result<(bool, Option<Value>), String> {
     let [_, _, _, object, ..] = PATTERN_DISTANCE[index.min(1)];
-    (pattern_runs_to_object(d, index), object_point(&d.inputs, object))
+    Ok((pattern_runs_to_object(d, index), extrude_object(app, &d.inputs, object)?))
 }
 
 /// The pick input an extent of To Object adds (a face, vertex or point to go to).
@@ -4761,7 +4761,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             let mut p = json!({"dir1": pt(d1), "count1": count, "spacing1": spacing});
             pattern_objects(s, sels(d, 0), &mut p);
-            match pattern_to_object(d, 0) {
+            match pattern_to_object(app, d, 0)? {
                 (true, Some(to)) => {
                     p["to1"] = to;
                     if !to_offset.trim().is_empty() {
@@ -4781,7 +4781,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     p["dir2"] = pt(d2);
                     p["count2"] = json!(count2);
                     p["spacing2"] = json!(spacing2);
-                    match pattern_to_object(d, 1) {
+                    match pattern_to_object(app, d, 1)? {
                         (true, Some(to)) => {
                             p["to2"] = to;
                             if !to_offset2.trim().is_empty() {
@@ -6481,6 +6481,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     to2,
                     to_offset1,
                     to_offset2,
+                    to1_ref,
+                    to2_ref,
                 } => {
                     let mut d = start("solid.pattern.rectangular")?;
                     d.extra.insert("alignment".into(), json!(alignment));
@@ -6491,14 +6493,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     // where the model shows it (as an extrude's does, #7780), not a bare point.
                     let active = d.active;
                     let frame = feature_frame(s, f.component);
-                    for (index, (extent, to)) in [(*extent1, *to1), (*extent2, *to2)].into_iter().enumerate() {
+                    for (index, (extent, to, reference)) in [(*extent1, *to1, to1_ref), (*extent2, *to2, to2_ref)].into_iter().enumerate() {
                         let [_, _, key, object, ..] = PATTERN_DISTANCE[index];
                         if let Some(to) = to {
                             d.extra.insert(key.into(), json!("to_object"));
-                            set_object(&mut d.inputs, &mut d.active, object, true);
+                            set_extrude_object(&mut d.inputs, &mut d.active, object, true);
+                            // A reference reopens as what was picked (the sketch point, the plane…).
                             let point = solidcraft_engine::doc::apply_point(&frame, to.0);
+                            let sel = reference.as_ref().and_then(|g| extent_ref_sel(s, g));
                             if let Some(input) = d.inputs.iter_mut().find(|i| i.label == object) {
-                                input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
+                                input.items = vec![sel.or_else(|| shown_face_sel(s, point)).unwrap_or(Sel::Vertex { body: String::new(), point })];
                             }
                         } else if extent {
                             d.extra.insert(key.into(), json!("extent"));

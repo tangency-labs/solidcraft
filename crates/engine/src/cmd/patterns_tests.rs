@@ -1204,3 +1204,35 @@ fn rectangular_to_object_face_along_the_direction_and_offset() {
     assert!(!hole_at(&s, 100.0, 60.0));
     assert!(s.doc.to_json().contains("\"to_offset1\""));
 }
+
+/// To Object a reference, as an extrude's (#8527): a construction plane and a sketch point the
+/// copies run to, followed when a parameter moves them, also once saved and opened again.
+#[test]
+fn rectangular_to_object_references_follow_them() {
+    let mut s = feature_pattern_plate();
+    run(&mut s, "parameters.add", json!({"name": "stop", "expression": "100 mm"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": "stop", "name": "Stop"}));
+    let marks = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.point", json!({"point": [30, "stop"], "id": "tip"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"to1":{"plane":"Stop"},
+               "dir2":[0,1,0],"count2":3,"to2":{"sketch":marks,"point":"tip"},"name":"Pattern"}),
+    );
+    let doc = s.doc.to_json();
+    assert!(doc.contains("\"to1_ref\"") && doc.contains("\"to2_ref\""), "{doc}");
+    for (x, y) in [(80.0, 80.0), (100.0, 100.0), (60.0, 100.0)] {
+        assert!(hole_at(&s, x, y), "hole at ({x}, {y})");
+    }
+    run(&mut s, "parameters.change", json!({"name": "stop", "expression": "80 mm"}));
+    for (x, y) in [(70.0, 70.0), (80.0, 80.0), (60.0, 80.0)] {
+        assert!(hole_at(&s, x, y), "hole at ({x}, {y}) after the move");
+    }
+    assert!(!hole_at(&s, 100.0, 100.0));
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    let mut cold = Session { doc: restored.into(), ..Default::default() };
+    cold.refresh();
+    assert!(hole_at(&cold, 80.0, 80.0) && !hole_at(&cold, 100.0, 100.0));
+}

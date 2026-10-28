@@ -6517,6 +6517,8 @@ fn pattern_transforms(
             to2,
             to_offset1,
             to_offset2,
+            to1_ref,
+            to2_ref,
         } => {
             let n1 = count(count1)?;
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
@@ -6533,10 +6535,10 @@ fn pattern_transforms(
             // The To Object faces' names follow `face_points`: `to1`, then `to2`.
             let names = feature.map(|f| f.face_names.as_slice()).unwrap_or_default();
             let to_name = |k: usize| names.get(k).map(String::as_str);
-            let reach = |to: Vec3, name: Option<&str>, d: Vec3, offset: &Option<crate::Expr>| -> Result<f64> {
+            let reach = |to: Vec3, name: Option<&str>, g: &Option<crate::construct::GeoRef>, d: Vec3, offset: &Option<crate::Expr>| -> Result<f64> {
                 let f = feature.ok_or_else(|| DocError::Invalid("not supported yet: To Object in a pattern of components".into()))?;
                 let off = offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
-                let h = pattern_reach(doc, st, f, component, to, name, d)?;
+                let h = pattern_reach(doc, vals, st, f, component, to, name, g.as_ref(), d)?;
                 // Past the object by the offset, the way the copies go.
                 let reach = h + if h >= 0.0 { off } else { -off };
                 if reach.abs() < 1e-9 {
@@ -6545,12 +6547,12 @@ fn pattern_transforms(
                 Ok(reach)
             };
             let s1 = match to1 {
-                Some(p) => step_to(reach(p.0, to_name(0), d1, to_offset1)?, n1, *alignment, *reversed),
+                Some(p) => step_to(reach(p.0, to_name(0), to1_ref, d1, to_offset1)?, n1, *alignment, *reversed),
                 None => step_of(val(vals, spacing1, Kind::Length)?, n1, *extent1),
             };
             let (s2, d2) = match (second, to2, spacing2) {
                 (Some((n2, d2)), Some(p), _) => {
-                    (step_to(reach(p.0, to_name(usize::from(to1.is_some())), d2, to_offset2)?, n2, *alignment2, *reversed2), d2)
+                    (step_to(reach(p.0, to_name(usize::from(to1.is_some())), to2_ref, d2, to_offset2)?, n2, *alignment2, *reversed2), d2)
                 }
                 (Some((n2, d2)), None, Some(sp)) => (step_of(val(vals, sp, Kind::Length)?, n2, *extent2), d2),
                 _ => (0.0, Vec3::Y),
@@ -6644,18 +6646,40 @@ fn step_to(reach: f64, n: usize, alignment: solidcraft_sketch::PatternAlignment,
     if far == 0 { 0.0 } else { reach / alignment.multiplier(far, reversed) }
 }
 
-/// How far, along unit direction `d`, the To Object pick `to` lies from the middle of what
-/// pattern `f` copies (#8523). A planar face square to `d` counts as a whole; a curved or slanted
-/// face where the line from the middle meets it; else the picked point.
-fn pattern_reach(doc: &Document, st: &ModelState, f: &Feature, component: u64, to: Vec3, name: Option<&str>, d: Vec3) -> Result<f64> {
+/// How far, along unit direction `d`, the To Object of pattern `f` lies from the middle of what it
+/// copies (#8523), found as an extrude's To Object is from its profiles' middle: a reference `g`
+/// where it is now (#8527), else the face picked at `to` (a planar face square to `d` as a whole,
+/// one running along `d` where it begins (#7780), a curved or slanted one where the line from the
+/// middle meets it), else the picked point.
+#[allow(clippy::too_many_arguments)]
+fn pattern_reach(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    f: &Feature,
+    component: u64,
+    to: Vec3,
+    name: Option<&str>,
+    g: Option<&crate::construct::GeoRef>,
+    d: Vec3,
+) -> Result<f64> {
     let FeatureKind::Pattern { features, bodies, .. } = &f.kind else {
         return Err(DocError::Invalid("not a pattern".into()));
     };
     let tst = state_in_frame(doc, st, component);
     let centre = seed_centre(doc, &tst, features, bodies).ok_or_else(|| DocError::Invalid("To Object: what the pattern copies has no geometry to measure from".into()))?;
     let plane = Plane::from_normal(centre, d).ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
-    let face = object_face(&tst, name, to, Some(d));
-    let reach = height_at(&tst, face, &plane, centre, to);
+    let reach = match g {
+        Some(g) => match reference_end(&extent_target(doc, vals, &tst, g)?, &plane, centre, to)? {
+            ReferenceEnd::Height(h) => h,
+            // A plane at an angle: where the line from the middle along `d` meets it.
+            ReferenceEnd::Slanted(pl) => {
+                let pn = pl.normal();
+                (pl.origin - centre).dot(pn) / d.dot(pn)
+            }
+        },
+        None => height_at(&tst, object_face(&tst, name, to, Some(d)), &plane, centre, to),
+    };
     if !reach.is_finite() || reach.abs() < 1e-9 {
         return Err(DocError::Invalid("the To object is where the pattern starts: pick one further along the direction".into()));
     }

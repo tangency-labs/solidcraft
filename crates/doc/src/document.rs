@@ -2240,6 +2240,13 @@ pub enum PatternKind {
         to1: Option<FacePick>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to2: Option<FacePick>,
+        /// To Object as a reference that is not a body face (a sketch point or curve, an origin or
+        /// construction plane, axis or point, a vertex, an edge), found again on each evaluation so
+        /// the copies follow it, as an extrude's `to_ref` (#8527); `to1` is where it was picked.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to1_ref: Option<crate::construct::GeoRef>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to2_ref: Option<crate::construct::GeoRef>,
         /// Past each To Object by this much, along the way the copies go (negative stops short),
         /// as an extrude's To offset.
         #[serde(default, skip_serializing_if = "Option::is_none")]

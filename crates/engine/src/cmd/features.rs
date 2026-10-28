@@ -87,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; type1?, type2?: spacing|extent|to_object (default spacing: between neighbours; extent: spacing<k> is the distance from the first copy to the last; to_object: the copy furthest along the direction reaches to<k>, measured from the middle of what is copied, and follows it; no spacing<k> needed); to1?, to2?: [x,y,z] (a point on the face, vertex or point to go to; implies to_object; not with components; a face along the direction is reached where it begins); to_offset1?, to_offset2?: expr (past the object, the way the copies go; negative stops short); alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip; To Object takes its side from the object)"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; type1?, type2?: spacing|extent|to_object (default spacing: between neighbours; extent: spacing<k> is the distance from the first copy to the last; to_object: the copy furthest along the direction reaches to<k>, measured from the middle of what is copied, and follows it; no spacing<k> needed); to1?, to2?: [x,y,z] (a point on the face, vertex or point to go to) or a reference followed when it moves, as solid.extrude's `to` takes it ({sketch, point|curve, at?} | {plane: XY|name} | {axis: X|name} | {construct_point: name} | {vertex|edge: [x,y,z]}); implies to_object; not with components; a face or curve running along the direction is reached where it begins, a slanted plane where the line from the middle meets it; to_offset1?, to_offset2?: expr (past the object, the way the copies go; negative stops short); alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip; To Object takes its side from the object)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
@@ -2064,13 +2064,13 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
     check_count(s, &count1, cmd, "count1")?;
-    let (extent1, to1) = distance_type(p, cmd, "1")?;
+    let (extent1, to1, to1_ref) = distance_type(s, p, cmd, "1")?;
     // To Object needs no spacing: a stored one is kept for switching back.
     let spacing1 = if to1.is_some() { expr(p, "spacing1").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "spacing1")? };
     check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
     let dir2 = p.get("dir2").and_then(vec3);
     let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
-    let (extent2, to2) = distance_type(p, cmd, "2")?;
+    let (extent2, to2, to2_ref) = distance_type(s, p, cmd, "2")?;
     if let Some(c) = &count2 {
         check_count(s, c, cmd, "count2")?;
     }
@@ -2096,6 +2096,8 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         alignment2: super::alignment_param(p, "alignment2", cmd)?,
         reversed: super::reversed_param(p, "reversed", cmd)?,
         reversed2: super::reversed_param(p, "reversed2", cmd)?,
+        to1_ref,
+        to2_ref,
         to_offset1: to1.and(expr(p, "to_offset1")),
         to_offset2: to2.and(expr(p, "to_offset2")),
         extent1,
@@ -2108,15 +2110,21 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A rectangular pattern direction's distance type (#8523), from `type<k>`: `spacing` (the
 /// default), `extent` (`spacing<k>` runs from the first copy to the last) or `to_object` (the
-/// last copy reaches the face or point at `to<k>`; a `to<k>` alone means To Object too).
-fn distance_type(p: &Value, cmd: &str, k: &str) -> Result<(bool, Option<FacePick>)> {
-    let to = p.get(format!("to{k}").as_str());
-    let to_point = || to.and_then(vec3).map(FacePick).ok_or_else(|| bad(cmd, format!("`to{k}` must be a point [x, y, z] on the face, vertex or point the pattern runs to")));
+/// copies run to `to<k>`, a point on a face or vertex or a reference, as an extrude's `to`
+/// (#8527); a `to<k>` alone means To Object too).
+type DistanceType = (bool, Option<FacePick>, Option<solidcraft_doc::construct::GeoRef>);
+fn distance_type(s: &Session, p: &Value, cmd: &str, k: &str) -> Result<DistanceType> {
+    let key = format!("to{k}");
+    let to = p.get(key.as_str());
+    let object = || match object_param(s, to, cmd, &key)? {
+        (Some(at), g) => Ok((false, Some(at), g)),
+        (None, _) => Err(bad(cmd, format!("`{key}` must be a point [x, y, z] on the face, vertex or point the pattern runs to, or a reference"))),
+    };
     match str_(p, &format!("type{k}")).map(str::to_ascii_lowercase).as_deref() {
-        None if to.is_some() => Ok((false, Some(to_point()?))),
-        None | Some("spacing") => Ok((false, None)),
-        Some("extent") => Ok((true, None)),
-        Some("to_object" | "to object" | "object") => Ok((false, Some(to_point()?))),
+        None if to.is_some() => object(),
+        None | Some("spacing") => Ok((false, None, None)),
+        Some("extent") => Ok((true, None, None)),
+        Some("to_object" | "to object" | "object") => object(),
         Some(t) => Err(bad(cmd, format!("unknown `type{k}` `{t}` (spacing, extent or to_object)"))),
     }
 }
