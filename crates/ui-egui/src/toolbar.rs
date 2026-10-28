@@ -111,6 +111,10 @@ const BUTTON_GAP: f32 = 3.0;
 const BUTTON_MIN_WIDTH: f32 = 54.0;
 const BUTTON_MAX_WIDTH: f32 = 76.0;
 const BUTTON_LABEL_PADDING: f32 = 10.0;
+/// Where a button's label starts below the button's top edge, under its icon.
+const BUTTON_LABEL_TOP: f32 = 32.0;
+/// Room kept below a button's label, inside its highlight.
+const BUTTON_LABEL_BOTTOM: f32 = 2.0;
 const SECTION_HEIGHT: f32 = 20.0;
 
 /// The » button's room at the end of the panels, kept only while some panel is in it.
@@ -980,9 +984,23 @@ fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<S
 fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color: Color32) -> std::sync::Arc<egui::Galley> {
     let lines = ribbon_button_lines(painter, label, width);
     // Explicit newlines only: egui must never split an oversized word.
-    let mut job = egui::text::LayoutJob::simple(lines.join("\n"), FontId::proportional(crate::theme::Tokens::get().font_body), color, f32::INFINITY);
+    let size = crate::theme::Tokens::get().font_body;
+    let mut job = egui::text::LayoutJob::simple(lines.join("\n"), FontId::proportional(size), color, f32::INFINITY);
     job.halign = egui::Align::Center;
+    // Two lines sit closer than the font's own spacing, so they fit in the button under its
+    // icon (#8391).
+    if lines.len() > 1
+        && let Some(section) = job.sections.first_mut()
+    {
+        section.format.line_height = Some(size + 2.0);
+    }
     painter.layout_job(job)
+}
+
+/// The top of a button's label, `height` tall, in the button `whole`: below the icon, raised
+/// when it would otherwise run past the button's bottom edge (#8391).
+fn ribbon_label_top(whole: Rect, height: f32) -> f32 {
+    (whole.top() + BUTTON_LABEL_TOP).min(whole.bottom() - BUTTON_LABEL_BOTTOM - height)
 }
 
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
@@ -1509,7 +1527,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let label = app.tr_label(if button_label == selected.label { info.label } else { button_label });
                     let color = if info.enabled { t.text } else { t.text_dim };
                     let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, color);
-                    painter.galley(pos2(whole.center().x, whole.top() + 32.0), galley, t.text);
+                    painter.galley(pos2(whole.center().x, ribbon_label_top(whole, galley.size().y)), galley, t.text);
                 }
             }
             if !collapsed && drawn > large.len() {
@@ -3494,6 +3512,41 @@ mod ribbon_label_tests {
             assert!((text.pos.x * scale - (text.pos.x * scale).round()).abs() < 0.001);
             assert!((text.pos.y * scale - (text.pos.y * scale).round()).abs() < 0.001);
         }
+    }
+
+    /// Every promoted button's label, in every language, sits between the button's icon and its
+    /// bottom edge, so the hover highlight holds all of it (#8391). One line stays where it was.
+    #[test]
+    fn every_promoted_label_fits_in_its_button_below_the_icon() {
+        let ctx = crate::fonts::test_context();
+        let mut two_lines = 0;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter().clone();
+            let specs = solidcraft_engine::command_specs();
+            for section in crate::workspace::SECTIONS {
+                let (commands, count) = crate::workspace::layout(section.tab, section.panel, &specs).unwrap();
+                for command in commands.iter().take(count) {
+                    for catalog in crate::i18n::LOCALES {
+                        let locale = crate::i18n::Locale::for_language(catalog.id);
+                        let label = locale.label(crate::workspace::ribbon_button_label(command));
+                        let whole = Rect::from_min_size(pos2(40.0, 2.0), vec2(ribbon_button_width(&painter, label), BUTTON_HEIGHT));
+                        let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, Color32::WHITE);
+                        let top = ribbon_label_top(whole, galley.size().y);
+                        let at = format!("{} in {}: {label:?}", command.id, catalog.id);
+                        // The icon is 26 points square, centred 16 points below the button's top.
+                        assert!(top >= whole.top() + 16.0 + 13.0, "{at} starts at {top} over the icon");
+                        assert!(top + galley.size().y <= whole.bottom() - BUTTON_LABEL_BOTTOM + 0.01, "{at} runs past the button");
+                        if galley.rows.len() == 1 {
+                            assert_eq!(top, whole.top() + BUTTON_LABEL_TOP, "{at}");
+                        } else {
+                            two_lines += 1;
+                        }
+                    }
+                }
+            }
+        });
+        output.textures_delta.clear();
+        assert!(two_lines > 0, "some labels take two lines");
     }
 
     #[test]
