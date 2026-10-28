@@ -469,6 +469,8 @@ mod tests {
                             to_offset: None,
                             from: None,
                             to_body_apart: false,
+                            to_ref: None,
+                            from_ref: None,
                         },
                         operation: crate::Operation::NewBody,
                         targets: vec![],

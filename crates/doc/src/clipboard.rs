@@ -221,6 +221,11 @@ impl crate::Feature {
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
+            K::Extrude { extent, .. } => {
+                for geo in extent.to_ref.iter().chain(&extent.from_ref) {
+                    checked_geo(geo, 0)?;
+                }
+            }
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -300,6 +305,11 @@ impl crate::Feature {
                             *n = remap_topology(n, ids, bodies);
                         }
                     }
+                }
+            }
+            K::Extrude { extent, .. } => {
+                for geo in extent.to_ref.iter_mut().chain(&mut extent.from_ref) {
+                    remap_geo(geo, ids, bodies, 0)?;
                 }
             }
             _ => {}

@@ -348,6 +348,14 @@ pub struct Extent {
     /// it set, so they keep the bodies they were built with.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub to_body_apart: bool,
+    /// To Object as a reference that is not a body face (a sketch point or curve, an origin or
+    /// construction plane, axis or point, a vertex), found again on each evaluation so the end
+    /// follows it; `to` is where it was picked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_ref: Option<crate::construct::GeoRef>,
+    /// From Object as a reference, as `to_ref`; `from` is where it was picked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_ref: Option<crate::construct::GeoRef>,
 }
 
 /// Thin Extrude: a wall of constant thickness along sketch curves instead of the profiles.
