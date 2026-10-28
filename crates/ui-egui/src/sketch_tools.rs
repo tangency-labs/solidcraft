@@ -7,9 +7,10 @@ use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use std::cell::{Cell, RefCell};
 
-use egui::{Pos2, Stroke};
+use egui::{Color32, Pos2, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcraft_engine::kernel::Continuity;
 
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
@@ -174,47 +175,70 @@ fn analysis(app: &mut SolveApp, cmd: &str, p: Value) {
     }
 }
 
-/// A seam from an `inspect.continuity` reply as a marker label: its class and the measure that
-/// decided it (the gap, the angle between the faces' normals, or the curvature jump).
-fn continuity_label(app: &SolveApp, seam: &Value) -> String {
-    let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
-    let jump = seam["curvature_jump_per_mm"]["value"].as_f64().map(|k| format!("\u{394}k {k:.4}/mm")).unwrap_or_default();
-    match seam["verdict"].as_str().unwrap_or_default() {
-        "gap" => format!("Gap {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
-        "sharp" => format!("{} {}", crate::i18n::tr("ui.continuity_crease"), deg("normal_angle_deg")),
-        "curvature_jump" => format!("{} {} {jump}", crate::i18n::tr("ui.continuity_tangent"), deg("normal_angle_deg")),
-        "smooth" => format!("{} {} {jump}", crate::i18n::tr("ui.continuity_curvature"), deg("normal_angle_deg")),
-        other => other.to_string(),
+/// The message id of the class a seam whose highest order met is `order` reads as: a gap, a
+/// crease (G0 only), or the word of its order (Tangent … Smooth curvature change).
+pub(crate) fn order_class(order: Option<Continuity>) -> &'static str {
+    match order {
+        None => "ui.continuity_gap",
+        Some(Continuity::G0) => "ui.continuity_crease",
+        Some(g) => g.label_id(),
     }
 }
 
-/// The Continuity Analysis legend in the viewport's lower left corner: each class in its
-/// colour, while seams are shaded.
+/// The measure a seam of `order` fails the next order on: its reply key, symbol and unit.
+fn next_measure(order: Continuity) -> Option<(&'static str, &'static str, &'static str)> {
+    match order {
+        Continuity::G1 => Some(("curvature_jump_per_mm", "\u{394}k", "/mm")),
+        Continuity::G2 => Some(("curvature_change_jump_per_mm2", "\u{394}k\u{2032}", "/mm\u{b2}")),
+        Continuity::G3 => Some(("curvature_change_rate_jump_per_mm3", "\u{394}k\u{2033}", "/mm\u{b3}")),
+        Continuity::G0 | Continuity::G4 => None,
+    }
+}
+
+/// A seam from an `inspect.continuity` reply as a marker label: its class in words and the
+/// measure that keeps it from the next order (the gap, the angle between the faces' normals, or
+/// the jump of the curvature, of its change, or of that change's rate).
+fn continuity_label(app: &SolveApp, seam: &Value) -> String {
+    let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
+    let order = seam["order"].as_str().and_then(Continuity::parse);
+    let class = crate::i18n::tr(order_class(order));
+    match order {
+        None => format!("{class} {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
+        Some(g) => {
+            let next = next_measure(g)
+                .and_then(|(key, symbol, unit)| seam[key]["value"].as_f64().map(|x| format!(" {symbol} {x:.4}{unit}")))
+                .unwrap_or_default();
+            format!("{class} {}{next}", deg("normal_angle_deg"))
+        }
+    }
+}
+
+/// The Continuity Analysis legend in the viewport's lower left corner: each class in its colour
+/// and width (the curvature-continuous orders share a colour and widen with each order), while
+/// seams are shaded.
 fn continuity_legend(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.session.continuity.is_empty() {
         return;
     }
     let tk = crate::theme::Tokens::get();
-    let [smooth, jump, sharp, gap] = tk.continuity;
-    // Stable ids: this Gap is a hole between faces, not the sheet-metal gap (`ui.sheet_gap`).
-    let tr = crate::i18n::tr;
-    let rows = [
-        (tr("ui.continuity_curvature"), smooth),
-        (tr("ui.continuity_tangent"), jump),
-        (tr("ui.continuity_crease"), sharp),
-        (tr("ui.continuity_gap"), gap),
-    ];
+    // Best to worst. Stable ids: this Gap is a hole between faces, not the sheet-metal gap.
+    let mut classes: Vec<Option<Continuity>> = Continuity::ALL.into_iter().rev().map(Some).collect();
+    classes.push(None);
+    let rows: Vec<(&str, Color32, f32)> = classes
+        .into_iter()
+        .map(|order| (crate::i18n::tr(order_class(order)), crate::viewport::continuity_color(&tk, order), crate::viewport::seam_width(order)))
+        .collect();
     let font = egui::FontId::proportional(tk.font_body);
     let (row, pad, swatch) = (18.0, 8.0, 22.0);
-    let text_width = rows.iter().map(|(label, _)| painter.layout_no_wrap(label.to_string(), font.clone(), tk.text).size().x).fold(0.0, f32::max);
+    let text_width = rows.iter().map(|(label, ..)| painter.layout_no_wrap(label.to_string(), font.clone(), tk.text).size().x).fold(0.0, f32::max);
     let size = egui::vec2(pad + swatch + 8.0 + text_width + pad, rows.len() as f32 * row + 2.0 * pad);
     let available = crate::shell::bottom_overlay_rect(app, proj.rect);
     let frame = egui::Rect::from_min_size(available.left_bottom() + egui::vec2(16.0, -(size.y + 16.0)), size);
     painter.rect_filled(frame, tk.radius_sm, tk.panel.gamma_multiply(0.9));
     crate::scenario::publish_rect("continuity_legend", frame);
-    for (i, (label, col)) in rows.iter().enumerate() {
+    for (i, (label, col, width)) in rows.iter().enumerate() {
         let y = frame.top() + pad + row * (i as f32 + 0.5);
-        painter.line_segment([egui::pos2(frame.left() + pad, y), egui::pos2(frame.left() + pad + swatch, y)], Stroke::new(3.0, *col));
+        painter.line_segment([egui::pos2(frame.left() + pad, y), egui::pos2(frame.left() + pad + swatch, y)], Stroke::new(*width, *col));
         painter.text(egui::pos2(frame.left() + pad + swatch + 8.0, y), egui::Align2::LEFT_CENTER, *label, font.clone(), tk.text);
     }
 }
@@ -308,16 +332,16 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         }
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
-        // Each class in the legend's words.
-        let counts: Vec<String> = [
-            ("smooth", "ui.continuity_curvature"),
-            ("curvature_jump", "ui.continuity_tangent"),
-            ("sharp", "ui.continuity_crease"),
-            ("gap", "ui.continuity_gap"),
-        ]
-        .iter()
-        .filter_map(|(key, class)| summary[*key].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(class))))
-        .collect();
+        // Each class in the legend's words, best first.
+        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(None))));
+        let counts: Vec<String> = Continuity::ALL
+            .into_iter()
+            .rev()
+            .filter_map(|g| {
+                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(Some(g)))))
+            })
+            .chain(gaps)
+            .collect();
         app.set_status(format!("Continuity: {} (click the button again to turn it off)", counts.join(", ")), false);
         return true;
     }

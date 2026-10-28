@@ -25,7 +25,9 @@ fn corner_seams(body: &Body, share: f64) -> (f64, f64, usize) {
         .map(|(i, _)| i)
         .collect();
     let edges: Vec<usize> = (0..rec.edges.len()).filter(|e| rec.edges[*e].uses.iter().any(|u| corner_faces.contains(&(u.face as usize)))).collect();
-    let report = seam_diagnostics(body, &edges, 65, ContinuityTolerances { gap_mm: 1e-3, angle_deg: 1.0, curvature_per_mm: 1e-6 }).unwrap();
+    let report =
+        seam_diagnostics(body, &edges, 65, ContinuityTolerances { gap_mm: 1e-3, angle_deg: 1.0, curvature_per_mm: 1e-6, ..Default::default() })
+            .unwrap();
     // The corner's vertices where its boundary turns: an end of two of its seams whose
     // directions there differ.
     let ends: Vec<(Vec3, Vec3, f64)> = report

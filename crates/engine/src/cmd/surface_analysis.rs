@@ -10,11 +10,6 @@ use crate::{ContinuitySeam, Result, Session, SurfaceAnalysis, kernel};
 
 /// Stations along each edge when the call does not say (`samples`).
 const DEFAULT_SAMPLES: usize = 33;
-/// Tolerances a seam is judged against when the call does not say: a micron of position gap, a
-/// degree of normal angle, and a curvature jump of 1/100 mm.
-const DEFAULT_GAP_MM: f64 = 1e-3;
-const DEFAULT_ANGLE_DEG: f64 = 1.0;
-const DEFAULT_CURVATURE_PER_MM: f64 = 0.01;
 /// Most edges one call may pick, and most bodies one call may analyse at once.
 const MAX_PICKS: usize = 512;
 const MAX_BODIES: usize = 64;
@@ -48,11 +43,14 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("inspect.continuity", "Continuity Analysis", continuity).at("SURFACE", "INSPECT").icon("continuity").noundo().params(
         "body?: name (default: the visible bodies); edges?: [x,y,z] points or {\"index\": i} (default: every edge of the body; \
              a pick must match one body); samples?: 3…257 stations along each edge, ends included (default 33); \
-             gap_tolerance_mm? (default 0.001), angle_tolerance_deg? (default 1), curvature_tolerance_per_mm? (default 0.01); \
+             gap_tolerance_mm? (default 0.001), angle_tolerance_deg? (default 1), curvature_tolerance_per_mm? (default 0.01), \
+             curvature_change_tolerance_per_mm2? (default 0.001), curvature_change_rate_tolerance_per_mm3? (default 0.0001); \
              add?: true keeps the seams already shaded and adds these (measuring an edge again replaces it); \
-             clear?: true turns the analysis off. → each edge's worst gap (G0), normal angle (G1) and curvature jump (G2) as \
-             {value, at: [x,y,z], edge_fraction}, its verdict (smooth, curvature_jump, sharp or gap) and a summary; \
-             the seams are shaded in the viewport",
+             clear?: true turns the analysis off. → each edge's worst gap (G0), normal angle (G1), curvature jump (G2), \
+             jump of the curvature's change across the seam dκ/ds (G3) and of that change's rate d²κ/ds² (G4), from the \
+             faces' exact derivatives, as {value, at: [x,y,z], edge_fraction}; its order (g0…g4: the highest every station \
+             meets within the tolerances, null where the faces do not meet), its verdict (smooth: g2 or better, \
+             curvature_jump, sharp or gap) and a summary; the seams are shaded in the viewport",
     ),
 ];
 
@@ -127,10 +125,13 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
             None => return Err(bad(cmd, "`samples` must be 3…257 stations along each edge")),
         },
     };
+    let default = kernel::ContinuityTolerances::default();
     let tolerances = kernel::ContinuityTolerances {
-        gap_mm: tolerance(p, "gap_tolerance_mm", DEFAULT_GAP_MM)?,
-        angle_deg: tolerance(p, "angle_tolerance_deg", DEFAULT_ANGLE_DEG)?,
-        curvature_per_mm: tolerance(p, "curvature_tolerance_per_mm", DEFAULT_CURVATURE_PER_MM)?,
+        gap_mm: tolerance(p, "gap_tolerance_mm", default.gap_mm)?,
+        angle_deg: tolerance(p, "angle_tolerance_deg", default.angle_deg)?,
+        curvature_per_mm: tolerance(p, "curvature_tolerance_per_mm", default.curvature_per_mm)?,
+        curvature_change_per_mm2: tolerance(p, "curvature_change_tolerance_per_mm2", default.curvature_change_per_mm2)?,
+        curvature_change_rate_per_mm3: tolerance(p, "curvature_change_rate_tolerance_per_mm3", default.curvature_change_rate_per_mm3)?,
     };
     let picks = edge_picks(p)?;
     let st = s.world_state()?;
@@ -177,8 +178,14 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
         let report = kernel::seam_diagnostics(&body.body, edges, samples, tolerances)?;
         let mut rows = Vec::new();
         for seam in &report.seams {
-            summary.count(seam.verdict);
-            seams.push(ContinuitySeam { body: body.name.clone(), edge: seam.edge, points: seam.points.clone(), verdict: seam.verdict });
+            summary.count(seam.verdict, seam.order);
+            seams.push(ContinuitySeam {
+                body: body.name.clone(),
+                edge: seam.edge,
+                points: seam.points.clone(),
+                verdict: seam.verdict,
+                order: seam.order,
+            });
             rows.push(json!({
                 "edge": seam.edge,
                 "length_mm": seam.length,
@@ -186,6 +193,9 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
                 "gap_mm": seam.gap_mm,
                 "normal_angle_deg": seam.normal_angle_deg,
                 "curvature_jump_per_mm": seam.curvature_jump_per_mm,
+                "curvature_change_jump_per_mm2": seam.curvature_change_jump_per_mm2,
+                "curvature_change_rate_jump_per_mm3": seam.curvature_change_rate_jump_per_mm3,
+                "order": seam.order,
                 "verdict": seam.verdict,
             }));
         }
@@ -213,6 +223,8 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
             "gap_mm": tolerances.gap_mm,
             "angle_deg": tolerances.angle_deg,
             "curvature_per_mm": tolerances.curvature_per_mm,
+            "curvature_change_per_mm2": tolerances.curvature_change_per_mm2,
+            "curvature_change_rate_per_mm3": tolerances.curvature_change_rate_per_mm3,
         },
         "bodies": bodies,
         "summary": {
@@ -223,6 +235,7 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
             "gap": summary.gap,
             "skipped": summary.skipped,
             "unmeasured": summary.unmeasured,
+            "orders": summary.orders(),
             "worst": summary.worst(),
         },
     }))
@@ -274,17 +287,27 @@ struct Summary {
     gap: usize,
     skipped: usize,
     unmeasured: usize,
+    /// Seams by the highest order they meet, indexed by [`kernel::Continuity::order`].
+    by_order: [usize; 5],
 }
 
 impl Summary {
-    fn count(&mut self, verdict: kernel::SeamVerdict) {
+    fn count(&mut self, verdict: kernel::SeamVerdict, order: Option<kernel::Continuity>) {
         self.edges += 1;
+        if let Some(slot) = order.and_then(|g| self.by_order.get_mut(g.order())) {
+            *slot += 1;
+        }
         match verdict {
             kernel::SeamVerdict::Smooth => self.smooth += 1,
             kernel::SeamVerdict::CurvatureJump => self.curvature_jump += 1,
             kernel::SeamVerdict::Sharp => self.sharp += 1,
             kernel::SeamVerdict::Gap => self.gap += 1,
         }
+    }
+
+    /// How many seams meet each order at best, by its word (`g0` … `g4`).
+    fn orders(&self) -> serde_json::Map<String, Value> {
+        kernel::Continuity::ALL.into_iter().zip(self.by_order).map(|(g, n)| (g.as_str().to_string(), json!(n))).collect()
     }
 
     /// The worst verdict over the edges measured (`None` when there was nothing to measure).
@@ -362,6 +385,7 @@ mod tests {
             assert!((angle - 90.0).abs() < 1e-9, "angle {angle} in {e}");
             assert!(jump < 1e-9, "curvature jump {jump} in {e}");
             assert_eq!(e["verdict"], json!("sharp"), "{e}");
+            assert_eq!(e["order"], json!("g0"), "{e}");
             assert_eq!(e["samples"], json!(33), "{e}");
             assert!((e["length_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{e}");
             assert_eq!(e["normal_angle_deg"]["at"].as_array().map(Vec::len), Some(3), "{e}");
@@ -370,7 +394,11 @@ mod tests {
         }
         assert_eq!(v["analysis"], json!("continuity"));
         assert_eq!(v["samples"], json!(33));
-        assert_eq!(v["tolerances"], json!({"gap_mm": 1e-3, "angle_deg": 1.0, "curvature_per_mm": 0.01}));
+        assert_eq!(
+            v["tolerances"],
+            json!({"gap_mm": 1e-3, "angle_deg": 1.0, "curvature_per_mm": 0.01, "curvature_change_per_mm2": 1e-3, "curvature_change_rate_per_mm3": 1e-4})
+        );
+        assert_eq!(v["summary"]["orders"], json!({"g0": 12, "g1": 0, "g2": 0, "g3": 0, "g4": 0}));
         assert_eq!(v["summary"]["edges"], json!(12));
         assert_eq!(v["summary"]["sharp"], json!(12));
         assert_eq!(v["summary"]["worst"], json!("sharp"));
@@ -395,7 +423,12 @@ mod tests {
             let jump = e["curvature_jump_per_mm"]["value"].as_f64().unwrap();
             assert!((jump - 0.25).abs() < 1e-6, "1 / radius 4: {e}");
             assert_eq!(e["verdict"], json!("curvature_jump"), "{e}");
+            assert_eq!(e["order"], json!("g1"), "a plane tangent to a cylinder is G1, not G2: {e}");
+            assert!(e["curvature_change_jump_per_mm2"]["value"].as_f64().unwrap() < 1e-9, "{e}");
+            assert!(e["curvature_change_rate_jump_per_mm3"]["value"].as_f64().unwrap() < 1e-9, "{e}");
         }
+        assert_eq!(v["summary"]["orders"]["g1"], json!(2));
+        assert_eq!(s.continuity.iter().filter(|seam| seam.order == Some(crate::kernel::Continuity::G1)).count(), 2);
         assert_eq!(v["summary"]["curvature_jump"], json!(2));
         assert_eq!(v["summary"]["sharp"], json!(13));
         assert_eq!(v["summary"]["smooth"], json!(0));
@@ -473,6 +506,8 @@ mod tests {
             json!({"gap_tolerance_mm": 1e12}),
             json!({"angle_tolerance_deg": f64::NAN}),
             json!({"curvature_tolerance_per_mm": "tight"}),
+            json!({"curvature_change_tolerance_per_mm2": -0.5}),
+            json!({"curvature_change_rate_tolerance_per_mm3": null}),
             json!({"edges": 3}),
             json!({"edges": [[1, 2]]}),
             json!({"edges": [[]]}),
