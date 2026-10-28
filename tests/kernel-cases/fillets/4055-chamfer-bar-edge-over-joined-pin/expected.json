@@ -6,5 +6,8 @@
  "source": "analytic",
  "method": "pin R8 x 30 (z 0..30) under a bar 100x20x15 (x -50..50, y -10..10, z 30..45). The chamfer of the bar bottom long edge (y=-10, z=30) removes the triangle 3 x 3 along the whole 100 mm: 450. All of it is inside the bar (z>=30); the pin lies below z=30, so it is untouched and only uncovers a strip of its top: V = pi*64*30 + 30000 - 450 = 35581.858. The result must be a closed solid (the strip of the pin top becomes a face).",
  "body_count": 1,
- "volume_mm3": 35581.857894892404
+ "volume_mm3": 35581.857894892404,
+ "continuity": {
+  "order": "g0"
+ }
 }

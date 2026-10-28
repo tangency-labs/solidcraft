@@ -6,5 +6,8 @@
  "source": "analytic",
  "method": "box 40x40x20 joined with a cylinder R12 height 40 centred on its side face at (40,20): union = 32000 + pi*144*40 - (half of the cylinder inside the box, pi*144/2*20) = 45571.7. The R0.8 round on the exposed bottom half circle (a half revolution, ending on the plane x=40 through the axis) removes (1-pi/4) r^2 x pi x (R - 0.2232 r) = 5.1007 (Pappus on the spandrel, centroid offset r (5/6-pi/4)/(1-pi/4)). V = 45566.580.",
  "body_count": 1,
- "volume_mm3": 45566.57957588062
+ "volume_mm3": 45566.57957588062,
+ "continuity": {
+  "order": "g1"
+ }
 }

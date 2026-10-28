@@ -7,5 +7,8 @@
  "source": "analytic",
  "method": "cube 20 less three orthogonal 10x10 through openings (cross): V0 = 4000. The chamfer plane takes, of the section, the triangle y + (20 - z) <= 9 (y >= 0, z <= 20), area 40.5, along x: 810; less its parts inside the openings: the x opening (y, z in [5, 15]) misses it (z >= 11 + y >= 16 there), the y opening (z in [5, 15], x in [5, 15]) holds y in [0, 4], z in [11 + y, 15]: area 8, times 10 = 80, the z opening (y in [5, 15], x in [5, 15]) holds y in [5, 9], z in [11 + y, 20]: area 8, times 10 = 80. V = 4000 - (810 - 160) = 3350.",
  "body_count": 1,
- "volume_mm3": 3350.0
+ "volume_mm3": 3350.0,
+ "continuity": {
+  "order": "g0"
+ }
 }

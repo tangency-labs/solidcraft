@@ -5,5 +5,8 @@
  "what": "after the boss's partial base arc is rounded r2, the bar's top edge that runs into the round rounded r0.5",
  "source": "invariants",
  "method": "bar and boss as 1207-fillet-bar-top-edge-and-boss-arc-together; the base arc rounded r2 first (V0 + 28.9190), running out over the front face where its section is a curve on that face tangent to the bar's top edge; then that edge rounded r0.5, the tangent chain on: the edge and the section curve it runs into. How the round runs on along the curve has no closed form: one valid closed body",
- "body_count": 1
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
 }

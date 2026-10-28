@@ -7,5 +7,8 @@
  "method": "each chamfer removes 2.5^2/2 x 40 = 125: V = 4000 - 250 = 3750. The y = 0 face is gone; the chamfers meet along a ridge at z = 2.5: faces top, bottom, back, two ends, two chamfers = 7",
  "body_count": 1,
  "faces": 7,
- "volume_mm3": 3750.0
+ "volume_mm3": 3750.0,
+ "continuity": {
+  "order": "g0"
+ }
 }

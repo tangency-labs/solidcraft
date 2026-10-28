@@ -10,5 +10,8 @@
  "volume_mm3": 1723.0742532035633,
  "faces": 18,
  "edges": 40,
- "vertices": 24
+ "vertices": 24,
+ "continuity": {
+  "order": "g1"
+ }
 }

@@ -19,5 +19,8 @@
    0,
    50
   ]
+ },
+ "continuity": {
+  "order": "g1"
  }
 }

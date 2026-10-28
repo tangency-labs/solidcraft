@@ -7,5 +7,8 @@
  "method": "a chamfer of a concave edge fills it: + 2*2/2 * 10 = 20. V = (25*15 - 21*11)*10 + 20 = 1460. Faces: 4 outer, 4 inner, the chamfer, top, bottom = 11",
  "body_count": 1,
  "faces": 11,
- "volume_mm3": 1460.0
+ "volume_mm3": 1460.0,
+ "continuity": {
+  "order": "g0"
+ }
 }

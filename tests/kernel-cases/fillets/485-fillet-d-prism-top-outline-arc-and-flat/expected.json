@@ -10,5 +10,8 @@
  "volume_mm3": 2353.478908251137,
  "tolerance": {
   "rel": 5e-05
+ },
+ "continuity": {
+  "order": "g1"
  }
 }

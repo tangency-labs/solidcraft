@@ -7,5 +7,8 @@
  "source": "analytic",
  "method": "cube 20 with three orthogonal 10x10 through openings (cross): union of the three bars 3*2000 - 3*1000 + 1000 = 4000, so V0 = 8000 - 4000 = 4000. The top front edge (y=0,z=20, length 20) is intact (the openings span 5..15 in the other axes), and a 4 mm setback stays inside the 5 mm between the edge and the openings: it removes 4^2/2 x 20 = 160, V = 3840.",
  "body_count": 1,
- "volume_mm3": 3840.0
+ "volume_mm3": 3840.0,
+ "continuity": {
+  "order": "g0"
+ }
 }
