@@ -38,5 +38,35 @@
     "prefs.ribbon_standard": "标准",
     "prefs.tooltip_descriptions": "显示工具说明",
     "prefs.tooltips": "工具提示"
+  },
+  "ar": {
+    "Show Large": "إظهار كبير",
+    "Show Small": "إظهار صغير",
+    "Small": "صغير",
+    "prefs.ribbon": "الشريط",
+    "prefs.ribbon_small_icons": "أيقونات صغيرة",
+    "prefs.ribbon_standard": "قياسي",
+    "prefs.tooltip_descriptions": "إظهار أوصاف الأدوات",
+    "prefs.tooltips": "تلميحات الأدوات"
+  },
+  "he": {
+    "Show Large": "הצגה גדולה",
+    "Show Small": "הצגה קטנה",
+    "Small": "קטן",
+    "prefs.ribbon": "רצועת הכלים",
+    "prefs.ribbon_small_icons": "סמלים קטנים",
+    "prefs.ribbon_standard": "רגיל",
+    "prefs.tooltip_descriptions": "הצגת תיאורי הכלים",
+    "prefs.tooltips": "תיאורי כלים"
+  },
+  "vi": {
+    "Show Large": "Hiển thị lớn",
+    "Show Small": "Hiển thị nhỏ",
+    "Small": "Nhỏ",
+    "prefs.ribbon": "Dải băng",
+    "prefs.ribbon_small_icons": "Biểu tượng nhỏ",
+    "prefs.ribbon_standard": "Tiêu chuẩn",
+    "prefs.tooltip_descriptions": "Hiển thị mô tả công cụ",
+    "prefs.tooltips": "Chú giải công cụ"
   }
 }
