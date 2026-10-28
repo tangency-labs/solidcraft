@@ -699,7 +699,7 @@ const SAMPLES: usize = 64;
 
 /// The parameter of the curve's point nearest `p` inside `interval`, and the distance: the
 /// nearest of evenly spaced samples, then a golden-section search between its neighbours.
-fn nearest_parameter(c: &CurveEval, [a, b]: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
+pub(crate) fn nearest_parameter(c: &CurveEval, [a, b]: [f64; 2], p: Vec3) -> Option<(f64, f64)> {
     let dist = |t: f64| c.point(t).map_or(f64::INFINITY, |q| q.dist(p));
     let at = |k: usize| a + (b - a) * k as f64 / SAMPLES as f64;
     let best = (0..=SAMPLES).min_by(|&i, &j| dist(at(i)).total_cmp(&dist(at(j))))?;
@@ -734,6 +734,28 @@ pub fn stitch(bodies: &[&Body], tol: f64) -> Result<Body> {
     let (parts, offsets) = Parts::joined(&records)?;
     let c = without_t_junctions(parts.canonical()?, &offsets, tol)?;
     let (body, h) = imp::stitched(&c.brep, tol)?;
+    let h = h.and_then(|h| carried(&h, &c, &offsets, bodies.len(), |operand, face| FaceOrigin::Face { operand, face }));
+    Ok(body.with_checked_history(h, &record::counts(bodies)))
+}
+
+/// [`stitch`] at `tol` exactly, taking a result whose SMLib check fails no more tests than the
+/// bodies' own records do, leaving out the tests `exempt` (by SMLib's test number): Repair Part
+/// sews parts SMLib's check already finds fault with (an import's edges off their faces), and
+/// an edge sewn across a gap carries that gap as its own tolerance.
+pub(crate) fn stitch_no_worse(bodies: &[&Body], tol: f64, exempt: &[u32]) -> Result<Body> {
+    if bodies.is_empty() {
+        return Err(invalid("nothing to stitch"));
+    }
+    for b in bodies {
+        b.require_brep("stitch")?;
+    }
+    if !(tol.is_finite() && tol > 0.0) {
+        return Err(invalid("a stitch tolerance must be positive"));
+    }
+    let records: Vec<&Brep> = bodies.iter().map(|b| b.record()).collect();
+    let (parts, offsets) = Parts::joined(&records)?;
+    let c = without_t_junctions(parts.canonical()?, &offsets, tol)?;
+    let (body, h) = imp::stitched_no_worse(&c.brep, tol, exempt)?;
     let h = h.and_then(|h| carried(&h, &c, &offsets, bodies.len(), |operand, face| FaceOrigin::Face { operand, face }));
     Ok(body.with_checked_history(h, &record::counts(bodies)))
 }
@@ -1248,11 +1270,34 @@ mod imp {
     /// and edges by their index in `r`); none where SMLib's import of `r` does not number it as
     /// `r` does.
     pub(super) fn stitched(r: &Brep, tol: f64) -> Result<(Body, Option<History>)> {
+        stitched_with(r, tol, |_, sewn| checked(sewn, "stitch").map(|_| ()))
+    }
+
+    /// [`stitched`], taking a result whose check fails no more tests outside `exempt` than the
+    /// input's does.
+    pub(super) fn stitched_no_worse(r: &Brep, tol: f64, exempt: &[u32]) -> Result<(Body, Option<History>)> {
+        stitched_with(r, tol, |input, sewn| {
+            let counted = |b: &SmBrep| -> Result<usize> {
+                let report = b.check(CheckLevel::All).map_err(sm("stitch"))?;
+                Ok(report.failed_tests().into_iter().filter(|t| !exempt.contains(t)).count())
+            };
+            let (was, now) = (counted(input)?, counted(sewn)?);
+            if now > was {
+                let check = sewn.check(CheckLevel::All).map_err(sm("stitch"))?;
+                return Err(failed(format!("SMLib stitch: SMLib's check finds the sewn part worse ({now} failed tests, {was} before): {check}")));
+            }
+            Ok(())
+        })
+    }
+
+    /// The record `r` sewn at `tol`, the result taken when `accept` (given SMLib's input and
+    /// result) does.
+    fn stitched_with(r: &Brep, tol: f64, accept: impl Fn(&SmBrep, &SmBrep) -> Result<()>) -> Result<(Body, Option<History>)> {
         let brep = SmBrep::from_record(r, true).map_err(sm("stitch"))?;
         let (back, order) = brep.to_native_ordered().map_err(|e| failed(format!("SMLib stitch: {e}")))?;
         let tagged = brep.tagged(0).map_err(sm("stitch"))?;
         let (sewn, _closed) = tagged.stitch(tol).map_err(sm("stitch"))?;
-        checked(&sewn, "stitch")?;
+        accept(&brep, &sewn)?;
         let (record, kept) = sewn.to_native_ordered().map_err(|e| failed(format!("SMLib stitch: {e}")))?;
         let h = if same_numbering(r, &back) { sewn.history().ok().and_then(|raw| raw.history(&[order], &kept).ok()) } else { None };
         Ok((Body::from_smlib_record(record)?, h))

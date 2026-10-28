@@ -7019,6 +7019,29 @@ fn eval_feature(
             *target = result;
             Ok(())
         }
+        FeatureKind::Repair { body, gap, patch_holes } => {
+            let gap = val(vals, gap, Kind::Length)?;
+            let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let source = st.bodies.get(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let (repaired, report) = kernel::repair(&source.body, &kernel::RepairOptions { gap, patch_holes: *patch_holes })?;
+            let repaired = repaired.with_color(source.body.color());
+            let result = ModelBody::new(source.name.clone(), repaired, source.feature);
+            let mut left: Vec<String> =
+                report.refused.iter().map(|r| format!("SMLib still refuses face {} ({:?}): {}", r.face + 1, r.surface, r.why)).collect();
+            left.extend(
+                report
+                    .holes
+                    .iter()
+                    .filter(|h| !h.patched)
+                    .map(|h| h.why.clone().unwrap_or_else(|| format!("a hole of {} edges is left open", h.edges.len()))),
+            );
+            if !left.is_empty() {
+                *warning = Some(left.join("; "));
+            }
+            let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            *target = result;
+            Ok(())
+        }
         FeatureKind::MeshImport { meshes, .. } => {
             for (k, (name, b)) in mesh_bodies(meshes)?.into_iter().enumerate() {
                 let name = copy_body_name(st, f, k, &name);

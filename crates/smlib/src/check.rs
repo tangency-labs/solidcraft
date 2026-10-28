@@ -28,6 +28,19 @@ impl CheckReport {
     pub fn is_valid(&self) -> bool {
         self.failures == 0
     }
+
+    /// The number of each failed test, line by line (`SmBrep::Test #82 …` is 82); a line without
+    /// one is left out.
+    pub fn failed_tests(&self) -> Vec<u32> {
+        self.text
+            .lines()
+            .filter_map(|l| {
+                let rest = l.split_once("Test #")?.1;
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                digits.parse().ok()
+            })
+            .collect()
+    }
 }
 
 impl std::fmt::Display for CheckReport {
