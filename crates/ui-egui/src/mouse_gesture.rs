@@ -770,30 +770,30 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                                         &shown,
                                         egui::PopupCloseBehavior::CloseOnClickOutside,
                                         |ui| {
-                                        let filter_id = ui.id().with("filter");
-                                        let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
-                                        crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
-                                        ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
-                                        let needle = filter.trim().to_lowercase();
-                                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                                            for (id, label) in &catalog {
-                                                if !needle.is_empty()
-                                                    && !label.to_lowercase().contains(&needle)
-                                                    && !id.to_lowercase().contains(&needle)
-                                                {
-                                                    continue;
+                                            let filter_id = ui.id().with("filter");
+                                            let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+                                            crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
+                                            ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                                            let needle = filter.trim().to_lowercase();
+                                            egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                                                for (id, label) in &catalog {
+                                                    if !needle.is_empty()
+                                                        && !label.to_lowercase().contains(&needle)
+                                                        && !id.to_lowercase().contains(&needle)
+                                                    {
+                                                        continue;
+                                                    }
+                                                    let taken = (list.contains(id) || other.contains(id)) && *id != list[i];
+                                                    let mut row = crate::ui_kit::MenuItem::new(id, label, icon_of(id));
+                                                    row.enabled = !taken;
+                                                    row.highlighted = *id == list[i];
+                                                    let picked = row.show(ui);
+                                                    if picked.clicked() {
+                                                        op = Some((r, Op::Set(i, id.clone())));
+                                                        ui.close();
+                                                    }
                                                 }
-                                                let taken = (list.contains(id) || other.contains(id)) && *id != list[i];
-                                                let mut row = crate::ui_kit::MenuItem::new(id, label, icon_of(id));
-                                                row.enabled = !taken;
-                                                row.highlighted = *id == list[i];
-                                                let picked = row.show(ui);
-                                                if picked.clicked() {
-                                                    op = Some((r, Op::Set(i, id.clone())));
-                                                    ui.close();
-                                                }
-                                            }
-                                        });
+                                            });
                                         },
                                     );
                                     crate::scenario::publish_target(&format!("gestures:tool:{r}:{i}"), picker.rect);
