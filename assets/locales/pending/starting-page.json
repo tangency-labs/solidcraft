@@ -1,0 +1,37 @@
+{
+  "en": {
+    "starting.design": "Opening the design…",
+    "starting.recovery": "Checking for unsaved work…",
+    "starting.view": "Preparing the 3D view…"
+  },
+  "ar": {
+    "starting.design": "جارٍ فتح التصميم…",
+    "starting.recovery": "جارٍ البحث عن عمل غير محفوظ…",
+    "starting.view": "جارٍ تجهيز العرض ثلاثي الأبعاد…"
+  },
+  "de": {
+    "starting.design": "Konstruktion wird geöffnet…",
+    "starting.recovery": "Nicht gespeicherte Arbeit wird gesucht…",
+    "starting.view": "3D-Ansicht wird vorbereitet…"
+  },
+  "he": {
+    "starting.design": "פותח את התכן…",
+    "starting.recovery": "בודק אם יש עבודה שלא נשמרה…",
+    "starting.view": "מכין את התצוגה התלת־ממדית…"
+  },
+  "ja": {
+    "starting.design": "設計を開いています…",
+    "starting.recovery": "保存されていない作業を確認しています…",
+    "starting.view": "3D ビューを準備しています…"
+  },
+  "vi": {
+    "starting.design": "Đang mở thiết kế…",
+    "starting.recovery": "Đang kiểm tra công việc chưa lưu…",
+    "starting.view": "Đang chuẩn bị khung nhìn 3D…"
+  },
+  "zh": {
+    "starting.design": "正在打开设计…",
+    "starting.recovery": "正在检查未保存的工作…",
+    "starting.view": "正在准备 3D 视图…"
+  }
+}

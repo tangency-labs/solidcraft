@@ -264,6 +264,7 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
+pub mod starting;
 #[cfg(test)]
 mod sweep_dialog_tests;
 pub(crate) mod test_boat;
@@ -792,7 +793,8 @@ impl SolveApp {
             tess: false,
             oit: false,
         };
-        self.set_wgpu_targets(rs, target, target);
+        let built = Self::build_wgpu(rs, target, target, !self.cpu_meshing);
+        self.adopt_wgpu(rs, built);
     }
 
     /// Draw the viewport on the GPU with the scene drawn offscreen: `depth_bits`/`stencil_bits`
@@ -800,6 +802,15 @@ impl SolveApp {
     /// sample. Native hosts check the installed renderer and fall back to 1x only when that
     /// succeeds where multisampling fails. Returns the effective scene sample count.
     pub fn set_wgpu_split(&mut self, rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, samples: u32) -> u32 {
+        let built = Self::build_wgpu_split(rs, depth_bits, stencil_bits, samples, !self.cpu_meshing);
+        self.adopt_wgpu(rs, built);
+        self.viewport.gpu.map_or(samples, |g| g.samples)
+    }
+
+    /// [`Self::set_wgpu_split`]'s slow half, the shader compile and the anti-aliasing check: it
+    /// takes no app, so the desktop app runs it on a worker thread (#1210). [`Self::adopt_wgpu`]
+    /// then puts the pipelines in use. `gpu_meshing` is `!cpu_meshing`.
+    pub fn build_wgpu_split(rs: &egui_wgpu::RenderState, depth_bits: u8, stencil_bits: u8, samples: u32, gpu_meshing: bool) -> gpu::Built {
         let scene = crate::gpu::GpuTarget {
             format: rs.target_format,
             depth: egui_wgpu::depth_format_from_bits(depth_bits, stencil_bits),
@@ -808,34 +819,36 @@ impl SolveApp {
             oit: false,
         };
         let window = crate::gpu::GpuTarget { format: rs.target_format, depth: None, samples: 1, tess: false, oit: false };
-        self.set_wgpu_targets(rs, scene, window);
-        self.viewport.gpu.map_or(samples, |g| g.samples)
+        Self::build_wgpu(rs, scene, window, gpu_meshing)
     }
 
-    fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
+    fn build_wgpu(rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget, gpu_meshing: bool) -> gpu::Built {
         #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
-        let (mut installed, stats, tess_ready) = gpu::install(rs, scene, window, !self.cpu_meshing);
+        let mut built = gpu::build(rs, scene, window, gpu_meshing);
         #[cfg(not(target_arch = "wasm32"))]
         if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
-            let mut renderer = rs.renderer.write();
-            if let Some(res) = renderer.callback_resources.get_mut::<gpu::Renderer>() {
-                match res.check_msaa(&rs.device, &rs.queue) {
-                    Ok(solidcraft_gpu::view::MsaaCheck::Passed) => {}
-                    Ok(solidcraft_gpu::view::MsaaCheck::Fallback) => {
-                        installed.samples = 1;
-                        self.msaa_compatibility = true;
-                        eprintln!(
-                            "SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session",
-                            scene.samples
-                        );
-                    }
-                    Ok(solidcraft_gpu::view::MsaaCheck::FailedAtOne) => {
-                        eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
-                    }
-                    Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
+            match built.renderer.check_msaa(&rs.device, &rs.queue) {
+                Ok(solidcraft_gpu::view::MsaaCheck::Passed) => {}
+                Ok(solidcraft_gpu::view::MsaaCheck::Fallback) => {
+                    built.target.samples = 1;
+                    built.msaa_fallback = true;
+                    eprintln!("SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session", scene.samples);
                 }
+                Ok(solidcraft_gpu::view::MsaaCheck::FailedAtOne) => {
+                    eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
+                }
+                Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
             }
         }
+        built
+    }
+
+    /// Draw the viewport with pipelines [`Self::build_wgpu_split`] made, perhaps on another thread.
+    pub fn adopt_wgpu(&mut self, rs: &egui_wgpu::RenderState, built: gpu::Built) {
+        if built.msaa_fallback {
+            self.msaa_compatibility = true;
+        }
+        let (installed, stats, tess_ready) = gpu::adopt(rs, built);
         self.viewport.gpu = Some(installed);
         self.viewport.tess_ready = tess_ready;
         self.viewport.draw_stats = Some(stats);
@@ -2012,6 +2025,20 @@ impl SolveApp {
     }
 
     /// Per-frame logic before layout.
+    /// The preferences that set how the window looks (zoom, theme, colour vision), once they
+    /// change. Every frame; the starting page (`starting`) uses it before the app's own frames do.
+    pub fn apply_preferences(&mut self, ctx: &egui::Context) {
+        prefs::apply(self, ctx);
+        // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
+        theme::set_viewport_dark(self.preferences.viewport_theme.dark());
+        if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision {
+            theme::set_dark(self.ui.dark);
+            theme::set_vision(self.preferences.color_vision);
+            theme::apply(ctx);
+            self.styled = true;
+        }
+    }
+
     pub fn logic(&mut self, ctx: &egui::Context) {
         frame_watch::begin(self);
         gpu::tick_tessellation(self);
@@ -2028,15 +2055,7 @@ impl SolveApp {
         open_meshing::tick(self, ctx);
         open_meshing::refresh(self, ctx.input(|i| i.time));
         self.esc_handled = false;
-        prefs::apply(self, ctx);
-        // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
-        theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision {
-            theme::set_dark(self.ui.dark);
-            theme::set_vision(self.preferences.color_vision);
-            theme::apply(ctx);
-            self.styled = true;
-        }
+        self.apply_preferences(ctx);
         if !self.fitted {
             self.fit_view();
             self.fitted = true;

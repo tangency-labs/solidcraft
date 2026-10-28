@@ -19,18 +19,26 @@ pub struct ViewportCallback(pub Frame);
 /// The GPU plan evaluation compiling beside the window: there once it is ready ([`tick_tessellation`]).
 pub type TessReady = std::sync::Arc<std::sync::OnceLock<solidcraft_gpu::TessGpu>>;
 
+/// The viewport's pipelines, compiled but not yet in egui's paint callbacks ([`build`], [`adopt`]).
+pub struct Built {
+    /// The scene's target, as built: `samples` 1 after a failed anti-aliasing check
+    /// (`SolveApp::build_wgpu`).
+    pub(crate) target: GpuTarget,
+    pub(crate) renderer: Renderer,
+    stats: DrawStatsHandle,
+    ready: Option<TessReady>,
+    /// The anti-aliasing check failed at the asked samples and passed at 1x.
+    pub(crate) msaa_fallback: bool,
+}
+
 /// Create the pipelines. Call once with the app's render state, the scene target's depth/stencil/
 /// MSAA settings, and the target of the pass the picture is shown in. Without a stencil the
 /// section cap does not hide the inside of cut bodies. Without `gpu_meshing` (safe mode) bodies
 /// are meshed on the CPU. When the two targets differ, the scene is drawn offscreen and blitted.
-/// Also returns the handle to what each frame drew, and the GPU plan evaluation still compiling
-/// (native: the target says `tess: false` until it is ready).
-pub fn install(
-    rs: &egui_wgpu::RenderState,
-    scene: GpuTarget,
-    window: GpuTarget,
-    gpu_meshing: bool,
-) -> (GpuTarget, DrawStatsHandle, Option<TessReady>) {
+/// This is the shader compile (seconds on some GPUs); it only needs the device, so the desktop
+/// app runs it on a worker thread while the window keeps drawing (#1210). [`adopt`] then hands
+/// the pipelines to egui.
+pub fn build(rs: &egui_wgpu::RenderState, scene: GpuTarget, window: GpuTarget, gpu_meshing: bool) -> Built {
     log_uncaptured_errors(&rs.device);
     // The evaluation shader compiles beside the window, which does not wait for it: on D3D12 it
     // takes seconds, most of the start (#4860). Bodies are built on the CPU until it is ready.
@@ -52,14 +60,21 @@ pub fn install(
     #[cfg(target_arch = "wasm32")]
     let ready = None;
     // What the renderer can do (order-independent transparency), not only what was asked for.
-    let scene = res.target();
+    let target = res.target();
     let stats = res.stats();
-    rs.renderer.write().callback_resources.insert(res);
-    (scene, stats, ready)
+    Built { target, renderer: res, stats, ready, msaa_fallback: false }
+}
+
+/// The pipelines [`build`] made, in egui's paint callbacks: the scene's target, the handle to what
+/// each frame drew, and the GPU plan evaluation still compiling (native: the target says
+/// `tess: false` until it is ready).
+pub fn adopt(rs: &egui_wgpu::RenderState, built: Built) -> (GpuTarget, DrawStatsHandle, Option<TessReady>) {
+    rs.renderer.write().callback_resources.insert(built.renderer);
+    (built.target, built.stats, built.ready)
 }
 
 /// Draw bodies from their plans on the GPU from the frame the evaluation shader has compiled
-/// ([`install`]); until then, and where it never does, they are built on the CPU.
+/// ([`build`]); until then, and where it never does, they are built on the CPU.
 pub(crate) fn tick_tessellation(app: &mut crate::SolveApp) {
     if app.viewport.tess_ready.as_ref().is_some_and(|ready| ready.get().is_some()) {
         app.viewport.tess_ready = None;
@@ -75,7 +90,7 @@ pub(crate) fn tick_tessellation(app: &mut crate::SolveApp) {
 /// panics with "wgpu error: ...", which would close the app with the open design (#5486 reported
 /// "wgpu error: Out of Memory" from such a panic). The headless picture devices do the same
 /// (`Capturer::headless`). Errors the code expects are caught under error scopes where they
-/// happen, and those take priority over this handler. Errors before [`install`] (egui's own
+/// happen, and those take priority over this handler. Errors before [`build`] (egui's own
 /// pipelines at startup) still reach the default handler, so a startup failure stays a crash
 /// report with its startup step.
 pub fn log_uncaptured_errors(device: &wgpu::Device) {
@@ -244,7 +259,7 @@ pub(crate) fn offscreen_device() -> Option<(wgpu::Adapter, wgpu::Device, wgpu::Q
     Some((adapter, device, queue))
 }
 
-/// Whether [`install`] would evaluate plans on the GPU with `shader`, on an offscreen device
+/// Whether [`build`] would evaluate plans on the GPU with `shader`, on an offscreen device
 /// (`None` without a GPU adapter).
 #[cfg(all(test, not(target_arch = "wasm32")))]
 pub(crate) fn offscreen_tessellates(shader: &str) -> Option<bool> {
@@ -255,7 +270,7 @@ pub(crate) fn offscreen_tessellates(shader: &str) -> Option<bool> {
 /// Render `scene` offscreen on a device of its own, through the viewport's real resources and
 /// frame callback (`prepare`, then `paint`), and read the pixels back: straight RGBA, `size` ×
 /// `size`. `None` without a GPU adapter. With `tess` (the tessellation shader), planned bodies
-/// are evaluated on the GPU where the device builds that pipeline, as [`install`] sets it up.
+/// are evaluated on the GPU where the device builds that pipeline, as [`build`] sets it up.
 /// `highlight` is drawn as the viewport's highlight scene (hover and selection). `analysis` is the
 /// surface analysis uniform (`viewport::analysis_uniform`; zeros for none) and `colors` its
 /// colours (`analysis_colors`).
