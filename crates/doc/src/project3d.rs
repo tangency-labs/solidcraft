@@ -191,55 +191,6 @@ pub(crate) fn iso_curve(m: &Mesh, f: u32, p: Vec3, dir: &str) -> Vec<Vec<Vec3>> 
     if len(&a) >= len(&b) { a } else { b }
 }
 
-/// Isocurve analysis: `count` curves each way across face `f` (picked at `p`), as world
-/// polylines. Each family is the face cut by parallel planes spaced evenly over the face.
-pub fn iso_grid(m: &Mesh, f: u32, p: Vec3, count: usize) -> Vec<Vec<Vec3>> {
-    let count = count.clamp(1, 100);
-    let verts: Vec<Vec3> = m.triangles.iter().zip(&m.tri_face).filter(|(_, x)| **x == f).filter_map(|(t, _)| m.tri(t)).flatten().collect();
-    if verts.is_empty() {
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for dir in ["u", "v"] {
-        // The family's cutting direction, from the curve through p.
-        let Some(first) = iso_curve(m, f, p, dir).into_iter().next() else { continue };
-        let pts: Vec<Vec3> = first.to_vec();
-        // Normal of the plane that curve lies in.
-        let Some(c) = pts.first().copied() else { continue };
-        let mut n = Vec3::ZERO;
-        for w in pts.windows(2) {
-            n += (w[0] - c).cross(w[1] - c);
-        }
-        let cut_n = match n.normalized() {
-            Some(n) => n,
-            // A straight curve: across it, within the face.
-            None => {
-                let d = pts.last().copied().unwrap_or(c) - c;
-                let np = (verts[1] - verts[0]).cross(verts[2] - verts[0]);
-                match d.cross(np).normalized() {
-                    Some(x) => x,
-                    None => continue,
-                }
-            }
-        };
-        let (lo, hi) = verts.iter().map(|v| v.dot(cut_n)).fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(x), b.max(x)));
-        if !(hi - lo > 1e-9) {
-            continue;
-        }
-        for k in 1..=count {
-            let d = lo + (hi - lo) * k as f64 / (count + 1) as f64;
-            let Some(pl) = Plane::from_normal(cut_n * d, cut_n) else { continue };
-            for g in crate::project::section(&pl, m, Some(f)) {
-                let w: Vec<Vec3> = link_polyline(&g).into_iter().map(|q| pl.to_world(q)).collect();
-                if w.len() >= 2 {
-                    out.push(w);
-                }
-            }
-        }
-    }
-    out
-}
-
 /// Join polylines whose ends meet into longer ones.
 fn join_wires(mut ws: Vec<Vec<Vec3>>, tol: f64) -> Vec<Vec<Vec3>> {
     let mut out: Vec<Vec<Vec3>> = Vec::new();

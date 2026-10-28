@@ -20,6 +20,10 @@ use crate::{AxisRef, DocError, Document, Feature, FeatureId, FeatureKind, HoleKi
 
 type JointFaces = (Body, kernel::Result<Arc<[kernel::FaceInfo]>>);
 
+/// A body's isoparametric curves worked out so far ([`ModelBody::iso_lines`]), with the body they
+/// were worked out on: by face, count each way and display quality.
+type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), Arc<[kernel::IsoLine]>>);
+
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
@@ -72,6 +76,8 @@ pub struct ModelBody {
     /// [`Body::is_surface`] of `body` (with the body it was measured on), worked out once and
     /// shared by clones.
     surface: Arc<OnceLock<(Body, bool)>>,
+    /// [`ModelBody::iso_lines`] worked out so far, shared by clones.
+    iso: Arc<std::sync::Mutex<IsoLines>>,
 }
 
 impl ModelBody {
@@ -98,6 +104,7 @@ impl ModelBody {
             outline: Arc::new(OnceLock::new()),
             measured: Arc::new(OnceLock::new()),
             surface: Arc::new(OnceLock::new()),
+            iso: Default::default(),
         }
     }
 
@@ -325,6 +332,31 @@ impl ModelBody {
     /// Already computed display geometry; saving must not trigger cold tessellation.
     pub fn cached_mesh(&self) -> Option<Arc<Mesh>> {
         self.mesh.get().cloned()
+    }
+
+    /// The isoparametric curves of face `face` for Isocurve Analysis: `count` each way across
+    /// the face, exact and cut to its trims ([`kernel::iso_grid`]), their points at the chord
+    /// tolerance of the viewport's display quality. Worked out once per face, count and display
+    /// quality, and shared by every clone of this body (timeline snapshots, world states). A mesh
+    /// body has no surfaces, so none.
+    pub fn iso_lines(&self, face: usize, count: usize) -> Result<Arc<[kernel::IsoLine]>> {
+        if self.body.is_mesh() {
+            return Err(DocError::Invalid(format!("{} is a mesh body: its faces have no surface parameters, so no isoparametric curves", self.name)));
+        }
+        let quality = crate::display_quality::current();
+        let key = (face, count, quality.index());
+        let make = || kernel::iso_grid(&self.body, face, count, quality.chord(self.body.size())).map(Arc::from);
+        let Ok(mut cache) = self.iso.lock() else { return Ok(make()?) };
+        if !cache.0.as_ref().is_some_and(|b| b.same(&self.body)) {
+            // A body replaced in this cell's holder since: what was worked out was on another.
+            *cache = (Some(self.body.clone()), Default::default());
+        }
+        if let Some(lines) = cache.1.get(&key) {
+            return Ok(lines.clone());
+        }
+        let lines = make()?;
+        cache.1.insert(key, lines.clone());
+        Ok(lines)
     }
 }
 

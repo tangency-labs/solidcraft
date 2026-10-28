@@ -51,6 +51,7 @@ mod iges_out;
 mod intersection;
 #[cfg(test)]
 mod intersection_curve_tests;
+mod iso;
 #[cfg(test)]
 mod issue_1038_tests;
 #[cfg(test)]
@@ -183,6 +184,7 @@ pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};
+pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
 pub use lip::{raise_band, rim_band};
 pub use loft_blend::loft_blend;
 pub use matchsurf::{match_surface, seam_continuity};
@@ -194,8 +196,7 @@ pub use native::{brep_record, decode_native_body, encode_native_body, native_pre
 pub use offset::with_same_surface;
 pub use ops::{BoolOp, boolean, half_space, join_apart, place_matrix, split_by_plane, transform, transform_matrix, union_all, union_apart};
 pub use point_path::{
-    PathPiece, PointPath, SpaceBezier, curve_path, edge_path, face_section_along, iso_curves, project_onto_face, sketch_record_curve,
-    sweep_point_path_with,
+    PathPiece, PointPath, SpaceBezier, curve_path, edge_path, face_section_along, project_onto_face, sketch_record_curve, sweep_point_path_with,
 };
 pub use polybool::faceted_boolean;
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};

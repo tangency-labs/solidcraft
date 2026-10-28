@@ -67,7 +67,6 @@ pub mod render_optics;
 pub mod render_resources;
 pub mod render_settings;
 pub mod render_surface;
-pub use project3d::iso_grid;
 pub mod sheet;
 pub mod text_params;
 pub mod thread_forms;

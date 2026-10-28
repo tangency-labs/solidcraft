@@ -418,6 +418,9 @@ pub struct Session {
     /// The seams `inspect.continuity` last measured, for the viewport to shade. View state: not
     /// part of the design and not an undo step.
     pub continuity: Vec<ContinuitySeam>,
+    /// The faces Isocurve Analysis shows the isoparametric curves of, for the viewport to draw
+    /// ([`Session::isocurve_lines`]). View state: not part of the design and not an undo step.
+    pub isocurves: Vec<IsoPick>,
     /// What is hidden or shown in the view (`browser.visibility`): saved with the design and an
     /// undo step of its own ([`Snapshot::visibility`]). A design brings its saved visibility when
     /// it opens (`Session::new`).
@@ -500,6 +503,15 @@ pub struct ContinuitySeam {
     pub points: Vec<Vec3>,
     /// The seam's worst verdict along its length.
     pub verdict: kernel::SeamVerdict,
+}
+
+/// A face Isocurve Analysis shows: the body, the picked point on the face (its face is found
+/// from it again whenever the body changes) and how many curves each way. View state only.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct IsoPick {
+    pub body: String,
+    pub at: Vec3,
+    pub count: usize,
 }
 
 impl SurfaceAnalysis {
@@ -594,6 +606,7 @@ impl Session {
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
+            isocurves: Vec::new(),
             checkpoints: Vec::new(),
             next_checkpoint: 1,
             replacements: 0,
@@ -1366,6 +1379,7 @@ impl Session {
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
+            isocurves: Vec::new(),
             checkpoints: Vec::new(),
             next_checkpoint: 1,
             replacements: 0,

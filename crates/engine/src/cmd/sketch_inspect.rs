@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use solidcraft_geom::{Aabb3, Seg2, Vec2, Vec3};
 
 use super::CommandSpec;
-use crate::params::{bad, num, string_list, vec3};
+use crate::params::{bad, bool_, num, string_list, vec3};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -23,7 +23,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "INSPECT")
         .icon("iso_analysis")
         .noundo()
-        .params("faces: [[x,y,z]…] points on faces; count?: curves each way (default 8): the faces' isoparametric curves"),
+        .params(
+            "faces: [[x,y,z]…] points on faces (1…100); count?: whole number of curves each way, 1…100 (default 8); \
+             add?: true keeps the faces already shown; clear?: true turns the analysis off. → each face's isoparametric \
+             curves, u = const and v = const of its surface, evenly spaced across it and cut to its trims, as points \
+             (`curves`) and per face (`faces`); the viewport draws them",
+        ),
     CommandSpec::new("inspect.center_of_mass", "Center of Mass", center_of_mass)
         .at("SKETCH", "INSPECT")
         .icon("center_of_mass")
@@ -121,12 +126,12 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
                 num(p, "count").filter(|c| c.is_finite()).map(|c| c.clamp(1.0, 50.0) as usize).ok_or_else(|| bad(cmd, "`count` must be a number"))?
             }
         };
+        let world = s.world_state()?;
         for v in faces.iter().take(100) {
             let at = vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
-            let (bi, f) = face_at(&st, at).ok_or_else(|| bad(cmd, "no face there"))?;
-            let m = st.bodies.get(bi).map(|b| b.mesh()).ok_or_else(|| bad(cmd, "that face's body is not evaluated"))?;
-            for (k, w) in solidcraft_doc::iso_grid(&m, f, at, count).iter().enumerate() {
-                combs.push((format!("face@{},{},{}#{k}", at.x, at.y, at.z), teeth_3d(w)));
+            let (body, face) = iso_face_at(s, &world, at).ok_or_else(|| bad(cmd, "no face there"))?;
+            for (k, line) in body.iso_lines(face, count)?.iter().enumerate() {
+                combs.push((format!("face@{},{},{}#{k}", at.x, at.y, at.z), teeth_3d(&line.points)));
             }
         }
     }
@@ -296,24 +301,92 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
     }))
 }
 
+/// Isocurves each way when the call does not say (`count`), and most faces one call may pick.
+const DEFAULT_ISO_COUNT: usize = 8;
+const MAX_ISO_FACES: usize = 100;
+
+/// The visible model body whose face is nearest `at` (within its pick tolerance), and that face.
+fn iso_face_at<'a>(s: &Session, st: &'a solidcraft_doc::ModelState, at: Vec3) -> Option<(&'a solidcraft_doc::ModelBody, usize)> {
+    st.bodies
+        .iter()
+        .filter(|b| s.body_visible(&b.name))
+        .filter_map(|b| {
+            let (d, f) = solidcraft_doc::appearance::nearest_face(b, at)?;
+            (d <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((d, b, f))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, b, f)| (b, f))
+}
+
+/// `inspect.isocurve`: the picked faces' isoparametric curves (`count` each way, exact and cut to
+/// each face's trims, [`solidcraft_doc::ModelBody::iso_lines`]), kept so the viewport draws them.
+/// View state only, like the other analyses: the design and its undo history are untouched.
 fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.isocurve";
-    let count = num(p, "count").map(|c| c.clamp(1.0, 100.0) as usize).unwrap_or(8);
-    let faces = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
-    if faces.is_empty() {
-        return Err(bad(cmd, "`faces` is empty"));
+    if bool_(p, "clear").unwrap_or(false) {
+        s.isocurves.clear();
+        s.revision += 1;
+        return Ok(json!({"analysis": "isocurve", "cleared": true}));
     }
-    let st = s.model.state();
-    let mut out = Vec::new();
-    for v in faces.iter().take(100) {
-        let at = vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z]"))?;
-        let (bi, f) = face_at(&st, at).ok_or_else(|| bad(cmd, "no face there"))?;
-        let m = st.bodies.get(bi).map(|b| b.mesh()).ok_or_else(|| bad(cmd, "body"))?;
-        for w in solidcraft_doc::iso_grid(&m, f, at, count) {
-            out.push(w.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>());
+    let max = crate::kernel::MAX_ISO_COUNT;
+    let count = match p.get("count") {
+        None | Some(Value::Null) => DEFAULT_ISO_COUNT,
+        Some(v) => v
+            .as_f64()
+            .filter(|c| c.fract() == 0.0 && (1.0..=max as f64).contains(c))
+            .map(|c| c as usize)
+            .ok_or_else(|| bad(cmd, format!("`count` must be a whole number of curves each way, 1…{max}")))?,
+    };
+    let faces = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z] on faces"))?;
+    if faces.is_empty() || faces.len() > MAX_ISO_FACES {
+        return Err(bad(cmd, format!("`faces` must list 1…{MAX_ISO_FACES} points [x,y,z] on faces")));
+    }
+    let st = s.world_state()?;
+    let (mut picks, mut curves, mut shown) = (Vec::new(), Vec::new(), Vec::new());
+    for v in faces {
+        let at = vec3(v).ok_or_else(|| bad(cmd, "`faces` must list points [x,y,z] on faces"))?;
+        let (body, face) = iso_face_at(s, &st, at).ok_or_else(|| bad(cmd, "no face there"))?;
+        let lines = body.iso_lines(face, count)?;
+        let along_u = lines.iter().filter(|l| l.along_u).count();
+        shown.push(json!({"body": body.name, "face": face, "count": count, "u_curves": along_u, "v_curves": lines.len() - along_u}));
+        curves.extend(lines.iter().map(|l| l.points.iter().map(|q| [q.x, q.y, q.z]).collect::<Vec<_>>()));
+        picks.push((face, crate::IsoPick { body: body.name.clone(), at, count }));
+    }
+    if bool_(p, "add").unwrap_or(false) {
+        // A face picked again shows its new count, once.
+        let again = |k: &crate::IsoPick| {
+            picks
+                .iter()
+                .any(|(f, n)| n.body == k.body && st.body(&k.body).and_then(|b| solidcraft_doc::appearance::face_index_at(b, k.at)) == Some(*f))
+        };
+        s.isocurves.retain(|k| !again(k));
+    } else {
+        s.isocurves.clear();
+    }
+    s.isocurves.extend(picks.into_iter().map(|(_, k)| k));
+    s.revision += 1;
+    Ok(json!({"curves": curves, "faces": shown}))
+}
+
+impl Session {
+    /// The curves Isocurve Analysis shows, for the viewport to draw: those of each face in
+    /// [`Session::isocurves`] of a visible body, found again from its picked point (worked out
+    /// once per face and count, [`solidcraft_doc::ModelBody::iso_lines`]). A pick whose body or
+    /// face is gone shows nothing.
+    pub fn isocurve_lines(&self) -> Vec<std::sync::Arc<[crate::kernel::IsoLine]>> {
+        if self.isocurves.is_empty() {
+            return Vec::new();
         }
+        let Ok(st) = self.world_state() else { return Vec::new() };
+        self.isocurves
+            .iter()
+            .filter_map(|k| {
+                let b = st.body(&k.body).filter(|b| self.body_visible(&b.name))?;
+                let face = solidcraft_doc::appearance::face_index_at(b, k.at)?;
+                b.iso_lines(face, k.count).ok()
+            })
+            .collect()
     }
-    Ok(json!({"curves": out}))
 }
 
 fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
@@ -402,7 +475,7 @@ mod tests {
         let r = s.execute("inspect.isocurve", &json!({"faces": [[58, 0, 5]], "count": 4})).unwrap();
         let curves = r["curves"].as_array().unwrap();
         let ring =
-            |c: &Value| c.as_array().unwrap().iter().all(|q| ((q[0].as_f64().unwrap() - 50.0).hypot(q[1].as_f64().unwrap()) - 8.0).abs() < 0.2);
+            |c: &Value| c.as_array().unwrap().iter().all(|q| ((q[0].as_f64().unwrap() - 50.0).hypot(q[1].as_f64().unwrap()) - 8.0).abs() < 1e-6);
         assert!(curves.len() >= 8, "{}", curves.len());
         assert!(curves.iter().all(ring), "every curve lies on the cylinder");
         let flat = |c: &Value| {
@@ -411,5 +484,128 @@ mod tests {
         };
         assert!(curves.iter().filter(|c| flat(c)).count() >= 4, "rings at constant height");
         assert!(s.execute("inspect.isocurve", &json!({"faces": []})).is_err());
+    }
+
+    /// Points of a reply's `curves`.
+    fn curve_points(r: &Value) -> Vec<Vec<[f64; 3]>> {
+        r["curves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c.as_array().unwrap().iter().map(|q| [0, 1, 2].map(|k| q[k].as_f64().unwrap())).collect())
+            .collect()
+    }
+
+    /// Isocurve Analysis draws a face's exact isoparametric curves, `count` each way, cut to its
+    /// trims: on a cylinder's side they lie on the cylinder and the lines along it stop where they
+    /// meet a hole through it; the view state keeps the face, and hostile counts are refused.
+    #[test]
+    fn isocurves_are_exact_and_stop_at_a_hole() {
+        let mut s = Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 10, "height": 40})).unwrap();
+        // Untrimmed but for its ends: `count` curves each way, each one piece.
+        let r = s.execute("inspect.isocurve", &json!({"faces": [[10, 0, 20]], "count": 5})).unwrap();
+        let face = &r["faces"][0];
+        assert_eq!((face["u_curves"].as_u64(), face["v_curves"].as_u64()), (Some(5), Some(5)), "{face}");
+        assert_eq!(s.isocurves.len(), 1);
+        assert_eq!(s.isocurve_lines().iter().map(|l| l.len()).sum::<usize>(), 10);
+        // A hole of radius 3 through it along X, at half height.
+        s.execute("solid.cylinder", &json!({"radius": 3, "height": 30, "base": [-15, 0, 20], "axis": "X", "operation": "cut"})).unwrap();
+        let r = s.execute("inspect.isocurve", &json!({"faces": [[0, 10, 20]], "count": 9})).unwrap();
+        let curves = curve_points(&r);
+        assert!(!curves.is_empty(), "{r}");
+        let from_hole = |q: &[f64; 3]| q[1].hypot(q[2] - 20.0) - 3.0;
+        for c in &curves {
+            for q in c {
+                assert!((q[0].hypot(q[1]) - 10.0).abs() < 1e-6, "on the cylinder: {q:?}");
+                assert!(from_hole(q) > -1e-3, "not in the hole: {q:?}");
+                assert!((-1e-6..=40.0 + 1e-6).contains(&q[2]), "within its ends: {q:?}");
+            }
+        }
+        // The lines along the axis that cross the hole stop at its rim: their ends there lie on
+        // the hole's edge.
+        let mut at_rim = 0;
+        for c in &curves {
+            for q in [c.first().unwrap(), c.last().unwrap()] {
+                if q[2] > 1e-3 && q[2] < 40.0 - 1e-3 && from_hole(q) < 0.5 {
+                    assert!(from_hole(q).abs() < 1e-3, "an end on the hole's edge: {q:?} is {} from it", from_hole(q));
+                    at_rim += 1;
+                }
+            }
+        }
+        assert!(at_rim >= 4, "the lines crossing the hole stop at it ({at_rim} ends there)");
+        // Picking the face again replaces it; `add` keeps the others; `clear` ends it.
+        s.execute("inspect.isocurve", &json!({"faces": [[0, -10, 5]], "count": 3, "add": true})).unwrap();
+        let shown = s.isocurves.len();
+        s.execute("inspect.isocurve", &json!({"faces": [[0, -10, 5]], "count": 4, "add": true})).unwrap();
+        assert_eq!(s.isocurves.len(), shown, "the same face again replaces its curves");
+        assert_eq!(s.isocurves.last().map(|k| k.count), Some(4));
+        let before = s.doc.clone();
+        s.execute("inspect.isocurve", &json!({"clear": true})).unwrap();
+        assert!(s.isocurves.is_empty() && s.isocurve_lines().is_empty());
+        assert!(std::sync::Arc::ptr_eq(&before, &s.doc), "view state only: the design is untouched");
+        // Hostile counts and picks.
+        for count in [json!(0), json!(-3), json!(2.5), json!(101), json!(1e300), json!("8"), json!([4])] {
+            assert!(s.execute("inspect.isocurve", &json!({"faces": [[0, 10, 20]], "count": count})).is_err(), "count {count}");
+        }
+        assert!(s.execute("inspect.isocurve", &json!({"faces": [[500, 0, 0]]})).is_err(), "no face there");
+        assert!(s.execute("inspect.isocurve", &json!({"faces": [["x", 0, 0]]})).is_err());
+        assert!(s.execute("inspect.isocurve", &json!({"faces": vec![[0, 10, 20]; 101]})).is_err());
+        assert!(s.isocurves.is_empty(), "a refused call shows nothing");
+    }
+
+    /// A sphere's face is closed by its seam and poles: its curves are the circles round it and
+    /// the meridians, each meridian from pole to pole.
+    #[test]
+    fn isocurves_of_a_sphere_meet_at_its_poles() {
+        let mut s = Session::default();
+        s.execute("solid.sphere", &json!({"radius": 10})).unwrap();
+        let r = s.execute("inspect.isocurve", &json!({"faces": [[10, 0, 0]], "count": 5})).unwrap();
+        let face = &r["faces"][0];
+        assert_eq!((face["u_curves"].as_u64(), face["v_curves"].as_u64()), (Some(5), Some(5)), "{face}");
+        let curves = curve_points(&r);
+        let len = |q: &[f64; 3]| q[0].hypot(q[1]).hypot(q[2]);
+        assert!(curves.iter().flatten().all(|q| (len(q) - 10.0).abs() < 1e-6), "on the sphere");
+        let pole = |q: &[f64; 3]| q[0].hypot(q[1]) < 1e-6 && (q[2].abs() - 10.0).abs() < 1e-6;
+        let meridians = curves.iter().filter(|c| pole(c.first().unwrap()) && pole(c.last().unwrap())).count();
+        assert_eq!(meridians, 5, "the meridians run from pole to pole");
+    }
+
+    /// On a trimmed B-spline face (a spline profile's extruded side, with a hole through it) the
+    /// isocurves are the surface's own rows and columns and stay inside the face's loops.
+    #[test]
+    fn isocurves_of_a_trimmed_spline_face_stay_inside_it() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.spline.fit_point", &json!({"points": [[0, 0], [20, 8], [40, 0]]})).unwrap();
+        s.execute("sketch.line", &json!({"points": [[40, 0], [0, 0]]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"distance": 30})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 3, "height": 30, "base": [20, -10, 15], "axis": "Y", "operation": "cut"})).unwrap();
+        let r = s.execute("inspect.isocurve", &json!({"faces": [[20, 8, 5]], "count": 12})).unwrap();
+        let face = &r["faces"][0];
+        assert!(face["u_curves"].as_u64().unwrap() >= 12 && face["v_curves"].as_u64().unwrap() >= 12, "{face}");
+        let st = s.model.state();
+        let body = &st.bodies[0];
+        let mesh = body.mesh();
+        let tol = body.display_tol();
+        let spline = face["face"].as_u64().unwrap() as u32;
+        for c in curve_points(&r) {
+            for q in &c {
+                let p = solidcraft_geom::Vec3::new(q[0], q[1], q[2]);
+                // On that face (within the display mesh's sag), within its extent, clear of the hole.
+                let d = mesh
+                    .triangles
+                    .iter()
+                    .zip(&mesh.tri_face)
+                    .filter(|(_, f)| **f == spline)
+                    .filter_map(|(t, _)| mesh.tri(t))
+                    .map(|[a, b, c]| super::closest_on_triangle(p, a, b, c).dist(p))
+                    .fold(f64::INFINITY, f64::min);
+                assert!(d < 2.0 * tol, "on the spline face: {q:?} is {d} from it");
+                assert!((-1e-6..=30.0 + 1e-6).contains(&q[2]) && q[1] > -1e-6, "{q:?}");
+                assert!((q[0] - 20.0).hypot(q[2] - 15.0) > 3.0 - 1e-3, "not in the hole: {q:?}");
+            }
+        }
     }
 }

@@ -93,6 +93,7 @@ const MARK: Palette = Palette {
     sketch_centerline: Rgb(43, 44, 45),
     axes: [Rgb(46, 47, 48), Rgb(49, 50, 51), Rgb(52, 53, 54)],
     cap: Rgb(55, 56, 57),
+    isocurve: Rgb(58, 59, 60),
     analysis: solidcraft_render::AnalysisColors {
         draft: [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]],
         access: [[0.11, 0.12, 0.13], [0.14, 0.15, 0.16]],
@@ -123,7 +124,7 @@ fn the_default_palette_is_the_colour_table() {
         (p.sketch_projected, p.sketch_lost, p.sketch_construction, p.sketch_centerline),
         (colors::SKETCH_PROJECTED, colors::SKETCH_LOST, colors::SKETCH_CONSTRUCTION, colors::SKETCH_CENTERLINE)
     );
-    assert_eq!((p.axes, p.cap), ([colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z], colors::SECTION_CAP));
+    assert_eq!((p.axes, p.cap, p.isocurve), ([colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z], colors::SECTION_CAP, colors::ISOCURVE));
     assert_eq!(p.analysis, solidcraft_render::AnalysisColors::DEFAULT);
 }
 
@@ -204,6 +205,8 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
     s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
     s.execute("sketch.line", &json!({"points": [[0, -20], [30, -20]]})).unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
+    // Isocurve Analysis on Plain's side face.
+    s.execute("inspect.isocurve", &json!({"faces": [[45, 0, 5]], "count": 2})).unwrap();
     s.selection = vec![Sel::Body { name: "Picked".into() }];
     s.section = Some((Vec3::new(0., 0., 5.), Vec3::Z));
     let cam = home_camera(&s).unwrap();
@@ -229,11 +232,12 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
         MARK.sketch_lost,
         MARK.sketch_construction,
         MARK.sketch_centerline,
+        MARK.isocurve,
     ];
     let all_lines = || marked.grid.iter().chain(&marked.lines);
     let stray: Vec<Rgb> = all_lines().map(|l| l.color).filter(|c| !allowed.contains(c)).collect();
     assert!(stray.is_empty(), "line colours not from the palette: {stray:?}");
-    for want in [MARK.grid, MARK.grid_major, MARK.edge, MARK.axes[0], MARK.axes[1], MARK.axes[2], MARK.sketch_done] {
+    for want in [MARK.grid, MARK.grid_major, MARK.edge, MARK.axes[0], MARK.axes[1], MARK.axes[2], MARK.sketch_done, MARK.isocurve] {
         assert!(all_lines().any(|l| l.color == want), "no line in {want:?}");
     }
     assert!(marked.grid.iter().all(|l| [MARK.grid, MARK.grid_major].contains(&l.color)), "only the grid is drawn under the model");
