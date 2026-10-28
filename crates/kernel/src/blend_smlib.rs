@@ -191,6 +191,7 @@ mod imp {
         body.require_brep(what)?;
         sizes_ok(what, sizes)?;
         let picked = resolve(body, edges)?;
+        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
         let kind = match kind {
             Kind::Round => Blend::Round,
             Kind::Curvature => Blend::Curvature,
@@ -214,6 +215,7 @@ mod imp {
             return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
         }
         let picked = resolve(body, edges)?;
+        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
         let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
         let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
         let tol = pick_tolerance(body);
@@ -234,6 +236,7 @@ mod imp {
             return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
         }
         let picked = resolve(body, edges)?;
+        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
         let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
         let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
         let at: Vec<Vec3> = setbacks.iter().map(|(p, _)| *p).collect();
@@ -281,6 +284,7 @@ mod imp {
         body.require_brep("chamfer")?;
         sizes_ok("chamfer", &vec![d1; edges.len()])?;
         let picked = resolve(body, edges)?;
+        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
         let second = match side {
             crate::ChamferSide::Distance(d) => ChamferSecond::Distance(d),
             crate::ChamferSide::Angle(a) => ChamferSecond::Angle(a),
@@ -296,6 +300,7 @@ mod imp {
             return Err(KernelError::Invalid("the start point must be finite".into()));
         }
         let picked = resolve(body, &[edge_at])?;
+        crate::blend::refuse_unblendable(body, &[edge_at], &picked.edges, &picked.hidden)?;
         let [at] = picked.points[..] else { return Err(KernelError::Invalid("one edge".into())) };
         let tol = pick_tolerance(body);
         run(body, "variable fillet", &picked.edges, |b| {
@@ -334,6 +339,10 @@ mod imp {
                     None => failed(what, "operation", SmError::CornerRefused { corner }),
                 },
                 SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {what} reported success but built no face")),
+                SmError::CornerUnsupported => KernelError::Invalid(format!(
+                    "not supported yet: the {what} meets a corner of this kind, which SMLib's blends do not handle yet (where its edges \
+                     run on tangentially into each other, or meet in a way no blend corner builds)"
+                )),
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 e => failed(what, "operation", e),
             })?;
@@ -593,5 +602,25 @@ mod tests {
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(10.0, 20.0, 20.0)], &[f64::NAN]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(f64::NAN, 20.0, 20.0)], &[1.0]).is_err());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[], &[]).is_err());
+    }
+
+    /// A smooth edge (a round's seam with the face it runs into) has nothing to round, and an
+    /// edge that runs on tangentially into one left out has no end SMLib can blend: both are
+    /// refused before SMLib, saying so. Rounded with its tangent chain the edge builds.
+    #[test]
+    fn smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why() {
+        let b = cube();
+        let rounded = fillet(&b, &[Vec3::new(10.0, 20.0, 20.0)], 3.0).unwrap();
+        // the seam where the r3 round meets the top, 3 in from the old edge
+        let seam = imp::blend(&rounded, "fillet", Kind::Round, &[Vec3::new(10.0, 17.0, 20.0)], &[1.0]).unwrap_err().to_string();
+        assert!(seam.contains("is smooth: its faces meet tangentially, so there is nothing to round"), "{seam}");
+        // the end face's top edge runs on tangentially into the round's end arc
+        let top = Vec3::new(0.0, 8.0, 20.0);
+        let alone = imp::blend(&rounded, "fillet", Kind::Round, &[top], &[1.0]).unwrap_err().to_string();
+        assert!(alone.contains("continues tangentially"), "{alone}");
+        let chain = crate::tangent_chain(&rounded, &[top]).unwrap();
+        assert!(chain.len() > 1, "{chain:?}");
+        let whole = fillet(&rounded, &chain, 1.0).unwrap();
+        assert!(volume(&whole) < volume(&rounded));
     }
 }

@@ -58,6 +58,8 @@ pub enum Error {
     WallsTouch,
     /// SMLib cannot build this exactly yet (a variable radius whose law has a corner).
     Unsupported,
+    /// A blend's edges meet at a vertex of a kind no SMLib blend corner handles yet.
+    CornerUnsupported,
     /// SMLib does not set back the corner of corner point `corner`: SMLib sets back a corner
     /// only where every edge meeting it is blended and they are all convex or all concave.
     CornerRefused { corner: usize },
@@ -92,6 +94,7 @@ impl std::fmt::Display for Error {
             Error::NoRoom => write!(f, "there is no room for it: an offset leaves none inside the body, or a blend is larger than its faces allow"),
             Error::WallsTouch => write!(f, "the offset's walls would meet along a line, which leaves no solid there"),
             Error::Unsupported => write!(f, "not supported yet: SMLib cannot build this exactly"),
+            Error::CornerUnsupported => write!(f, "not supported yet: a corner of this kind is not supported yet by SMLib's blends"),
             Error::CornerRefused { corner } => write!(
                 f,
                 "not supported yet: SMLib does not set back corner {}: it sets back a corner only where every edge meeting it is blended, all convex or all concave",
@@ -129,6 +132,7 @@ fn error(s: i32) -> Error {
         ffi::ops::ERR_NO_ROOM => Error::NoRoom,
         ffi::ops::ERR_WALLS_TOUCH => Error::WallsTouch,
         ffi::ops::ERR_UNSUPPORTED => Error::Unsupported,
+        ffi::ops::ERR_CORNER_UNSUPPORTED => Error::CornerUnsupported,
         ffi::ops::ERR_NO_EFFECT => Error::NoEffect,
         ffi::trim::ERR_NOT_EXACT => Error::NotExact,
         ffi::ERR_EXCEPTION => Error::Exception,
