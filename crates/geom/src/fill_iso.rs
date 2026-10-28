@@ -37,9 +37,10 @@
 //!   spokes starting as straight lines to the centre, the mean of the midpoints.
 //! - **The inside**: with the loop's rows held, the other control points (each patch's interior,
 //!   the spokes' and the centre, each once) minimise, by least squares, the misfit to the
-//!   conditions plus a vanishing multiple of the patches' thin-plate energy
-//!   `∫∫ |S_uu|² + 2|S_uv|² + |S_vv|²` (of the control net on the polynomial basis; it alone
-//!   decides a G0 fill). The conditions are those of G^n continuity in the linkage-curve
+//!   conditions plus a vanishing multiple of the patches' fairing energy of order n + 1,
+//!   `∫∫ Σ_r C(n+1, r) |∂ᵘʳ ∂ᵥⁿ⁺¹⁻ʳ S|²` (the thin plate `∫∫ |S_uu|² + 2|S_uv|² + |S_vv|²` for G0
+//!   and G1, of the control net on the polynomial basis; it alone decides a G0 fill), so the
+//!   change of curvature the conditions ask at the edges is spread over the fill. The conditions are those of G^n continuity in the linkage-curve
 //!   formulation ([`crate::linkage`]): at stations along an edge, the iso-parameter curve `c`
 //!   of the fill leaving across it (σ growing into the fill) must have its height above the
 //!   neighbour vanish to order n:
@@ -119,12 +120,15 @@ const CORNER_SHARE: f64 = 0.1;
 const FOLD_SAMPLES: usize = 24;
 /// How far, relative to one, the corners' weights may disagree once the edges are scaled.
 const WEIGHT_TOL: f64 = 1e-9;
-/// Four-point Gauss–Legendre nodes and weights on `[−1, 1]` (exact to degree 7).
-const GAUSS4: [(f64, f64); 4] = [
-    (-0.861_136_311_594_052_6, 0.347_854_845_137_453_8),
-    (-0.339_981_043_584_856_3, 0.652_145_154_862_546_2),
-    (0.339_981_043_584_856_3, 0.652_145_154_862_546_2),
-    (0.861_136_311_594_052_6, 0.347_854_845_137_453_8),
+/// Six-point Gauss–Legendre nodes and weights on `[−1, 1]` (exact to degree 11: the Gram
+/// matrices of quintics).
+const GAUSS6: [(f64, f64); 6] = [
+    (-0.932_469_514_203_152_1, 0.171_324_492_379_170_4),
+    (-0.661_209_386_466_264_5, 0.360_761_573_048_138_6),
+    (-0.238_619_186_083_196_9, 0.467_913_934_572_691_0),
+    (0.238_619_186_083_196_9, 0.467_913_934_572_691_0),
+    (0.661_209_386_466_264_5, 0.360_761_573_048_138_6),
+    (0.932_469_514_203_152_1, 0.171_324_492_379_170_4),
 ];
 
 /// One edge of the loop: a B-spline from the loop's corner before it to the one after (the
@@ -1148,7 +1152,8 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     if quilt.unknowns > most {
         return Err(SplineError::TooLarge(format!("{} free control points (at most {most})", quilt.unknowns)));
     }
-    let energy: Vec<Vec<(usize, usize, f64)>> = quilt.patches.iter().map(energy).collect::<SplineResult<_>>()?;
+    let fairing = stations.iter().map(Station::order).max().unwrap_or(1).max(1) + 1;
+    let energy: Vec<Vec<(usize, usize, f64)>> = quilt.patches.iter().map(|p| energy(p, fairing)).collect::<SplineResult<_>>()?;
     let mut located: Vec<(usize, [f64; 2])> = Vec::new();
     let mut report = Achieved::default();
     let mut along = Along::default();
@@ -1286,18 +1291,40 @@ fn linkage_rows(rows: &mut Vec<Row>, patch: &Patch, s: &Station, span: f64) -> S
     Ok(())
 }
 
-/// A patch's thin-plate energy coefficients between its control points (flat indices), of the
-/// terms `G⁽ʳ⁾ ⊗ G⁽ˢ⁾` with `(r, s)` = (2, 0), (1, 1) twice, (0, 2).
-fn energy(patch: &Patch) -> SplineResult<Vec<(usize, usize, f64)>> {
-    let (gu, gv) = (gram(&patch.spaces[0])?, gram(&patch.spaces[1])?);
-    let at = |g: &[Vec<Vec<f64>>; 3], r: usize, a: usize, b: usize| g.get(r).and_then(|x| x.get(a)).and_then(|x| x.get(b)).copied().unwrap_or(0.0);
+/// A patch's fairing energy for a fill asked G^n, between its control points (flat indices): the
+/// thin plate (order 2) plus, for n ≥ 2, the energy of order `m = n + 1`, each scaled to unit
+/// trace ([`energy_of`]). The higher order leaves the change the conditions ask (of curvature,
+/// of its rate…) spread over the fill rather than squeezed into the first span along its edges;
+/// the thin plate, whose null space (the planes) the loop pins, keeps the system definite where
+/// the higher order's (polynomials of degree below m) is not.
+fn energy(patch: &Patch, m: usize) -> SplineResult<Vec<(usize, usize, f64)>> {
+    let thin = energy_of(patch, 2)?;
+    if m <= 2 {
+        return Ok(thin);
+    }
+    let high = energy_of(patch, m)?;
+    let trace = |e: &[(usize, usize, f64)]| e.iter().filter(|(a, b, _)| a == b).map(|(_, _, x)| *x).sum::<f64>();
+    let (t2, tm) = (trace(&thin), trace(&high));
+    if !(t2 > 0.0 && tm > 0.0) {
+        return Ok(thin);
+    }
+    Ok(thin.into_iter().map(|(a, b, x)| (a, b, x / t2)).chain(high.into_iter().map(|(a, b, x)| (a, b, x / tm))).collect())
+}
+
+/// A patch's fairing energy of order `m` between its control points (flat indices):
+/// `∫∫ Σ_r C(m, r) |∂ᵘʳ ∂ᵥᵐ⁻ʳ S|²`, the terms `G⁽ʳ⁾ ⊗ G⁽ᵐ⁻ʳ⁾` of the spaces' Gram matrices (order 2
+/// is the thin plate `∫∫ |S_uu|² + 2|S_uv|² + |S_vv|²`).
+fn energy_of(patch: &Patch, m: usize) -> SplineResult<Vec<(usize, usize, f64)>> {
+    let (gu, gv) = (gram(&patch.spaces[0], m)?, gram(&patch.spaces[1], m)?);
+    let at = |g: &[Vec<Vec<f64>>], r: usize, a: usize, b: usize| g.get(r).and_then(|x| x.get(a)).and_then(|x| x.get(b)).copied().unwrap_or(0.0);
+    let binom = |n: usize, k: usize| (0..k).fold(1.0, |c, i| c * (n - i) as f64 / (i + 1) as f64);
     let [cu, cv] = patch.counts();
     let mut out = Vec::new();
     for j in 0..cv {
         for l in 0..cv {
             for i in 0..cu {
                 for k in 0..cu {
-                    let e = at(&gu, 2, i, k) * at(&gv, 0, j, l) + 2.0 * at(&gu, 1, i, k) * at(&gv, 1, j, l) + at(&gu, 0, i, k) * at(&gv, 2, j, l);
+                    let e: f64 = (0..=m).map(|r| binom(m, r) * at(&gu, r, i, k) * at(&gv, m - r, j, l)).sum();
                     if e != 0.0 {
                         out.push((i + cu * j, k + cu * l, e));
                     }
@@ -1308,14 +1335,14 @@ fn energy(patch: &Patch) -> SplineResult<Vec<(usize, usize, f64)>> {
     Ok(out)
 }
 
-/// The Gram matrices `∫ N_a⁽ʳ⁾ N_b⁽ʳ⁾` of a space's basis for r = 0, 1, 2 (Gauss–Legendre on
+/// The Gram matrices `∫ N_a⁽ʳ⁾ N_b⁽ʳ⁾` of a space's basis for r = 0 … m (Gauss–Legendre on
 /// each span, exact for the degrees used).
-fn gram(s: &Space) -> SplineResult<[Vec<Vec<f64>>; 3]> {
+fn gram(s: &Space, m: usize) -> SplineResult<Vec<Vec<Vec<f64>>>> {
     let n = s.count();
-    let mut g: [Vec<Vec<f64>>; 3] = std::array::from_fn(|_| vec![vec![0.0; n]; n]);
+    let mut g: Vec<Vec<Vec<f64>>> = vec![vec![vec![0.0; n]; n]; m + 1];
     for w in breaks(s).windows(2) {
         let (lo, hi) = (w[0], w[1]);
-        for (x, wt) in GAUSS4 {
+        for (x, wt) in GAUSS6 {
             let t = 0.5 * (lo + hi) + 0.5 * (hi - lo) * x;
             let weight = 0.5 * (hi - lo) * wt;
             for (r, gr) in g.iter_mut().enumerate() {
