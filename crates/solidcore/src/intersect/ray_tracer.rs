@@ -13,7 +13,7 @@
 //! | `Drop` (implicit)                                 | `~SmRayTracer`                            |
 //! | [`RayTracer::set_solver_tolerance`]               | `SmRayTracer::SetSolverTolerance`         |
 //! | [`RayTracer::fire_ray`], [`RayHit`]               | `SmRayTracer::FireRay`                    |
-//! | [`RayTracer::add_surface_to_grid`], [`RayTracer::add_surface_with_bbox`] | `SmRayTracer::AddSurfaceToGrid` |
+//! | [`RayTracer::add_surface_to_grid`], [`RayTracer::add_surface_with_bbox`], [`RayTracer::add_surface_with_fetched_cache`] | `SmRayTracer::AddSurfaceToGrid` |
 //! | [`RayTracer::add_poly_brep_to_grid`]              | `SmRayTracer::AddPolyBrepToGrid`          |
 //! | [`RayTracer::poly_brep`], [`RayTracer::poly_brep_count`] | `m_sPolyBreps`                     |
 //! | [`RayRenderer`], [`RayRenderer::new`]               | `SmRayRenderer`, `SmRayRenderer::SmRayRenderer` |
@@ -1249,6 +1249,31 @@ impl<'s> RayTracer<'s> {
         // Expand the hierarchy element to avoid recomputing the surface cache a 2nd
         // time: every lowest Bezier leaf becomes `SmSurfaceGridElement::Init`
         self.grid.expand_hierarchy(k, id, &mut cache)
+    }
+
+    /// [`RayTracer::add_surface_with_cache`] for a cache whose `GetTree` calls the
+    /// caller has already run, in upstream order: `AddSurfaceToGrid`'s two and
+    /// `ExpandHierarchy`'s one. A face-owned trimmed cache rebuilds its tree through
+    /// its face ([`TrimSrfCache::get_tree_with_face`](crate::surface::trim_srf_cache::TrimSrfCache::get_tree_with_face)),
+    /// which may change the face's B-rep, so it cannot run while the tracer borrows
+    /// the surfaces. Here the tree is read as is.
+    ///
+    /// # Errors
+    ///
+    /// As [`RayTracer::add_surface_with_cache`]; `SM_ERR` when the cache has no tree
+    /// or the tree no top node.
+    pub fn add_surface_with_fetched_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &'s Surface,
+        mut cache: SurfaceCache<usize>,
+    ) -> Result<()> {
+        const OP: &str = "intersect::ray_tracer::add_surface_with_fetched_cache";
+        let tree = cache.tree().ok_or(SolidError::sm_err(OP))?;
+        let top = tree.top_node().ok_or(SolidError::sm_err(OP))?;
+        let bbox = tree.node(top)?.bbox;
+        let id = self.add_surface_with_bbox(surface, &bbox)?;
+        self.grid.expand_hierarchy_fetched(k, id, &mut cache)
     }
 
     /// Embeds the faces of a poly B-rep in the grid (`AddPolyBrepToGrid`): notifies

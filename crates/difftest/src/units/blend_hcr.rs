@@ -7,11 +7,16 @@
 //! vector or a view placement, seeds silhouette edges (the silhouette branch of
 //! `ComputeSilhouettes`' edge loop) and back-facing edges, and runs one member. It
 //! exports the scene B-rep (`GetSceneBrep()`, the copy transformed by the unported
-//! `SmBrep` copy constructor and `Transform`) with its `CalculateBoundingBox` (unit
-//! `query.brep`, unported); the Rust side imports that scene record by record (the
-//! `topology.vertexuse` importer), builds its HCR with [`Hcr::from_scene`], seeds the same
-//! edges and runs the same member. Both sides first build the scene (shim op 8) and check
-//! the seeds and op arguments against it with the same `ffi::validate`.
+//! `SmBrep` copy constructor and `Transform`) with its `CalculateBoundingBox`. The Rust
+//! side makes everything itself, in the shim's call order, so no C++ state reaches it:
+//! the B-rep block built by the Rust kernel ([`crate::own_builder`], `.smb` files by the
+//! Rust reader), the extra wire edge (`create_wire_edge_from_curve`), the HCR from
+//! [`Hcr::new`] / [`Hcr::with_transform`] (its own scene copy, transform, infinite
+//! region and bounding box), the scene renumbered into the shim's traversal order
+//! ([`crate::own_builder::renumber_with`], so edge and vertex selectors name the same
+//! entities), then the same seeds and member. The C++ side checks the seeds and op
+//! arguments against its scene with `ffi::validate` (shim op 8); the Rust side makes the
+//! same checks against its own scene ([`validate_rust`]).
 //!
 //! Compared: the construction state (transforms, projection box, ray offset tolerance,
 //! view vector, options), `IsSilhouetteEdge` / `IsBackFacingEdge`, the intervals and
@@ -31,26 +36,21 @@
 //! generated.
 //!
 //! Status `-2` marks an upstream path that is undefined (UB-170, null topology): the
-//! shim does not run it and the port returns `InvalidInput`. Ops whose edge curves (or,
-//! for op 5, face surfaces) the importer cannot hold exactly (an `SmEllipse` edge curve
-//! is imported as its B-spline part) report `inexact_geometry` on both sides, decided
-//! from the same export.
+//! shim does not run it and the port returns `InvalidInput`. The Rust scene holds its
+//! geometry natively, so no case is skipped as inexact.
 //!
-//! The importer leaves the surfaces' owners unset; the runner sets each face surface's
-//! owner to its face, as the upstream B-rep build does, so `SmBrep::GetSurfaces`
-//! (`IsPointVisible`) selects the same surfaces on both sides.
+//! The renumbered scene's geometry is owned under the kernel's arena identities (and the
+//! B-rep records that naming), so `SmBrep::GetSurfaces` (`IsPointVisible`) finds each face
+//! surface's owner, as upstream's copy constructor sets it.
 //!
 //! `ComputeSilhouettes` and `ComputeGlobalVisibility` are not run: their C++ path reaches
 //! UB-170 on open silhouette chains.
 
-use super::topology_vertexuse::{
-    gen_brep, import, import_raw, path_of, push_curve, push_surface, sel, BrepIn, CrvIn,
-};
-use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
+use super::topology_vertexuse::{gen_brep, path_of, push_curve, push_surface, sel, BrepIn, CrvIn};
+use crate::{own_reader, Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use solidcore::blend::hcr::{new_curve_classification, view_transform_for_vector, Hcr, HcrObject, HcrOptions};
-use solidcore::curve::curve::p2::{BSPLINE_CURVE_TYPE, LINE_TYPE};
+use solidcore::blend::hcr::{new_curve_classification, Hcr, HcrObject, HcrOptions};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
@@ -59,9 +59,11 @@ use solidcore::intersect::curve_class::p1::CurveClassification;
 use solidcore::intersect::point_class::PointClassification;
 use solidcore::kernel::Kernel;
 use solidcore::math::Vec3;
-use solidcore::topology::brep_cache::{arena_identity, CacheObject};
-use solidcore::topology::{edge, Brep, EdgeId, FaceId, VertexId};
-use solidcore::SolidError;
+use solidcore::geom::attribute::ObjectKey;
+use solidcore::geom::object::ObjectRef;
+use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::{edge, EdgeId, VertexId};
+use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::{blend_hcr as ffi, topology_vertexuse as fixture};
 use std::collections::BTreeSet;
 
@@ -235,23 +237,29 @@ fn ops_block(r: &Resolved) -> (u8, Vec<f64>) {
     (op, v)
 }
 
-/// What both sides compute before running: the scene (shim op 8), the resolved
-/// selectors and the op block, validated against the scene.
+/// What the C++ side computes before running: the scene (shim op 8), the resolved
+/// selectors and the op block, validated against that scene.
 struct Prepared {
     path: String,
     brep: Vec<f64>,
     hcr: Vec<f64>,
-    scene: Vec<f64>,
-    r: Resolved,
     op: u8,
     ops: Vec<f64>,
 }
 
-/// [`Prepared`], or the label of a rejection both sides report identically.
+/// [`Prepared`], or the label of a rejection.
 fn prepare(i: &Inputs) -> Result<Result<Prepared, String>, HarnessError> {
     let path = path_of(&i.brep)?;
     let brep = brep_block(&i.brep)?;
     let hcr = hcr_block(i)?;
+    // a failed build of the B-rep block (the shim's `build` returns NULL), reported with
+    // its status as the Rust side reports its own failed build
+    if let Ok(ex) = fixture::eval(fixture::Op::Export, &path, &brep) {
+        if ex.first() == Some(&-1.0) {
+            let status = ex.get(1).copied().unwrap_or(0.0);
+            return Ok(Err(format!("brep_build_status_{status}")));
+        }
+    }
     let scene = match ffi::scene(&path, &brep, &hcr) {
         Ok(s) => s,
         Err(e) => return Ok(Err(format!("rejected: {e}"))),
@@ -269,27 +277,225 @@ fn prepare(i: &Inputs) -> Result<Result<Prepared, String>, HarnessError> {
         path,
         brep,
         hcr,
-        scene,
-        r,
         op,
         ops,
     }))
 }
 
-fn exact_curve(types: &[f64], e: i64) -> bool {
-    types
-        .get(e as usize)
-        .is_some_and(|&t| t == BSPLINE_CURVE_TYPE as f64 || t == LINE_TYPE as f64)
+// ---- the Rust side's own scene and checks ---------------------------------------------------
+
+/// The label of an input rejection (`ffi::scene` / `ffi::validate`'s `bad`).
+fn bad(msg: &str) -> String {
+    format!("rejected: invalid argument: blend.hcr: {msg}")
 }
 
-/// Whether the op depends on geometry the import does not hold exactly.
-fn inexact(r: &Resolved, types: &[f64], exact_faces: &[bool]) -> bool {
-    let curves = |e: i64| !exact_curve(types, e) || r.sil.iter().any(|&s| !exact_curve(types, s));
-    match r.op {
-        OpIn::Intersect { edge, .. } | OpIn::CurveVisibility { edge, .. } => curves(edge),
-        OpIn::EdgeVisibility { edge, .. } => curves(edge) || exact_faces.iter().any(|x| !x),
-        _ => false,
+/// `ffi`'s `MAX_SCENE_MAGNITUDE` check on the inputs (the `±f64::MAX` markers aside).
+fn check_magnitudes(v: &[f64]) -> Result<(), String> {
+    if v.iter().any(|x| {
+        let a = x.abs();
+        a > ffi::MAX_SCENE_MAGNITUDE && a < f64::MAX
+    }) {
+        return Err(bad("scene value above 1e15 (grid walk does not end)"));
     }
+    Ok(())
+}
+
+/// `ffi`'s view checks on the inputs (UB-169: a view vector `SmVector3d::Unitize`
+/// cannot unitize; the placement, tolerances and flags are typed inputs here).
+fn check_view(i: &Inputs) -> Result<(), String> {
+    if i.placement.is_none() {
+        let [x, y, z] = i.view;
+        let l = x * x + y * y + z * z;
+        if !(l >= 1.0e-24 && l.is_finite()) {
+            return Err(bad("UB-169: view vector cannot be unitized"));
+        }
+    }
+    Ok(())
+}
+
+/// `ffi::validate`'s checks of the seeds and op arguments (`ops`, as [`ops_block`]
+/// makes them) against the Rust scene `h` (its edge and vertex counts and which edges
+/// have a curve).
+fn validate_rust(op: u8, h: &Hcr, ops: &[f64]) -> Result<(), String> {
+    if op == 7 {
+        check_magnitudes(ops)?;
+    }
+    let b = h.scene_brep();
+    let (n_e, n_v) = (b.edges().len(), b.vertices().len());
+    let mut at = 0usize;
+    let mut num = || -> Result<f64, String> {
+        let x = *ops.get(at).ok_or_else(|| bad("short input"))?;
+        at += 1;
+        if !x.is_finite() {
+            return Err(bad("non-finite number"));
+        }
+        Ok(x)
+    };
+    let count = |x: f64| -> Result<usize, String> {
+        if x.fract() != 0.0 || !(0.0..=64.0).contains(&x) {
+            return Err(bad("count out of range"));
+        }
+        Ok(x as usize)
+    };
+    let index = |x: f64, n: usize, allow_none: bool| -> Result<i64, String> {
+        if x.fract() != 0.0 || x < if allow_none { -1.0 } else { 0.0 } || x >= n as f64 {
+            return Err(bad("index out of range"));
+        }
+        Ok(x as i64)
+    };
+    let flag = |x: f64| -> Result<(), String> {
+        if x != 0.0 && x != 1.0 {
+            return Err(bad("flag"));
+        }
+        Ok(())
+    };
+    let n_sil = count(num()?)?;
+    for _ in 0..n_sil {
+        let e = index(num()?, n_e, false)?;
+        let has_curve = b.edge(eid(e)).is_ok_and(|x| x.curve.is_some());
+        if !has_curve {
+            return Err(bad("seeded silhouette edge without curve"));
+        }
+    }
+    let n_back = count(num()?)?;
+    for _ in 0..n_back {
+        index(num()?, n_e, false)?;
+    }
+    match op {
+        1 | 2 => {
+            index(num()?, n_e, false)?;
+        }
+        3 | 4 => {
+            index(num()?, n_e, false)?;
+            let (fa, fb) = (num()?, num()?);
+            if !(0.0..=1.0).contains(&fa) || !(0.0..=1.0).contains(&fb) {
+                return Err(bad("interval fractions"));
+            }
+            for _ in 0..2 {
+                let h = num()?;
+                if !(-9.223_372_036_854_775_808e18..9.223_372_036_854_775_808e18).contains(&h) {
+                    return Err(bad("hint"));
+                }
+            }
+        }
+        5 => {
+            index(num()?, n_e, false)?;
+            index(num()?, n_v, true)?;
+            flag(num()?)?;
+            flag(num()?)?;
+        }
+        7 => {
+            for _ in 0..3 {
+                num()?;
+            }
+        }
+        _ => {}
+    }
+    if at != ops.len() {
+        return Err(bad("trailing op input"));
+    }
+    Ok(())
+}
+
+/// The identity of an original B-rep object the scene copy notifies under: the
+/// notification naming in a key namespace of its own (as the sweep's HCR scene copy).
+fn source_key(e: EntityRef) -> ObjectRef {
+    let r = own_reader::read_key_of(e);
+    ObjectRef {
+        type_code: r.type_code,
+        key: ObjectKey(r.key.0 | 1 << 50),
+    }
+}
+
+/// The Rust side's HCR, as the shim makes it: the B-rep block built by the Rust kernel,
+/// the extra wire edge, the HCR constructor (scene copy, transform, infinite region,
+/// bounding box), the scene renumbered into the shim's `walk` order; or the output of a
+/// rejected or failed build.
+fn rust_hcr(k: &mut Kernel, i: &Inputs) -> Result<Result<Hcr, Output>, HarnessError> {
+    use crate::own_builder::{build_as, failed_output, renumber_with, Built, Conventions};
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    // `ffi::scene`'s input checks
+    let (brep, hcr) = (brep_block(&i.brep)?, hcr_block(i)?);
+    if let Err(m) = check_magnitudes(&brep).and_then(|()| check_magnitudes(&hcr)) {
+        return Ok(Err(Output::err(m)));
+    }
+    // the fixture export's block checks (`fixture::eval`; pure Rust, no shim call)
+    if let Err(e) = fixture::validate_block(&path_of(&i.brep)?, &brep) {
+        return Ok(Err(Output::err(format!("rejected: {e}"))));
+    }
+    if let Err(m) = check_view(i) {
+        return Ok(Err(Output::err(m)));
+    }
+    // the shim's `build` (`sc_topology_fixture.h`, no validate-only, no gap walk)
+    let built = match &i.brep {
+        BrepIn::File { rebuild, .. } => {
+            own_reader::file_in_order(k, &path_of(&i.brep)?, *rebuild, false, false, conv)?
+        }
+        src => build_as(k, src, false, false, conv)?
+            .ok_or_else(|| harness("own builder: no build for the source"))?,
+    };
+    let mut b = match built {
+        Built::Brep(b) => *b,
+        Built::Failed(e) => return Ok(Err(failed_output(&e))),
+    };
+    // the extra wire edge (`CreateWireEdgeFromCurve`)
+    if let Some(x) = &i.extra {
+        let curve: super::topology_edgeuse_p1::CrvIn = serde_json::to_value(&x.curve)
+            .and_then(serde_json::from_value)
+            .map_err(|e| harness(format!("extra curve: {e}")))?;
+        let c = Curve::from(super::topology_edgeuse_p1::bspline_of(&curve)?);
+        if let Err(e) = solidcore::topology::brep::p5::create_wire_edge_from_curve(
+            k,
+            &mut b,
+            c,
+            Extent1d::from_min_max(x.t0, x.t1),
+        ) {
+            return Ok(Err(Output::unported(&e)
+                .unwrap_or_else(|| Output::err(format!("extra_wire_failed: {e}")))));
+        }
+    }
+    let opts = HcrOptions {
+        approx_tol_3d: i.approx_tol,
+        ang_tol_rad: i.ang_tol,
+        display_seams: i.seams,
+        display_smooth_edges: i.smooth,
+    };
+    let mut state = ArenaNotifyState::default();
+    let made = match i.placement {
+        None => Hcr::new(
+            k,
+            &mut state.env(None),
+            &b,
+            &source_key,
+            Vec3::new(i.view[0], i.view[1], i.view[2]),
+            opts,
+        ),
+        Some([z, x]) => {
+            let mut a = Axis2Placement::default();
+            a.set_step_canonical(
+                Vec3::new(i.view[0], i.view[1], i.view[2]),
+                Vec3::new(z[0], z[1], z[2]),
+                Vec3::new(x[0], x[1], x[2]),
+            )
+            .and_then(|()| Hcr::with_transform(k, &mut state.env(None), &b, &source_key, &a, opts))
+        }
+    };
+    let mut h = match made {
+        Ok(h) => h,
+        Err(e) => {
+            return Ok(Err(Output::unported(&e)
+                .unwrap_or_else(|| Output::err(format!("hcr_construct_failed: {e}")))))
+        }
+    };
+    // the shim's `walk(scene, g)` order: the scene's arena ids renumbered to it (nothing
+    // in the freshly constructed HCR refers to a scene id yet), its geometry owned under
+    // the arena identities the renumbering gives it
+    let mut scene = renumber_with(h.scene_brep(), conv)?;
+    scene
+        .use_arena_naming()
+        .map_err(|e| harness(format!("scene naming: {e}")))?;
+    *h.scene_brep_mut() = scene;
+    Ok(Ok(h))
 }
 
 fn output(status: f64, record: Vec<f64>) -> Output {
@@ -307,11 +513,6 @@ impl UnitDiff for Runner {
             Ok(p) => p,
             Err(msg) => return Ok(Output::err(msg)),
         };
-        let s = ffi::split(&p.scene).ok_or_else(|| harness("short scene output"))?;
-        let (_, exact_faces) = import_raw(s.export)?;
-        if inexact(&p.r, s.curve_types, &exact_faces) {
-            return Ok(Output::err("inexact_geometry"));
-        }
         let v = match ffi::eval(p.op, &p.path, &p.brep, &p.hcr, &p.ops) {
             Ok(v) => v,
             Err(e) => return Ok(Output::err(format!("rejected: {e}"))),
@@ -322,42 +523,20 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let p = match prepare(&i)? {
-            Ok(p) => p,
-            Err(msg) => return Ok(Output::err(msg)),
+        let mut k = Kernel::default();
+        let h = match rust_hcr(&mut k, &i)? {
+            Ok(h) => h,
+            Err(o) => return Ok(o),
         };
-        let s = ffi::split(&p.scene).ok_or_else(|| harness("short scene output"))?;
-        let (mut scene, exact_faces) = import(s.export)?;
-        if inexact(&p.r, s.curve_types, &exact_faces) {
-            return Ok(Output::err("inexact_geometry"));
-        }
-        // the surfaces' owners (`SmSurface::GetOwner`, set by the B-rep build upstream and
-        // read by `SmBrep::GetSurfaces`): the kernel's arena identities
-        let face_ids: Vec<FaceId> = scene.faces().ids().collect();
-        for id in face_ids {
-            if let Some(surface) = scene
-                .face_mut(id)
-                .map_err(|e| harness(e.to_string()))?
-                .surface
-                .as_mut()
-            {
-                let _ = surface.set_owner(Some(arena_identity(CacheObject::Face(id))));
-            }
-            // the face's tolerance, as the face upstream answers GetTolerance with
-            scene
-                .sync_face_surface_tolerance(id)
-                .map_err(|e| harness(e.to_string()))?;
-        }
-        let [x0, y0, z0, x1, y1, z1] = s.scene_box;
-        let (lo, hi) = (Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
-        let scene_box = if lo.x <= hi.x && lo.y <= hi.y && lo.z <= hi.z {
-            Extent3d::from_points(lo, hi)
-        } else if Extent3d::new().min() == lo && Extent3d::new().max() == hi {
-            Extent3d::new()
-        } else {
-            return Err(harness("scene box neither ordered nor empty"));
+        let b = h.scene_brep();
+        let Some(r) = resolve(&i, b.edges().len(), b.vertices().len()) else {
+            return Ok(Output::err("no_edge"));
         };
-        match run_rust(&i, &p.r, scene, scene_box) {
+        let (op, ops) = ops_block(&r);
+        if let Err(m) = validate_rust(op, &h, &ops) {
+            return Ok(Output::err(m));
+        }
+        match run_rust(&k, h, &r) {
             Ok((status, record)) => Ok(output(status, record)),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| match e {
                 SolidError::InvalidInput {
@@ -445,29 +624,9 @@ fn put_piece(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     }
 }
 
-fn run_rust(i: &Inputs, r: &Resolved, scene: Brep, scene_box: Extent3d) -> Result<(f64, Vec<f64>), SolidError> {
-    let k = Kernel::default();
-    let transform = match i.placement {
-        None => view_transform_for_vector(Vec3::new(i.view[0], i.view[1], i.view[2]))?,
-        Some([z, x]) => {
-            let mut a = Axis2Placement::default();
-            a.set_step_canonical(
-                Vec3::new(i.view[0], i.view[1], i.view[2]),
-                Vec3::new(z[0], z[1], z[2]),
-                Vec3::new(x[0], x[1], x[2]),
-            )?;
-            a
-        }
-    };
-    let opts = HcrOptions {
-        approx_tol_3d: i.approx_tol,
-        ang_tol_rad: i.ang_tol,
-        display_seams: i.seams,
-        display_smooth_edges: i.smooth,
-    };
-    let mut h = Hcr::from_scene(&k, scene, &transform, scene_box, opts);
+fn run_rust(k: &Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>), SolidError> {
     for &e in &r.sil {
-        h.add_silhouette_edge(&k, eid(e))?;
+        h.add_silhouette_edge(k, eid(e))?;
     }
     for &e in &r.back {
         h.add_back_facing_edge(eid(e));
@@ -484,19 +643,19 @@ fn run_rust(i: &Inputs, r: &Resolved, scene: Brep, scene_box: Extent3d) -> Resul
             rec.extend([v.x, v.y, v.z, h.approx_tol_3d(), h.ang_tol_rad()]);
             rec.extend([flag(h.display_seams()), flag(h.display_smooth_edges())]);
         }
-        OpIn::IsSilhouette { edge } => rec.push(flag(h.is_silhouette_edge(&k, eid(edge))?)),
-        OpIn::IsBackFacing { edge } => rec.push(flag(h.is_back_facing_edge(&k, eid(edge))?)),
+        OpIn::IsSilhouette { edge } => rec.push(flag(h.is_silhouette_edge(k, eid(edge))?)),
+        OpIn::IsBackFacing { edge } => rec.push(flag(h.is_back_facing_edge(k, eid(edge))?)),
         OpIn::Intersect { edge, fa, fb } | OpIn::CurveVisibility { edge, fa, fb, .. } => {
             let e = eid(edge);
             let ivl = edge::interval(h.scene_brep(), e)?;
             let ivl = Extent1d::from_min_max(ivl.evaluate(fa), ivl.evaluate(fb));
             let tol = edge::tolerance(h.scene_brep(), e)?;
-            let mut cc = new_curve_classification(&k, HcrObject::Curve(e), ivl, tol);
+            let mut cc = new_curve_classification(k, HcrObject::Curve(e), ivl, tol);
             let res = match r.op {
                 OpIn::CurveVisibility { start_hint, end_hint, .. } => {
-                    h.compute_curve_visibility(&k, &mut cc, hint_ulong(start_hint), hint_ulong(end_hint))
+                    h.compute_curve_visibility(k, &mut cc, hint_ulong(start_hint), hint_ulong(end_hint))
                 }
-                _ => h.intersect_curve_with_silhouettes(&k, &mut cc),
+                _ => h.intersect_curve_with_silhouettes(k, &mut cc),
             };
             match res {
                 Ok(()) => {}
@@ -512,18 +671,18 @@ fn run_rust(i: &Inputs, r: &Resolved, scene: Brep, scene_box: Extent3d) -> Resul
                 marked.insert(eid(edge));
             }
             let v = (vertex >= 0).then(|| VertexId::from_index(vertex as u32));
-            match h.compute_edge_visibility(&k, eid(edge), v, visible, &mut marked) {
+            match h.compute_edge_visibility(k, eid(edge), v, visible, &mut marked) {
                 Ok(()) => {}
                 Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
                 Err(e) => return Err(e),
             }
             rec.push(h.visible_curves().len() as f64);
             for c in h.visible_curves() {
-                put_piece(&k, &mut rec, c);
+                put_piece(k, &mut rec, c);
             }
             rec.push(h.invisible_curves().len() as f64);
             for c in h.invisible_curves() {
-                put_piece(&k, &mut rec, c);
+                put_piece(k, &mut rec, c);
             }
         }
         OpIn::SilhouetteEdges => {
@@ -533,7 +692,7 @@ fn run_rust(i: &Inputs, r: &Resolved, scene: Brep, scene_box: Extent3d) -> Resul
             rec.push(edges.len() as f64);
             rec.extend(edges.iter().map(|e| f64::from(e.index())));
         }
-        OpIn::PointVisible { p } => rec.push(flag(h.is_point_visible(&k, Vec3::new(p[0], p[1], p[2]))?)),
+        OpIn::PointVisible { p } => rec.push(flag(h.is_point_visible(k, Vec3::new(p[0], p[1], p[2]))?)),
     }
     Ok((status, rec))
 }

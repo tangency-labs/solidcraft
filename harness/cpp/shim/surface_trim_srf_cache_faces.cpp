@@ -76,7 +76,7 @@ void face_classify(std::vector<double>& out, SmSurfaceCache* cache, const FacePr
 }
 } // namespace
 
-// Input: surface_type loop_count occurrence build editing modified test_tol
+// Input: surface_type loop_count occurrence build_mode editing modified test_tol
 //        boundary_probes sample_count (u_fraction v_fraction source_tolerance)*.
 // Output is documented in the safe FFI module. Every native result is computed here.
 SC_EXPORT int32_t sc_surface_trim_srf_cache_faces_eval(
@@ -92,7 +92,8 @@ SC_EXPORT int32_t sc_surface_trim_srf_cache_faces_eval(
         input[1] < 0 || input[1] > UINT32_MAX || std::floor(input[1]) != input[1] ||
         input[2] < 0 || input[2] > UINT32_MAX || std::floor(input[2]) != input[2] ||
         input[8] < 0 || input[8] > 64 || std::floor(input[8]) != input[8]) return SC_ERR_ARG;
-    for (int i = 3; i <= 7; ++i)
+    if (input[3] < 0 || input[3] > 5 || std::floor(input[3]) != input[3]) return SC_ERR_ARG;
+    for (int i = 4; i <= 7; ++i)
         if (input[i] != 0.0 && input[i] != 1.0) return SC_ERR_ARG;
     const int64_t count = (int64_t)input[8];
     if (input_len != 9 + count * 3) return SC_ERR_ARG;
@@ -129,8 +130,16 @@ SC_EXPORT int32_t sc_surface_trim_srf_cache_faces_eval(
     face_domain(out, domain);
     built.brep->m_bEditingEnabled = input[4] != 0.0 ? TRUE : FALSE;
     std::unique_ptr<NativeFaceCache> cache(new (context) NativeFaceCache(*face->GetSurface()));
-    const bool build_tree = input[3] != 0.0;
-    const SmStatus build_status = build_tree ? cache->BuildTree(nullptr) : SM_SUCCESS;
+    // input[3]: 0 none, 1 BuildTree, 2 BuildTree then GetTree, 3 BuildTree, editing
+    // off, GetTree, 4 GetTree, 5 editing off, GetTree (GetTree's virtual BuildTree).
+    const int mode = (int)input[3];
+    const bool build_tree = mode >= 1;
+    SmStatus build_status = (mode >= 1 && mode <= 3) ? cache->BuildTree(nullptr) : SM_SUCCESS;
+    if (build_status == SM_SUCCESS && mode >= 2)
+    {
+        if (mode == 3 || mode == 5) built.brep->m_bEditingEnabled = FALSE;
+        build_status = cache->GetTree() != nullptr ? SM_SUCCESS : SM_ERR;
+    }
     cache->m_bFaceWasModified = input[5] != 0.0 ? TRUE : FALSE;
     out.insert(out.end(), {build_tree ? (double)build_status : -1.0,
                            built.brep->m_bEditingEnabled == TRUE ? 1.0 : 0.0,

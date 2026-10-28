@@ -41,6 +41,10 @@ struct Inputs {
     #[serde(default)]
     occurrence: u32,
     build: bool,
+    /// `GetTree` after the build step: 0 none, 1 with the editing flag as is, 2 with
+    /// editing disabled first.
+    #[serde(default)]
+    get_tree: u8,
     #[serde(default)]
     editing: bool,
     #[serde(default)]
@@ -61,12 +65,22 @@ fn flag(value: bool) -> f64 {
 }
 
 impl Inputs {
+    /// The shim's `build_mode` (see the FFI module).
+    fn build_mode(&self) -> f64 {
+        match (self.build, self.get_tree) {
+            (false, 0) => 0.0,
+            (true, 0) => 1.0,
+            (true, g) => 1.0 + f64::from(g),
+            (false, g) => 3.0 + f64::from(g),
+        }
+    }
+
     fn flat(&self) -> Vec<f64> {
         let mut out = vec![
             f64::from(self.surface_type),
             f64::from(self.loops),
             f64::from(self.occurrence),
-            flag(self.build),
+            self.build_mode(),
             flag(self.editing),
             flag(self.modified),
             flag(self.test_tol),
@@ -81,6 +95,9 @@ impl Inputs {
 fn parse(value: &Value) -> Result<Inputs, HarnessError> {
     let input: Inputs = serde_json::from_value(value.clone())
         .map_err(|e| harness(format!("native_face input: {e}")))?;
+    if input.get_tree > 2 {
+        return Err(harness("native_face get_tree must be 0, 1 or 2"));
+    }
     ffi::validate(&input.path, &input.flat()).map_err(|e| harness(e.to_string()))?;
     Ok(input)
 }
@@ -359,8 +376,20 @@ fn rust_record(input: &Inputs, brep: &mut Brep, face: FaceId) -> SolidResult<Vec
         EntityRef::Face(face),
         tolerance,
     )?;
-    if input.build {
-        let built = cache.build_tree_with_face(&k, &mut BrepCacheFace { b: brep, f: face });
+    if input.build || input.get_tree != 0 {
+        let mut built = if input.build {
+            cache.build_tree_with_face(&k, &mut BrepCacheFace { b: brep, f: face })
+        } else {
+            Ok(())
+        };
+        if built.is_ok() && input.get_tree != 0 {
+            if input.get_tree == 2 {
+                brep.set_editing_enabled(false);
+            }
+            built = cache
+                .get_tree_with_face(&k, &mut BrepCacheFace { b: brep, f: face })
+                .map(|_| ());
+        }
         let build_status = match built {
             Ok(()) => SUCCESS,
             Err(error) => status(error)?,

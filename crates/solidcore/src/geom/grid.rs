@@ -15,7 +15,7 @@
 //! | [`Grid::add_element`], [`ElementSource`] | `SmGrid::AddElement`, `SmGridElementType`      |
 //! | [`Grid::add_surface_node`], [`Grid::add_surface_element`] | `SmGrid::AddElement(SM_GE_SURFACE)` (from a tree node; from prepared leaf data) |
 //! | [`Grid::add_hierarchy_element`]        | `SmGrid::AddHierarchyElement`                    |
-//! | [`Grid::expand_hierarchy`]             | `SmSurfaceHierarchyElement::ExpandHierarchy`     |
+//! | [`Grid::expand_hierarchy`], [`Grid::expand_hierarchy_fetched`] | `SmSurfaceHierarchyElement::ExpandHierarchy` |
 //! | [`Grid::expand_hierarchy_with`]        | `SmSurfaceHierarchyElement::ExpandHierarchy` over a caller-held surface cache tree |
 //! | [`Grid::setup_3ddda`]                  | `SmGrid::Setup3DDDA`                             |
 //! | `AxisStep` (private)                   | one axis of `SmGrid::Setup3DDDA`                 |
@@ -1181,6 +1181,33 @@ impl<O: Copy + PartialEq> Grid<O> {
         id: HierarchyId,
         cache: &mut SurfaceCache<O>,
     ) -> Result<()> {
+        self.expand_hierarchy_in(k, id, cache, true)
+    }
+
+    /// [`Grid::expand_hierarchy`] for a cache whose `GetTree` the caller has already
+    /// run (a face-owned trimmed cache, whose tree build needs its face:
+    /// [`TrimSrfCache::get_tree_with_face`](crate::surface::trim_srf_cache::TrimSrfCache::get_tree_with_face)):
+    /// the cache's tree is read as is, never rebuilt.
+    ///
+    /// # Errors
+    ///
+    /// As [`Grid::expand_hierarchy`]; `InvalidInput` when the cache has no tree.
+    pub fn expand_hierarchy_fetched(
+        &mut self,
+        k: &Kernel,
+        id: HierarchyId,
+        cache: &mut SurfaceCache<O>,
+    ) -> Result<()> {
+        self.expand_hierarchy_in(k, id, cache, false)
+    }
+
+    fn expand_hierarchy_in(
+        &mut self,
+        k: &Kernel,
+        id: HierarchyId,
+        cache: &mut SurfaceCache<O>,
+        fetch: bool,
+    ) -> Result<()> {
         const OP: &str = "geom::grid::Grid::expand_hierarchy";
         let element = self.hierarchy.get(id.0).ok_or_else(|| bad_id(OP))?;
         let surface = element.surface.ok_or(SolidError::sm_err(OP))?;
@@ -1191,7 +1218,17 @@ impl<O: Copy + PartialEq> Grid<O> {
             });
         }
         // The clone lets `init` borrow the cache mutably (it builds polar boxes).
-        let tree = cache.get_tree(k)?.clone();
+        let tree = if fetch {
+            cache.get_tree(k)?.clone()
+        } else {
+            cache
+                .tree()
+                .ok_or(SolidError::InvalidInput {
+                    operation: OP,
+                    reason: "surface cache has no tree",
+                })?
+                .clone()
+        };
         self.expand_hierarchy_with(id, &tree, |_, node| {
             SurfaceGridElement::init(k, cache, node)
         })

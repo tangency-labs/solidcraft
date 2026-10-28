@@ -3,8 +3,11 @@
 //! Upstream: `source/SMLib/src/SmTrimSrfCache.cpp` (`BuildTree`, `PointTest`,
 //! `PointClassify`). Shim: `harness/cpp/shim/surface_trim_srf_cache_faces.cpp`.
 //!
-//! Input: `surface_type loop_count occurrence build editing modified test_tol
+//! Input: `surface_type loop_count occurrence build_mode editing modified test_tol
 //! boundary_probes sample_count (u_fraction v_fraction source_tolerance)*`.
+//! `build_mode` is 0 (none), 1 (`BuildTree`), 2 (`BuildTree`, then `GetTree`), 3
+//! (`BuildTree`, editing disabled, `GetTree`), 4 (`GetTree`) or 5 (editing disabled,
+//! `GetTree`); `build_status` is that of the last call (`GetTree` NULL is `SM_ERR`).
 //! The selector is the zero-based occurrence among faces of that **exact** concrete
 //! surface type and upward-loop count in the shared native Graph walk.
 //!
@@ -70,8 +73,12 @@ pub fn validate(path: &str, input: &[f64]) -> Result<(), FfiError> {
             ));
         }
     }
+    let mode = *head.get(3).ok_or_else(|| bad("missing build mode"))?;
+    if mode.fract() != 0.0 || !(0.0..=5.0).contains(&mode) {
+        return Err(bad("build mode must be an integer in 0..=5"));
+    }
     if head
-        .get(3..8)
+        .get(4..8)
         .ok_or_else(|| bad("missing flags"))?
         .iter()
         .any(|v| *v != 0.0 && *v != 1.0)
@@ -149,7 +156,9 @@ mod tests {
             (0, 15030.0),
             (1, -1.0),
             (2, 0.5),
-            (3, 2.0),
+            (3, 6.0),
+            (3, 0.5),
+            (4, 2.0),
             (8, 65.0),
             (9, f64::INFINITY),
             (10, f64::NAN),

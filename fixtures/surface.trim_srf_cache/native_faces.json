@@ -69,6 +69,76 @@
         "test_tol": true, "boundary_probes": true,
         "samples": [[0.5,0.5,0.00001], [-0.25,0.5,0.00001]]
       }}
+    },
+    {
+      "name": "native_face_bspline_get_tree_editing_rebuilds_standalone",
+      "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb; source/SMLib/src/SmSurfaceCache.cpp:5459 (GetTree); source/SMLib/src/SmTrimSrfCache.cpp:132; GetTree on an editing-enabled face (the blend.hcr IsPointVisible regime): BuildTree runs again on the built tree and keeps the standalone flags",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Mouse.smb"},
+        "surface_type": 15002, "loops": 1, "build": true, "get_tree": 1, "editing": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [-0.25,0.5,0.00001], [1.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_bspline_get_tree_after_editing_implants_trims",
+      "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb; source/SMLib/src/SmSurfaceCache.cpp:5459 (GetTree); source/SMLib/src/SmTrimSrfCache.cpp:132; BuildTree with editing on, then editing off and GetTree: the rebuild implants the trims into the existing tree",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Mouse.smb"},
+        "surface_type": 15002, "loops": 1, "build": true, "get_tree": 2, "editing": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [-0.25,0.5,0.00001], [1.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_bspline_get_tree_trimmed_no_rebuild",
+      "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb; source/SMLib/src/SmSurfaceCache.cpp:5459 (GetTree); source/SMLib/src/SmTrimSrfCache.cpp:132; GetTree after a trimmed build (m_bHaveTSurfaceCache) returns the tree without rebuilding",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Mouse.smb"},
+        "surface_type": 15002, "loops": 1, "build": true, "get_tree": 1,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [-0.25,0.5,0.00001], [1.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_bspline_get_tree_builds_unbuilt",
+      "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb; source/SMLib/src/SmSurfaceCache.cpp:5459 (GetTree); source/SMLib/src/SmTrimSrfCache.cpp:132; GetTree with no tree builds it through the face",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Mouse.smb"},
+        "surface_type": 15002, "loops": 1, "build": false, "get_tree": 1,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [-0.25,0.5,0.00001], [1.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_holed_plane_get_tree_editing_rebuilds_standalone",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmSurfaceCache.cpp:5459 (GetTree); source/SMLib/src/SmTrimSrfCache.cpp:132; GetTree on an editing-enabled planar face rebuilds with the standalone flags",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": true, "get_tree": 1, "editing": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [0.5,0.25,0.00001], [0.1,0.1,0.00001], [-0.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_holed_plane_get_tree_after_editing_implants_trims",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmSurfaceCache.cpp:5459 (GetTree); source/SMLib/src/SmTrimSrfCache.cpp:132; planar face: editing off before GetTree implants both loops into the existing tree",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": true, "get_tree": 2, "editing": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [0.5,0.25,0.00001], [0.1,0.1,0.00001], [-0.25,0.5,0.00001]]
+      }}
+    },
+    {
+      "name": "native_face_holed_plane_get_tree_unbuilt_editing",
+      "upstream_ref": "TestFiles/pt_TestFiles/Fillet/ext_w_hole.smb; source/SMLib/src/SmSurfaceCache.cpp:5459 (GetTree); source/SMLib/src/SmTrimSrfCache.cpp:132; GetTree with no tree on an editing-enabled face builds the standalone tree",
+      "inputs": {"native_face": {
+        "path": {"$upstream_file": "Fillet/ext_w_hole.smb"},
+        "surface_type": 15011, "loops": 2, "build": false, "get_tree": 1, "editing": true,
+        "test_tol": true, "boundary_probes": true,
+        "samples": [[0.5,0.5,0.00001], [0.25,0.5,0.00001], [0.5,0.25,0.00001], [0.1,0.1,0.00001], [-0.25,0.5,0.00001]]
+      }}
     }
   ]
 }

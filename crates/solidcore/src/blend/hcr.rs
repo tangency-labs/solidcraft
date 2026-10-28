@@ -70,7 +70,12 @@
 //!   [`Hcr::compute_silhouettes`] and [`Hcr::compute_global_visibility`] take the
 //!   kernel mutably.
 //! - `IsPointVisible` keeps the ray tracer's surface set and grid and rebuilds the
-//!   tracer (which borrows the surfaces) for each ray.
+//!   tracer (which borrows the surfaces) for each ray. A face-owned surface's cache
+//!   (`smsurf_GetSurfaceCache`, then the `GetTree` calls of `AddSurfaceToGrid` and
+//!   `ExpandHierarchy`, in that order) runs through its face before the tracer borrows
+//!   the surfaces: the trimmed cache's `BuildTree` reads the face and may change its
+//!   B-rep. The tracer then reads that tree as is
+//!   (`RayTracer::add_surface_with_fetched_cache`).
 //! - `DrawVisibleCurves`, `IsConcaveSilhouette` and `IsFrontFacingFace` are not owned by
 //!   this unit (no caller, graphics only).
 
@@ -102,10 +107,13 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
+use crate::query::face::p2::BrepCacheFace;
 use crate::query::face::p2::{point_classify_prepared, PointClassifyOptions};
+use crate::surface::surface::p1::get_surface_cache_with_face;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::{Surface, SurfaceKind};
-use crate::surface::surface_cache::face_context::prepare_face_surface_cache;
+use crate::surface::surface_cache::face_context::MappedCacheFace;
+use crate::surface::surface_cache::SurfaceCache;
 use crate::surface::volume::Volume;
 use crate::topology::{edge, edgeuse, vertex, vertexuse};
 use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, RegionId, VertexId};
@@ -498,7 +506,92 @@ enum RaySurface {
 /// First cache handle of a scene entity: below it are the tracer's surface indices.
 const ENTITY_HANDLE_BASE: usize = usize::MAX / 2;
 
-/// The handles `prepare_face_surface_cache` addresses the scene's entities by, in the
+/// A surface cache the tracer lists: one whose `GetTree` calls the tracer runs itself
+/// (`Lazy`), or a face-owned one whose `GetTree` calls already ran through its face
+/// (`Fetched`, see [`face_surface_cache`]).
+enum ListedCache {
+    Lazy(SurfaceCache<usize>),
+    Fetched(SurfaceCache<usize>),
+}
+
+/// `smsurf_GetSurfaceCache` of a surface without face and `AddSurfaceToGrid`'s
+/// `GetTree() == NULL` check: the cache, `None` when the cache or its tree fails (the
+/// surface is not listed; the status is ignored upstream) or the tree has no top node.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the cache build.
+fn standalone_surface_cache(
+    k: &Kernel,
+    surface: &Surface,
+    handle: usize,
+) -> Result<Option<ListedCache>> {
+    let mut cache = match surface_cache::<usize>(k, surface, Some(handle)) {
+        Ok(cache) => cache,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    // `AddSurfaceToGrid` lists the surface only once its tree has a top node
+    let has_top = match cache.get_tree(k) {
+        Ok(tree) => tree.top_node().is_some(),
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => false,
+    };
+    Ok(has_top.then_some(ListedCache::Lazy(cache)))
+}
+
+/// `smsurf_GetSurfaceCache` of the surface of face `f` of `scene` (built through the
+/// face, which may create its UV trim curves), then the three `GetTree` calls the
+/// tracer makes on it (`AddSurfaceToGrid`'s `GetTree() == NULL` check and
+/// `GetTree()->GetTopNode()`, then `ExpandHierarchy`'s `GetTree()`), each with the
+/// face: a face-owned trimmed cache whose face has no trim curves, or whose B-rep is
+/// being edited, rebuilds on every call (`SmTrimSrfCache::BuildTree`). `None` when a
+/// step fails (the surface is not listed) or the tree has no top node.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the cache build; those of the face lookups.
+fn face_surface_cache(
+    k: &Kernel,
+    scene: &mut Brep,
+    f: FaceId,
+    handle: usize,
+    handle_of: &dyn Fn(EntityRef) -> Result<usize>,
+    entity_of: &dyn Fn(usize) -> Result<EntityRef>,
+) -> Result<Option<ListedCache>> {
+    // the cache refers to the face's surface (an exact evaluation copy: the face's
+    // B-rep is changed through the face while the cache is built)
+    let surface = scene
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or(undefined("face without surface"))?
+        .clone_for_evaluation()?;
+    let mut mapped = match MappedCacheFace::new(BrepCacheFace { b: scene, f }, handle_of, entity_of)
+    {
+        Ok(mapped) => mapped,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let mut cache = match get_surface_cache_with_face(k, &surface, Some(handle), &mut mapped) {
+        Ok(cache) => cache,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    // AddSurfaceToGrid: GetTree() == NULL, GetTree()->GetTopNode(); ExpandHierarchy:
+    // GetTree()
+    for check_top in [true, true, false] {
+        match cache.get_tree_with_face(k, &mut mapped) {
+            Ok(tree) if check_top && tree.top_node().is_none() => return Ok(None),
+            Ok(_) => {}
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => return Ok(None),
+        }
+    }
+    Ok(Some(ListedCache::Fetched(cache.into_base())))
+}
+
+/// The handles [`face_surface_cache`] addresses the scene's entities by, in the
 /// tracer's usize handle space above [`ENTITY_HANDLE_BASE`], and the inverse table.
 fn entity_handles(b: &Brep) -> (BTreeMap<EntityRef, usize>, Vec<EntityRef>) {
     let all: Vec<EntityRef> = b
@@ -1509,23 +1602,19 @@ impl Hcr {
                 }
                 RaySurface::Owned(_) => None,
             };
-            let built = match (face_owned, s) {
+            let handle = listed_faces.len();
+            let fetched = match (face_owned, s) {
                 (Some(f), _) => {
                     let (to_handle, to_entity) =
                         entities.get_or_insert_with(|| entity_handles(&self.scene));
-                    prepare_face_surface_cache(
-                        k,
-                        &mut self.scene,
-                        f,
-                        listed_faces.len(),
-                        &|e| to_handle.get(&e).copied().ok_or(undefined("cache entity")),
-                        &|h| {
-                            h.checked_sub(ENTITY_HANDLE_BASE)
-                                .and_then(|i| to_entity.get(i))
-                                .copied()
-                                .ok_or(undefined("cache handle"))
-                        },
-                    )
+                    let handle_of = |e| to_handle.get(&e).copied().ok_or(undefined("cache entity"));
+                    let entity_of = |h: usize| {
+                        h.checked_sub(ENTITY_HANDLE_BASE)
+                            .and_then(|i| to_entity.get(i))
+                            .copied()
+                            .ok_or(undefined("cache handle"))
+                    };
+                    face_surface_cache(k, &mut self.scene, f, handle, &handle_of, &entity_of)?
                 }
                 (None, RaySurface::Face(f)) => {
                     let surface = self
@@ -1534,31 +1623,16 @@ impl Hcr {
                         .surface
                         .as_ref()
                         .ok_or(undefined("face without surface"))?;
-                    surface_cache::<usize>(k, surface, Some(listed_faces.len()))
+                    standalone_surface_cache(k, surface, handle)?
                 }
-                (None, RaySurface::Owned(surface)) => {
-                    surface_cache::<usize>(k, surface, Some(listed_faces.len()))
+                (None, RaySurface::Owned(surface)) => standalone_surface_cache(k, surface, handle)?,
+            };
+            match fetched {
+                Some(cache) => {
+                    listed_faces.push(face_owned);
+                    caches.push(Some(cache));
                 }
-            };
-            let mut cache = match built {
-                Ok(cache) => cache,
-                Err(e) if e.is_unported() => return Err(e),
-                Err(_) => {
-                    caches.push(None);
-                    continue;
-                }
-            };
-            // `AddSurfaceToGrid` lists the surface only once its tree has a top node
-            let has_top = match cache.get_tree(k) {
-                Ok(tree) => tree.top_node().is_some(),
-                Err(e) if e.is_unported() => return Err(e),
-                Err(_) => false,
-            };
-            if has_top {
-                listed_faces.push(face_owned);
-                caches.push(Some(cache));
-            } else {
-                caches.push(None);
+                None => caches.push(None),
             }
         }
 
@@ -1584,8 +1658,14 @@ impl Hcr {
                     .ok_or(undefined("face without surface"))?,
                 RaySurface::Owned(ref s) => &**s,
             };
-            if let Some(cache) = cache {
-                ignore_status(tracer.add_surface_with_cache(k, surface, cache))?;
+            match cache {
+                Some(ListedCache::Fetched(cache)) => {
+                    ignore_status(tracer.add_surface_with_fetched_cache(k, surface, cache))?;
+                }
+                Some(ListedCache::Lazy(cache)) => {
+                    ignore_status(tracer.add_surface_with_cache(k, surface, cache))?;
+                }
+                None => {}
             }
         }
 
