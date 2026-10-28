@@ -337,7 +337,7 @@ impl Revolution {
         if !(major > radius + slack) {
             return Err(NOT_ANALYTIC);
         }
-        let torus = b::Surface::Torus { frame: frame(foot), major_radius: major, minor_radius: radius };
+        let torus = b::Surface::Torus { frame: frame(foot), major_radius: major, minor_radius: radius, tube_start: 0.0 };
         Ok((torus, [angle, sorted(first, last)]))
     }
 }
@@ -358,9 +358,9 @@ fn analytic_uv(s: &b::Surface, p: Vec3, near: [f64; 2]) -> Option<[f64; 2]> {
         let q = p - v3(*origin);
         return Some([q.dot(v3(*u_axis)), q.dot(v3(*v_axis))]);
     }
-    let (frame, round) = match s {
-        b::Surface::Cylinder { frame, .. } | b::Surface::Cone { frame, .. } | b::Surface::Sphere { frame, .. } => (frame, 0.0),
-        b::Surface::Torus { frame, major_radius, .. } => (frame, *major_radius),
+    let (frame, round, tube) = match s {
+        b::Surface::Cylinder { frame, .. } | b::Surface::Cone { frame, .. } | b::Surface::Sphere { frame, .. } => (frame, 0.0, 0.0),
+        b::Surface::Torus { frame, major_radius, tube_start, .. } => (frame, *major_radius, *tube_start),
         _ => return None,
     };
     let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
@@ -371,7 +371,7 @@ fn analytic_uv(s: &b::Surface, p: Vec3, near: [f64; 2]) -> Option<[f64; 2]> {
     let r = qx.hypot(qy);
     Some(match s {
         b::Surface::Sphere { .. } => [u, qz.atan2(r)],
-        b::Surface::Torus { .. } => [u, unwrap(qz.atan2(r - round), near[1])],
+        b::Surface::Torus { .. } => [u, unwrap(qz.atan2(r - round) - tube, near[1])],
         _ => [u, qz],
     })
 }

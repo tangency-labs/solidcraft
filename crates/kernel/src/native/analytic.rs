@@ -54,7 +54,7 @@ pub(super) fn load_analytic(surface: b::Surface, height: [f64; 2]) -> Result<mt:
             let meridian = b::Frame { origin: frame.origin, x_axis: frame.x_axis, y_axis: vector(z) };
             revolved(arc(&meridian, [radius; 2], [-FRAC_PI_2, FRAC_PI_2])?.inverse(), p(frame.origin), z, false)
         }
-        b::Surface::Torus { frame, major_radius, minor_radius } => {
+        b::Surface::Torus { frame, major_radius, minor_radius, .. } => {
             let z = axis(&frame);
             let profile = b::Frame { origin: point(p(frame.origin) + v(frame.x_axis) * major_radius), x_axis: frame.x_axis, y_axis: vector(z) };
             revolved(arc(&profile, [minor_radius; 2], [0., TAU])?.inverse(), p(frame.origin), z, false)

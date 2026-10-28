@@ -95,7 +95,12 @@ fn circles_about_the_axis_are_u_lines() {
         (Surface::Cone { frame: about_z(o, false), radius_at_origin: 2., half_angle: half }, 4., 2. + 4. * half.tan(), 4.),
         (Surface::Sphere { frame: about_z(o, false), radius: 5. }, 3., 4., 3f64.atan2(4.)),
         (Surface::Sphere { frame: about_z(o, false), radius: 5. }, -3., 4., (-3f64).atan2(4.)),
-        (Surface::Torus { frame: about_z(o, false), major_radius: 10., minor_radius: 2. }, 2f64.sqrt(), 10. - 2f64.sqrt(), 0.75 * PI),
+        (
+            Surface::Torus { frame: about_z(o, false), major_radius: 10., minor_radius: 2., tube_start: 0.0 },
+            2f64.sqrt(),
+            10. - 2f64.sqrt(),
+            0.75 * PI,
+        ),
     ];
     for (surface, h, r, v) in cases {
         for down in [false, true] {
@@ -326,7 +331,7 @@ fn a_seam_from_pole_to_pole_encloses_the_whole_sphere() {
 fn a_torus_bounded_by_its_seams_spans_both_periods() {
     let frames = [about_z([0.; 3], false), frame([1., 2., 3.], [0., 0.6, 0.8], [0., -0.8, 0.6])];
     for sf in frames {
-        let torus = Surface::Torus { frame: sf.clone(), major_radius: 10., minor_radius: 2. };
+        let torus = Surface::Torus { frame: sf.clone(), major_radius: 10., minor_radius: 2., tube_start: 0.0 };
         let ax = crate::brep::eval::Axes::new(&sf);
         let p = |v: Vec3| [v.x, v.y, v.z];
         // The outer equator (v = 0, u from 0) and the tube circle at u = 0 (v from 0, upwards).
@@ -398,7 +403,7 @@ fn a_seam_on_a_spline_closed_in_u_gets_pcurves_a_period_apart() {
     // Each surface and circle on its NURBS form (`form`), as SolidCraft's builders give them.
     let on = |c: &Curve, iv: [f64; 2]| crate::brep::form::curve(c, iv).unwrap();
     // The torus band: the tube's quarter from its outer equator to its top.
-    let torus = Surface::Torus { frame: about_z([0.; 3], false), major_radius: big, minor_radius: small };
+    let torus = Surface::Torus { frame: about_z([0.; 3], false), major_radius: big, minor_radius: small, tube_start: 0.0 };
     let (band, _) = crate::brep::form::surface(&torus, [full, [0., FRAC_PI_2]]).unwrap();
     let outer = on(&Curve::Circle { frame: about_z([0.; 3], false), radius: big + small }, full);
     let top = on(&Curve::Circle { frame: about_z([0., 0., small], false), radius: big }, full);
@@ -606,7 +611,7 @@ fn hostile_records_give_errors() {
     };
     assert!(pcurves(&cylinder, &one(&touching, [0., 1.]), 1e-6).is_err());
     // Extreme but valid: a torus as wide as the schema allows and thin as it allows.
-    let torus = Surface::Torus { frame: about_z([0.; 3], false), major_radius: 1e12, minor_radius: 1e-12 };
+    let torus = Surface::Torus { frame: about_z([0.; 3], false), major_radius: 1e12, minor_radius: 1e-12, tube_start: 0.0 };
     let far = Curve::Circle { frame: about_z([0.; 3], false), radius: 1e12 };
     let _ = pcurves(&torus, &one(&far, [0., 1.]), 1e-6);
 }

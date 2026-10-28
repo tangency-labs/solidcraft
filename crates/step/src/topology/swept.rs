@@ -546,12 +546,12 @@ fn offset(s: BSurface, d: f64) -> R<BSurface> {
             }
             BSurface::Cone { frame, radius_at_origin: r, half_angle }
         }
-        BSurface::Torus { frame, major_radius, minor_radius } => {
+        BSurface::Torus { frame, major_radius, minor_radius, tube_start } => {
             let r = minor_radius + d;
             if !(r > 1e-9 && r < major_radius) {
                 return bad("torus that collapses or meets its axis");
             }
-            BSurface::Torus { frame, major_radius, minor_radius: r }
+            BSurface::Torus { frame, major_radius, minor_radius: r, tube_start }
         }
         _ => return Err(unsupported("an OFFSET_SURFACE of a spline or swept surface")),
     })
@@ -611,6 +611,7 @@ fn canonical(s: &Surface, reversed: &mut bool) -> Option<BSurface> {
                 frame: solidcraft_geom::brep::Frame { origin: p3(foot), x_axis: p3(x), y_axis: p3(k.cross(x)) },
                 major_radius: big,
                 minor_radius: *radius,
+                tube_start: 0.0,
             })
         }
         _ => None,
@@ -641,7 +642,7 @@ fn map_surface_in(s: &Surface, ext: &Extent, tol: f64, depth: usize, reversed: &
             if !(major_radius > minor_radius) {
                 return torus_revolved(position, *major_radius, *minor_radius, ext);
             }
-            BSurface::Torus { frame: frame(position), major_radius: *major_radius, minor_radius: *minor_radius }
+            BSurface::Torus { frame: frame(position), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: 0.0 }
         }
         Surface::DegenerateTorus { position, major_radius, minor_radius, .. } => {
             return torus_revolved(position, *major_radius, *minor_radius, ext);

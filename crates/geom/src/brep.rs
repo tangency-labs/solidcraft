@@ -232,9 +232,18 @@ pub enum Surface {
     /// `origin + radius (cos v (cos u x + sin u y) + sin v z)`: u the longitude, v the latitude
     /// in [-π/2, π/2] (STEP `SPHERICAL_SURFACE`).
     Sphere { frame: Frame, radius: f64 },
-    /// `origin + (R + r cos v)(cos u x + sin u y) + r sin v z`: u the longitude, v the meridian
-    /// angle (STEP `TOROIDAL_SURFACE`).
-    Torus { frame: Frame, major_radius: f64, minor_radius: f64 },
+    /// `origin + (R + r cos w)(cos u x + sin u y) + r sin w z`, `w = v + tube_start`: u the
+    /// longitude, v the meridian angle measured from `tube_start` (radians; 0, the outer equator,
+    /// in STEP `TOROIDAL_SURFACE` and older records). The tube start is the tube's own reference,
+    /// as the frame's x axis is the longitude's: a face's form starts its tube on a quarter line
+    /// from there (`form`).
+    Torus {
+        frame: Frame,
+        major_radius: f64,
+        minor_radius: f64,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        tube_start: f64,
+    },
     /// A tensor-product B-spline: `points[i][j]`, i along u (STEP `B_SPLINE_SURFACE_WITH_KNOTS`).
     Spline { u_knots: Vec<f64>, v_knots: Vec<f64>, points: Vec<Vec<[f64; 3]>> },
     /// A NURBS surface: homogeneous `[x*w, y*w, z*w, w]` coefficients.
@@ -306,6 +315,10 @@ fn frame(f: &Frame, budget: &mut Budget) -> Result<()> {
     points(&[f.origin, f.x_axis, f.y_axis], budget)?;
     let (x, y) = (vector(f.x_axis), vector(f.y_axis));
     require((x.len() - 1.).abs() <= 1e-8 && (y.len() - 1.).abs() <= 1e-8 && x.dot(y).abs() <= 1e-8, "nonorthonormal frame")
+}
+/// A field left out of a record where it is zero (its default).
+fn is_zero(x: &f64) -> bool {
+    *x == 0.0
 }
 fn radius(r: f64) -> Result<()> {
     require(r.is_finite() && (1e-12..=1e12).contains(&r), "radius")
@@ -465,10 +478,11 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
             numbers([*radius_at_origin, *half_angle])?;
             require(*radius_at_origin >= 0. && half_angle.abs() >= 1e-12 && half_angle.abs() < std::f64::consts::FRAC_PI_2, "cone dimensions")
         }
-        Surface::Torus { frame: f, major_radius, minor_radius } => {
+        Surface::Torus { frame: f, major_radius, minor_radius, tube_start } => {
             frame(f, budget)?;
             radius(*major_radius)?;
             radius(*minor_radius)?;
+            require(tube_start.is_finite() && tube_start.abs() <= std::f64::consts::TAU, "torus tube start")?;
             require(major_radius > minor_radius, "ring torus radii")
         }
         Surface::Spline { u_knots, v_knots, points: p } => grid(u_knots, v_knots, p, budget),

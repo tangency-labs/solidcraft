@@ -396,10 +396,7 @@ impl On {
                 let h = axes.local(c.o)[2];
                 let v = match &self.surface {
                     SurfaceEval::Sphere { .. } => h.atan2(*radius),
-                    SurfaceEval::Torus { major, .. } => {
-                        let v = h.atan2(radius - major);
-                        if v < 0.0 { v + std::f64::consts::TAU } else { v }
-                    }
+                    SurfaceEval::Torus { major, tube, .. } => (h.atan2(radius - major) - tube).rem_euclid(std::f64::consts::TAU),
                     _ => h,
                 };
                 Some(segment([u0 + sign * t0, v], [u0 + sign * t1, v]))
@@ -421,9 +418,10 @@ impl On {
     /// angle from the outward radial toward the axis, `α + s·t` (`s` ±1 as the circle runs).
     /// `None` for any other circle.
     fn meridian(&self, axes: &super::eval::Axes, c: &super::eval::Axes, radius: f64, curve: &CurveEval, [t0, t1]: [f64; 2]) -> Option<Curve2> {
-        let ring = match &self.surface {
-            SurfaceEval::Sphere { radius: r, .. } => (0.0, *r),
-            SurfaceEval::Torus { major, minor, .. } => (*major, *minor),
+        // The ring's radius, the circle's, and the tube angle at v = 0.
+        let (ring, tube) = match &self.surface {
+            SurfaceEval::Sphere { radius: r, .. } => ((0.0, *r), 0.0),
+            SurfaceEval::Torus { major, minor, tube, .. } => ((*major, *minor), *tube),
             _ => return None,
         };
         let size = 1.0 + ring.0 + ring.1;
@@ -442,7 +440,7 @@ impl On {
         }
         let s = c.z.dot(radial.cross(axes.z)).signum();
         let d = m - centre;
-        let vm = d.dot(axes.z).atan2(d.dot(radial));
+        let vm = d.dot(axes.z).atan2(d.dot(radial)) - tube;
         let alpha = vm - s * tm;
         Some(Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![[u0, alpha + s * t0], [u0, alpha + s * t1]] })
     }

@@ -96,8 +96,8 @@ impl Rigid {
                 Surface::Cone { frame: self.frame(frame), radius_at_origin: *radius_at_origin, half_angle: *half_angle }
             }
             Surface::Sphere { frame, radius } => Surface::Sphere { frame: self.frame(frame), radius: *radius },
-            Surface::Torus { frame, major_radius, minor_radius } => {
-                Surface::Torus { frame: self.frame(frame), major_radius: *major_radius, minor_radius: *minor_radius }
+            Surface::Torus { frame, major_radius, minor_radius, tube_start } => {
+                Surface::Torus { frame: self.frame(frame), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: *tube_start }
             }
             Surface::Spline { u_knots, v_knots, points } => Surface::Spline {
                 u_knots: u_knots.clone(),

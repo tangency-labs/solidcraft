@@ -61,7 +61,7 @@ pub(crate) fn surf_of(b: &Brep, face: usize) -> Option<Surf> {
             let a = if *half_angle > 0.0 { z } else { -z };
             Surf::Cone { v: apex, a, half: half_angle.abs(), convex: out }
         }
-        Surface::Torus { frame, major_radius, minor_radius } => {
+        Surface::Torus { frame, major_radius, minor_radius, .. } => {
             let (o, a) = axes(frame)?;
             Surf::Torus { o, a, big: *major_radius, h: 0.0, r: *minor_radius, convex: out }
         }
