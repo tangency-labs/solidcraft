@@ -176,12 +176,25 @@ impl JsonSchema for Point3 {
 macro_rules! target_point {
     ($(#[$doc:meta])* $name:ident, $message:literal) => {
         $(#[$doc])*
-        #[derive(Clone, Copy, Debug, PartialEq)]
-        pub struct $name(pub Vec3);
+        #[derive(Clone, Debug, PartialEq)]
+        pub enum $name {
+            /// A point on the face, vertex or place.
+            Point(Vec3),
+            /// A reference, as the CONSTRUCT commands take it: `{sketch, point|curve}`,
+            /// `{plane: XY|name}`, `{axis: X|name}`, `{construct_point: name}`, `{vertex|edge|face: [x,y,z]}`…
+            Reference(Value),
+        }
 
         impl<'de> Deserialize<'de> for $name {
             fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-                params::vec3(&Value::deserialize(d)?).map($name).ok_or_else(|| D::Error::custom($message))
+                let v = Value::deserialize(d)?;
+                if let Some(p) = params::vec3(&v) {
+                    return Ok($name::Point(p));
+                }
+                match v {
+                    Value::Object(_) | Value::String(_) => Ok($name::Reference(v)),
+                    _ => Err(D::Error::custom($message)),
+                }
             }
         }
 
@@ -193,21 +206,28 @@ macro_rules! target_point {
                 true
             }
             fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-                generator.subschema_for::<Point3>()
+                let point = generator.subschema_for::<Point3>();
+                json_schema!({
+                    "anyOf": [
+                        point,
+                        {"type": "object", "description": "A reference: {sketch, point|curve, at?}, {plane: XY|name}, {axis: X|name}, {construct_point: name}, {vertex|edge|face: [x,y,z]}; followed when it moves."},
+                        {"type": "string", "description": "A plane by name (XY, XZ, YZ or a construction plane)."}
+                    ]
+                })
             }
         }
     };
 }
 
 target_point!(
-    /// Extrude's `to`: a [`Point3`], with the handler's message.
+    /// Extrude's `to`: a [`Point3`] or a reference, with the handler's message.
     ToPoint,
-    "must be a point [x, y, z] on the face, vertex or point to extrude to"
+    "must be a point [x, y, z] on the face, vertex or point to extrude to, or a reference"
 );
 target_point!(
-    /// Extrude's `from`: a [`Point3`], with the handler's message.
+    /// Extrude's `from`: a [`Point3`] or a reference, with the handler's message.
     FromPoint,
-    "must be a point [x, y, z] on the face or point to start from"
+    "must be a point [x, y, z] on the face or point to start from, or a reference"
 );
 
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
