@@ -1490,10 +1490,10 @@ fn countersink_exports_one_cone() {
     assert_eq!(imp.bodies[0].file_faces, 8);
 }
 
-/// Knot multiplicities are expanded into one value each before the knot count is compared with
-/// the control points, so the sum has to be checked first: 1,000,000 knots of multiplicity 64
-/// against two control points asked for a 500 MB vector (20,000,000 for 10 GB) only to reject
-/// it afterwards, and an allocation failure aborts the process where an error does not.
+/// Knot multiplicities are checked before anything is expanded: 1,000,000 knots of multiplicity
+/// 64 against two control points asked for a 500 MB vector (20,000,000 for 10 GB) only to reject
+/// it afterwards, and an allocation failure aborts the process where an error does not. A knot
+/// above degree + 1 is refused on its own; knots each within it are refused by their sum.
 #[test]
 fn knot_multiplicities_are_checked_before_they_are_expanded() {
     let curve = |n: usize, mult: usize| {
@@ -1510,8 +1510,10 @@ fn knot_multiplicities_are_checked_before_they_are_expanded() {
         let ex = p21::parse(text).unwrap();
         solidcraft_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
     };
+    // These diagnostics come from the checks before expansion; wall-clock time depends on CI load.
     let error = read(&curve(1_000_000, 64)).unwrap_err();
-    // This diagnostic comes from the check before expansion; wall-clock time depends on CI load.
+    assert!(error.contains("bad knot multiplicity"), "{error}");
+    let error = read(&curve(1_000_000, 2)).unwrap_err();
     assert!(error.contains("knot multiplicities do not match"), "{error}");
     // A degree-1 curve with two control points needs exactly four knot values.
     assert!(read(&curve(2, 2)).is_ok());
