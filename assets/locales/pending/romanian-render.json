@@ -716,7 +716,7 @@
     "render.tree_solo": "Lumină solo",
     "render.tree_spot": "Spot",
     "render.tree_sun": "Soare",
-    "render.tree_switch": "Comutator",
+    "render.tree_switch": "Comută",
     "render.tree_user_one": "{count} obiect",
     "render.tree_users": "{count} obiecte",
     "render.volume_albedo": "Albedo de împrăștiere · RGB liniar",
