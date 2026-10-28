@@ -1370,6 +1370,11 @@ mod tests {
         let mut copy = solidcraft_engine::Session::new((*h.app.session.doc).clone());
         let refused = copy.execute("solid.fillet", &parameters(&h)).unwrap_err().to_string();
         assert!(refused.contains("setback must be more than the radius (2 mm)"), "the kernel refuses what the field flags: {refused}");
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(&refused, true),
+            Some(crate::dialogs::FilletRefusal::InField),
+            "the field says it, not again under the dialog"
+        );
         let least = crate::dialogs::fillet_least_setback(
             &h.ctx,
             &h.app.session,

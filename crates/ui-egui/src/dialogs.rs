@@ -2595,14 +2595,17 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick"));
             return;
         }
-        // A fillet's refusal reads in plain words; the kernel's own text stays in the hover
-        // text, Copy Details and the issue report.
-        let plain = if matches!(d.kind, Kind::Fillet { chamfer: false, .. }) { fillet_plain_error(&error) } else { None };
+        // A fillet's refusal reads in plain words, or not at all where its Setback field already
+        // says what is wrong; the kernel's own text stays in the hover text, Copy Details and the
+        // issue report.
+        let setback_in_field = d.extra.get("setbacks").is_none();
+        let plain = if matches!(d.kind, Kind::Fillet { chamfer: false, .. }) { fillet_plain_error(&error, setback_in_field) } else { None };
         ui.vertical(|ui| {
             match &plain {
-                Some(plain) => {
+                Some(FilletRefusal::Plain(plain)) => {
                     crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).on_hover_text(shown_error(&error));
                 }
+                Some(FilletRefusal::InField) => {}
                 None => {
                     crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
                 }
@@ -2615,6 +2618,10 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                         ui.ctx().copy_text(error.clone());
                     }
                 }
+                // A value the field flags is the user's to change, not a failure to report.
+                if matches!(plain, Some(FilletRefusal::InField)) {
+                    return;
+                }
                 let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
                 crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
                 if response.clicked() {
@@ -2625,11 +2632,25 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     }
 }
 
+/// How the Fillet dialog shows a kernel refusal ([`fillet_plain_error`]).
+#[derive(Debug, PartialEq)]
+pub(crate) enum FilletRefusal {
+    /// In these plain words.
+    Plain(&'static str),
+    /// Not again: the Setback field already flags the value and names the least it takes.
+    InField,
+}
+
 /// A fillet's refusal by the kernel in plain words, for the dialog: what happened and what may
-/// help, without SMLib's status codes, its check's test list or the command's parameter names.
-/// `None` for a refusal that is no kernel failure (an expression, a pick), shown as it is.
-pub(crate) fn fillet_plain_error(error: &str) -> Option<&'static str> {
+/// help, without SMLib's status codes, its check's test list or the command's parameter names;
+/// a setback short of the least is left to the Setback field (`setback_in_field`: the setback
+/// came from it, so it is flagged there). `None` for a refusal that is no kernel failure (an
+/// expression, a pick), shown as it is.
+pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<FilletRefusal> {
     // The kernel's refusals as the timeline records them (`KernelError`, `blend_smlib`).
+    if setback_in_field && error.contains("the setback must be more than") {
+        return Some(FilletRefusal::InField);
+    }
     let too_large = error.contains("larger than the faces beside its edges allow");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
@@ -2638,11 +2659,11 @@ pub(crate) fn fillet_plain_error(error: &str) -> Option<&'static str> {
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
     if too_large {
-        Some(tr("ui.fillet_error_too_large"))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large")))
     } else if corner && kernel {
-        Some(tr("ui.fillet_error_corner"))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_corner")))
     } else if kernel {
-        Some(tr("ui.fillet_error_failed"))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_failed")))
     } else {
         None
     }
