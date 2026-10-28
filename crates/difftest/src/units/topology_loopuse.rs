@@ -3,10 +3,12 @@
 //!
 //! The B-reps are those of unit `topology.edgeuse_p1` (upstream `.smb` files, wire edges,
 //! faces from B-spline surfaces and real `SmPlane`s, the wire network of `prog_test`
-//! `my_test_topology`): the C++ side builds a real `SmBrep` per call, the Rust side
-//! imports the graph the shim exports ([`super::topology_edgeuse_p1::import`], which
-//! carries each loop use's `m_eOrientation`; each face's `m_pFU`, which the export lacks,
-//! comes from the shim's `FaceFu` op), and the ported functions run on both.
+//! `my_test_topology`): the C++ side builds a real `SmBrep` per call. The Rust side
+//! builds every non-file source itself ([`crate::own_builder`], renumbered into the
+//! shim's traversal order); for an `.smb` file it imports the graph the shim exports
+//! ([`super::topology_edgeuse_p1::import`], which carries each loop use's
+//! `m_eOrientation`; each face's `m_pFU`, which the export lacks, comes from the shim's
+//! `FaceFu` op). The ported functions run on both.
 //! Loop, loop use, edge use and target arguments are selectors taken modulo the count
 //! of their kind (`-1` selects null). Results are compared as traversal indices; the
 //! mutating ops (`FlipLoopOrientation`, `CollectEdgeuses`, `SetEdgeuse`, the setters)
@@ -317,9 +319,34 @@ fn graph_of(path: &str, block: &[f64]) -> Result<Rc<Graph>, HarnessError> {
     Ok(g)
 }
 
-fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
+/// The case's B-rep and resolved op. `own` (the Rust side) builds a shim-built source
+/// with the Rust kernel ([`crate::own_builder`]); the C++ side, and the Rust side for
+/// an `.smb` file, import the shim's graph export.
+fn setup(i: &Inputs, own: bool) -> Result<Result<Setup, Output>, HarnessError> {
+    use crate::own_builder::{build, counts, failed_output, Built};
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), i.validate_only, i.init_gaps)?;
+    if own {
+        let mut k = Kernel::default();
+        match build(&mut k, &i.brep, i.validate_only, i.init_gaps)? {
+            Some(Built::Brep(b)) => {
+                let brep = *b;
+                let c = counts(&brep);
+                let Some(op) = resolve(&i.op, c, &brep) else {
+                    return Ok(Err(Output::err("no_entity_of_that_kind")));
+                };
+                return Ok(Ok(Setup {
+                    path,
+                    block,
+                    brep,
+                    types: ImportTypes::default(),
+                    op,
+                }));
+            }
+            Some(Built::Failed(e)) => return Ok(Err(failed_output(&e))),
+            None => {}
+        }
+    }
     let g = graph_of(&path, &block)?;
     let (ex, fus) = (&g.0, &g.1);
     let (Some(c), Some(fus)) = (ffi1::counts(ex), fus) else {
@@ -352,7 +379,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
 // ---- C++ side ---------------------------------------------------------------------------
 
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    let s = match setup(i)? {
+    let s = match setup(i, false)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
@@ -855,7 +882,7 @@ fn inexact_geometry(s: &Setup) -> Option<Output> {
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let mut s = match setup(i)? {
+    let mut s = match setup(i, true)? {
         Ok(s) => s,
         Err(o) => return Ok(o),
     };

@@ -5,10 +5,11 @@
 //! does: read from an upstream `.smb` test file (optionally rebuilding its UV trim
 //! curves), a wire edge from a B-spline curve (`CreateWireEdgeFromCurve`), a face from a
 //! B-spline surface or a plane (`CreateFaceFromSurface`), or the wire network of
-//! `prog_test` `my_test_topology`. There is no Rust B-rep reader or builder yet (units
-//! `topology.brep_*`), so the Rust side imports the graph the shim exports in traversal
-//! order (raw members, including each vertex use's cached gap states and UV point) into a
-//! [`Brep`] and runs the ported functions on it; their results are compared as traversal
+//! `prog_test` `my_test_topology`. The Rust side builds a wire edge, face or network
+//! source itself ([`crate::own_builder`], renumbered into the shim's traversal order).
+//! For an `.smb` file it imports the graph the shim exports in traversal order (raw
+//! members, including each vertex use's cached gap states and UV point) into a [`Brep`].
+//! It runs the ported functions on that B-rep; their results are compared as traversal
 //! indices, flags, statuses and values. `init_gaps` has the C++ side compute the cached
 //! gaps before the op, so that resets are observable.
 //!
@@ -1353,12 +1354,41 @@ fn notify_operation(code: u8) -> Result<NotifyOperation, HarnessError> {
     })
 }
 
+/// A Rust B-rep, whether each face's surface is held exactly, and its entity counts.
+type OwnBrep = (Brep, Vec<bool>, [usize; 10]);
+
+/// The Rust B-rep of a case, whether each face's surface is held exactly, and its
+/// entity counts, or the output of a failed build. Shim-built sources are built by the
+/// Rust kernel ([`crate::own_builder`] under `sc_topology_fixture.h`'s conventions);
+/// only `.smb` file sources are still imported from the C++ export ([`import_raw`]).
+fn rust_brep(
+    i: &Inputs,
+) -> Result<crate::own_builder::RustBrep<OwnBrep>, HarnessError> {
+    use crate::own_builder::{build_as, counts, failed_output, Built, Conventions};
+    let mut k = Kernel::default();
+    let conv = &Conventions::TOPOLOGY_FIXTURE;
+    match build_as(&mut k, &i.brep, i.validate_only, i.init_gaps, conv)? {
+        Some(Built::Brep(b)) => {
+            let c = counts(&b);
+            Ok(Ok((*b, vec![true; c[3]], c)))
+        }
+        Some(Built::Failed(e)) => Ok(Err(failed_output(&e))),
+        None => {
+            let ex = export(i)?;
+            let Some(c) = ffi::counts(&ex) else {
+                return Ok(Err(build_failure(&ex)));
+            };
+            let (b, exact) = import_raw(&ex)?;
+            Ok(Ok((b, exact, c)))
+        }
+    }
+}
+
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let ex = export(i)?;
-    let Some(c) = ffi::counts(&ex) else {
-        return Ok(build_failure(&ex));
+    let (mut b, exact, c) = match rust_brep(i)? {
+        Ok(x) => x,
+        Err(o) => return Ok(o),
     };
-    let (mut b, exact) = import_raw(&ex)?;
     let Some(op) = resolve(&i.op, c) else {
         return Ok(Output::err("no_vertexuse"));
     };

@@ -1,4 +1,6 @@
-//! Native B-rep p6 operations over independently imported raw topology.
+//! Native B-rep p6 operations. The Rust side builds a wire edge, face, network or
+//! kind-5 net fixture itself ([`crate::own_builder`]); only an `.smb` file's raw
+//! topology is imported from the shim's export.
 //! Closure passes compare actual statuses, output reset, shell ownership, context
 //! mark advancement/locks, and every face-use mark. Copy compares only empty inputs.
 //! Op 3 runs `MakeFaceTopology` one or more times (each on the B-rep the previous
@@ -278,10 +280,9 @@ impl UnitDiff for Runner {
         if i.op == 3 {
             return make_faces_rust(&i);
         }
-        let fixture = ffi::export(&path_of(&i)?, &block(&i)?).map_err(harness)?;
-        let c = counts(&fixture.graph).ok_or_else(|| harness("fixture construction failed"))?;
+        let mut b = rust_fixture(&i)?;
+        let c = crate::own_builder::counts(&b);
         let request = request(&i, c);
-        let (mut b, _) = shared::import(&fixture.graph)?;
         // SmBrep.cpp:549-552: even an empty native B-rep owns a void
         // infinite region. Re-express that input fixture, not an empty arena.
         b.set_key(ObjectKey(0xB000_0000));
@@ -922,10 +923,114 @@ fn export_graph(b: &Brep, g: &Graph, w: &mut W) -> Result<(), SolidError> {
     Ok(())
 }
 
+fn own_face_owner(f: FaceId) -> ObjectRef {
+    key_of(EntityRef::Face(f))
+}
+
+fn own_edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
+    (
+        key_of(EntityRef::Edge(e)),
+        key_of(EntityRef::Brep(solidcore::topology::BrepId::from_index(0))),
+    )
+}
+
+/// The shim's build conventions (`sc_topology_fixture.h`), with the geometry owned
+/// under this runner's [`key_of`] identities.
+const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder::Conventions {
+    face_owner: &own_face_owner,
+    edge_owner: &own_edge_owner,
+    ..crate::own_builder::Conventions::TOPOLOGY_FIXTURE
+};
+
+/// The shim's kind-5 build (`sc_topology_fixture.h`): a shell vertex
+/// (`MakeShellVertex`) at each point, then per edge `MakeEdgeTopology` between its
+/// points' vertices with its curve (the given B-spline, else a `CreateLineSegment`
+/// line), set as the wire network's (`SetCurve(c, TRUE)`, `SetOwner`, the natural
+/// interval, `SM_OT_SAME`). The first failure ends the build with its status.
+fn build_net(
+    k: &mut Kernel,
+    b: &mut Brep,
+    points: &[[f64; 3]],
+    edges: &[(usize, usize, Option<Curve>)],
+) -> Result<(), SolidError> {
+    use solidcore::topology::brep::p2::ArenaNotifyState;
+    let mut state = ArenaNotifyState::new(b);
+    let region = b.infinite_region();
+    let mut vs = Vec::new();
+    for p in points {
+        let (_, v) = {
+            let mut env = state.env(None);
+            solidcore::topology::brep::p9::make_shell_vertex(
+                b,
+                region,
+                Vec3::from_array(*p),
+                &mut env,
+            )?
+        };
+        state.seed(b);
+        vs.push(v);
+    }
+    let bad = || SolidError::invalid_input("brep_p6 net", "edge point index");
+    for (a, e, c) in edges {
+        let (va, ve) = (*vs.get(*a).ok_or_else(bad)?, *vs.get(*e).ok_or_else(bad)?);
+        let c = match c {
+            Some(c) => c.clone(),
+            None => crate::own_builder::line(b.vertex(va)?.point, b.vertex(ve)?.point)?,
+        };
+        {
+            let mut env = state.env(None);
+            crate::own_builder::edge_with_curve(k, b, &mut env, va, ve, c)?;
+        }
+        state.seed(b);
+    }
+    Ok(())
+}
+
+/// The Rust B-rep of a case's fixture, built by the Rust kernel
+/// ([`crate::own_builder`] under [`CONVENTIONS`]; a kind-5 net by [`build_net`]), or
+/// the build's error; `None` for an `.smb` file (imported from the shim's export).
+fn own_fixture(i: &Inputs) -> Result<Option<Result<Brep, SolidError>>, HarnessError> {
+    use crate::own_builder::{build_as, finish, in_new_brep, Built};
+    let mut k = Kernel::default();
+    let built = if let Some(net) = &i.net {
+        let edges = net
+            .edges
+            .iter()
+            .map(|e| {
+                Ok((
+                    e.a,
+                    e.b,
+                    e.curve.as_ref().map(curve_of).transpose()?.map(Curve::from),
+                ))
+            })
+            .collect::<Result<Vec<_>, HarnessError>>()?;
+        let raw = in_new_brep(&mut k, |k, b| build_net(k, b, &net.points, &edges))?;
+        Some(finish(&mut k, raw, false, false, &CONVENTIONS)?)
+    } else {
+        build_as(&mut k, brep_of(i)?, false, false, &CONVENTIONS)?
+    };
+    Ok(built.map(|b| match b {
+        Built::Brep(b) => Ok(*b),
+        Built::Failed(e) => Err(e),
+    }))
+}
+
+/// The Rust fixture B-rep: built by [`own_fixture`], or for an `.smb` file imported
+/// from the shim's graph export.
+fn rust_fixture(i: &Inputs) -> Result<Brep, HarnessError> {
+    match own_fixture(i)? {
+        Some(Ok(b)) => Ok(b),
+        Some(Err(e)) => Err(harness(format!("fixture construction failed: {e}"))),
+        None => {
+            let fixture = ffi::export(&path_of(i)?, &block(i)?).map_err(harness)?;
+            counts(&fixture.graph).ok_or_else(|| harness("fixture construction failed"))?;
+            Ok(shared::import(&fixture.graph)?.0)
+        }
+    }
+}
+
 fn make_faces_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let fixture = ffi::export(&path_of(i)?, &block(i)?).map_err(harness)?;
-    counts(&fixture.graph).ok_or_else(|| harness("fixture construction failed"))?;
-    let (mut b, _) = shared::import(&fixture.graph)?;
+    let mut b = rust_fixture(i)?;
     b.set_key(ObjectKey(0xB000_0000));
     // The fixture's edges own their curves, as its faces own their surfaces (the import
     // gives those the face names of `key_of`). The ray fires of the infinite-region

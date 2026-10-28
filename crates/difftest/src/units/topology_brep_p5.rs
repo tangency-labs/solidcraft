@@ -6,6 +6,8 @@
 //! topology mutation is compared only for `CreateWireEdgeFromCurve` (op 13, fixtures);
 //! nonidentity transformation is not certified here.
 //! Inputs the FFI guards refuse (undefined natively) are `rejected`, not failed.
+//! The Rust side builds the fixture itself ([`own_fixture`], the shim's `p5_build` with
+//! the Rust kernel); no C++ export is read on the Rust side.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,7 +27,7 @@ use solidcore_ffi::units::topology_brep_p5::{self as ffi, Op};
 use solidcore_ffi::FfiError;
 
 use super::boolean_merge_p1::graph;
-use super::topology_vertexuse::{import, import_raw};
+use super::topology_vertexuse::import_raw;
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 
 /// Part 5's runner.
@@ -489,9 +491,10 @@ fn notification_values(lists: &solidcore::topology::topology::TopologyChangeList
     out
 }
 
-// The native fixture's geometry retains its actual edge/face owners. The import
-// uses arena labels; a plain kernel edit notifies under kernel-issued topology
-// identities. Bind owned geometry into that same context before transforming it.
+// The native fixture's geometry retains its actual edge/face owners. The Rust
+// build owns it under the fixture identities; a plain kernel edit notifies under
+// kernel-issued topology identities. Bind owned geometry into that same context
+// before transforming it.
 fn bind_transform_owners(k: &mut Kernel, b: &mut Brep) -> SolidResult<()> {
     use solidcore::topology::brep::p3::{notify_serial, topology_ref};
     use solidcore::EntityRef;
@@ -512,6 +515,97 @@ fn bind_transform_owners(k: &mut Kernel, b: &mut Brep) -> SolidResult<()> {
         }
     }
     Ok(())
+}
+
+/// The shim's `p5_build` with the Rust kernel, renumbered into the shim's traversal
+/// order ([`crate::own_builder`], `sc_topology_fixture.h`'s `walk`): kind 1 the
+/// `prog_test` wire network, kind 2 the shared fixture's plane face (`SmPlane` at the
+/// origin with normal `+z` over `[-2, 4] x [-3, 5]`), kind 0 two shell vertices
+/// (`MakeShellVertex`, then `SetTolerance(SmZoneTol3d(tol), FALSE, FALSE)`), each with its count of
+/// `MakeWireEdgeVertex` wire edges over `CreateLineSegment` lines to
+/// `point + (2 + j, 3 + j^2, 5 + j)`, `m_bEditingEnabled` set. A failed build is
+/// rejected with its status, as the C++ side's.
+fn own_fixture(f: &[f64; 11]) -> Result<Result<Brep, Output>, HarnessError> {
+    use crate::own_builder::{build_status, build_with, finish, in_new_brep, line, Built};
+    use crate::own_builder::Conventions;
+    use crate::units::topology_edgeuse_p1::{BrepIn, SrfIn};
+    let mut k = Kernel::default();
+    let conv = &Conventions::TOPOLOGY_FIXTURE;
+    let built = match f[0] as i64 {
+        1 => build_with(&mut k, &BrepIn::Network, false, false, conv)?,
+        2 => build_with(
+            &mut k,
+            &BrepIn::Face {
+                surface: SrfIn::Plane {
+                    o: [0.0, 0.0, 0.0],
+                    n: [0.0, 0.0, 1.0],
+                },
+                dom: [-2.0, -3.0, 4.0, 5.0],
+            },
+            false,
+            false,
+            conv,
+        )?,
+        _ => {
+            let raw = in_new_brep(&mut k, |k, b| {
+                use solidcore::topology::brep::p2::ArenaNotifyState;
+                b.set_editing_enabled(true);
+                let mut state = ArenaNotifyState::new(b);
+                let region = b.infinite_region();
+                // (point, raw tolerance, incident edge count) of each vertex
+                let stars = [
+                    ([f[1], f[2], f[3]], f[7], f[9]),
+                    ([f[4], f[5], f[6]], f[8], f[10]),
+                ];
+                for (point, raw_tol, count) in stars {
+                    let (_, v) = {
+                        let mut env = state.env(None);
+                        solidcore::topology::brep::p9::make_shell_vertex(
+                            b,
+                            region,
+                            Vec3::from_array(point),
+                            &mut env,
+                        )?
+                    };
+                    state.seed(b);
+                    // `SetTolerance(SmZoneTol3d(raw), FALSE, FALSE)`
+                    let tol = solidcore::geom::tol::zone_tol3d(k, raw_tol);
+                    solidcore::topology::vertex::set_tolerance(b, v, tol, false, false)?;
+                    for j in 0..(count as i64) {
+                        let jf = j as f64;
+                        let start = b.vertex(v)?.point;
+                        let end = start + Vec3::new(2.0 + jf, 3.0 + jf * jf, 5.0 + jf);
+                        let c = line(start, end)?;
+                        let natural = c.natural_interval();
+                        {
+                            let mut env = state.env(None);
+                            solidcore::topology::brep::p3::make_wire_edge_vertex(
+                                k,
+                                b,
+                                &mut env,
+                                region,
+                                v,
+                                c,
+                                &natural,
+                                OrientType::Same,
+                                end,
+                            )?;
+                        }
+                        state.seed(b);
+                    }
+                }
+                Ok(())
+            })?;
+            Some(finish(&mut k, raw, false, false, conv)?)
+        }
+    };
+    match built {
+        Some(Built::Brep(b)) => Ok(Ok(*b)),
+        Some(Built::Failed(e)) => Ok(Err(Output::unported(&e).unwrap_or_else(|| {
+            Output::rejected(format!("fixture constructor status {}", build_status(&e)))
+        }))),
+        None => Err(HarnessError::new("fixture kind without a build")),
+    }
 }
 
 impl UnitDiff for Runner {
@@ -544,17 +638,22 @@ impl UnitDiff for Runner {
             .get(1..=n)
             .ok_or_else(|| HarnessError::new("short record"))?
             .to_vec();
-        let (b, _) = import_raw(
+        let (mut b, _) = import_raw(
             raw.get(n + 1..)
                 .ok_or_else(|| HarnessError::new("short graph"))?,
         )?;
+        // the face loop lists and loop edge lists the export does not carry, derived
+        // from the exported uses as the Rust B-rep holds them (the Rust side builds its
+        // input itself, so its faces and loops have them)
+        b.refresh_cached_topology();
         Ok(graph(&b, record))
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let raw = ffi::eval(Op::Export, &i.fixture, &args(&i))
-            .map_err(|e| HarnessError::new(e.to_string()))?;
-        let (mut b, _) = import(&raw)?;
+        let mut b = match own_fixture(&i.fixture)? {
+            Ok(b) => b,
+            Err(o) => return Ok(o),
+        };
         // The shim sets `m_bEditingEnabled` from the editing argument for every op.
         b.set_editing_enabled(i.editing);
         if i.op == 15 {
@@ -630,3 +729,4 @@ impl UnitDiff for Runner {
         crate::runner::default_cases(self, &ctx)
     }
 }
+

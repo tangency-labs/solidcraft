@@ -4,17 +4,19 @@
 //! The C++ side builds a real `SmBrep` per call with the shared topology fixture (an
 //! upstream `.smb` file, a wire edge, a one-face B-rep or the `my_test_topology` wire
 //! network), normalised as the `topology.brep_p2` shim does, and runs one member of the
-//! unit (the constructors and `SmApiBrepCopy` too). The Rust side imports the graph
-//! the `topology.brep_p2` shim exports for the same input (the `topology.vertexuse`
-//! importer), restores what the import cannot carry (the B-rep tolerance, infinite
-//! region, region list head, editing flag, each vertex's vertex use order, the
-//! geometry owners and each face's upward face use), runs the port and writes the
-//! same output layout (`out`).
+//! unit (the constructors and `SmApiBrepCopy` too). The Rust side builds a wire edge,
+//! face or network source itself ([`crate::own_builder`] under the `topology.brep_p2`
+//! shim's conventions; the normalisation only replaces analytic geometry, which these
+//! sources lack). For an `.smb` file it imports the graph the `topology.brep_p2` shim
+//! exports for the same input (the `topology.vertexuse` importer), restores what the
+//! import cannot carry (the B-rep tolerance, infinite region, region list head, editing
+//! flag, each vertex's vertex use order, the geometry owners and each face's upward
+//! face use). It runs the port and writes the same output layout (`out`).
 //!
 //! Entity selectors are taken modulo the matching entity count (`-1` selects null);
 //! an op that needs an entity the B-rep lacks is skipped on both sides (`no target`).
-//! `Merge` / `CopyVertices` target a second build of the same B-rep (a second import
-//! on the Rust side), whose objects the Rust side notifies under identities of their
+//! `Merge` / `CopyVertices` target a second build of the same B-rep (a second build
+//! or import on the Rust side), whose objects the Rust side notifies under identities of their
 //! own ([`source_key_of`]). `DeleteFace` always passes a deleted list
 //! (`pOptDeletedEdgesVertices`); the header default `NULL` only skips its `Add`s and
 //! is not compared. `CopyVertices` also appends the source and existing destination
@@ -483,6 +485,49 @@ fn rust_brep(path: &str, h: &[f64], c: &[usize; 10]) -> Result<Brep, HarnessErro
         }
     }
     Ok(b)
+}
+
+/// The shim's build conventions (`sc_topology_fixture.h` as the `topology.brep_p2`
+/// shim, whose export this runner reads, uses it: the face, edge and vertex lists
+/// registered before the traversal, `GetVertexEdgeGap` in the `init_gaps` walk), with
+/// the geometry owned under the arena identities [`rust_brep`] gives it.
+const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder::Conventions {
+    prefix_lists: true,
+    vertex_edge_gaps: true,
+    vertex_lists_last: false,
+    ..crate::own_builder::Conventions::EDGEUSE_GRAPH
+};
+
+/// The Rust B-rep of the case and its entity counts, or the build failure's output:
+/// shim-built sources are built by the Rust kernel ([`crate::own_builder`], the
+/// shim's `editing` flag applied after); `.smb` files are imported from the shim's
+/// export ([`rust_brep`]).
+fn own_brep(
+    k: &mut Kernel,
+    i: &Inputs,
+) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
+    use crate::own_builder::{build_as, build_status, counts, Built};
+    match build_as(k, &i.brep, i.validate_only, i.init_gaps, &CONVENTIONS)? {
+        Some(Built::Brep(b)) => {
+            let mut b = *b;
+            if i.editing >= 0 {
+                b.set_editing_enabled(i.editing != 0);
+            }
+            let c = counts(&b);
+            Ok(Ok((b, c)))
+        }
+        Some(Built::Failed(e)) => match Output::unported(&e) {
+            Some(o) => Ok(Err(o)),
+            None => Ok(Err(Output::new().values("out", vec![-1.0, build_status(&e)]))),
+        },
+        None => {
+            let (path, h, c) = match prepare(i)? {
+                Ok(x) => x,
+                Err(o) => return Ok(Err(o)),
+            };
+            Ok(Ok((rust_brep(&path, &h, &c)?, c)))
+        }
+    }
 }
 
 fn rust_curve(c: &CrvIn) -> Result<BSplineCurve, HarnessError> {
@@ -1586,16 +1631,17 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             Err(Fail::Harness(e)) => Err(e),
         };
     }
-    let (path, h, c) = match prepare(i)? {
+    let (mut b, c) = match own_brep(&mut k, i)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
     let Some((_, args)) = op_args(&i.op, &c)? else {
         return Ok(Output::err("no target"));
     };
-    let mut b = rust_brep(&path, &h, &c)?;
     let mut second = match i.op {
-        OpIn::Merge { .. } | OpIn::CopyVertices { .. } => Some(rust_brep(&path, &h, &c)?),
+        OpIn::Merge { .. } | OpIn::CopyVertices { .. } => Some(own_brep(&mut k, i)?.map_err(
+            |_| harness("the second build of the B-rep failed where the first did not"),
+        )?.0),
         _ => None,
     };
     match run_rust_op(&mut k, &mut b, second.as_mut(), &i.op, &args) {

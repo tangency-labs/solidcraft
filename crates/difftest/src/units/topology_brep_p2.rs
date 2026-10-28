@@ -988,6 +988,7 @@ fn edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
 const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder::Conventions {
     prefix_lists: true,
     vertex_edge_gaps: true,
+    vertex_lists_last: false,
     face_owner: &face_owner,
     edge_owner: &edge_owner,
 };

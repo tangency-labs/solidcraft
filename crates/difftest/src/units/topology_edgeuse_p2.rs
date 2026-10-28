@@ -4,6 +4,7 @@
 //! The B-reps are those of unit `topology.edgeuse_p1` (upstream `.smb` files, wire edges,
 //! faces from B-spline surfaces and real `SmPlane`s, the wire network of `prog_test`
 //! `my_test_topology`): the C++ side builds a real `SmBrep` per call, the Rust side
+//! builds a non-file source itself ([`crate::own_builder`]) and for an `.smb` file
 //! imports the graph the shim exports ([`super::topology_edgeuse_p1::import`]), and the
 //! ported functions run on both. Edge use arguments are selectors taken modulo the edge
 //! use count.
@@ -145,9 +146,38 @@ pub(super) struct Setup {
 
 type CaseSetup = (Setup, Option<ffi::PreparedBrep>);
 
+/// The case's setup. `prepare` (the C++ side) also keeps the shim's prepared B-rep;
+/// without it (the Rust side) a shim-built source is built by the Rust kernel
+/// ([`crate::own_builder`]) and only an `.smb` file's graph export is imported.
 fn setup(i: &Inputs, prepare: bool) -> Result<Result<CaseSetup, Output>, HarnessError> {
+    use crate::own_builder::{build, counts, failed_output, Built};
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), i.validate_only, i.init_gaps)?;
+    if !prepare {
+        let mut k = Kernel::default();
+        match build(&mut k, &i.brep, i.validate_only, i.init_gaps)? {
+            Some(Built::Brep(b)) => {
+                let brep = *b;
+                let s = sel(i.op.eu(), counts(&brep)[6]);
+                if s < 0 {
+                    return Ok(Err(Output::err("no_entity_of_that_kind")));
+                }
+                let eu = EdgeuseId::from_index(u32::try_from(s).map_err(|_| harness("index"))?);
+                return Ok(Ok((
+                    Setup {
+                        path,
+                        block,
+                        brep,
+                        eu,
+                        types: ImportTypes::default(),
+                    },
+                    None,
+                )));
+            }
+            Some(Built::Failed(e)) => return Ok(Err(failed_output(&e))),
+            None => {}
+        }
+    }
     let prepared = prepare
         .then(|| ffi::PreparedBrep::new(&path, &block))
         .transpose()

@@ -5,9 +5,10 @@
 //! does: read from an upstream `.smb` test file (optionally rebuilding its UV trim
 //! curves), a wire edge from a B-spline curve (`CreateWireEdgeFromCurve`), a face from a
 //! B-spline surface or a plane (`CreateFaceFromSurface`), or the wire network of
-//! `prog_test` `my_test_topology`. There is no Rust B-rep reader or builder yet (units
-//! `topology.brep_*`), so the Rust side imports the graph the shim exports in traversal
-//! order (raw members, including each vertex's vertex use list in upstream list order,
+//! `prog_test` `my_test_topology`, or a chain of wire edges. The Rust side builds every
+//! non-file source itself ([`crate::own_builder`] under this shim's [`CONVENTIONS`], a
+//! chain by [`build_chain`]). For an `.smb` file it imports the graph the shim exports
+//! in traversal order (raw members, including each vertex's vertex use list in upstream list order,
 //! each vertex use's cached gaps, each edge's curve identity and each face's upward face
 //! use) into a [`Brep`] and runs the ported functions on it; their results are compared
 //! as traversal indices, flags, statuses and values. `init_gaps` has the C++ side compute the cached
@@ -1548,12 +1549,149 @@ fn notify_operation(code: u8) -> Result<NotifyOperation, HarnessError> {
     })
 }
 
-fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let ex = export(i)?;
-    let Some(c) = ffi::counts(&ex) else {
-        return Ok(build_failure(&ex));
+/// The `topology.vertex` shim's build conventions (its own `build` and `walk`: the
+/// vertex use lists followed after the loops' loop uses, `GetVertexEdgeGap` in the
+/// `init_gaps` walk), geometry owned under the arena identities.
+const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder::Conventions {
+    vertex_edge_gaps: true,
+    vertex_lists_last: true,
+    ..crate::own_builder::Conventions::EDGEUSE_GRAPH
+};
+
+/// The shim's `build_chain`: per segment its curve (an `SmLine` segment, re-parameterised
+/// to `ivl` when given, a `CreateLineSegment` B-spline, or the given B-spline), the
+/// first segment's start vertex by `MakeShellVertex`, then `MakeWireEdgeVertex` to a
+/// new end vertex, or `MakeWireEdge` back to the first vertex for the last segment of a
+/// closed chain; `rev` runs the edge against its curve.
+fn build_chain(
+    k: &mut Kernel,
+    b: &mut Brep,
+    closed: bool,
+    segs: &[SegIn],
+    curves: &[Option<SmCurve>],
+) -> Result<(), SolidError> {
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::topology::brep::p2::ArenaNotifyState;
+    use solidcore::topology::brep::{p3 as bp3, p9 as bp9};
+    let mut state = ArenaNotifyState::new(b);
+    let region = b.infinite_region();
+    let mut first = None;
+    let mut prev = None;
+    let n = segs.len();
+    for (i, sg) in segs.iter().enumerate() {
+        let (c, rev) = match sg {
+            SegIn::Line {
+                a,
+                b: e,
+                smline,
+                ivl,
+                rev,
+            } => {
+                let (a, e) = (Vec3::from_array(*a), Vec3::from_array(*e));
+                let c = if *smline {
+                    let ivl = ivl.map(|[t0, t1]| Extent1d::from_min_max(t0, t1));
+                    SmCurve::from(Line::create_line_segment(3, a, e, ivl.as_ref())?)
+                } else {
+                    crate::own_builder::line(a, e)?
+                };
+                (c, *rev)
+            }
+            SegIn::Curve { rev, .. } => (
+                curves
+                    .get(i)
+                    .cloned()
+                    .flatten()
+                    .ok_or_else(|| SolidError::invalid_input("chain", "segment curve"))?,
+                *rev,
+            ),
+        };
+        let ivl = c.natural_interval();
+        let p0 = c.evaluate_point(k, ivl.min())?;
+        let p1 = c.evaluate_point(k, ivl.max())?;
+        let o = if rev { OrientType::Opposite } else { OrientType::Same };
+        let start = if let Some(v) = prev {
+            v
+        } else {
+            let (_, v) = {
+                let mut env = state.env(None);
+                bp9::make_shell_vertex(b, region, if rev { p1 } else { p0 }, &mut env)?
+            };
+            state.seed(b);
+            first = Some(v);
+            v
+        };
+        if closed && i + 1 == n {
+            let end = first.unwrap_or(start);
+            let mut env = state.env(None);
+            bp3::make_wire_edge(k, b, &mut env, region, start, end, c, &ivl, o)?;
+        } else {
+            let end_point = if rev { p0 } else { p1 };
+            let (_, next) = {
+                let mut env = state.env(None);
+                bp3::make_wire_edge_vertex(k, b, &mut env, region, start, c, &ivl, o, end_point)?
+            };
+            prev = Some(next);
+        }
+        state.seed(b);
+    }
+    Ok(())
+}
+
+/// The Rust B-rep of a case, the face surface subclass held only inexactly (none for a
+/// built source) and its entity counts, or the output of a failed build. Shim-built
+/// sources are built by the Rust kernel ([`crate::own_builder`] under this shim's
+/// [`CONVENTIONS`]; a chain by [`build_chain`]); only `.smb` file sources are still
+/// imported from the C++ export ([`import`]).
+fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<OwnBrep>, HarnessError> {
+    use crate::own_builder::{build_as, counts, failed_output, finish, in_new_brep, Built};
+    let mut k = Kernel::default();
+    let built = match &i.brep {
+        BrepIn::Chain { closed, segs } => {
+            let curves = segs
+                .iter()
+                .map(|sg| match sg {
+                    SegIn::Curve { curve, .. } => chain_curve(curve).map(Some),
+                    SegIn::Line { .. } => Ok(None),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let raw = in_new_brep(&mut k, |k, b| build_chain(k, b, *closed, segs, &curves))?;
+            Some(finish(&mut k, raw, i.validate_only, i.init_gaps, &CONVENTIONS)?)
+        }
+        src => build_as(&mut k, src, i.validate_only, i.init_gaps, &CONVENTIONS)?,
     };
-    let (mut b, inexact) = import(&ex)?;
+    match built {
+        Some(Built::Brep(b)) => {
+            let c = counts(&b);
+            Ok(Ok((*b, None, c)))
+        }
+        Some(Built::Failed(e)) => Ok(Err(failed_output(&e))),
+        None => {
+            let ex = export(i)?;
+            let Some(c) = ffi::counts(&ex) else {
+                return Ok(Err(build_failure(&ex)));
+            };
+            let (b, inexact) = import(&ex)?;
+            Ok(Ok((b, inexact, c)))
+        }
+    }
+}
+
+/// A Rust B-rep, the inexactly held face surface subclass and its entity counts.
+type OwnBrep = (Brep, Option<i64>, [usize; 10]);
+
+/// A chain segment's B-spline curve, as the shim's `read_curve` makes it.
+fn chain_curve(c: &CrvIn) -> Result<SmCurve, HarnessError> {
+    let c: super::topology_edgeuse_p1::CrvIn = serde_json::to_value(c)
+        .and_then(serde_json::from_value)
+        .map_err(|e| harness(format!("chain curve: {e}")))?;
+    Ok(SmCurve::from(super::topology_edgeuse_p1::bspline_of(&c)?))
+}
+
+fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+    let (mut b, inexact, c) = match own_brep(i)? {
+        Ok(x) => x,
+        Err(o) => return Ok(o),
+    };
     let op = match resolve(&i.op, c, &b) {
         Ok(op) => op,
         Err(o) => return Ok(*o),

@@ -1,6 +1,8 @@
 //! Native B-rep construction calls and dependency-limited Rust entrypoints.
 //!
-//! Initial graphs are exported before either operation. Split refusals compare
+//! The Rust side builds a wire edge, face or network source itself
+//! ([`crate::own_builder`]) and repeats the shim's setup edits ([`own_setup`]); an
+//! `.smb` file's initial graph is exported after the setup, before either operation. Split refusals compare
 //! their retained endpoint as well as the complete semantic topology/geometry
 //! snapshot. Successful native mutations on deferred paths are not parity passes.
 use super::boolean_merge_p1::{graph_reachable, Canon};
@@ -146,12 +148,171 @@ fn request<'a>(i: &Inputs, path: &'a str, block: &'a [f64]) -> ffi::Request<'a> 
 fn target<I: ArenaId>(count: usize, selector: u8) -> Option<I> {
     (count > 0).then(|| I::from_index(u32::from(selector) % count as u32))
 }
-fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
-    let (mut b, _) = import(
-        initial
-            .get(2..)
-            .ok_or_else(|| error("missing initial export"))?,
-    )?;
+/// The shim's build conventions (`sc_topology_fixture.h`'s `build` and `walk`).
+const CONVENTIONS: crate::own_builder::Conventions<'static> =
+    crate::own_builder::Conventions::TOPOLOGY_FIXTURE;
+
+/// The shim's setup edits of the built B-rep `b` (in its walk order) before the
+/// export: op 5 variant 0 with editing, two `MakeVertexLoop`s on the selected face at
+/// fractions `(0.3, 0.4)` and `(0.7, 0.6)` of its UV domain, then a fresh walk; ops
+/// 4, 6 and 7, on the selected edge, an `SmLine` between its interval ends
+/// (`EditParameterization` to the interval, `SetCurve(line, TRUE)`, `SetOwner`) for
+/// variants 1 and 3, the primary edge use's mate made primary for variants 2 and 3,
+/// and the start and end vertex tolerances. The B-rep after the setup and the start
+/// and end vertex uses' walk indices (`-1` for none), or `None` where the shim
+/// returns `SC_ERR_ARG`.
+fn own_setup(
+    k: &mut Kernel,
+    b: Brep,
+    i: &Inputs,
+) -> Result<Option<(Brep, [f64; 2])>, HarnessError> {
+    use solidcore::topology::brep::p2::ArenaNotifyState;
+    let fail = |e: SolidError| error(&e);
+    let mut b = b;
+    if i.op == 5 && i.variant == 0 && i.editing {
+        let Some(face) = target::<FaceId>(b.faces().len(), i.selector) else {
+            return Ok(None);
+        };
+        let d = solidcore::topology::face::p2::uv_domain(&b, face).map_err(fail)?;
+        let Some(surface) = solidcore::topology::face::p2::surface(&b, face)
+            .map_err(fail)?
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let uv0 = Point2::new(d.min().x + 0.3 * d.x_length(), d.min().y + 0.4 * d.y_length());
+        let uv1 = Point2::new(d.min().x + 0.7 * d.x_length(), d.min().y + 0.6 * d.y_length());
+        let (Ok(p), Ok(q)) = (surface.evaluate_point(k, uv0), surface.evaluate_point(k, uv1))
+        else {
+            return Ok(None);
+        };
+        let mut state = ArenaNotifyState::new(&b);
+        let mut loops = Vec::new();
+        for point in [p, q] {
+            let made = {
+                let mut env = state.env(None);
+                port::make_vertex_loop(&mut b, face, point, OrientType::Opposite, &mut env)
+            };
+            let Ok((l, _)) = made else {
+                return Ok(None);
+            };
+            state.seed(&b);
+            loops.push(l);
+        }
+        let mut vus = Vec::new();
+        for l in loops {
+            let lu = b.loop_(l).map_err(fail)?.loopuse;
+            let vu = match lu.map(|lu| b.loopuse(lu).map(|r| r.start)) {
+                Some(Ok(solidcore::topology::LoopuseStart::Vertexuse(vu))) => vu,
+                _ => None,
+            };
+            vus.push(vu);
+        }
+        // the fresh walk: the walk order of the edited B-rep, with the new vertex uses'
+        // indices in it
+        let g = crate::own_builder::walk_with(&b, false).map_err(fail)?;
+        let index = |vu: Option<VertexuseId>| {
+            vu.and_then(|vu| g.vertexuses.items.iter().position(|&x| x == vu))
+                .map_or(-1.0, |x| x as f64)
+        };
+        let ids = [
+            index(vus.first().copied().flatten()),
+            index(vus.get(1).copied().flatten()),
+        ];
+        let b = crate::own_builder::renumber_with(&b, &CONVENTIONS)?;
+        return Ok(Some((b, ids)));
+    }
+    if matches!(i.op, 4 | 6 | 7) {
+        let Some(edge) = target::<EdgeId>(b.edges().len(), i.selector) else {
+            return Ok(None);
+        };
+        let rec = b.edge(edge).map_err(fail)?;
+        let (Some(curve), Some(v0), Some(v1)) = (
+            rec.curve.clone(),
+            solidcore::topology::edge::start_vertex(&b, edge).map_err(fail)?,
+            solidcore::topology::edge::end_vertex(&b, edge).map_err(fail)?,
+        ) else {
+            return Ok(None);
+        };
+        let ivl = rec.interval;
+        if matches!(i.variant, 1 | 3) {
+            let (Ok(p), Ok(q)) = (
+                curve.evaluate_point(k, ivl.min()),
+                curve.evaluate_point(k, ivl.max()),
+            ) else {
+                return Ok(None);
+            };
+            let mut line = Line::from_points(p, q, 3);
+            if line.edit_parameterization(&ivl).is_err() {
+                return Ok(None);
+            }
+            let mut state = ArenaNotifyState::new(&b);
+            {
+                let mut env = state.env(None);
+                solidcore::topology::edge::set_curve(
+                    &mut b,
+                    edge,
+                    Some(Curve::from(line)),
+                    solidcore::topology::edge::SetCurveOptions {
+                        delete_old_curve: true,
+                        ..solidcore::topology::edge::SetCurveOptions::default()
+                    },
+                    &mut env,
+                    [None, None],
+                )
+                .map_err(fail)?;
+            }
+            if let Some(c) = b.edge_mut(edge).map_err(fail)?.curve.as_mut() {
+                let (owner, brep) = (CONVENTIONS.edge_owner)(edge);
+                let _ = c.set_owner(Some(owner), Some(brep));
+            }
+        }
+        if matches!(i.variant, 2 | 3) {
+            let primary = solidcore::topology::edgeuse::p1::primary_edgeuse(&b, edge)
+                .map_err(fail)?
+                .ok_or_else(|| error("edge without primary edge use"))?;
+            let mate = solidcore::topology::edgeuse::p1::mate(&b, primary).map_err(fail)?;
+            solidcore::topology::edge::reset_primary_edgeuse(&mut b, edge, mate)
+                .map_err(fail)?;
+        }
+        // `SetTolerance(SmZoneTol3d(raw), FALSE)`
+        let [t0, t1] = i.tolerances.map(|t| zone_tol3d(k, t));
+        solidcore::topology::vertex::set_tolerance(&mut b, v0, t0, false, true).map_err(fail)?;
+        solidcore::topology::vertex::set_tolerance(&mut b, v1, t1, false, true).map_err(fail)?;
+    }
+    Ok(Some((b, [-1.0, -1.0])))
+}
+
+/// The Rust B-rep after the shim's setup and the start/end vertex use indices: a
+/// shim-built source built by the Rust kernel ([`crate::own_builder`], then
+/// [`own_setup`]); an `.smb` file imported from the shim's post-setup export.
+fn rust_input(i: &Inputs) -> Result<(Brep, [f64; 2]), HarnessError> {
+    use crate::own_builder::{build_with, Built};
+    let mut k = Kernel::default();
+    match build_with(&mut k, &i.brep, false, false, &CONVENTIONS)? {
+        Some(Built::Brep(b)) => {
+            if i.op > 8 || i.variant > 5 {
+                return Err(error("native request rejected"));
+            }
+            own_setup(&mut k, *b, i)?.ok_or_else(|| error("native request rejected"))
+        }
+        Some(Built::Failed(e)) => Err(error(&format!("native build failed: {e}"))),
+        None => {
+            let path = spec::path_of(Some(&i.brep))?;
+            let block = spec::brep_block_of(Some(&i.brep), false, false)?;
+            let initial = ffi::eval(request(i, &path, &block), true).map_err(|e| error(&e))?;
+            let (b, _) = import(
+                initial
+                    .get(2..)
+                    .ok_or_else(|| error("missing initial export"))?,
+            )?;
+            let vu = |slot: usize| initial.get(slot).copied().unwrap_or(-1.0);
+            Ok((b, [vu(0), vu(1)]))
+        }
+    }
+}
+
+fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessError> {
     // As the native B-rep: each edge owns its curve and each face its surface, under the
     // arena keys op 0's `BrepQuery::default()` names them by (the import leaves curves
     // unowned and owns face f's surface as `1 + f`), and a face-owned surface carries the
@@ -534,10 +695,8 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let path = spec::path_of(Some(&i.brep))?;
-        let block = spec::brep_block_of(Some(&i.brep), false, false)?;
-        let initial = ffi::eval(request(&i, &path, &block), true).map_err(|e| error(&e))?;
-        rust(&i, &initial)
+        let (b, initial) = rust_input(&i)?;
+        rust(&i, b, initial)
     }
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         let scale = *[1e-6, 1.0, 1e6].get(rng.below(3) as usize)?;
