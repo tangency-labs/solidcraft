@@ -62,3 +62,27 @@ fn a_copy_with_another_solid_makes_its_own_meshes() {
     let m = swapped.mesh(&crate::MeshTolerance::chord(0.5)).unwrap();
     assert_eq!(m.triangles.len(), other.mesh(&crate::MeshTolerance::chord(0.5)).unwrap().triangles.len());
 }
+
+/// A placed copy that shows its original's display is planned as the original, moved: the same
+/// triangles on every face, its points the original's placed (so within the original's chord of
+/// the copy's surfaces), and the original planned once for every copy.
+#[test]
+fn a_placed_copy_is_planned_as_its_original_moved() {
+    let part = plate();
+    let share = DisplayShare::new(part.clone());
+    let (angle, shift) = (0.7f64, Vec3::new(50.0, -20.0, 5.0));
+    let (c, s) = (angle.cos(), angle.sin());
+    let t = [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [shift.x, shift.y, shift.z, 1.]];
+    let copies: Vec<Body> = (0..2).map(|_| crate::transform(&part, shift, Vec3::ZERO, Vec3::Z, angle).unwrap().with_display_share(&share, t)).collect();
+    let tol = crate::MeshTolerance::display_of(part.size());
+    let original = part.mesh_plan(&tol).unwrap().evaluate();
+    for copy in &copies {
+        let m = copy.mesh_of(&copy.mesh_plan(&tol).unwrap()).unwrap();
+        assert_eq!(m.triangles, original.triangles);
+        assert_eq!(m.tri_face, original.tri_face);
+        let placed = placed_mesh(&original, &t).unwrap();
+        let far = m.positions.iter().zip(&placed.positions).map(|(p, q)| p.dist(*q)).fold(0.0, f64::max);
+        assert!(far < 1e-9, "{far}");
+    }
+    assert_eq!(share.0.plans.lock().unwrap().len(), 1, "planned once for both copies");
+}

@@ -70,7 +70,7 @@ pub(super) fn workers() -> usize {
     }
 }
 
-fn prepare(ex: &Exchange, job: &Job) -> Prepared {
+pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
     let _span = solidcraft_profile::span("import", "step.body");
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),

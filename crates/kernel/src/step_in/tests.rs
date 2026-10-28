@@ -772,9 +772,9 @@ fn instanced_parts_are_oriented_once() {
 }
 
 /// Distinct parts are oriented together, not one occurrence at a time: an assembly placing
-/// two parts in turn converts in a few steps of many solids (the first finds both parts'
-/// orientations side by side on the workers, the next places every other instance), where
-/// converting instance by instance took one step each.
+/// two parts in turn converts in one step (both parts' orientations found side by side on the
+/// workers, every other instance placed after its part's first), where converting instance by
+/// instance took one step each, and stopping the step at a part's second instance two.
 #[test]
 fn distinct_parts_convert_together_across_instances() {
     let n = 24;
@@ -784,7 +784,7 @@ fn distinct_parts_convert_together_across_instances() {
     while reading.step() {
         steps += 1;
     }
-    assert_eq!(steps, 2, "both parts in the first step, every other instance in the second");
+    assert_eq!(steps, 1, "both parts and every other instance in one step");
     let threaded = reading.finish().unwrap();
     assert_eq!(threaded.bodies.len(), n as usize);
     assert!(threaded.warnings.is_empty(), "{:?}", threaded.warnings);
