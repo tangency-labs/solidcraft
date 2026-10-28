@@ -727,6 +727,13 @@ pub fn create_oriented_trim_boundary(
         eu1::faceuse_loopuses(b, fu, false, None)?
     };
 
+    // WR-491, opt-in: the periods of the directions in which the surface is closed
+    let periods = if k.fixes.trim_boundary_seam_wrap && parameter_space && fill_singularities {
+        seam_periods(k, b, f)?
+    } else {
+        [None, None]
+    };
+
     // for every loop
     for lu in loopuses {
         // no work - lone vertex
@@ -740,83 +747,183 @@ pub fn create_oriented_trim_boundary(
             continue;
         };
 
-        // the last edge's end-point (status ignored)
-        let mut last_pnt = Vec3::UNDEF;
-        if let Some(p) = ignored(normalized_evaluate_uv(k, b, last_eu, 1.0))? {
-            last_pnt = p;
-        }
+        let first_curve = out.curves.len();
+        // With the fix, a first pass shifts the curves after a seam wrap; a loop that does
+        // not close that way is made again as upstream does.
+        for wrap in [periods != [None, None], false] {
+            out.curves.truncate(first_curve);
+            let mut shift = Vec3::new(0.0, 0.0, 0.0);
 
-        let mut edges_in_loop = 0usize;
-
-        // for every edgeuse in this loop
-        for &eu in &edgeuses {
-            if eu1::orientation(b, eu)? == OrientType::Same {
-                let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
-                let ivl = uv_curve.natural_interval();
-
-                // get trim curve's start UV point
-                let pnt = uv_curve.evaluate_point(k, ivl.min())?;
-
-                // get dist from this start pt to last curve's end-point
-                let diff = pnt - last_pnt;
-                let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
-                if diff.length_squared() > scaled_zero && parameter_space && fill_singularities {
-                    // If there is a gap create a line to fill it
-                    edges_in_loop += 1;
-                    out.curves.push(gap_line(last_pnt, pnt)?);
-                }
-
-                // Get UVCurve->End UVPoint
-                last_pnt = uv_curve.evaluate_point(k, ivl.max())?;
-                edges_in_loop += 1;
-                if parameter_space {
-                    // (status ignored upstream; only NER(pOrig))
-                    let orig = fetch_uv_trim_curve(k, b, eu)?
-                        .1
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
-                    let mut bsc = orig.copy(k)?;
-                    bsc.convert_to_2d(k)?;
-                    let _ = bsc.set_owner(Some(key_of(EntityRef::Edgeuse(eu))), None);
-                    out.curves.push(bsc);
-                } else {
-                    let e = edge_deref(b, eu)?;
-                    out.curves.push(trimmed_edge_curve(k, b, e)?);
-                }
-            } else {
-                let mut bsc = if parameter_space {
-                    let orig = get_or_create_uv_trim_curve(k, b, eu)?;
-                    let mut bsc = orig.copy(k)?;
-                    bsc.convert_to_2d(k)?;
-                    let _ = bsc.set_owner(orig.owner(), None);
-                    bsc
-                } else {
-                    let e = edge_deref(b, eu)?;
-                    let owner = edge_bspline_curve(b, e)?.owner();
-                    let mut bsc = trimmed_edge_curve(k, b, e)?;
-                    let _ = bsc.set_owner(owner, None);
-                    bsc
-                };
-
-                let ivl = bsc.natural_interval();
-                let ivl = bsc.reverse_parameterization(k, &ivl)?;
-                let pnt = bsc.evaluate_point(k, ivl.min())?;
-                let diff = pnt - last_pnt;
-                let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
-                if diff.length_squared() > scaled_zero && parameter_space && fill_singularities {
-                    // If there is a gap create a line to fill it
-                    edges_in_loop += 1;
-                    out.curves.push(gap_line(last_pnt, pnt)?);
-                }
-                last_pnt = bsc.evaluate_point(k, ivl.max())?;
-                edges_in_loop += 1;
-                out.curves.push(bsc);
+            // the last edge's end-point (status ignored)
+            let mut last_pnt = Vec3::UNDEF;
+            if let Some(p) = ignored(normalized_evaluate_uv(k, b, last_eu, 1.0))? {
+                last_pnt = p;
             }
-        }
 
-        out.loops.push(edges_in_loop);
+            let mut edges_in_loop = 0usize;
+
+            // for every edgeuse in this loop
+            for &eu in &edgeuses {
+                if eu1::orientation(b, eu)? == OrientType::Same {
+                    let uv_curve = get_or_create_uv_trim_curve(k, b, eu)?;
+                    let ivl = uv_curve.natural_interval();
+
+                    // get trim curve's start UV point
+                    let mut pnt = uv_curve.evaluate_point(k, ivl.min())?;
+                    if wrap {
+                        shift = shift + seam_wrap(pnt + shift - last_pnt, periods);
+                        pnt += shift;
+                    }
+
+                    // get dist from this start pt to last curve's end-point
+                    let diff = pnt - last_pnt;
+                    let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
+                    if diff.length_squared() > scaled_zero && parameter_space && fill_singularities
+                    {
+                        // If there is a gap create a line to fill it
+                        edges_in_loop += 1;
+                        out.curves.push(gap_line(last_pnt, pnt)?);
+                    }
+
+                    // Get UVCurve->End UVPoint
+                    last_pnt = uv_curve.evaluate_point(k, ivl.max())?;
+                    if wrap {
+                        last_pnt += shift;
+                    }
+                    edges_in_loop += 1;
+                    if parameter_space {
+                        // (status ignored upstream; only NER(pOrig))
+                        let orig = fetch_uv_trim_curve(k, b, eu)?
+                            .1
+                            .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        let mut bsc = orig.copy(k)?;
+                        bsc.convert_to_2d(k)?;
+                        let _ = bsc.set_owner(Some(key_of(EntityRef::Edgeuse(eu))), None);
+                        if wrap {
+                            shift_curve(k, &mut bsc, shift)?;
+                        }
+                        out.curves.push(bsc);
+                    } else {
+                        let e = edge_deref(b, eu)?;
+                        out.curves.push(trimmed_edge_curve(k, b, e)?);
+                    }
+                } else {
+                    let mut bsc = if parameter_space {
+                        let orig = get_or_create_uv_trim_curve(k, b, eu)?;
+                        let mut bsc = orig.copy(k)?;
+                        bsc.convert_to_2d(k)?;
+                        let _ = bsc.set_owner(orig.owner(), None);
+                        bsc
+                    } else {
+                        let e = edge_deref(b, eu)?;
+                        let owner = edge_bspline_curve(b, e)?.owner();
+                        let mut bsc = trimmed_edge_curve(k, b, e)?;
+                        let _ = bsc.set_owner(owner, None);
+                        bsc
+                    };
+
+                    let ivl = bsc.natural_interval();
+                    let ivl = bsc.reverse_parameterization(k, &ivl)?;
+                    let mut pnt = bsc.evaluate_point(k, ivl.min())?;
+                    if wrap {
+                        shift = shift + seam_wrap(pnt + shift - last_pnt, periods);
+                        pnt += shift;
+                    }
+                    let diff = pnt - last_pnt;
+                    let scaled_zero = EFF_ZERO * (1.0 + pnt.max_dimension());
+                    if diff.length_squared() > scaled_zero && parameter_space && fill_singularities
+                    {
+                        // If there is a gap create a line to fill it
+                        edges_in_loop += 1;
+                        out.curves.push(gap_line(last_pnt, pnt)?);
+                    }
+                    last_pnt = bsc.evaluate_point(k, ivl.max())?;
+                    if wrap {
+                        last_pnt += shift;
+                    }
+                    edges_in_loop += 1;
+                    if wrap {
+                        shift_curve(k, &mut bsc, shift)?;
+                    }
+                    out.curves.push(bsc);
+                }
+            }
+
+            // a loop shifted by a net period is not closed: upstream's gap lines instead
+            if wrap && (shift.x != 0.0 || shift.y != 0.0) {
+                continue;
+            }
+            out.loops.push(edges_in_loop);
+            break;
+        }
     }
 
     Ok(out)
+}
+
+/// How near a whole number of periods a UV gap must be to count as a seam wrap, as a
+/// fraction of the period (WR-491).
+const SEAM_WRAP_RESIDUAL: f64 = 0.01;
+
+/// The periods (natural domain lengths) of the directions in which the face's surface is
+/// closed within twice the face tolerance (two of its points each that near a shared place), `None` in the others (WR-491).
+fn seam_periods(k: &Kernel, b: &Brep, f: FaceId) -> Result<[Option<f64>; 2]> {
+    let surface = b
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| null("face without surface"))?;
+    let tolerance = fp2::tolerance(b, f)?;
+    let dom = surface.natural_uv_domain_with_nurb(k)?;
+    let mut periods = [None, None];
+    for (slot, (length, direction)) in periods.iter_mut().zip([
+        (dom.x_length(), SurfParamType::U),
+        (dom.y_length(), SurfParamType::V),
+    ]) {
+        if length.is_finite()
+            && length > 0.0
+            && surface
+                .is_closed(k, &dom, direction, Some(2.0 * tolerance), false)?
+                .0
+        {
+            *slot = Some(length);
+        }
+    }
+    Ok(periods)
+}
+
+/// The shift that takes a curve starting at `gap` from the end of the one before it onto
+/// that end, where `gap` is whole periods in a closed direction up to
+/// [`SEAM_WRAP_RESIDUAL`] (WR-491): a seam crossing, not a surface singularity.
+fn seam_wrap(gap: Vec3, periods: [Option<f64>; 2]) -> Vec3 {
+    let mut shift = Vec3::new(0.0, 0.0, 0.0);
+    for (d, period, s) in [
+        (gap.x, periods[0], &mut shift.x),
+        (gap.y, periods[1], &mut shift.y),
+    ] {
+        if let Some(p) = period {
+            let n = (d / p).round();
+            if n != 0.0 && (d - n * p).abs() <= SEAM_WRAP_RESIDUAL * p {
+                *s = -n * p;
+            }
+        }
+    }
+    shift
+}
+
+/// `curve` (2D) moved by `shift` in the parameter plane (WR-491).
+fn shift_curve(k: &Kernel, curve: &mut Curve, shift: Vec3) -> Result<()> {
+    if shift.x == 0.0 && shift.y == 0.0 {
+        return Ok(());
+    }
+    let x = Vec3::new(1.0, 0.0, 0.0);
+    let y = Vec3::new(0.0, 1.0, 0.0);
+    curve.transform(
+        k,
+        &Axis2Placement::new(Point3::new(shift.x, shift.y, 0.0), x, y),
+        None,
+    )?;
+    curve.convert_to_2d(k)
 }
 
 /// `SmLine::CreateLineSegment(ctx, 2, start, end, pLine)`.
