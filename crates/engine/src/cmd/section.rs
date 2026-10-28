@@ -86,51 +86,29 @@ fn english_name(n: usize) -> String {
 /// Where Section Analysis `id` cuts now, or why it cannot (its plane is gone or not flat);
 /// `None` when there is no such section.
 pub fn status(s: &Session, id: u64) -> Option<std::result::Result<Cut, String>> {
-    let sec = s.doc.section_analyses.get(id)?.clone();
-    Some(resolve_cached(s, &sec))
+    let sec = s.doc.section_analyses.get(id)?;
+    Some(resolve(s, sec))
 }
 
-/// Results worked out for the design, model and world they were worked out for: a cut on a face
-/// looks the face up, which meshes its body, so it is done once per model, not once a frame.
+/// Faces found for the model and world they were found in: finding a face meshes its body, so
+/// it is done once per model, not once per command or frame (an open dialog's preview, the
+/// browser's rows).
 #[derive(Default)]
 pub(crate) struct Cache {
-    key: Option<(Arc<Document>, Arc<ModelState>, Arc<ModelState>)>,
-    found: Vec<(SectionAnalysis, std::result::Result<Cut, String>)>,
+    key: Option<(Arc<ModelState>, Arc<ModelState>)>,
+    found: Vec<(SectionPlane, std::result::Result<Cut, String>)>,
 }
 
 pub(crate) type SharedCache = Arc<Mutex<Cache>>;
 
-fn resolve_cached(s: &Session, sec: &SectionAnalysis) -> std::result::Result<Cut, String> {
-    let (model, world) = (s.model.state(), s.world_state());
-    let same = |c: &Cache| c.key.as_ref().is_some_and(|(d, m, w)| Arc::ptr_eq(d, &s.doc) && Arc::ptr_eq(m, &model) && Arc::ptr_eq(w, &world));
-    if let Ok(c) = s.section_cache.lock()
-        && same(&c)
-        && let Some((_, r)) = c.found.iter().find(|(x, _)| x == sec)
-    {
-        return r.clone();
-    }
-    let r = resolve(s, &s.doc, &model, &world, sec);
-    if let Ok(mut c) = s.section_cache.lock() {
-        if !same(&c) {
-            c.key = Some((s.doc.clone(), model, world));
-            c.found.clear();
-        }
-        if c.found.len() >= 64 {
-            drop(c.found.remove(0));
-        }
-        c.found.push((sec.clone(), r.clone()));
-    }
-    r
-}
-
 /// The cut a section makes in this model: its plane found where it is now, moved `offset` along
 /// the plane's normal, and turned round by `flip`.
-fn resolve(s: &Session, doc: &Document, model: &ModelState, world: &ModelState, sec: &SectionAnalysis) -> std::result::Result<Cut, String> {
-    let (origin, normal) = base_plane(s, doc, model, world, &sec.plane)?;
+fn resolve(s: &Session, sec: &SectionAnalysis) -> std::result::Result<Cut, String> {
+    let (origin, normal) = base_plane(s, &sec.plane)?;
     let offset = if sec.offset.trim().is_empty() {
         0.0
     } else {
-        doc.eval(&sec.offset, solidcraft_doc::expr::Kind::Length).map_err(|e| format!("distance: {e}"))?
+        s.doc.eval(&sec.offset, solidcraft_doc::expr::Kind::Length).map_err(|e| format!("distance: {e}"))?
     };
     if !origin.is_finite() || !offset.is_finite() || !normal.is_finite() {
         return Err("the plane must be finite".into());
@@ -139,27 +117,49 @@ fn resolve(s: &Session, doc: &Document, model: &ModelState, world: &ModelState, 
     Ok((origin, if sec.flip { -normal } else { normal }))
 }
 
-fn base_plane(s: &Session, doc: &Document, model: &ModelState, world: &ModelState, plane: &SectionPlane) -> std::result::Result<Cut, String> {
+fn base_plane(s: &Session, plane: &SectionPlane) -> std::result::Result<Cut, String> {
     match plane {
         SectionPlane::Origin { name } => Plane::named(name).map(|p| (p.origin, p.normal())).ok_or_else(|| format!("unknown plane `{name}`")),
         SectionPlane::Fixed { origin, normal } => {
             normal.normalized().map(|n| (*origin, n)).ok_or_else(|| "the plane needs a non-zero normal".to_string())
         }
         SectionPlane::Construction { feature } => {
-            let name = doc.feature(*feature).map(|f| f.name.clone()).ok_or_else(|| "its construction plane was deleted".to_string())?;
+            let name = s.doc.feature(*feature).map(|f| f.name.clone()).ok_or_else(|| "its construction plane was deleted".to_string())?;
+            let model = s.model.state();
             let c = model.construct.iter().find(|c| c.feature == *feature);
             match c.map(|c| &c.geom) {
                 Some(solidcraft_doc::construct::ConstructGeom::Plane(pl)) => Ok((pl.origin, pl.normal())),
                 _ => Err(format!("construction plane `{name}` is not built (rolled back, suppressed or failed)")),
             }
         }
-        SectionPlane::Face { body, face, at } => face_plane(s, world, body, face, *at),
+        SectionPlane::Face { body, face, at } => {
+            let (model, world) = (s.model.state(), s.world_state());
+            let same = |c: &Cache| c.key.as_ref().is_some_and(|(m, w)| Arc::ptr_eq(m, &model) && Arc::ptr_eq(w, &world));
+            if let Ok(c) = s.section_cache.lock()
+                && same(&c)
+                && let Some((_, r)) = c.found.iter().find(|(x, _)| x == plane)
+            {
+                return r.clone();
+            }
+            let r = face_plane(&world, body, face, *at);
+            if let Ok(mut c) = s.section_cache.lock() {
+                if !same(&c) {
+                    c.key = Some((model, world));
+                    c.found.clear();
+                }
+                if c.found.len() >= 64 {
+                    drop(c.found.remove(0));
+                }
+                c.found.push((plane.clone(), r.clone()));
+            }
+            r
+        }
     }
 }
 
 /// A planar face by its persistent name: on its body, or on any body when that is gone (renamed
 /// or split off), the piece nearest where it was picked.
-fn face_plane(_s: &Session, st: &ModelState, body: &str, face: &str, at: Vec3) -> std::result::Result<Cut, String> {
+fn face_plane(st: &ModelState, body: &str, face: &str, at: Vec3) -> std::result::Result<Cut, String> {
     use solidcraft_doc::naming;
     let hit = st.body(body).filter(|b| !b.body.is_mesh()).and_then(|b| naming::face_on_body(b, face, at).map(|(i, p, _)| (b, i, p)));
     let hit = hit.or_else(|| {
@@ -191,7 +191,7 @@ pub(crate) fn sync(s: &mut Session) {
     s.section_derived = true;
     let visible = s.doc.section_analyses.visible().cloned();
     let (cut, hatch) = match &visible {
-        Some(sec) => (resolve_cached(s, sec).ok(), sec.hatch),
+        Some(sec) => (resolve(s, sec).ok(), sec.hatch),
         None => (None, s.section_hatch),
     };
     if s.section != cut || s.section_hatch != hatch {
@@ -301,16 +301,19 @@ fn face_of(s: &Session, v: &Value, cmd: &str) -> Result<SectionPlane> {
             .map(|(_, b, i)| (b, i))
             .ok_or_else(|| bad(cmd, "no face is at the point"))?,
     };
+    let name = if b.body.is_mesh() { None } else { solidcraft_doc::naming::face_names(b).get(index).filter(|n| !n.is_empty()).cloned() };
+    if let Some(face) = name {
+        // Found as the section will find it from now on (and kept for that).
+        let plane = SectionPlane::Face { body: b.name.clone(), face, at: point };
+        base_plane(s, &plane).map_err(|_| bad(cmd, "the face must be planar"))?;
+        return Ok(plane);
+    }
+    // A face with no name (a mesh): where it is now.
     let tol = (b.body.size() * 1e-3).max(1e-3);
     let faces = b.body.faces(tol).map_err(|e| bad(cmd, format!("the face cannot be read: {e}")))?;
     let f = faces.iter().find(|f| f.index == index).ok_or_else(|| bad(cmd, format!("body `{}` has no face {index}", b.name)))?;
     let normal = f.plane_normal.ok_or_else(|| bad(cmd, "the face must be planar"))?;
-    let name = if b.body.is_mesh() { None } else { solidcraft_doc::naming::face_names(b).get(index).filter(|n| !n.is_empty()).cloned() };
-    Ok(match name {
-        Some(face) => SectionPlane::Face { body: b.name.clone(), face, at: point },
-        // A face with no name (a mesh): where it is now.
-        None => SectionPlane::Fixed { origin: point, normal },
-    })
+    Ok(SectionPlane::Fixed { origin: point, normal })
 }
 
 /// The world axis a named plane's normal lies along.
@@ -383,9 +386,7 @@ fn reply(s: &Session, id: Option<u64>) -> Result<Value> {
 
 /// A section as given, checked: it must cut now (its plane is built, its distance evaluates).
 fn checked_cut(s: &Session, sec: &SectionAnalysis, cmd: &str) -> Result<()> {
-    let model = s.model.state();
-    let world = s.world_state();
-    resolve(s, &s.doc, &model, &world, sec).map(|_| ()).map_err(|e| bad(cmd, e))
+    resolve(s, sec).map(|_| ()).map_err(|e| bad(cmd, e))
 }
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
@@ -533,7 +534,7 @@ fn list(s: &mut Session, _p: &Value) -> Result<Value> {
         .items
         .iter()
         .map(|sec| {
-            let r = resolve_cached(s, sec);
+            let r = resolve(s, sec);
             let (cut, error) = match r {
                 Ok(c) => (Some(c), None),
                 Err(e) => (None, Some(e)),

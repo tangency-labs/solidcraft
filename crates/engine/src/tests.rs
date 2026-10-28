@@ -1807,7 +1807,7 @@ fn section_analyses_are_saved_with_the_design() {
     assert_eq!(back.section_analyses, s.doc.section_analyses);
     let reopened = Session::new(back);
     assert_eq!(reopened.section, Some(cut), "the section shown is shown again");
-    assert_eq!(reopened.section_hatch, true);
+    assert!(reopened.section_hatch);
     let mut hidden = reopened.scratch();
     hidden.section_sync = true;
     run(&mut hidden, "inspect.section.visibility", json!({"visible": false}));
