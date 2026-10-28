@@ -22,15 +22,16 @@
 //!   weight one at their ends), and refused otherwise. Inside, the weights are the Coons blend of
 //!   the boundary's and stay fixed, so the surface `S = Σ R_ij P_ij`, `R_ij = w_ij N_i N_j / W`,
 //!   is linear in the free points and everything below is a linear least-squares problem.
-//! - **One space.** Every side, each on `[0, 1]` by an affine map of its parameter (which changes
-//!   neither the curve nor its pieces), is made compatible with every other exactly: split into
-//!   Bézier pieces at its breaks, each piece raised to the fill's degree (NURBS Book §5.5), joined
-//!   with each break repeated as often as that degree, then carried into the common space
-//!   ([`crate::spline_space::embed`]). The common space repeats every side's breaks as often as
-//!   the degree; the breaks refinement adds are simple knots, so the fill is as smooth across them
-//!   as its degree allows. The degree is the sides' highest, and at least one more than the
-//!   highest continuity order n asked (G1 quadratic … G4 quintic), so the fill's own
-//!   derivatives up to order n are continuous across the knots refinement adds.
+//! - **The spaces.** Every side, each on `[0, 1]` by an affine map of its parameter (which
+//!   changes neither the curve nor its pieces), is carried exactly into a common space: one
+//!   patch has a space along u holding its two sides that run along u, and one along v; patches
+//!   about a centre share one space both ways, which every edge half and spoke runs in. A space
+//!   keeps each side's continuity at its breaks (a knot of multiplicity `m` in a side of degree
+//!   `p` is one of multiplicity `m + q − p` at degree `q`, NURBS Book §5.5), and the breaks
+//!   refinement adds are simple knots, so the fill is as smooth across them as its degree allows.
+//!   The degree is the sides' highest, and at least one more than the highest continuity order
+//!   n asked (G1 quadratic … G4 quintic), so the fill's own derivatives up to order n are
+//!   continuous across the knots refinement adds.
 //! - **The start**: each patch is the bilinearly blended Coons patch of its sides (S. A. Coons,
 //!   1967), built on the Greville abscissae (a linear function is reproduced exactly there), the
 //!   spokes starting as straight lines to the centre, the mean of the midpoints.
@@ -58,11 +59,15 @@
 //!   At a corner where the neighbours' tangent planes disagree no surface is G1 to both, and at
 //!   the centre the spokes' tangency conditions overdetermine the patches: the stations near
 //!   either are fitted but not held to the angle tolerance.
-//! - **Refinement**: while the normals miss the neighbours' (or each other's across a spoke) by
-//!   more than the angle tolerance, a jump of order 2 … n carried over the loop's size
-//!   ([`within_order`]) does, a point is missed, a patch folds, or the space has too few
-//!   rows for the conditions from opposite sides to stay apart, every span is halved (knot
-//!   insertion carries the sides into the finer space exactly), up to [`MAX_ISO_SPANS`].
+//! - **Refinement**: while the normals at the stations of the sides running along u (or v) miss
+//!   the neighbours' (or each other's across a spoke) by more than the angle tolerance beyond the
+//!   edge's own lean out of the neighbour's tangent plane (a fill that holds an edge cannot come
+//!   nearer its neighbour than the edge itself does), or a jump
+//!   of order 2 … n carried over the loop's size does ([`within_order`]), or the space that way
+//!   has too few rows for the conditions from opposite sides to stay apart, the spans that way are
+//!   halved (both ways where a point is missed, a patch folds, or the patches share one space),
+//!   up to [`MAX_ISO_SPANS`] and the free points one solve takes ([`MAX_BANDED_POINTS`] for one
+//!   patch, whose system is banded, [`MAX_UNKNOWN_POINTS`] about a centre, whose is dense).
 //! - **A crown** fills the middle out along the normals, on control points clear of the rows the
 //!   conditions hold, so the loop and the conditions across it do not move.
 //!
@@ -73,14 +78,17 @@ use crate::Vec3;
 use crate::bspline::{HPoint, MAX_SPLINE_DEGREE, NurbsSurface, SplineError, SplineResult, check_knots, invalid, segment};
 use crate::fill_general::Across;
 use crate::linkage::MAX_CONTINUITY;
-use crate::spline_space::{Space, embed};
+use crate::spline_space::{Cond, Interpolant, Space};
 
 /// Most spans of the fill's space.
 pub const MAX_ISO_SPANS: usize = 64;
 /// Most edges of a loop.
 pub const MAX_ISO_EDGES: usize = 16;
-/// Most free control points one least-squares solve takes (its system is dense).
+/// Most free control points of patches about a centre (their system is solved dense: the
+/// spokes and the centre couple every patch).
 const MAX_UNKNOWN_POINTS: usize = 500;
+/// Most free control points of one patch (its system is banded: see [`Quilt::new`]).
+const MAX_BANDED_POINTS: usize = 6000;
 /// Stations per span of a side where conditions are asked and checked.
 const STATIONS_PER_SPAN: usize = 6;
 /// Stations per control point of a row.
@@ -134,6 +142,15 @@ impl IsoEdge {
     pub fn middle(&self) -> f64 {
         let [a, b] = self.domain();
         0.5 * (a + b)
+    }
+
+    /// The unit tangent at parameter `t` (the loop's way), `None` where the edge stops.
+    pub fn tangent(&self, t: f64) -> Option<Vec3> {
+        let space = Space::new(self.degree, self.knots.clone()).ok()?;
+        let h = self.homogeneous();
+        let (a, da) = (space.eval(&h, t, 0).ok()?, space.eval(&h, t, 1).ok()?);
+        let p = a.project()?;
+        ((da.xyz() - p * da.w) * (1.0 / a.w)).normalized()
     }
 
     /// The homogeneous control points.
@@ -191,6 +208,11 @@ pub struct Achieved {
     /// a spoke, between the two patches') at a station held to the tolerance, and at any station.
     pub normal_deviation: f64,
     pub normal_deviation_all: f64,
+    /// The largest angle (radians) by which the fill's normal at a station held to the tolerance
+    /// misses the neighbour's beyond the edge's own lean out of the neighbour's tangent plane
+    /// there (the fill holds the edge, so it can come no nearer): what the angle tolerance is
+    /// held to.
+    pub normal_excess: f64,
     /// `jumps[k]`, k = 2 … 4: the largest jump, clear of the loop's corners, of the k-th
     /// derivative of the linkage curves' height above the neighbour per unit length of their
     /// foot (`(n·c⁽ᵏ⁾ − target) / |x₁|ᵏ`, 1/lengthᵏ⁻¹) across the edges asked for order k or more:
@@ -253,47 +275,68 @@ fn snapped(s: &Space, breaks: &[f64]) -> SplineResult<Space> {
     Space::new(s.degree(), knots)
 }
 
-/// One space holding every curve, of degree `q` (at least each curve's): every break of any
-/// curve repeated `q` times (breaks of different curves within [`BREAK_TOL`] made one), and the
-/// breaks `extra` adds as simple knots; and each curve's control points there (each Bézier piece
-/// raised to that degree, then knots inserted). Exact.
+/// One space holding every curve, of degree `q` (at least each curve's), and each curve's
+/// control points there. Each break of a curve keeps that curve's continuity there: a knot of
+/// multiplicity `m` in a curve of degree `p` is one of multiplicity `m + q − p` in the space (as
+/// raising the degree needs, NURBS Book §5.5), the most any curve asks (breaks of different
+/// curves within [`BREAK_TOL`] made one); the breaks `extra` adds are simple knots. Exact: the
+/// space contains every curve, which is carried into it by [`carried`].
 fn compatible(curves: &[&Curve], extra: &[f64], q: usize) -> SplineResult<(Space, Vec<Vec<HPoint>>)> {
     let q = curves.iter().map(|s| s.space.degree()).max().unwrap_or(1).max(q);
-    let mut own: Vec<f64> = curves.iter().flat_map(|s| breaks(&s.space)).collect();
-    own.sort_by(f64::total_cmp);
-    own.dedup_by(|b, a| (*b - *a).abs() <= BREAK_TOL);
-    let inner: Vec<f64> = own.iter().copied().filter(|x| *x > BREAK_TOL && *x < 1.0 - BREAK_TOL).collect();
+    let mut need: Vec<(f64, usize)> = Vec::new();
+    for c in curves {
+        let p = c.space.degree();
+        for (x, m) in interior_knots(&c.space) {
+            let k = (m + q - p).min(q);
+            match need.iter_mut().find(|(y, _)| (*y - x).abs() <= BREAK_TOL) {
+                Some((_, have)) => *have = (*have).max(k),
+                None => need.push((x, k)),
+            }
+        }
+    }
+    need.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut knots = vec![0.0; q + 1];
-    for &x in &inner {
-        knots.extend(std::iter::repeat_n(x, q));
+    for &(x, k) in &need {
+        knots.extend(std::iter::repeat_n(x, k));
     }
     knots.extend(std::iter::repeat_n(1.0, q + 1));
     let target = Space::new(q, knots)?.refined(extra)?;
+    let canonical: Vec<f64> = need.iter().map(|(x, _)| *x).collect();
     let mut out = Vec::with_capacity(curves.len());
     for c in curves {
-        let p = c.space.degree();
-        let space = snapped(&c.space, &[&[0.0], inner.as_slice(), &[1.0]].concat())?;
-        let mine = breaks(&space);
-        // The curve at degree q on its own breaks, each repeated q times.
-        let mut points: Vec<HPoint> = Vec::new();
-        for w in mine.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            let (_, piece) = segment(p, space.knots(), &c.points, a, b)?;
-            let raised = embed(&Space::polynomial(p, a, b)?, &piece, &Space::polynomial(q, a, b)?)?;
-            points.extend(raised.into_iter().skip(usize::from(!points.is_empty())));
-        }
-        let mut own_knots = vec![0.0; q + 1];
-        for &x in mine.iter().filter(|x| **x > 0.0 && **x < 1.0) {
-            own_knots.extend(std::iter::repeat_n(x, q));
-        }
-        own_knots.extend(std::iter::repeat_n(1.0, q + 1));
-        let points = embed(&Space::new(q, own_knots)?, &points, &target)?;
-        if points.len() != target.count() {
-            return invalid("the sides' pieces do not fill the common space");
-        }
-        out.push(points);
+        out.push(carried(&snapped(&c.space, &canonical)?, &c.points, &target)?);
     }
     Ok((target, out))
+}
+
+/// The distinct interior knots of a space and how often each is repeated.
+fn interior_knots(s: &Space) -> Vec<(f64, usize)> {
+    let [a, b] = s.domain();
+    let mut out: Vec<(f64, usize)> = Vec::new();
+    for &k in s.knots().iter().filter(|k| **k > a && **k < b) {
+        match out.last_mut() {
+            Some((x, m)) if *x == k => *m += 1,
+            _ => out.push((k, 1)),
+        }
+    }
+    out
+}
+
+/// The control points in `to` of the curve with control points `ctrl` in `from`, which `to`
+/// contains: the curve interpolated at `to`'s Greville abscissae (where the interpolation
+/// problem is uniquely solvable, Schoenberg–Whitney), which is the curve itself since it lies in
+/// the space; its end points are the curve's own.
+fn carried(from: &Space, ctrl: &[HPoint], to: &Space) -> SplineResult<Vec<HPoint>> {
+    let conds: Vec<Cond> = greville(to).into_iter().map(|t| Cond { t, der: 0 }).collect();
+    let data = conds.iter().map(|c| from.eval(ctrl, c.t, 0)).collect::<SplineResult<Vec<HPoint>>>()?;
+    let mut points = Interpolant::new(to.clone(), conds)?.fit(&data)?;
+    if let (Some(f), Some(first)) = (points.first_mut(), ctrl.first()) {
+        *f = *first;
+    }
+    if let (Some(l), Some(last)) = (points.last_mut(), ctrl.last()) {
+        *l = *last;
+    }
+    Ok(points)
 }
 
 /// The Greville abscissae of a space (where its splines reproduce a linear function).
@@ -302,11 +345,11 @@ fn greville(s: &Space) -> Vec<f64> {
     (0..s.count()).map(|i| (1..=p).map(|r| k.get(i + r).copied().unwrap_or(0.0)).sum::<f64>() / p as f64).collect()
 }
 
-/// A tensor patch in the fill's space both ways, control point `(i, j)` (i along u) at
-/// `i + c·j`, `c` the space's count, with its fixed weights.
+/// A tensor patch in the fill's spaces along u and v, control point `(i, j)` (i along u) at
+/// `i + c·j`, `c` the u space's count, with its fixed weights.
 #[derive(Clone, Debug)]
 struct Patch {
-    space: Space,
+    spaces: [Space; 2],
     net: Vec<Vec3>,
     weights: Vec<f64>,
     /// Whether any weight differs from one (else the polynomial basis is used as it is).
@@ -316,16 +359,21 @@ struct Patch {
 }
 
 impl Patch {
-    fn count(&self) -> usize {
-        self.space.count()
+    /// The control points along u and along v.
+    fn counts(&self) -> [usize; 2] {
+        [self.spaces[0].count(), self.spaces[1].count()]
+    }
+
+    fn flat(&self, i: usize, j: usize) -> usize {
+        i + self.spaces[0].count() * j
     }
 
     fn at(&self, i: usize, j: usize) -> Vec3 {
-        self.net.get(i + self.count() * j).copied().unwrap_or(Vec3::ZERO)
+        self.net.get(self.flat(i, j)).copied().unwrap_or(Vec3::ZERO)
     }
 
     fn weight(&self, i: usize, j: usize) -> f64 {
-        self.weights.get(i + self.count() * j).copied().unwrap_or(1.0)
+        self.weights.get(self.flat(i, j)).copied().unwrap_or(1.0)
     }
 
     /// The coefficients of `∂^(du+dv) S / ∂u^du ∂v^dv` at (u, v) on each control point it
@@ -334,8 +382,8 @@ impl Patch {
     /// `R^(a,b) = (f^(a,b) − Σ_{(k,l) ≠ (0,0)} C(a,k) C(b,l) W^(k,l) R^(a−k,b−l)) / W`.
     fn row(&self, u: f64, v: f64, du: usize, dv: usize) -> SplineResult<Vec<(usize, usize, f64)>> {
         if !self.rational {
-            let (iu, bu) = self.space.basis(u, du)?;
-            let (iv, bv) = self.space.basis(v, dv)?;
+            let (iu, bu) = self.spaces[0].basis(u, du)?;
+            let (iv, bv) = self.spaces[1].basis(v, dv)?;
             let mut out = Vec::with_capacity(bu.len() * bv.len());
             for (b, nv) in bv.iter().enumerate() {
                 for (a, nu) in bu.iter().enumerate() {
@@ -345,18 +393,18 @@ impl Patch {
             return Ok(out);
         }
         // The basis and its derivatives up to the orders asked, each way.
-        let ders = |t: f64, top: usize| -> SplineResult<(usize, Vec<Vec<f64>>)> {
+        let ders = |d: usize, t: f64, top: usize| -> SplineResult<(usize, Vec<Vec<f64>>)> {
             let mut first = 0;
             let mut out = Vec::with_capacity(top + 1);
             for r in 0..=top {
-                let (f, b) = self.space.basis(t, r)?;
+                let (f, b) = self.spaces[d].basis(t, r)?;
                 first = f;
                 out.push(b);
             }
             Ok((first, out))
         };
-        let (iu, bu) = ders(u, du)?;
-        let (iv, bv) = ders(v, dv)?;
+        let (iu, bu) = ders(0, u, du)?;
+        let (iv, bv) = ders(1, v, dv)?;
         let width = (bu.first().map_or(0, Vec::len), bv.first().map_or(0, Vec::len));
         let basis = |d: &[Vec<f64>], r: usize, a: usize| d.get(r).and_then(|x| x.get(a)).copied().unwrap_or(0.0);
         // W^(k,l) at the point.
@@ -419,11 +467,11 @@ impl Patch {
     }
 
     fn surface(&self) -> SplineResult<NurbsSurface> {
-        let c = self.count();
+        let [cu, cv] = self.counts();
         let ctrl: Vec<HPoint> =
-            (0..c).flat_map(|j| (0..c).map(move |i| (i, j))).map(|(i, j)| HPoint::weighted(self.at(i, j), self.weight(i, j))).collect();
-        let knots = self.space.knots().to_vec();
-        NurbsSurface::from_homogeneous([self.space.degree(); 2], [knots.clone(), knots], ctrl)
+            (0..cv).flat_map(|j| (0..cu).map(move |i| (i, j))).map(|(i, j)| HPoint::weighted(self.at(i, j), self.weight(i, j))).collect();
+        let [su, sv] = &self.spaces;
+        NurbsSurface::from_homogeneous([su.degree(), sv.degree()], [su.knots().to_vec(), sv.knots().to_vec()], ctrl)
     }
 }
 
@@ -490,9 +538,11 @@ fn corner_scales(edges: &[IsoEdge]) -> SplineResult<Vec<f64>> {
 }
 
 impl Quilt {
-    /// The fill's patches over the loop's sides at degree `degree` (at least) in the space
-    /// refined by `extra` breaks.
-    fn new(edges: &[IsoEdge], extra: &[f64], degree: usize) -> SplineResult<Quilt> {
+    /// The fill's patches over the loop's sides at degree `degree` (at least) in spaces refined
+    /// by `extra` breaks (along u and v). One patch has a space each way, each holding the two
+    /// sides that run that way; patches about a centre share one space both ways, which each
+    /// spoke, a row of two patches, runs in.
+    fn new(edges: &[IsoEdge], extra: &[Vec<f64>; 2], degree: usize) -> SplineResult<Quilt> {
         let n = edges.len();
         let scales = corner_scales(edges)?;
         let scale = |k: usize| scales.get(k).copied().unwrap_or(1.0);
@@ -504,21 +554,27 @@ impl Quilt {
             if n == 3 {
                 sides.push(line(corner(0), corner(0))?);
             }
-            let refs: Vec<&Curve> = sides.iter().collect();
-            let (space, rows) = compatible(&refs, extra, degree)?;
-            let (Some(c0), Some(c1), Some(c2), Some(c3)) = (rows.first(), rows.get(1), rows.get(2), rows.get(3)) else { return invalid("sides") };
-            let patch = coons(&space, c0, c2, c3, c1, n == 3)?;
-            let c = space.count();
-            let mut slots = vec![None; c * c];
-            let mut unknowns = 0;
-            for j in 1..c - 1 {
-                for i in 1..c - 1 {
-                    if let Some(s) = slots.get_mut(i + c * j) {
-                        *s = Some(unknowns);
-                        unknowns += 1;
+            let (Some(s0), Some(s1), Some(s2), Some(s3)) = (sides.first(), sides.get(1), sides.get(2), sides.get(3)) else { return invalid("sides") };
+            let (su, along_u) = compatible(&[s0, s2], &extra[0], degree)?;
+            let (sv, along_v) = compatible(&[s3, s1], &extra[1], degree)?;
+            let (Some(c0), Some(c2), Some(c3), Some(c1)) = (along_u.first(), along_u.get(1), along_v.first(), along_v.get(1)) else {
+                return invalid("sides");
+            };
+            let patch = coons([su, sv], c0, c2, c3, c1, n == 3)?;
+            // The free points numbered with the shorter direction fastest, which keeps the
+            // normal equations' band narrow.
+            let [cu, cv] = patch.counts();
+            let mut slots = vec![None; cu * cv];
+            let (inner_u, inner_v) = (cu.saturating_sub(2), cv.saturating_sub(2));
+            for j in 1..cv - 1 {
+                for i in 1..cu - 1 {
+                    let id = if inner_u <= inner_v { (i - 1) + inner_u * (j - 1) } else { (j - 1) + inner_v * (i - 1) };
+                    if let Some(s) = slots.get_mut(i + cu * j) {
+                        *s = Some(id);
                     }
                 }
             }
+            let unknowns = inner_u * inner_v;
             let pieces = edges.iter().enumerate().map(|(k, e)| (k, e.domain(), 0, k)).collect();
             return Ok(Quilt { patches: vec![patch], slots: vec![slots], unknowns, pieces, spokes: Vec::new() });
         }
@@ -536,7 +592,7 @@ impl Quilt {
             curves.push(line(*m, HPoint::weighted(centre, 1.0))?);
         }
         let refs: Vec<&Curve> = curves.iter().collect();
-        let (space, rows) = compatible(&refs, extra, degree)?;
+        let (space, rows) = compatible(&refs, &extra[0], degree)?;
         let c = space.count();
         let row = |r: usize| rows.get(r).cloned().ok_or_else(|| SplineError::Invalid("rows".into()));
         let mut patches = Vec::with_capacity(n);
@@ -544,7 +600,7 @@ impl Quilt {
             let prev = (k + n - 1) % n;
             // v = 0: edge k's first half; u = 0: edge k − 1's second half, from V_k up to M_{k−1};
             // u = 1: spoke k; v = 1: spoke k − 1, from M_{k−1} to C.
-            patches.push(coons(&space, &row(2 * k)?, &row(2 * n + prev)?, &row(2 * prev + 1)?, &row(2 * n + k)?, false)?);
+            patches.push(coons([space.clone(), space.clone()], &row(2 * k)?, &row(2 * n + prev)?, &row(2 * prev + 1)?, &row(2 * n + k)?, false)?);
         }
         // The spokes are shared rows: their weights the same in both patches (the Coons blends
         // agree on them), and so are their points once solved.
@@ -586,6 +642,12 @@ impl Quilt {
         Ok(Quilt { patches, slots, unknowns, pieces, spokes })
     }
 
+    /// Most free control points one solve takes: about a centre (`shared` spaces) the system is
+    /// dense, for one patch banded.
+    fn most_unknowns(shared: bool) -> usize {
+        if shared { MAX_UNKNOWN_POINTS } else { MAX_BANDED_POINTS }
+    }
+
     /// Write the unknowns' values into every patch that holds them.
     fn set(&mut self, values: &[Vec3]) {
         for (patch, slots) in self.patches.iter_mut().zip(&self.slots) {
@@ -607,26 +669,26 @@ fn eval_edge_h(e: &IsoEdge, t: f64) -> SplineResult<HPoint> {
 /// `d0`, `d1` along v at u = 0 and 1, all running with their parameter. Points and weights are
 /// blended alike, so the boundary rows are the sides' own and the weights inside are the blend
 /// of theirs (refused where one is not positive).
-fn coons(space: &Space, c0: &[HPoint], c1: &[HPoint], d0: &[HPoint], d1: &[HPoint], pole: bool) -> SplineResult<Patch> {
-    let g = greville(space);
-    let c = space.count();
+fn coons(spaces: [Space; 2], c0: &[HPoint], c1: &[HPoint], d0: &[HPoint], d1: &[HPoint], pole: bool) -> SplineResult<Patch> {
+    let (gu, gv) = (greville(&spaces[0]), greville(&spaces[1]));
+    let (cu, cv) = (gu.len(), gv.len());
     let (Some(p00), Some(p10), Some(p01), Some(p11)) = (c0.first().copied(), c0.last().copied(), c1.first().copied(), c1.last().copied()) else {
         return invalid("a side has no points");
     };
     let get = |a: &[HPoint], k: usize| a.get(k).copied().unwrap_or(HPoint::ZERO);
-    let mut net = Vec::with_capacity(c * c);
-    let mut weights = Vec::with_capacity(c * c);
-    for (j, &y) in g.iter().enumerate() {
-        for (i, &x) in g.iter().enumerate() {
+    let mut net = Vec::with_capacity(cu * cv);
+    let mut weights = Vec::with_capacity(cu * cv);
+    for (j, &y) in gv.iter().enumerate() {
+        for (i, &x) in gu.iter().enumerate() {
             let ruled_v = get(c0, i) * (1.0 - y) + get(c1, i) * y;
             let ruled_u = get(d0, j) * (1.0 - x) + get(d1, j) * x;
             let bilinear = (p00 * (1.0 - x) + p10 * x) * (1.0 - y) + (p01 * (1.0 - x) + p11 * x) * y;
             // The boundary rows exactly the sides' own points.
             let h = match (i, j) {
                 (_, 0) => get(c0, i),
-                (_, j) if j + 1 == c => get(c1, i),
+                (_, j) if j + 1 == cv => get(c1, i),
                 (0, _) => get(d0, j),
-                (i, _) if i + 1 == c => get(d1, j),
+                (i, _) if i + 1 == cu => get(d1, j),
                 _ => ruled_v + ruled_u - bilinear,
             };
             let p = h
@@ -638,7 +700,7 @@ fn coons(space: &Space, c0: &[HPoint], c1: &[HPoint], d0: &[HPoint], d1: &[HPoin
         }
     }
     let rational = weights.iter().any(|w| *w != 1.0);
-    Ok(Patch { space: space.clone(), net, weights, rational, pole })
+    Ok(Patch { spaces, net, weights, rational, pole })
 }
 
 /// One condition row: `Σ along·P = value` over its terms' control points, and its weight.
@@ -679,15 +741,21 @@ struct Station {
     side: usize,
     t: f64,
     across: Across,
+    /// The continuity order asked here: the neighbour's, or less near a corner whose neighbours
+    /// do not agree to it.
+    order: usize,
+    /// How far (radians) the edge itself leans out of the neighbour's tangent plane here: the
+    /// fill holds the edge, so its normal can come no nearer the neighbour's than that.
+    tilt: f64,
     held: bool,
     clear: bool,
     speed: f64,
 }
 
 impl Station {
-    /// The continuity order its conditions ask: 1 (G1), or its neighbour's jet's (G2 … G4).
+    /// The continuity order its conditions ask: 1 (G1) … 4 (G4).
     fn order(&self) -> usize {
-        self.across.jet.map_or(1, |j| j.order)
+        self.order
     }
 }
 
@@ -704,17 +772,94 @@ fn targets(s: &Station, c: &[Vec3]) -> Vec<f64> {
     let Some(jet) = s.across.jet else { return Vec::new() };
     let (t, w) = (s.across.normal.cross(s.across.leave), s.across.leave);
     let x: Vec<[f64; 2]> = c.iter().map(|d| [d.dot(t), d.dot(w)]).collect();
-    jet.targets(&x).unwrap_or_default()
+    let mut out = jet.targets(&x).unwrap_or_default();
+    out.truncate(s.order().saturating_sub(1));
+    out
+}
+
+/// To what order the neighbours agree at each corner of the loop (`[k]`: where edge `k`
+/// starts), from their conditions at its two edges' ends ([`corner_agreement`]); no cap
+/// (`usize::MAX`) where either edge asks only G0.
+fn corner_orders(
+    edges: &[IsoEdge],
+    across: &mut dyn FnMut(usize, &[f64]) -> Result<Vec<Option<Across>>, String>,
+    size: f64,
+    angle_tol: f64,
+) -> SplineResult<Vec<usize>> {
+    let n = edges.len();
+    let mut out = vec![usize::MAX; n];
+    for (k, slot) in out.iter_mut().enumerate() {
+        let prev = (k + n - 1) % n;
+        let (Some(ea), Some(eb)) = (edges.get(prev), edges.get(k)) else { continue };
+        let (end, start) = (ea.domain()[1], eb.domain()[0]);
+        let before = across(prev, &[end]).map_err(SplineError::Invalid)?.into_iter().next().flatten();
+        let after = across(k, &[start]).map_err(SplineError::Invalid)?.into_iter().next().flatten();
+        if let (Some(x), Some(y), Some(d0), Some(d1)) = (before, after, ea.tangent(end), eb.tangent(start)) {
+            *slot = corner_agreement(&x, &y, [d0, d1], size, angle_tol);
+        }
+    }
+    Ok(out)
+}
+
+/// To what order the neighbours `before` and `after` the loop's corner agree there (where no
+/// surface can meet both with more): 0 when no surface can be within `angle_tol` of both
+/// tangent planes there, or (with both neighbours' jets) their twists between the two edges
+/// differ (at a corner the fill's normal is the loop's own, `d₀ × d₁` of the
+/// edges' tangents `directions`, so each neighbour's must be within the tolerance of it; at a
+/// corner where the loop runs straight on, the two must be within twice the tolerance of each
+/// other); else the highest order k up to both jets' such that their forms `H_2 … H_k` agree
+/// along the two tangents once carried over half the loop's `size` ([`turn`]), as the fill's
+/// own jumps are held. A corner whose neighbours agree to the order asked caps nothing.
+pub fn corner_agreement(before: &Across, after: &Across, directions: [Vec3; 2], size: f64, angle_tol: f64) -> usize {
+    let cos = before.normal.dot(after.normal);
+    let tangent = match directions[0].cross(directions[1]).normalized() {
+        Some(corner) if directions[0].dot(directions[1]) < (2.0 * angle_tol).cos() => {
+            [before.normal, after.normal].iter().all(|n| n.dot(corner).abs() >= angle_tol.cos())
+        }
+        _ => cos.abs() >= (2.0 * angle_tol).cos(),
+    };
+    if !tangent {
+        return 0;
+    }
+    let (Some(a), Some(b)) = (before.jet, after.jet) else { return 1 };
+    // Heights along each one's own normal; along the other's they change sign with the order.
+    let sign = cos.signum();
+    let form = |x: &Across, jet: &crate::linkage::Jet, m: usize, d: Vec3| {
+        let (t, w) = (x.normal.cross(x.leave), x.leave);
+        jet.form(m, [d.dot(t), d.dot(w)])
+    };
+    // G1 along both edges fixes the fill's twist `n·S_uv` at the corner twice, from each
+    // neighbour's second form between the two edges' directions, `H₂(d₀, d₁)`
+    // (`(H₂(d₀ + d₁) − H₂(d₀ − d₁)) / 4`): where those differ, not even G1 holds there.
+    let [d0, d1] = directions;
+    let twist = |x: &Across, jet: &crate::linkage::Jet| Some(0.25 * (form(x, jet, 2, d0 + d1)? - form(x, jet, 2, d0 - d1)?));
+    match (twist(before, &a), twist(after, &b)) {
+        (Some(x), Some(y)) if turn((x - sign * y).abs(), 2, size) <= angle_tol => {}
+        _ => return 0,
+    }
+    let mut agreed = 1;
+    for m in 2..=a.order.min(b.order) {
+        let same = directions.iter().all(|d| match (form(before, &a, m, *d), form(after, &b, m, *d)) {
+            (Some(x), Some(y)) => turn((x - sign * y).abs(), m, size) <= angle_tol,
+            _ => false,
+        });
+        if !same {
+            return agreed;
+        }
+        agreed = m;
+    }
+    agreed
 }
 
 /// Fill the loop `edges` (three to [`MAX_ISO_EDGES`], each ending where the next starts) with
 /// patches on them (module docs). `across(k, ts)` gives the neighbour's conditions at the
-/// parameters `ts` of edge `k` (its own parameter; `None`: G0 there); `clash[k]`: the
-/// neighbours' tangent planes disagree at the corner where edge `k` starts.
+/// parameters `ts` of edge `k` (its own parameter; `None`: G0 there). Where the neighbours at a
+/// corner agree to a lower order than asked ([`corner_orders`]), the stations within
+/// [`CLASH_SHARE`] of it ask no more than that (at least G1), and where their tangent planes
+/// disagree they are not held to the angle tolerance either: no surface can meet both better.
 pub fn iso_fill(
     edges: &[IsoEdge],
     across: &mut dyn FnMut(usize, &[f64]) -> Result<Vec<Option<Across>>, String>,
-    clash: &[bool],
     spec: &IsoSpec,
 ) -> SplineResult<IsoFill> {
     let n = edges.len();
@@ -771,44 +916,63 @@ pub fn iso_fill(
         return invalid(format!("a patch's continuity is at most G{MAX_CONTINUITY}"));
     }
     let degree = if order == 0 { 1 } else { (order + 1).min(MAX_SPLINE_DEGREE) };
-    let mut extra: Vec<f64> = Vec::new();
-    let mut spans = 1usize;
+    let corners = corner_orders(edges, &mut *across, size, spec.angle_tol)?;
+    let mut extra: [Vec<f64>; 2] = [Vec::new(), Vec::new()];
+    let mut spans = [1usize; 2];
     loop {
         let quilt = Quilt::new(edges, &extra, degree)?;
-        let stations = stations(edges, &quilt, &mut *across, clash)?;
-        let space = quilt.patches.first().map(|p| p.space.clone()).ok_or_else(|| SplineError::Invalid("no patch".into()))?;
+        let stations = stations(edges, &quilt, &mut *across, &corners)?;
+        let spaces = quilt.patches.first().map(|p| p.spaces.clone()).ok_or_else(|| SplineError::Invalid("no patch".into()))?;
+        let shared = !quilt.spokes.is_empty();
         // Rows enough for the conditions from opposite sides not to share control points.
-        let roomy = space.count() >= 2 * (order + 1);
-        let finer = quilt.unknowns * 4 > MAX_UNKNOWN_POINTS;
-        if !roomy && !finer && spans * 2 <= MAX_ISO_SPANS {
-            spans *= 2;
-            let b = breaks(&space);
-            extra.extend(b.windows(2).map(|w| 0.5 * (w[0] + w[1])));
+        let cramped = spaces.clone().map(|s| s.count() < 2 * (order + 1));
+        if cramped.iter().any(|c| *c) && refinable(&spans, cramped, shared, quilt.unknowns) {
+            halve(&mut extra, &mut spans, &spaces, cramped, shared);
             continue;
         }
-        let (quilt, report) = solve(quilt, &stations, spec)?;
-        let fits = report.normal_deviation <= spec.angle_tol
-            && within_order(&report.jumps, order, size, spec.angle_tol)
-            && report.point_deviation <= spec.tol
-            && !quilt.patches.iter().any(folds);
-        if fits || spans * 2 > MAX_ISO_SPANS || finer {
-            if !fits {
-                let jumps =
-                    report.jumps.get(2..=order).filter(|_| order >= 2).map(|j| format!(", jumps of orders 2 to {order} {j:?}")).unwrap_or_default();
-                let folded = if quilt.patches.iter().any(folds) { ", and it folds" } else { "" };
-                return Err(SplineError::Unsupported(format!(
-                    "a patch on these edges within the tolerances: normals within {:.4}° of the neighbours'{jumps}, points within {:.2e}{folded}",
-                    report.normal_deviation.to_degrees(),
-                    report.point_deviation
-                )));
-            }
+        let (quilt, report, along) = solve(quilt, &stations, spec)?;
+        let folded = quilt.patches.iter().any(folds);
+        let mut wanted = along.missing(order, size, spec.angle_tol);
+        if folded || report.point_deviation > spec.tol {
+            wanted = [true; 2];
+        }
+        if !wanted.iter().any(|w| *w) {
             let quilt = crowned(quilt, &stations, spec.crown, size)?;
             return finished(quilt, edges, report);
         }
-        // Halve every span.
-        spans *= 2;
-        let b = breaks(&space);
-        extra.extend(b.windows(2).map(|w| 0.5 * (w[0] + w[1])));
+        if !refinable(&spans, wanted, shared, quilt.unknowns) {
+            let jumps =
+                report.jumps.get(2..=order).filter(|_| order >= 2).map(|j| format!(", jumps of orders 2 to {order} {j:?}")).unwrap_or_default();
+            let folded = if folded { ", and it folds" } else { "" };
+            return Err(SplineError::Unsupported(format!(
+                "a patch on these edges within the tolerances: normals within {:.4}° of the neighbours' beyond the edges' own lean{jumps}, points within {:.2e}{folded}",
+                report.normal_excess.to_degrees(),
+                report.point_deviation
+            )));
+        }
+        halve(&mut extra, &mut spans, &spaces, wanted, shared);
+    }
+}
+
+/// Whether the spans may be halved in the `wanted` directions (both when the patches share one
+/// space, about a centre): within [`MAX_ISO_SPANS`] each way, and the free points, doubling for
+/// each direction, within what one solve takes ([`Quilt::most_unknowns`]).
+fn refinable(spans: &[usize; 2], wanted: [bool; 2], shared: bool, unknowns: usize) -> bool {
+    let wanted = if shared { [true; 2] } else { wanted };
+    let grows = wanted.iter().filter(|w| **w).count() as u32;
+    let spans_ok = spans.iter().zip(wanted).all(|(s, w)| !w || s * 2 <= MAX_ISO_SPANS);
+    spans_ok && unknowns.saturating_mul(2usize.pow(grows)) <= Quilt::most_unknowns(shared)
+}
+
+/// Halve every span of the spaces in the `wanted` directions (both when the patches share one
+/// space): the breaks that do it added to `extra`.
+fn halve(extra: &mut [Vec<f64>; 2], spans: &mut [usize; 2], spaces: &[Space; 2], wanted: [bool; 2], shared: bool) {
+    let wanted = if shared { [true; 2] } else { wanted };
+    for (((e, n), s), w) in extra.iter_mut().zip(spans.iter_mut()).zip(spaces).zip(wanted) {
+        if w {
+            e.extend(breaks(s).windows(2).map(|w| 0.5 * (w[0] + w[1])));
+            *n *= 2;
+        }
     }
 }
 
@@ -855,9 +1019,10 @@ fn finished(quilt: Quilt, edges: &[IsoEdge], achieved: Achieved) -> SplineResult
         .iter()
         .filter_map(|&(left, _)| {
             let p = quilt.patches.get(left)?;
-            let c = p.count();
-            let weights = p.rational.then(|| (0..c).map(|j| p.weight(c - 1, j)).collect());
-            Some(IsoEdge { degree: p.space.degree(), knots: p.space.knots().to_vec(), points: (0..c).map(|j| p.at(c - 1, j)).collect(), weights })
+            let [cu, cv] = p.counts();
+            let weights = p.rational.then(|| (0..cv).map(|j| p.weight(cu - 1, j)).collect());
+            let along = &p.spaces[1];
+            Some(IsoEdge { degree: along.degree(), knots: along.knots().to_vec(), points: (0..cv).map(|j| p.at(cu - 1, j)).collect(), weights })
         })
         .collect();
     Ok(IsoFill { patches, spokes, achieved })
@@ -875,13 +1040,14 @@ fn stations(
     edges: &[IsoEdge],
     quilt: &Quilt,
     across: &mut dyn FnMut(usize, &[f64]) -> Result<Vec<Option<Across>>, String>,
-    clash: &[bool],
+    corners: &[usize],
 ) -> SplineResult<Vec<Station>> {
     let n = edges.len();
     let mut out = Vec::new();
-    let Some(space) = quilt.patches.first().map(|p| &p.space) else { return Ok(out) };
-    let count = station_count(space);
     for &(k, [a, b], patch, side) in &quilt.pieces {
+        // The space the side runs in: u for sides 0 and 2, v for 1 and 3.
+        let Some(space) = quilt.patches.get(patch).and_then(|p| p.spaces.get(side % 2)) else { continue };
+        let count = station_count(space);
         let [ea, eb] = edges.get(k).map(IsoEdge::domain).unwrap_or([0.0, 1.0]);
         // Stations inside the piece (its corners are its neighbours' corners); every side runs
         // the loop's way round its patch, as the edge does.
@@ -893,42 +1059,49 @@ fn stations(
             let Some(c) = c else { continue };
             let t = (param - a) / (b - a);
             let f = (param - ea) / (eb - ea);
-            let near_start = clash.get(k).copied().unwrap_or(false) && f < CLASH_SHARE;
-            let near_end = clash.get((k + 1) % n).copied().unwrap_or(false) && f > 1.0 - CLASH_SHARE;
-            let clear = f > CORNER_SHARE && f < 1.0 - CORNER_SHARE;
+            // What the corners near the station let it ask.
+            let asked = c.jet.map_or(1, |j| j.order);
+            let near = |corner: usize, close: bool| if close { corners.get(corner).copied().unwrap_or(usize::MAX) } else { usize::MAX };
+            let cap = near(k, f < CLASH_SHARE).min(near((k + 1) % n, f > 1.0 - CLASH_SHARE));
+            let order = asked.min(cap.max(1));
+            let clear = f > CORNER_SHARE && f < 1.0 - CORNER_SHARE && order == asked;
             let (uv, (du, dv, sign)) = station_on(side, t);
             // How fast the Coons start leaves into the leave direction: it blends the sides
             // across, so it leaves as fast as the opposite sides lie apart; the side's own speed
             // where it does not leave into the patch at all.
             let along = p.eval(uv[0], uv[1], dv, du).map(|d| d.len()).unwrap_or(0.0);
             let speed = p.eval(uv[0], uv[1], du, dv).map(|d| (d * sign).dot(c.leave)).ok().filter(|x| *x > 0.0).unwrap_or(along);
-            out.push(Station { patch, side, t, across: c, held: !(near_start || near_end), clear, speed });
+            let tilt = edges.get(k).and_then(|e| e.tangent(param)).map_or(0.0, |d| d.dot(c.normal).abs().clamp(0.0, 1.0).asin());
+            out.push(Station { patch, side, t, across: c, order, tilt, held: cap > 0, clear, speed });
         }
     }
     Ok(out)
 }
 
 /// The fill's free control points by least squares (module docs), and what they achieve.
-fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult<(Quilt, Achieved)> {
+fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult<(Quilt, Achieved, Along)> {
     if quilt.unknowns == 0 {
-        return Ok((quilt, Achieved::default()));
+        return Ok((quilt, Achieved::default(), Along::default()));
     }
-    if quilt.unknowns > MAX_UNKNOWN_POINTS {
-        return Err(SplineError::TooLarge(format!("{} free control points (at most {MAX_UNKNOWN_POINTS})", quilt.unknowns)));
+    let most = Quilt::most_unknowns(!quilt.spokes.is_empty());
+    if quilt.unknowns > most {
+        return Err(SplineError::TooLarge(format!("{} free control points (at most {most})", quilt.unknowns)));
     }
     let energy: Vec<Vec<(usize, usize, f64)>> = quilt.patches.iter().map(energy).collect::<SplineResult<_>>()?;
     let mut located: Vec<(usize, [f64; 2])> = Vec::new();
     let mut report = Achieved::default();
-    let spoke_count = quilt.patches.first().map_or(0, |p| station_count(&p.space));
+    let mut along = Along::default();
+    let spoke_count = quilt.patches.first().map_or(0, |p| station_count(&p.spaces[0]));
     let top = stations.iter().map(Station::order).max().unwrap_or(1);
-    // The space's span (the same both ways and in every patch).
-    let span = quilt.patches.first().map_or(1.0, |p| 1.0 / breaks(&p.space).len().saturating_sub(1).max(1) as f64);
+    // The mean span of each space (the same in every patch).
+    let span = quilt.patches.first().map_or([1.0; 2], |p| p.spaces.clone().map(|s| 1.0 / breaks(&s).len().saturating_sub(1).max(1) as f64));
     let rounds = if top >= 2 { ROUNDS_PER_ORDER * top } else { ROUNDS };
     for round in 0..rounds {
         let mut rows: Vec<Row> = Vec::new();
         for s in stations {
             let Some(patch) = quilt.patches.get(s.patch) else { continue };
-            linkage_rows(&mut rows, patch, s, span)?;
+            // The span across the side: of v for sides 0 and 2, of u for 1 and 3.
+            linkage_rows(&mut rows, patch, s, span.get(1 - s.side % 2).copied().unwrap_or(1.0))?;
         }
         // Across each spoke the two patches' derivatives away from it are opposed.
         for &(left, right) in &quilt.spokes {
@@ -945,13 +1118,13 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
         let solved = least_squares(&quilt, &rows, &energy)?;
         quilt.set(&solved);
         located = spec.points.iter().map(|p| nearest(&quilt, *p)).collect();
-        report = measure(&quilt, stations, spec.points, &located, spoke_count)?;
+        (report, along) = measure(&quilt, stations, spec.points, &located, spoke_count)?;
         let relinearise = top >= 2 || !spec.points.is_empty();
         if !relinearise && round == 0 {
             break;
         }
     }
-    Ok((quilt, report))
+    Ok((quilt, report, along))
 }
 
 /// A station's rows (module docs), linearised about the patch as it stands:
@@ -981,10 +1154,10 @@ fn linkage_rows(rows: &mut Vec<Row>, patch: &Patch, s: &Station, span: f64) -> S
         rows.push(Row { terms: along(s.patch, first, dir), value, weight: HERMITE_WEIGHT });
     }
     let Some(jet) = s.across.jet else { return Ok(()) };
-    let c = linkage(patch, s, order)?;
+    let c = linkage(patch, s, jet.order)?;
     let x0: Vec<[f64; 2]> = c.iter().map(|d| [d.dot(t), d.dot(w)]).collect();
     let Some(targets) = jet.linearised(&x0) else { return Ok(()) };
-    for (k, target) in (2..).zip(targets) {
+    for (k, target) in (2..=order).zip(targets) {
         let Some(top) = derivative.get(k - 1) else { continue };
         let mut terms = along(s.patch, top, n);
         let mut value = target.value;
@@ -1001,11 +1174,31 @@ fn linkage_rows(rows: &mut Vec<Row>, patch: &Patch, s: &Station, span: f64) -> S
 /// A patch's thin-plate energy coefficients between its control points (flat indices), of the
 /// terms `G⁽ʳ⁾ ⊗ G⁽ˢ⁾` with `(r, s)` = (2, 0), (1, 1) twice, (0, 2).
 fn energy(patch: &Patch) -> SplineResult<Vec<(usize, usize, f64)>> {
-    let s = &patch.space;
+    let (gu, gv) = (gram(&patch.spaces[0])?, gram(&patch.spaces[1])?);
+    let at = |g: &[Vec<Vec<f64>>; 3], r: usize, a: usize, b: usize| g.get(r).and_then(|x| x.get(a)).and_then(|x| x.get(b)).copied().unwrap_or(0.0);
+    let [cu, cv] = patch.counts();
+    let mut out = Vec::new();
+    for j in 0..cv {
+        for l in 0..cv {
+            for i in 0..cu {
+                for k in 0..cu {
+                    let e = at(&gu, 2, i, k) * at(&gv, 0, j, l) + 2.0 * at(&gu, 1, i, k) * at(&gv, 1, j, l) + at(&gu, 0, i, k) * at(&gv, 2, j, l);
+                    if e != 0.0 {
+                        out.push((i + cu * j, k + cu * l, e));
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The Gram matrices `∫ N_a⁽ʳ⁾ N_b⁽ʳ⁾` of a space's basis for r = 0, 1, 2 (Gauss–Legendre on
+/// each span, exact for the degrees used).
+fn gram(s: &Space) -> SplineResult<[Vec<Vec<f64>>; 3]> {
     let n = s.count();
     let mut g: [Vec<Vec<f64>>; 3] = std::array::from_fn(|_| vec![vec![0.0; n]; n]);
-    let b = breaks(s);
-    for w in b.windows(2) {
+    for w in breaks(s).windows(2) {
         let (lo, hi) = (w[0], w[1]);
         for (x, wt) in GAUSS4 {
             let t = 0.5 * (lo + hi) + 0.5 * (hi - lo) * x;
@@ -1022,37 +1215,23 @@ fn energy(patch: &Patch) -> SplineResult<Vec<(usize, usize, f64)>> {
             }
         }
     }
-    let at = |r: usize, a: usize, b: usize| g.get(r).and_then(|x| x.get(a)).and_then(|x| x.get(b)).copied().unwrap_or(0.0);
-    let mut out = Vec::new();
-    for j in 0..n {
-        for l in 0..n {
-            for i in 0..n {
-                for k in 0..n {
-                    let e = at(2, i, k) * at(0, j, l) + 2.0 * at(1, i, k) * at(1, j, l) + at(0, i, k) * at(2, j, l);
-                    if e != 0.0 {
-                        out.push((i + n * j, k + n * l, e));
-                    }
-                }
-            }
-        }
-    }
-    Ok(out)
+    Ok(g)
 }
 
 /// The free points minimising the weighted rows' squares plus a vanishing multiple of the
 /// patches' energy, the loop's rows held: the normal equations, solved by Cholesky.
 fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>]) -> SplineResult<Vec<Vec3>> {
     let dim = 3 * quilt.unknowns;
-    let mut a = vec![0.0; dim * dim];
-    let mut b = vec![0.0; dim];
     let slot = |p: usize, flat: usize| quilt.slots.get(p).and_then(|s| s.get(flat)).copied().flatten();
+    let mut a = Normal::new(dim, bandwidth(quilt, rows, energy));
+    let mut b = vec![0.0; dim];
     let value = |p: usize, flat: usize| quilt.patches.get(p).and_then(|x| x.net.get(flat)).copied().unwrap_or(Vec3::ZERO);
     let mut condition_trace = 0.0;
     for r in rows {
         let mut unknown: Vec<(usize, f64)> = Vec::new();
         let mut known = 0.0;
         for t in &r.terms {
-            let flat = t.i + quilt.patches.get(t.patch).map_or(0, Patch::count) * t.j;
+            let flat = quilt.patches.get(t.patch).map_or(0, |p| p.flat(t.i, t.j));
             let v = value(t.patch, flat);
             for (k, (f, x)) in [t.along.x, t.along.y, t.along.z].into_iter().zip([v.x, v.y, v.z]).enumerate() {
                 if f == 0.0 {
@@ -1068,9 +1247,7 @@ fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>
         let w2 = r.weight * r.weight;
         for &(x, cx) in &unknown {
             for &(y, cy) in &unknown {
-                if let Some(cell) = a.get_mut(x * dim + y) {
-                    *cell += w2 * cx * cy;
-                }
+                a.add(x, y, w2 * cx * cy);
             }
             if let Some(cell) = b.get_mut(x) {
                 *cell += w2 * cx * rhs;
@@ -1088,9 +1265,7 @@ fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>
             match slot(p, g) {
                 Some(y) => {
                     for k in 0..3 {
-                        if let Some(cell) = a.get_mut((3 * x + k) * dim + 3 * y + k) {
-                            *cell += lambda * e;
-                        }
+                        a.add(3 * x + k, 3 * y + k, lambda * e);
                     }
                 }
                 None => {
@@ -1104,10 +1279,64 @@ fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>
             }
         }
     }
-    let x = cholesky(a, b, dim)?;
+    let x = a.solve(b)?;
     Ok((0..quilt.unknowns)
         .map(|i| Vec3::new(x.get(3 * i).copied().unwrap_or(0.0), x.get(3 * i + 1).copied().unwrap_or(0.0), x.get(3 * i + 2).copied().unwrap_or(0.0)))
         .collect())
+}
+
+/// The widest coupling between two unknowns (coordinates) in any row or energy term: the
+/// normal equations' half bandwidth.
+fn bandwidth(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>]) -> usize {
+    let slot = |p: usize, i: usize, j: usize| quilt.patches.get(p).and_then(|x| quilt.slots.get(p)?.get(x.flat(i, j)).copied().flatten());
+    let mut bw = 0usize;
+    for r in rows {
+        let ids = r.terms.iter().filter_map(|t| slot(t.patch, t.i, t.j));
+        let (lo, hi) = ids.fold((usize::MAX, 0usize), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        if lo <= hi {
+            bw = bw.max(3 * (hi - lo) + 2);
+        }
+    }
+    for (p, entries) in energy.iter().enumerate() {
+        let Some(slots) = quilt.slots.get(p) else { continue };
+        for &(f, g, _) in entries {
+            if let (Some(Some(x)), Some(Some(y))) = (slots.get(f), slots.get(g)) {
+                bw = bw.max(3 * x.abs_diff(*y) + 2);
+            }
+        }
+    }
+    bw
+}
+
+/// The normal equations' matrix: banded where the band is narrow against the size, else dense.
+enum Normal {
+    Band(crate::fill::Band),
+    Dense(Vec<f64>, usize),
+}
+
+impl Normal {
+    fn new(n: usize, bw: usize) -> Normal {
+        if 4 * bw < n { Normal::Band(crate::fill::Band::new(n, bw)) } else { Normal::Dense(vec![0.0; n * n], n) }
+    }
+
+    /// Add `v` at `(r, s)` (callers add both halves of a symmetric matrix).
+    fn add(&mut self, r: usize, s: usize, v: f64) {
+        match self {
+            Normal::Band(b) => b.add(r, s, v),
+            Normal::Dense(a, n) => {
+                if let Some(x) = a.get_mut(r * *n + s) {
+                    *x += v;
+                }
+            }
+        }
+    }
+
+    fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
+        match self {
+            Normal::Band(m) => m.factor_rows()?.substitute(b),
+            Normal::Dense(a, n) => cholesky(a, b, n),
+        }
+    }
 }
 
 /// Solve the symmetric positive definite `a·x = b` (dense, `n × n`).
@@ -1160,31 +1389,45 @@ fn cholesky(mut a: Vec<f64>, mut b: Vec<f64>, n: usize) -> SplineResult<Vec<f64>
 }
 
 /// What the fill achieves at the stations, across the spokes and at the points.
-fn measure(quilt: &Quilt, stations: &[Station], points: &[Vec3], located: &[(usize, [f64; 2])], spoke_count: usize) -> SplineResult<Achieved> {
+fn measure(
+    quilt: &Quilt,
+    stations: &[Station],
+    points: &[Vec3],
+    located: &[(usize, [f64; 2])],
+    spoke_count: usize,
+) -> SplineResult<(Achieved, Along)> {
     let mut r = Achieved::default();
-    let mut angle = |a: f64, held: bool| {
-        r.normal_deviation_all = r.normal_deviation_all.max(a);
-        if held {
-            r.normal_deviation = r.normal_deviation.max(a);
-        }
-    };
+    let mut along = Along::default();
     let mut jumps = [0.0f64; MAX_CONTINUITY + 1];
     for s in stations {
         let Some(patch) = quilt.patches.get(s.patch) else { continue };
         let (uv, _) = station_on(s.side, s.t);
         let Some(normal) = patch.normal(uv[0], uv[1]) else { continue };
-        angle(normal.dot(s.across.normal).abs().clamp(0.0, 1.0).acos(), s.held);
+        let a = normal.dot(s.across.normal).abs().clamp(0.0, 1.0).acos();
+        r.normal_deviation_all = r.normal_deviation_all.max(a);
+        let d = s.side % 2;
+        if s.held {
+            r.normal_deviation = r.normal_deviation.max(a);
+            r.normal_excess = r.normal_excess.max(a - s.tilt);
+            if let Some(x) = along.angle.get_mut(d) {
+                *x = x.max(a - s.tilt);
+            }
+        }
         if s.order() < 2 || !s.clear {
             continue;
         }
         // The linkage curve's height above the neighbour, per unit length along its foot.
-        let c = linkage(patch, s, s.order())?;
+        let c = linkage(patch, s, s.across.jet.map_or(1, |j| j.order))?;
         let n = s.across.normal;
         let Some(first) = c.first() else { continue };
         let foot = (*first - n * first.dot(n)).len().max(1e-300);
         for (k, want) in (2..).zip(targets(s, &c)) {
             let (Some(ck), Some(jump)) = (c.get(k - 1), jumps.get_mut(k)) else { continue };
-            *jump = jump.max(((n.dot(*ck) - want) / foot.powi(k as i32)).abs());
+            let here = ((n.dot(*ck) - want) / foot.powi(k as i32)).abs();
+            *jump = jump.max(here);
+            if let Some(x) = along.jumps.get_mut(d).and_then(|j| j.get_mut(k)) {
+                *x = x.max(here);
+            }
         }
     }
     // Across the spokes, clear of the centre.
@@ -1193,7 +1436,13 @@ fn measure(quilt: &Quilt, stations: &[Station], points: &[Vec3], located: &[(usi
         for i in 0..spoke_count {
             let t = (i as f64 + 0.5) / spoke_count as f64;
             if let (Some(na), Some(nb)) = (a.normal(1.0, t), b.normal(t, 1.0)) {
-                angle(na.dot(nb).clamp(-1.0, 1.0).acos(), t < 1.0 - CLASH_SHARE);
+                let a = na.dot(nb).clamp(-1.0, 1.0).acos();
+                r.normal_deviation_all = r.normal_deviation_all.max(a);
+                if t < 1.0 - CLASH_SHARE {
+                    r.normal_deviation = r.normal_deviation.max(a);
+                    r.normal_excess = r.normal_excess.max(a);
+                    along.angle = along.angle.map(|x| x.max(a));
+                }
             }
         }
     }
@@ -1203,7 +1452,23 @@ fn measure(quilt: &Quilt, stations: &[Station], points: &[Vec3], located: &[(usi
             r.point_deviation = r.point_deviation.max(on.eval(uv[0], uv[1], 0, 0)?.dist(*p));
         }
     }
-    Ok(r)
+    Ok((r, along))
+}
+
+/// What a fit achieves at the stations of the sides running along u (`[0]`) and along v (`[1]`):
+/// where it falls short, the spans that way are halved.
+#[derive(Clone, Copy, Debug, Default)]
+struct Along {
+    angle: [f64; 2],
+    jumps: [[f64; MAX_CONTINUITY + 1]; 2],
+}
+
+impl Along {
+    /// The directions whose sides miss the angle tolerance, or an order's ([`within_order`]).
+    fn missing(&self, order: usize, size: f64, angle_tol: f64) -> [bool; 2] {
+        [0, 1]
+            .map(|d| self.angle.get(d).is_some_and(|a| *a > angle_tol) || self.jumps.get(d).is_some_and(|j| !within_order(j, order, size, angle_tol)))
+    }
 }
 
 /// The patch and parameters of the fill's point nearest `p`: the nearest of a grid of samples
@@ -1273,13 +1538,13 @@ fn crowned(mut quilt: Quilt, stations: &[Station], crown: f64, size: f64) -> Spl
     let bump = |x: f64, y: f64| if about_centre { x * (2.0 - x) * y * (2.0 - y) } else { 16.0 * x * (1.0 - x) * y * (1.0 - y) };
     let mut moved = std::collections::HashMap::new();
     for (k, patch) in quilt.patches.iter().enumerate() {
-        let c = patch.count();
-        let g = greville(&patch.space);
-        let far = if about_centre { c } else { c.saturating_sub(held) };
-        for j in held..far {
-            for i in held..far {
-                let Some(Some(id)) = quilt.slots.get(k).and_then(|s| s.get(i + c * j)) else { continue };
-                let (x, y) = (g.get(i).copied().unwrap_or(0.5), g.get(j).copied().unwrap_or(0.5));
+        let [cu, cv] = patch.counts();
+        let (gu, gv) = (greville(&patch.spaces[0]), greville(&patch.spaces[1]));
+        let far = |c: usize| if about_centre { c } else { c.saturating_sub(held) };
+        for j in held..far(cv) {
+            for i in held..far(cu) {
+                let Some(Some(id)) = quilt.slots.get(k).and_then(|s| s.get(patch.flat(i, j))) else { continue };
+                let (x, y) = (gu.get(i).copied().unwrap_or(0.5), gv.get(j).copied().unwrap_or(0.5));
                 let Some(n) = patch.normal(x, y) else { continue };
                 moved.entry(*id).or_insert_with(|| patch.at(i, j) + n * (crown * size * bump(x, y)));
             }

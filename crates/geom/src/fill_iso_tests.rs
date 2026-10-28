@@ -130,7 +130,7 @@ fn jump(fill: &IsoFill, edges: &[IsoEdge], k: usize) -> f64 {
 fn a_sphere_window_on_rational_arcs_holds_each_order_asked_and_not_the_next() {
     let edges = window();
     for order in 1..=4 {
-        let fill = iso_fill(&edges, &mut sphere_beside(&edges, order), &[false; 4], &spec()).unwrap();
+        let fill = iso_fill(&edges, &mut sphere_beside(&edges, order), &spec()).unwrap();
         let a = fill.achieved;
         let measured: Vec<f64> = (2..=4).map(|k| jump(&fill, &edges, k)).collect();
         eprintln!(
@@ -168,7 +168,7 @@ fn a_sphere_window_on_rational_arcs_holds_each_order_asked_and_not_the_next() {
 #[test]
 fn hostile_edges_are_refused() {
     let edges = window();
-    let ok = |e: &[IsoEdge]| iso_fill(e, &mut sphere_beside(e, 2), &[false; 4], &spec());
+    let ok = |e: &[IsoEdge]| iso_fill(e, &mut sphere_beside(e, 2), &spec());
     let mut bad = edges.clone();
     bad[1].weights = Some(vec![-1.0; bad[1].points.len()]);
     assert!(ok(&bad).is_err(), "a negative weight");
@@ -197,7 +197,7 @@ fn hostile_edges_are_refused() {
         }
         Ok(got)
     };
-    assert!(iso_fill(&edges, &mut too_high, &[false; 4], &spec()).is_err());
+    assert!(iso_fill(&edges, &mut too_high, &spec()).is_err());
 }
 
 /// The rational basis's derivatives (the Leibniz rule on `w N N = R W`) against central
@@ -205,7 +205,7 @@ fn hostile_edges_are_refused() {
 #[test]
 fn a_rational_patch_s_derivatives_are_its_differences() {
     let edges = window();
-    let q = Quilt::new(&edges, &[], 3).unwrap();
+    let q = Quilt::new(&edges, &[Vec::new(), Vec::new()], 3).unwrap();
     let p = &q.patches[0];
     assert!(p.rational);
     let (u, v, h) = (0.3, 0.6, 1e-5);

@@ -80,6 +80,9 @@ pub struct PatchReport {
     /// corners where the neighbours themselves disagree, and anywhere.
     pub normal_deviation_deg: f64,
     pub normal_deviation_all_deg: f64,
+    /// The largest angle (degrees) by which the patch's normal misses a neighbour's beyond the
+    /// loop edge's own lean out of that neighbour's tangent plane (what the tolerance holds).
+    pub normal_excess_deg: f64,
     /// `jumps[k]`, k = 2 … 4: the largest jump across the edges asked for order k or more, clear
     /// of the loop's corners, of the k-th derivative of the linkage curves' height above the
     /// neighbour (1/mmᵏ⁻¹): the normal curvature (k = 2), its rate of change
@@ -154,18 +157,6 @@ fn general_fill(
     for (&(e, forward), order) in chain.iter().zip(orders) {
         beside.push(if *order == Continuity::G0 { None } else { Some(Beside::new(record, e, forward, *order, size)?) });
     }
-    // Where a G1/G2 edge's neighbour and the one before disagree at their corner.
-    let n = chain.len();
-    let mut clash = vec![false; n];
-    for (k, slot) in clash.iter_mut().enumerate() {
-        let prev = (k + n - 1) % n;
-        let (Some(Some(a)), Some(Some(b))) = (beside.get(prev), beside.get(k)) else { continue };
-        let (Some(ea), Some(eb)) = (edges.get(prev), edges.get(k)) else { continue };
-        let (end, start) = (ea.knots.last().copied().unwrap_or(0.0), eb.knots.first().copied().unwrap_or(0.0));
-        if let (Some(x), Some(y)) = (a.across(record, end)?, b.across(record, start)?) {
-            *slot = x.normal.dot(y.normal).abs() < (2.0 * PATCH_ANGLE_TOL_DEG).to_radians().cos();
-        }
-    }
     let mut across = |k: usize, ts: &[f64]| -> std::result::Result<Vec<Option<Across>>, String> {
         match beside.get(k) {
             None => Err("no such edge".into()),
@@ -174,7 +165,7 @@ fn general_fill(
         }
     };
     let spec = IsoSpec { tol: face_tolerance(body), angle_tol: PATCH_ANGLE_TOL_DEG.to_radians(), crown, points };
-    let fill = solidcraft_geom::fill_iso::iso_fill(&edges, &mut across, &clash, &spec).map_err(spline_error)?;
+    let fill = solidcraft_geom::fill_iso::iso_fill(&edges, &mut across, &spec).map_err(spline_error)?;
     let made = quilt_body(body, record, chain, &fill, face_tolerance(body))?;
     let a = fill.achieved;
     let report = PatchReport {
@@ -182,6 +173,7 @@ fn general_fill(
         gap: 0.0,
         normal_deviation_deg: a.normal_deviation.to_degrees(),
         normal_deviation_all_deg: a.normal_deviation_all.to_degrees(),
+        normal_excess_deg: a.normal_excess.to_degrees(),
         jumps: a.jumps,
         point_gap: a.point_deviation,
     };
