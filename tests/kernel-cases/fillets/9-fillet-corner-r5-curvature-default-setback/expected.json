@@ -1,0 +1,26 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#9"
+ ],
+ "what": "three r5 rounds at a box corner with the curvature (g2) corner at its default setback 1.5 r: the corner patch must meet the rounds and faces G2 (today it is G1 at the corner point)",
+ "source": "invariants",
+ "method": "as ladder 07-fillets/015: box 60x40x20, the three edges at the corner (60, 40, 20) rounded r5 with corner g2, the corner set back 7.5 and filled with one patch built G2 to the three rounds and the three faces; no closed-form volume: one valid body, 6 faces + 3 rounds + the patch, within the box; every seam of the patch G2, measured as Continuity Analysis measures it",
+ "body_count": 1,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g2",
+  "edges": "corner"
+ }
+}

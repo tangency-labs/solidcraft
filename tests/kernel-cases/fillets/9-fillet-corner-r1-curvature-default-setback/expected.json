@@ -2,7 +2,7 @@
  "sources": [
   "tangency-labs/solidcraft#9"
  ],
- "what": "three r1 rounds at a box corner with the curvature (g2) corner at its default setback 1.5 r",
+ "what": "three r1 rounds at a box corner with the curvature (g2) corner at its default setback 1.5 r: the corner patch must meet the rounds and faces G2 (today it is G1 at the corner point)",
  "source": "invariants",
  "method": "as ladder 07-fillets/015 at r1: the corner set back 1.5 and filled with one patch; no closed-form volume: one valid body, 6 faces + 3 rounds + the patch, within the box",
  "body_count": 1,
