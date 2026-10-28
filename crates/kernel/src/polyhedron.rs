@@ -185,10 +185,12 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
 }
 
 /// Hollow a body: walls of `thickness` inside, open at the faces under `open` (SMLib's shell).
-/// The result's history is over `[b]`: the inner walls are offsets of the faces they line.
+/// The result's history is over `[b]`: the inner walls are offsets of the faces they line. Each
+/// kept planar wall and its inner lining carry the outer and inner shell roles of the face they
+/// came from (face certificates: sketches and press-pulls attach to them).
 pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "shell");
-    crate::offset_backend::shell(b, open, thickness)
+    crate::offset_backend::shell(b, open, thickness)?.with_shell_planar_sources(b, thickness, open)
 }
 
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they
