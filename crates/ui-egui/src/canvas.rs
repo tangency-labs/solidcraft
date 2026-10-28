@@ -811,12 +811,13 @@ fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2,
     value_box_full(ui, ids, label, value, placed(ui, at), (select_all, false), note, place);
 }
 
-/// Where the main value box goes this frame (see [`clear_of_model`]). While the pointer is over
-/// the box it stays put, so the wheel keeps stepping its value.
+/// Where the main value box goes this frame (see [`clear_of_model`]). With wheel stepping on, it
+/// stays put while the pointer is over it, so the wheel keeps stepping its value; off, it follows
+/// its handle as before.
 fn placed(ui: &egui::Ui, at: Pos2) -> (Pos2, egui::Align2) {
     let last = egui::Id::new("sc_canvas_box_at");
-    let over =
-        ui.ctx().memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).zip(ui.ctx().pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
+    let over = crate::value_step::enabled(ui.ctx())
+        && ui.ctx().memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).zip(ui.ctx().pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
     if over && let Some(kept) = ui.ctx().data(|d| d.get_temp::<(Pos2, egui::Align2)>(last)) {
         return kept;
     }
