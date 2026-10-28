@@ -47,6 +47,13 @@ panel, and in the right-click menu of a body) open the same dialog with that for
 the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
 the format there.
 
+How closely an exported mesh follows curved faces is its `quality` in `file.export` and
+`file.save_mesh` (STL, OBJ and 3MF): `coarse`, `standard` (the default), `fine` or `finest`, a
+chord tolerance of 1/1000, 2/10000, 5/100000 or 1/100000 of each body's size. `coarse` is the chord
+tolerance the viewport draws with at Normal display quality, and suits a model for a web viewer or
+a small-scale print. `chord_mm` (0.001 to 100) sets one tolerance in millimetres for every body
+instead, for example `{"path": "assembly.stl", "chord_mm": 0.05}`.
+
 **File → Send to Slicer** (also on the Insert tab's Files panel, and in the right-click menu of a
 body) is the short way: it saves the selected bodies as a 3MF in millimetres, without face tags,
 and sends it to a slicer. It always asks which one and pre-selects the slicer you used last time,

@@ -56,12 +56,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: coarse|standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 1e-3, 2e-4, 5e-5 or 1e-5 of each body's size; default standard; coarse is the chord tolerance of the viewport at Normal display quality, for display meshes and small-scale prints); chord_mm?: number (STL, OBJ and 3MF: an absolute chord tolerance in mm, 0.001 to 100, the same for every body, in place of quality)"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("INSERT", "FILES")
         .icon("mesh_export")
         .noundo()
-        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard)"),
+        .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: coarse|standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 1e-3, 2e-4, 5e-5 or 1e-5 of each body's size; default standard; coarse is the chord tolerance of the viewport at Normal display quality, for display meshes and small-scale prints); chord_mm?: number (STL, OBJ and 3MF: an absolute chord tolerance in mm, 0.001 to 100, the same for every body, in place of quality)"),
     CommandSpec::new("file.send_to_slicer", "Send to Slicer", send_to_slicer)
         .enabled(starts_programs)
         .at("INSERT", "FILES")
@@ -589,14 +589,22 @@ fn save_as(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-/// A mesh export's `quality`: standard (as every export was) unless asked for (#4747).
+/// A mesh export's `quality`: standard (as every export was) unless asked for (#4747), and an
+/// absolute `chord_mm` in its place when given (#8198).
 fn mesh_quality(p: &Value, cmd: &str) -> Result<solidcraft_io::MeshQuality> {
-    match p.get("quality") {
-        None | Some(Value::Null) => Ok(solidcraft_io::MeshQuality::default()),
+    use solidcraft_io::MeshQuality;
+    let level = match p.get("quality") {
+        None | Some(Value::Null) => MeshQuality::default(),
         Some(v) => v
             .as_str()
-            .and_then(solidcraft_io::MeshQuality::from_name)
-            .ok_or_else(|| bad(cmd, format!("`quality` must be standard, fine or finest, not {v}"))),
+            .and_then(MeshQuality::from_name)
+            .ok_or_else(|| bad(cmd, format!("`quality` must be coarse, standard, fine or finest, not {v}")))?,
+    };
+    match p.get("chord_mm") {
+        None | Some(Value::Null) => Ok(level),
+        Some(v) => v.as_f64().filter(|mm| (MeshQuality::MIN_CHORD..=MeshQuality::MAX_CHORD).contains(mm)).map(MeshQuality::Chord).ok_or_else(|| {
+            bad(cmd, format!("`chord_mm` must be a number from {} to {} (mm), not {v}", MeshQuality::MIN_CHORD, MeshQuality::MAX_CHORD))
+        }),
     }
 }
 
@@ -864,7 +872,50 @@ mod tests {
         assert!(std::fs::metadata(&finest_3mf).unwrap().len() > std::fs::metadata(&standard_3mf).unwrap().len());
         for bad in [json!("ultra"), json!(3), json!(true)] {
             let e = s.execute("file.export", &json!({"path": dir.join("bad.stl").to_string_lossy(), "quality": bad})).unwrap_err().to_string();
-            assert!(e.contains("`quality` must be standard, fine or finest"), "{bad}: {e}");
+            assert!(e.contains("`quality` must be coarse, standard, fine or finest"), "{bad}: {e}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #8198: a display mesh can be coarser than standard, at the `coarse` level (1e-3 of the
+    /// body's size) or at an absolute `chord_mm`, which takes the place of `quality`. The 3 mm
+    /// hole of a 200 mm plate gets fewer triangles at coarse than at standard in STL, OBJ and
+    /// 3MF; more as `chord_mm` shrinks; and a `chord_mm` out of range or not a number is refused.
+    #[test]
+    fn a_mesh_export_is_coarser_at_coarse_or_a_larger_chord() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-mesh-coarse-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 200, "width": 100, "height": 5})).unwrap();
+        s.execute("solid.cylinder", &json!({"base": [100, 50, -1], "radius": 1.5, "height": 7, "operation": "cut"})).unwrap();
+        let stl_triangles = |b: &[u8]| u32::from_le_bytes([b[80], b[81], b[82], b[83]]);
+        let mut export = |name: &str, extra: Value| {
+            let path = dir.join(name).to_string_lossy().to_string();
+            let mut p = json!({"path": path});
+            for (k, v) in extra.as_object().unwrap() {
+                p[k] = v.clone();
+            }
+            let cmd = if name.ends_with(".3mf") { "file.save_mesh" } else { "file.export" };
+            s.execute(cmd, &p).unwrap();
+            std::fs::read(&path).unwrap()
+        };
+        let standard = export("standard.stl", json!({}));
+        let coarse = export("coarse.stl", json!({"quality": "coarse"}));
+        assert!(stl_triangles(&coarse) < stl_triangles(&standard), "{} vs {}", stl_triangles(&coarse), stl_triangles(&standard));
+        assert!(export("coarse.obj", json!({"quality": "coarse"})).len() < export("standard.obj", json!({})).len());
+        assert!(export("coarse.3mf", json!({"quality": "coarse"})).len() < export("standard.3mf", json!({})).len());
+        // A smaller chord, more triangles; and the chord wins over the level.
+        let chords: Vec<u32> =
+            [1.0, 0.1, 0.01].iter().map(|mm| stl_triangles(&export(&format!("chord-{mm}.stl"), json!({"chord_mm": mm})))).collect();
+        assert!(chords[0] < chords[1] && chords[1] < chords[2], "{chords:?}");
+        assert_eq!(stl_triangles(&export("chord-over-finest.stl", json!({"quality": "finest", "chord_mm": 1.0}))), chords[0]);
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        for bad in [json!(0), json!(-1), json!(0.0001), json!(101), json!("0.5"), json!(true)] {
+            for cmd in ["file.export", "file.save_mesh"] {
+                let e = s.execute(cmd, &json!({"path": dir.join("bad.stl").to_string_lossy(), "chord_mm": bad})).unwrap_err().to_string();
+                assert!(e.contains("`chord_mm` must be a number from 0.001 to 100 (mm)"), "{cmd} {bad}: {e}");
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

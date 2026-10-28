@@ -361,20 +361,30 @@ impl Format {
 }
 
 /// How closely an exported mesh follows curved faces: its chord tolerance as a share of each
-/// body's size. Standard is what every mesh export used; Fine and Finest give the small round
-/// features of a large part more sides (#4747).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// body's size, or in millimetres. Standard is what every mesh export used; Fine and Finest give
+/// the small round features of a large part more sides (#4747); Coarse and an absolute chord
+/// make smaller files for display and small-scale prints (#8198).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum MeshQuality {
+    Coarse,
     #[default]
     Standard,
     Fine,
     Finest,
+    /// An absolute chord tolerance in millimetres, the same for every body.
+    Chord(f64),
 }
 
 impl MeshQuality {
-    /// By the name commands take: `standard`, `fine` or `finest`.
+    /// The smallest absolute chord tolerance (mm): one micrometre, the floor every level has.
+    pub const MIN_CHORD: f64 = 1e-3;
+    /// The largest absolute chord tolerance (mm).
+    pub const MAX_CHORD: f64 = 100.0;
+
+    /// By the name commands take: `coarse`, `standard`, `fine` or `finest`.
     pub fn from_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
+            "coarse" => Some(Self::Coarse),
             "standard" => Some(Self::Standard),
             "fine" => Some(Self::Fine),
             "finest" => Some(Self::Finest),
@@ -382,13 +392,16 @@ impl MeshQuality {
         }
     }
 
-    /// The chord tolerance as a share of the body's size.
-    fn share(self) -> f64 {
-        match self {
-            Self::Standard => 2e-4,
-            Self::Fine => 5e-5,
-            Self::Finest => 1e-5,
-        }
+    /// The chord tolerance (mm) for a body of size `size` (never finer than 1 µm).
+    fn chord(self, size: f64) -> f64 {
+        let tol = match self {
+            Self::Coarse => size * 1e-3,
+            Self::Standard => size * 2e-4,
+            Self::Fine => size * 5e-5,
+            Self::Finest => size * 1e-5,
+            Self::Chord(mm) => mm,
+        };
+        tol.max(Self::MIN_CHORD)
     }
 }
 
@@ -399,7 +412,7 @@ pub fn export_mesh(b: &solidcraft_kernel::Body) -> Result<Mesh> {
 
 /// [`export_mesh`] at `quality` (never finer than 1 µm).
 pub fn export_mesh_at(b: &solidcraft_kernel::Body, quality: MeshQuality) -> Result<Mesh> {
-    Ok(b.tessellate((b.size() * quality.share()).max(1e-3))?)
+    Ok(b.tessellate(quality.chord(b.size()))?)
 }
 
 /// Distance within which an exported mesh's vertices are welded (STL and 3MF alike).
