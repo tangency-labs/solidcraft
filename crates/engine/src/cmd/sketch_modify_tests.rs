@@ -2797,3 +2797,59 @@ fn a_fillet_stays_a_quarter_arc_when_its_corner_is_pinned_or_dragged_to_the_othe
     assert_eq!(curve(&si, "l1")["end_at"], json!([45.0, 10.0]), "{}", curve(&si, "l1"));
     assert_eq!(curve(&si, "l2")["start_at"], json!([40.0, 5.0]), "{}", curve(&si, "l2"));
 }
+
+/// Breaking a piece again where it was already broken adds nothing: no zero-length piece and
+/// no new constraints, however often it is clicked.
+#[test]
+fn breaking_again_where_a_curve_was_broken_adds_nothing() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}))["curves"])[0].clone();
+    // A circle tangent to A (as the slot's end arc is to its side): a tangent touch is a double
+    // root, found as two cuts a hair apart.
+    let x = 20.0 / 3.0 + 0.123_456_789;
+    run(&mut s, "sketch.circle.center", json!({"center": [x, 3.0], "radius": 3.0}));
+    run(&mut s, "sketch.dimension", json!({"entities": [a.clone()], "value": 20}));
+    run(&mut s, "sketch.break", json!({"curve": a, "at": [5, 0]}));
+    let count = |s: &Session| {
+        let k = sketch(s);
+        (k.curves.len(), k.constraints.len())
+    };
+    let first = count(&s);
+    let shown = |s: &Session| {
+        let k = sketch(s);
+        k.curves
+            .iter()
+            .map(|c| match c.kind {
+                CurveKind::Line { a, b } => format!("line {:?}-{:?}", k.point(a), k.point(b)),
+                _ => "other".into(),
+            })
+            .collect::<Vec<_>>()
+    };
+    eprintln!("after the first break: {:?}", shown(&s));
+    for _ in 0..5 {
+        let k = sketch(&s);
+        let left = k
+            .curves
+            .iter()
+            .find(|c| {
+                matches!(c.kind, CurveKind::Line { .. })
+                    && k.shape(k.curve_index(&c.id).unwrap()).is_some_and(|sh| sh.project(Vec2::new(5.0, 0.0)).dist(Vec2::new(5.0, 0.0)) < 1e-9)
+            })
+            .map(|c| c.id.clone());
+        let Some(left) = left else { panic!("no piece through (5, 0): {:?}", shown(&s)) };
+        let _ = s.execute("sketch.break", &json!({"curve": left, "at": [5, 0]}));
+        let _ = s.execute("sketch.break", &json!({"curve": left, "at": [x - 1e-7, 0]}));
+    }
+    let k = sketch(&s);
+    eprintln!("first {first:?} now {:?}; constraints {:?}", count(&s), k.constraints.iter().map(|c| format!("{:?}", c.kind)).collect::<Vec<_>>());
+    assert_eq!(count(&s), first, "repeated breaks added curves or constraints");
+    // The line stays where it was, 20 long: the length became the distance between its old ends.
+    let k = sketch(&s);
+    for c in &k.curves {
+        if let CurveKind::Line { a, b } = c.kind {
+            let (pa, pb) = (k.point(a).unwrap(), k.point(b).unwrap());
+            assert!(pa.y.abs() < 1e-9 && pb.y.abs() < 1e-9 && pa.dist(pb) > 1e-3, "{:?}", shown(&s));
+        }
+    }
+    assert!(k.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Distance { value, .. } if close(value, 20.0))), "{:?}", k.constraints);
+}
