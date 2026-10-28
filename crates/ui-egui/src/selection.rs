@@ -102,12 +102,15 @@ pub struct SelInput {
     /// What the input is for, as a message id: its tooltip, and the note a click that picks
     /// nothing leaves under the form (#10428). Without one the tooltip names what it takes.
     pub tip: Option<&'static str>,
+    /// The form draws this input's row itself, under the choice that adds it (an extrude's To
+    /// Object under Extent Type); the list of inputs at the top leaves it out.
+    pub under_choice: bool,
     pub items: Vec<Sel>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, items: Vec::new() }
+        SelInput { label, accept, multi, places: false, tip: None, under_choice: false, items: Vec::new() }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
@@ -119,6 +122,12 @@ impl SelInput {
     /// This input with a tooltip saying what it is for (see [`SelInput::tip`]).
     pub fn tip(mut self, id: &'static str) -> SelInput {
         self.tip = Some(id);
+        self
+    }
+
+    /// This input with its row drawn by the form (see [`SelInput::under_choice`]).
+    pub fn under_choice(mut self) -> SelInput {
+        self.under_choice = true;
         self
     }
 
