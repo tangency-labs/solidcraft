@@ -80,7 +80,7 @@ cadmpeg-ir = "=0.6.3"
 cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
-ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 
 # Ends a process group with the system call (MIT; already in the tree through zip).
 nix = { version = "0.31", default-features = false, features = ["signal"] }

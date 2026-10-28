@@ -200,7 +200,10 @@ impl<'a> TextMetrics<'a> {
     /// The face of `font` set in `style`: its letter and line spacing (its bold and italic chose the face).
     pub fn new(font: &'a FontData, style: &TextStyle) -> Result<TextMetrics<'a>> {
         check_spacing(style)?;
-        let face = ttf_parser::Face::parse(font.bytes(), font.index).map_err(|e| SketchError::Invalid(format!("font: {e}")))?;
+        let mut face = ttf_parser::Face::parse(font.bytes(), font.index).map_err(|e| SketchError::Invalid(format!("font: {e}")))?;
+        if let Some(weight) = font.weight {
+            face.set_variation(ttf_parser::Tag::from_bytes(b"wght"), weight);
+        }
         Ok(TextMetrics {
             cap: cap_height(&face),
             pitch: f64::from(face.ascender()) - f64::from(face.descender()) + f64::from(face.line_gap()),
