@@ -13,7 +13,8 @@ use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
 use solidcraft_sketch::{LinkGeom, LinkKind, Sketch};
 
-use super::sketch::{edit, target_sketch};
+use super::sketch::edit;
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, str_, string_list};
 use crate::schema::sketch_links::{
@@ -138,9 +139,14 @@ fn named_links(sk: &Sketch, p: &Value, cmd: &str) -> Result<Vec<String>> {
 /// references (when `all`), in timeline order.
 fn target_sketches(s: &Session, p: &Value, cmd: &str, all: bool) -> Result<Vec<u64>> {
     if p.get("sketch").is_some() || s.active_sketch.is_some() || !all {
-        return Ok(vec![target_sketch(s, p, cmd)?]);
+        return Ok(vec![sketch_store::target(s, p, cmd)?]);
     }
-    Ok(s.doc.features.iter().filter(|f| s.doc.sketch(f.id).is_ok_and(|sk| sk.links.iter().any(|l| l.kind != LinkKind::Text))).map(|f| f.id).collect())
+    Ok(s.doc
+        .features
+        .iter()
+        .filter(|f| sketch_store::read(&s.doc, f.id).is_ok_and(|sk| sk.links.iter().any(|l| l.kind != LinkKind::Text)))
+        .map(|f| f.id)
+        .collect())
 }
 
 /// Where each of a link's points is, by id.
@@ -343,7 +349,7 @@ fn references(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.references";
     let mut out = Vec::new();
     for id in target_sketches(s, p, cmd, true)? {
-        let stored = s.doc.sketch(id)?;
+        let stored = sketch_store::read(&s.doc, id)?;
         let result = s.model.result(id);
         let evaluated = result.and_then(|r| r.state.sketch(id)).map(|ss| &ss.sketch);
         let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
@@ -430,7 +436,7 @@ fn update_references(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "capture").unwrap_or(false) {
         let read: std::collections::BTreeSet<u64> = targets
             .iter()
-            .filter_map(|id| s.doc.sketch(*id).ok())
+            .filter_map(|id| sketch_store::read(&s.doc, *id).ok())
             .flat_map(|sk| sk.links.iter().filter_map(|l| l.placement.clone()))
             .flat_map(|p| p.source.into_iter().chain(p.author))
             .collect();
@@ -451,7 +457,7 @@ fn update_references(s: &mut Session, p: &Value) -> Result<Value> {
     let mut lost = false;
     for id in &targets {
         let mut doc = (*s.doc).clone();
-        let before = doc.sketch(*id)?.clone();
+        let before = sketch_store::read(&doc, *id)?.clone();
         let mut sk = before.clone();
         let warnings = super::sketch_project::refresh(s, &doc, *id, &mut sk);
         for l in sk.links.iter().filter(|l| l.kind != LinkKind::Text) {
@@ -468,7 +474,7 @@ fn update_references(s: &mut Session, p: &Value) -> Result<Value> {
             links.push(LinkUpdate::Link { sketch: *id, link: l.id.clone(), source: l.source.describe(), status: status.into() });
         }
         if sk != before {
-            *doc.sketch_mut(*id)? = sk;
+            sketch_store::write(&mut doc, *id, sk)?;
             *s.doc_mut() = doc;
             s.refresh();
         }
@@ -510,26 +516,26 @@ fn freeze_link(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn resume_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.resume_link";
-    let id = target_sketch(s, p, cmd)?;
+    let id = sketch_store::target(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     let links = named_links(&sk, p, cmd)?;
     for l in &links {
         sk.set_link_frozen(l, false)?;
     }
     let warnings = super::sketch_project::refresh(s, &doc, id, &mut sk);
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     reply(ResumeLinkResult { resumed: links, warnings, param_warnings: Vec::new() })
 }
 
 fn repair_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.repair_link";
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let link = str_(p, "link").ok_or_else(|| bad(cmd, "`link` must name the link to repair"))?.to_string();
     let reference = p.get("ref").ok_or_else(|| bad(cmd, "`ref` must give the new source"))?;
     let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     let old = sk.link(&link).cloned().ok_or_else(|| bad(cmd, format!("no link `{link}`")))?;
     if old.kind == LinkKind::Text {
         return Err(bad(cmd, "a text is not a reference"));
@@ -561,9 +567,9 @@ fn repair_link(s: &mut Session, p: &Value) -> Result<Value> {
     }
     sk.set_link_wires(&link, &wires)?;
     let update = sk.update_link_detail(&link, &geom)?;
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
-    let sk = s.doc.sketch(id)?;
+    let sk = sketch_store::read(&s.doc, id)?;
     let curves: Vec<String> = sk.link_curves(&link).iter().filter_map(|c| sk.curves.get(*c)).map(|c| c.id.clone()).collect();
     let points: Vec<String> = sk.link_points(&link).iter().filter_map(|q| sk.points.get(*q)).map(|q| q.id.clone()).collect();
     reply(RepairLinkResult { link, rebuilt: update.rebuilt, dropped_constraints: update.dropped, curves, points, param_warnings: Vec::new() })
