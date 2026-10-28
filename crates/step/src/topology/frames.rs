@@ -17,6 +17,15 @@
 //! on a quarter line, or where two of them spill, maybe an end); a face
 //! whose frame cannot be turned (a placed revolution, its angle zero at its profile) keeps its
 //! group as the file has it.
+//!
+//! A torus face's tube spills the same way along its tube angle, which STEP counts from the outer
+//! equator: its tube start moves to where the face's tube begins, or a turn before where it ends
+//! (`brep::form::tube_turned`), the same surface. Its circles round the tube are labelled from
+//! the tube start (`brep::form::on_tube`), unless one is about another round face's axis (a
+//! pipe's cylinder meeting the tube), which labels it on its own grid: the tube start is then
+//! the one of the two that puts the tube's grid on that face's.
+
+use std::f64::consts::TAU;
 
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::CurveEval;
@@ -53,8 +62,77 @@ fn root(parent: &mut [usize], mut i: usize) -> usize {
 impl Builder<'_, '_> {
     /// Measure every round face's box on its label, and turn the frames of the faces whose
     /// forms would run past one turn, with the faces their circle edges join them to, so that
-    /// each starts on a quarter line. Returns how many faces were turned.
+    /// each starts on a quarter line; a torus face whose tube would, its tube start too. Returns
+    /// how many faces were turned.
     pub(super) fn turn_frames(&mut self) -> R<usize> {
+        let about_axis = self.turn_about_axes()?;
+        Ok(about_axis + self.turn_tubes())
+    }
+
+    /// The torus faces whose forms would run past one turn of the tube start it where their
+    /// tube begins, or a turn before where it ends (either fits it in four quarters): the one that
+    /// puts its tube circles on the quarter grid of the round faces they are about the axes of
+    /// (a pipe's cylinder meeting the tube), so those circles' pcurves are exact on both; where
+    /// neither does, where it begins.
+    fn turn_tubes(&mut self) -> usize {
+        let tol = self.tol;
+        let frames: Vec<Option<brep::Frame>> = self.faces.iter().map(|f| brep::form::frame_of(&f.surface)).collect();
+        // The round faces each edge bounds.
+        let mut bounding: Vec<Vec<usize>> = vec![Vec::new(); self.edges.len()];
+        for (fi, f) in self.faces.iter().enumerate() {
+            for l in &f.loops {
+                if let LoopB::Edges(es) = l {
+                    for (e, _) in es {
+                        if frames.get(fi).is_some_and(Option::is_some)
+                            && let Some(b) = bounding.get_mut(*e as usize)
+                            && !b.contains(&fi)
+                        {
+                            b.push(fi);
+                        }
+                    }
+                }
+            }
+        }
+        let mut turned = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            let Some(e) = face.extent else { continue };
+            if brep::form::tube_quarters(&face.surface, e, tol).is_none_or(|q| q <= 4) {
+                continue;
+            }
+            // Its tube circles about another round face's axis, with that face's frame.
+            let mut joined = Vec::new();
+            for l in &face.loops {
+                let LoopB::Edges(es) = l else { continue };
+                for (ei, _) in es {
+                    let Some(edge) = self.edges.get(*ei as usize) else { continue };
+                    for other in bounding.get(*ei as usize).into_iter().flatten().filter(|o| **o != fi) {
+                        if let Some(Some(fr)) = frames.get(*other) {
+                            joined.push((&edge.curve, edge.interval, fr));
+                        }
+                    }
+                }
+            }
+            let on_grid = |start: f64| {
+                brep::form::tube_turned(&face.surface, start)
+                    .is_some_and(|torus| joined.iter().all(|(c, iv, fr)| brep::form::tube_on_grid(c, *iv, fr, &torus, tol).is_none_or(|on| on)))
+            };
+            let (begin, end) = (e[1][0], e[1][1] - TAU);
+            let start = if !on_grid(begin) && on_grid(end) { end } else { begin };
+            let Some(surface) = brep::form::tube_turned(&face.surface, start) else { continue };
+            if let Some(face) = self.faces.get_mut(fi) {
+                face.surface = surface;
+                if let Some(e) = face.extent.as_mut() {
+                    e[1] = [e[1][0] - start, e[1][1] - start];
+                }
+                turned += 1;
+            }
+        }
+        turned
+    }
+
+    /// Measure the round faces' boxes and turn the groups that spill about their axes.
+    fn turn_about_axes(&mut self) -> R<usize> {
         let n = self.faces.len();
         let frames: Vec<Option<brep::Frame>> = self.faces.iter().map(|f| brep::form::frame_of(&f.surface)).collect();
         for fi in 0..n {

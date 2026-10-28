@@ -96,9 +96,10 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
         Ok(EvalCurve { degree: 1, knots: vec![-h1, -h1, -h0, -h0], ctrl: vec![[a.x, a.y, a.z, 1.0], [b.x, b.y, b.z, 1.0]] })
     };
     // A meridian from the record's least angle to its greatest, reversed (so the normal is the
-    // record's natural one, outward).
-    let meridian = |centre: Vec3, x: Vec3, z: Vec3, r: f64, angle: [f64; 2], o: Vec3| -> Result<(EvalSurface, Params)> {
-        let (curve, spans) = arc(centre, x, z, r, angle);
+    // record's natural one, outward), its angle measured from `x` toward `y` in the plane of `x`
+    // and the axis `z`.
+    let meridian = |centre: Vec3, [x, y]: [Vec3; 2], z: Vec3, r: f64, angle: [f64; 2], o: Vec3| -> Result<(EvalSurface, Params)> {
+        let (curve, spans) = arc(centre, x, y, r, angle);
         Ok((revolved(curve.reversed(), o, z)?, Params::Meridian(spans)))
     };
     match surface {
@@ -113,11 +114,13 @@ pub(crate) fn eval_surface(surface: &brep::Surface, domain: [[f64; 2]; 2]) -> Re
         }
         brep::Surface::Sphere { frame, radius } => {
             let (o, x, z) = axes(frame);
-            meridian(o, x, z, *radius, [-FRAC_PI_2, FRAC_PI_2], o)
+            meridian(o, [x, z], z, *radius, [-FRAC_PI_2, FRAC_PI_2], o)
         }
-        brep::Surface::Torus { frame, major_radius, minor_radius } => {
+        brep::Surface::Torus { frame, major_radius, minor_radius, tube_start } => {
             let (o, x, z) = axes(frame);
-            meridian(o + x * *major_radius, x, z, *minor_radius, [0.0, TAU], o)
+            // The tube angle counts from its start.
+            let (s, c) = tube_start.sin_cos();
+            meridian(o + x * *major_radius, [x * c + z * s, z * c - x * s], z, *minor_radius, [0.0, TAU], o)
         }
         _ => match SurfaceEval::new(surface) {
             Ok(SurfaceEval::Eval(e, _)) => Ok((e, Params::Same)),

@@ -117,8 +117,9 @@ impl Surface {
                 Surface::cone(apex, frame.x_axis, frame.y_axis, half_angle.to_degrees(), [(v[0] - at).max(0.0), v[1] - at])
             }
             S::Sphere { frame, radius } => Surface::sphere(frame.origin, frame.x_axis, frame.y_axis, *radius, deg(u), deg(v)),
-            S::Torus { frame, major_radius, minor_radius } => {
-                Surface::torus(frame.origin, frame.x_axis, frame.y_axis, *major_radius, *minor_radius, deg(u), deg(v))
+            S::Torus { frame, major_radius, minor_radius, tube_start } => {
+                // SMLib's tube angle counts from the outer equator.
+                Surface::torus(frame.origin, frame.x_axis, frame.y_axis, *major_radius, *minor_radius, deg(u), deg(v.map(|a| a + tube_start)))
             }
             S::Spline { u_knots, v_knots, points } => {
                 let (nu, nv) = (points.len(), points.first().map_or(0, Vec::len));

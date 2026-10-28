@@ -79,10 +79,12 @@ pub enum SurfaceEval {
         axes: Axes,
         radius: f64,
     },
+    /// `tube`: the tube angle at v = 0 (`Surface::Torus::tube_start`).
     Torus {
         axes: Axes,
         major: f64,
         minor: f64,
+        tube: f64,
     },
 }
 
@@ -103,8 +105,8 @@ impl SurfaceEval {
                 Ok(SurfaceEval::Cone { axes: Axes::new(frame), radius_at_origin: *radius_at_origin, slope: half_angle.tan() })
             }
             Surface::Sphere { frame, radius } => Ok(SurfaceEval::Sphere { axes: Axes::new(frame), radius: *radius }),
-            Surface::Torus { frame, major_radius, minor_radius } => {
-                Ok(SurfaceEval::Torus { axes: Axes::new(frame), major: *major_radius, minor: *minor_radius })
+            Surface::Torus { frame, major_radius, minor_radius, tube_start } => {
+                Ok(SurfaceEval::Torus { axes: Axes::new(frame), major: *major_radius, minor: *minor_radius, tube: *tube_start })
             }
             Surface::Spline { u_knots, v_knots, points } => {
                 let rows: Vec<Vec<[f64; 4]>> = points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect()).collect();
@@ -163,9 +165,9 @@ impl SurfaceEval {
                 let (s, c) = v.sin_cos();
                 (a.o + (r * c + a.z * s) * *radius, dr * (c * radius), (a.z * c - r * s) * *radius)
             }
-            SurfaceEval::Torus { axes: a, major, minor } => {
+            SurfaceEval::Torus { axes: a, major, minor, tube } => {
                 let (r, dr) = a.radial(u);
-                let (s, c) = v.sin_cos();
+                let (s, c) = (v + tube).sin_cos();
                 let ring = major + minor * c;
                 (a.o + r * ring + a.z * (minor * s), dr * ring, (a.z * c - r * s) * *minor)
             }
@@ -195,9 +197,9 @@ impl SurfaceEval {
                 let (s, c) = v.sin_cos();
                 (r * (-c * radius), dr * (-s * radius), (r * c + a.z * s) * -*radius)
             }
-            SurfaceEval::Torus { axes: a, major, minor } => {
+            SurfaceEval::Torus { axes: a, major, minor, tube } => {
                 let (r, dr) = a.radial(u);
-                let (s, c) = v.sin_cos();
+                let (s, c) = (v + tube).sin_cos();
                 (r * -(major + minor * c), dr * (-s * minor), (r * c + a.z * s) * -*minor)
             }
         })
@@ -241,8 +243,8 @@ impl SurfaceEval {
                 let pole = if i == 0 { a.z * s } else { Vec3::ZERO };
                 Some(lift(a, i, j, (radial(a, i) * c + pole) * *radius))
             }),
-            SurfaceEval::Torus { axes: a, major, minor } => tabulate(|i, j| {
-                let (c, s) = at_v(j);
+            SurfaceEval::Torus { axes: a, major, minor, tube } => tabulate(|i, j| {
+                let (c, s) = trig_derivative(v + tube, j);
                 let ring = if j == 0 { major + minor * c } else { minor * c };
                 let tube = if i == 0 { a.z * (minor * s) } else { Vec3::ZERO };
                 Some(lift(a, i, j, radial(a, i) * ring + tube))
@@ -274,10 +276,10 @@ impl SurfaceEval {
                 let [a, b, h] = axes.local(p);
                 [angle(a, b, near.map(|n| n[0])), h.atan2(a.hypot(b))]
             }
-            SurfaceEval::Torus { axes, major, .. } => {
+            SurfaceEval::Torus { axes, major, tube, .. } => {
                 let [a, b, h] = axes.local(p);
-                let v = h.atan2(a.hypot(b) - major);
-                [angle(a, b, near.map(|n| n[0])), if v < 0.0 { v + TAU } else { v }]
+                let v = (h.atan2(a.hypot(b) - major) - tube).rem_euclid(TAU);
+                [angle(a, b, near.map(|n| n[0])), v]
             }
         };
         (q[0].is_finite() && q[1].is_finite() && self.point(q).is_some_and(|s| s.dist(p) <= accept)).then_some(q)

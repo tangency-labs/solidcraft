@@ -2583,3 +2583,180 @@ fn a_circle_edge_between_two_vertices_closer_than_the_tolerance_is_the_arc_betwe
     assert!(rel(m.volume, pi * r * r * h) < 1e-6, "{}", m.volume);
     assert!(rel(m.area, 2.0 * pi * r * r + 2.0 * pi * r * h) < 1e-6, "{}", m.area);
 }
+
+/// A ring torus (R 10, r 3) about z, as a closed solid: with `tube` its whole turn about the axis
+/// and its tube from `tube.0` for `tube.1` radians, the gap across the tube closed by a cone
+/// through the two circles where the tube ends (face #53, its seam a tube arc, the cone #57);
+/// without it the whole tube for `sweep` radians from `start` about the axis, closed by two discs
+/// (its seam an arc of the outer equator).
+fn torus_part(tube: Option<(f64, f64)>, (start, sweep): (f64, f64)) -> String {
+    let (big, small) = (10.0, 3.0);
+    let p = |x: f64, y: f64, z: f64| format!("({x:.17},{y:.17},{z:.17})");
+    let head = format!(
+        "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#50=TOROIDAL_SURFACE('',#4,{big:?},{small:?});\n"
+    );
+    let tail = "#80=CLOSED_SHELL('',(#53,#57,#61));\n#81=MANIFOLD_SOLID_BREP('Torus part',#80);\n#82=SHAPE_REPRESENTATION('',(#81),$);\n";
+    if let Some((v0, dv)) = tube {
+        // The circles about the axis at the tube's two ends, and the cone through them from the
+        // narrower one, its axis toward the wider; its sense outward from the tube.
+        let v1 = v0 + dv;
+        let ring = |v: f64| (big + small * v.cos(), small * v.sin());
+        let ((ra, za), (rb, zb)) = (ring(v0), ring(v1));
+        let ((r_near, z_near), (r_far, z_far)) = if ra < rb { ((ra, za), (rb, zb)) } else { ((rb, zb), (ra, za)) };
+        let k = (z_far - z_near).signum();
+        let semi = ((r_far - r_near) / (z_far - z_near).abs()).atan();
+        // The cone's natural normal at u = 0, (1, 0, −k tan) in (radial, axial), against the way
+        // out of the tube at the chord's middle.
+        let (mx, mz) = (0.5 * (ra + rb) - big, 0.5 * (za + zb));
+        let sense = if mx - k * semi.tan() * mz > 0.0 { "T" } else { "F" };
+        format!(
+            "{head}#5=DIRECTION('',(0.,0.,{k:.1}));
+#6=CARTESIAN_POINT('',{});
+#7=AXIS2_PLACEMENT_3D('',#6,#2,#3);
+#8=CARTESIAN_POINT('',{});
+#9=AXIS2_PLACEMENT_3D('',#8,#2,#3);
+#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',{});
+#12=VERTEX_POINT('',#13);
+#13=CARTESIAN_POINT('',{});
+#30=CIRCLE('',#7,{ra:.17});
+#31=CIRCLE('',#9,{rb:.17});
+#40=EDGE_CURVE('',#10,#10,#30,.T.);
+#41=EDGE_CURVE('',#12,#12,#31,.T.);
+#14=CARTESIAN_POINT('',({big:?},0.,0.));
+#15=DIRECTION('',(0.,-1.,0.));
+#16=AXIS2_PLACEMENT_3D('',#14,#15,#3);
+#32=CIRCLE('',#16,{small:?});
+#42=EDGE_CURVE('',#10,#12,#32,.T.);
+#200=ORIENTED_EDGE('',*,*,#40,.T.);
+#201=ORIENTED_EDGE('',*,*,#41,.F.);
+#204=ORIENTED_EDGE('',*,*,#42,.T.);
+#205=ORIENTED_EDGE('',*,*,#42,.F.);
+#51=EDGE_LOOP('',(#200,#204,#201,#205));
+#54=FACE_OUTER_BOUND('',#51,.T.);
+#53=ADVANCED_FACE('Tube',(#54),#50,.T.);
+#202=ORIENTED_EDGE('',*,*,#40,.F.);
+#203=ORIENTED_EDGE('',*,*,#41,.T.);
+#56=EDGE_LOOP('',(#202));
+#58=EDGE_LOOP('',(#203));
+#59=FACE_OUTER_BOUND('',#56,.T.);
+#60=FACE_BOUND('',#58,.T.);
+#62=CARTESIAN_POINT('',{});
+#63=AXIS2_PLACEMENT_3D('',#62,#5,#3);
+#64=CONICAL_SURFACE('',#63,{r_near:.17},{semi:.17});
+#57=ADVANCED_FACE('Gap',(#59,#60),#64,.{sense}.);
+#80=CLOSED_SHELL('',(#53,#57));
+#81=MANIFOLD_SOLID_BREP('Torus part',#80);
+#82=SHAPE_REPRESENTATION('',(#81),$);
+{TAIL}",
+            p(0.0, 0.0, za),
+            p(0.0, 0.0, zb),
+            p(ra, 0.0, za),
+            p(rb, 0.0, zb),
+            p(0.0, 0.0, z_near),
+        )
+    } else {
+        // A tube circle in each end's meridian plane, run with the tube angle, and the discs.
+        let end = |u: f64| {
+            let (c, s) = (u.cos(), u.sin());
+            ((big * c, big * s), (c, s), (s, -c))
+        };
+        let (((x0, y0), (c0, s0), (a0x, a0y)), ((x1, y1), (c1, s1), (a1x, a1y))) = (end(start), end(start + sweep));
+        format!(
+            "{head}#6=CARTESIAN_POINT('',{});
+#7=DIRECTION('',{});
+#8=DIRECTION('',{});
+#9=AXIS2_PLACEMENT_3D('',#6,#7,#8);
+#14=CARTESIAN_POINT('',{});
+#15=DIRECTION('',{});
+#16=DIRECTION('',{});
+#17=AXIS2_PLACEMENT_3D('',#14,#15,#16);
+#10=VERTEX_POINT('',#11);
+#11=CARTESIAN_POINT('',{});
+#12=VERTEX_POINT('',#13);
+#13=CARTESIAN_POINT('',{});
+#30=CIRCLE('',#9,{small:?});
+#31=CIRCLE('',#17,{small:?});
+#40=EDGE_CURVE('',#10,#10,#30,.T.);
+#41=EDGE_CURVE('',#12,#12,#31,.T.);
+#32=CIRCLE('',#4,{:.17});
+#43=EDGE_CURVE('',#10,#12,#32,.T.);
+#200=ORIENTED_EDGE('',*,*,#40,.F.);
+#201=ORIENTED_EDGE('',*,*,#41,.T.);
+#204=ORIENTED_EDGE('',*,*,#43,.T.);
+#205=ORIENTED_EDGE('',*,*,#43,.F.);
+#51=EDGE_LOOP('',(#204,#201,#205,#200));
+#54=FACE_OUTER_BOUND('',#51,.T.);
+#53=ADVANCED_FACE('Tube',(#54),#50,.T.);
+#202=ORIENTED_EDGE('',*,*,#40,.T.);
+#56=EDGE_LOOP('',(#202));
+#59=FACE_OUTER_BOUND('',#56,.T.);
+#64=PLANE('',#9);
+#57=ADVANCED_FACE('Start',(#59),#64,.T.);
+#203=ORIENTED_EDGE('',*,*,#41,.F.);
+#58=EDGE_LOOP('',(#203));
+#60=FACE_OUTER_BOUND('',#58,.T.);
+#65=DIRECTION('',{});
+#66=AXIS2_PLACEMENT_3D('',#14,#65,#16);
+#67=PLANE('',#66);
+#61=ADVANCED_FACE('End',(#60),#67,.T.);
+{tail}{TAIL}",
+            p(x0, y0, 0.0),
+            p(a0x, a0y, 0.0),
+            p(c0, s0, 0.0),
+            p(x1, y1, 0.0),
+            p(a1x, a1y, 0.0),
+            p(c1, s1, 0.0),
+            p(x0 + small * c0, y0 + small * s0, 0.0),
+            p(x1 + small * c1, y1 + small * s1, 0.0),
+            big + small,
+            p(-a1x, -a1y, 0.0),
+        )
+    }
+}
+
+/// A torus face round most of its tube off the tube's quarter lines (326° of the tube from
+/// −113.8°, as an exhaust collector has it) needed a fifth quarter along the tube: its form ran
+/// past a full turn of the tube and SMLib refused the solid. Its tube start moves to where the
+/// face's tube begins: the same torus, a form of four quarters along the tube, and the solid with
+/// its exact volume and area. A face round the whole tube (300° about the axis from 75°, which
+/// turns its frame instead) keeps its tube start and its four quarters.
+#[test]
+fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
+    use std::f64::consts::PI;
+    let (big, small) = (10.0f64, 3.0f64);
+    let (v0, dv) = ((-113.8f64).to_radians(), 326f64.to_radians());
+    for (tube, about) in [(Some((v0, dv)), (0.0, 2.0 * PI)), (None, (75f64.to_radians(), 300f64.to_radians()))] {
+        let imp = step_import(&torus_part(tube, about)).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        let b = &imp.bodies[0];
+        assert!(b.closed && b.refused.is_none(), "{tube:?}: {:?} {:?}", b.refused, imp.warnings);
+        let face = b.face_origin.iter().position(|f| *f == 53).unwrap();
+        let record = b.body.record();
+        let Some(solidcraft_geom::brep::Surface::RationalSpline { v_knots, .. }) = &record.faces[face].nurbs else { panic!("the tube's form") };
+        assert!(v_knots[v_knots.len() - 1] - v_knots[0] <= 4.0, "{tube:?}: the tube's form spans {v_knots:?}");
+        let m = measure(&b.body).unwrap();
+        let (volume, area) = match tube {
+            Some((v0, dv)) => {
+                // The whole torus less the segment of the tube the cone cuts off, revolved
+                // (Pappus); the tube's face and the cone's.
+                let gap = 2.0 * PI - dv;
+                let segment = 0.5 * small * small * (gap - gap.sin());
+                let centroid = 4.0 * small * (0.5 * gap).sin().powi(3) / (3.0 * (gap - gap.sin()));
+                let middle = v0 + dv + 0.5 * gap;
+                let volume = 2.0 * PI * PI * big * small * small - segment * 2.0 * PI * (big + centroid * middle.cos());
+                let ring = |v: f64| big + small * v.cos();
+                let chord = 2.0 * small * (0.5 * gap).sin();
+                let area = 2.0 * PI * small * (big * dv + small * ((v0 + dv).sin() - v0.sin())) + PI * (ring(v0) + ring(v0 + dv)) * chord;
+                (volume, area)
+            }
+            None => {
+                assert_eq!(v_knots[v_knots.len() - 1] - v_knots[0], 4.0, "a whole tube is four quarters");
+                let sweep = about.1;
+                (PI * small * small * big * sweep, sweep * 2.0 * PI * small * big + 2.0 * PI * small * small)
+            }
+        };
+        assert!(rel(m.volume, volume) < 1e-6, "{tube:?}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-6, "{tube:?}: area {} vs {area}", m.area);
+    }
+}

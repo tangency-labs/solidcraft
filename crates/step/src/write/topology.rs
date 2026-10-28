@@ -264,7 +264,7 @@ pub fn surface(s: &BSurface) -> R<(Surface, Map)> {
             (Surface::Cone { position, radius: *radius_at_origin, semi_angle: half_angle.abs() }, Map { m: [[k, 0.0], [0.0, k]] })
         }
         BSurface::Sphere { frame, radius } => (Surface::Sphere { position: placement(frame), radius: *radius }, Map::IDENTITY),
-        BSurface::Torus { frame, major_radius, minor_radius } => {
+        BSurface::Torus { frame, major_radius, minor_radius, .. } => {
             (Surface::Torus { position: placement(frame), major_radius: *major_radius, minor_radius: *minor_radius }, Map::IDENTITY)
         }
         BSurface::Spline { u_knots, v_knots, points } => (bspline_surface(u_knots, v_knots, points.clone(), None)?, Map::IDENTITY),
@@ -460,6 +460,10 @@ impl BrepWriter<'_, '_, '_> {
         // (STEP's are in the angle); only which way its normal points carries over.
         let map = match &face.nurbs {
             Some(n) => form_map(&face.surface, n, face.domain, map).ok_or_else(|| format!("face {f}: its NURBS form has no normal"))?,
+            // STEP's torus has no tube start: its pcurves would be off by it.
+            None if matches!(face.surface, BSurface::Torus { tube_start, .. } if tube_start != 0.0) => {
+                return Err(format!("face {f}: a torus with a tube start and no NURBS form"));
+            }
             None => map,
         };
         let s = (Arc::new(s), map);

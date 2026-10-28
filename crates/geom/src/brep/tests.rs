@@ -220,8 +220,12 @@ fn one_face(surface: Surface, domain: [[f64; 2]; 2], edges: Vec<(Curve, [f64; 2]
 /// at u = 0, a seam used twice, each on its form.
 fn closed_band() -> Brep {
     let (big, small) = (5., 1.);
-    let torus =
-        Surface::Torus { frame: Frame { origin: [0., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, major_radius: big, minor_radius: small };
+    let torus = Surface::Torus {
+        frame: Frame { origin: [0., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] },
+        major_radius: big,
+        minor_radius: small,
+        tube_start: 0.0,
+    };
     let about = |z: f64| Frame { origin: [0., 0., z], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
     let quarter = Curve::Circle { frame: Frame { origin: [big, 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] }, radius: small };
     one_face(
@@ -788,7 +792,7 @@ fn analytic_records_are_unbounded_with_independent_frames() {
         Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: 0.2 },
         Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: -0.2 },
         Surface::Sphere { frame: f.clone(), radius: 2. },
-        Surface::Torus { frame: f.clone(), major_radius: 4., minor_radius: 1. },
+        Surface::Torus { frame: f.clone(), major_radius: 4., minor_radius: 1., tube_start: 0.0 },
     ];
     // A cone narrowing along z (a negative half angle, as SMLib makes them) lies below its apex.
     let apex = 2. / 0.2f64.tan();
@@ -815,7 +819,7 @@ fn analytic_records_are_unbounded_with_independent_frames() {
     assert!(frame(&bad, &mut Budget(0)).is_err());
     assert!(interval(&[2., 1.], UNBOUNDED).is_err());
     assert!(radius(f64::NAN).is_err());
-    assert!(surface(&Surface::Torus { frame: a_frame(), major_radius: 1., minor_radius: 2. }, 0, &mut Budget(0)).is_err());
+    assert!(surface(&Surface::Torus { frame: a_frame(), major_radius: 1., minor_radius: 2., tube_start: 0.0 }, 0, &mut Budget(0)).is_err());
 }
 
 /// A cylinder face round its axis with a hole beside its seam: the seam at 350 degrees (so its
@@ -883,7 +887,7 @@ fn analytic_partials_are_the_derivatives_of_the_order_below() {
         Surface::Cylinder { frame: f.clone(), radius: 3. },
         Surface::Cone { frame: f.clone(), radius_at_origin: 2., half_angle: 0.3 },
         Surface::Sphere { frame: f.clone(), radius: 4. },
-        Surface::Torus { frame: f.clone(), major_radius: 5., minor_radius: 1.5 },
+        Surface::Torus { frame: f.clone(), major_radius: 5., minor_radius: 1.5, tube_start: 0.0 },
     ];
     let (u, v, h) = (0.8, 0.4, 1e-4);
     let close = |a: crate::Vec3, b: crate::Vec3, tol: f64| a.dist(b) <= tol * (1.0 + a.len().max(b.len()));

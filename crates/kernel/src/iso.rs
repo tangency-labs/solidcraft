@@ -384,13 +384,16 @@ fn iso_record(surface: &brep::Surface, along_u: bool, fixed: f64, (a, b): (f64, 
                 circle(o, x * fixed.cos() + y * fixed.sin(), z, *radius)
             }
         }
-        Surface::Torus { frame: f, major_radius, minor_radius } => {
+        Surface::Torus { frame: f, major_radius, minor_radius, tube_start } => {
             let (o, x, y, z) = frame(f);
             if along_u {
-                circle(o + z * (minor_radius * fixed.sin()), x, y, major_radius + minor_radius * fixed.cos())
+                let w = fixed + tube_start;
+                circle(o + z * (minor_radius * w.sin()), x, y, major_radius + minor_radius * w.cos())
             } else {
+                // The tube circle from its start, so its angle is v.
                 let dir = x * fixed.cos() + y * fixed.sin();
-                circle(o + dir * *major_radius, dir, z, *minor_radius)
+                let (s, c) = tube_start.sin_cos();
+                circle(o + dir * *major_radius, dir * c + z * s, z * c - dir * s, *minor_radius)
             }
         }
         Surface::Spline { u_knots, v_knots, points } => {

@@ -195,7 +195,14 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
                 nurbs_block(&mut a, n)?;
                 true
             }
-            None => surface(&mut a, &f.surface, f.domain, analytic)?,
+            // SMLib's tube angle counts from the outer equator, the record's from its tube start.
+            None => match f.surface {
+                b::Surface::Torus { tube_start, .. } => {
+                    let [u, v] = f.domain;
+                    surface(&mut a, &f.surface, [u, v.map(|t| t + tube_start)], analytic)?
+                }
+                _ => surface(&mut a, &f.surface, f.domain, analytic)?,
+            },
         };
         if any_form {
             a.i(flat::FACE_NURBS_FORM).push(i64::from(f.nurbs.is_some() && !form_is_face));
@@ -358,7 +365,7 @@ fn surface(a: &mut Arrays, s: &b::Surface, domain: [[f64; 2]; 2], analytic_plane
             analytic(a, flat::SURFACE_SPHERE, [flat::FACE_SPHERE_CENTER, flat::FACE_SPHERE_AXIS, flat::FACE_SPHERE_REF_DIRECTION], frame);
             a.r(flat::FACE_SPHERE_RADIUS).push(*radius);
         }
-        b::Surface::Torus { frame, major_radius, minor_radius } => {
+        b::Surface::Torus { frame, major_radius, minor_radius, .. } => {
             analytic(a, flat::SURFACE_TORUS, [flat::FACE_TORUS_ORIGIN, flat::FACE_TORUS_AXIS, flat::FACE_TORUS_REF_DIRECTION], frame);
             a.r(flat::FACE_TORUS_MAJOR_RADIUS).push(*major_radius);
             a.r(flat::FACE_TORUS_MINOR_RADIUS).push(*minor_radius);

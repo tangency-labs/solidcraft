@@ -398,6 +398,8 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
                 ),
                 major_radius: at(flat.f(FACE_TORUS_MAJOR_RADIUS), i, "torus")?,
                 minor_radius: at(flat.f(FACE_TORUS_MINOR_RADIUS), i, "torus")?,
+                // SMLib's torus has no tube start: the face's form carries where its tube begins.
+                tube_start: 0.0,
             },
             SURFACE_NURBS => next_nurbs(&mut nurbs_at)?,
             other => return Err(unsupported(format!("SMLib surface kind {other}"))),

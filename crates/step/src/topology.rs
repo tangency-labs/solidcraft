@@ -962,22 +962,28 @@ impl<'b, 'a> Builder<'b, 'a> {
         self.turn_frames()?;
         // Each edge's label and NURBS form: a circle about a revolved face's axis labelled on that
         // face's frame, so its form lies on the face's quarter grid.
+        // A circle round a torus face's tube is labelled from its tube start likewise.
         let mut frames: Vec<Vec<brep::Frame>> = vec![Vec::new(); self.edges.len()];
+        let mut tori: Vec<Vec<BSurface>> = vec![Vec::new(); self.edges.len()];
         for f in &self.faces {
             let Some(frame) = brep::form::frame_of(&f.surface) else { continue };
+            let torus = matches!(f.surface, BSurface::Torus { .. });
             for l in &f.loops {
                 if let LoopB::Edges(es) = l {
                     for (e, _) in es {
                         if let Some(slot) = frames.get_mut(*e as usize) {
                             slot.push(frame.clone());
                         }
+                        if torus && let Some(slot) = tori.get_mut(*e as usize) {
+                            slot.push(f.surface.clone());
+                        }
                     }
                 }
             }
         }
-        for (edge, fr) in self.edges.iter_mut().zip(&frames) {
+        for ((edge, fr), tr) in self.edges.iter_mut().zip(&frames).zip(&tori) {
             let (label, interval, form) =
-                brep::form::edge(&edge.curve, edge.interval, fr, self.tol).ok_or_else(|| unsupported("an arc of more than one turn"))?;
+                brep::form::edge_on(&edge.curve, edge.interval, fr, tr, self.tol).ok_or_else(|| unsupported("an arc of more than one turn"))?;
             (edge.curve, edge.interval, edge.form) = (label, interval, form);
         }
         // Each face's pcurves; a face whose loops disagree with its same_sense is turned over.
