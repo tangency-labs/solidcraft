@@ -188,9 +188,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 distance2: String,
                 angle: String,
                 flip: bool,
-                /// A smooth-patch corner's setback along each edge, as typed; empty for the
-                /// command's own default (1.5 × the radius).
-                setback: String,
+                /// A smooth-patch corner's setback along each edge, as typed; `None` until the
+                /// user types one: the field then shows the command's own default (1.5 × the
+                /// radius) as a length that follows the radius, and the command gets none.
+                setback: Option<String>,
             },
             Mirror,
             /// Rectangular pattern of bodies: along one direction, optionally a second.
@@ -1708,6 +1709,34 @@ pub(crate) fn fillet_corners(s: &Session, items: &[Sel]) -> Vec<Vec3> {
         }
     }
     corners
+}
+
+/// The least setback the smooth-patch `corners` of a Fillet dialog's edges take with rounds of
+/// `radius`: the largest the kernel names at any of them ([`kernel::fillet_least_setback`]; a
+/// setback must be more than this). `None` where the kernel names none (a corner whose least
+/// SMLib decides). Kept per design revision, radius and corners: the kernel reads the bodies'
+/// faces, and the form asks every frame.
+pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Sel], corners: &[Vec3], radius: f64) -> Option<f64> {
+    let mut bodies: Vec<String> = fillet_edge_ids(s, items).into_iter().map(|(b, _)| b).collect();
+    bodies.dedup();
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    (&s.document_id, s.revision, radius.to_bits(), &bodies).hash(&mut key);
+    corners.iter().for_each(|c| [c.x, c.y, c.z].map(f64::to_bits).hash(&mut key));
+    let key = key.finish();
+    let id = egui::Id::new("fillet_least_setback");
+    if let Some((k, least)) = ctx.data(|d| d.get_temp::<(u64, Option<f64>)>(id))
+        && k == key
+    {
+        return least;
+    }
+    let st = crate::open_meshing::session_world(s);
+    let least = bodies
+        .iter()
+        .filter_map(|b| st.body(b))
+        .flat_map(|b| corners.iter().filter_map(|c| solidcraft_engine::doc::kernel::fillet_least_setback(&b.body, *c, radius).ok().flatten()))
+        .reduce(f64::max);
+    ctx.data_mut(|d| d.insert_temp(id, (key, least)));
+    least
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else
@@ -3502,16 +3531,7 @@ pub(crate) const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", 
 
 /// A new Fillet or Chamfer dialog's values.
 fn fillet_kind(size: &str, chamfer: bool) -> Kind {
-    Kind::Fillet {
-        radius: size.into(),
-        chamfer,
-        chain: true,
-        ctype: 0,
-        distance2: size.into(),
-        angle: "45 deg".into(),
-        flip: false,
-        setback: String::new(),
-    }
+    Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false, setback: None }
 }
 
 /// A length field's first text: `number` in the design's units, with the unit written out so the
@@ -4107,15 +4127,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         }
                     }
                 }
-                // A smooth patch's setback, typed once, goes to each of the dialog's corners; left
-                // empty, the command sets them back by its default (1.5 × the radius).
+                // A smooth patch's setback, typed once, goes to each of the dialog's corners; not
+                // typed (or emptied), the command sets them back by its default (1.5 × the radius).
                 if d.extra.get("corner").and_then(Value::as_str) == Some("g2")
                     && dense::fillet_option_applies(&d.extra, "corner")
-                    && !setback.trim().is_empty()
+                    && let Some(setback) = setback.as_deref().map(str::trim).filter(|s| !s.is_empty())
                 {
                     let corners = fillet_corners(s, sels(d, 0));
                     if !corners.is_empty() {
-                        p["setbacks"] = Value::Array(corners.into_iter().map(|v| json!({"vertex": pt3(v), "distance": setback.trim()})).collect());
+                        p["setbacks"] = Value::Array(corners.into_iter().map(|v| json!({"vertex": pt3(v), "distance": setback})).collect());
                     }
                 }
                 ("solid.fillet", p)
@@ -5438,7 +5458,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 let at_corners =
                     corners.len() == setbacks.len() && setbacks.iter().all(|c| corners.iter().any(|v| v.dist(c.vertex.0) < VERTEX_TOLERANCE));
                 match &mut d.kind {
-                    Kind::Fillet { setback, .. } if !corner.is_rolling() && uniform && at_corners => *setback = first.distance.to_string(),
+                    Kind::Fillet { setback, .. } if !corner.is_rolling() && uniform && at_corners => *setback = Some(first.distance.to_string()),
                     _ => {
                         let saved = setbacks.iter().map(|c| json!({"vertex": pt3(c.vertex.0), "distance": c.distance.to_string()}));
                         d.extra.insert("setbacks".into(), Value::Array(saved.collect()));

@@ -237,14 +237,8 @@ fn setbacks_reach(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f
     let faces = Faces::of(body)?;
     let (picked, _) = crate::blend_smlib::picked_edges(body, edges)?;
     let picked: BTreeSet<usize> = picked.into_iter().collect();
-    let reach = body.size() * 0.05 + 1e-3;
     for (at, distance) in setbacks {
-        let nearest = (0..faces.rec.vertices.len())
-            .filter_map(|v| u32::try_from(v).ok())
-            .filter_map(|v| faces.point(v).map(|p| (p.dist(*at), v)))
-            .filter(|(d, _)| *d <= reach)
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        let Some((_, v)) = nearest else { continue };
+        let Some(v) = corner_vertex(body, &faces, *at) else { continue };
         let all_rounded = (0..faces.rec.edges.len())
             .filter(|e| faces.rec.edges.get(*e).is_some_and(|x| !x.uses.is_empty() && x.vertices.contains(&v)))
             .all(|e| picked.contains(&e));
@@ -265,6 +259,27 @@ fn setbacks_reach(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f
         }
     }
     Ok(())
+}
+
+/// The least setback the corner at the vertex nearest `at` takes with rounds of `radius`
+/// ([`setback_minimum`]): a setback there must be more than this, or [`fillet_setback`] and
+/// [`fillet_g2_corners`] refuse it. `None` where no vertex is near `at`, or at a corner whose
+/// least SMLib decides (one with a curved face or edge).
+pub fn fillet_least_setback(body: &Body, at: Vec3, radius: f64) -> Result<Option<f64>> {
+    body.require_brep("fillet")?;
+    let faces = Faces::of(body)?;
+    Ok(corner_vertex(body, &faces, at).and_then(|v| setback_minimum(&faces, v, radius)))
+}
+
+/// The vertex a setback at `at` names: the nearest, within the reach the setbacks take.
+fn corner_vertex(body: &Body, faces: &Faces, at: Vec3) -> Option<u32> {
+    let reach = body.size() * 0.05 + 1e-3;
+    (0..faces.rec.vertices.len())
+        .filter_map(|v| u32::try_from(v).ok())
+        .filter_map(|v| faces.point(v).map(|p| (p.dist(at), v)))
+        .filter(|(d, _)| *d <= reach)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, v)| v)
 }
 
 /// The least setback a corner of rounds of `radius` at `vertex` takes: on each face at the

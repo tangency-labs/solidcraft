@@ -83,6 +83,18 @@ pub(crate) fn hint_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str)
     row(ui, label, |ui| super::hint_field(ui, value, hint))
 }
 
+/// Expression row with an empty-value hint whose value the form checks: with `warning`, the
+/// field is outlined in the warning colour and the message sits under it in that colour, so the
+/// colour is never the only cue. Returns accepted Enter and the field's response. Tokens: `row,
+/// checked_field, warning_caption`.
+pub(crate) fn checked_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, warning: Option<&str>) -> (bool, Response) {
+    let out = row(ui, label, |ui| super::checked_field(ui, value, hint, warning.is_some()));
+    if let Some(message) = warning {
+        warning_caption(ui, label, message);
+    }
+    out
+}
+
 /// Plain text row; the caller retains Enter/change ownership. Tokens: `row, text_field`.
 pub(crate) fn text_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> (bool, bool) {
     row(ui, label, |ui| super::text_field(ui, value, hint))
@@ -159,12 +171,22 @@ pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl F
 /// row's control. It says in words what a colour or an icon shows, so colour is never the only cue.
 /// Dim helper beneath a row control. Tokens: `form_icon_size, font_small, text_dim, space_8; label-column tokens`.
 pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    caption_in(ui, aligned_to, text, Tokens::get().form_dim);
+}
+
+/// [`caption`] in the warning colour, for what is wrong with the row's value (a value the
+/// operation would refuse). Tokens: `caption tokens, warning`.
+pub(crate) fn warning_caption(ui: &mut Ui, aligned_to: &str, text: &str) {
+    caption_in(ui, aligned_to, text, Tokens::get().warning);
+}
+
+fn caption_in(ui: &mut Ui, aligned_to: &str, text: &str, color: egui::Color32) {
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, t.form_icon_size), egui::Sense::hover());
     let left = (rect.left() + label_column(ui, aligned_to, width) + label_gap(ui, width)).min(rect.right());
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max);
-    paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), t.form_dim, false);
+    paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), color, false);
     scenario::publish_rect(&format!("dialog:caption:{aligned_to}"), text_rect);
 }
 

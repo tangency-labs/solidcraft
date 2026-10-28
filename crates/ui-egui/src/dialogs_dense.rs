@@ -114,12 +114,16 @@ const FILLET_TYPES: [(&str, &str); 5] = [
 const FILLET_CORNERS: [(Continuity, &str); 2] =
     [(Continuity::G1, "ui.fillet_corner_tangent_tip"), (Continuity::G2, "ui.fillet_corner_curvature_tip")];
 
-/// The default setback of a smooth-patch corner, as a multiple of the radius.
-const SETBACK_FACTOR: &str = "1.5";
+/// The default setback of a smooth-patch corner, as a multiple of the radius (the kernel's), as
+/// the messages show it.
+fn setback_factor() -> String {
+    solidcraft_engine::doc::kernel::DEFAULT_SETBACK_FACTOR.to_string()
+}
 
 /// The Corners row's hover text: a line for each choice.
 fn fillet_corner_tip() -> String {
-    FILLET_CORNERS.map(|(_, tip)| crate::i18n::format(tip, &[("factor", SETBACK_FACTOR)])).join("\n")
+    let factor = setback_factor();
+    FILLET_CORNERS.map(|(_, tip)| crate::i18n::format(tip, &[("factor", &factor)])).join("\n")
 }
 
 /// What `solid.fillet` does with a radius too large for the faces beside an edge (`fit`): stop
@@ -150,14 +154,14 @@ pub(super) fn fillet_option_applies(extra: &serde_json::Map<String, Value>, key:
 /// After `changed` (`fit` or `corner`) took a new value, the options it rules out back to their
 /// defaults: a fitted radius (`fit` reduce or taper) takes tangent corners, a curvature corner
 /// takes the exact radius. A type other than Constant clears both ([`choose_fillet_type`]).
-fn settle_fillet_options(extra: &mut serde_json::Map<String, Value>, changed: &str, setback: &mut String) {
+fn settle_fillet_options(extra: &mut serde_json::Map<String, Value>, changed: &str, setback: &mut Option<String>) {
     let fitted = extra.get("fit").and_then(Value::as_str).is_some_and(|fit| fit != "exact");
     let patch = extra.get("corner").and_then(Value::as_str) == Some("g2");
     match changed {
         "fit" if fitted => {
             extra.remove("corner");
             extra.remove("setbacks");
-            setback.clear();
+            *setback = None;
         }
         "corner" if patch => {
             extra.remove("fit");
@@ -174,10 +178,13 @@ fn fillet_corner_rows(
     s: &solidcraft_engine::Session,
     extra: &mut serde_json::Map<String, Value>,
     inputs: &[selection::SelInput],
-    setback: &mut String,
+    radius: &str,
+    setback: &mut Option<String>,
 ) -> bool {
+    let items = selection::items(inputs, 0);
+    let corners = fillet_corners(s, items);
     let patch = extra.get("corner").and_then(Value::as_str) == Some("g2");
-    if !patch && fillet_corners(s, selection::items(inputs, 0)).is_empty() {
+    if !patch && corners.is_empty() {
         return false;
     }
     let mut enter = false;
@@ -192,18 +199,38 @@ fn fillet_corner_rows(
         settle_fillet_options(extra, "corner", setback);
     }
     if extra.get("corner").and_then(Value::as_str) == Some("g2") {
-        ui.scope(|ui| {
-            let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", SETBACK_FACTOR)]);
-            enter |= hint_row(ui, "ui.fillet_setback", setback, &hint);
-        })
-        .response
-        .on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", SETBACK_FACTOR)]));
+        let factor = setback_factor();
+        let length = |text: &str| crate::length_input::eval(&s.doc, text, solidcraft_engine::doc::expr::Kind::Length).ok().filter(|v| v.is_finite());
+        let r = length(radius).filter(|r| *r > 0.0);
+        // Not typed, the field shows the command's default as a length, following the radius.
+        let default = r.map(|r| crate::length_input::shown(&s.doc, solidcraft_engine::doc::kernel::DEFAULT_SETBACK_FACTOR * r));
+        let shown = setback.clone().or(default).unwrap_or_default();
+        // A setback at or below the least the kernel takes there is flagged before OK.
+        let least = r.and_then(|r| crate::dialogs::fillet_least_setback(ui.ctx(), s, items, &corners, r));
+        let warning = least
+            .filter(|least| length(&shown).is_some_and(|v| v <= least * (1.0 + 1e-9)))
+            .map(|least| crate::i18n::format("ui.fillet_setback_least", &[("least", &crate::length_input::shown(&s.doc, least))]));
+        let mut text = shown.clone();
+        let row = ui.scope(|ui| {
+            let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", &factor)]);
+            ui_kit::checked_row(ui, "ui.fillet_setback", &mut text, &hint, warning.as_deref())
+        });
+        row.response.on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", &factor)]));
+        let (accepted, field) = row.inner;
+        enter |= accepted;
+        if text != shown {
+            *setback = Some(text);
+        }
+        // Emptied and left, the field goes back to the default.
+        if setback.as_deref().is_some_and(|t| t.trim().is_empty()) && !field.has_focus() {
+            *setback = None;
+        }
     }
     enter
 }
 
 /// A Constant radius fillet's "If too large" row (`fit`), with the radius a reduced fillet used.
-fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut String) {
+fn fillet_fit_rows(app: &SolveApp, ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, setback: &mut Option<String>) {
     let t = Tokens::get();
     let before = extra.get("fit").cloned();
     let row = ui.scope(|ui| form_row(ui, "ui.fillet_fit", |ui| extra_choice(ui, extra, "fi_fit", "fit", &FILLET_FITS)));
@@ -478,7 +505,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 })
                 .on_hover_text(tr("ui.fillet_type_choices_tip"));
                 if rtype == 0 {
-                    enter |= fillet_corner_rows(ui, &app.session, &mut d.extra, &d.inputs, setback);
+                    enter |= fillet_corner_rows(ui, &app.session, &mut d.extra, &d.inputs, radius, setback);
                     fillet_fit_rows(app, ui, &mut d.extra, setback);
                 }
             }
@@ -1260,7 +1287,7 @@ mod tests {
     }
 
     /// Corners shows only once three rounded edges meet at a corner; Curvature (a smooth patch) writes
-    /// `corner: g2`, its Setback (empty for the command's 1.5 × radius) goes to that corner as
+    /// `corner: g2`, its Setback (untouched: the command's 1.5 × radius) goes to that corner as
     /// `setbacks`, and Tangent (a rolling ball) writes neither.
     #[test]
     fn corners_row_follows_the_selection_and_maps_to_corner_and_setbacks() {
@@ -1282,7 +1309,7 @@ mod tests {
         assert!(p.get("setbacks").is_none(), "an empty Setback leaves the command's default: {p}");
         assert!(scenario::handle_at("dialog:ui.fillet_setback").is_some());
         if let Some(Dialog { kind: Kind::Fillet { setback, .. }, .. }) = h.app.dialog.as_mut() {
-            *setback = "3 mm".into();
+            *setback = Some("3 mm".into());
         }
         assert_eq!(parameters(&h)["setbacks"], json!([{"vertex": [10.0, 0.0, 5.0], "distance": "3 mm"}]));
         choose(&mut h, "ui.corners", Continuity::G1.label_id());
@@ -1295,6 +1322,73 @@ mod tests {
         let p = parameters(&h);
         assert!(p.get("corner").is_none() && p.get("setbacks").is_none(), "{p}");
         assert!(scenario::handle_at("dialog:ui.corners").is_none());
+    }
+
+    /// Setback shows the command's default as an editable length that follows the radius until
+    /// one is typed (and sends none), keeps a typed one through radius changes, and flags one at
+    /// or below the least setback the kernel takes there (the radius, at this square corner)
+    /// before OK; a setback past it builds.
+    #[test]
+    fn setback_shows_its_default_keeps_a_typed_value_and_flags_one_too_small() {
+        let mut h = fillet_harness();
+        set_edges(&mut h, 3);
+        choose(&mut h, "ui.corners", Continuity::G2.label_id());
+        let radius = |h: &mut Harness, r: &str| {
+            if let Some(Dialog { kind: Kind::Fillet { radius, .. }, .. }) = h.app.dialog.as_mut() {
+                *radius = r.into();
+            }
+            h.frames(3);
+        };
+        let shown = |h: &Harness| {
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            let label = crate::i18n::tr_label("ui.fillet_setback");
+            tree.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.value()).unwrap_or_default().to_string()
+        };
+        let typed = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+            Kind::Fillet { setback, .. } => setback.clone(),
+            other => panic!("{other:?}"),
+        };
+        let flagged = || scenario::rect_of("dialog:caption:ui.fillet_setback").is_some();
+        let type_setback = |h: &mut Harness, text: &str| {
+            h.step(&json!({"click":{"handle":"dialog:ui.fillet_setback"}})).unwrap();
+            h.step(&json!({"key":"A","cmd":true})).unwrap();
+            h.step(&json!({"text": text})).unwrap();
+            h.frames(3);
+        };
+        radius(&mut h, "2 mm");
+        assert_eq!((shown(&h), typed(&h)), ("3 mm".to_string(), None), "the default, 1.5 × the radius, as a length");
+        assert!(!flagged() && parameters(&h).get("setbacks").is_none(), "an untouched default sends none");
+        radius(&mut h, "3 mm");
+        assert_eq!(shown(&h), "4.5 mm", "untouched, it follows the radius");
+        radius(&mut h, "2 mm");
+        type_setback(&mut h, "1.5 mm");
+        assert_eq!(typed(&h).as_deref(), Some("1.5 mm"));
+        radius(&mut h, "2.5 mm");
+        assert_eq!(shown(&h), "1.5 mm", "typed, it stays as typed");
+        radius(&mut h, "2 mm");
+        assert!(flagged(), "1.5 mm is not past the least, the 2 mm radius");
+        let mut copy = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+        let refused = copy.execute("solid.fillet", &parameters(&h)).unwrap_err().to_string();
+        assert!(refused.contains("setback must be more than the radius (2 mm)"), "the kernel refuses what the field flags: {refused}");
+        let least = crate::dialogs::fillet_least_setback(
+            &h.ctx,
+            &h.app.session,
+            &h.app.dialog.as_ref().unwrap().inputs[0].items,
+            &[Vec3::new(10.0, 0.0, 5.0)],
+            2.0,
+        );
+        assert!(least.is_some_and(|l| (l - 2.0).abs() < 1e-9), "{least:?}");
+        assert_eq!(crate::length_input::shown(&h.app.session.doc, least.unwrap()), "2 mm", "the message's least");
+        type_setback(&mut h, "2 mm");
+        assert!(flagged(), "the least itself is refused too");
+        type_setback(&mut h, "3 mm");
+        assert!(!flagged(), "past the least");
+        let p = parameters(&h);
+        assert_eq!(p["setbacks"], json!([{"vertex": [10.0, 0.0, 5.0], "distance": "3 mm"}]));
+        let mut copy = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+        copy.execute("solid.fillet", &p).unwrap();
+        let st = crate::open_meshing::session_world(&copy);
+        assert!(st.bodies.iter().all(|b| b.body.validity().is_empty()), "a 3 mm setback on 2 mm rounds builds");
     }
 
     /// No visible label of the fillet dialog names a continuity by its code (G0 … G3): the words
@@ -1327,9 +1421,9 @@ mod tests {
     #[test]
     fn a_saved_smooth_patch_reopens_with_its_setback() {
         for (setbacks, field) in [
-            (json!([{"vertex": [0, 0, 0], "distance": 7}]), "7"),
+            (json!([{"vertex": [0, 0, 0], "distance": 7}]), Some("7")),
             // Named near the vertex, as the command allows, rather than at it.
-            (json!([{"vertex": [0.1, 0.1, 0], "distance": 7}]), ""),
+            (json!([{"vertex": [0.1, 0.1, 0], "distance": 7}]), None),
         ] {
             let mut h = Harness::new();
             // The command's own smooth-patch corner: a 20 mm box, its three edges at the origin.
@@ -1346,7 +1440,7 @@ mod tests {
             h.app.edit_feature(id);
             h.frames(3);
             let d = h.app.dialog.as_ref().unwrap();
-            assert!(matches!(&d.kind, Kind::Fillet { setback, .. } if setback == field), "{:?}", d.kind);
+            assert!(matches!(&d.kind, Kind::Fillet { setback, .. } if setback.as_deref() == field), "{:?}", d.kind);
             assert_eq!(d.extra.get("corner"), Some(&json!("g2")));
             for (command, params) in apply_commands(&h.app, d).unwrap() {
                 crate::dialogs::roll_marker(&mut h.app, None).unwrap();

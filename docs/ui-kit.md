@@ -24,7 +24,10 @@ preferences, manager cards, prompts, context menus and the sketch palette. Impor
 - `expr_row`, `hint_row`, `text_row` and `choice_row` compose `row` with the existing
   expression, hinted expression, plain text and dropdown controls. They preserve row order,
   labels, focus IDs and completion; callers keep Enter/change ownership and explicit dropdown IDs.
-  `count_row` composes `row` with `count_field` for pattern quantities.
+  `count_row` composes `row` with `count_field` for pattern quantities. `checked_row` is
+  `hint_row` for a value the form checks before it runs: with a warning, the field is outlined in
+  the warning colour and the message sits under it (`warning_caption`), so colour is never the
+  only cue.
 - `Panel` owns bounded windows, feature/palette composition, scrolling bodies,
   pinned actions, compute status and keyboard routing. `wide()` uses three card
   widths. `feature_frame` and `palette_frame` retain docked/floating surfaces.
@@ -89,13 +92,13 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | confirm: `Confirm`, `Tone` | Modal warning/danger/info, title/message, mono detail and ghost/cancel/primary actions | `warning`, `form_error/fill`, `accent_soft`, `form_primary`, `on_accent`, `tab_on_fill_dark`, `font_subtitle`, spacing |
 | metrics: `row_height`, `table_row_height`, `header_height` | Shared control/header heights | `control_height`, `space_8`, `form_header_height` |
 | layout: `scope`, `row` | Form styling and aligned label/control columns | `form_label_width`, `form_gap_y`, `control_*`, `font_label`, `dialog_label`, `space_4/8` |
-| `caption` | Dim caption aligned beneath a control | `font_small`, `text_dim`, label-column tokens |
+| `caption`, `warning_caption` | Dim caption aligned beneath a control; the warning one says what is wrong with its value | `font_small`, `text_dim`, `warning`, label-column tokens |
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
 | `section`, `section_count`, `divider` | Persisted small-caps disclosure with chevron, optional count badge and trailing hairline; full-width rule | `control_height`, `dialog_rule`, `font_caption`, tracking, spacing |
 | `list_row` | Picked item with a remove target | `control_height`, `font_label`, icon/spacing tokens |
 | `text`, `Text` | Hint, note, report, inline or cell text; see variants below | `font_small/label`, `text/dim/error`, `control_height`, `space_4` |
 | `text_lines` | Virtualized read-only licence/report lines, horizontal overflow | `font_small`, `text`, `control_height` |
-| fields: `field`, `hint_field`, `focused_field` | Expression editors, optional empty hint or retained focus; returns accepted Enter | `control_height/fill`, `form_inset`, `font_label` |
+| fields: `field`, `hint_field`, `focused_field`, `checked_field` | Expression editors, optional empty hint or retained focus, or outlined in the warning colour when flagged; returns accepted Enter | `control_height/fill`, `form_inset`, `font_label`, `warning` |
 | `count_field`, `Count` | Expression editor for a whole-number count (a pattern's quantity) with up/down step arrows at its right edge. `Count` gives the limits and the evaluator (the design's parameters); an arrow steps the evaluated count by one within them, replacing a plain number or adjusting an expression's trailing `+ n`, and is dimmed when it can't step. Handles `dialog:<row> up` / `down`; returns accepted Enter | field tokens, `control_border`, `control_radius`, `selected_bg`, `form_ink/dim`, `space_4` |
 | `text_field`, `focused_text_field` | Plain name editor, optionally retaining focus | field tokens |
 | `multiline_text_field` | Three-line plain-text row with stable focus ID | field/row tokens |

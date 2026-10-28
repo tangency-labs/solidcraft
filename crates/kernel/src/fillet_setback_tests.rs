@@ -56,4 +56,9 @@ fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
     }
     let out = corner_case(Some(5.5)).unwrap();
     assert!(out.validity().is_empty(), "{:?}", out.validity());
+    // The least the refusal names, for a form to show before it runs; none at no vertex.
+    let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 40.0, 20.0)).unwrap();
+    let least = crate::fillet_least_setback(&b, Vec3::new(60.0, 40.0, 20.0), 5.0).unwrap();
+    assert!(least.is_some_and(|l| (l - 5.0).abs() < 1e-9), "{least:?}");
+    assert_eq!(crate::fillet_least_setback(&b, Vec3::new(30.0, 20.0, 10.0), 5.0).unwrap(), None);
 }
