@@ -68,13 +68,13 @@ pub(crate) struct MeshMemo {
 /// Meshes a [`MeshMemo`] keeps at most (the oldest goes first).
 const MEMO_MESHES: usize = 4;
 
-/// Meshes kept for reuse, by tolerance (see [`remembered`]).
-type Remembered = std::sync::Mutex<Vec<((u64, u64), std::sync::Arc<Mesh>)>>;
+/// Meshes (or their plans) kept for reuse, by tolerance (see [`remembered`]).
+type Remembered<T = Mesh> = std::sync::Mutex<Vec<((u64, u64), std::sync::Arc<T>)>>;
 
-/// The mesh at `t` from `kept`, made by `make` and kept (at most [`MEMO_MESHES`]) if it isn't
-/// there. The lock is held while meshing: threads asking for the same mesh wait for it rather
-/// than make it too.
-fn remembered(kept: &Remembered, t: &MeshTolerance, make: impl FnOnce() -> Result<Mesh>) -> Result<std::sync::Arc<Mesh>> {
+/// The mesh (or plan) at `t` from `kept`, made by `make` and kept (at most [`MEMO_MESHES`]) if
+/// it isn't there. The lock is held while meshing: threads asking for the same mesh wait for it
+/// rather than make it too.
+fn remembered<T>(kept: &Remembered<T>, t: &MeshTolerance, make: impl FnOnce() -> Result<T>) -> Result<std::sync::Arc<T>> {
     let Ok(mut made) = kept.lock() else { return make().map(std::sync::Arc::new) };
     let key = t.key();
     if let Some((_, m)) = made.iter().find(|(k, _)| *k == key) {
@@ -89,16 +89,21 @@ fn remembered(kept: &Remembered, t: &MeshTolerance, make: impl FnOnce() -> Resul
 }
 
 /// The display mesh of a body that several placed copies show (see `Body::display_of`): the
-/// body, and its mesh once made.
+/// body, and its mesh and plan once made.
 #[derive(Debug)]
 pub(crate) struct SharedDisplay {
     pub(crate) original: Body,
     meshes: Remembered,
+    plans: Remembered<solidcraft_geom::tess::TessPlan>,
 }
 
 impl SharedDisplay {
     pub(crate) fn new(original: Body) -> Self {
-        SharedDisplay { original: Body { display_of: None, meshes: None, ..original }, meshes: std::sync::Mutex::new(Vec::new()) }
+        SharedDisplay {
+            original: Body { display_of: None, meshes: None, ..original },
+            meshes: std::sync::Mutex::new(Vec::new()),
+            plans: std::sync::Mutex::new(Vec::new()),
+        }
     }
 }
 
@@ -1028,6 +1033,13 @@ impl Body {
         if self.is_mesh() {
             return Err(KernelError::Invalid("a mesh body has no surfaces to mesh".into()));
         }
+        // A placed copy is planned as its original, moved (as `Body::mesh` shows the original's
+        // mesh): the part is planned once for every copy.
+        if let Some((shared, m)) = self.display_of.as_deref()
+            && brep::placement::Rigid::of_matrix(m).is_some()
+        {
+            return Ok(remembered(&shared.plans, t, || shared.original.mesh_plan_untimed(t))?.transformed(m));
+        }
         let (tol, turn) = t.rules(self.size());
         let (plan, stats) = guard("mesh", || crate::tess::plan(&self.record, tol, turn))?;
         // A face filled leniently has no hole on screen, but its pcurves or seams are still wrong:
@@ -1130,12 +1142,7 @@ impl Body {
         if self.is_mesh() {
             return 0;
         }
-        // A placed copy shows its original's mesh (`Body::mesh`).
-        let meshed = match self.display_of.as_deref() {
-            Some((shared, m)) if brep::placement::Rigid::of_matrix(m).is_some() => &shared.original,
-            _ => self,
-        };
-        let Ok(plan) = meshed.mesh_plan(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
+        let Ok(plan) = self.mesh_plan(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
         plan.faces_with_triangles(self.face_count()).iter().filter(|h| !**h).count()
     }
 
