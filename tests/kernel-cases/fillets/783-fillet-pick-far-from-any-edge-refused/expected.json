@@ -6,5 +6,6 @@
  "what": "a fillet whose edge pick is 15 mm from the nearest edge must be refused, not applied to some other edge",
  "source": "invariants",
  "method": "box 20x20x10 and a pick at (10,-15,10): the nearest edge is the top front edge, 15 mm away, so the pick names no edge. The right answer is a clean refusal (never silently rounding the nearest edge).",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "no edge at"
 }

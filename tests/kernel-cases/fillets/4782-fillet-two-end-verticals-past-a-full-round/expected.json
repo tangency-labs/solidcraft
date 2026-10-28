@@ -4,6 +4,7 @@
  ],
  "what": "both vertical edges of a 15 mm wide box end rounded r10, past the full round (7.5): refused",
  "source": "invariants",
- "method": "each round's rail on the end face lies 10 from its edge, past the other's (15 - 10 = 5): the rounds would cross on the face; the largest that fits is the full round, 7.5",
- "outcome": "refused"
+ "method": "each round's rail on the end face lies 10 from its edge, past the other's (15 - 10 = 5): the rounds would cross on the face; refused as too large (the largest that fits is the full round, 7.5, which fit reduce finds)",
+ "outcome": "refused",
+ "refusal": "larger than the faces beside its edges allow"
 }

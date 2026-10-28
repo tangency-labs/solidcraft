@@ -394,6 +394,38 @@ fn shelled_three_quarter_tube_round_trips() {
     round_trip(&b);
 }
 
+/// A half tube (half a torus's tube, half way round, closed by a flat annulus and
+/// two flat ends) whose torus the file places 5 nm off the rest, well within the file's
+/// accuracy: the torus face's boundary then projects a hair past both ends of its half of the
+/// tube, and its NURBS form once took the quarter past each end too, going round the whole tube,
+/// which SMLib does not take for a torus: the part came in as a mesh of its faces.
+#[test]
+fn half_tube_a_hair_off_its_torus_imports_as_a_solid() {
+    use solidcraft_geom::Seg2;
+    use std::f64::consts::PI;
+    let (major, minor) = (10.75, 1.25);
+    let d = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::new(major, 0.0), radius: minor, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(major - minor, 0.0), b: Vec2::new(major + minor, 0.0) },
+        ],
+    };
+    let tube = revolve(&Plane::XZ, &[Region2 { outer: d, holes: vec![] }], Vec2::ZERO, Vec2::Y, PI).unwrap().pop().unwrap();
+    let text = step_export(&[&tube], "test").unwrap();
+    // The torus's placement moved to a point of its own, 5 nm along the axis, off the face's side.
+    let torus = text.lines().find_map(|l| l.split_once("=TOROIDAL_SURFACE('',#")).unwrap().1.split(',').next().unwrap().to_string();
+    let place = text.lines().find(|l| l.starts_with(&format!("#{torus}=AXIS2_PLACEMENT_3D('',#"))).unwrap();
+    let (_, axes) = place.split_once("('',#").unwrap().1.split_once(',').unwrap();
+    let mut low = text.replace(place, &format!("#{torus}=AXIS2_PLACEMENT_3D('',#900000,{axes}"));
+    let data_end = low.rfind("ENDSEC;").unwrap();
+    low.insert_str(data_end, "#900000=CARTESIAN_POINT('',(0.0,0.0,-5.E-6));\n");
+    let imp = step_import(&low).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && b.closed && !b.body.is_mesh() && !b.body.is_surface(), "{:?} {:?}", b.refused, imp.warnings);
+    assert!(rel(measure(&b.body).unwrap().volume, measure(&tube).unwrap().volume) < 1e-3);
+}
+
 #[test]
 fn several_bodies_and_names() {
     let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
@@ -536,6 +568,46 @@ fn product(pd: u64, name: &str) -> String {
         pd + 3,
         pd + 4
     )
+}
+
+/// A surface model of a closed shell and an open one beside it (Poppy Humanoid's thighs: the
+/// part, and a sheet of two faces on it) comes in as two bodies: the closed shell a solid of its
+/// own, the open one a surface body, each in the model's colour. It once came in as one body,
+/// open for its sheet's edges.
+#[test]
+fn a_surface_models_closed_shell_beside_a_sheet_is_a_solid_of_its_own() {
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    // A unit square sheet at z = 5.
+    let corners = [(0, 0), (1, 0), (1, 1), (0, 1)];
+    for (i, (x, y)) in corners.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,5.));\n#{}=VERTEX_POINT('',#{});\n", 800 + i, 810 + i, 800 + i);
+    }
+    let mut oes = Vec::new();
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        t += &format!("#{}=DIRECTION('',({}.,{}.,0.));\n#{}=VECTOR('',#{},1.);\n", 820 + 2 * i, b.0 - a.0, b.1 - a.1, 821 + 2 * i, 820 + 2 * i);
+        t += &format!("#{}=LINE('',#{},#{});\n", 830 + i, 800 + i, 821 + 2 * i);
+        t += &format!("#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 840 + i, 810 + i, 810 + (i + 1) % 4, 830 + i);
+        t += &format!("#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n", 850 + i, 840 + i);
+        oes.push(format!("#{}", 850 + i));
+    }
+    t += &format!("#860=EDGE_LOOP('',({}));\n#861=FACE_OUTER_BOUND('',#860,.T.);\n", oes.join(","));
+    t += "#862=CARTESIAN_POINT('',(0.,0.,5.));\n#863=DIRECTION('',(0.,0.,1.));\n#864=AXIS2_PLACEMENT_3D('',#862,#863,$);\n#865=PLANE('',#864);\n";
+    t += "#866=ADVANCED_FACE('',(#861),#865,.T.);\n#130=OPEN_SHELL('',(#866));\n#110=SHELL_BASED_SURFACE_MODEL('Thigh',(#100,#130));\n";
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#110),#20);\n";
+    t += "#70=STYLED_ITEM('',(#71),#110);\n#71=PRESENTATION_STYLE_ASSIGNMENT((#72));\n#72=SURFACE_STYLE_USAGE(.BOTH.,#73);\n#73=SURFACE_SIDE_STYLE('',(#74));\n#74=SURFACE_STYLE_FILL_AREA(#75);\n#75=FILL_AREA_STYLE('',(#76));\n#76=FILL_AREA_STYLE_COLOUR('',#77);\n#77=COLOUR_RGB('',1.,0.5,0.);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let (solid, sheet) = (&imp.bodies[0], &imp.bodies[1]);
+    assert!(solid.closed && solid.refused.is_none() && !solid.body.is_surface(), "{:?}", imp.warnings);
+    assert_eq!((solid.source_item, solid.file_faces), (100, 6));
+    assert!(rel(measure(&solid.body).unwrap().volume, 1.0) < 1e-9);
+    assert!(!sheet.closed && sheet.body.is_surface() && sheet.body.face_count() == 1);
+    assert_eq!((sheet.source_item, sheet.name.as_str()), (110, "Thigh"));
+    assert!(imp.bodies.iter().all(|b| b.color == Some([1.0, 0.5, 0.0])));
 }
 
 #[test]

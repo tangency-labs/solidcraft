@@ -624,10 +624,22 @@ impl Reader {
                             self.warn(format!("more than {MAX_BODIES} bodies: the rest are left out"));
                             return;
                         }
-                        // The node lists the planned solid; it becomes a body index once converted.
-                        out.push(self.plan.len());
-                        self.plan.push(Planned { item, units: u, batch: id });
-                        *self.uses.entry(item).or_default() += 1;
+                        // The node lists the planned solids (a surface model's closed shells
+                        // beside its sheet are solids of their own, in the model's colour); each
+                        // becomes a body index once converted.
+                        for piece in solidcraft_step::topology::items(&self.ex, item) {
+                            if piece != item {
+                                if let Some(c) = self.colors.get(&item).copied() {
+                                    self.colors.entry(piece).or_insert(c);
+                                }
+                                if let Some(o) = self.opacity.get(&item).copied() {
+                                    self.opacity.entry(piece).or_insert(o);
+                                }
+                            }
+                            out.push(self.plan.len());
+                            self.plan.push(Planned { item: piece, units: u, batch: id });
+                            *self.uses.entry(piece).or_default() += 1;
+                        }
                     }
                 }
                 "MAPPED_ITEM" => {

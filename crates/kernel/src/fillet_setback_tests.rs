@@ -42,3 +42,18 @@ fn a_setback_off_the_rounded_corner_is_refused() {
     assert!(fillet_setback(&b, &edges, 5.0, &[(Vec3::new(0.0, 0.0, 0.0), 8.0)]).is_err());
     assert!(matches!(corner_case(Some(20.0)), Err(KernelError::TooLarge(_))));
 }
+
+/// A setback that does not reach past where the corner's rounds meet without one (on faces square
+/// to each other, the radius) is refused before SMLib runs, naming that least setback; a setback
+/// just past it builds.
+#[test]
+fn a_setback_not_past_the_radius_is_refused_naming_the_least() {
+    for s in [2.0, 5.0] {
+        match corner_case(Some(s)) {
+            Err(KernelError::Invalid(why)) => assert!(why.contains("setback must be more than the radius (5 mm)"), "{why}"),
+            other => panic!("setback {s}: {:?}", other.map(|b| b.face_count())),
+        }
+    }
+    let out = corner_case(Some(5.5)).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
+}

@@ -246,9 +246,22 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
             return out;
         }
         (Err(e), true) => {
-            // The right answer is a clean refusal.
-            out["status"] = json!("pass");
-            out["refused_with"] = json!(e.to_string());
+            // The right answer is a clean refusal, for the reason the case gives: a `refused`
+            // case names it (`refusal`, a part of the message), so a failure for another reason
+            // (an SMLib status) is not taken for it.
+            let e = e.to_string();
+            out["refused_with"] = json!(e);
+            match want["refusal"].as_str() {
+                Some(why) if !e.contains(why) => {
+                    out["status"] = json!("fail");
+                    out["error"] = json!(format!("refused, but not because {why:?}: {e}"));
+                }
+                None if refused => {
+                    out["status"] = json!("fail");
+                    out["error"] = json!(format!("refused ({e}), but expected.json gives no `refusal`: the reason it must be refused for"));
+                }
+                _ => out["status"] = json!("pass"),
+            }
             return out;
         }
         (Err(e), false) => {

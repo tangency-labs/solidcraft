@@ -6,5 +6,6 @@
  "what": "a fillet of radius 6.9 on a cylinder rim whose flat top ring (round the joined boss) is only 4.3 mm wide must be refused, not grow the part",
  "source": "invariants",
  "method": "cylinder radius 7, boss radius 2.7 flush on its top face: the flat ring round the boss is 7 - 2.7 = 4.3 mm wide, and a rolling-ball round of radius 6.9 needs 6.9 mm of top face (for a convex rim the round consumes r of each neighbouring face). No such round exists, so the right answer is a clean refusal; accepting it produced a body larger than before the fillet (a round only removes material).",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "larger than the faces beside its edges allow"
 }
