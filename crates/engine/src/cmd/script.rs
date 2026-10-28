@@ -200,6 +200,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         (doc.point_clouds.is_empty(), "point clouds"),
         (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
         (doc.named_views.is_empty(), "named views"),
+        (doc.section_analyses.is_empty(), "section analyses"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
         (doc.visibility.is_empty(), "hidden items"),

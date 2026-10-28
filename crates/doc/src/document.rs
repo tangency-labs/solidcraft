@@ -2785,6 +2785,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Section Analyses: view cuts kept with the design, and which one is shown (#3977).
+    #[serde(default, skip_serializing_if = "crate::section_analysis::SectionAnalyses::is_empty")]
+    pub section_analyses: crate::section_analysis::SectionAnalyses,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -3077,6 +3080,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            section_analyses: Default::default(),
             visibility: Visibility::default(),
         }
     }
@@ -3139,6 +3143,7 @@ impl Document {
         for (_, v) in self.browser_order.iter_mut().filter(|(k, _)| k.ends_with("/bodies")) {
             v.iter_mut().for_each(rename);
         }
+        self.section_analyses.rename_body(old, new);
     }
 
     /// The single body rename (old name, new name) that turns `previous` into this design,
@@ -3245,6 +3250,16 @@ impl Document {
         }
         let mut normalized = previous.clone();
         normalized.appearances = self.appearances.clone();
+        *self == normalized
+    }
+
+    /// Only the Section Analyses changed: they cut the view, so nothing is evaluated again.
+    pub fn differs_only_in_sections(&self, previous: &Document) -> bool {
+        if self.section_analyses == previous.section_analyses {
+            return false;
+        }
+        let mut normalized = previous.clone();
+        normalized.section_analyses = self.section_analyses.clone();
         *self == normalized
     }
 

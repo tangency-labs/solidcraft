@@ -358,6 +358,7 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
         g.features.retain(|f| sc.inside.contains(f));
     }
     part.named_views.clear();
+    part.section_analyses = Default::default();
     part.configs = Default::default();
     part.assembly = Default::default();
     let features: BTreeMap<u64, u64> = sc.inside.iter().map(|f| (*f, *f)).collect();

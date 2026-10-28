@@ -530,6 +530,14 @@ pub struct Session {
     pub section: Option<(Vec3, Vec3)>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
     pub section_hatch: bool,
+    /// `section` and `section_hatch` are the design's shown Section Analysis
+    /// (`cmd::section::sync`), worked out again after every command.
+    section_derived: bool,
+    /// Whether every command brings `section` in line with the design (a scratch copy only does
+    /// for the section commands, which its dialog previews run).
+    section_sync: bool,
+    /// Where the design's sections cut in the current model (shared with scratch copies).
+    section_cache: cmd::section::SharedCache,
     /// Component identification colours are enabled when present; view state only.
     pub colored_components: Option<()>,
     /// Surface analysis shading the model (zebra, draft, curvature map).
@@ -688,7 +696,7 @@ impl Session {
 
     /// A session on `doc` evaluated as `model`, with what it hides.
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
-        Session {
+        let mut session = Session {
             saved: doc.clone(),
             doc,
             model,
@@ -735,6 +743,9 @@ impl Session {
             foreign_copy: None,
             section: None,
             section_hatch: true,
+            section_derived: false,
+            section_sync: true,
+            section_cache: Default::default(),
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
@@ -754,7 +765,9 @@ impl Session {
             evaluations: 0,
             motion_traces: Default::default(),
             crash_journal: false,
-        }
+        };
+        cmd::section::sync(&mut session);
+        session
     }
 
     /// Become `fresh` (another design opened, recovered or started), keeping the settings that
@@ -1276,7 +1289,8 @@ impl Session {
         }
     }
 
-    /// Only persistent render intent, part properties, appearances or the browser's groups changed.
+    /// Only persistent render intent, part properties, appearances, the browser's groups or the
+    /// Section Analyses changed.
     /// Never evaluate or clear a stale model here.
     fn render_only_change(&self, before: &Snapshot) -> bool {
         self.active_sketch == before.active_sketch
@@ -1284,7 +1298,8 @@ impl Session {
             && (self.doc.differs_only_in_render(&before.doc)
                 || self.doc.differs_only_in_part_properties(&before.doc)
                 || self.doc.differs_only_in_appearance(&before.doc)
-                || self.doc.differs_only_in_browser(&before.doc))
+                || self.doc.differs_only_in_browser(&before.doc)
+                || self.doc.differs_only_in_sections(&before.doc))
     }
 
     /// Only what is hidden or shown changed (`browser.visibility`): the document and the model
@@ -1295,8 +1310,12 @@ impl Session {
 
     fn refresh_render(&mut self, previous: &Arc<Document>) {
         self.revision += 1;
-        // Geometry/placements have been proved identical. Retarget the cache's document key
-        // instead of discarding prepared meshes merely because the document Arc changed.
+        self.retarget_world_cache(previous);
+    }
+
+    /// Geometry/placements have been proved identical. Retarget the cache's document key
+    /// instead of discarding prepared meshes merely because the document Arc changed.
+    pub(crate) fn retarget_world_cache(&self, previous: &Arc<Document>) {
         if let Ok(mut cache) = self.world_cache.lock()
             && let Some(cache) = cache.as_mut()
             && Arc::ptr_eq(&cache.doc, previous)
@@ -1546,6 +1565,11 @@ impl Session {
                 Err(e)
             }
         };
+        // The shown Section Analysis follows the design: its plane, a face or construction plane
+        // it is on, and undo and redo.
+        if self.section_sync {
+            cmd::section::sync(self);
+        }
         if let Some((before, changed, failed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final
             // document, so the next command does not mistake that work for an outside edit
@@ -1641,6 +1665,7 @@ impl Session {
         } else if !Arc::ptr_eq(&self.doc, &before.doc) || self.active_sketch != before.active_sketch || self.pending_moves != before.pending_moves {
             self.refresh();
         }
+        cmd::section::sync(self);
         Ok(())
     }
 
@@ -1703,6 +1728,9 @@ impl Session {
             foreign_copy: self.foreign_copy.clone(),
             section: None,
             section_hatch: true,
+            section_derived: false,
+            section_sync: false,
+            section_cache: self.section_cache.clone(),
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
@@ -2183,6 +2211,8 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        // Section Analyses cut only the view: joints never read them.
+        section_analyses: _,
         visibility,
         next_component_color_index,
     } = a;

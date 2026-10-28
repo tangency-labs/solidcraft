@@ -73,7 +73,7 @@ pub(crate) mod motion;
 mod parts;
 mod point_cloud;
 mod script;
-mod section;
+pub mod section;
 pub mod settings;
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
