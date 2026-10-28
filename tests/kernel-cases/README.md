@@ -97,6 +97,28 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `tolerance` | Optional overrides: `rel`, `abs_mm`, `mesh_mm`, `weld_mm`. |
 | `missing` | A capability SolidCraft has no command or parameter for yet (`"solid.thread has no start count"`): the case is reported **not supported yet** without running, so the gap stays visible. |
 
+## The fillet gate
+
+The fillet cases are the fillet regression suite: each is one small case of one issue, with its
+exact answer. `.github/workflows/fillet-rig.yml` runs them on every pull request (not a draft)
+that touches fillet code: `crates/kernel/src/{blend*,fillet*,*corner*,continuity*}.rs`,
+`crates/smlib/**` (`SMLIB_REV` and `SMLIB_PREBUILT` included), `crates/doc/src/eval*.rs`,
+`crates/engine/src/cmd/features.rs`, `tests/kernel-cases/fillets/**` and the rig's own code
+(GitHub filters whole files, so any change to `eval*.rs` or `features.rs` runs it). One release
+build of `solidcraft-cli`, then:
+
+```sh
+cargo xtask kernel-cases --area fillets --cli target/release/solidcraft-cli \
+  --known-failing tests/kernel-cases/fillets/KNOWN_FAILING
+```
+
+`fillets/KNOWN_FAILING` lists the cases that fail today, sorted, one a line with its cause
+(`<case> <why it fails today>`; `#` starts a comment). The gate fails on a **regression**, a case
+that fails (or crashes, hangs, or is not supported yet) and is not listed, and on a **fixed** case,
+one listed that passes: a fix removes its line in the same pull request, so the list only shrinks.
+A new case that fails today goes in with its line. With `--known-failing` the run writes no
+report; `docs/kernel-cases.md` stays the full run's.
+
 ## The complexity ladder
 
 `ladder/` orders kernel operations by complexity instead of by where they went wrong: tiers from
