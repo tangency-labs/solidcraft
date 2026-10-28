@@ -82,10 +82,73 @@ pub struct StepImport {
     pub tree: Vec<StepNode>,
     /// What could not be read (unsupported entities, faces left out…).
     pub warnings: Vec<String>,
+    /// The same, by kind and part, with what came in of the file's parts: for a summary in words.
+    pub report: ImportReport,
     /// FILE_SCHEMA (e.g. `AUTOMOTIVE_DESIGN`, `CONFIG_CONTROL_DESIGN`, `AP242_…`).
     pub schema: String,
     /// FILE_NAME originating system.
     pub system: String,
+}
+
+/// What an import warning is about, so a window can word a summary of them (the warning's
+/// text is the detail).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueKind {
+    /// No body could be made of the part: it is not in the design.
+    NotImported,
+    /// No solid could be made of the part: it is shown as a mesh of its faces.
+    ShownAsMesh,
+    /// No solid could be made of the part: it came in as surfaces of its faces.
+    ImportedAsSurfaces,
+    /// A face of the part could not be read or made, and is left out.
+    FaceLeftOut,
+    /// The part's shell is not closed: it came in as an open body.
+    OpenBody,
+    /// Faces of the part could not be meshed and are not shown.
+    FacesNotShown,
+    /// Something was repaired on the way (edges split at a pole, faces turned, gaps covered).
+    Repaired,
+    /// The file as a whole: its assembly structure, its limits, its entity ids.
+    File,
+}
+
+/// One import warning: what it is about and the part it concerns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ImportIssue {
+    pub kind: IssueKind,
+    /// The STEP item of the part (`None`: the file as a whole).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<u64>,
+    /// The part's name in the file (empty: it has none).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub part: String,
+    /// Faces it concerns: one for a face left out, the count for faces not shown, else 0.
+    #[serde(default)]
+    pub faces: usize,
+    /// How many times it came (a part not imported says so at each of its instances).
+    pub times: usize,
+    /// The warning as [`StepImport::warnings`] words it.
+    pub detail: String,
+}
+
+/// What an import made of the file's parts, and its warnings by kind and part.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImportReport {
+    /// Parts (distinct solid items) the file places.
+    pub parts: usize,
+    /// Parts that came in as closed solids.
+    pub solids: usize,
+    /// In the order of [`StepImport::warnings`].
+    pub issues: Vec<ImportIssue>,
+}
+
+/// A warning kept by [`Reader::note`]: what it is about and how often it came.
+struct Noted {
+    kind: IssueKind,
+    item: Option<u64>,
+    faces: usize,
+    times: usize,
 }
 
 /// A solid the walk found, converted later.
@@ -189,7 +252,7 @@ fn frame_matrix(p: &solidcraft_step::geom::Placement) -> M4 {
 struct Reader {
     ex: Arc<Exchange>,
     units: HashMap<u64, Units>,
-    warnings: BTreeMap<String, usize>,
+    warnings: BTreeMap<String, Noted>,
     /// Representation → its items and context.
     reps: HashMap<u64, (Vec<u64>, Option<u64>)>,
     /// Plain representation relationships (same product, no placement).
@@ -293,8 +356,20 @@ impl Reader {
         false
     }
 
+    /// A warning about the file as a whole.
     fn warn(&mut self, msg: impl Into<String>) {
-        *self.warnings.entry(msg.into()).or_default() += 1;
+        self.note(IssueKind::File, None, 0, msg);
+    }
+
+    /// A warning of `kind` about `item`'s part (`faces`: the faces it concerns), counted when it
+    /// comes again.
+    fn note(&mut self, kind: IssueKind, item: Option<u64>, faces: usize, msg: impl Into<String>) {
+        self.warnings.entry(msg.into()).or_insert(Noted { kind, item, faces, times: 0 }).times += 1;
+    }
+
+    /// The part's own name in the file (empty: it has none).
+    fn part_name(&self, item: u64) -> String {
+        self.ex.get(item).and_then(|e| e.params().first()).and_then(Param::as_str).unwrap_or("").trim().to_string()
     }
 
     fn index(&mut self) {
@@ -574,7 +649,7 @@ impl Reader {
     }
 
     fn label(&self, item: u64) -> String {
-        let name = self.ex.get(item).and_then(|e| e.params().first()).and_then(Param::as_str).unwrap_or("").trim().to_string();
+        let name = self.part_name(item);
         if name.is_empty() { format!("solid #{item}") } else { format!("solid '{name}'") }
     }
 
@@ -708,7 +783,7 @@ impl Reader {
             if let Some(again) = self.unreadable.get(&item) {
                 if let Some(msg) = again.clone() {
                     let label = self.label(item);
-                    self.warn(format!("{label}: not imported: {msg}"));
+                    self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
                 }
                 continue;
             }
@@ -732,14 +807,19 @@ impl Reader {
                     if let Some(failed) = read {
                         let label = self.label(item);
                         if let Some(why) = &part.refused {
-                            let kind = if part.body.is_mesh() { "shown as a mesh" } else { "imported as surfaces" };
-                            self.warn(format!("{label}: {kind}: {why}"));
+                            let kind = if part.body.is_mesh() { IssueKind::ShownAsMesh } else { IssueKind::ImportedAsSurfaces };
+                            let words = if part.body.is_mesh() { "shown as a mesh" } else { "imported as surfaces" };
+                            self.note(kind, Some(item), 0, format!("{label}: {words}: {why}"));
                         }
                         for f in &failed {
-                            self.warn(format!("{label}: {f}"));
+                            let (kind, faces, f) = match f {
+                                parallel::Note::LeftOut(f) => (IssueKind::FaceLeftOut, 1, f),
+                                parallel::Note::Repaired(f) => (IssueKind::Repaired, 0, f),
+                            };
+                            self.note(kind, Some(item), faces, format!("{label}: {f}"));
                         }
                         if !part.closed && part.refused.is_none() {
-                            self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
+                            self.note(IssueKind::OpenBody, Some(item), 0, format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }
                     if !self.once.contains(&item) {
@@ -750,7 +830,12 @@ impl Reader {
                     let name = if own.is_empty() { product.clone() } else { own };
                     // Faces the mesher gives up on (or that the budget cut short) are reported.
                     if self.unmeshed_checked.insert(item) && missing > 0 {
-                        self.warn(format!("solid '{name}': {missing} face(s) could not be meshed and are not shown"));
+                        self.note(
+                            IssueKind::FacesNotShown,
+                            Some(item),
+                            missing,
+                            format!("solid '{name}': {missing} face(s) could not be meshed and are not shown"),
+                        );
                     }
                     if let Some(slot) = self.made.get_mut(i) {
                         *slot = Some(self.bodies.len());
@@ -798,7 +883,7 @@ impl Reader {
                 }
                 Err(parallel::Failure { read, msg }) => {
                     let label = self.label(item);
-                    self.warn(format!("{label}: not imported: {msg}"));
+                    self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
                     // Later instances don't read the item again.
                     if !self.oriented.contains_key(&item) {
                         self.unreadable.insert(item, (!read).then_some(msg));
@@ -807,6 +892,27 @@ impl Reader {
             }
         }
         true
+    }
+
+    /// The warnings (worded as `warnings`, in their order) by kind and part, and how many of the
+    /// file's parts came in as closed solids.
+    fn report(&self, warnings: &[String]) -> ImportReport {
+        let parts = self.plan.iter().map(|p| p.item).collect::<HashSet<_>>().len();
+        let solids = self.bodies.iter().filter(|b| b.closed && b.refused.is_none()).map(|b| b.source_item).collect::<HashSet<_>>().len();
+        let issues = self
+            .warnings
+            .values()
+            .zip(warnings)
+            .map(|(n, detail)| ImportIssue {
+                kind: n.kind,
+                item: n.item,
+                part: n.item.map(|i| self.part_name(i)).unwrap_or_default(),
+                faces: n.faces,
+                times: n.times,
+                detail: detail.clone(),
+            })
+            .collect();
+        ImportReport { parts, solids, issues }
     }
 
     /// Planned-solid indices (a node's `bodies` after the walk) as body indices, leaving out
@@ -1179,13 +1285,14 @@ impl StepReading {
         if let Some(first) = ex.duplicates.first() {
             rd.warn(format!("{} entity ids are defined twice (first #{first}); the first definitions were used", ex.duplicates.len()));
         }
-        let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if *n > 1 { format!("{m} (×{n})") } else { m.clone() }).collect();
+        let warnings: Vec<String> = rd.warnings.iter().map(|(m, n)| if n.times > 1 { format!("{m} (×{})", n.times) } else { m.clone() }).collect();
+        let report = rd.report(&warnings);
         if rd.bodies.is_empty() {
             let why = warnings.first().cloned().unwrap_or_else(|| "the file has no solids".into());
             return Err(KernelError::Failed(format!("STEP import: no bodies ({why})")));
         }
         let bodies = std::mem::take(&mut rd.bodies);
-        Ok(StepImport { bodies, tree, warnings, schema: ex.schemas.join(", "), system: ex.originating_system.clone() })
+        Ok(StepImport { bodies, tree, warnings, report, schema: ex.schemas.join(", "), system: ex.originating_system.clone() })
     }
 
     /// [`Self::finish`], and the import is cached for the next read of the same text.

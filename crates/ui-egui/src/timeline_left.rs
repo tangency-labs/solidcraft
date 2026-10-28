@@ -1257,7 +1257,8 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     let result = app.session.model.result(id);
     let elapsed = result.map(|r| r.ms);
     let error = result.and_then(|result| result.error.clone());
-    let warning = result.and_then(|result| result.warning.clone());
+    let warning = result.and_then(crate::timeline::warning_text);
+    let status = (error.is_some() || warning.is_some()).then(|| crate::timeline::feature_status(name, ty, result));
     let rolled = match row_kind {
         RowKind::Reference { parent } => parent >= marker,
         RowKind::Own | RowKind::Nested => index >= marker,
@@ -1314,8 +1315,8 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
             .unwrap_or_else(|| elapsed.map_or_else(String::new, |ms| format!("{ms:.1} ms")));
         let kind = crate::i18n::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
         let mut tip = format!("{name} · {kind} · {summary}");
-        if error.is_some() || warning.is_some() {
-            tip.push_str(&format!("\n{}", crate::timeline::status_text(name, ty, error.as_deref(), warning.as_deref())));
+        if let Some(status) = &status {
+            tip.push_str(&format!("\n{status}"));
         }
         crate::ui_kit::text(ui, &tip, crate::ui_kit::Text::Value("history", false));
         // A value row is one line: where the sketch is listed gets a row of its own.

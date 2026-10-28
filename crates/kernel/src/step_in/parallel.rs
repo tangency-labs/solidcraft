@@ -39,8 +39,16 @@ pub(super) struct Made {
     /// Faces the mesher missed (counted when the job asked).
     pub missing: usize,
     pub part: Arc<Part>,
-    /// This job read the item: the faces the read left out, with the reason.
-    pub read: Option<Vec<String>>,
+    /// This job read the item: what the read repaired and the faces it left out.
+    pub read: Option<Vec<Note>>,
+}
+
+/// What reading an item noted.
+pub(super) enum Note {
+    /// Repaired on the way (the reader's notes).
+    Repaired(String),
+    /// A face left out, with the reason.
+    LeftOut(String),
 }
 
 /// Why a job made no body: the item could not be read (`read`), or its body not made.
@@ -90,13 +98,13 @@ fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// A solid item read with the STEP reader into its schema 4 record, then into SMLib as given,
 /// and brought back as a body: the part SMLib made of the file. A solid the reader or SMLib
 /// refuses fails with the reason ([`surface_part`] then imports what it can of it).
-pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<String>), Failure> {
+pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let solid = solidcraft_profile::scope("import", "step.read_solid", || {
         solidcraft_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibTrims)
     })
     .map_err(|msg| Failure { read: true, msg })?;
     let part = solid_part(&solid)?;
-    Ok((part, solid.notes))
+    Ok((part, solid.notes.into_iter().map(Note::Repaired).collect()))
 }
 
 /// The part SMLib makes of a solid (or sheet) record the reader made.
@@ -199,7 +207,7 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 /// 3. Where SMLib cannot stitch them either: a mesh of them ([`mesh_part`]).
 ///
 /// With no face to import, the solid stays refused.
-fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<String>), Failure> {
+fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let _span = solidcraft_profile::span("import", "step.refused_surfaces");
     let trims = &solidcraft_smlib::pcurves::SmlibTrims;
     let Ok(faces) = solidcraft_step::topology::read_faces_with(ex, item, units, trims) else { return Err(refused) };
@@ -223,11 +231,14 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
         let skip: std::collections::HashSet<u64> = left_out.iter().map(|(f, _)| *f).collect();
         let read =
             solidcraft_profile::scope("import", "step.read_without", || solidcraft_step::topology::read_solid_without(ex, item, units, trims, &skip));
-        match read.map_err(|msg| Failure { read: true, msg }).and_then(|solid| Ok((solid_part(&solid)?, solid.notes))) {
+        match read
+            .map_err(|msg| Failure { read: true, msg })
+            .and_then(|solid| Ok((solid_part(&solid)?, solid.notes.into_iter().map(Note::Repaired).collect::<Vec<_>>())))
+        {
             Ok((mut part, mut notes)) => {
                 part.file_faces = faces.len();
                 part.refused = Some(refused.msg);
-                notes.extend(left_out.iter().map(|(_, m)| format!("left out: {m}")));
+                notes.extend(left_out.iter().map(|(_, m)| Note::LeftOut(format!("left out: {m}"))));
                 return Ok((part, notes));
             }
             Err(e) => {
@@ -242,7 +253,7 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
     for f in &faces {
         match f.record.clone().map_err(KernelError::Failed).and_then(Body::from_record) {
             Ok(b) => pieces.push((f.face, b)),
-            Err(e) => notes.push(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: "))),
+            Err(e) => notes.push(Note::LeftOut(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: ")))),
         }
     }
     match stitched_part(&pieces, faces.len(), &refused.msg) {
@@ -283,12 +294,7 @@ fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> cr
 /// body: no B-rep (modelling operations refuse it), for a solid whose faces SMLib could not
 /// stitch either. Faces that cannot be meshed are left out, each named in the notes; with no
 /// face to show, the solid stays refused.
-fn mesh_part(
-    pieces: &[(u64, Body)],
-    file_faces: usize,
-    mut notes: Vec<String>,
-    refused: Failure,
-) -> std::result::Result<(Part, Vec<String>), Failure> {
+fn mesh_part(pieces: &[(u64, Body)], file_faces: usize, mut notes: Vec<Note>, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let _span = solidcraft_profile::span("import", "step.refused_mesh");
     // Every face at the display tolerance of the whole solid.
     let bounds: solidcraft_geom::Aabb3 = pieces.iter().flat_map(|(_, b)| b.record().vertices.iter().map(|v| crate::body::v3(v.point))).collect();
@@ -302,8 +308,8 @@ fn mesh_part(
                 positions.extend_from_slice(&m.positions);
                 triangles.extend(m.triangles.iter().map(|t| t.map(|i| i.saturating_add(base))));
             }
-            Ok(_) => notes.push(format!("left out: face #{face}: no triangles")),
-            Err(e) => notes.push(format!("left out: face #{face}: {}", e.to_string().trim_start_matches("the operation failed: "))),
+            Ok(_) => notes.push(Note::LeftOut(format!("left out: face #{face}: no triangles"))),
+            Err(e) => notes.push(Note::LeftOut(format!("left out: face #{face}: {}", e.to_string().trim_start_matches("the operation failed: ")))),
         }
     }
     if triangles.is_empty() {

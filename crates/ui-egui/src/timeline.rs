@@ -4,8 +4,9 @@ use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Rect, Sense, UiBuilder, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
-    FeatureKind, PlaneRef, SketchId,
+    FeatureKind, FeatureResult, PlaneRef, SketchId,
     construct::{AxisDef, PointDef},
+    kernel::{ImportReport, IssueKind},
 };
 
 use crate::SolveApp;
@@ -293,6 +294,21 @@ pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) 
     }
 }
 
+/// A feature tooltip's (and its copied message's) name, type, error and warning: an import's
+/// summary as it is (the mark already says it is a warning), any other warning labelled.
+pub(crate) fn feature_status(name: &str, ty: &str, result: Option<&FeatureResult>) -> String {
+    let error = result.and_then(|r| r.error.as_deref());
+    match result.and_then(|r| r.import_report.as_deref()).filter(|r| !r.issues.is_empty()) {
+        Some(report) => {
+            let mut text = status_text(name, ty, error, None);
+            text.push('\n');
+            text.push_str(&import_summary(report));
+            text
+        }
+        None => status_text(name, ty, error, result.and_then(|r| r.warning.as_deref())),
+    }
+}
+
 /// The common prefix of a feature tooltip and its copied status message.
 pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Option<&str>) -> String {
     let mut text = format!("{name}  ({ty})");
@@ -308,14 +324,94 @@ pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Op
 }
 
 /// What a feature's error or warning mark says, as its tooltip shows it (name and type, then
-/// the error and the warning), for the clipboard. `None` when it has neither.
+/// the error and the warning), for the clipboard, and an import's every warning as the kernel
+/// words them. `None` when it has neither.
 pub(crate) fn feature_message(app: &SolveApp, id: u64) -> Option<String> {
     let result = app.session.model.result(id)?;
     if result.error.is_none() && result.warning.is_none() {
         return None;
     }
     let feature = app.session.doc.features.iter().find(|f| f.id == id)?;
-    Some(status_text(&feature.name, feature.kind.type_name(), result.error.as_deref(), result.warning.as_deref()))
+    let mut text = feature_status(&feature.name, feature.kind.type_name(), Some(result));
+    if let Some(report) = result.import_report.as_ref().filter(|r| !r.issues.is_empty()) {
+        text.push_str("\n\n");
+        text.push_str(crate::i18n::tr("import_report.details"));
+        for issue in &report.issues {
+            text.push('\n');
+            text.push_str(&issue.detail);
+        }
+    }
+    Some(text)
+}
+
+/// What a feature's warning mark says: an import's warnings summed up in words, else the
+/// feature's warning.
+pub(crate) fn warning_text(result: &FeatureResult) -> Option<String> {
+    match result.import_report.as_deref().filter(|r| !r.issues.is_empty()) {
+        Some(report) => Some(import_summary(report)),
+        None => result.warning.clone(),
+    }
+}
+
+/// The status line after an open or an import with warnings: their summary. The import made
+/// the reply's `feature`; a STEP file opened as a design is the design's one import. `None`
+/// without an import's warnings.
+pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
+    let reported = |r: &&FeatureResult| r.import_report.as_deref().is_some_and(|r| !r.issues.is_empty());
+    let result = match reply.get("feature").and_then(Value::as_u64) {
+        Some(id) => app.session.model.result(id).filter(reported)?,
+        // Only when the open says it has warnings: a design opened with an import in it does not.
+        None if reply.get("warnings").and_then(Value::as_array).is_some_and(|w| !w.is_empty()) => {
+            let mut imports = app.session.model.results.iter().filter(reported);
+            match (imports.next(), imports.next()) {
+                (Some(only), None) => only,
+                _ => return None,
+            }
+        }
+        None => return None,
+    };
+    result.import_report.as_deref().map(import_summary)
+}
+
+/// An import's warnings for a person who uses CAD: how many of the file's parts came in as
+/// solids, then what happened to the others, by kind, counted by part (faces for the faces left
+/// out or not drawn), and what may help. Entity numbers and the kernel's wording stay in the
+/// details ([`feature_message`]).
+pub(crate) fn import_summary(report: &ImportReport) -> String {
+    let mut parts: std::collections::BTreeMap<IssueKind, std::collections::BTreeSet<Option<u64>>> = Default::default();
+    let mut faces: std::collections::BTreeMap<IssueKind, usize> = Default::default();
+    let mut file = 0usize;
+    for issue in &report.issues {
+        if issue.kind == IssueKind::File {
+            file += 1;
+            continue;
+        }
+        parts.entry(issue.kind).or_default().insert(issue.item);
+        *faces.entry(issue.kind).or_default() += issue.faces;
+    }
+    let parts_of = |kind| parts.get(&kind).map_or(0, std::collections::BTreeSet::len);
+    let faces_of = |kind| faces.get(&kind).copied().unwrap_or(0);
+    let counted = |key: &str, n: usize| crate::i18n::format(&format!("{key}_{}", if n == 1 { "one" } else { "other" }), &[("count", &n.to_string())]);
+    let mut out = Vec::new();
+    if report.parts > 1 && report.solids < report.parts {
+        out.push(crate::i18n::format("import_report.solids", &[("solids", &report.solids.to_string()), ("parts", &report.parts.to_string())]));
+    }
+    let sentences = [
+        ("import_report.not_imported", parts_of(IssueKind::NotImported)),
+        ("import_report.mesh", parts_of(IssueKind::ShownAsMesh)),
+        ("import_report.surfaces", parts_of(IssueKind::ImportedAsSurfaces)),
+        ("import_report.left_out", faces_of(IssueKind::FaceLeftOut)),
+        ("import_report.open", parts_of(IssueKind::OpenBody)),
+        ("import_report.not_shown", faces_of(IssueKind::FacesNotShown)),
+        ("import_report.repaired", parts_of(IssueKind::Repaired)),
+        ("import_report.file", file),
+    ];
+    out.extend(sentences.iter().filter(|(_, n)| *n > 0).map(|(key, n)| counted(key, *n)));
+    let lost = [IssueKind::NotImported, IssueKind::ShownAsMesh, IssueKind::ImportedAsSurfaces, IssueKind::FaceLeftOut, IssueKind::OpenBody];
+    if lost.iter().any(|k| parts.contains_key(k)) {
+        out.push(crate::i18n::tr("import_report.hint").to_string());
+    }
+    out.join(" ")
 }
 
 /// Copy Error Message (or Copy Warning Message) in the menu of a feature that has one.
@@ -526,7 +622,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 let resp = ui.interact(br, ui.id().with(("feat", *id)), Sense::click_and_drag());
                 let res = app.session.model.result(*id);
                 let err = res.and_then(|r| r.error.clone());
-                let warn = res.and_then(|r| r.warning.clone());
+                let warn = res.and_then(warning_text);
                 let rolled = i >= marker;
                 let is_it = |s: &solidcraft_engine::Sel| matches!(s, solidcraft_engine::Sel::Feature { id: f } if f == id);
                 let sel = app.session.selection.iter().any(is_it) || app.dialog.as_ref().is_some_and(|d| d.items().iter().any(is_it));
@@ -551,7 +647,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 if floating && marker > 0 && i == marker - 1 {
                     p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
                 }
-                let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                let mut tip = feature_status(name, ty, res);
                 if let Some(r) = res {
                     tip += &format!("\n{:.1} ms", r.ms);
                 }
@@ -741,6 +837,53 @@ mod tests {
         );
         let _english = crate::i18n::scope("en");
         assert_eq!(super::status_text("Box", "BoxFeature", Some("error"), Some("warning")), "Box  (BoxFeature)\nError: error\nWarning: warning");
+    }
+
+    /// An import's warnings read as a summary for a CAD user: parts counted by what became of
+    /// them, faces counted, no entity numbers or kernel wording (those stay in the details).
+    #[test]
+    fn an_import_summary_counts_parts_and_faces_in_plain_words() {
+        use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
+        let _english = crate::i18n::scope("en");
+        let issue =
+            |kind, item: Option<u64>, faces, detail: &str| ImportIssue { kind, item, part: String::new(), faces, times: 1, detail: detail.into() };
+        let report = ImportReport {
+            parts: 43,
+            solids: 40,
+            issues: vec![
+                issue(
+                    IssueKind::ShownAsMesh,
+                    Some(7),
+                    0,
+                    "solid #7: shown as a mesh: pcurves failed on 1 of 122 faces; first: face #9: SMLib pcurves: an edge lies 13.73370504071075 mm off the face's surface",
+                ),
+                issue(
+                    IssueKind::FaceLeftOut,
+                    Some(7),
+                    1,
+                    "solid #7: not shown: face #9: SMLib pcurves: SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+                ),
+                issue(IssueKind::ImportedAsSurfaces, Some(8), 0, "solid #8: imported as surfaces: …"),
+                issue(IssueKind::FaceLeftOut, Some(8), 1, "solid #8: left out: face #11: …"),
+                issue(IssueKind::FaceLeftOut, Some(8), 1, "solid #8: left out: face #12: …"),
+                issue(IssueKind::NotImported, Some(5), 0, "solid #5: not imported: …"),
+                issue(IssueKind::Repaired, Some(3), 0, "solid #3: 2 seam edges added to faces that wind around their surface"),
+                issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
+                issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
+            ],
+        };
+        let summary = super::import_summary(&report);
+        assert_eq!(
+            summary,
+            "Imported 40 of 43 parts as solids. 1 part couldn't be imported. 1 part couldn't be made into a solid and is shown as a mesh. \
+             1 part couldn't be made into a solid and came in as surfaces. 3 faces couldn't be repaired and are missing. \
+             Small flaws were repaired in 2 parts. There was 1 other problem with the file. \
+             Exporting these parts again from the program that made them may fix this. Copy Warning Message has the details."
+        );
+        assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
+        // Only repairs: no advice, and a part alone has no "of" count.
+        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
+        assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
     #[test]

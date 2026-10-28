@@ -228,6 +228,9 @@ impl Model {
                 if let Some(w) = &r.warning {
                     f["warning"] = json!(w);
                 }
+                if let Some(report) = &r.import_report {
+                    f["import_report"] = serde_json::to_value(report.as_ref()).map_err(|e| kernel::KernelError::Invalid(e.to_string()))?;
+                }
                 features.push(f);
             }
             let records = json!({
@@ -589,6 +592,10 @@ impl Model {
                 name: f.name.clone(),
                 error: None,
                 warning: r.get("warning").map(|w| text(Some(w))).transpose()?,
+                import_report: r
+                    .get("import_report")
+                    .map(|v| serde_json::from_value::<kernel::ImportReport>(v.clone()).map(Arc::new).map_err(|_| bad("saved model: import report")))
+                    .transpose()?,
                 ms,
                 skipped: r.get("skipped").and_then(Json::as_bool).ok_or_else(|| bad("saved model: skipped"))?,
                 stale: false,
@@ -623,7 +630,14 @@ impl Model {
                 let local = fingerprint(doc, 0, f, &vals, false, &model.step_digests) ^ placement_digest(doc, f, Some(&before));
                 cache.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
-                    CachedEval { error: None, warning: r.warning.clone(), ms: r.ms, bytes: r.state.retained_bytes(), state: r.state.clone() },
+                    CachedEval {
+                        error: None,
+                        warning: r.warning.clone(),
+                        import_report: r.import_report.clone(),
+                        ms: r.ms,
+                        bytes: r.state.retained_bytes(),
+                        state: r.state.clone(),
+                    },
                 );
                 before = r.state.clone();
             }
