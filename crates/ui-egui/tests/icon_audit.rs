@@ -173,6 +173,9 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     });
     h.app.preferences.radial_context_menu = true;
     assert_eq!(h.call("ui.icon_audit", json!({"reset":true}))["ok"], true);
+    // The Browser's rows start open here, as they did before they started closed, so every row
+    // asks for its icon.
+    h.app.preferences.browser_rows_start_open = true;
     h.app.session.run_script(&solidcraft_engine::sample::script()).unwrap();
     h.frames(3);
     let mut requested = BTreeMap::new();
@@ -401,6 +404,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     for sample in solidcraft_engine::sample::samples().into_iter().filter(|s| matches!(s.name, "Sheet Metal Bracket" | "Hinge Assembly")) {
         let mut sample_h = harness();
         sample_h.app.home.open = false;
+        sample_h.app.preferences.browser_rows_start_open = true;
         sample_h.app.session.run_script(&(sample.script)()).unwrap();
         sample_h.frames(3);
         ribbon(&mut sample_h, &mut requested);
@@ -419,6 +423,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     }
     let mut geometry = harness();
     geometry.app.home.open = false;
+    geometry.app.preferences.browser_rows_start_open = true;
     geometry.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Audit block"})).unwrap();
     geometry.app.run("solid.split_body", json!({"body":"Audit block","plane":{"origin":[5,0,0],"normal":[1,0,0]}})).unwrap();
     geometry.frames(3);

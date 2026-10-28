@@ -343,7 +343,7 @@
   }
  },
  {
-  "note": "Component placements start closed (a large assembly shows one row per component); their arrows open them."
+  "note": "Component placements and their folders start closed (a large assembly shows one row per component); their arrows open them."
  },
  {
   "expect": {
@@ -364,6 +364,28 @@
   }
  },
  {
+  "note": "An open placement shows its folders, closed. The last fold arrow drawn with each name is Component2's."
+ },
+ {
+  "expect": {
+   "shown_handles": [
+    "fold:Bodies",
+    "fold:Sketches",
+    "fold:Construction"
+   ],
+   "hidden_handles": [
+    "row:Body2",
+    "row:Sketch2",
+    "row:Plane1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Bodies"
+  }
+ },
+ {
   "expect": {
    "shown_handles": [
     "row:Body2"
@@ -395,6 +417,11 @@
   }
  },
  {
+  "click": {
+   "handle": "fold:Sketches"
+  }
+ },
+ {
   "expect": {
    "shown_handles": [
     "row:Sketch2"
@@ -423,6 +450,11 @@
    "shown_handles": [
     "row:Sketch2"
    ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Construction"
   }
  },
  {
@@ -493,6 +525,14 @@
    "shown_handles": [
     "row:Sketch2"
    ]
+  }
+ },
+ {
+  "note": "Component1's Sketches folder is the first one listed (the design itself has none)."
+ },
+ {
+  "click": {
+   "chevron": "Sketches"
   }
  },
  {

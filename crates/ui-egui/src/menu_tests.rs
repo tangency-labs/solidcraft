@@ -1149,6 +1149,7 @@ fn double_click_on_a_body_row_renames_it_in_the_row() {
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.box", json!({"length": 40, "width": 40, "height": 10, "body_name": "Block"})).unwrap();
     h.app.run("select.clear", json!({})).unwrap();
+    h.app.tree.expanded.insert("c0/bodies".into());
     h.frames(3);
     let at = crate::scenario::handle_at("row:Block").expect("the body has a browser row");
     h.call("ui.click", json!({"x": at.x, "y": at.y, "double": true}));
@@ -1256,6 +1257,7 @@ fn construction_plane_row_opens_its_menu() {
     h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Cut"})).unwrap();
     let id = h.app.session.doc.find_feature("Cut").map(|f| f.id).unwrap();
     h.app.run("select.clear", json!({})).unwrap();
+    h.app.tree.expanded.insert("c0/construction".into());
     h.frames(3);
     let at = crate::scenario::handle_at("row:Cut").expect("the plane has a browser row");
     h.call("ui.click", json!({"x": at.x, "y": at.y, "button": "right"}));
@@ -1844,6 +1846,8 @@ mod browser_rows {
         h.app.home.open = false;
         h.app.ui.show_browser = true;
         h.app.session.run_script(&solidcraft_engine::sample::script()).expect("sample");
+        // The Bodies folder starts closed.
+        h.app.tree.expanded.insert("c0/bodies".into());
         h.frames(3);
         h
     }

@@ -8,6 +8,11 @@
   {"call": "engine.execute", "params": {"command": "component.activate", "params": {"component": "root"}}},
   {"expect": {"bodies": 2, "errors": 0, "prefs": {"browser_bodies_folders": "several"}}},
 
+  {"note": "Placements start closed: their arrows open them."},
+  {"expect": {"browser_has": ["Frame:1"], "browser_lacks": ["Plate", "Pin:1"]}},
+  {"click": {"chevron": "Frame:1"}},
+  {"click": {"chevron": "Pin:1"}},
+
   {"note": "Several bodies only (the default): each lone body sits straight under its placement, one level in, with no Bodies row."},
   {"expect": {"browser_has": ["Frame:1", "Plate", "Pin:1", "Shaft"], "browser_lacks": ["Bodies"], "handle_order": ["indent:Frame:1", "indent:Plate"]}},
   {"expect": {"handle_order": ["indent:Pin:1", "indent:Shaft"]}},
@@ -16,7 +21,10 @@
   {"call": "engine.execute", "params": {"command": "component.activate", "params": {"component": "Frame"}}},
   {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 5, "width": 20, "height": 15, "corner": [60, 0, 0], "body_name": "Rib"}}},
   {"call": "engine.execute", "params": {"command": "component.activate", "params": {"component": "root"}}},
-  {"expect": {"bodies": 3, "browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["indent:Bodies", "indent:Plate"]}},
+  {"expect": {"bodies": 3, "browser_has": ["Bodies", "Shaft"], "browser_lacks": ["Plate", "Rib"]}},
+  {"note": "The folder starts closed, as folders do; its arrow opens it."},
+  {"click": {"chevron": "Bodies"}},
+  {"expect": {"browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["indent:Bodies", "indent:Plate"]}},
 
   {"note": "Never: every component's bodies sit straight under it, two of them too."},
   {"call": "ui.prefs", "params": {"browser_bodies_folders": "never"}},
@@ -24,7 +32,10 @@
 
   {"note": "Always: every component keeps its folder, Pin's too (the last Bodies row drawn, between Pin:1 and Shaft)."},
   {"call": "ui.prefs", "params": {"browser_bodies_folders": "always"}},
-  {"expect": {"prefs": {"browser_bodies_folders": "always"}, "browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["indent:Pin:1", "indent:Bodies", "indent:Shaft"]}},
+  {"expect": {"prefs": {"browser_bodies_folders": "always"}, "browser_has": ["Bodies", "Plate", "Rib"], "browser_lacks": ["Shaft"]}},
+  {"note": "Pin's folder starts closed; its fold handle is the last one drawn."},
+  {"click": {"handle": "fold:Bodies"}},
+  {"expect": {"browser_has": ["Bodies", "Plate", "Rib", "Shaft"], "handle_order": ["indent:Pin:1", "indent:Bodies", "indent:Shaft"]}},
 
   {"note": "A value this version doesn't know is refused and changes nothing."},
   {"call": "ui.prefs", "params": {"browser_bodies_folders": "sometimes"}, "fail": true},

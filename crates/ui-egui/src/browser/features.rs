@@ -24,18 +24,8 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
         return; // Sketches are listed in Sketches, not Features.
     }
     let component = feature.component;
-    let state = app.session.model.state();
-    let world = app.session.world_state();
-    let Some(source) = world.body(body).map(|selected| selected.definition_name()) else { return };
-    let Some((_, path, _)) = app
-        .session
-        .doc
-        .placements()
-        .into_iter()
-        .find(|(owner, path, _)| *owner == component && app.session.doc.world_body_name(&state, source, component, path) == body)
-    else {
-        return;
-    };
+    let Some(source) = app.session.world_state().body(body).map(|selected| selected.definition_name().to_string()) else { return };
+    let Some(path) = super::placement_named(app, &source, component, body) else { return };
     app.ui.show_browser = true;
     app.preferences.timeline_left_browser_collapsed = false;
     app.tree.reveal = None;
@@ -50,9 +40,10 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
 pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
     let Some(component) = app.session.doc.feature(id).map(|feature| feature.component) else { return };
     app.ui.show_browser = true;
-    app.tree.collapsed.remove("c0");
-    app.tree.collapsed.remove(&format!("c{component}"));
-    app.tree.collapsed.remove(&format!("c{component}/history"));
+    // Opened whichever way each row starts: a component's row may start closed (#3005).
+    for key in ["c0".to_string(), format!("c{component}"), format!("c{component}/history")] {
+        set_open(app, &key, true, true);
+    }
     app.tree.reveal_feature = Some(Reveal { id, path: Vec::new() });
 }
 
@@ -486,7 +477,7 @@ mod tests {
         let mut h = Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
-        h.app.tree.expanded.insert("c0/features".into());
+        h.app.tree.expanded.extend(["c0/features".into(), "c0/sketches".into()]);
         let saved = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
         h.frames(2);
@@ -513,6 +504,7 @@ mod tests {
         for cache in ["current", "missing", "stale"] {
             assert_eq!(feature_rows(&mut h, cache), ["Features".to_owned(), name.clone()], "{cache}");
         }
+        h.app.tree.expanded.insert("c0/sketches".into());
         h.frames(2);
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
         assert_eq!(labels.iter().filter(|label| *label == "Profile").count(), 1, "{labels:?}");
@@ -742,6 +734,96 @@ mod tests {
         let worked = MARKS_WORKED_OUT.with(std::cell::Cell::get);
         assert!(worked > 0 && worked < 40, "{worked} of 81 folded Features folders worked out their mark");
         assert!(!crate::scenario::handles("status:error:Features").is_empty(), "a folder on screen shows its mark");
+    }
+
+    /// Whether a row is open, read the way it starts (the design's row open, the others as the
+    /// preference says).
+    fn row_open(app: &SolveApp, key: &str) -> bool {
+        is_open(app, key, key == "c0" || rows_start_open(app))
+    }
+
+    /// Find in Browser opens the rows down to the body it finds and no others, and lights them
+    /// from the path it found, without walking the placements again. The next find closes the
+    /// rows the last one opened, but not rows opened or closed by hand since.
+    #[test]
+    fn browser_find_opens_only_the_found_bodys_rows_and_the_next_find_closes_them() {
+        let mut h = Harness::new();
+        // Part placed twice, through two placements of Assembly, and Leaf inside Other.
+        let assembly = h.app.run("component.create", json!({"name":"Assembly"})).unwrap()["occurrence"].as_u64().unwrap();
+        let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap();
+        let copy = h.app.run("occurrence.copy", json!({"occurrence":assembly,"translate":[70,25,10]})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let other = h.app.run("component.create", json!({"name":"Other"})).unwrap()["occurrence"].as_u64().unwrap();
+        let leaf = h.app.run("component.create", json!({"name":"Leaf"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,90,0],"body_name":"Pin"})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.ui.show_browser = true;
+        let (first, second, pin) = (vec![assembly, part], vec![copy, part], vec![other, leaf]);
+        let mut rows = Vec::new();
+        for path in [&first, &second, &pin] {
+            rows.extend([occurrence_key(&path[..1]), occurrence_key(path), format!("{}/bodies", occurrence_key(path))]);
+        }
+        h.frames(2);
+        assert!(rows.iter().all(|key| !row_open(&h.app, key)), "placements and folders start closed");
+        let plate = h.app.session.occurrence_bodies(&second, false).unwrap()[0].clone();
+        let first_plate = h.app.session.occurrence_bodies(&first, false).unwrap()[0].clone();
+        find_in_browser(&mut h.app, face(&plate));
+        let opened: Vec<&String> = rows.iter().filter(|key| row_open(&h.app, key)).collect();
+        assert_eq!(opened, rows[3..6].iter().collect::<Vec<_>>(), "only the rows down to the body open");
+        h.frames(2);
+        assert!(h.app.tree.reveal.is_none(), "the body row was drawn and scrolled to");
+        assert!(h.app.tree.order.contains(&format!("b:{plate}")) && !h.app.tree.order.contains(&format!("b:{first_plate}")));
+        h.app.viewport.hover = None;
+        assert_eq!(Lit::of(&mut h.app).paths, std::slice::from_ref(&second), "the rows above the found body are marked");
+        assert!(!h.app.tree.model.as_ref().unwrap().body_paths_walked(), "from the path found once");
+
+        // By hand: the first Assembly opens, and Part in the second is closed and opened again.
+        crate::test_support::click(&mut h, &format!("fold:occurrence:{assembly}"));
+        let part_row = format!("fold:occurrence:{copy}/{part}");
+        crate::test_support::click(&mut h, &part_row);
+        crate::test_support::click(&mut h, &part_row);
+        assert!(row_open(&h.app, &rows[0]) && row_open(&h.app, &rows[4]));
+
+        let pin_body = h.app.session.occurrence_bodies(&pin, false).unwrap()[0].clone();
+        find_in_browser(&mut h.app, face(&pin_body));
+        let open: Vec<bool> = rows.iter().map(|key| row_open(&h.app, key)).collect();
+        assert_eq!(
+            open,
+            [true, false, false, false, true, false, true, true, true],
+            "the second Assembly and Part's Bodies close again; the rows opened by hand stay open: {rows:?}"
+        );
+        assert!(row_open(&h.app, "c0"));
+        h.frames(2);
+        assert!(h.app.tree.reveal.is_none() && h.app.tree.order.contains(&format!("b:{pin_body}")));
+        h.app.viewport.hover = None;
+        assert_eq!(Lit::of(&mut h.app).paths, std::slice::from_ref(&pin));
+        h.app.run("select.clear", json!({})).unwrap();
+        assert!(Lit::of(&mut h.app).paths.is_empty(), "the marks go with the selection");
+        assert!(!h.app.tree.found_rows.is_empty());
+        // Another design's tab: a Find there leaves the rows of this one alone.
+        crate::documents::new_tab(&mut h.app);
+        assert!(h.app.tree.found_rows.is_empty() && h.app.tree.found.is_none(), "the rows found belong to the other design");
+    }
+
+    /// The History's Find in Browser finds the feature's body as the body's own Find in Browser
+    /// does: the Browser shows, and only the rows down to the body open.
+    #[test]
+    fn history_find_in_browser_opens_the_rows_down_to_the_features_body() {
+        let mut h = Harness::new();
+        let assembly = h.app.run("component.create", json!({"name":"Assembly"})).unwrap()["occurrence"].as_u64().unwrap();
+        let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        let feature = h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let path = [assembly, part];
+        let rows = [occurrence_key(&path[..1]), occurrence_key(&path), format!("{}/bodies", occurrence_key(&path))];
+        h.app.ui.show_browser = false;
+        crate::timeline::find_in_browser(&mut h.app, feature);
+        assert!(h.app.ui.show_browser);
+        assert!(rows.iter().all(|key| row_open(&h.app, key)), "{rows:?}");
+        assert_eq!(h.app.session.selection, [Sel::Body { name: "Plate".into() }]);
+        h.frames(2);
+        assert!(h.app.tree.reveal.is_none(), "the body row was drawn and scrolled to");
     }
 
     #[test]

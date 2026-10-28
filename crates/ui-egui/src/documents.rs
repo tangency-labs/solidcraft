@@ -248,6 +248,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.view_changed(before, app.session.revision);
     }
+    crate::browser::forget_found(app);
     put_work(app, slot.work, before);
     out
 }
