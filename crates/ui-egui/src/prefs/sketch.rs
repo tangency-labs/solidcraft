@@ -16,9 +16,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_block_hint(ui, app.tr("prefs.hold_stop_snapping"), app.tr("prefs.snap_drawing_note"), t.space_24 * 8.0 + t.space_8, |ui| {
             let combo = &mut app.preferences.suppress_sketch_snap;
             ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
-                ui_kit::dropdown_menu(ui, "pref_suppress_sketch_snap", &combo.label(), |ui| {
+                ui_kit::dropdown_menu(ui, "pref_suppress_sketch_snap", &combo.shown_label(), |ui| {
                     for choice in ModifierCombo::SNAP_SUPPRESS_CHOICES {
-                        if ui_kit::list_picker(ui, &choice.label(), &choice.label(), *combo == choice).clicked() {
+                        if ui_kit::list_picker(ui, &choice.label(), &choice.shown_label(), *combo == choice).clicked() {
                             *combo = choice;
                         }
                     }

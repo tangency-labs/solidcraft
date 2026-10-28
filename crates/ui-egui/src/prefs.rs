@@ -4602,6 +4602,22 @@ mod tests {
             .collect()
     }
 
+    /// The snap-suppress choice and Direct interaction read in the user's language: the classic
+    /// choice's "or" was English in every language, and Direct interaction had no message.
+    #[test]
+    fn modifier_choice_and_direct_interaction_are_translated() {
+        let _japanese = crate::i18n::scope("ja");
+        let either = crate::tool_modifiers::ModifierCombo::CTRL_ALT.shown_label();
+        assert!(either.contains(" または ") && !either.contains(" or "), "{either}");
+        assert_ne!(crate::tool_modifiers::ModifierCombo::NONE.shown_label(), "None");
+        for english in [
+            "Direct interaction",
+            "Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size",
+        ] {
+            assert_ne!(crate::i18n::tr_label(english), english);
+        }
+    }
+
     /// Origin plane names (#6491): Top, Front and Right are names shown in the browser, the
     /// dialogs' chips and the plane choices; the planes' ids, the commands and the design keep XY,
     /// XZ and YZ. Saved, refused when unknown, and taken back by Cancel and Restore Defaults.

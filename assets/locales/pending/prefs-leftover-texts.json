@@ -1,0 +1,62 @@
+{
+  "en": {
+    "ui.direct_interaction": "Direct interaction",
+    "ui.direct_interaction_note": "Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size",
+    "ui.modifiers_either": "{first} or {second}"
+  },
+  "ar": {
+    "ui.direct_interaction": "التفاعل المباشر",
+    "ui.direct_interaction_note": "اعمل على النموذج مباشرة في منطقة العرض. اضغط على وجه مستوٍ أو مقطع واسحب: إلى الأعلى للبثق، وإلى الأسفل داخل جسم للقطع، والحركة الجانبية تحدد حجم الخطوة",
+    "ui.modifiers_either": "{first} أو {second}"
+  },
+  "de": {
+    "ui.direct_interaction": "Direkte Bearbeitung",
+    "ui.direct_interaction_note": "Das Modell direkt in der Ansicht bearbeiten. Eine ebene Fläche oder ein Profil drücken und ziehen: nach oben extrudiert, nach unten in einen Körper schneidet, seitliche Bewegung legt die Schrittweite fest",
+    "ui.modifiers_either": "{first} oder {second}"
+  },
+  "es": {
+    "ui.direct_interaction": "Interacción directa",
+    "ui.direct_interaction_note": "Trabaja directamente sobre el modelo en la vista. Pulsa una cara plana o un perfil y tira: hacia arriba extruye, hacia abajo dentro de un cuerpo corta, y el movimiento lateral fija el paso",
+    "ui.modifiers_either": "{first} o {second}"
+  },
+  "fr": {
+    "ui.direct_interaction": "Interaction directe",
+    "ui.direct_interaction_note": "Travailler directement sur le modèle dans la vue. Appuyer sur une face plane ou un profil et tirer : vers le haut extrude, vers le bas dans un corps découpe, et un mouvement latéral règle le pas",
+    "ui.modifiers_either": "{first} ou {second}"
+  },
+  "he": {
+    "ui.direct_interaction": "אינטראקציה ישירה",
+    "ui.direct_interaction_note": "עבודה ישירה על המודל בחלון התצוגה. יש ללחוץ על פאה מישורית או על פרופיל ולמשוך: למעלה משיכה, למטה לתוך גוף חיתוך, ותנועה לצדדים קובעת את גודל הצעד",
+    "ui.modifiers_either": "{first} או {second}"
+  },
+  "it": {
+    "ui.direct_interaction": "Interazione diretta",
+    "ui.direct_interaction_note": "Lavora direttamente sul modello nella vista. Premi una faccia piana o un profilo e trascina: verso l'alto estrude, verso il basso dentro un corpo taglia, e il movimento laterale imposta il passo",
+    "ui.modifiers_either": "{first} o {second}"
+  },
+  "ja": {
+    "ui.direct_interaction": "ダイレクト操作",
+    "ui.direct_interaction_note": "ビューポートでモデルを直接操作します。平らな面またはプロファイルを押して引きます。上に引くと押し出し、ボディの中へ下げるとカット、横の動きで刻み幅を設定します",
+    "ui.modifiers_either": "{first} または {second}"
+  },
+  "ko": {
+    "ui.direct_interaction": "직접 조작",
+    "ui.direct_interaction_note": "뷰포트에서 모델을 직접 다룹니다. 평평한 면이나 프로파일을 누르고 끌면 위로는 돌출, 바디 안쪽 아래로는 잘라내기이며, 옆으로 움직이면 단계 크기를 정합니다",
+    "ui.modifiers_either": "{first} 또는 {second}"
+  },
+  "vi": {
+    "ui.direct_interaction": "Tương tác trực tiếp",
+    "ui.direct_interaction_note": "Thao tác trực tiếp trên mô hình trong khung nhìn. Nhấn vào một mặt phẳng hoặc biên dạng rồi kéo: lên trên là đùn, xuống vào thân là cắt, di chuyển sang ngang đặt bước nhảy",
+    "ui.modifiers_either": "{first} hoặc {second}"
+  },
+  "zh": {
+    "ui.direct_interaction": "直接交互",
+    "ui.direct_interaction_note": "在视口中直接处理模型。按住平面或轮廓并拖动：向上为拉伸，向下进入实体为切除，横向移动设置步长",
+    "ui.modifiers_either": "{first} 或 {second}"
+  },
+  "zh-TW": {
+    "ui.direct_interaction": "直接互動",
+    "ui.direct_interaction_note": "在視埠中直接處理模型。按住平面或輪廓並拖曳：向上為擠出，向下進入實體為切除，橫向移動設定步長",
+    "ui.modifiers_either": "{first} 或 {second}"
+  }
+}

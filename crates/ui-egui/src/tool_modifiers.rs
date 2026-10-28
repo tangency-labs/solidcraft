@@ -136,6 +136,19 @@ impl ModifierCombo {
         parts.join("+")
     }
 
+    /// The display label in the user's language, for the host platform: "Cmd or Option" reads
+    /// "Cmd oder Option" in German. Key names stay as the keyboard prints them.
+    pub fn shown_label(self) -> String {
+        let platform = Platform::host();
+        if self == Self::CTRL_ALT {
+            return crate::i18n::format("ui.modifiers_either", &[("first", ctrl_name_for(platform)), ("second", alt_name_for(platform))]);
+        }
+        if self == Self::NONE {
+            return crate::i18n::tr_label("None").to_string();
+        }
+        self.label_for(platform)
+    }
+
     /// Combos offered by the sketch snap-suppress picker (classic OR first).
     pub const SNAP_SUPPRESS_CHOICES: [Self; 4] = [Self::CTRL_ALT, Self::CTRL, Self::ALT, Self::SHIFT];
 }
