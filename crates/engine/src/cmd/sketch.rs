@@ -16,6 +16,7 @@ mod drag;
 #[path = "sketch_face.rs"]
 pub(super) mod face;
 use dimensioned::draw as draw_dimensioned;
+pub(super) use dimensioned::with_dimension;
 use drag::drag_entity;
 
 /// The `connect` parameter every drawing command takes (see `connect_points`).
@@ -57,7 +58,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("rect")
         .key("R")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: opposite corners [x,y]; construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a corner is fixed where it comes to and follows the parameters, as in sketch.line); construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", rect_three_point)
         .at("SKETCH", "CREATE")
         .icon("rect3")
@@ -72,14 +73,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
-        .params(concat!("center, corner; construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("center, corner: [x,y] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters, as in sketch.line); construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", circle_center)
         .at("SKETCH", "CREATE")
         .icon("circle")
         .key("C")
         .enabled(in_sketch)
         .params(concat!(
-            "center: [x,y] or point ref, radius | diameter: number; through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
+            "center: [x,y] (x and y each a number or an expression over the design's parameters, as in sketch.line) or point ref, radius | diameter: number or expression (one naming a parameter, \"W / 4\", adds a driving radius or diameter dimension holding it, so the circle follows the parameters; its parameter is returned as `param`); through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
             connect_doc!(),
             created_doc!()
         )),
@@ -512,11 +513,47 @@ pub(super) fn expr_point(doc: &solidcraft_doc::Document, v: &Value, cmd: &str) -
 /// again whenever the parameters change.
 pub(super) fn add_placed_point(sk: &mut Sketch, at: Vec2, exprs: PointExprs, id: Option<&str>) -> Result<usize> {
     let i = sk.add_point(at, id)?;
+    place_point(sk, i, exprs);
+    Ok(i)
+}
+
+/// Point `i` placed by parameters, as [`add_placed_point`] places a new one.
+pub(super) fn place_point(sk: &mut Sketch, i: usize, exprs: PointExprs) {
     if let Some(q) = sk.points.get_mut(i) {
         q.fixed = true;
         q.exprs = Some(Box::new(exprs));
     }
-    Ok(i)
+}
+
+/// Required point argument `k`: `[x, y]`, each a number or an expression over the design's
+/// parameters (`sketch.line`'s grammar, without point ids). Where it is and, when it names a
+/// parameter, the expressions that place it (see [`expr_point`]).
+pub(super) fn req_expr_vec2(doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<(Vec2, Option<PointExprs>)> {
+    let v = p.get(k).unwrap_or(&Value::Null);
+    if let Some(at) = vec2(v) {
+        return Ok((at, None));
+    }
+    expr_point(doc, v, cmd)?.ok_or_else(|| bad(cmd, format!("`{k}` must be a point [x, y]")))
+}
+
+/// Which corner of an axis-aligned box from `lo` `q` is, counter-clockwise from the bottom-left
+/// (as `polygon_lines` makes a rectangle's corners): `q` is one of its corners.
+fn corner_index(q: Vec2, lo: Vec2) -> usize {
+    match (q.x > lo.x, q.y > lo.y) {
+        (false, false) => 0,
+        (true, false) => 1,
+        (true, true) => 2,
+        (false, true) => 3,
+    }
+}
+
+/// Corners given as expressions over the design's parameters stay where they put them.
+fn place_corners(sk: &mut Sketch, pts: &[usize], lo: Vec2, placed: &[(Vec2, Option<PointExprs>)]) {
+    for (q, exprs) in placed {
+        if let (Some(exprs), Some(i)) = (exprs, pts.get(corner_index(*q, lo))) {
+            place_point(sk, *i, exprs.clone());
+        }
+    }
 }
 
 pub(super) fn curve_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
@@ -1122,7 +1159,8 @@ fn rect_result(sk_out: (Vec<String>, Vec<String>), names: Value, info: Value) ->
 
 fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.two_point";
-    let (a, b) = (req_vec2(cmd, p, "p0")?, req_vec2(cmd, p, "p1")?);
+    let placed = [req_expr_vec2(&s.doc, p, "p0", cmd)?, req_expr_vec2(&s.doc, p, "p1", cmd)?];
+    let (a, b) = (placed[0].0, placed[1].0);
     if (a.x - b.x).abs() < 1e-9 || (a.y - b.y).abs() < 1e-9 {
         return Err(bad(cmd, "the corners must differ in x and y"));
     }
@@ -1130,6 +1168,7 @@ fn rect_two_point(s: &mut Session, p: &Value) -> Result<Value> {
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[lo, Vec2::new(hi.x, lo.y), hi, Vec2::new(lo.x, hi.y)])?;
+        place_corners(sk, &pts, lo, &placed);
         let mut cons = rect_constraints(sk, &l)?;
         mark_construction(sk, &l, p);
         cons.extend(connect_points(sk, first, p)?);
@@ -1195,7 +1234,9 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.rectangle.center";
-    let (c, k) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "corner")?);
+    let (c, centre_exprs) = req_expr_vec2(&s.doc, p, "center", cmd)?;
+    let corner = req_expr_vec2(&s.doc, p, "corner", cmd)?;
+    let k = corner.0;
     let h = Vec2::new((k.x - c.x).abs(), (k.y - c.y).abs());
     if h.x < 1e-9 || h.y < 1e-9 {
         return Err(bad(cmd, "the corner must differ from the centre in x and y"));
@@ -1203,6 +1244,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
     let ((out, names), info) = edit(s, p, cmd, false, |sk, _| {
         let first = sk.points.len();
         let (l, pts) = polygon_lines(sk, &[c - h, Vec2::new(c.x + h.x, c.y - h.y), c + h, Vec2::new(c.x - h.x, c.y + h.y)])?;
+        place_corners(sk, &pts, c - h, &[corner]);
         let mut cons = rect_constraints(sk, &l)?;
         // Both diagonals (construction), the centre at their crossing. Only the first carries
         // the midpoint constraint: diagonals of a parallelogram bisect each other, so a second
@@ -1215,7 +1257,10 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
                     cu.construction = true;
                 }
             }
-            let cp = sk.add_point(c, None)?;
+            let cp = match centre_exprs {
+                Some(exprs) => add_placed_point(sk, c, exprs, None)?,
+                None => sk.add_point(c, None)?,
+            };
             cons.push(add_c(sk, ConstraintKind::Midpoint { p: cp, l: diag })?);
         }
         mark_construction(sk, &l, p);
@@ -1258,10 +1303,36 @@ pub(super) fn radius_arg(p: &Value, cmd: &str) -> Result<f64> {
     if r > 1e-9 { Ok(r) } else { Err(bad(cmd, "radius must be positive")) }
 }
 
+/// A circle's size, `radius` or else `diameter`, each a number or an expression over the
+/// design's parameters: the radius and, for an expression that names a parameter, which of the
+/// two it gives and the expression.
+pub(super) fn circle_size(doc: &solidcraft_doc::Document, p: &Value, cmd: &str) -> Result<(f64, Option<(&'static str, String)>)> {
+    const MUST: &str = "a radius or diameter must be a number or an expression over the design's parameters";
+    let Some((key, v)) = ["radius", "diameter"].into_iter().find_map(|k| p.get(k).filter(|v| v.is_number() || v.is_string()).map(|v| (k, v))) else {
+        return Err(bad(cmd, "needs `radius` or `diameter`"));
+    };
+    let (size, exprs) = super::sketch_create::text_number(doc, v, cmd, key, MUST, false)?;
+    let r = if key == "diameter" { size / 2.0 } else { size };
+    if !(r > 1e-9) {
+        return Err(bad(cmd, "radius must be positive"));
+    }
+    Ok((r, exprs.map(|e| (key, e))))
+}
+
 fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
-    let r = radius_arg(p, cmd)?;
+    let (r, size_expr) = circle_size(&s.doc, p, cmd)?;
+    // A size from the parameters: the circle as drawn at its size now, and a driving dimension
+    // holding the expression, so it follows them.
+    if let Some((key, e)) = size_expr {
+        let mut plain = p.clone();
+        if let Some(o) = plain.as_object_mut() {
+            o.remove("diameter");
+            o.insert("radius".into(), json!(r));
+        }
+        return with_dimension(s, cmd, &plain, key, &e);
+    }
     let id = str_(p, "id").map(str::to_string);
     let (out, info) = draw(s, p, cmd, |sk, doc| {
         let c = req_parg(sk, doc, p, "center", cmd)?;

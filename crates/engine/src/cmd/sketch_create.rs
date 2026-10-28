@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle};
+use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, PointExprs, Shape, Sketch, TextAlign, TextExprs, TextStyle};
 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
 macro_rules! text_style_doc {
@@ -61,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius",
+        "center, major: end of the major axis [x,y] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters, as in sketch.line), minor: a point the ellipse passes through on the minor side [x,y] | minor_radius: number or expression (one naming a parameter, \"W / 4\", adds a driving dimension of the minor radius holding it, so the ellipse follows the parameters; its parameter is returned as `param`)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", spline_fit)
@@ -597,11 +597,22 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.ellipse";
-    let (c, m) = (req_vec2(cmd, p, "center")?, req_vec2(cmd, p, "major")?);
+    let (c, centre_exprs) = super::sketch::req_expr_vec2(&s.doc, p, "center", cmd)?;
+    let (m, major_exprs) = super::sketch::req_expr_vec2(&s.doc, p, "major", cmd)?;
     let u = (m - c).normalized().ok_or_else(|| bad(cmd, "the major axis end must differ from the centre"))?;
     let a = c.dist(m);
-    let r = match (num(p, "minor_radius"), p.get("minor").and_then(crate::params::vec2)) {
-        (Some(r), _) => r,
+    let minor_radius = match p.get("minor_radius").filter(|v| v.is_number() || v.is_string()) {
+        Some(v) => {
+            Some(text_number(&s.doc, v, cmd, "minor_radius", "`minor_radius` must be a number or an expression over the design's parameters", false)?)
+        }
+        None => None,
+    };
+    let mut minor_expr = None;
+    let r = match (minor_radius, p.get("minor").and_then(crate::params::vec2)) {
+        (Some((r, e)), _) => {
+            minor_expr = e;
+            r
+        }
         (None, Some(q)) => {
             // Minor radius so the ellipse passes through q.
             let d = q - c;
@@ -617,9 +628,22 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "the minor radius must be positive"));
     }
+    // A minor radius from the parameters: the ellipse as drawn at its size now, and a driving
+    // dimension holding the expression, so it follows them.
+    if let Some(e) = minor_expr {
+        let mut plain = p.clone();
+        plain["minor_radius"] = json!(r);
+        return super::sketch::with_dimension(s, cmd, &plain, "radius", &e);
+    }
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        let ci = sk.add_point(c, None)?;
-        let mi = sk.add_point(m, None)?;
+        let place = |sk: &mut Sketch, at: Vec2, exprs: Option<PointExprs>| -> Result<usize> {
+            match exprs {
+                Some(exprs) => super::sketch::add_placed_point(sk, at, exprs, None),
+                None => Ok(sk.add_point(at, None)?),
+            }
+        };
+        let ci = place(sk, c, centre_exprs)?;
+        let mi = place(sk, m, major_exprs)?;
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
         Ok((ids_of(sk, &[e]), Vec::new()))

@@ -143,6 +143,29 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// `create` run with `params` (its size a number), then a driving dimension of type `ty` on the
+/// curve it drew, valued `value`: an expression over the design's parameters, so the size follows
+/// them. One command and one undo step; the reply is the creator's, with the dimension's
+/// parameter as `param`.
+pub(in crate::cmd) fn with_dimension(s: &mut Session, create: &str, params: &Value, ty: &str, value: &str) -> Result<Value> {
+    let mut scratch = s.scratch();
+    let mut out = scratch.execute(create, params)?;
+    let curve = out["curves"].get(0).filter(|v| v.is_string()).cloned().ok_or_else(|| bad(create, "the curve drawn is missing"))?;
+    let mut dimension = json!({"entities": [curve], "type": ty, "value": value});
+    if let Some(sketch) = params.get("sketch") {
+        dimension["sketch"] = sketch.clone();
+    }
+    let dimensioned = scratch.execute("sketch.dimension", &dimension)?;
+    // Session::execute records the wrapper's before snapshot. Nested history must not leak.
+    scratch.undo.clear();
+    s.accept_computed(scratch);
+    out["param"] = dimensioned.get("param").cloned().unwrap_or(Value::Null);
+    if let Some(info) = dimensioned.get("sketch") {
+        out["sketch"] = info.clone();
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 #[path = "sketch_dimensioned_tests.rs"]
 mod tests;

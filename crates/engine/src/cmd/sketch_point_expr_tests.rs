@@ -187,3 +187,111 @@ fn a_tangent_from_a_placed_point_keeps_the_side_it_was_drawn_on() {
     }
     assert!(flipped.is_empty(), "the tangent went over to the other side, without a word, at {flipped:?}");
 }
+
+/// Sketch `S` as the model solved it.
+fn solved_sketch(s: &Session) -> solidcraft_sketch::Sketch {
+    let f = s.doc.find_feature("S").unwrap().id;
+    s.model.state().sketch(f).unwrap().sketch.clone()
+}
+
+fn near(a: Vec2, b: Vec2) -> bool {
+    a.dist(b) < 1e-6
+}
+
+/// The four corners of a rectangle as its reply names them, as the model solved them.
+fn corners(s: &Session, r: &Value) -> [Vec2; 4] {
+    ["bottom_left", "bottom_right", "top_right", "top_left"].map(|k| solved(s, r["corners"][k].as_str().unwrap()))
+}
+
+#[test]
+fn rectangle_corners_typed_as_expressions_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "30 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    // p1 below and right of p0: which corner each is does not matter.
+    let two = run(&mut s, "sketch.rectangle.two_point", json!({"p0": ["W / 2", "H"], "p1": ["W", 20]}));
+    let centre = run(&mut s, "sketch.rectangle.center", json!({"center": ["-W", 0], "corner": ["-W / 2", "H / 3"]}));
+    // Plain numbers: free corners, as before.
+    let plain = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, -50], "p1": [10, -40]}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    let box_of = |lo: (f64, f64), hi: (f64, f64)| [Vec2::new(lo.0, lo.1), Vec2::new(hi.0, lo.1), Vec2::new(hi.0, hi.1), Vec2::new(lo.0, hi.1)];
+    let same = |got: [Vec2; 4], want: [Vec2; 4]| got.iter().zip(want).all(|(g, w)| near(*g, w));
+    assert!(same(corners(&s, &two), box_of((20.0, 20.0), (40.0, 30.0))), "{:?}", corners(&s, &two));
+    assert!(same(corners(&s, &centre), box_of((-60.0, -10.0), (-20.0, 10.0))), "{:?}", corners(&s, &centre));
+    let f = s.doc.find_feature("S").unwrap().id;
+    let fixed = |id: &Value| s.doc.sketch(f).unwrap().points.iter().find(|q| q.id == id.as_str().unwrap()).unwrap().fixed;
+    assert!(fixed(&two["corners"]["top_left"]) && fixed(&two["corners"]["bottom_right"]) && !fixed(&two["corners"]["bottom_left"]));
+    assert!(fixed(&centre["corners"]["top_right"]) && !fixed(&centre["corners"]["bottom_left"]));
+    assert!(["bottom_left", "top_right"].iter().all(|k| !fixed(&plain["corners"][*k])), "plain numbers leave the corners free");
+
+    // Both rectangles follow the parameters, and keep doing so in the design file.
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "60 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "48 mm"}));
+    let check = |s: &Session| {
+        no_trouble(s);
+        assert!(same(corners(s, &two), box_of((30.0, 20.0), (60.0, 48.0))), "{:?}", corners(s, &two));
+        assert!(same(corners(s, &centre), box_of((-90.0, -16.0), (-30.0, 16.0))), "{:?}", corners(s, &centre));
+        assert!(same(corners(s, &plain), box_of((0.0, -50.0), (10.0, -40.0))), "{:?}", corners(s, &plain));
+    };
+    check(&s);
+    check(&reopened(&s));
+}
+
+#[test]
+fn a_circle_and_an_ellipse_sized_by_expressions_follow_their_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let by_radius = run(&mut s, "sketch.circle.center", json!({"center": ["W", 0], "radius": "W / 4", "id": "r"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "diameter": "W / 2", "id": "d"}));
+    let ellipse = run(&mut s, "sketch.ellipse", json!({"center": [0, "W"], "major": ["W / 2", "W"], "minor_radius": "W / 8"}));
+    // A plain number is just a size: no dimension.
+    let plain = run(&mut s, "sketch.circle.center", json!({"center": [0, -40], "radius": 3, "id": "p"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    assert!(by_radius["param"].is_string() && ellipse["param"].is_string(), "{by_radius} {ellipse}");
+    assert!(plain.get("param").is_none(), "{plain}");
+    let e = ellipse["curves"][0].as_str().unwrap().to_string();
+    let f = s.doc.find_feature("S").unwrap().id;
+    let dims = s.doc.sketch(f).unwrap().constraints.iter().filter(|c| c.param.is_some()).count();
+    assert_eq!(dims, 3, "a driving dimension for each size typed as an expression");
+
+    let check = |s: &Session, w: f64| {
+        no_trouble(s);
+        let sk = solved_sketch(s);
+        let curve = |id: &str| sk.curves.iter().position(|c| c.id == id).unwrap();
+        let (r, d) = (curve("r"), curve("d"));
+        assert!((sk.radius(r).unwrap() - w / 4.0).abs() < 1e-6 && near(sk.center(r).unwrap(), Vec2::new(w, 0.0)), "{w}");
+        assert!((sk.radius(d).unwrap() - w / 4.0).abs() < 1e-6 && near(sk.center(d).unwrap(), Vec2::ZERO), "{w}");
+        assert!((sk.radius(curve("p")).unwrap() - 3.0).abs() < 1e-9);
+        let Some(solidcraft_sketch::CurveKind::Ellipse { c, m, r }) = sk.curves.get(curve(&e)).map(|c| c.kind.clone()) else { panic!("no ellipse") };
+        assert!(near(sk.points[c].pos, Vec2::new(0.0, w)) && near(sk.points[m].pos, Vec2::new(w / 2.0, w)), "{w}");
+        assert!((r - w / 8.0).abs() < 1e-6, "{w}: minor radius {r}");
+    };
+    check(&s, 40.0);
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "60 mm"}));
+    check(&s, 60.0);
+    check(&reopened(&s), 60.0);
+    // One undo takes the whole circle and its dimension away.
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    let curves = s.doc.sketch(f).unwrap().curves.len();
+    run(&mut s, "sketch.circle.center", json!({"center": [100, 0], "radius": "W / 10"}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.sketch(f).unwrap().curves.len(), curves);
+}
+
+#[test]
+fn a_size_expression_that_cannot_be_worked_out_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    for bad in ["nope", "W - W", "-W", "1 / 0", ""] {
+        assert!(s.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": bad})).is_err(), "{bad}");
+        assert!(s.execute("sketch.ellipse", &json!({"center": [0, 0], "major": [10, 0], "minor_radius": bad})).is_err(), "{bad}");
+    }
+    assert!(s.execute("sketch.rectangle.two_point", &json!({"p0": ["nope", 0], "p1": [10, 10]})).is_err());
+    assert!(s.execute("sketch.rectangle.center", &json!({"center": [0, 0], "corner": ["W - W", 10]})).is_err(), "no width");
+    assert_eq!(s.doc.sketch(s.doc.find_feature("S").unwrap().id).unwrap().curves.len(), 0);
+}
