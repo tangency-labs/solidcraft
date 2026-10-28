@@ -1111,7 +1111,7 @@ mod tests {
             for g in Continuity::ALL {
                 let (label, tip) = (locale.text(g.label_id()), locale.text(g.tip_id()));
                 assert!(label != g.label_id() && tip != g.tip_id(), "{lang}: {g:?} has no text");
-                assert!(!coded(&label), "{lang}: the {g:?} label names a code: {label}");
+                assert!(!coded(label), "{lang}: the {g:?} label names a code: {label}");
                 assert!(tip.contains(g.code()), "{lang}: the {g:?} hover text names its code: {tip}");
             }
         }

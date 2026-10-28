@@ -429,7 +429,7 @@ fn station(at: Vec3, tangent: Vec3, on_a: &mut FaceSurface, on_b: &mut FaceSurfa
     // round, so its k-th derivative of curvature reads (−1)^(k+1) times as much in face a's.
     let opposed = na.dot(nb) < 0.0;
     let jump = |k: usize, a: f64, b: f64| {
-        let flip = if opposed && k % 2 == 0 { -1.0 } else { 1.0 };
+        let flip = if opposed && k.is_multiple_of(2) { -1.0 } else { 1.0 };
         (a - flip * b).abs()
     };
     let [ka, ca, ra] = ja.values();
