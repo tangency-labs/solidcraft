@@ -664,7 +664,7 @@ fn select_item(app: &mut SolveApp, ui: &egui::Ui, item: TimelineItem, order: &[T
     }
 }
 
-fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup]) {
+pub(crate) fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft_engine::doc::TimelineGroup]) {
     let features = selected_feature_ids(app);
     let selected_groups = app.tree.picked_timeline_groups.clone();
     let has_selection = !features.is_empty() || !selected_groups.is_empty();
@@ -675,7 +675,9 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
                 && let Some(group) = result.get("group").and_then(serde_json::Value::as_u64)
             {
                 app.tree.collapsed.remove(&format!("timeline_group:{group}"));
-                crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), pos2(0.0, 0.0));
+                // The History at the left edits the name in the row; elsewhere the box opens here.
+                let at = ui.ctx().pointer_latest_pos().unwrap_or(pos2(0.0, 0.0));
+                crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group), at);
             }
             ui.close();
         }
@@ -859,7 +861,7 @@ fn group_last_feature(
 }
 
 /// Whether Sketches: Under their feature is on (#6489).
-fn nests(app: &SolveApp) -> bool {
+pub(crate) fn nests(app: &SolveApp) -> bool {
     app.preferences.history_sketches == crate::prefs::HistorySketches::UnderFeature
 }
 
@@ -877,7 +879,7 @@ fn drawn_rows(app: &SolveApp, nest: bool) -> HistoryRows {
 }
 
 /// The fold of a feature's listed sketches; closed until opened.
-fn sketches_key(feature: u64) -> String {
+pub(crate) fn sketches_key(feature: u64) -> String {
     format!("timeline/feature/{feature}/sketches")
 }
 

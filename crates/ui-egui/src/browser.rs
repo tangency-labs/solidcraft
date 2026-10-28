@@ -60,6 +60,10 @@ pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     }
 }
 
+pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
+    features::reveal_in_history(app, id);
+}
+
 #[cfg(test)]
 #[path = "browser_model_tests.rs"]
 mod model_tests;
@@ -2256,7 +2260,9 @@ fn folder_rows_at(
     // eyes, hover and drops do its jobs. It is always open, as nothing could open it again.
     let render = crate::render_workspace::active(app);
     let folded = !render && folder == "bodies" && bodies_folded(app, comp, prefix, data.entries().count());
-    let open = folded || is_open(app, key, true);
+    // With the history in the browser the sketches are there too: their folder starts closed.
+    let default_open = !(folder == "sketches" && app.preferences.history_in_browser);
+    let open = folded || is_open(app, key, default_open);
     let inner = if folded { depth } else { depth + 1 };
     // The folder's eye is its own: hiding it hides its items without changing theirs, and its
     // items never change it. It and everything in it fade while it or a placement above is
@@ -2283,13 +2289,13 @@ fn folder_rows_at(
             )
         };
         if r.fold {
-            toggle(app, key, true);
+            toggle(app, key, default_open);
         } else if r.clicked {
             // The Bodies label is the whole set while a command is asking for bodies. The arrow
             // still folds it. With no such command, the label folds, as it always has.
             let names: Vec<String> = data.entries().flat_map(|e| e.bodies.clone()).collect();
             if !offer_bodies(app, &names, Take::Toggle) {
-                toggle(app, key, true);
+                toggle(app, key, default_open);
             }
         }
         if r.eye {
