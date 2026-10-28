@@ -169,19 +169,32 @@ fn curvature_jumps(body: &solidcraft_engine::kernel::Body, near: [f64; 3], withi
     Ok(json!({"seams": seams.len(), "stations_clear": stations, "worst_per_mm": worst, "worst_clear_per_mm": worst_clear}))
 }
 
-/// The seams a `continuity: {order, edges}` check measures on `b`, by edge index, with how each
-/// lies: `blend`, every seam of a face a fillet or chamfer made (a round, a chamfer face or a
-/// corner patch) with the faces either side of the edge it replaced, and every seam of a corner
-/// patch with the rounds it joins: what the blend is built to meet. Where two rounds meet
-/// without a patch, their seam is the input's (tangent only where the rounded edges were) and is
-/// not one. `corner`, those of them on a corner patch. An error for any other selection.
-fn blend_seams(b: &solidcraft_engine::doc::ModelBody, edges: &str) -> Result<Vec<solidcraft_engine::doc::naming::BlendSeam>, String> {
+/// The seams a `continuity: {order, edges}` check measures on `b`, by edge index, with what
+/// each lies between: `blend` (the default), every seam of a face a fillet or chamfer made (a
+/// round, a chamfer face or a corner patch) with the faces either side of the edge it replaced,
+/// and every seam of a corner patch with the rounds it joins: what the blend is built to meet.
+/// Where two rounds meet without a patch, their seam is the input's (tangent only where the
+/// rounded edges were) and is not one. `corner`, those of them on a corner patch. A list of
+/// points `[[x,y,z], …]`, the edges nearest them, as Continuity Analysis picks them. An error for
+/// anything else, or a point near no edge.
+fn continuity_seams(b: &solidcraft_engine::doc::ModelBody, edges: &Value) -> Result<Vec<(usize, &'static str)>, String> {
     use solidcraft_engine::doc::naming::BlendSeamKind;
+    if let Some(points) = edges.as_array() {
+        let picks = points
+            .iter()
+            .map(|p| v3(p).map(|[x, y, z]| solidcraft_engine::kernel::EdgePick::Point(solidcraft_engine::geom::Vec3::new(x, y, z))))
+            .collect::<Option<Vec<_>>>()
+            .ok_or("continuity `edges` points must each be [x,y,z]")?;
+        let picked = solidcraft_engine::kernel::pick_edges(&b.body, &picks).map_err(|e| e.to_string())?;
+        return Ok(picked.into_iter().map(|e| (e, "picked")).collect());
+    }
     let all = solidcraft_engine::doc::naming::blend_seams(b).into_iter().filter(|s| s.kind == BlendSeamKind::Contact || s.corner);
-    match edges {
-        "blend" => Ok(all.collect()),
-        "corner" => Ok(all.filter(|s| s.corner).collect()),
-        _ => Err(format!("continuity `edges` must be \"blend\" or \"corner\", not {edges:?}")),
+    let label =
+        |s: &solidcraft_engine::doc::naming::BlendSeam| (s.edge, if s.kind == BlendSeamKind::Blend { "with_blends" } else { "with_contact_faces" });
+    match edges.as_str().unwrap_or("blend") {
+        "blend" => Ok(all.map(|s| label(&s)).collect()),
+        "corner" => Ok(all.filter(|s| s.corner).map(|s| label(&s)).collect()),
+        other => Err(format!("continuity `edges` must be \"blend\", \"corner\" or a list of points, not {other:?}")),
     }
 }
 
@@ -189,15 +202,16 @@ fn blend_seams(b: &solidcraft_engine::doc::ModelBody, edges: &str) -> Result<Vec
 /// Analysis (`inspect.continuity`) measures them, at its default stations and tolerances, and the
 /// lowest order among them with the seam that has it (the worst: of those, the one whose first
 /// failing metric is furthest past its tolerance), its faces' names and that metric's worst value.
-/// `Ok((report, ok))`, `ok` where every seam meets `want`.
+/// `Ok((report, ok))`, `ok` where every seam meets `want` (`exact`: reaches it and no more).
 fn continuity_order(
     b: &solidcraft_engine::doc::ModelBody,
     want: solidcraft_engine::kernel::Continuity,
-    edges: &str,
+    edges: &Value,
+    exact: bool,
 ) -> Result<(Value, bool), String> {
     use solidcraft_engine::kernel::{self as k, Continuity};
-    let seams = blend_seams(b, edges)?;
-    let selected: Vec<usize> = seams.iter().map(|s| s.edge).collect();
+    let seams = continuity_seams(b, edges)?;
+    let selected: Vec<usize> = seams.iter().map(|s| s.0).collect();
     if selected.is_empty() {
         return Ok((json!(format!("{}: no {edges} seams", b.name)), false));
     }
@@ -221,17 +235,14 @@ fn continuity_order(
     let edge_names = solidcraft_engine::doc::naming::edge_names(b);
     let order_word = |o: Option<Continuity>| o.map_or("none (the faces do not meet)", Continuity::as_str);
     // How many seams reach each order, by what the blend meets there.
-    let kind = |edge: usize| match seams.iter().find(|s| s.edge == edge) {
-        Some(s) if s.kind == solidcraft_engine::doc::naming::BlendSeamKind::Blend => "with_blends",
-        _ => "with_contact_faces",
-    };
+    let kind = |edge: usize| seams.iter().find(|s| s.0 == edge).map_or("picked", |s| s.1);
     let mut orders = json!({});
     for s in &report.seams {
         let n = &mut orders[kind(s.edge)][order_word(s.order)];
         *n = json!(n.as_u64().unwrap_or(0) + 1);
     }
     let mut got = json!({
-        "body": b.name, "edges": edges, "seams": report.seams.len(), "unmeasured": report.unmeasured, "orders": orders,
+        "body": b.name, "edges": if edges.is_array() { "picked" } else { edges.as_str().unwrap_or("blend") }, "seams": report.seams.len(), "unmeasured": report.unmeasured, "orders": orders,
     });
     if let Some(s) = worst {
         got["order"] = json!(order_word(s.order));
@@ -241,7 +252,9 @@ fn continuity_order(
                 json!({"metric": metric.get(i), "value": w.value, "tolerance": limits.get(i), "at": w.at, "edge_fraction": w.edge_fraction});
         }
     }
-    let ok = report.unmeasured == 0 && !report.seams.is_empty() && report.seams.iter().all(|s| s.order.is_some_and(|o| o >= want));
+    let ok = report.unmeasured == 0
+        && !report.seams.is_empty()
+        && report.seams.iter().all(|s| s.order.is_some_and(|o| if exact { o == want } else { o >= want }));
     Ok((got, ok))
 }
 
@@ -402,10 +415,12 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
         }
         // The order every blend seam reaches, as Continuity Analysis measures it.
         if let Some(order) = want["continuity"].get("order").filter(|o| !o.is_null()) {
-            let edges = want["continuity"]["edges"].as_str().unwrap_or("blend");
-            let need = format!(">= {} at every {edges} seam", order.as_str().unwrap_or("?"));
+            let edges = &want["continuity"]["edges"];
+            let exact = want["continuity"]["exact"].as_bool().unwrap_or(false);
+            let which = if edges.is_array() { "picked" } else { edges.as_str().unwrap_or("blend") };
+            let need = format!("{} {} at every {which} seam", if exact { "exactly" } else { ">=" }, order.as_str().unwrap_or("?"));
             match order.as_str().and_then(solidcraft_engine::kernel::Continuity::parse) {
-                Some(o) => match continuity_order(b, o, edges) {
+                Some(o) => match continuity_order(b, o, edges, exact) {
                     Ok((got, ok)) => c.push("continuity_order", got, json!(need), ok),
                     Err(e) => c.push("continuity_order", json!(format!("{}: {e}", b.name)), json!(need), false),
                 },
