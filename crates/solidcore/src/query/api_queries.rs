@@ -13,6 +13,7 @@
 //! | [`get_edges`], [`get_faces`], [`find_edge`], [`find_faces`] | `SmApiGetEdges`, `SmApiGetFaces`, `SmApiFindEdge`, `SmApiFindFaces` |
 //! | [`face_get_boundary_loops`] | `SmApiFaceGetBoundaryLoops` |
 //! | [`brep_is_manifold_solid`], [`brep_bounding_box`] | `SmApiBrepIsManifoldSolid`, `SmApiBrepBoundingBox` |
+//! | [`brep_material_census`] | `SmApiBrepMaterialCensus` |
 //! | [`face_bounding_box`], [`face_internal_point`], [`face_classify_uv`], [`face_closest_point`], [`face_closest_point_in_shape`] | `SmApiFaceBoundingBox`, `SmApiFaceInternalPoint`, `SmApiFaceClassifyUV`, `SmApiFaceClosestPoint` |
 //! | [`edge_bounding_box`], [`edge_closest_point`], [`edge_parameter_range`], [`edge_classify_parameter`], [`edge_tangent`] | `SmApiEdgeBoundingBox`, `SmApiEdgeClosestPoint`, `SmApiEdgeParameterRange`, `SmApiEdgeClassifyParameter`, `SmApiEdgeTangent` |
 //! | [`vertex_get_point`] | `SmApiVertexGetPoint` |
@@ -785,6 +786,32 @@ pub fn brep_is_manifold_solid(brep: &Brep) -> Result<bool> {
     crate::topology::brep::p2::is_manifold_solid(brep)
 }
 
+/// Counts a B-rep's material regions and enclosed void cavities
+/// (`SmApiBrepMaterialCensus`), returned as `(solids, voids)`.
+///
+/// One walk of `SmBrep::GetRegions`: a region whose `IsVoid()` is nonzero (`TRUE` or
+/// `UNSURE`) counts as a void unless it is the infinite region; any other region counts
+/// as a solid. A null B-rep (`SM_ERR_INVALID_INPUT`) has no typed equivalent.
+///
+/// # Errors
+///
+/// A dangling region on the region list.
+pub fn brep_material_census(brep: &Brep) -> Result<(usize, usize)> {
+    let mut solids = 0usize;
+    let mut voids = 0usize;
+    for id in crate::topology::brep::p1::regions(brep, None)? {
+        let region = brep.region(id)?;
+        if region.is_void() != 0 {
+            if !region.is_infinite_region(brep, id) {
+                voids += 1;
+            }
+        } else {
+            solids += 1;
+        }
+    }
+    Ok((solids, voids))
+}
+
 /// Loose or tight B-rep box (`SmApiBrepBoundingBox`); missing queries are `Unported`.
 pub fn brep_bounding_box(k: &Kernel, brep: &Brep, tight: bool) -> Result<Extent3d> {
     if tight {
@@ -986,6 +1013,22 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
+
+    #[test]
+    fn material_census_of_a_box_and_an_empty_brep() {
+        // the repro of issue 1436: one material region, the infinite region is no void
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Vec3::new(1.0, -2.0, 3.0),
+            10.0,
+            20.0,
+            30.0,
+        )
+        .unwrap();
+        assert_eq!(brep_material_census(&b).unwrap(), (1, 0));
+        assert_eq!(brep_material_census(&Brep::new()).unwrap(), (0, 0));
+    }
 
     #[derive(Clone, Copy, PartialEq)]
     struct Object(ObjectKind);
