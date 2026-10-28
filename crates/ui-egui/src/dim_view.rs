@@ -244,9 +244,7 @@ fn entities_value(entities: &[String]) -> serde_json::Value {
     serde_json::Value::Array(
         entities
             .iter()
-            .map(|entity| {
-                serde_json::from_str(entity).ok().filter(serde_json::Value::is_object).unwrap_or_else(|| json!(entity))
-            })
+            .map(|entity| serde_json::from_str(entity).ok().filter(serde_json::Value::is_object).unwrap_or_else(|| json!(entity)))
             .collect(),
     )
 }

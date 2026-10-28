@@ -388,24 +388,29 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                             })
                     })
             });
-            let hit = midpoint.as_deref().and_then(|id| id.strip_prefix("mid:")).map(|id| (id.to_string(), true, true)).or_else(|| {
-                hits.iter().find_map(|h| match h {
-                    Hit::SketchPoint { sketch, id, .. } if Some(*sketch) == app.session.active_sketch => Some((id.clone(), false, true)),
-                    Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
-                        Some((id.clone(), true, *straight))
-                    }
-                    _ => None,
+            let hit = midpoint
+                .as_deref()
+                .and_then(|id| id.strip_prefix("mid:"))
+                .map(|id| (id.to_string(), true, true))
+                .or_else(|| {
+                    hits.iter().find_map(|h| match h {
+                        Hit::SketchPoint { sketch, id, .. } if Some(*sketch) == app.session.active_sketch => Some((id.clone(), false, true)),
+                        Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
+                            Some((id.clone(), true, *straight))
+                        }
+                        _ => None,
+                    })
                 })
-            }).or_else(|| {
-                // With nothing of the sketch under the cursor, a body's edge or vertex may be
-                // measured too (#7912): the command projects it into the sketch. An edge is a
-                // length of its own; a vertex waits for the entity it is measured against.
-                hits.iter().find_map(|h| match h {
-                    Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
-                    Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
-                    _ => None,
-                })
-            });
+                .or_else(|| {
+                    // With nothing of the sketch under the cursor, a body's edge or vertex may be
+                    // measured too (#7912): the command projects it into the sketch. An edge is a
+                    // length of its own; a vertex waits for the entity it is measured against.
+                    hits.iter().find_map(|h| match h {
+                        Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
+                        Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                        _ => None,
+                    })
+                });
             let fresh = |tool: &Tool, id: &String| !tool.picks.contains(id) && tool.picks.len() < 2;
             // Before a new dimension is under way, a click on an existing one edits its value;
             // the tool stays on for the next dimension.
