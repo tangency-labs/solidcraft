@@ -5351,7 +5351,7 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         } else {
             crate::i18n::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
         };
-        let msg = format!("{} — {status}", ss.name);
+        let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
         let c = if ss.report.ok() { v.sketch_accent } else { v.error };
         painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
     }
