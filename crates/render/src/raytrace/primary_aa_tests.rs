@@ -174,6 +174,7 @@ fn fixture(samples: u8, r: u8, left: Option<bool>) -> ImageTask {
         ..Default::default()
     };
     let request = ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,

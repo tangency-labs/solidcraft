@@ -1,0 +1,42 @@
+{
+  "en": {
+    "render.pick_body": "Body",
+    "render.pick_face": "Face",
+    "render.pick_help": "Choose Body, Face or Component. Click empty space to clear; Shift or Ctrl adds or toggles. Highlights appear only in the live product view."
+  },
+  "de": {
+    "render.pick_body": "Körper",
+    "render.pick_face": "Fläche",
+    "render.pick_help": "Körper, Fläche oder Komponente wählen. Ein Klick ins Leere löscht die Auswahl; Umschalt oder Strg fügt hinzu oder schaltet um. Hervorhebungen erscheinen nur in der Live-Produktansicht."
+  },
+  "ja": {
+    "render.pick_body": "ボディ",
+    "render.pick_face": "面",
+    "render.pick_help": "ボディ、面、コンポーネントを選択します。空白をクリックすると選択解除、Shift または Ctrl で追加・切り替えます。ハイライトはライブ製品ビューのみに表示されます。"
+  },
+  "zh": {
+    "render.pick_body": "实体",
+    "render.pick_face": "面",
+    "render.pick_help": "选择实体、面或组件。单击空白处清除选择；Shift 或 Ctrl 可添加或切换选择。高亮仅显示在实时产品视图中。"
+  },
+  "ko": {
+    "render.pick_body": "바디",
+    "render.pick_face": "면",
+    "render.pick_help": "바디, 면 또는 구성요소를 선택합니다. 빈 공간을 클릭하면 선택이 해제되고 Shift 또는 Ctrl로 추가하거나 전환합니다. 강조 표시는 실시간 제품 뷰에만 나타납니다."
+  },
+  "ar": {
+    "render.pick_body": "الجسم",
+    "render.pick_face": "الوجه",
+    "render.pick_help": "اختر جسمًا أو وجهًا أو مكوّنًا. انقر في فراغ للمسح؛ Shift أو Ctrl للإضافة أو التبديل. لا يظهر التمييز إلا في عرض المنتج الحي."
+  },
+  "he": {
+    "render.pick_body": "גוף",
+    "render.pick_face": "פאה",
+    "render.pick_help": "בחר גוף, פאה או רכיב. לחץ על שטח ריק כדי לנקות; Shift או Ctrl להוספה או להחלפה. ההדגשה מופיעה רק בתצוגת המוצר החיה."
+  },
+  "vi": {
+    "render.pick_body": "Thân",
+    "render.pick_face": "Mặt",
+    "render.pick_help": "Chọn Thân, Mặt hoặc Thành phần. Bấm vào chỗ trống để bỏ chọn; Shift hoặc Ctrl để thêm hoặc đảo. Phần tô sáng chỉ hiện ở chế độ xem sản phẩm trực tiếp."
+  }
+}

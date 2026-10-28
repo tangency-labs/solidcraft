@@ -21,6 +21,10 @@ impl Menu {
         )
     }
 
+    pub(crate) fn text<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+        Self::button_with(ui, |ui, _| super::text_button(ui, label, true), add)
+    }
+
     pub(crate) fn item_button<R>(ui: &mut Ui, item: &MenuItem<'_>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
         Self::button_with(ui, |ui, _| item.show(ui), add)
     }

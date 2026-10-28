@@ -137,10 +137,19 @@ pub(crate) fn panel_bounds(app: &SolveApp, mut available: Rect) -> Rect {
     available
 }
 
-/// One source of occlusion for navigation, picking, overlays and fit.
+/// One source of occlusion for navigation, picking and overlays.
 pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
+    occluding_rects(app, false)
+}
+
+/// Selection controls follow the projected model, so they must not influence its fit.
+pub(crate) fn fit_rects(app: &SolveApp) -> Vec<Rect> {
+    occluding_rects(app, true)
+}
+
+fn occluding_rects(app: &SolveApp, fitting: bool) -> Vec<Rect> {
     let mut rects = Vec::new();
-    rects.extend(app.shell.workspace_panels.values().map(|(rect, _)| *rect));
+    rects.extend(app.shell.workspace_panels.iter().filter(|(id, _)| !fitting || **id != "render:selection").map(|(_, (rect, _))| *rect));
     if crate::render_workspace::active(app) || Container::for_layout(app.ui.layout, Surface::Panel).floating() {
         rects.extend(app.shell.cards.iter().copied());
         rects.extend(app.shell.panels.iter().copied());

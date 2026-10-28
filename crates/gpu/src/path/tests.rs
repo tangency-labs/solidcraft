@@ -21,6 +21,7 @@ fn request(size: u32) -> ImageRequest {
     let mut camera = Camera { distance: 4.0, ..Default::default() };
     camera.set_view(StandardView::Top);
     ImageRequest {
+        studio_weights: None,
         integrator: Default::default(),
         raytrace: None,
         textures: None,
@@ -429,6 +430,7 @@ fn glass_transport_evidence() {
     let bounds = meshes.iter().fold(Aabb3::EMPTY, |a, m| a.union(&m.mesh.bounds()));
     let camera = Camera { target: Vec3::new(0.0, 0.0, 1.0), yaw: -0.45, pitch: 0.5, distance: 13.0, fov: 0.65, ..Default::default() };
     let request = ImageRequest {
+        studio_weights: None,
         integrator: Default::default(),
         raytrace: None,
         textures: None,
@@ -527,6 +529,13 @@ fn shader_validates_without_a_device() {
     let naga::TypeInner::Struct { span, .. } = &parameters.inner else { panic!("Params must be a struct") };
     assert_eq!(*span as usize, PARAMETER_BYTES);
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+}
+
+#[test]
+fn render_lights_path_visibility_uniform_keeps_the_shader_contract() {
+    shader_validates_without_a_device();
+    let request = request(4);
+    assert!(request.studio_weights.is_none());
 }
 
 /// #3217: the path tracer opens Vulkan adapters only, and none where the platform has no

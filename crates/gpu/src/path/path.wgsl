@@ -31,6 +31,7 @@ struct Params {
     volume_max: vec4<f32>, // camera-relative bounds maximum, HG mean cosine
     volume_albedo: vec4<f32>, // RGB single-scattering albedo, reserved
     aging: array<AgingLayer,8>,
+    studio_weights: vec4<f32>,
 
 };
 @group(0) @binding(0) var<uniform> u: Params;
@@ -953,7 +954,7 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             let light = lights[i];
             if u.lighting.z > 0.0 && dot(geometric,light.xyz)>0.0 && dot(n,light.xyz)>0.0 {
                 let visibility=shadow_transmittance(o,light.xyz,FAR);
-                radiance += visibility.transmittance * throughput * brdf(t,n,v,light.xyz) * ((1.0-t.base.w)*light.w*dot(n,light.xyz)*u.lighting.z);
+                radiance += visibility.transmittance * throughput * brdf(t,n,v,light.xyz) * ((1.0-t.base.w)*light.w*dot(n,light.xyz)*u.lighting.z*u.studio_weights[i]);
             }
         }
         if t.base.w > 0.0 && random(&rng) < t.base.w {

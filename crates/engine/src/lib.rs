@@ -25,6 +25,7 @@ pub mod params;
 pub mod product_scene;
 pub mod recovery;
 pub mod render_jobs;
+pub mod render_lights;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
@@ -400,6 +401,8 @@ pub struct Session {
     pub clipboard: Vec<solidcraft_doc::Feature>,
     /// Sketch geometry copied with `sketch.copy` (pasted by `sketch.paste`).
     pub sketch_clipboard: Option<cmd::sketch_clipboard::SketchClip>,
+    /// Resolved appearance copied by appearance.copy; transient, outside design/history.
+    pub appearance_clipboard: Option<solidcraft_doc::appearance::Look>,
     /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
     pub section: Option<(Vec3, Vec3)>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
@@ -582,6 +585,7 @@ impl Session {
             contact_meshes: Default::default(),
             clipboard: Vec::new(),
             sketch_clipboard: None,
+            appearance_clipboard: None,
             section: None,
             section_hatch: true,
             colored_components: None,
@@ -1374,6 +1378,7 @@ impl Session {
             contact_meshes: self.contact_meshes.clone(),
             clipboard: self.clipboard.clone(),
             sketch_clipboard: self.sketch_clipboard.clone(),
+            appearance_clipboard: self.appearance_clipboard.clone(),
             section: None,
             section_hatch: true,
             colored_components: None,

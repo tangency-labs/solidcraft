@@ -23,11 +23,27 @@ CommandSpec::new("view.ground_shadow", "Ground shadow", ground_shadow)
     .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
 CommandSpec::new("view.navigation_bar", "Navigation bar", navigation_bar)
     .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.render_frame", "Render Frame Guides", crate::checked!("view.render_frame", render_frame))
+    .icon("camera").noundo().doc_only()
+    .contract(&RENDER_FRAME_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::view_navigation::RenderFrame>)
+    .params("aspect?: 16:9|3:2|1:1|4:5|9:16|custom; thirds?, safe_area?, centre_mark?: bool. At least one field. Validated transient overlay request, echoed headlessly; never saves guides, changes output size, evaluates geometry or opens a dialog"),
+CommandSpec::new("view.render_browser", "Render Browser", render_browser)
+    .icon("list").noundo().doc_only()
+    .params("by_look?: bool; search?: bool; query?: string (up to 1024 bytes) → validated transient Browser controls; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_inspector", "Render Inspector", render_inspector)
+    .icon("inspect").noundo().doc_only()
+    .params("visible: bool → {visible}; per-document Inspector visibility; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_select", "Render selection", crate::checked!("view.render_select", render_select))
+    .icon("select").noundo().doc_only()
+    .contract(&crate::schema::TypedContract::<crate::schema::view_navigation::RenderSelect>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::view_navigation::RenderSelect>)
+    .params("kind: nothing|environment|lighting|light|shot|output|sampling|effects|check|wear; id?: bounded nonempty string for light/shot → validated transient Browser focus; never edits the design or opens a dialog"),
 CommandSpec::new("view.render_stage", "Render Stage", render_stage)
     .icon("render_scene").noundo().doc_only()
     .params("stage: look|light|frame|output → {stage}; per-document UI state, never edits or evaluates the design; headless validation only"),
 CommandSpec::new("view.shots_strip", "Shots Strip", shots_strip)
-    .at("RENDER CAMERA", "SHOTS").icon("camera").noundo().doc_only()
+    .icon("camera").noundo().doc_only()
     .params("visible: bool → {visible}; Render Shots strip UI preference. Headless echo only, no document edits or undo"),
 CommandSpec::new("view.layout", "Workspace layout", layout)
     .icon("settings").noundo().doc_only().params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
@@ -210,6 +226,57 @@ fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
 }
 
+fn render_select(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::view_navigation::RenderSelect =
+        serde_json::from_value(p.clone()).map_err(|e| bad("view.render_select", e.to_string()))?;
+    let identified = matches!(request.kind.as_str(), "light" | "shot");
+    if !matches!(
+        request.kind.as_str(),
+        "nothing" | "environment" | "lighting" | "light" | "shot" | "output" | "sampling" | "effects" | "check" | "wear"
+    ) || identified != request.id.is_some()
+        || request.id.as_ref().is_some_and(|id| id.trim().is_empty() || id.len() > 1024)
+    {
+        return Err(bad("view.render_select", "expected a Browser kind and an id only for light or shot"));
+    }
+    let result = serde_json::to_value(request).map_err(|e| bad("view.render_select", e.to_string()))?;
+    Ok(result)
+}
+
+fn render_browser(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        by_look: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        search: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    }
+    if !p.is_object() {
+        return Err(bad("view.render_browser", "expected an object with Browser controls"));
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_browser", e.to_string()))?;
+    if request.by_look.is_none() && request.search.is_none() && request.query.is_none() {
+        return Err(bad("view.render_browser", "expected at least one Browser control"));
+    }
+    if request.query.as_ref().is_some_and(|q| q.len() > 1024) {
+        return Err(bad("query", "expected at most 1024 bytes"));
+    }
+    serde_json::to_value(request).map_err(|e| bad("view.render_browser", e.to_string()))
+}
+
+static RENDER_FRAME_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::RenderFrame> = crate::schema::TypedContract::new();
+
+fn render_frame(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.render_frame";
+    let request: crate::schema::view_navigation::RenderFrame = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if request.aspect.is_none() && request.thirds.is_none() && request.safe_area.is_none() && request.centre_mark.is_none() {
+        return Err(bad(cmd, "expected at least one frame control"));
+    }
+    serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn render_stage(_s: &mut Session, p: &Value) -> Result<Value> {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -221,6 +288,16 @@ fn render_stage(_s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("stage", "expected look, light, frame or output"));
     }
     Ok(json!({"stage":request.stage}))
+}
+
+fn render_inspector(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        visible: bool,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_inspector", e.to_string()))?;
+    Ok(json!({"visible":request.visible}))
 }
 
 fn shots_strip(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -898,6 +975,43 @@ fn render_workspace_shots_strip_is_a_validated_headless_preference_request() {
 
 #[cfg(test)]
 #[test]
+fn render_frame_validates_hostile_requests_without_saving_guides_or_evaluating() {
+    let mut s = Session::default();
+    let document = s.doc.clone();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        s.param_check = mode;
+        for aspect in ["16:9", "3:2", "1:1", "4:5", "9:16", "custom"] {
+            let request = json!({"aspect":aspect,"thirds":true,"safe_area":false,"centre_mark":true});
+            assert_eq!(s.execute("view.render_frame", &request).unwrap(), request);
+        }
+        for request in [json!({"thirds":false}), json!({"safe_area":true}), json!({"centre_mark":false})] {
+            assert_eq!(s.execute("view.render_frame", &request).unwrap(), request);
+        }
+        for request in [
+            Value::Null,
+            json!({}),
+            json!([]),
+            json!({"thirds":null}),
+            json!({"thirds":1e300}),
+            json!({"safe_area":"yes"}),
+            json!({"centre_mark":[]}),
+            json!({"aspect":"4:3"}),
+            json!({"aspect":"x".repeat(1025)}),
+            json!({"aspect":null}),
+            json!({"thirds":true,"extra":1}),
+        ] {
+            assert!(s.execute("view.render_frame", &request).is_err(), "{request}");
+        }
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    let command = crate::find_command("view.render_frame").unwrap();
+    assert!(command.contract.is_some() && command.output.is_some());
+}
+
+#[cfg(test)]
+#[test]
 fn render_workspace_stage_validates_without_document_changes_or_evaluation() {
     let mut session = Session::default();
     let document = session.doc.clone();
@@ -918,4 +1032,137 @@ fn render_workspace_stage_validates_without_document_changes_or_evaluation() {
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
     assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[cfg(test)]
+#[test]
+fn render_browser_focus_validates_without_document_changes_or_evaluation() {
+    let mut session = Session::default();
+    let doc = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for request in [
+        json!({"kind":"nothing"}),
+        json!({"kind":"environment"}),
+        json!({"kind":"lighting"}),
+        json!({"kind":"wear"}),
+        json!({"kind":"light","id":"sun:0"}),
+        json!({"kind":"shot","id":"Hero"}),
+        json!({"kind":"output"}),
+        json!({"kind":"sampling"}),
+        json!({"kind":"effects"}),
+        json!({"kind":"check"}),
+    ] {
+        assert_eq!(session.execute("view.render_select", &request).unwrap(), request);
+    }
+    for request in [
+        Value::Null,
+        json!([]),
+        json!({}),
+        json!({"kind":"wear","id":"extra"}),
+        json!({"kind":"wear","extra":true}),
+        json!({"kind":"wear","id":1e300}),
+        json!({"kind":"object"}),
+        json!({"kind":"shot"}),
+        json!({"kind":"light","id":1}),
+        json!({"kind":"light","id":" "}),
+        json!({"kind":"shot","id":"x".repeat(1025)}),
+        json!({"kind":"output","id":"extra"}),
+        json!({"kind":"lighting","id":"extra"}),
+        json!({"kind":"sampling","id":"extra"}),
+        json!({"kind":"effects","id":"extra"}),
+        json!({"kind":"check","id":"extra"}),
+        json!({"kind":"environment","extra":true}),
+    ] {
+        assert!(session.execute("view.render_select", &request).is_err(), "{request}");
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    let description = session.execute("engine.describe", &json!({"command":"view.render_select"})).unwrap();
+    for key in ["input", "output"] {
+        assert!(description[key].is_object());
+        assert!(description[key].to_string().contains("\"lighting\""));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn render_select_wear_schema_and_strict_contract_agree() {
+    let mut session = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    let spec = crate::find_command("view.render_select").unwrap();
+    let contract = spec.contract.unwrap();
+    assert_eq!(contract.allowed_keys().iter().map(String::as_str).collect::<Vec<_>>(), ["id", "kind"]);
+    let input = contract.input_schema().to_value();
+    let output = spec.output.unwrap()().to_value();
+    for schema in [input, output] {
+        assert!(schema.to_string().contains("\"wear\""), "the published kind enum includes Wear");
+        assert_eq!(schema["additionalProperties"], false);
+    }
+    let request = json!({"kind":"wear"});
+    assert!(contract.check(&request).is_empty());
+    assert_eq!(session.execute("view.render_select", &request).unwrap(), request);
+    for request in [json!({"kind":"wear","id":"extra"}), json!({"kind":"wear","extra":true}), json!({"kind":"wear","id":1e300})] {
+        // The structural schema checks types and unknown fields. The command
+        // additionally requires an id only for identified light/shot selections.
+        if request.get("extra").is_some() || request.get("id").is_some_and(|id| !id.is_string()) {
+            assert!(!contract.check(&request).is_empty());
+        }
+        assert!(session.execute("view.render_select", &request).is_err());
+    }
+    assert!(session.undo.is_empty() && session.redo.is_empty());
+    assert_eq!(session.evaluations, 0);
+}
+
+#[cfg(test)]
+#[test]
+fn render_browser_controls_validate_without_document_changes_or_evaluation() {
+    let mut session = Session::default();
+    let document = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for request in [json!({"by_look":true}), json!({"search":true,"query":"Copper"}), json!({"query":""})] {
+        assert_eq!(session.execute("view.render_browser", &request).unwrap(), request);
+    }
+    for request in [
+        Value::Null,
+        json!([]),
+        json!({}),
+        json!({"by_look":null}),
+        json!({"by_look":1}),
+        json!({"search":null,"extra":true}),
+        json!({"query":"x".repeat(1025)}),
+    ] {
+        assert!(session.execute("view.render_browser", &request).is_err());
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[test]
+fn render_inspector_visibility_is_validated_without_mutation() {
+    let mut session = Session::default();
+    let before = session.doc.to_json();
+    let revision = session.revision;
+    for visible in [false, true] {
+        assert_eq!(session.execute("view.render_inspector", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+    }
+    for value in [json!({}), json!({"visible":null}), json!({"visible":"false"}), json!({"visible":true,"extra":1})] {
+        assert!(session.execute("view.render_inspector", &value).is_err());
+    }
+    assert_eq!(session.doc.to_json(), before);
+    assert_eq!(session.revision, revision);
+    assert!(session.undo.is_empty());
+}
+
+#[cfg(test)]
+#[test]
+fn render_editor_focus_preserves_cad_selection_revision_and_history() {
+    let mut session = Session { selection: vec![crate::Sel::Body { name: "Picked body".into() }], ..Default::default() };
+    let picks = session.selection.clone();
+    let document = session.doc.clone();
+    let before = (session.revision, session.undo.len(), session.redo.len());
+    for kind in ["nothing", "environment", "lighting", "wear", "output", "sampling", "effects", "check"] {
+        session.execute("view.render_select", &json!({"kind":kind})).unwrap();
+        assert_eq!(session.selection, picks);
+        assert_eq!((session.revision, session.undo.len(), session.redo.len()), before);
+        assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    }
 }

@@ -2,9 +2,9 @@
 
 Tracking issue: #6281. Related: #5493 (render integration), #6201 (Render usability audit).
 
-The Render workspace on `main` (basic delivery #6050 and the full ribbon, inspector and
-libraries from #5494) works but is one ribbon tab over an 11-page inspector. This plan
-restructures it, in small PRs, around the order a render is prepared. It reuses the existing
+The Render workspace now uses the selection-driven Inspector described below.
+The former Render studio page strip, setup header and common job footer are removed.
+The four stages organise preparation while preserving the current editor selection. It reuses the existing
 commands and controls; it does not add a second renderer or change the document format.
 
 ## Design rationale
@@ -94,7 +94,7 @@ Each step is its own PR. Steps that edit the shared Render files are taken one a
 10. Appearance editor with the look chain, scope and mixed values; Advanced section. Modify.
 11. Shots strip with thumbnails, Update and Revert. Modify: drop the ribbon item.
 12. Output editor and result viewer: size presets, Check, Copy, progress pill. Modify.
-13. Selection model and Inspector dispatch: one selection, one editor per kind, scene overview. New.
+13. Selection model and Inspector dispatch: one selection, one editor per kind, scene overview. Integrated; the old studio panel is removed.
 14. Movable Inspector (dock side). New.
 15. Environment editor, ground, Studios and Environments panel, rotation ring. New.
 16. Lights: named lights, Light editor, solo and mute, handles in the view, Place by highlight. New.

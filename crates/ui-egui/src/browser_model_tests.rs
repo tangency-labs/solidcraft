@@ -196,6 +196,31 @@ fn construction_rows_include_points_and_axes() {
     assert!(super::entries(&h.app, 0, "construction").is_empty());
 }
 
+#[test]
+fn render_browser_swatch_resolves_face_body_component_then_physical_material() {
+    let (mut h, component, _) = fixture();
+    crate::render_workspace::enter(&mut h.app, true).unwrap();
+    let swatch = |h: &crate::scenario::Harness| crate::render_workspace::scene::decoration(&h.app, &["Body1".into()]);
+    h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Brass"})).unwrap();
+    assert_eq!(swatch(&h).name, "Brass");
+    h.app.run("appearance.assign", json!({"components":[component.to_string()],"appearance":"ABS - Red"})).unwrap();
+    assert_eq!(swatch(&h).name, "ABS - Red");
+    h.app.run("appearance.assign", json!({"bodies":["Body1"],"appearance":"ABS - Blue"})).unwrap();
+    assert_eq!(swatch(&h).name, "ABS - Blue");
+    let point = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 5.0);
+    h.app.run("appearance.assign", json!({"body":"Body1","faces":[point],"appearance":"ABS - Red"})).unwrap();
+    let state = h.app.session.world_state();
+    let body = state.body("Body1").unwrap();
+    let face = solidcraft_engine::doc::appearance::face_index_at(body, point).unwrap();
+    h.app.run("select.set", json!({"items":[Sel::Face{body:"Body1".into(),index:face,point}]})).unwrap();
+    let resolved = swatch(&h);
+    assert_eq!(resolved.name, "ABS - Red");
+    assert_eq!(resolved.swatch, Some(egui::Color32::from_rgb(196, 40, 40)));
+    assert_eq!(resolved.count, "1 face");
+    h.app.run("select.clear", json!({})).unwrap();
+    assert_eq!(swatch(&h).name, "ABS - Blue");
+}
+
 fn body_names(app: &crate::SolveApp) -> Vec<String> {
     app.dialog
         .as_ref()

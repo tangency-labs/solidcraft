@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Grid</title>
+  <path d="M13 9L23 9Q27 9 27 13L27 23Q27 27 23 27L13 27Q9 27 9 23L9 13Q9 9 13 9Z" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41 9L51 9Q55 9 55 13L55 23Q55 27 51 27L41 27Q37 27 37 23L37 13Q37 9 41 9Z" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M13 37L23 37Q27 37 27 41L27 51Q27 55 23 55L13 55Q9 55 9 51L9 41Q9 37 13 37Z" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M41 37L51 37Q55 37 55 41L55 51Q55 55 51 55L41 55Q37 55 37 51L37 41Q37 37 41 37Z" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,22 @@
+{
+  "ar": {
+    "prefs.search": "البحث في الإعدادات",
+    "prefs.search_empty": "لا توجد إعدادات مطابقة"
+  },
+  "de": {
+    "prefs.search": "Einstellungen suchen",
+    "prefs.search_empty": "Keine passenden Einstellungen"
+  },
+  "he": {
+    "prefs.search": "חיפוש הגדרות",
+    "prefs.search_empty": "אין הגדרות תואמות"
+  },
+  "ko": {
+    "prefs.search": "설정 검색",
+    "prefs.search_empty": "일치하는 설정이 없습니다"
+  },
+  "vi": {
+    "prefs.search": "Tìm kiếm cài đặt",
+    "prefs.search_empty": "Không có cài đặt nào khớp"
+  }
+}

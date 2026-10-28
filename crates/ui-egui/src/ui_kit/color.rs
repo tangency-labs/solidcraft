@@ -9,6 +9,38 @@ fn publish(key: &str, response: &Response) {
     scenario::publish_handle(key, response.rect.center());
 }
 
+/// Linear RGB swatch and precise channel fields. The preview is clipped to display gamut;
+/// HDR values and sub-byte precision stay intact until a control is edited.
+/// Tokens: control_height, space_4, control_fill/border and the shared colour popover.
+pub(crate) fn linear_color_field(ui: &mut Ui, rgb: &mut [f64; 3], maximum: f64) -> Response {
+    let maximum = if maximum.is_finite() { maximum.clamp(1.0, 1e6) } else { 1e6 };
+    let mut changed = false;
+    let output = ui.horizontal(|ui| {
+        let preview = rgb.map(|v| if v.is_finite() { v.clamp(0.0, 1.0) as f32 } else { 0.0 });
+        let color = Color32::from(egui::Rgba::from_rgb(preview[0], preview[1], preview[2]));
+        let mut bytes = [color.r(), color.g(), color.b()];
+        if color_field(ui, &mut bytes).changed() {
+            let linear = egui::Rgba::from(Color32::from_rgb(bytes[0], bytes[1], bytes[2])).to_array();
+            for (channel, value) in rgb.iter_mut().zip(linear) {
+                *channel = f64::from(value);
+            }
+            changed = true;
+        }
+        let width = ((ui.available_width() - Tokens::get().space_4 * 2.0) / 3.0).max(Tokens::get().space_16);
+        for (index, value) in rgb.iter_mut().enumerate() {
+            ui.push_id(index, |ui| {
+                ui.set_width(width);
+                changed |= super::number_field(ui, value, 0.0..=maximum, 0.01, "").changed();
+            });
+        }
+    });
+    let mut response = output.response;
+    if changed {
+        response.mark_changed();
+    }
+    response
+}
+
 /// Shared colour button and outside-click-dismissed popover. Retains the enclosing row handle.
 pub(crate) fn color_field(ui: &mut Ui, rgb: &mut [u8; 3]) -> Response {
     let t = Tokens::get();
@@ -44,6 +76,39 @@ pub(crate) fn color_field(ui: &mut Ui, rgb: &mut [u8; 3]) -> Response {
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     if ui.style().explanation_tooltips { response.on_hover_text(i18n::tr("color.edit")) } else { response }
+}
+
+/// A colour swatch and editable hexadecimal field; incomplete text remains local until valid.
+pub(crate) fn color_hex_field(ui: &mut Ui, rgb: &mut [u8; 3], mixed: Option<&str>) -> Response {
+    let id = ui.id().with(("color_hex", label(ui)));
+    let current = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
+    let is_mixed = mixed.is_some();
+    let initial = || if is_mixed { String::new() } else { current.clone() };
+    let (observed, was_mixed, mut hex) = ui.ctx().data(|d| d.get_temp::<([u8; 3], bool, String)>(id)).unwrap_or_else(|| (*rgb, is_mixed, initial()));
+    if observed != *rgb || was_mixed != is_mixed {
+        hex = initial();
+    }
+    let mut response = color_field(ui, rgb);
+    if response.changed() {
+        hex = format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]);
+    }
+    let mut field = super::bounded_cell_editor(ui, id.with("field"), &mut hex, mixed.unwrap_or("#RRGGBB"), false, 32);
+    scenario::publish_target(&format!("dialog:color_hex:{}", label(ui)), field.rect);
+    let mut valid = false;
+    if field.changed() {
+        let text = hex.trim();
+        let digits = text.strip_prefix('#').unwrap_or(text);
+        if digits.len() == 6
+            && let Ok(value) = u32::from_str_radix(digits, 16)
+        {
+            *rgb = [(value >> 16) as u8, (value >> 8) as u8, value as u8];
+            valid = true;
+            response.mark_changed();
+        }
+    }
+    field.flags.set(egui::response::Flags::CHANGED, valid);
+    ui.ctx().data_mut(|d| d.insert_temp(id, (*rgb, is_mixed, hex)));
+    response.union(field)
 }
 
 /// Popover body, also rendered independently by the gallery. Format is global, alpha is opaque.

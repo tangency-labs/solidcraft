@@ -998,6 +998,14 @@ fn completed_png_content_identity_matches_status_and_exact_retained_export() {
     finish(&host);
     let newer = s.execute("render.status", &json!({"job":replacement})).unwrap();
     assert_ne!(newer["frame"]["png_sha256"], metadata["png_sha256"]);
+    let still_retained = dir.join("still-retained.png");
+    s.execute("render.export", &json!({"job":id,"path":still_retained})).unwrap();
+    assert_eq!(std::fs::read(still_retained).unwrap(), bytes);
+    for _ in 0..7 {
+        let next = start(&mut s);
+        finish(&host);
+        s.execute("render.status", &json!({"job":next})).unwrap();
+    }
     let evicted = dir.join("evicted.png");
     assert!(s.execute("render.export", &json!({"job":id,"path":evicted})).is_err());
     assert!(!evicted.exists());
@@ -1196,4 +1204,28 @@ fn a_setup_saved_with_exposure_renders_and_names_the_controls_it_leaves_out() {
     finish(&host);
     let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
     assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
+}
+
+#[test]
+fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads() {
+    let (mut s, host) = session();
+    let job = start(&mut s);
+    assert!(s.execute("render.result.copy", &json!({"job":job})).is_err());
+    finish(&host);
+    let document = s.doc.clone();
+    let before = (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes());
+    let copied = s.execute("render.result.copy", &json!({"job":job})).unwrap();
+    assert_eq!(copied["frame"]["job"], json!(job));
+    assert_eq!(copied["frame"]["width"], 16);
+    assert!(copied.get("png").is_none());
+    for params in [json!({}), json!(null)] {
+        assert_eq!(s.execute("render.result.copy", &params).unwrap(), copied, "an omitted job uses the selected result");
+    }
+    for params in
+        [json!({"job":1e300}), json!({"job":"selected"}), json!({"job":job,"extra":true}), json!({"job":{"session":0,"serial":0,"generation":0}})]
+    {
+        assert!(s.execute("render.result.copy", &params).is_err());
+    }
+    assert!(Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes()));
 }

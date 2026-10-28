@@ -7,6 +7,7 @@ fn request() -> ImageRequest {
     let mut camera = Camera { distance: 50.0, ..Default::default() };
     camera.set_view(StandardView::Front);
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: Default::default(),
@@ -17,6 +18,20 @@ fn request() -> ImageRequest {
         background: [20, 40, 60],
         transparent_background: true,
     }
+}
+
+#[test]
+fn render_lights_raster_mute_is_captured_in_request_and_darkens_only_the_product() {
+    let part = scene(vec![square("part", [200, 180, 160], 1.0, Vec3::ZERO)]);
+    let mut input = request();
+    input.transparent_background = false;
+    let normal = finish(ImageTask::new(part.clone(), input.clone(), super::CancelToken::default()).unwrap());
+    input.studio_weights = Some([0.0; 3]);
+    let dark = finish(ImageTask::new(part, input, super::CancelToken::default()).unwrap());
+    assert_ne!(normal, dark);
+    let image = image::load_from_memory(&dark).unwrap().to_rgba8();
+    assert_eq!(image.get_pixel(32, 32).0, [0, 0, 0, 255]);
+    assert_eq!(image.get_pixel(0, 0).0, [20, 40, 60, 255]);
 }
 
 fn square(name: &str, colour: [u8; 3], opacity: f64, offset: Vec3) -> ProductMesh {

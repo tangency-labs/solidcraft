@@ -1,13 +1,16 @@
 //! Interactive adapters for existing registered commands, shared by ribbon,
 //! menus, search and pinned job controls. Direct engine JSON APIs are unchanged.
-use super::{cpu, inspector, library, setups, studio};
+use super::{RenderSelection, cpu, inspector, library, setups, studio};
 use crate::SolveApp;
 use serde_json::json;
 use solidcraft_engine::render::job::Phase;
 use solidcraft_engine::{CommandInfo, CommandSpec};
 
 fn is_job_action(id: &str) -> bool {
-    matches!(id, "render.preflight" | "render.start" | "render.cancel" | "render.export" | "render.result.regrade")
+    matches!(
+        id,
+        "render.preflight" | "render.start" | "render.batch" | "render.cancel" | "render.export" | "render.result.regrade" | "render.result.copy"
+    )
 }
 fn handled(id: &str) -> bool {
     is_job_action(id)
@@ -15,6 +18,7 @@ fn handled(id: &str) -> bool {
             id,
             "render.aging.describe"
                 | "render.effects.describe"
+                | "render.environment.set"
                 | "render.preset.resolve"
                 | "render.preset.apply"
                 | "render.settings.get"
@@ -44,10 +48,17 @@ fn handled(id: &str) -> bool {
                 | "render.quality.prepare"
                 | "render.status"
                 | "render.backends"
+                | "render.result.view"
+                | "render.result.close"
+                | "render.compare"
         )
 }
 
 pub(super) fn busy(app: &SolveApp) -> bool {
+    let queue = app.session.render_queue_state();
+    if queue.running != 0 || queue.waiting != 0 {
+        return true;
+    }
     app.render_workspace
         .view
         .job
@@ -63,6 +74,19 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
         return Err(app.tr("render.ribbon_finish_dialog").into());
     }
     match id {
+        "render.batch" => {
+            if app.session.doc.render.setups.is_empty() {
+                return Err(app.tr("render.batch_empty").into());
+            }
+            if app.session.doc.render.setups.len() > 32 {
+                return Err(app.tr("render.batch_limit").into());
+            }
+            if busy(app) {
+                return Err(app.tr("render.ribbon_job_active").into());
+            }
+            super::image_params(app).map(|_| ())
+        }
+        "render.compare" if app.render_workspace.view.retained.is_empty() => Err(app.tr("render.ribbon_no_result").into()),
         "render.preflight" | "render.start" => {
             if id == "render.start" && busy(app) {
                 return Err(app.tr("render.ribbon_job_active").into());
@@ -79,7 +103,8 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
             presentation(app).validate().map_err(|error| error.to_string())
         }
         "render.cancel" if !busy(app) => Err(app.tr("render.ribbon_no_active_job").into()),
-        "render.export" => {
+        "render.result.close" if !super::result_active(app) => Err(app.tr("render.ribbon_no_result").into()),
+        "render.export" | "render.result.copy" => {
             let completed = app
                 .render_workspace
                 .view
@@ -89,7 +114,7 @@ pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
             if completed.is_none() {
                 return Err(app.tr("render.ribbon_no_result").into());
             }
-            if app.render_workspace.view.studio.export_exr && !studio::linear_export_available(app) {
+            if id == "render.export" && app.render_workspace.view.studio.export_exr && !studio::linear_export_available(app) {
                 return Err(app.tr("render.linear_unavailable").into());
             }
             Ok(())
@@ -120,9 +145,19 @@ pub(super) fn command_info(app: &SolveApp, command: &CommandSpec) -> CommandInfo
 pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
     action_ready(app, id)?;
     match id {
+        "render.batch" => {
+            let request = super::image_params(app)?;
+            app.run(id, json!({"request":request}))?;
+        }
         "render.preflight" => {
             let request = super::image_params(app)?;
-            let reply = app.run(id, request.clone())?;
+            let reply = match app.run(id, request.clone()) {
+                Ok(reply) => reply,
+                Err(error) => {
+                    inspector::record_check(app, &request, &json!({"error":error}));
+                    return Err(error);
+                }
+            };
             cpu::record_checked(app, &request, &reply);
             inspector::record_check(app, &request, &reply);
             app.set_status(app.tr("render.image_supported").to_string(), false);
@@ -132,6 +167,11 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
             let reply = app.run(id, request)?;
             let job = serde_json::from_value(reply["job"].clone()).map_err(|e| format!("invalid render job identity: {e}"))?;
             app.render_workspace.view.job = Some(job);
+            app.render_workspace.view.job_shot = Some(app.render_workspace.view.name.clone());
+        }
+        "render.result.copy" => {
+            let job = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
+            app.run(id, json!({"job":job}))?;
         }
         "render.result.regrade" => {
             let source = app.render_workspace.view.completed.ok_or_else(|| app.tr("render.ribbon_no_result").to_string())?;
@@ -140,7 +180,12 @@ pub(super) fn perform_job(app: &mut SolveApp, id: &str) -> Result<(), String> {
             app.render_workspace.view.job = Some(job);
         }
         "render.cancel" => {
-            let job = app.render_workspace.view.job.ok_or_else(|| app.tr("render.ribbon_no_active_job").to_string())?;
+            let job = app
+                .session
+                .render_queue_state()
+                .job
+                .or(app.render_workspace.view.job)
+                .ok_or_else(|| app.tr("render.ribbon_no_active_job").to_string())?;
             app.run(id, json!({"job":job}))?;
         }
         "render.export" => {
@@ -169,8 +214,8 @@ pub(super) fn presentation(app: &SolveApp) -> solidcraft_engine::render::job::pr
     }
 }
 
-fn focus(app: &mut SolveApp, page: inspector::Page, category: Option<&str>) {
-    app.render_workspace.view.inspector.page = page;
+fn focus(app: &mut SolveApp, selection: super::RenderSelection, category: Option<&str>) {
+    super::select(app, selection);
     if let Some(category) = category {
         library::open_category(app, category);
     }
@@ -188,7 +233,7 @@ pub(super) fn start(app: &mut SolveApp, id: &str) -> bool {
             return true;
         }
         // Entering from Design never starts an expensive render with hidden defaults.
-        focus(app, inspector::Page::Output, None);
+        focus(app, RenderSelection::Output, None);
         if is_job_action(id) {
             return true;
         }
@@ -202,35 +247,48 @@ pub(super) fn start(app: &mut SolveApp, id: &str) -> bool {
 
 fn navigate(app: &mut SolveApp, id: &str) -> Result<(), String> {
     action_ready(app, id)?;
-    use inspector::Page;
     match id {
-        "render.aging.describe" => focus(app, Page::Aging, None),
-        "render.effects.describe" => focus(app, Page::Effects, None),
-        "render.preset.resolve" | "render.preset.apply" => focus(app, Page::Scene, Some("native_scenes")),
+        "render.compare" => super::compare::start_default(app)?,
+        "render.result.close" => {
+            app.run(id, json!({}))?;
+        }
+        "render.result.view" => {
+            app.run(id, json!({"view":"image"}))?;
+        }
+        "render.aging.describe" => {
+            focus(app, RenderSelection::Wear, None);
+            inspector::reveal(app, "render:appearance:advanced");
+        }
+        "render.effects.describe" => focus(app, RenderSelection::Effects, None),
+        "render.preset.resolve" | "render.preset.apply" => focus(app, RenderSelection::Nothing, Some("native_scenes")),
         "render.settings.get" | "render.shot.duplicate" | "render.shot.rename" | "render.shot.remove" => {
-            focus(app, Page::Scene, None);
-            inspector::reveal(app, "render_shot_manager");
+            focus(app, super::current_shot_selection(app), None);
         }
-        "render.settings.set" => setups::save(app)?,
-        "render.library.appearance.apply" | "render.optics.bind" | "render.optics.unbind" => focus(app, Page::Appearance, Some("surfaces")),
+        "render.settings.set" => app.render_workspace.view.save_shot_name = Some(String::new()),
+        "render.library.appearance.apply" | "render.optics.bind" | "render.optics.unbind" => {
+            focus(app, super::object_selection(app), Some("surfaces"))
+        }
         "render.library.surface.bind" | "render.library.surface.prepare" | "render.library.surface.unbind" => {
-            focus(app, Page::Appearance, Some("surfaces"));
+            focus(app, super::object_selection(app), Some("surfaces"));
         }
-        "render.library.physical.prepare" => focus(app, Page::Appearance, Some("physical_profiles")),
-        "render.library.studio.prepare" => focus(app, Page::Lighting, Some("rigs")),
-        "render.library.studio.apply" => focus(app, Page::Lighting, None),
-        "render.library.environment.apply" => focus(app, Page::Environment, Some("hdr")),
-        "render.hdr.inspect" | "render.settings.capture_hdr" => focus(app, Page::Environment, None),
-        "render.stage.backdrop" => focus(app, Page::Background, None),
+        "render.library.physical.prepare" => focus(app, super::object_selection(app), Some("physical_profiles")),
+        "render.library.studio.prepare" => focus(app, RenderSelection::Lighting, Some("rigs")),
+        "render.library.studio.apply" => focus(app, RenderSelection::Lighting, None),
+        "render.library.environment.apply" => focus(app, RenderSelection::Environment, Some("hdr")),
+        "render.environment.set" | "render.hdr.inspect" | "render.settings.capture_hdr" => focus(app, RenderSelection::Environment, None),
+        "render.stage.backdrop" => focus(app, RenderSelection::Environment, None),
         "render.stage.ground" | "render.stage.clear" => {
-            focus(app, Page::Background, None);
+            focus(app, RenderSelection::Environment, None);
             inspector::reveal(app, "render_ground_details");
         }
         "render.settings.apply" => inspector::restore_camera(app)?,
         "render.camera.fit" => inspector::fit_subject(app)?,
-        "render.camera.get" | "render.camera.set" => focus(app, Page::Camera, None),
-        "render.quality.prepare" => focus(app, Page::Output, Some("quality")),
-        "render.status" | "render.backends" => focus(app, Page::Diagnostics, None),
+        "render.camera.get" | "render.camera.set" => focus(app, super::current_shot_selection(app), None),
+        "render.quality.prepare" => {
+            focus(app, RenderSelection::Sampling, Some("quality"));
+            library::review_selected_quality(app)?;
+        }
+        "render.status" | "render.backends" => focus(app, RenderSelection::Check, None),
         _ => return Err("unbound interactive Render command".into()),
     }
     Ok(())

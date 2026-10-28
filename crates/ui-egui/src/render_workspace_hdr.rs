@@ -122,6 +122,8 @@ pub(super) fn pick(app: &mut SolveApp, target: Target) {
         }
         if let Err(error) = inspect(app, target, path) {
             app.set_status(error, true);
+        } else if app.render_workspace.view.selection == super::RenderSelection::Environment {
+            super::environment::persist(app);
         }
     });
 }
@@ -151,7 +153,7 @@ pub(super) fn request(app: &SolveApp, target: Target) -> Result<Value, String> {
     }
 }
 
-fn metadata(app: &SolveApp, target: Target) -> Option<Metadata> {
+pub(super) fn metadata(app: &SolveApp, target: Target) -> Option<Metadata> {
     match input(app, target) {
         Input::FileCaptured { metadata, .. } => Some(*metadata),
         Input::EmbeddedResource { resource } => {
@@ -165,29 +167,50 @@ fn metadata(app: &SolveApp, target: Target) -> Option<Metadata> {
 
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui, target: Target) {
     if input(app, target).embedded() {
-        ui.label(app.tr("render.hdr_embedded"));
-        ui.small(app.tr("render.hdr_embedded_help"));
+        ui_kit::text(ui, app.tr("render.hdr_embedded_help"), ui_kit::Text::Note("render.hdr_embedded_help"));
+        if ui_kit::button(ui, app.tr("render.environment.choose"), ui_kit::Button::Normal).clicked() {
+            pick(app, target);
+        }
     } else {
         let mut path = input(app, target).path().to_string();
         let hint = app.tr("render.studio_hdr_required").to_string();
-        let field = ui_kit::bounded_cell_editor(ui, ui.id().with("hdr_source_path"), &mut path, &hint, false, 4096);
+        let field = ui_kit::row(ui, app.tr("render.environment.file"), |ui| {
+            ui_kit::bounded_cell_editor(ui, ui.id().with("hdr_source_path"), &mut path, &hint, false, 4096)
+        });
         if field.changed() {
             set_input(app, target, Input::FilePending { path });
         }
-        let captured = matches!(input(app, target), Input::FileCaptured { .. });
-        ui.small(app.tr(if captured { "render.hdr_file_captured" } else { "render.hdr_inspect_required" }));
-        if ui_kit::button(ui, app.tr("render.hdr_inspect"), ui_kit::Button::Enabled(valid_path(input(app, target).path()))).clicked() {
-            let path = input(app, target).path().to_string();
-            if let Err(error) = inspect(app, target, path) {
-                app.set_status(error, true);
+        ui.horizontal(|ui| {
+            if ui_kit::button(ui, app.tr("render.environment.choose"), ui_kit::Button::Normal).clicked() {
+                pick(app, target);
             }
+            if ui
+                .add_enabled_ui(valid_path(input(app, target).path()), |ui| {
+                    ui_kit::button(ui, app.tr("render.environment.check"), ui_kit::Button::Primary)
+                })
+                .inner
+                .clicked()
+            {
+                let path = input(app, target).path().to_string();
+                if let Err(error) = inspect(app, target, path) {
+                    app.set_status(error, true);
+                }
+            }
+        });
+        if matches!(input(app, target), Input::FileCaptured { .. }) {
+            ui_kit::banner(ui, ui_kit::AssistantTone::Working, |ui| {
+                ui_kit::text(ui, app.tr("render.environment.checked"), ui_kit::Text::Note("render.environment.checked"));
+            });
+        } else {
+            ui_kit::text(ui, app.tr("render.hdr_inspect_required"), ui_kit::Text::Note("render.hdr_inspect_required"));
         }
     }
-    if ui_kit::button(ui, app.tr("render.studio_hdr_browse"), ui_kit::Button::Normal).clicked() {
-        pick(app, target);
-    }
     if let Some(metadata) = metadata(app, target) {
-        ui.label(format!("{} × {} px · {:.2} MiB", metadata.width, metadata.height, metadata.encoded_bytes as f64 / 1_048_576.0));
+        ui_kit::text(
+            ui,
+            &format!("{} × {} px · {:.2} MiB", metadata.width, metadata.height, metadata.encoded_bytes as f64 / 1_048_576.0),
+            ui_kit::Text::Inline,
+        );
         let primaries = if metadata.primaries == Some(solidcraft_engine::doc::render_resources::SRGB_D65_PRIMARIES) {
             "render.hdr_primaries_srgb"
         } else if metadata.primaries.is_some() {
@@ -195,13 +218,13 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui, target: Target) {
         } else {
             "render.hdr_primaries_undeclared"
         };
-        ui.small(app.tr(primaries));
+        ui_kit::text(ui, app.tr(primaries), ui_kit::Text::Note(primaries));
         let title = app.tr("render.hdr_details").to_string();
         ui_kit::section(ui, "hdr_source_details", &title, false, |ui| {
-            ui.label(format!("SHA-256: {}", metadata.sha256));
+            ui_kit::text(ui, &format!("SHA-256: {}", metadata.sha256), ui_kit::Text::Inline);
             if let Some([rx, ry, gx, gy, bx, by, wx, wy]) = metadata.primaries {
-                ui.label(format!("CIE xy · R ({rx:.6}, {ry:.6}) · G ({gx:.6}, {gy:.6})"));
-                ui.label(format!("CIE xy · B ({bx:.6}, {by:.6}) · W ({wx:.6}, {wy:.6})"));
+                ui_kit::text(ui, &format!("CIE xy · R ({rx:.6}, {ry:.6}) · G ({gx:.6}, {gy:.6})"), ui_kit::Text::Inline);
+                ui_kit::text(ui, &format!("CIE xy · B ({bx:.6}, {by:.6}) · W ({wx:.6}, {wy:.6})"), ui_kit::Text::Inline);
             }
         });
     }

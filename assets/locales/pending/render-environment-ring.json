@@ -1,0 +1,26 @@
+{
+  "en": {
+    "render.env_ring_help": "Drag the ring to rotate the lighting. Hold Shift to snap to 15°."
+  },
+  "de": {
+    "render.env_ring_help": "Den Ring ziehen, um die Beleuchtung zu drehen. Mit Umschalt in 15°-Schritten einrasten."
+  },
+  "ja": {
+    "render.env_ring_help": "リングをドラッグして照明を回転します。Shift を押すと15°刻みにスナップします。"
+  },
+  "ko": {
+    "render.env_ring_help": "링을 드래그하여 조명을 회전하세요. Shift를 누르면 15° 간격으로 스냅합니다."
+  },
+  "zh": {
+    "render.env_ring_help": "拖动圆环旋转照明。按住 Shift 以15°为增量吸附。"
+  },
+  "ar": {
+    "render.env_ring_help": "اسحب الحلقة لتدوير الإضاءة. اضغط Shift للمحاذاة كل 15°."
+  },
+  "he": {
+    "render.env_ring_help": "גרור את הטבעת כדי לסובב את התאורה. החזק Shift להצמדה ל-15°."
+  },
+  "vi": {
+    "render.env_ring_help": "Kéo vòng để xoay ánh sáng. Giữ Shift để bám theo bước 15°."
+  }
+}

@@ -152,7 +152,7 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 /// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
 /// occlusion radius), the 8 analysis colours, their flags, the depth direction and the two
 /// whole-body highlight colours (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 416;
+const UNIFORM_SIZE: u64 = 416 + 16 + 21 * 64;
 
 /// A body drawn from its display plan, evaluated on the GPU: the plan, and a palette index per
 /// face (the plan's face numbering; faces past the end take the last index).
@@ -910,6 +910,8 @@ const IMG_SIZE: usize = 24;
 
 /// Per-frame parameters.
 pub struct Frame {
+    /// Bounded unshadowed product-light preview. None retains the fixed studio.
+    pub product_lights: Option<Vec<[f32; 16]>>,
     /// Product preview uses its own batches, retaining the Design viewport's uploads.
     pub product: bool,
     pub key: u64,
@@ -3171,6 +3173,7 @@ fn frame_key(cb: &Frame) -> u64 {
     use std::hash::Hash as _;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     cb.product.hash(&mut h);
+    cb.product_lights.as_ref().map(|lights| lights.iter().take(21).map(|light| light.map(f32::to_bits)).collect::<Vec<_>>()).hash(&mut h);
     cb.key.hash(&mut h);
     cb.sketch_key.hash(&mut h);
     cb.hl_key.hash(&mut h);
@@ -3242,6 +3245,7 @@ impl Renderer {
         if cb.product {
             res.product.take(device, queue, &res.uniform, &res.uniform_bgl, cb.key, &cb.slot, None, false);
             res.product.sort_glass(queue, cb.back);
+            res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, false);
             queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
             // The product picture goes through the window's pass too: offscreen when the targets
             // differ or it is drawn smaller, else straight into the window's pass.
@@ -3434,7 +3438,7 @@ impl Renderer {
             }
         };
         let (m, sk, h, pv) = if cb.product {
-            (&res.product, &res.empty, &res.empty, &res.empty)
+            (&res.product, &res.empty, &res.highlight, &res.empty)
         } else if cb.pv_hide {
             (&res.model, &res.sketch, &res.highlight, &res.empty)
         } else {
@@ -4004,6 +4008,16 @@ pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -
     v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, 0.0]);
     v.extend([cb.hover_tint[0], cb.hover_tint[1], cb.hover_tint[2], 0.0]);
     v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], 0.0]);
+    v.extend([
+        if cb.product_lights.is_some() { 1.0 } else { 0.0 },
+        cb.product_lights.as_ref().map_or(0, |lights| lights.len().min(21)) as f32,
+        0.0,
+        0.0,
+    ]);
+    for index in 0..21 {
+        let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
+        v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
+    }
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -4165,11 +4179,30 @@ mod tests {
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
     }
 
+    #[test]
+    fn render_lights_preview_shader_uniform_and_frame_cache_include_light_state() {
+        let source = format!("{}\n{}", super::SHADER, crate::pbr::SOURCE);
+        let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|error| panic!("{}", error.emit_to_string(&source)));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
+        let uniform = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some("U")).unwrap().1;
+        let naga::TypeInner::Struct { span, .. } = &uniform.inner else { panic!("U is a uniform struct") };
+        assert_eq!(u64::from(*span), super::UNIFORM_SIZE);
+        let mut frame = cached_frame();
+        let previous = super::frame_key(&frame);
+        frame.product_lights = Some(vec![[0.0; 16]]);
+        assert_ne!(super::frame_key(&frame), previous);
+        assert_eq!(super::uniform_bytes(&frame, 800.0, 600.0, false, false).len() as u64, super::UNIFORM_SIZE);
+        let previous = super::frame_key(&frame);
+        frame.product_lights = Some(Vec::new());
+        assert_ne!(super::frame_key(&frame), previous);
+    }
+
     /// A frame with a fixed picture, and a key that names everything it shows.
     fn cached_frame() -> super::Frame {
         use std::sync::{Arc, Mutex};
         let slot = || Arc::new(Mutex::new(None));
         super::Frame {
+            product_lights: None,
             product: false,
             key: 1,
             slot: slot(),
@@ -4494,6 +4527,7 @@ mod glass_tests {
         }
         let none = || Arc::new(Mutex::new(None));
         let frame = Frame {
+            product_lights: None,
             product: false,
             key: 1,
             slot: Arc::new(Mutex::new(Some(scene))),
@@ -4665,6 +4699,7 @@ mod glass_tests {
         const SIZE: u32 = 64;
         let none = || Arc::new(Mutex::new(None));
         Frame {
+            product_lights: None,
             product: false,
             key: 1,
             slot: Arc::new(Mutex::new(Some(scene))),

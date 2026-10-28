@@ -1244,3 +1244,41 @@ fn a_reorder_keeps_the_model_it_was_checked_on() {
     fresh.evaluate(&s.doc);
     assert_eq!(fresh.state().bodies.len(), bodies(&s));
 }
+
+#[test]
+fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refuses_hostile_input() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    run(&mut s, "appearance.assign", json!({"bodies":["A","B"],"appearance":"ABS - Red"}));
+    run(&mut s, "appearance.assign", json!({"bodies":["C"],"appearance":"ABS - Blue"}));
+    run(&mut s, "appearance.assign", json!({"body":"C","faces":[[40,5,5]],"appearance":"ABS - Red"}));
+    let doc = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.evaluations);
+    run(&mut s, "select.same_look", json!({"body":"A"}));
+    assert_eq!(s.selection.len(), 3);
+    let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
+    let face = solidcraft_doc::appearance::face_index_at(s.world_state().body("C").unwrap(), point).unwrap();
+    run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
+    run(&mut s, "select.same_look", json!({}));
+    assert_eq!(s.selection.len(), 3);
+    run(&mut s, "select.same_look", json!({"body":"C"}));
+    assert_eq!(s.selection, [Sel::Body { name: "C".into() }]);
+    let selected = s.selection.clone();
+    // Session treats null parameters as the command's empty/default object.
+    run(&mut s, "select.same_look", Value::Null);
+    for params in [
+        json!([]),
+        json!({"body":"missing"}),
+        json!({"body":"A","face":u64::MAX}),
+        json!({"body":"A","face":-1}),
+        json!({"body":1}),
+        json!({"body":"A","extra":true}),
+    ] {
+        assert!(s.execute("select.same_look", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected);
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(history, (s.undo.len(), s.redo.len(), s.evaluations));
+}

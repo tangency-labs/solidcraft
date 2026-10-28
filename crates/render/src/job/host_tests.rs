@@ -144,6 +144,7 @@ mod progressive_checkpoints {
 
 fn request() -> ImageRequest {
     ImageRequest {
+        studio_weights: None,
         integrator: Default::default(),
         raytrace: None,
         textures: None,
@@ -351,6 +352,25 @@ fn native_job_finishes_without_any_poll_or_ui_pump() {
     assert_eq!(frame.info.png_bytes, frame.png().len() as u64);
     assert_eq!(frame.info.png_sha256, format!("{:x}", Sha256::digest(frame.png())));
     assert_eq!(status.frame.unwrap().png_sha256, frame.info.png_sha256);
+    let duration = job.completed_duration().unwrap().unwrap();
+    assert_eq!(job.completed_duration().unwrap(), Some(duration), "completed duration is independent of status polling");
+}
+
+#[test]
+fn completed_duration_is_captured_at_publication_and_never_for_cancelled_work() {
+    let host = CpuHost::cooperative();
+    let job = host.submit(id(1, 1), 12, empty(), request()).unwrap();
+    assert!(job.completed_duration().unwrap().is_none());
+    drain(&host);
+    let duration = job.completed_duration().unwrap().unwrap();
+    assert!(duration.as_secs_f64().is_finite());
+    job.status().unwrap();
+    host.pump(1).unwrap();
+    assert_eq!(job.completed_duration().unwrap(), Some(duration));
+    let cancelled = host.submit(id(1, 2), 12, empty(), request()).unwrap();
+    cancelled.cancel().unwrap();
+    drain(&host);
+    assert!(cancelled.completed_duration().unwrap().is_none());
 }
 
 /// Isolate the existing integrator-to-host completion boundary with a real PNG

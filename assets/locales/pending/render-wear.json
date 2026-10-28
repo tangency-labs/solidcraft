@@ -1,0 +1,74 @@
+{
+  "en": {
+    "render.wear_title": "Wear",
+    "render.wear_layers": "Layers",
+    "render.wear_selected_layer": "Selected layer",
+    "render.wear_applies_to": "Applies to",
+    "render.wear_no_layers": "No layers",
+    "render.wear_layer_one": "{count} layer",
+    "render.wear_layer_count": "{count} layers"
+  },
+  "ja": {
+    "render.wear_title": "ウェア",
+    "render.wear_layers": "レイヤー",
+    "render.wear_selected_layer": "選択したレイヤー",
+    "render.wear_applies_to": "適用先",
+    "render.wear_no_layers": "レイヤーなし",
+    "render.wear_layer_one": "{count} レイヤー",
+    "render.wear_layer_count": "{count} レイヤー"
+  },
+  "zh": {
+    "render.wear_title": "表面老化",
+    "render.wear_layers": "图层",
+    "render.wear_selected_layer": "所选图层",
+    "render.wear_applies_to": "应用于",
+    "render.wear_no_layers": "无图层",
+    "render.wear_layer_one": "{count} 个图层",
+    "render.wear_layer_count": "{count} 个图层"
+  },
+  "de": {
+    "render.wear_title": "Abnutzung",
+    "render.wear_layers": "Ebenen",
+    "render.wear_selected_layer": "Ausgewählte Ebene",
+    "render.wear_applies_to": "Anwenden auf",
+    "render.wear_no_layers": "Keine Ebenen",
+    "render.wear_layer_one": "{count} Ebene",
+    "render.wear_layer_count": "{count} Ebenen"
+  },
+  "ko": {
+    "render.wear_title": "마모",
+    "render.wear_layers": "레이어",
+    "render.wear_selected_layer": "선택한 레이어",
+    "render.wear_applies_to": "적용 대상",
+    "render.wear_no_layers": "레이어 없음",
+    "render.wear_layer_one": "레이어 {count}개",
+    "render.wear_layer_count": "레이어 {count}개"
+  },
+  "ar": {
+    "render.wear_title": "البلى",
+    "render.wear_layers": "الطبقات",
+    "render.wear_selected_layer": "الطبقة المحددة",
+    "render.wear_applies_to": "ينطبق على",
+    "render.wear_no_layers": "لا طبقات",
+    "render.wear_layer_one": "{count} طبقة",
+    "render.wear_layer_count": "{count} طبقات"
+  },
+  "he": {
+    "render.wear_title": "בלאי",
+    "render.wear_layers": "שכבות",
+    "render.wear_selected_layer": "שכבה נבחרת",
+    "render.wear_applies_to": "חל על",
+    "render.wear_no_layers": "אין שכבות",
+    "render.wear_layer_one": "שכבה {count}",
+    "render.wear_layer_count": "{count} שכבות"
+  },
+  "vi": {
+    "render.wear_title": "Hao mòn",
+    "render.wear_layers": "Lớp",
+    "render.wear_selected_layer": "Lớp đã chọn",
+    "render.wear_applies_to": "Áp dụng cho",
+    "render.wear_no_layers": "Không có lớp",
+    "render.wear_layer_one": "{count} lớp",
+    "render.wear_layer_count": "{count} lớp"
+  }
+}

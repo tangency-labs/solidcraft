@@ -332,6 +332,8 @@ pub struct UiState {
     pub pick_off: Vec<String>,
     /// A click on a face picks its whole body.
     pub pick_bodies: bool,
+    /// A face picks its exact component occurrence in Design and Render.
+    pub pick_components: bool,
     /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
@@ -362,6 +364,7 @@ impl Default for UiState {
             dark: true,
             pick_off: Vec::new(),
             pick_bodies: false,
+            pick_components: false,
             visual_style: 0,
             ground_shadow: true,
             up_axis: Default::default(),
@@ -980,9 +983,40 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         let t0 = now_ms();
-        let r = self.session.execute(id, &params).map_err(|e| e.to_string());
+        if matches!(id, "render.lights.solo" | "render.lights.mute") {
+            render_workspace::light::validate_visibility(self, &params)?;
+        }
+        let params = if matches!(id, "render.start" | "render.preflight") { render_workspace::light::filter_request(self, params)? } else { params };
+        let selected_before = self.session.selection.clone();
+        let revision = self.session.revision;
+        let r = self.session.execute(id, &params).map_err(|e| e.to_string()).and_then(|reply| {
+            render_workspace::apply_command(self, id, &reply)?;
+            Ok(reply)
+        });
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;
-        self.command_completed(id, r)
+        // An Undo offered by the last toast is stale once another command changed the design.
+        if self.status_undo && revision != self.session.revision {
+            self.status_undo = false;
+            self.status = None;
+        }
+        let done = self.command_completed(id, r);
+        // Semantic Browser focus survives the command clearing the previous CAD picks.
+        if done.is_ok()
+            && id != "view.render_select"
+            && (self.session.selection != selected_before || matches!(id, "select.set" | "select.clear" | "select.same_look"))
+        {
+            let selection = render_workspace::object_selection(self);
+            render_workspace::select(self, selection);
+        }
+        if let Ok(v) = &done {
+            if matches!(id, "render.lights.solo" | "render.lights.mute") {
+                render_workspace::light::apply_visibility(self, id, v);
+            }
+            if matches!(id, "render.lights.set" | "render.lights.add" | "render.lights.duplicate" | "render.lights.remove") {
+                render_workspace::light::edited(self, &params, v);
+            }
+        }
+        done
     }
 
     /// Host effects shared by directly executed and already evaluated commands.
@@ -1014,6 +1048,34 @@ impl SolveApp {
                 }
                 _ => {}
             }
+            if id == "view.render_inspector" {
+                render_workspace::set_inspector_visible(self, v.get("visible").and_then(Value::as_bool).unwrap_or(true));
+            }
+            if id == "view.render_browser" {
+                render_workspace::apply_browser_controls(self, v);
+            }
+            if id == "view.render_frame" {
+                render_workspace::shot::apply_frame(self, v);
+            }
+            if id == "appearance.favorite" {
+                render_workspace::assign::favorite_applied(self, v);
+            }
+            if id == "view.render_select" {
+                use render_workspace::RenderSelection;
+                let selected = match v.get("kind").and_then(Value::as_str) {
+                    Some("environment") => RenderSelection::Environment,
+                    Some("lighting") => RenderSelection::Lighting,
+                    Some("wear") => RenderSelection::Wear,
+                    Some("output") => RenderSelection::Output,
+                    Some("sampling") => RenderSelection::Sampling,
+                    Some("effects") => RenderSelection::Effects,
+                    Some("check") => RenderSelection::Check,
+                    Some("light") => RenderSelection::Light(v.get("id").and_then(Value::as_str).unwrap_or_default().into()),
+                    Some("shot") => RenderSelection::Shot(v.get("id").and_then(Value::as_str).unwrap_or_default().into()),
+                    _ => RenderSelection::Nothing,
+                };
+                render_workspace::select(self, selected);
+            }
             if id == "view.layout" {
                 let layout =
                     if v.get("mode").and_then(Value::as_str) == Some("compact") { shell::LayoutMode::Docked } else { shell::LayoutMode::Floating };
@@ -1038,6 +1100,12 @@ impl SolveApp {
                 && let Some(stage) = v.get("stage").and_then(Value::as_str)
             {
                 render_workspace::select_stage(self, stage);
+            }
+            if id == "select.filter" {
+                let mode = v.get("mode").and_then(Value::as_str);
+                self.ui.pick_bodies = mode == Some("body");
+                self.ui.pick_components = mode == Some("component");
+                self.ui.pick_off.retain(|kind| kind != "faces");
             }
             if id == "view.shots_strip"
                 && let Some(visible) = v.get("visible").and_then(Value::as_bool)
@@ -1088,6 +1156,12 @@ impl SolveApp {
             sketch_palette::apply_mode(self, id, v);
         }
         self.finish_command(id, &r);
+        if render_workspace::active(self)
+            && matches!(id, "appearance.assign" | "appearance.paste")
+            && let Ok(value) = &r
+        {
+            render_workspace::assign::assigned(self, value);
+        }
         r
     }
 
@@ -1244,6 +1318,10 @@ impl SolveApp {
         if id == "material.properties.validate" {
             self.material_card_review = Some(material_card_review::ReviewWindow::default());
             self.home.open = false;
+            return;
+        }
+        if id == "library.export" {
+            dialogs_library::start_export(self);
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place.
@@ -2220,6 +2298,7 @@ impl SolveApp {
         if !self.ui.show_browser {
             self.shell.browser = None;
             shell::register_panel(self, "render:browser", None, None);
+            shell::register_panel(self, "render:appearances", None, None);
         }
         if floating || left_timeline || !show_timeline {
             self.shell.history = None;
@@ -2246,7 +2325,10 @@ impl SolveApp {
                 (i.pointer.middle_down() || i.pointer.secondary_down())
                     && i.pointer.press_origin().is_some_and(|p| full.contains(p) && !shell::covered(self, p))
             });
-            let blocked = !continuing_navigation && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| shell::covered(self, p));
+            // A captured comparison divider also keeps its primary drag across floating cards.
+            let continuing_comparison = render_workspace::comparison_drag_captured(self) && ui.input(|i| i.pointer.primary_down());
+            let blocked =
+                !continuing_navigation && !continuing_comparison && ui.input(|i| i.pointer.latest_pos()).is_some_and(|p| shell::covered(self, p));
             let mut viewport_ui = ui.new_child(egui::UiBuilder::new().max_rect(full).id_salt("floating_viewport"));
             if blocked {
                 // Disabled only to shield the scene from input under a card or menu; it must

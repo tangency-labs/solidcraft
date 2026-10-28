@@ -14,6 +14,17 @@ fn click(ctx: &egui::Context, key: &str, rgb: &mut [u8; 3]) {
 }
 
 #[test]
+fn linear_field_preserves_hdr_precision_without_edits_and_bounds_hostile_limits() {
+    let ctx = crate::fonts::test_context();
+    let original = [0.123456789, 18.0, 0.9];
+    let mut rgb = original;
+    for maximum in [1e6, f64::NAN, f64::INFINITY] {
+        frame(&ctx, vec![], |ui| linear_color_field(ui, &mut rgb, maximum));
+        assert_eq!(rgb, original);
+    }
+}
+
+#[test]
 fn format_toggle_is_global_and_does_not_change_colour() {
     let ctx = crate::fonts::test_context();
     let mut rgb = [204, 208, 214];

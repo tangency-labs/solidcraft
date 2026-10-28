@@ -12,6 +12,12 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
 use crate::{EngineError, Result, Session};
 
+#[path = "appearance_chain.rs"]
+mod appearance_chain;
+
+#[path = "appearance_gestures.rs"]
+pub(super) mod appearance_gestures;
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("inspect.colored_components", "Enable Component Colors", colored_components)
         .at("SOLID", "INSPECT").icon("colored_components").noundo()
@@ -45,6 +51,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         "bodies?: [names]; faces?: [[x,y,z] on faces] (body?: which body, default the nearest); components?: [names or ids, or occurrence names]; \
              appearance?: library name or stable starter.* ID (appearance.library) | color: \"#rrggbb\" or [r, g, b] (0–255), opacity? (0–1, default 1); \
              name?: inert copied look label (requires color, mutually exclusive with appearance); pbr?: {metallic:0..1, roughness:0.045..1, dielectric_ior:1..3} (requires color/appearance and opacity 1); a starter ID or registered starter name resolves its recipe before color overrides; omitted pbr retains that response and pbr: null explicitly clears it. Unavailable glass recipes refuse through either selector. Other custom labels with an explicit color retain legacy scalar behavior. Neither appearance nor color (or color: null): clear, so the face follows its body, the body its component, the component its material",
+    ),
+    CommandSpec::new("appearance.copy", "Copy Look", appearance_gestures::copy).icon("copy").noundo().key("Ctrl+Alt+C")
+        .params("target: appearance.chain target. Copies its resolved look to a transient session clipboard. No document change or dialogs."),
+    CommandSpec::new("appearance.paste", "Paste Look", appearance_gestures::paste).icon("paste").key("Ctrl+Alt+V")
+        .params("bodies/faces/components: appearance.assign targets. Applies the copied look atomically in one undo step; no dialogs."),
+    CommandSpec::new("appearance.favorite", "Favourite Look", appearance_gestures::favorite).icon("star").noundo().doc_only()
+        .params("look: appearance.assign look; favorite: bool → validated look and preference request; UI library preference only, no document change or dialogs."),
+    CommandSpec::new("appearance.chain", "Appearance Chain", appearance_chain::chain).icon("inspect").noundo().params(
+        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
+    ),
+    CommandSpec::new("appearance.replace", "Replace Appearance", appearance_chain::replace).icon("appearance").params(
+        "from: library name | saved look {name,color,opacity,pbr?} (copy appearance.list in_design); to: library name | assignment look {appearance? | color, name?, opacity?, pbr?} (appearance.assign rules; no clear). Matches the full look including name and PBR. scope?: {bodies?: [names], components?: [names or ids]}, at most 10000 targets; body scope includes face overrides, component scope selects only the component override. Omitted scope means all overrides, including hidden/suppressed ones; physical defaults are unchanged. Duplicate targets count once. Returns count of rewritten overrides; zero adds no history. One undo step, atomic; no dialogs. Designs above 100000 overrides refuse",
     ),
     CommandSpec::new("appearance.library", "Appearance Library", appearance_library).icon("library")
         .noundo()
@@ -474,71 +492,9 @@ pub(super) fn color_param(v: &Value) -> Option<[u8; 3]> {
 }
 
 pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
-    use solidcraft_doc::appearance::{FaceLook, Look, library};
+    use solidcraft_doc::appearance::FaceLook;
     let cmd = "appearance.assign";
-    // A saved label is data, not a request to resolve a recipe. Keep the explicit
-    // appearance selector separate so an owned look may have any recipe's ID as its name.
-    let copied_name = match p.get("name") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(name)) if !name.is_empty() && name.chars().count() <= 128 && !name.chars().any(char::is_control) => Some(name),
-        _ => return Err(bad(cmd, "`name` must be a nonempty label of at most 128 characters without controls")),
-    };
-    if copied_name.is_some() && (p.get("color").is_none_or(Value::is_null) || p.get("appearance").is_some_and(|value| !value.is_null())) {
-        return Err(bad(cmd, "`name` requires an explicit color and cannot be combined with `appearance`"));
-    }
-    // Both the stable ID and a registered display name explicitly select a recipe.
-    // Copied labels use `name`, so color overrides cannot bypass unsupported optics.
-    let preset = str_(p, "appearance").and_then(solidcraft_doc::appearance_pack::find);
-    let mut look: Option<Look> = if let Some(preset) = preset {
-        // Refuse unsupported optics before any color/PBR/opacity override.
-        let mut look = preset.opaque_look().map_err(|e| bad(cmd, e.to_string()))?;
-        if let Some(color) = p.get("color").filter(|v| !v.is_null()) {
-            look.color = color_param(color).ok_or_else(|| bad(cmd, "invalid preset color override"))?;
-        }
-        if let Some(opacity) = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()) {
-            look.opacity = opacity.clamp(0.0, 1.0);
-        }
-        Some(look)
-    } else {
-        match (str_(p, "appearance"), p.get("color")) {
-            // A colour with a name: that colour, called that (a name not in the library is fine).
-            (Some(n), Some(v)) if !v.is_null() => {
-                let c = color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?;
-                let o = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(1.0);
-                let mut l = Look::custom(c, o);
-                l.name = n.chars().take(128).collect();
-                Some(l)
-            }
-            (Some(n), _) => {
-                let mut l = if let Some(preset) = solidcraft_doc::appearance_pack::find(n) {
-                    preset.opaque_look().map_err(|e| bad(cmd, e.to_string()))?
-                } else {
-                    library(n).ok_or_else(|| bad(cmd, format!("no appearance `{n}` in the library (appearance.library)")))?
-                };
-                if let Some(o) = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()) {
-                    l.opacity = o.clamp(0.0, 1.0);
-                }
-                Some(l)
-            }
-            (None, None | Some(Value::Null)) => None,
-            (None, Some(v)) => {
-                let c = color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?;
-                let o = match p.get("opacity") {
-                    Some(o) => o.as_f64().filter(|x| x.is_finite() && (0.0..=1.0).contains(x)).ok_or_else(|| bad(cmd, "`opacity` must be 0…1"))?,
-                    None => 1.0,
-                };
-                Some(Look::custom(c, o))
-            }
-        }
-    };
-    if let Some(l) = &mut look {
-        if let Some(name) = copied_name {
-            l.name = name.clone();
-        }
-        attach_pbr(cmd, p, l)?;
-    } else if p.get("pbr").is_some_and(|v| !v.is_null()) {
-        return Err(bad(cmd, "`pbr` requires a color or appearance"));
-    }
+    let look = appearance_look(cmd, p)?;
     let bodies = string_list(p, "bodies");
     let st = s.model.state();
     if bodies.iter().any(|b| st.body(b).is_none()) {
@@ -640,6 +596,75 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
         "components": comps,
         "appearance": look.as_ref().map(look_json),
     }))
+}
+
+/// Shared look parser for assignment and atomic replacement.
+pub(super) fn appearance_look(cmd: &str, p: &Value) -> Result<Option<solidcraft_doc::appearance::Look>> {
+    use solidcraft_doc::appearance::{Look, library};
+    // A saved label is data, not a request to resolve a recipe. Keep the explicit
+    // appearance selector separate so an owned look may have any recipe's ID as its name.
+    let copied_name = match p.get("name") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) if !name.is_empty() && name.chars().count() <= 128 && !name.chars().any(char::is_control) => Some(name),
+        _ => return Err(bad(cmd, "`name` must be a nonempty label of at most 128 characters without controls")),
+    };
+    if copied_name.is_some() && (p.get("color").is_none_or(Value::is_null) || p.get("appearance").is_some_and(|value| !value.is_null())) {
+        return Err(bad(cmd, "`name` requires an explicit color and cannot be combined with `appearance`"));
+    }
+    // Both the stable ID and a registered display name explicitly select a recipe.
+    // Copied labels use `name`, so color overrides cannot bypass unsupported optics.
+    let preset = str_(p, "appearance").and_then(solidcraft_doc::appearance_pack::find);
+    let mut look: Option<Look> = if let Some(preset) = preset {
+        // Refuse unsupported optics before any color/PBR/opacity override.
+        let mut look = preset.opaque_look().map_err(|e| bad(cmd, e.to_string()))?;
+        if let Some(color) = p.get("color").filter(|v| !v.is_null()) {
+            look.color = color_param(color).ok_or_else(|| bad(cmd, "invalid preset color override"))?;
+        }
+        if let Some(opacity) = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()) {
+            look.opacity = opacity.clamp(0.0, 1.0);
+        }
+        Some(look)
+    } else {
+        match (str_(p, "appearance"), p.get("color")) {
+            // A colour with a name: that colour, called that (a name not in the library is fine).
+            (Some(n), Some(v)) if !v.is_null() => {
+                let c = color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?;
+                let o = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()).unwrap_or(1.0);
+                let mut l = Look::custom(c, o);
+                l.name = n.chars().take(128).collect();
+                Some(l)
+            }
+            (Some(n), _) => {
+                let mut l = if let Some(preset) = solidcraft_doc::appearance_pack::find(n) {
+                    preset.opaque_look().map_err(|e| bad(cmd, e.to_string()))?
+                } else {
+                    library(n).ok_or_else(|| bad(cmd, format!("no appearance `{n}` in the library (appearance.library)")))?
+                };
+                if let Some(o) = p.get("opacity").and_then(Value::as_f64).filter(|x| x.is_finite()) {
+                    l.opacity = o.clamp(0.0, 1.0);
+                }
+                Some(l)
+            }
+            (None, None | Some(Value::Null)) => None,
+            (None, Some(v)) => {
+                let c = color_param(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0–255"))?;
+                let o = match p.get("opacity") {
+                    Some(o) => o.as_f64().filter(|x| x.is_finite() && (0.0..=1.0).contains(x)).ok_or_else(|| bad(cmd, "`opacity` must be 0…1"))?,
+                    None => 1.0,
+                };
+                Some(Look::custom(c, o))
+            }
+        }
+    };
+    if let Some(l) = &mut look {
+        if let Some(name) = copied_name {
+            l.name = name.clone();
+        }
+        attach_pbr(cmd, p, l)?;
+    } else if p.get("pbr").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`pbr` requires a color or appearance"));
+    }
+    Ok(look)
 }
 
 fn dist_to(b: &solidcraft_doc::ModelBody, p: solidcraft_geom::Vec3) -> f64 {

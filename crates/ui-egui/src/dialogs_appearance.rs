@@ -239,7 +239,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 }
 
 /// The command giving `targets` (bodies or faces) a look.
-fn apply_params(targets: &[Sel], color: [u8; 3], opacity: f64, look: Option<&str>, pbr: Option<PbrParameters>) -> Option<Value> {
+pub(crate) fn apply_params(targets: &[Sel], color: [u8; 3], opacity: f64, look: Option<&str>, pbr: Option<PbrParameters>) -> Option<Value> {
     let bodies: Vec<String> = targets.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
     let faces: Vec<Value> = targets
         .iter()
@@ -304,7 +304,11 @@ pub(super) fn selected_params(k: &Ap, items: &[Sel]) -> Option<Value> {
 
 /// Removing an override restores the inherited component or material appearance.
 fn clear_params(k: &Ap, items: &[Sel]) -> Option<Value> {
-    let mut p = selected_params(k, items)?;
+    Some(without_look(selected_params(k, items)?))
+}
+
+/// Shared clear form for dialogs and the selection Inspector.
+pub(crate) fn without_look(mut p: Value) -> Value {
     if let Some(obj) = p.as_object_mut() {
         obj.remove("appearance");
         obj.remove("name");
@@ -312,7 +316,7 @@ fn clear_params(k: &Ap, items: &[Sel]) -> Option<Value> {
         obj.remove("opacity");
         obj.remove("pbr");
     }
-    Some(p)
+    p
 }
 
 /// What a swatch dropped now would land on: the face or body under the cursor in the viewport,
@@ -358,6 +362,17 @@ fn in_design(app: &mut SolveApp) -> Vec<(Look, usize)> {
         }
     }
     out
+}
+
+/// Replacement pickers share the dialog's design looks and admitted library recipes.
+pub(crate) fn replacement_library(app: &mut SolveApp) -> Vec<Look> {
+    let mut looks: Vec<_> = in_design(app).into_iter().map(|(look, _)| look).collect();
+    for look in library(app).into_iter().filter(preset_available) {
+        if !looks.iter().any(|saved| saved.name == look.name && saved.color == look.color && saved.opacity == look.opacity && saved.pbr == look.pbr) {
+            looks.push(look);
+        }
+    }
+    looks
 }
 
 fn c32(c: [u8; 3], opacity: f64) -> Color32 {

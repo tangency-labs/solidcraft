@@ -50,7 +50,7 @@ pub(super) fn snapshot(app: &SolveApp) -> Result<RenderSetup, String> {
 
 // Compare editable numerical intent before validation, so an incompatible legacy value
 // or a lens temporarily paired with an orthographic camera cannot disable dirty tracking.
-fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
+pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
     let view = &app.render_workspace.view;
     let mut setup = RenderSetup { camera: app.cam, ..view.draft.clone() };
     setup.job = Some(match view.method {
@@ -138,6 +138,41 @@ fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
         }
     });
     Ok(setup)
+}
+
+/// Save only fields a numerical editor changed. Navigation keeps its explicit
+/// Update shot/Revert flow, and temporary optical bindings remain local.
+pub(super) fn persist_editor(app: &mut SolveApp, before: &RenderSetup) -> Result<(), String> {
+    let after = draft(app)?;
+    let old = serde_json::to_value(before).map_err(|error| error.to_string())?;
+    let new = serde_json::to_value(&after).map_err(|error| error.to_string())?;
+    let saved = app.session.doc.render.setups.get(&app.render_workspace.view.name);
+    let saved = saved.and_then(|setup| serde_json::to_value(setup).ok());
+    let mut patch = serde_json::Map::new();
+    if let Some(fields) = new.as_object() {
+        for (key, value) in fields {
+            if key != "camera" && old.get(key) != Some(value) && saved.as_ref().and_then(|saved| saved.get(key)) != Some(value) {
+                patch.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    if !patch.is_empty() {
+        after.validate().map_err(|error| error.to_string())?;
+        let name = app.render_workspace.view.name.clone();
+        app.run("render.settings.set", serde_json::json!({"name":name,"set":patch}))?;
+        app.render_workspace.revision = app.session.revision;
+        app.render_workspace.view.clean_setup = Some(after.clone());
+    }
+    if let Some(saved) = app.session.doc.render.setups.get(&app.render_workspace.view.name) {
+        let mut saved = saved.clone();
+        saved.camera = after.camera;
+        if saved == after {
+            app.render_workspace.view.dirty = has_runtime_inputs(app);
+            app.render_workspace.view.clean_setup = Some(after);
+            app.render_workspace.revision = app.session.revision;
+        }
+    }
+    Ok(())
 }
 
 /// A setup switch/reload replaces its numeric editor draft, never a completed image or camera.
@@ -234,6 +269,7 @@ pub(super) fn load(app: &mut SolveApp) {
     app.render_workspace.revision = app.session.revision;
     // Keep the existing explicit Restore Saved Camera action: loading options does not navigate.
     app.render_workspace.view.clean_setup = draft(app).ok();
+    super::light::loaded(app);
 }
 
 pub(super) fn refresh_dirty(app: &mut SolveApp) {

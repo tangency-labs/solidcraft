@@ -176,6 +176,7 @@ fn thirty_two_emission_bindings_resume_with_four_work_units_and_cancel_without_p
 }
 fn request() -> ImageRequest {
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,

@@ -1584,8 +1584,6 @@
   "prefs.saving": "Tự động lưu và khôi phục",
   "prefs.scale_note": "Cũng có thể dùng Ctrl + / Ctrl − trong cửa sổ. Các nút có kích thước 28 px ở mức 100%.",
   "prefs.scale_text": "Tỉ lệ và văn bản",
-  "prefs.search": "Tìm kiếm cài đặt",
-  "prefs.search_empty": "Không có cài đặt nào khớp",
   "prefs.select": "Chọn",
   "prefs.select_one_item": "Chọn một mục",
   "prefs.selecting": "Đang chọn",

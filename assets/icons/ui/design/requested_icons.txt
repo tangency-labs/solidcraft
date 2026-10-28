@@ -110,6 +110,7 @@ folder	false
 frame_member	false
 gear	false
 graph	false
+grid	false
 ground	false
 help	false
 hem	false
@@ -158,6 +159,7 @@ pattern_rect	false
 perforate	false
 perspective	false
 pipe	false
+placeholder	true
 plane	false
 plane_along_path	false
 plane_angle	false

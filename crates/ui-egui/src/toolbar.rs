@@ -2091,7 +2091,9 @@ fn drag_ghost(app: &SolveApp, ctx: &egui::Context, id: &str, at: egui::Pos2, rem
 pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(crate::i18n::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
-    crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Select bodies (a face picks its body)"), &mut app.ui.pick_bodies);
+    if crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Select bodies (a face picks its body)"), &mut app.ui.pick_bodies).changed() {
+        app.ui.pick_components = false;
+    }
     for (k, label) in [
         ("faces", "Faces"),
         ("edges", "Edges"),
@@ -2221,9 +2223,21 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         match k {
             Key::Escape => {
                 app.esc_handled = true;
+                if crate::render_workspace::result_active(app) {
+                    crate::keymap::press(app, "Escape", repeat);
+                    continue;
+                }
                 // End navigation before the underlying tool or dialog; sketch double-Escape
                 // handling starts with the next press.
                 if app.viewport.nav.take().is_some() {
+                    app.last_escape = None;
+                    continue;
+                }
+                if crate::render_workspace::assign::cancel(app) {
+                    app.last_escape = None;
+                    continue;
+                }
+                if crate::render_workspace::escape_inspector(app, ctx) {
                     app.last_escape = None;
                     continue;
                 }

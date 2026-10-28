@@ -169,14 +169,37 @@ pub(crate) fn searchable_dropdown(
     pending: Option<&str>,
 ) -> Option<String> {
     crate::prefs_search::note_current(ui, current);
+    searchable_dropdown_with(ui, id, current, filter, options, SearchMenu { custom, pending, icon: None })
+}
+
+struct SearchMenu<'a> {
+    custom: Option<&'a str>,
+    pending: Option<&'a str>,
+    icon: Option<&'static str>,
+}
+
+fn searchable_dropdown_with(
+    ui: &mut Ui,
+    id: &str,
+    current: &str,
+    filter: &mut String,
+    options: &[SearchOption<'_>],
+    menu: SearchMenu<'_>,
+) -> Option<String> {
+    let SearchMenu { custom, pending, icon } = menu;
     let mut chosen = None;
     let row = label(ui).to_owned();
-    let response = egui::ComboBox::from_id_salt(id)
-        .width(dimension(ui.available_width()))
+    let combo = egui::ComboBox::from_id_salt(id)
+        .width(if icon.is_some() { Tokens::get().control_height } else { dimension(ui.available_width()) })
         .height(Tokens::get().space_24 * 14.0)
-        .selected_text(current)
-        .icon(dropdown_arrow)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .selected_text(if icon.is_some() { "" } else { current })
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    let combo = if let Some(icon) = icon {
+        combo.icon(move |ui, rect, _, _| crate::icons::paint_ink(ui.painter(), rect.shrink(Tokens::get().space_2), icon, Tokens::get().form_dim))
+    } else {
+        combo.icon(dropdown_arrow)
+    };
+    let response = combo
         .show_ui(ui, |ui| {
             let search = ui.add(
                 text_input(egui::TextEdit::singleline(filter))
@@ -291,6 +314,22 @@ pub(crate) fn dropdown_menu_with_close_behavior(
     close_behavior: egui::PopupCloseBehavior,
     add: impl FnOnce(&mut Ui),
 ) -> Response {
+    dropdown_menu_width(ui, id, current, false, close_behavior, add)
+}
+
+/// Intrinsic-width variant for horizontal toolbars and bottom strips.
+pub(crate) fn compact_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str, add: impl FnOnce(&mut Ui)) -> Response {
+    dropdown_menu_width(ui, id, current, true, egui::PopupCloseBehavior::CloseOnClick, add)
+}
+
+fn dropdown_menu_width(
+    ui: &mut Ui,
+    id: impl egui::AsIdSalt,
+    current: &str,
+    compact: bool,
+    close_behavior: egui::PopupCloseBehavior,
+    add: impl FnOnce(&mut Ui),
+) -> Response {
     crate::prefs_search::note_current(ui, current);
     // Only a search probe may skip the real control. A dialog's first frame is not visible yet,
     // and a stand-in there makes the next frame too short to show OK.
@@ -299,8 +338,14 @@ pub(crate) fn dropdown_menu_with_close_behavior(
     {
         return crate::prefs_search::hidden_response(ui);
     }
+    let t = Tokens::get();
+    let width = if compact {
+        ui.painter().layout_no_wrap(current.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink).size().x + t.space_24 + t.space_8
+    } else {
+        dimension(ui.available_width())
+    };
     let response = egui::ComboBox::from_id_salt(id)
-        .width(dimension(ui.available_width()))
+        .width(width)
         .height(Tokens::get().space_24 * 14.0)
         .selected_text(current)
         .icon(dropdown_arrow)
@@ -390,6 +435,29 @@ pub(crate) fn value_pair(ui: &mut Ui, label: &str, values: [&mut String; 2], axe
     })
 }
 
+/// Paired bounded numeric fields in the shared value-pair row geometry.
+pub(crate) fn number_pair<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    label: &str,
+    values: [&mut T; 2],
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+) -> [Response; 2] {
+    let t = Tokens::get();
+    super::row(ui, label, |ui| {
+        let width = ((dimension(ui.available_width()) - t.space_8) / 2.0).max(0.0);
+        ui.spacing_mut().item_spacing.x = t.space_8;
+        values.map(|value| {
+            ui.allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
+                number_field(ui, value, range.clone(), speed, suffix)
+            })
+            .inner
+        })
+    })
+}
+
 /// Variable-radius location editor. Tokens: scope's control and typography tokens.
 /// Retains the established 0.01 step, fractional range and locale parser.
 /// Locale-aware variable-radius position editor. Tokens: `scope control/font tokens`.
@@ -455,7 +523,34 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
 
 /// Search input with native accessibility and a stable caller ID. Tokens: cell_editor tokens.
 pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
-    cell_editor(ui, id, value, hint, false)
+    if !super::layout::in_catalog(ui) {
+        return cell_editor(ui, id, value, hint, false);
+    }
+    let t = Tokens::get();
+    let editor = text_input(egui::TextEdit::singleline(value))
+        .id(id)
+        .char_limit(128)
+        .hint_text(hint)
+        .min_size(vec2(0.0, t.space_16 + t.space_2))
+        .margin(egui::Margin { left: t.space_24 as i8, right: t.space_8 as i8, top: 0, bottom: 0 })
+        .font(egui::FontId::proportional(t.font_small))
+        .text_color(t.form_ink);
+    let response = ui.add_sized(vec2(dimension(ui.available_width()), t.space_16 + t.space_2), editor);
+    let icon = egui::Rect::from_center_size(egui::pos2(response.rect.left() + t.space_12, response.rect.center().y), vec2(t.space_12, t.space_12));
+    crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
+    super::layout::publish_geometry(ui, &response);
+    response
+}
+
+/// Compact icon action opening the shared searchable menu.
+pub(crate) fn searchable_icon_dropdown(
+    ui: &mut Ui,
+    icon: &'static str,
+    label: &str,
+    filter: &mut String,
+    options: &[SearchOption<'_>],
+) -> Option<String> {
+    searchable_dropdown_with(ui, "icon_search_menu", label, filter, options, SearchMenu { custom: None, pending: None, icon: Some(icon) })
 }
 
 /// Behaviour of the one kit slider. Appearance is always owned by `slider`.
@@ -465,11 +560,22 @@ pub(crate) struct Slider {
     pub format: fn(f64) -> String,
     pub show_value: bool,
     pub integer: bool,
+    pub workspace_accent: bool,
+}
+
+/// Bounded read-only code box for diagnostic payloads. Native selection and copying
+/// remain available; the caller's source cannot be edited. Uses shared form styling.
+pub(crate) fn read_only_text(ui: &mut Ui, text: &str) -> Response {
+    let mut source = text;
+    egui::ScrollArea::vertical()
+        .max_height(160.0)
+        .show(ui, |ui| ui.add(egui::TextEdit::multiline(&mut source).code_editor().desired_width(ui.available_width()).desired_rows(8)))
+        .inner
 }
 
 impl Default for Slider {
     fn default() -> Self {
-        Self { step: None, format: |v| format!("{v:.2}"), show_value: true, integer: false }
+        Self { step: None, format: |v| format!("{v:.2}"), show_value: true, integer: false, workspace_accent: false }
     }
 }
 
@@ -484,6 +590,7 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
     super::scope(ui, |ui| {
         let t = Tokens::get();
         ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
+        let primary = if options.workspace_accent { crate::theme::TabAccent::current(ui.ctx()).ink } else { t.form_primary };
         let limits = (range.start().to_f64(), range.end().to_f64());
         let reserved = if options.show_value {
             // Reserve the actual formatted editor, including suffixes and localized Instant.
@@ -530,8 +637,8 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         let fraction = if limits.1 != limits.0 { ((value.to_f64() - limits.0) / (limits.1 - limits.0)).clamp(0.0, 1.0) as f32 } else { 0.0 };
         let center = egui::pos2(egui::lerp(track.x_range(), fraction), track.center().y);
         ui.painter().rect_filled(track, t.control_radius, t.dialog_rule);
-        ui.painter().rect_filled(egui::Rect::from_min_max(track.min, egui::pos2(center.x, track.bottom())), t.control_radius, t.form_primary);
-        ui.painter().circle(center, t.space_8, t.control_fill, egui::Stroke::new(t.space_2, t.form_primary));
+        ui.painter().rect_filled(egui::Rect::from_min_max(track.min, egui::pos2(center.x, track.bottom())), t.control_radius, primary);
+        ui.painter().circle(center, t.space_8, t.control_fill, egui::Stroke::new(t.space_2, primary));
         publish(ui, &response, egui::WidgetType::Slider);
         response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), crate::i18n::tr_label(label(ui))));
         scenario::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
@@ -540,14 +647,68 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
     })
 }
 
+/// Shared slider with a compact mixed-aware value editor at the right.
+/// The caller owns commit timing, just as for `mixed_scalar_field`.
+pub(crate) fn mixed_slider(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>, mixed: Option<&str>) -> Response {
+    let t = Tokens::get();
+    ui.horizontal(|ui| {
+        let width = if mixed.is_some() { t.space_24 * 2.0 } else { t.space_24 + t.space_12 };
+        let track = ui
+            .allocate_ui(vec2((ui.available_width() - width - t.space_8).max(0.0), row_height()), |ui| {
+                slider(ui, value, range.clone(), Slider { show_value: false, workspace_accent: true, ..Default::default() })
+            })
+            .inner;
+        let field = ui
+            .allocate_ui(vec2(width, row_height()), |ui| {
+                ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                ui.style_mut().text_styles.insert(egui::TextStyle::Monospace, egui::FontId::monospace(t.font_label));
+                scalar_field_impl(ui, value, range, mixed, true)
+            })
+            .inner;
+        field.union(track)
+    })
+    .inner
+}
+
 /// Locale-aware bounded scalar field, used for dimensionless material properties.
 pub(crate) fn scalar_field(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>) -> Response {
+    mixed_scalar_field(ui, value, range, None)
+}
+
+/// A bounded scalar with a translated mixed-value placeholder. Typing or dragging
+/// replaces the placeholder; commit ownership remains with the caller.
+pub(crate) fn mixed_scalar_field(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>, mixed: Option<&str>) -> Response {
+    scalar_field_impl(ui, value, range, mixed, false)
+}
+
+fn scalar_field_impl(ui: &mut Ui, value: &mut f64, range: std::ops::RangeInclusive<f64>, mixed: Option<&str>, plain: bool) -> Response {
     ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
-    let response = ui.add_sized(
-        vec2(dimension(ui.available_width()), row_height()),
-        egui::DragValue::new(value).range(range).speed(0.01).custom_parser(crate::prefs::parse_number),
-    );
-    Tokens::get().input_bevel(ui, &response);
+    let before = *value;
+    let parsed = std::cell::Cell::new(false);
+    let field = egui::DragValue::new(value).range(range).speed(0.01).custom_parser(|text| {
+        let value = crate::prefs::parse_number(text);
+        parsed.set(value.is_some());
+        value
+    });
+    let field = if plain { field.fixed_decimals(2) } else { field };
+    let mut response = ui.add_sized(vec2(dimension(ui.available_width()), row_height()), |ui: &mut Ui| {
+        let field = if let Some(mixed) = mixed.filter(|_| !ui.ctx().is_being_dragged(ui.next_auto_id())) {
+            field.custom_formatter(move |_, _| mixed.to_owned())
+        } else {
+            field
+        };
+        ui.add(field)
+    });
+    // Entering the first target's existing number still sets every mixed target.
+    // Merely focusing and leaving the translated placeholder is inert.
+    if mixed.is_some() {
+        response.flags.set(egui::response::Flags::CHANGED, *value != before || parsed.get());
+    }
+    if !plain {
+        Tokens::get().input_bevel(ui, &response);
+    }
     scenario::publish_target(&format!("dialog:scalar:{}", label(ui)), response.rect);
     response
 }
@@ -640,6 +801,54 @@ pub(crate) fn number_field<T: egui::emath::Numeric>(
     });
     super::layout::publish_geometry(ui, &response);
     response
+}
+
+/// Three bounded numeric components sharing the available control-column width.
+/// Each field retains the standard parser, bevel and focus behaviour. Tokens:
+/// number_field typography/chrome and the enclosing row's spacing.
+pub(crate) fn vector3_field(ui: &mut Ui, values: &mut [f64; 3], range: std::ops::RangeInclusive<f64>, suffix: &str) -> bool {
+    let mut changed = false;
+    let label = super::layout::label(ui).to_owned();
+    ui.columns(3, |columns| {
+        for (axis, (ui, value)) in columns.iter_mut().zip(values).enumerate() {
+            let width = ui.available_width().max(0.0);
+            ui.spacing_mut().text_edit_width = width;
+            ui.spacing_mut().interact_size.x = width;
+            ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
+            let response = number_field(ui, value, range.clone(), 0.01, suffix);
+            scenario::publish_target(&format!("dialog:vector:{label}:{axis}"), response.rect);
+            changed |= response.changed();
+        }
+    });
+    changed
+}
+
+/// Equal-width numeric cells within a shared `row`. Returns each field's response in order.
+/// Tokens: `control_height`, inherited item spacing and number-field tokens.
+pub(crate) fn number_fields<T: egui::emath::Numeric>(
+    ui: &mut Ui,
+    values: &mut [T],
+    range: std::ops::RangeInclusive<T>,
+    speed: f64,
+    suffix: &str,
+) -> Vec<Response> {
+    let gap = ui.spacing().item_spacing.x;
+    let width = dimension(ui.available_width() - gap * values.len().saturating_sub(1) as f32) / values.len().max(1) as f32;
+    values
+        .iter_mut()
+        .enumerate()
+        .map(|(index, value)| {
+            ui.push_id(index, |ui| {
+                ui.allocate_ui_with_layout(vec2(width, row_height()), egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                    ui.spacing_mut().text_edit_width = width;
+                    ui.spacing_mut().interact_size.x = width;
+                    number_field(ui, value, range.clone(), speed, suffix)
+                })
+                .inner
+            })
+            .inner
+        })
+        .collect()
 }
 
 /// Growing plain-text message editor; its parent owns scrolling and Enter routing.

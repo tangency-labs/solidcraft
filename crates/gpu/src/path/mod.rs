@@ -42,7 +42,7 @@ const SHADER: &str = concat!(
     include_str!("aging.wgsl")
 );
 const MAX_TRIANGLES: u64 = MAX_GPU_PATH_TRIANGLES;
-const PARAMETER_BYTES: usize = 1168;
+const PARAMETER_BYTES: usize = 1184;
 // Eight u32 words: count low, pixel, bounce, sample, code, count high, first-writer flag, spare.
 const FAILURE_BYTES: u64 = 32;
 // A path that cannot classify its glass medium ends there. Isolated paths at the
@@ -319,6 +319,12 @@ fn admission(scene: &ProductScene, request: &ImageRequest, options: JobOptions) 
         return Err(JobError::new(ErrorCode::InvalidRequest, "GPU path rendering does not accept CPU raytrace options"));
     }
     options.validate()?;
+    if request.studio_weights.is_some_and(|weights| weights.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "invalid studio visibility weights"));
+    }
+    if request.studio_weights.is_some() && (options.lighting.is_some() || request.environment.is_some()) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "studio weights require implicit studio lighting"));
+    }
     options.aging.validate_scene(scene)?;
     if options.finishing.photographic.active() && request.transparent_background {
         return Err(JobError::new(ErrorCode::InvalidRequest, "photographic effects require opaque output; choose it explicitly"));
@@ -751,6 +757,10 @@ impl Task {
             for value in layer {
                 bytes.extend_from_slice(&value.to_le_bytes());
             }
+        }
+        let weights = self.request.studio_weights.unwrap_or([1.0; 3]);
+        for value in [weights[0] as f32, weights[1] as f32, weights[2] as f32, 0.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
         }
         bytes
     }

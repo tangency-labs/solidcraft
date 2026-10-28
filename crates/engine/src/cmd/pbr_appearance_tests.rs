@@ -637,3 +637,290 @@ fn starter_names_and_ids_share_admission_before_all_overrides() {
         }
     }
 }
+
+fn chain_read(s: &mut Session, target: serde_json::Value) -> serde_json::Value {
+    s.execute("appearance.chain", &json!({"target":target})).unwrap()
+}
+
+#[test]
+fn appearance_chain_and_from_material_preserve_mass_and_all_four_steps() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"Part"})).unwrap();
+    s.execute("solid.box", &json!({"body_name":"Specimen","length":10,"width":20,"height":5})).unwrap();
+    s.execute("material.create", &json!({"name":"Substrate","density_g_cm3":2.3,"appearance":"Steel - Satin PBR"})).unwrap();
+    s.execute("material.assign", &json!({"bodies":["Specimen"],"material":"Substrate"})).unwrap();
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    let physical = s.doc.user_materials.clone();
+    let face = s.execute("model.faces", &json!({"body":"Specimen"})).unwrap()["faces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["point"][2] == 5.0)
+        .unwrap()["index"]
+        .clone();
+    let target = json!({"body":"Specimen","face":face});
+    s.execute("appearance.assign", &json!({"components":["Part"],"appearance":"ABS - Blue"})).unwrap();
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"color":"#abcdef","opacity":0.5})).unwrap();
+    s.execute("appearance.assign", &json!({"body":"Specimen","faces":[[5,10,5]],"appearance":"Copper - Clean PBR"})).unwrap();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let doc = s.doc.clone();
+    let chain = chain_read(&mut s, target.clone());
+    assert_eq!(chain["active"], "face");
+    assert_eq!(
+        chain["steps"].as_array().unwrap().iter().map(|s| s["step"].as_str().unwrap()).collect::<Vec<_>>(),
+        ["face", "body", "component", "material"]
+    );
+    assert_eq!(chain["steps"][0]["look"]["name"], "Copper - Clean PBR");
+    assert_eq!(chain["steps"][1]["look"]["opacity"], 0.5);
+    assert_eq!(chain["steps"][2]["look"]["name"], "ABS - Blue");
+    assert_eq!(chain["steps"][3]["look"]["pbr"]["metallic"], 1.0);
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    assert_eq!(chain_read(&mut s, json!({"body":"Specimen"}))["active"], "body");
+    assert_eq!(chain_read(&mut s, json!({"component":"Part"}))["active"], "component");
+    // The existing clear form walks down the same chain, one edit at a time.
+    s.execute("appearance.assign", &json!({"body":"Specimen","faces":[[6,11,5]],"color":null})).unwrap();
+    assert_eq!(chain_read(&mut s, target.clone())["active"], "body");
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"color":null})).unwrap();
+    assert_eq!(chain_read(&mut s, target.clone())["active"], "component");
+    s.execute("appearance.assign", &json!({"components":["Part"]})).unwrap();
+    for t in [target.clone(), json!({"body":"Specimen"}), json!({"component":"Part"})] {
+        assert_eq!(chain_read(&mut s, t)["active"], "material");
+    }
+    // Clearing each target independently also restores material when no lower override exists.
+    for assign in [json!({"bodies":["Specimen"]}), json!({"components":["Part"]}), json!({"body":"Specimen","faces":[[5,10,5]]})] {
+        let mut painted = assign.clone();
+        painted["appearance"] = json!("ABS - Red");
+        s.execute("appearance.assign", &painted).unwrap();
+        s.execute("appearance.assign", &assign).unwrap();
+        assert_eq!(chain_read(&mut s, target.clone())["active"], "material");
+        assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+    }
+    assert_eq!(s.doc.user_materials, physical);
+    let state = s.model.state();
+    let body = state.body("Specimen").unwrap();
+    assert_eq!(s.doc.model_face_look(body, face.as_u64().unwrap() as usize), s.doc.model_display_look(body));
+    let mut reopened = Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(chain_read(&mut reopened, target.clone()), chain_read(&mut s, target));
+}
+
+#[test]
+fn appearance_replace_is_exact_atomic_one_undo_and_survives_reopen() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"Part"})).unwrap();
+    s.execute("solid.box", &json!({"body_name":"Specimen","length":10,"width":20,"height":5})).unwrap();
+    s.execute("material.create", &json!({"name":"Substrate","density_g_cm3":2.3,"appearance":"Steel - Satin PBR"})).unwrap();
+    s.execute("material.assign", &json!({"bodies":["Specimen"],"material":"Substrate"})).unwrap();
+    s.execute(
+        "appearance.assign",
+        &json!({"bodies":["Specimen"],"components":["Part"],"body":"Specimen","faces":[[5,10,5]],"appearance":"Steel - Satin PBR"}),
+    )
+    .unwrap();
+    // Same label and color, different optical values: full equality must distinguish it.
+    let mut scalar = s.doc.appearances.bodies["Specimen"].clone();
+    scalar.pbr = None;
+    s.doc_mut().appearances.bodies.insert("Suppressed fixture".into(), scalar.clone());
+    let mass = s.execute("component.properties", &json!({})).unwrap();
+    let scene = product_scene::extract(&s).unwrap();
+    let before = s.doc.clone();
+    let history = s.undo.len();
+    let listed = s.execute("appearance.list", &json!({})).unwrap();
+    let from = listed["in_design"].as_array().unwrap().iter().find(|l| l.get("pbr").is_some()).unwrap().clone();
+    let params = json!({"from":from,"to":"Copper - Clean PBR"});
+    assert_eq!(s.execute("appearance.replace", &params).unwrap()["count"], 3);
+    assert_eq!(s.undo.len(), history + 1);
+    assert_eq!(s.doc.appearances.bodies["Suppressed fixture"], scalar);
+    assert_eq!(s.doc.user_materials, before.user_materials);
+    assert_eq!(s.doc.materials, before.materials);
+    assert_eq!(s.doc.features, before.features);
+    assert_eq!(s.doc.occurrences, before.occurrences);
+    assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
+    let after_scene = product_scene::extract(&s).unwrap();
+    assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &after_scene.meshes[0].mesh));
+    let after = s.doc.appearances.clone();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc.appearances, before.appearances);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.appearances, after);
+    let reopened = Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(reopened.doc.appearances, after);
+    let snapshot = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    assert_eq!(s.execute("appearance.replace", &params).unwrap()["count"], 0);
+    assert_eq!(s.execute("appearance.replace", &json!({"from":"Copper - Clean PBR","to":"Copper - Clean PBR"})).unwrap()["count"], 0);
+    assert!(Arc::ptr_eq(&snapshot, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+}
+
+#[test]
+fn appearance_replace_scope_deduplicates_and_does_not_expand_component_targets() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name":"Part"})).unwrap();
+    s.execute("solid.box", &json!({"body_name":"Specimen","length":10,"width":20,"height":5})).unwrap();
+    let part = s.doc.find_component("Part").unwrap();
+    let assign = json!({"bodies":["Specimen"],"components":["Part"],"body":"Specimen","faces":[[5,10,5]],"appearance":"ABS - Red"});
+    s.execute("appearance.assign", &assign).unwrap();
+    let history = s.undo.len();
+    assert_eq!(
+        s.execute(
+            "appearance.replace",
+            &json!({"from":"ABS - Red","to":{"color":"#123456","opacity":0.4},"scope":{"bodies":["Specimen","Specimen"]}})
+        )
+        .unwrap()["count"],
+        2
+    );
+    assert_eq!(s.undo.len(), history + 1);
+    assert_eq!(s.doc.appearances.components[&part].name, "ABS - Red");
+    assert_eq!(
+        s.execute("appearance.replace", &json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"components":[part,"Part",part.to_string()]}}))
+            .unwrap()["count"],
+        1
+    );
+    assert_eq!(s.doc.appearances.bodies["Specimen"].color, [18, 52, 86]);
+    // Empty scope is an explicit no-op, and a no-op preserves an existing redo entry.
+    s.execute("edit.undo", &json!({})).unwrap();
+    let doc = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    assert_eq!(s.execute("appearance.replace", &json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"bodies":[]}})).unwrap()["count"], 0);
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+}
+
+#[test]
+fn appearance_chain_and_replace_hostile_inputs_refuse_atomically() {
+    let mut s = fixture();
+    s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"ABS - Red"})).unwrap();
+    let doc = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.revision);
+    for target in [
+        json!({}),
+        json!({"body":"missing"}),
+        json!({"component":"missing"}),
+        json!({"component":0}),
+        json!({"body":"Specimen","face":u64::MAX}),
+        json!({"body":"Specimen","face":-1}),
+        json!({"body":"Specimen","component":1}),
+        json!({"body":["Specimen"]}),
+        json!({"body":"Specimen","face":null}),
+    ] {
+        assert!(s.execute("appearance.chain", &json!({"target":target})).is_err());
+    }
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        // JSON has no nonfinite numbers: serde_json encodes these as null.
+        for look in [
+            json!({"color":[value,0,0]}),
+            json!({"color":"#ffffff","opacity":value}),
+            json!({"color":"#ffffff","pbr":{"metallic":value,"roughness":0.3,"dielectric_ior":1.5}}),
+        ] {
+            for field in ["from", "to"] {
+                let mut params = json!({"from":"ABS - Red","to":"ABS - Blue"});
+                params[field] = look.clone();
+                assert!(s.execute("appearance.replace", &params).is_err());
+            }
+        }
+    }
+    for params in [
+        json!({"from":"ABS - Red","to":null}),
+        json!({"from":"unknown","to":"ABS - Blue"}),
+        json!({"from":"ABS - Red","to":{"color":[256,0,0]}}),
+        json!({"from":"ABS - Red","to":{"appearance":"ABS - Blue","opacity":2}}),
+        json!({"from":"ABS - Red","to":{"appearance":"starter.glass.clear-soda-lime","color":"#ffffff","pbr":null}}),
+        json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"bodies":["Specimen","missing"]}}),
+        json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"components":["missing"]}}),
+        json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"bodies":["Specimen"],"components":[false]}}),
+        json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"bodies":vec!["Specimen";10_001]}}),
+        json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"bodies":vec!["Specimen";5001],"components":vec!["missing";5000]}}),
+        json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"bodies":"Specimen"}}),
+        json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"faces":[]}}),
+    ] {
+        assert!(s.execute("appearance.replace", &params).is_err(), "{params}");
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    }
+}
+
+#[test]
+fn appearance_chain_and_replace_process_ten_thousand_entries_with_bounded_output() {
+    let mut s = fixture();
+    let look = crate::doc::appearance::library("ABS - Red").unwrap();
+    for i in 0..10_000 {
+        // Suppressed definition overrides are still uses and must be replaced.
+        s.doc_mut().appearances.bodies.insert(format!("Dormant {i}"), look.clone());
+    }
+    let chain = chain_read(&mut s, json!({"body":"Specimen"}));
+    assert_eq!(chain["steps"].as_array().unwrap().len(), 4);
+    assert!(chain["active"].is_null());
+    assert_eq!(s.execute("appearance.replace", &json!({"from":"ABS - Red","to":"ABS - Blue"})).unwrap(), json!({"count":10_000}));
+    assert!(s.doc.appearances.bodies.values().all(|l| l.name == "ABS - Blue"));
+    assert_eq!(
+        s.execute("appearance.replace", &json!({"from":"ABS - Blue","to":"ABS - Red","scope":{"bodies":vec!["Specimen";10_000]}})).unwrap()["count"],
+        0
+    );
+}
+
+#[test]
+fn appearance_gestures_copy_paste_preserve_full_resolved_look_and_history() {
+    let mut s = fixture();
+    s.execute(
+        "appearance.assign",
+        &json!({"body":"Specimen","faces":[[5,10,5]],"name":"Sampled","color":"#345678","pbr":{"metallic":0.2,"roughness":0.3,"dielectric_ior":1.6}}),
+    )
+    .unwrap();
+    let face = s.execute("model.faces", &json!({"body":"Specimen"})).unwrap()["faces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["point"][2].as_f64() == Some(5.0))
+        .unwrap()["index"]
+        .clone();
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let target = json!({"body":"Specimen","face":face});
+    let sampled = s.execute("appearance.pick_up", &json!({"target":target})).unwrap();
+    assert_eq!(sampled["look"]["name"], "Sampled");
+    assert_eq!(s.execute("appearance.copy", &json!({"target":target})).unwrap(), sampled);
+    s.execute("appearance.paint", &sampled["look"]).unwrap();
+    assert!(Arc::ptr_eq(&before, &s.doc));
+    assert_eq!(s.undo.len(), undo);
+    s.execute("appearance.paste", &json!({"bodies":["Specimen"]})).unwrap();
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(serde_json::to_value(&s.doc.appearances.bodies["Specimen"]).unwrap()["pbr"], sampled["look"]["pbr"]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc.to_json(), before.to_json());
+    let document = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len());
+    for (id, params) in [
+        ("appearance.pick_up", json!({"target":{"body":"missing"}})),
+        ("appearance.copy", json!({"target":{"body":"Specimen","face":999999}})),
+        ("appearance.paste", json!({"bodies":["Specimen","missing"]})),
+        ("appearance.paint", json!({"appearance":"starter.glass.clear-soda-lime"})),
+    ] {
+        assert!(s.execute(id, &params).is_err(), "{id}");
+        assert!(Arc::ptr_eq(&document, &s.doc));
+        assert_eq!((s.undo.len(), s.redo.len()), history);
+    }
+}
+
+#[test]
+fn appearance_gestures_favorite_is_a_validated_transient_request() {
+    let mut s = fixture();
+    let before = s.doc.clone();
+    let state = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    for favorite in [true, false] {
+        let reply = s.execute("appearance.favorite", &json!({"look":{"appearance":"Copper"},"favorite":favorite})).unwrap();
+        assert_eq!(reply["look"]["name"], "Copper");
+        assert_eq!(reply["favorite"], favorite);
+    }
+    for params in [
+        json!(null),
+        json!([]),
+        json!({}),
+        json!({"look":{},"favorite":true}),
+        json!({"look":{"color":"#123456"},"favorite":"true"}),
+        json!({"look":{"color":"#123456"},"favorite":true,"extra":1}),
+    ] {
+        assert!(s.execute("appearance.favorite", &params).is_err());
+    }
+    assert!(Arc::ptr_eq(&before, &s.doc));
+    assert_eq!((s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()), state);
+}

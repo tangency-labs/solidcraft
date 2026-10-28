@@ -1307,8 +1307,6 @@
   "prefs.saving": "자동 저장 및 복구",
   "prefs.scale_note": "창에서 Ctrl + / Ctrl −로도 조절합니다. 버튼은 100%에서 28 px입니다.",
   "prefs.scale_text": "배율 및 텍스트",
-  "prefs.search": "설정 검색",
-  "prefs.search_empty": "일치하는 설정이 없습니다",
   "prefs.select": "선택",
   "prefs.select_one_item": "항목 하나 선택",
   "prefs.selecting": "선택",

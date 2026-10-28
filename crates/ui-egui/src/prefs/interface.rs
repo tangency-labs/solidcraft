@@ -159,16 +159,6 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         let check = setting::view_confirm_corner(app, ui).on_hover_text(app.tr("prefs.view_confirm_corner_note"));
                         crate::scenario::publish_target("prefs:view_confirm_corner", check.rect);
                     });
-                    ui_kit::row(ui, app.tr("prefs.bodies_folders"), |ui| {
-                        let modes = BodiesFolders::ALL;
-                        let labels: Vec<_> = modes.iter().map(|m| app.tr(m.label_id())).collect();
-                        let mut selected = modes.iter().position(|m| *m == app.preferences.browser_bodies_folders).unwrap_or(0);
-                        if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { proportional: true, compact: true, ..Default::default() })
-                            && let Some(mode) = modes.get(selected)
-                        {
-                            app.preferences.browser_bodies_folders = *mode;
-                        }
-                    });
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));
                     ui_kit::text(ui, app.tr("prefs.history_sketches_note"), ui_kit::Text::Hint("history_sketches"));
                     ui_kit::LayoutPreview {

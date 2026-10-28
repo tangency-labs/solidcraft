@@ -1407,8 +1407,6 @@
   "prefs.minutes_suffix": " min",
   "prefs.origin_plane_names": "Namen der Ursprungsebenen",
   "prefs.origin_plane_names_note": "Namen in Browser, Dialogen und Listen. {top} ist XY, {front} ist XZ und {right} ist YZ, mit Z nach oben. Befehle, Skripte und gespeicherte Konstruktionen behalten XY, XZ und YZ.",
-  "prefs.search": "Einstellungen suchen",
-  "prefs.search_empty": "Keine passenden Einstellungen",
   "prefs.theme_follow": "Einer Designdatei folgen",
   "prefs.theme_follow_error": "Nicht angewendet: {error}. Das letzte gültige Design bleibt aktiv.",
   "prefs.theme_follow_launch": "Nur für diesen Start (--theme-file); wird neu geladen, sobald ein anderes Werkzeug die Datei überschreibt.",

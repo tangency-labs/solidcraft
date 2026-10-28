@@ -1,0 +1,74 @@
+{
+  "en": {
+    "render.shots_camera_changed": "Camera changed since this shot was saved",
+    "render.shots_name_help": "Enter a unique name for the current shot.",
+    "render.shots_no_result": "No render yet",
+    "render.shots_result": "Render {number} · {width} × {height}",
+    "render.shots_revert": "Revert",
+    "render.shots_save": "Save Shot",
+    "render.shots_update": "Update shot"
+  },
+  "de": {
+    "render.shots_camera_changed": "Die Kamera wurde seit dem Speichern dieser Aufnahme geändert",
+    "render.shots_name_help": "Geben Sie einen eindeutigen Namen für die aktuelle Aufnahme ein.",
+    "render.shots_no_result": "Noch kein Renderbild",
+    "render.shots_result": "Rendering {number} · {width} × {height}",
+    "render.shots_revert": "Zurücksetzen",
+    "render.shots_save": "Aufnahme speichern",
+    "render.shots_update": "Aufnahme aktualisieren"
+  },
+  "ja": {
+    "render.shots_camera_changed": "このショットの保存後にカメラが変更されました",
+    "render.shots_name_help": "現在のショットに一意の名前を入力してください。",
+    "render.shots_no_result": "レンダリング結果なし",
+    "render.shots_result": "レンダー {number} · {width} × {height}",
+    "render.shots_revert": "元に戻す",
+    "render.shots_save": "ショットを保存",
+    "render.shots_update": "ショットを更新"
+  },
+  "zh": {
+    "render.shots_camera_changed": "相机已在此镜头保存后发生变化",
+    "render.shots_name_help": "请输入当前镜头的唯一名称。",
+    "render.shots_no_result": "尚无渲染结果",
+    "render.shots_result": "渲染 {number} · {width} × {height}",
+    "render.shots_revert": "还原",
+    "render.shots_save": "保存镜头",
+    "render.shots_update": "更新镜头"
+  },
+  "ko": {
+    "render.shots_camera_changed": "이 샷을 저장한 후 카메라가 변경되었습니다",
+    "render.shots_name_help": "현재 샷의 고유한 이름을 입력하세요.",
+    "render.shots_no_result": "렌더링 결과 없음",
+    "render.shots_result": "렌더 {number} · {width} × {height}",
+    "render.shots_revert": "되돌리기",
+    "render.shots_save": "샷 저장",
+    "render.shots_update": "샷 업데이트"
+  },
+  "ar": {
+    "render.shots_camera_changed": "تغيّرت الكاميرا منذ حفظ هذه اللقطة",
+    "render.shots_name_help": "أدخل اسمًا فريدًا للقطة الحالية.",
+    "render.shots_no_result": "لا يوجد تصيير بعد",
+    "render.shots_result": "التصيير {number} · {width} × {height}",
+    "render.shots_revert": "استرجاع",
+    "render.shots_save": "حفظ اللقطة",
+    "render.shots_update": "تحديث اللقطة"
+  },
+  "he": {
+    "render.shots_camera_changed": "המצלמה השתנתה מאז שמירת הצילום",
+    "render.shots_name_help": "הזן שם ייחודי לצילום הנוכחי.",
+    "render.shots_no_result": "עדיין אין רינדור",
+    "render.shots_result": "רינדור {number} · {width} × {height}",
+    "render.shots_revert": "שחזר",
+    "render.shots_save": "שמור צילום",
+    "render.shots_update": "עדכן צילום"
+  },
+  "vi": {
+    "render.shots_camera_changed": "Máy ảnh đã đổi kể từ khi lưu cảnh chụp này",
+    "render.shots_name_help": "Nhập tên duy nhất cho cảnh chụp hiện tại.",
+    "render.shots_no_result": "Chưa kết xuất",
+    "render.shots_result": "Kết xuất {number} · {width} × {height}",
+    "render.shots_revert": "Hoàn nguyên",
+    "render.shots_save": "Lưu cảnh chụp",
+    "render.shots_update": "Cập nhật cảnh chụp"
+  }
+}

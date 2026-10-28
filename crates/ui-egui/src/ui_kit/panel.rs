@@ -21,6 +21,18 @@ pub(crate) fn collapsible_header(ui: &mut Ui, icon: &str, title: &str, collapsed
 }
 
 fn header_impl(ui: &mut Ui, icon: &str, title: &str, collapsed: Option<&mut bool>, closeable: bool, on_close: impl FnOnce()) {
+    header_actions(ui, icon, title, collapsed, closeable, on_close, None);
+}
+
+fn header_actions(
+    ui: &mut Ui,
+    icon: &str,
+    title: &str,
+    collapsed: Option<&mut bool>,
+    closeable: bool,
+    on_close: impl FnOnce(),
+    actions: Option<&mut dyn FnMut(&mut Ui)>,
+) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
     // Shared card chrome: 12 pt left inset, 19 pt icon, 8 pt gap and 26 pt close target.
@@ -28,7 +40,11 @@ fn header_impl(ui: &mut Ui, icon: &str, title: &str, collapsed: Option<&mut bool
         egui::pos2(rect.left() + t.space_12 + t.form_icon_size / 2.0, rect.center().y),
         vec2(t.form_icon_size, t.form_icon_size),
     );
-    crate::icons::paint_icon(ui.painter(), icon_rect, icon, 1.0);
+    if icon.is_empty() {
+        ui.painter().circle_filled(icon_rect.center(), t.space_3, crate::theme::TabAccent::current(ui.ctx()).ink);
+    } else {
+        crate::icons::paint_icon(ui.painter(), icon_rect, icon, 1.0);
+    }
     let close_rect = egui::Rect::from_center_size(
         egui::pos2((rect.right() - t.space_8 - t.form_close_size / 2.0).max(rect.left()), rect.center().y),
         vec2(t.form_close_size, t.form_close_size),
@@ -40,7 +56,15 @@ fn header_impl(ui: &mut Ui, icon: &str, title: &str, collapsed: Option<&mut bool
             on_close();
         }
     }
-    let right = if let Some(collapsed) = collapsed {
+    let right = if let Some(actions) = actions {
+        let action_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.right() - t.space_8 - t.control_height, rect.center().y),
+            vec2(t.control_height * 2.0, t.control_height),
+        );
+        let mut action_ui = ui.new_child(egui::UiBuilder::new().max_rect(action_rect));
+        actions(&mut action_ui);
+        action_rect.left() - t.space_8
+    } else if let Some(collapsed) = collapsed {
         let fold = egui::Rect::from_min_size(egui::pos2(close_rect.left() - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
         let response = super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
         scenario::publish_handle("dialog:collapse", response.rect.center());
@@ -55,7 +79,7 @@ fn header_impl(ui: &mut Ui, icon: &str, title: &str, collapsed: Option<&mut bool
     };
     let left = (icon_rect.right() + t.space_8).min(right);
     let title_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(right.max(left), rect.bottom()));
-    paint_text(ui, title_rect, title, crate::fonts::semibold(t.font_heading), t.form_ink, false);
+    paint_text(ui, title_rect, title, crate::fonts::semibold(if icon.is_empty() { t.font_label } else { t.font_heading }), t.form_ink, false);
     let title_response = ui.interact(title_rect, ui.make_persistent_id("title_text"), egui::Sense::hover());
     title_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
     scenario::publish_rect("dialog:header", rect);
@@ -180,6 +204,57 @@ impl<'a> TopHeader<'a> {
     }
 }
 
+/// Selection editor chrome, shared by floating Inspectors. Returns an action for registry dispatch.
+#[derive(Clone, Copy)]
+pub(crate) enum InspectorAction {
+    Close,
+    Remove,
+}
+
+pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str) -> Option<InspectorAction> {
+    let t = Tokens::get();
+    let mut action = None;
+    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
+    let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + (t.space_16 + t.space_4), rect.center().y), vec2(t.space_14, t.space_14));
+    crate::icons::paint_ink(ui.painter(), icon_rect, icon, crate::theme::TabAccent::current(ui.ctx()).ink);
+    let close_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - (t.space_16 + t.space_4), rect.center().y),
+        vec2(t.form_close_size, t.form_close_size),
+    );
+    let close = super::icon_button_at(ui, close_rect, "close", crate::i18n::tr_label("Close"));
+    scenario::publish_target("render:appearance:close", close.rect);
+    if close.clicked() {
+        action = Some(InspectorAction::Close);
+    }
+    let more_rect = close_rect.translate(vec2(-t.control_height - t.space_4, 0.0));
+    {
+        let mut more_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_more").max_rect(more_rect));
+        let ui = &mut more_ui;
+        super::Menu::text(ui, "…", |ui| {
+            if super::MenuItem::new("render:appearance:remove", crate::i18n::tr("render.inspector_remove"), "").show(ui).clicked() {
+                action = Some(InspectorAction::Remove);
+                ui.close();
+            }
+        });
+    }
+    let badge_width = ui.painter().layout_no_wrap(kind.to_owned(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;
+    let badge = egui::Rect::from_center_size(
+        egui::pos2(more_rect.left() - t.space_8 - badge_width / 2.0, rect.center().y),
+        vec2(badge_width, t.space_16 + t.space_4),
+    );
+    {
+        let mut badge_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_kind").max_rect(badge));
+        super::workspace_chip(&mut badge_ui, kind);
+    }
+    let name = egui::Rect::from_min_max(egui::pos2(icon_rect.right() + t.space_8, rect.top()), egui::pos2(badge.left() - t.space_8, rect.bottom()));
+    paint_text(ui, name, title, crate::fonts::semibold(t.font_label), t.form_ink, false);
+    ui.interact(name, ui.make_persistent_id("inspector_title"), egui::Sense::hover())
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+    t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
+    scenario::publish_rect("dialog:header", rect);
+    action
+}
+
 /// A bounded docked or floating card. Uses form_card_width and the caller's tokenised frame.
 /// Window IDs and content scopes are retained so moving a card does not reset field focus.
 pub(crate) struct Panel<'a> {
@@ -203,6 +278,9 @@ pub(crate) struct WorkspaceOptions<'a> {
     pub icon: &'a str,
     pub bounds: egui::Rect,
     pub fill_height: bool,
+    pub editor: bool,
+    pub enabled: bool,
+    pub header_actions: Option<&'a mut dyn FnMut(&mut Ui)>,
 }
 
 pub(crate) struct FeatureOptions<'a> {
@@ -229,6 +307,21 @@ pub(crate) enum Part {
 }
 
 impl<'a> Panel<'a> {
+    /// Shared vertical dock policy: reserve room for a second card, then place it
+    /// below the measured first card with the standard container gap.
+    pub(crate) fn stack_first_bounds(mut bounds: egui::Rect) -> egui::Rect {
+        bounds.max.y = bounds.top()
+            + bounds
+                .height()
+                .min(Tokens::get().form_header_height + Tokens::get().control_height * 10.0 + Tokens::get().space_8 * 2.0)
+                .min((bounds.height() * 0.5).floor());
+        bounds
+    }
+
+    pub(crate) fn stack_next_bounds(mut bounds: egui::Rect, previous: egui::Rect) -> egui::Rect {
+        bounds.min.y = (previous.bottom() + Tokens::get().space_8).min(bounds.bottom());
+        bounds
+    }
     /// Pinned inline actions inside an existing feature/card surface. This is not
     /// a second window or painted card: the parent owns the chrome. Tokens:
     /// control_height, space_24/8; bounded row count preserves finite geometry.
@@ -241,6 +334,43 @@ impl<'a> Panel<'a> {
             .resizable(false)
             .frame(host.edge_frame(egui::Color32::TRANSPARENT))
             .show(ui, add)
+    }
+
+    /// One-row editor footer, pinned inside the shared workspace card.
+    pub(crate) fn editor_footer<R>(ui: &mut Ui, key: &'static str, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+        let t = Tokens::get();
+        let host = super::Container::new(ui.ctx(), super::Surface::Viewport);
+        host.edge(key, super::Edge::Bottom)
+            .exact_size(t.form_footer_height)
+            .resizable(false)
+            .frame(
+                host.edge_frame(t.dialog_footer)
+                    .outer_margin(egui::Margin::symmetric(-(t.space_12 as i8), 0))
+                    .inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_8 as i8)),
+            )
+            .show(ui, |ui| {
+                let band = ui.max_rect().expand2(vec2(t.space_12, t.space_8));
+                ui.painter().rect_filled(band, egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl }, t.dialog_footer);
+                t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
+                scenario::publish_rect("dialog:editor_footer", band);
+                add(ui)
+            })
+    }
+
+    /// Shared strip composition reserves actions at the right and scrolls choices at the left.
+    pub(crate) fn strip_contents(ui: &mut egui::Ui, right: impl FnOnce(&mut egui::Ui), choices: impl FnOnce(&mut egui::Ui)) {
+        ui.spacing_mut().item_spacing.x = Tokens::get().space_8;
+        ui.horizontal_centered(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                right(ui);
+                egui::ScrollArea::horizontal()
+                    .id_salt("strip_choices")
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| {
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), choices);
+                    });
+            });
+        });
     }
 
     /// Floating workspace strip using the same bottom rectangle and chrome as History.
@@ -273,9 +403,33 @@ impl<'a> Panel<'a> {
     /// rail changes its remembered width. Neither gesture changes the document.
     pub(crate) fn workspace<R>(
         ui: &mut Ui,
+        mut options: WorkspaceOptions<'_>,
+        side: &mut String,
+        width: &mut f32,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> Option<egui::InnerResponse<R>> {
+        let actions = options.header_actions.take();
+        Self::workspace_with_header(
+            ui,
+            options,
+            side,
+            width,
+            false,
+            |ui, options| {
+                header_actions(ui, options.icon, options.title, None, false, || {}, actions);
+            },
+            add,
+        )
+    }
+
+    /// Shared tree cards can place navigation in the title band and let rows own their insets.
+    pub(crate) fn workspace_with_header<R>(
+        ui: &mut Ui,
         options: WorkspaceOptions<'_>,
         side: &mut String,
         width: &mut f32,
+        tree: bool,
+        header: impl FnOnce(&mut Ui, &WorkspaceOptions<'_>),
         add: impl FnOnce(&mut Ui) -> R,
     ) -> Option<egui::InnerResponse<R>> {
         let container = super::Container::floating_card(super::Surface::Panel);
@@ -299,7 +453,13 @@ impl<'a> Panel<'a> {
         );
         let ctx = ui.ctx().clone();
         let response = container.area(egui::Id::new(options.id)).fixed_pos(rect.min).movable(false).order(egui::Order::Middle).show(&ctx, |ui| {
-            let frame = container.frame(&ctx, t.panel, if left { crate::frame::Side::Left } else { crate::frame::Side::Right }).inner_margin(0.0);
+            let frame = container
+                .frame(
+                    &ctx,
+                    if options.editor { t.dialog_body } else { t.panel },
+                    if left { crate::frame::Side::Left } else { crate::frame::Side::Right },
+                )
+                .inner_margin(0.0);
             let content = container.show_frame(ui, frame, bounds, |ui| {
                 let size = (rect.size() - frame.total_margin().sum()).max(egui::Vec2::ZERO);
                 // Allocate the bounded host once; overflowing controls scroll/clip inside a child,
@@ -307,6 +467,9 @@ impl<'a> Panel<'a> {
                 let (body, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(body).id_salt("workspace_body"));
                 let ui = &mut child;
+                if !options.enabled {
+                    ui.disable();
+                }
                 ui.set_clip_rect(ui.clip_rect().intersect(body));
                 ui.set_width(size.x);
                 ui.set_max_height(size.y);
@@ -317,9 +480,10 @@ impl<'a> Panel<'a> {
                 // persistent; their navigation lives in the separately padded body.
                 ui.spacing_mut().item_spacing.y = 0.0;
                 let band = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), header_height()));
-                let grip = ui.interact(band, ui.id().with("workspace_grip"), egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::Grab);
+                let grip_rect = if tree { egui::Rect::from_min_size(band.min, vec2(t.space_24 * 2.0 + t.space_8, band.height())) } else { band };
+                let grip = ui.interact(grip_rect, ui.id().with("workspace_grip"), egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::Grab);
                 scenario::publish_target(&format!("{}:grip", options.id), grip.rect);
-                header_impl(ui, options.icon, options.title, None, false, || {});
+                header(ui, &options);
                 scenario::publish_rect(&format!("{}:header", options.id), band);
                 if grip.dragged() {
                     let frame_nr = ui.ctx().cumulative_frame_nr();
@@ -333,10 +497,24 @@ impl<'a> Panel<'a> {
                     ui.ctx().request_repaint();
                 }
                 egui::Frame::NONE
-                    .inner_margin(t.space_12)
+                    .inner_margin(if tree {
+                        egui::Margin::symmetric(0, t.space_4 as i8)
+                    } else if options.editor {
+                        egui::Margin { left: t.space_12 as i8, right: t.space_12 as i8, top: t.space_10 as i8, bottom: 0 }
+                    } else {
+                        egui::Margin::same(if options.icon.is_empty() { t.space_10 } else { t.space_12 } as i8)
+                    })
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = t.form_gap_y;
-                        super::scope(ui, add)
+                        if tree {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                        }
+                        super::scope(ui, |ui| {
+                            if options.editor {
+                                ui.spacing_mut().item_spacing.y = t.space_8;
+                            }
+                            add(ui)
+                        })
                     })
                     .inner
             });

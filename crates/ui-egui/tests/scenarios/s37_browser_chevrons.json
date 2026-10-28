@@ -3,15 +3,6 @@
   "note": "Browser chevrons expand and collapse every kind of node (folders, components, groups, the origin, named views, document settings). Model: two components with a body each, a joint, a sketch, an offset plane, a named view."
  },
  {
-  "note": "Each component keeps its Bodies folder (Preferences › Interface › Bodies folders: Always), so that folder's chevron is checked too."
- },
- {
-  "call": "ui.prefs",
-  "params": {
-   "browser_bodies_folders": "always"
-  }
- },
- {
   "start": "component.create"
  },
  {

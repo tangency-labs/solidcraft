@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.appearance_chain": "Appearance Chain"
+  },
+  "de": {
+    "cmd.appearance_chain": "Aussehen-Herkunft"
+  },
+  "ja": {
+    "cmd.appearance_chain": "外観の由来"
+  },
+  "zh": {
+    "cmd.appearance_chain": "外观来源"
+  },
+  "ko": {
+    "cmd.appearance_chain": "외관 출처"
+  },
+  "ar": {
+    "cmd.appearance_chain": "سلسلة المظهر"
+  },
+  "he": {
+    "cmd.appearance_chain": "שרשרת מראה"
+  },
+  "vi": {
+    "cmd.appearance_chain": "Chuỗi diện mạo"
+  }
+}

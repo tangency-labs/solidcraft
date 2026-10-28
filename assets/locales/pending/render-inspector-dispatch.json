@@ -1,0 +1,22 @@
+{
+  "en": {
+    "render.dispatch.open_wear": "Open Wear",
+    "render.dispatch.wear_status": "Wear: {layers}"
+  },
+  "ja": {
+    "render.dispatch.open_wear": "ウェアを開く",
+    "render.dispatch.wear_status": "ウェア：{layers}"
+  },
+  "zh": {
+    "render.dispatch.open_wear": "打开磨损",
+    "render.dispatch.wear_status": "磨损：{layers}"
+  },
+  "de": {
+    "render.dispatch.open_wear": "Abnutzung öffnen",
+    "render.dispatch.wear_status": "Abnutzung: {layers}"
+  },
+  "ko": {
+    "render.dispatch.open_wear": "마모 열기",
+    "render.dispatch.wear_status": "마모: {layers}"
+  }
+}

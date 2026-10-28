@@ -64,6 +64,17 @@ fn icon_button_presentation(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &s
     response.on_hover_text(crate::i18n::tr_label(label))
 }
 
+/// Plain secondary text action, sharing the kit's normal hit height and typography.
+pub(crate) fn text_button(ui: &mut Ui, label: &str, enabled: bool) -> Response {
+    let t = Tokens::get();
+    let response = ui.add_enabled(
+        enabled,
+        egui::Button::new(RichText::new(label).size(t.font_label).color(t.form_ink)).frame(false).min_size(vec2(0.0, t.control_height)),
+    );
+    scenario::publish_target(&format!("dialog:action:{label}"), response.rect);
+    response
+}
+
 /// Esc cancels; unowned Enter submits only when valid. Tokens: `none`.
 pub(crate) fn keyboard(ctx: &egui::Context, ok_enabled: bool) -> Action {
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -555,6 +566,14 @@ pub(crate) fn icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: b
     icon_label_presentation(ui, crate::i18n::tr_label(label), Some(icon), enabled, false, danger, false)
 }
 
+/// Icon-only action with an accessible name and tooltip, using the shared action
+/// geometry, enabled state and optional danger ink. Tokens: icon-label action tokens.
+pub(crate) fn icon_action(ui: &mut Ui, label: &str, icon: &str, enabled: bool, danger: bool) -> Response {
+    let response = icon_label_button(ui, "", icon, enabled, danger).on_hover_text(label);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
+    response
+}
+
 /// Compact stage actions share the icon-label button's frame, typography and hit target.
 pub(super) fn icon_label_width(ui: &Ui, label: &str, icon: Option<&str>, primary: bool) -> f32 {
     let t = Tokens::get();
@@ -571,12 +590,46 @@ pub(super) fn icon_label_width(ui: &Ui, label: &str, icon: Option<&str>, primary
         + if icon.is_some() { t.space_14 + t.space_6 } else { 0.0 }
 }
 
-pub(super) fn icon_label_action(ui: &mut Ui, label: &str, icon: Option<&str>, enabled: bool, primary: bool) -> Response {
+pub(crate) fn icon_label_action(ui: &mut Ui, label: &str, icon: Option<&str>, enabled: bool, primary: bool) -> Response {
     icon_label_presentation(ui, label, icon, enabled, primary, false, false)
 }
 
 pub(crate) fn compact_icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: bool) -> Response {
     icon_label_presentation(ui, label, Some(icon), enabled, false, false, true)
+}
+
+/// A name chip and quiet actions in a selection card. Feature code supplies command data only.
+pub(crate) fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::StageAction<'_>]) -> Option<usize> {
+    let t = Tokens::get();
+    let accent = crate::theme::TabAccent::current(ui.ctx());
+    ui.spacing_mut().interact_size.y = t.control_height - t.space_2;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = t.space_2;
+        let font = crate::fonts::semibold(t.font_small);
+        let width = ui.painter().layout_no_wrap(name.into(), font.clone(), accent.ink).size().x.min(t.form_label_width) + t.space_12;
+        let (rect, name_response) = ui.allocate_exact_size(vec2(width, t.control_height - t.space_2), egui::Sense::click());
+        name_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
+        super::text::paint_text(ui, rect.shrink2(vec2(t.space_6, 0.0)), name, font, accent.ink, false);
+        scenario::publish_target("selection:name", rect);
+        let mut clicked = name_response.clicked().then_some(actions.len());
+        for (index, action) in actions.iter().enumerate() {
+            let response = ui
+                .add_enabled_ui(action.enabled, |ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(t.control_height - t.space_2, t.control_height - t.space_2), egui::Sense::hover());
+                    icon_button_colored(ui, rect, action.icon.unwrap_or("inspect"), action.label, action.primary.then_some(accent.ink))
+                })
+                .inner;
+            scenario::publish_target(&format!("selection:action:{index}"), response.rect);
+            if response.clicked() {
+                clicked = Some(index);
+            }
+            if let Some(reason) = action.reason {
+                response.on_disabled_hover_text(reason);
+            }
+        }
+        clicked
+    })
+    .inner
 }
 
 fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled: bool, primary: bool, danger: bool, dense: bool) -> Response {

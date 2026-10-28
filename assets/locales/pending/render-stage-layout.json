@@ -1,0 +1,22 @@
+{
+  "en": {
+    "render.stage_layout.appearance_note": "Click to apply to the selection.",
+    "render.stage_layout.studio_note": "Click to review before applying."
+  },
+  "de": {
+    "render.stage_layout.appearance_note": "Zum Anwenden auf die Auswahl klicken.",
+    "render.stage_layout.studio_note": "Vor dem Anwenden zur Prüfung klicken."
+  },
+  "ja": {
+    "render.stage_layout.appearance_note": "クリックして選択に適用します。",
+    "render.stage_layout.studio_note": "クリックして適用前に確認します。"
+  },
+  "ko": {
+    "render.stage_layout.appearance_note": "클릭하여 선택 항목에 적용합니다.",
+    "render.stage_layout.studio_note": "클릭하여 적용 전에 검토하세요."
+  },
+  "zh": {
+    "render.stage_layout.appearance_note": "点击应用到所选对象。",
+    "render.stage_layout.studio_note": "点击以在应用前检查。"
+  }
+}

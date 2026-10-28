@@ -33,8 +33,8 @@ pub(crate) struct NavCaps {
 impl NavCaps {
     /// The modelling viewport.
     pub const MODEL: NavCaps = NavCaps { orbit: true, pick: true };
-    /// The Render workspace's product preview: the same navigation, nothing to select.
-    pub const RENDER: NavCaps = NavCaps { orbit: true, pick: false };
+    /// The Render workspace's product preview: shared navigation and product picking.
+    pub const RENDER: NavCaps = NavCaps { orbit: true, pick: true };
 }
 
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
@@ -290,7 +290,9 @@ pub(crate) fn modifier_motion(
         && app.viewport.point_drag.is_none()
         && app.viewport.text_drag.is_none()
         && app.viewport.boxsel.is_none()
-        && !(picking && hover.is_some_and(|p| app.viewport.rect.is_some_and(|rect| crate::canvas::owns_pointer(app, &projection(app, rect), p))))
+        && !(picking
+            && !crate::render_workspace::active(app)
+            && hover.is_some_and(|p| app.viewport.rect.is_some_and(|rect| crate::canvas::owns_pointer(app, &projection(app, rect), p))))
         && !hover.is_some_and(|p| app.viewport.layout.as_ref().is_some_and(|l| l.navigation.contains(p)));
     let next = crate::prefs::nav_preset(&app.preferences.nav).motion_mode(mods).zip(hover.filter(|p| owns && p.is_finite()));
     let previous = app.viewport.modifier_nav;
@@ -569,7 +571,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                         return true;
                     }
                     let proj = projection(app, rect);
-                    pick(app, &proj, p).is_empty() && crate::dim_view::hit(p).is_none() && crate::sketch_tools::glyph_at(p).is_none()
+                    pick(app, &proj, p).is_empty()
+                        && (crate::render_workspace::active(app) || (crate::dim_view::hit(p).is_none() && crate::sketch_tools::glyph_at(p).is_none()))
                 })
         };
         let openscad_orbit =
