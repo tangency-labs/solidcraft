@@ -1124,13 +1124,19 @@ impl Body {
         Ok(crossed)
     }
 
-    /// Faces with no triangles in a coarse mesh (the mesher failed or gave up).
+    /// Faces with no triangles in a coarse mesh (the mesher failed or gave up), counted on the
+    /// mesh's plan: the mesh itself is not made.
     pub fn unmeshed_faces(&self) -> usize {
         if self.is_mesh() {
             return 0;
         }
-        let Ok(m) = self.mesh(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
-        self.faces_without_triangles(&m)
+        // A placed copy shows its original's mesh (`Body::mesh`).
+        let meshed = match self.display_of.as_deref() {
+            Some((shared, m)) if brep::placement::Rigid::of_matrix(m).is_some() => &shared.original,
+            _ => self,
+        };
+        let Ok(plan) = meshed.mesh_plan(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
+        plan.faces_with_triangles(self.face_count()).iter().filter(|h| !**h).count()
     }
 
     /// Faces of the body with no triangles in its mesh `m` (left out by the mesher).

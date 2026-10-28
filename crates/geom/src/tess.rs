@@ -70,6 +70,13 @@ pub struct FacePlan {
     pub triangles: Vec<[u32; 3]>,
 }
 
+impl FacePlan {
+    /// Triangle `t` is on this face's own nodes (the evaluated mesh keeps only those).
+    fn has_nodes(&self, t: &[u32; 3]) -> bool {
+        t.iter().all(|&i| (i as usize) < self.uv.len())
+    }
+}
+
 /// A body's display tessellation, ready to evaluate.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TessPlan {
@@ -98,9 +105,8 @@ impl TessPlan {
                 out.positions.push(p);
                 out.normals.push(if f.flip { -n } else { n });
             }
-            let n = f.uv.len();
             for t in &f.triangles {
-                if t.iter().all(|&i| (i as usize) < n) {
+                if f.has_nodes(t) {
                     let at = |i: u32| u32::try_from(base + i as usize).unwrap_or(u32::MAX);
                     out.triangles.push([at(t[0]), at(t[1]), at(t[2])]);
                     out.tri_face.push(f.face);
@@ -110,6 +116,20 @@ impl TessPlan {
         out.edges = self.edges.clone();
         out.edge_faces = self.edge_faces.clone();
         out
+    }
+
+    /// Which of the body's `faces` faces have triangles in [`TessPlan::evaluate`]'s mesh,
+    /// without evaluating it.
+    pub fn faces_with_triangles(&self, faces: usize) -> Vec<bool> {
+        let mut has = vec![false; faces];
+        for f in &self.faces {
+            if f.triangles.iter().any(|t| f.has_nodes(t))
+                && let Some(h) = has.get_mut(f.face as usize)
+            {
+                *h = true;
+            }
+        }
+        has
     }
 
     /// Vertices across all faces.
@@ -772,5 +792,19 @@ mod tests {
         assert_eq!(m.triangles, vec![[0, 1, 2]]);
         assert_eq!(m.tri_face, vec![3]);
         assert!(m.normals.iter().all(|n| close(*n, -Vec3::Z, 1e-12)));
+        // Faces with triangles, counted without evaluating, are the faces the mesh has: not a
+        // face whose only triangle is off its nodes, nor one with none, nor one out of range.
+        let mut plan = plan;
+        let only = |face: u32, triangles: Vec<[u32; 3]>| FacePlan { face, uv: vec![[0.0, 0.0]; 3], triangles, ..Default::default() };
+        plan.faces.extend([only(0, vec![[0, 1, 9]]), only(1, vec![]), only(2, vec![[2, 1, 0]]), only(7, vec![[0, 1, 2]])]);
+        let has = plan.faces_with_triangles(5);
+        let mut evaluated = vec![false; 5];
+        for f in plan.evaluate().tri_face {
+            if let Some(h) = evaluated.get_mut(f as usize) {
+                *h = true;
+            }
+        }
+        assert_eq!(has, evaluated);
+        assert_eq!(has, vec![false, false, true, true, false]);
     }
 }
