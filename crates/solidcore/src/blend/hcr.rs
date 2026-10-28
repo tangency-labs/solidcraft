@@ -34,8 +34,15 @@
 //!   environment. [`Hcr::from_scene`] is the rest of `ConstructorInit` for a caller that
 //!   already holds the transformed scene and its box.
 //! - The pointer maps `m_pSilVertices`, `m_pSilEdges` and `m_pBackFacingEdges` are id
-//!   sets; [`Hcr::silhouette_edges`] returns the ids in ascending order (upstream
-//!   `GetAllKeys` iterates the pointer hash, whose order is not reproducible).
+//!   sets. [`Hcr::silhouette_edges`] returns the silhouette edges newest first (the
+//!   reverse of the order `ComputeSilhouettes` found them in). Upstream `GetAllKeys`
+//!   iterates the pointer hash (`std::unordered_map`, ND-2), whose order is not
+//!   reproducible; libstdc++ links a key whose bucket is empty at the front, so without
+//!   bucket collisions it yields exactly this order. The order decides which swept edge a
+//!   whole-B-rep `DoSweep` maps a silhouette vertex to (`SetHigher` keeps the first),
+//!   and with it the stitch's keep choices: ascending ids made the stitch of a box with a
+//!   wire edge fail where upstream succeeds (`sweep.topology_sweep`
+//!   `nm_box_linear_z_stitch`).
 //! - The traversal mark of `ComputeGlobalVisibility` (`SmNewMarkAndLock`, `Mark`,
 //!   `IsMarked`) is a set of marked edges owned by the call: a freshly advanced mark
 //!   marks nothing. [`Hcr::compute_edge_visibility`] takes that set.
@@ -594,6 +601,8 @@ pub struct Hcr {
     sil_edge_tree: Tree<EdgeId>,
     sil_vertices: BTreeSet<VertexId>,
     sil_edges: BTreeSet<EdgeId>,
+    /// `sil_edges` in the order they were found (first insertion of each).
+    sil_edge_order: Vec<EdgeId>,
     back_facing_edges: BTreeSet<EdgeId>,
     visible_curves: Vec<Curve>,
     invisible_curves: Vec<Curve>,
@@ -692,6 +701,7 @@ impl Hcr {
             sil_edge_tree: Tree::new_spatial(&proj_bbox),
             sil_vertices: BTreeSet::new(),
             sil_edges: BTreeSet::new(),
+            sil_edge_order: Vec::new(),
             back_facing_edges: BTreeSet::new(),
             visible_curves: Vec::new(),
             invisible_curves: Vec::new(),
@@ -800,10 +810,18 @@ impl Hcr {
         self.sil_vertices.iter().copied().collect()
     }
 
-    /// The silhouette edges found so far, in ascending id order (`GetSilhouetteEdges`).
+    /// The silhouette edges found so far, newest first (`GetSilhouetteEdges`; see the
+    /// module deviations for the order).
     #[must_use]
     pub fn silhouette_edges(&self) -> Vec<EdgeId> {
-        self.sil_edges.iter().copied().collect()
+        self.sil_edge_order.iter().rev().copied().collect()
+    }
+
+    /// Adds `e` to `m_pSilEdges` (a key already present keeps its place).
+    fn insert_silhouette_edge(&mut self, e: EdgeId) {
+        if self.sil_edges.insert(e) {
+            self.sil_edge_order.push(e);
+        }
     }
 
     // ---- visibility -------------------------------------------------------------------
@@ -1092,7 +1110,7 @@ impl Hcr {
         let e_box = self.edge_box(k, e)?;
 
         // add edge to m_pSilEdges and m_pSilEdgeTree
-        self.sil_edges.insert(e);
+        self.insert_silhouette_edge(e);
         ignore_status(self.sil_edge_tree.add_to_spatial_tree(
             &e_box,
             Some(e),
@@ -1194,7 +1212,7 @@ impl Hcr {
                 let p1 = self.scene.vertex(v1)?.point;
                 let p2 = self.scene.vertex(v2)?.point;
                 let e_box = self.edge_box(k, e)?;
-                self.sil_edges.insert(e);
+                self.insert_silhouette_edge(e);
                 ignore_status(self.sil_edge_tree.add_to_spatial_tree(
                     &e_box,
                     Some(e),

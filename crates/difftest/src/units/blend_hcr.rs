@@ -527,7 +527,9 @@ fn run_rust(i: &Inputs, r: &Resolved, scene: Brep, scene_box: Extent3d) -> Resul
             }
         }
         OpIn::SilhouetteEdges => {
-            let edges = h.silhouette_edges();
+            // sorted, as the shim's put_sorted (the pointer-hash order is not compared)
+            let mut edges = h.silhouette_edges();
+            edges.sort_unstable();
             rec.push(edges.len() as f64);
             rec.extend(edges.iter().map(|e| f64::from(e.index())));
         }
