@@ -1,0 +1,29 @@
+{
+  "en": {
+    "End of Jog": "End of Jog",
+    "Jog Line": "Jog Line",
+    "Measure": "Measure",
+    "Middle of Jog": "Middle of Jog",
+    "Offset": "Offset",
+    "Start of Jog": "Start of Jog",
+    "cmd.sheet_jog": "Jog"
+  },
+  "ja": {
+    "End of Jog": "ジョグの終点",
+    "Jog Line": "ジョグ線",
+    "Measure": "測定基準",
+    "Middle of Jog": "ジョグの中央",
+    "Offset": "オフセット",
+    "Start of Jog": "ジョグの始点",
+    "cmd.sheet_jog": "ジョグ"
+  },
+  "zh": {
+    "End of Jog": "错位终点",
+    "Jog Line": "错位折弯线",
+    "Measure": "测量方式",
+    "Middle of Jog": "错位中点",
+    "Offset": "偏移",
+    "Start of Jog": "错位起点",
+    "cmd.sheet_jog": "错位折弯"
+  }
+}

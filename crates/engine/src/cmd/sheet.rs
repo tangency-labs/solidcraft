@@ -47,6 +47,14 @@ pub static COMMANDS: &[CommandSpec] = &[
          angle? (default 90 deg); radius? (default: rule); position?: centerline|start|end|mould (where the line sits in the bend, default centerline); \
          fixed?: [x,y,z] on the side that stays (default: the larger side); flip? (fold the other way); body?",
     ),
+    CommandSpec::new("sheet.jog", "Jog", jog).at("SHEET METAL", "CREATE").icon("jog").params(
+        "line: sketch + curve (a sketch line across a flat panel; followed when the sketch changes) or points: [[x,y,z], [x,y,z]]; \
+         offset: expr (the height of the step); measure?: outside|inside|faces (what the offset is measured between: outer face to outer face, \
+         inner face to inner face, or a face to the same face; default outside); angle? (default 90 deg, both bends); radius? (default: rule); \
+         position?: start|middle|end (where the line sits in the jog, from the line toward the side that moves; default start); \
+         fixed?: [x,y,z] on the side that stays (default: the larger side); flip? (step the other way); body? - two bends and a straight wall \
+         in one feature; an offset too small for the bends is refused with the smallest that fits",
+    ),
     CommandSpec::new("sheet.unfold", "Unfold", unfold).at("SHEET METAL", "MODIFY").icon("unfold").params("body? (default: the last sheet body) — all bends"),
     CommandSpec::new("sheet.refold", "Refold", refold).at("SHEET METAL", "MODIFY").icon("refold").params("body? (default: the last unfolded sheet)"),
     CommandSpec::new("sheet.convert", "Convert to Sheet Metal", convert)
@@ -388,8 +396,8 @@ fn hem(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
-fn fold(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "sheet.fold";
+/// The line of a fold or jog: a sketch line (`sketch` + `curve`) or two `points`.
+fn bend_line(s: &Session, p: &Value, cmd: &str) -> Result<(Option<SketchId>, Option<String>, Vec3, Vec3)> {
     let (sketch, curve, a, b) = match p.get("points") {
         Some(v) => {
             let pts = v.as_array().filter(|a| a.len() == 2).ok_or_else(|| bad(cmd, "`points` must be two points [x, y, z]"))?;
@@ -413,6 +421,12 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
     if a.dist(b) < 1e-9 {
         return Err(bad(cmd, "the fold line has no length"));
     }
+    Ok((sketch.map(SketchId), curve, a, b))
+}
+
+fn fold(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.fold";
+    let (sketch, curve, a, b) = bend_line(s, p, cmd)?;
     let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let radius = expr(p, "radius");
@@ -432,7 +446,7 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         s,
         p,
         FeatureKind::SheetFold {
-            sketch: sketch.map(SketchId),
+            sketch,
             curve,
             a: Position(a),
             b: Position(b),
@@ -477,6 +491,62 @@ fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::SheetPath { edge: Position(edge), sketch: SketchId(sketch), curves, radius, body: str_(p, "body").map(BodyName::from) },
     )
+}
+
+fn jog(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.jog";
+    let (sketch, curve, a, b) = bend_line(s, p, cmd)?;
+    let offset = req_expr(cmd, p, "offset")?;
+    check_expr(s, &offset, Kind::Length, cmd, "offset")?;
+    let measure = str_(p, "measure").unwrap_or("outside").to_ascii_lowercase();
+    if !matches!(measure.as_str(), "outside" | "inside" | "faces") {
+        return Err(bad(cmd, "`measure` must be outside, inside or faces"));
+    }
+    let angle = expr(p, "angle").unwrap_or_else(|| "90 deg".into());
+    check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
+    let radius = expr(p, "radius");
+    if let Some(r) = &radius {
+        check_expr(s, r, Kind::Length, cmd, "radius")?;
+    }
+    let position = str_(p, "position").unwrap_or("start").to_ascii_lowercase();
+    if !matches!(position.as_str(), "start" | "middle" | "end") {
+        return Err(bad(cmd, "`position` must be start, middle or end"));
+    }
+    let fixed = match p.get("fixed") {
+        Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`fixed` must be a point [x, y, z]"))?),
+        None => None,
+    };
+    let r = add_feature(
+        s,
+        p,
+        FeatureKind::SheetJog {
+            sketch,
+            curve,
+            a: Position(a),
+            b: Position(b),
+            offset,
+            measure,
+            angle,
+            radius,
+            position,
+            flip: bool_(p, "flip").unwrap_or(false),
+            fixed: fixed.map(Position),
+            body: str_(p, "body").map(|b| BodyName(b.to_string())),
+        },
+    )?;
+    // As for a fold: a new jog refuses a fixed point off the sheet (#263).
+    if let Some(f) = fixed {
+        let id = r.get("feature").and_then(Value::as_u64);
+        let off =
+            id.and_then(|id| s.model.result(id)).and_then(|res| res.warning.as_deref()).is_some_and(|w| w.contains(sheet::FOLD_FIXED_OFF_SHEET));
+        if off {
+            return Err(bad(
+                cmd,
+                format!("the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays", f.x, f.y, f.z),
+            ));
+        }
+    }
+    Ok(r)
 }
 
 fn unfold(s: &mut Session, p: &Value) -> Result<Value> {

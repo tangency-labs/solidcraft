@@ -155,6 +155,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "sheet_fold", "a": o, "b": [1, 0, 0], "angle": "fold.angle", "radius": "fold.radius", "position": "centerline"}),
         ),
         ("sheet_path", json!({"type": "sheet_path", "edge": o, "sketch": 1, "curves": ["l1"], "radius": "path.radius"})),
+        (
+            "sheet_jog",
+            json!({"type": "sheet_jog", "a": o, "b": [1, 0, 0], "offset": "jog.offset", "measure": "outside", "angle": "jog.angle", "radius": "jog.radius", "position": "start"}),
+        ),
         ("sheet_unfold", json!({"type": "sheet_unfold"})),
         ("sheet_convert", json!({"type": "sheet_convert", "body": "B", "face": o})),
         (
@@ -262,7 +266,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         "surface_loft" => json!({"sections": [{"sketch": 4}, {"sketch": 5}], "rails": [{"sketch": 6, "curves": ["l1"]}]}),
         "split_face" => json!({"body": "B", "tool": tool, "sketch": 6}),
         "emboss" => json!({"face": {"body": "B", "at": o}, "targets": ["B"]}),
-        "sheet_fold" => json!({"sketch": 7, "body": "B"}),
+        "sheet_fold" | "sheet_jog" => json!({"sketch": 7, "body": "B"}),
         "patch" => json!({"sketch": 8, "body": "B"}),
         _ => json!({}),
     };
@@ -299,7 +303,7 @@ pub(super) fn with_points(name: &str, mut v: Value) -> Value {
         }
         "emboss" => json!({"face": {"body": "B", "at": p(5.0)}}),
         "sheet_convert" => json!({"bends": [p(6.0)]}),
-        "sheet_fold" => json!({"fixed": p(7.0)}),
+        "sheet_fold" | "sheet_jog" => json!({"fixed": p(7.0)}),
         "rest" => json!({"along": [0.6, 0.8, 0.0]}),
         "align" => json!({"from_normal": [0.0, 0.0, 1.0], "to_normal": [1.0, 0.0, 0.0]}),
         "scale" => json!({"origin": p(8.0)}),

@@ -131,6 +131,7 @@ intersect	false
 intersection_curve	false
 iso_analysis	false
 iso_curve	false
+jog	false
 joint	false
 joint_origin	false
 library	false
