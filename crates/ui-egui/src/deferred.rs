@@ -11,7 +11,8 @@
 //! the features it evaluated ([`solidcraft_engine::Session::prime`]) rather than computing them
 //! again. Commands asked for meanwhile wait their turn; a marker moved again
 //! replaces the move still waiting, so a drag computes where it ends rather than every slot it
-//! crossed.
+//! crossed. A parameter changed in the Parameters dialog and a configuration activated compute
+//! the same way, and the window says which feature the evaluation has reached.
 //!
 //! A delete first checks what it takes with it and what it would make fail (#2678): the
 //! timeline's Delete asks `timeline.dependents`, Delete on the selection runs `selection.delete`
@@ -30,6 +31,8 @@ pub struct Deferred {
     evaluated: Option<Option<solidcraft_engine::Evaluated>>,
     /// When it started (ms).
     pub(crate) started: f64,
+    /// How far its evaluation is.
+    pub(crate) progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
     command: (String, Value),
     /// The design's revision it was computed for: a design changed meanwhile computes it again.
     revision: u64,
@@ -252,11 +255,18 @@ impl SolveApp {
         }
     }
 
+    /// The feature the command computing off the window thread has reached and the timeline's
+    /// length, once its evaluation has started.
+    pub fn computing_feature(&self) -> Option<(usize, usize)> {
+        let (done, total) = self.deferred.as_ref()?.progress.features();
+        (total > 0).then(|| ((done + 1).min(total), total))
+    }
+
     /// Start evaluating a command ahead. `None` when it should just run: not asked for
     /// ([`SolveApp::apply_off_thread`]), a file operation in progress, no threads (the web), or
     /// done within the wait.
     #[cfg(not(target_arch = "wasm32"))]
-    fn begin_deferred(&self, id: &str, params: &Value) -> Start {
+    fn begin_deferred(&mut self, id: &str, params: &Value) -> Start {
         let Some(wait) = self.apply_off_thread else { return Start::Now(None, None) };
         if self.file_load.busy() || self.file_picker.is_some() {
             return Start::Now(None, None);
@@ -265,9 +275,16 @@ impl SolveApp {
         let kept = ahead.kept();
         let command = (id.to_string(), params.clone());
         let commands = vec![command.clone()];
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        #[cfg(test)]
+        if let Some(i) = self.deferred_hold_at.take() {
+            progress.hold_at(i);
+        }
+        let watching = progress.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new().name("history".into()).spawn(move || {
-            let _ = tx.send(ahead.evaluate(&commands).ok());
+            let evaluated = solidcraft_engine::doc::progress::watch(watching, || ahead.evaluate(&commands).ok());
+            let _ = tx.send(evaluated);
         });
         if spawned.is_err() {
             return Start::Now(None, None);
@@ -281,11 +298,19 @@ impl SolveApp {
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
-        Start::Later(Deferred { done: rx, evaluated: None, started: crate::now_ms(), command, revision: self.session.revision, kept: Some(kept) })
+        Start::Later(Deferred {
+            done: rx,
+            evaluated: None,
+            started: crate::now_ms(),
+            progress,
+            command,
+            revision: self.session.revision,
+            kept: Some(kept),
+        })
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn begin_deferred(&self, _id: &str, _params: &Value) -> Start {
+    fn begin_deferred(&mut self, _id: &str, _params: &Value) -> Start {
         Start::Now(None, None)
     }
 }

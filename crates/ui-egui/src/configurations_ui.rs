@@ -115,14 +115,14 @@ pub(super) fn configurations_rows(
                             let apply = ui_kit::button(ui, crate::i18n::tr_label("Apply"), ui_kit::Button::Small);
                             crate::scenario::publish_handle(&format!("config:activate:{name}"), apply.rect.center());
                             if apply.clicked() {
-                                run(app, error, "config.activate", json!({"row":name}));
+                                *error = app.run_heavy("config.activate", json!({"row":name})).err();
                             }
                         }
                     } else {
                         let activate = ui_kit::button(ui, crate::i18n::tr_label("Activate"), ui_kit::Button::Small);
                         crate::scenario::publish_handle(&format!("config:activate:{name}"), activate.rect.center());
                         if activate.clicked() {
-                            run(app, error, "config.activate", json!({"row":name}));
+                            *error = app.run_heavy("config.activate", json!({"row":name})).err();
                         }
                     }
                 });

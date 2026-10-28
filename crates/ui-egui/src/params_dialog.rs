@@ -47,6 +47,9 @@ pub struct ParamsDialog {
     pub error: Option<String>,
     /// The expression edit to preview: (name, expression).
     pub preview: Option<(String, String)>,
+    /// Expressions applied and still computing off the window thread, by parameter name: their
+    /// rows show them until they are in.
+    pub(crate) applying: std::collections::BTreeMap<String, String>,
     /// The rows as the engine listed them at one revision of the design (#2723): listing
     /// evaluates every parameter, so it happens when the design changes, not every frame.
     listed: Option<(u64, Arc<Vec<Row>>)>,
@@ -185,6 +188,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         publish(app, ctx);
     }
     let Some(mut d) = app.params.take() else { return };
+    if app.computing_since().is_none() && app.deferred_queue.is_empty() {
+        d.applying.clear();
+    }
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let viewport = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     if !viewport.is_finite() || !viewport.is_positive() {
@@ -471,13 +477,13 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                         if selected != before
                             && let Some(unit) = UNITS.get(selected)
                         {
-                            d.error = app.run("parameters.change", json!({"name":r.name,"expression":r.expression,"unit":unit})).err();
+                            d.error = app.run_heavy("parameters.change", json!({"name":r.name,"expression":r.expression,"unit":unit})).err();
                         }
                     } else {
                         ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell);
                     }
                 });
-                let mut expression = d.editing.get(&r.name).cloned().unwrap_or_else(|| r.expression.clone());
+                let mut expression = d.editing.get(&r.name).or_else(|| d.applying.get(&r.name)).cloned().unwrap_or_else(|| r.expression.clone());
                 let live = (expression != r.expression).then(|| check(app, &expression, &r.unit));
                 let invalid = matches!(live, Some(Err(_))) || (live.is_none() && r.error.is_some());
                 row.cell(|ui| {
@@ -492,18 +498,21 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                     if response.changed() || completed {
                         d.editing.insert(r.name.clone(), expression.clone());
                     }
-                    if response.has_focus() && matches!(live, Some(Ok(_))) {
+                    if response.has_focus() && matches!(live, Some(Ok(_))) && d.editing.contains_key(&r.name) {
                         d.preview = Some((r.name.clone(), expression.clone()));
                     }
                     let entered = !completed && enter_for(ui, focused);
                     if !completed && (response.lost_focus() || entered) {
                         d.preview = None;
-                        if expression != r.expression {
+                        if expression != r.expression && d.editing.contains_key(&r.name) {
                             d.error = check(app, &expression, &r.unit)
-                                .and_then(|_| app.run("parameters.change", json!({"name":r.name,"expression":expression})))
+                                .and_then(|_| app.run_heavy("parameters.change", json!({"name":r.name,"expression":expression})))
                                 .err();
-                            if d.error.is_none() {
-                                d.editing.remove(&r.name);
+                            if d.error.is_none()
+                                && let Some(applied) = d.editing.remove(&r.name)
+                                && app.computing_since().is_some()
+                            {
+                                d.applying.insert(r.name.clone(), applied);
                             }
                         } else {
                             d.editing.remove(&r.name);

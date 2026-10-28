@@ -4668,9 +4668,7 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<
         }
     }
     if let Some(since) = app.computing_since() {
-        let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
-        let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
-        if let Some(r) = paint_toast(ui, free, text, false, true) {
+        if let Some(r) = paint_toast(ui, free, computing_text(app, since), false, true) {
             obstacles.push(r);
             crate::scenario::publish_rect("toast:computing", r);
             if app.status.is_none() {
@@ -4685,6 +4683,18 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<
     obstacles.retain(|o| Some(*o) != nav);
     shown.extend(agent_chip(app, ui, view, &obstacles));
     shown
+}
+
+/// What the computing toast says: the feature the evaluation has reached, as opening a design
+/// shows it, or, until it knows, how long it has computed since `since` (ms).
+pub(crate) fn computing_text(app: &SolveApp, since: f64) -> String {
+    match app.computing_feature() {
+        Some((at, total)) => crate::i18n::format("file_load.rebuilding", &[("done", &at.to_string()), ("total", &total.to_string())]),
+        None => {
+            let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
+            crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])
+        }
+    }
 }
 
 /// What a toast's button is for, which sets its look and where it goes: the main action first

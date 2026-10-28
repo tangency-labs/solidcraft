@@ -729,6 +729,98 @@ fn the_window_thread_run_reuses_what_was_computed_ahead() {
     }
 }
 
+/// A block whose length is the parameter `len` (60 mm), a boss on it and a hole through the
+/// boss, both placed by `len`: a change of `len` recomputes every feature. Every command
+/// computes off the window thread.
+fn block_of_len() -> Harness {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("parameters.add", json!({"name": "len", "expression": "60 mm"})).unwrap();
+    for (id, p) in [
+        ("solid.box", json!({"length": "len", "width": 20, "height": 10})),
+        ("solid.box", json!({"corner": ["len / 2", 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join"})),
+        ("solid.cylinder", json!({"base": ["len / 2 + 5", 10, -1], "axis": [0, 0, 1], "radius": 2, "height": 20, "operation": "cut"})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h
+}
+
+fn len(h: &Harness) -> Option<String> {
+    h.app.session.doc.param("len").map(|p| p.expr.clone())
+}
+
+/// The design of [`block_of_len`] with `len` at `mm`.
+fn volume_at_len(mm: f64) -> f64 {
+    mm * 200.0 + 500.0 - std::f64::consts::PI * 4.0 * 15.0
+}
+
+/// Frames until the command computing off the window thread has reached feature `at` of `total`.
+fn until_reached(h: &mut Harness, at: usize, total: usize) {
+    for _ in 0..500 {
+        if h.app.computing_feature() == Some((at, total)) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.frames(1);
+}
+
+/// Let the evaluation held by `deferred_hold_at` go on.
+fn release(h: &Harness) {
+    if let Some(job) = &h.app.deferred {
+        job.progress.hold_at(usize::MAX);
+    }
+}
+
+/// A parameter changed in the Parameters dialog computes off the window thread: the window keeps
+/// drawing, saying which feature the rebuild has reached, the dialog shows the expression being
+/// applied, and the change is in once computed.
+#[test]
+fn a_parameter_changed_in_the_dialog_computes_off_the_window_thread_saying_how_far() {
+    let mut h = block_of_len();
+    h.step(&json!({"start": "parameters.change"})).unwrap();
+    h.frames(3);
+    // The rebuild waits before the hole until the test has seen it say so.
+    h.app.deferred_hold_at = Some(2);
+    h.run(&json!([{"click": {"handle": "param:len"}}, {"key": "A", "cmd": true}, {"text": "70 mm"}, {"key": "Enter"}])).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_eq!(len(&h).as_deref(), Some("60 mm"), "the design is as it was while it computes");
+    until_reached(&mut h, 3, 3);
+    assert!(crate::scenario::rect_of("toast:computing").is_some(), "the window says it computes");
+    let since = h.app.computing_since().unwrap_or_default();
+    assert_eq!(crate::viewport::computing_text(&h.app, since), "Rebuilding feature 3 of 3");
+    let applying = h.app.params.as_ref().and_then(|d| d.applying.get("len").cloned());
+    assert_eq!(applying.as_deref(), Some("70 mm"), "the dialog shows the expression it applies");
+    release(&h);
+    until_settled(&mut h);
+    assert_eq!(len(&h).as_deref(), Some("70 mm"));
+    assert!((volume(&mut h) - volume_at_len(70.0)).abs() < 1.0);
+    assert!(h.app.params.as_ref().is_some_and(|d| d.applying.is_empty() && d.editing.is_empty()), "nothing left pending");
+    assert!(crate::scenario::rect_of("toast:computing").is_none(), "and the window no longer says it computes");
+}
+
+/// A configuration activated in the configurations table computes off the window thread too.
+#[test]
+fn a_configuration_activated_computes_off_the_window_thread() {
+    let mut h = block_of_len();
+    h.app.run("config.configure", json!({"params": ["len"]})).unwrap();
+    h.app.run("config.row", json!({"name": "Long", "values": {"len": "80 mm"}})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.app.deferred_hold_at = Some(1);
+    h.step(&json!({"click": {"handle": "config:activate:Long"}})).unwrap();
+    assert!(h.app.computing_since().is_some(), "computing");
+    assert_ne!(h.app.session.doc.configs.active.as_deref(), Some("Long"), "not active while it computes");
+    until_reached(&mut h, 2, 3);
+    release(&h);
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.configs.active.as_deref(), Some("Long"));
+    assert_eq!(len(&h).as_deref(), Some("80 mm"));
+    assert!((volume(&mut h) - volume_at_len(80.0)).abs() < 1.0);
+}
+
 fn feature_ids(h: &Harness) -> Vec<u64> {
     h.app.session.doc.features.iter().map(|f| f.id).collect()
 }
