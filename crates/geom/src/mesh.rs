@@ -600,33 +600,10 @@ impl Mesh {
         self.edges.extend(o.edges.iter().cloned());
     }
 
-    /// Number of triangles a ray crosses (for inside/outside tests on closed meshes).
+    /// Number of triangles a ray crosses (for inside/outside tests on closed meshes), each
+    /// crossing counted once ([`ray_crosses`]).
     pub fn ray_crossings(&self, o: Vec3, dir: Vec3) -> usize {
-        let mut n = 0;
-        for t in &self.triangles {
-            let Some([a, b, c]) = self.tri(t) else { continue };
-            let (e1, e2) = (b - a, c - a);
-            let p = dir.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < 1e-14 {
-                continue;
-            }
-            let inv = 1.0 / det;
-            let s = o - a;
-            let u = s.dot(p) * inv;
-            if !(0.0..1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = dir.dot(q) * inv;
-            if v < 0.0 || u + v >= 1.0 {
-                continue;
-            }
-            if e2.dot(q) * inv > 0.0 {
-                n += 1;
-            }
-        }
-        n
+        self.triangles.iter().filter_map(|t| self.tri(t)).filter(|&[a, b, c]| ray_crosses(a, b, c, o, dir)).count()
     }
 
     /// Point inside a closed mesh (majority vote of three skewed rays).
@@ -854,37 +831,35 @@ impl InsideIndex<'_> {
             return 0;
         }
         let Some(list) = g.cells.get(gx * g.n.1 + gy) else { return 0 };
-        let dir = g.dir;
-        let mut n = 0;
-        for &i in list {
-            let Some(t) = self.mesh.triangles.get(i as usize) else { continue };
-            let Some([a, b, c]) = self.mesh.tri(t) else { continue };
-            let (e1, e2) = (b - a, c - a);
-            let p = dir.cross(e2);
-            let det = e1.dot(p);
-            if det.abs() < 1e-14 {
-                continue;
-            }
-            let inv = 1.0 / det;
-            let s = o - a;
-            let u = s.dot(p) * inv;
-            if !(0.0..1.0).contains(&u) {
-                continue;
-            }
-            let q = s.cross(e1);
-            let v = dir.dot(q) * inv;
-            if v < 0.0 || u + v >= 1.0 {
-                continue;
-            }
-            if e2.dot(q) * inv > 0.0 {
-                n += 1;
-            }
-        }
-        n
+        list.iter()
+            .filter_map(|&i| self.mesh.triangles.get(i as usize))
+            .filter_map(|t| self.mesh.tri(t))
+            .filter(|&[a, b, c]| ray_crosses(a, b, c, o, g.dir))
+            .count()
     }
 
     /// Same answer as `Mesh::contains`.
     pub fn contains(&self, p: Vec3) -> bool {
         self.rays.iter().filter(|g| self.crossings(g, p) % 2 == 1).count() >= 2
     }
+}
+
+/// Whether the ray from `o` along `dir` crosses the triangle `a b c` in front of `o`. Watertight:
+/// a ray through an edge two triangles share crosses exactly one of them. Each edge's side of the
+/// ray is the signed volume `dir · ((p - o) × (q - o))`, exactly antisymmetric in floating point
+/// (swapping `p` and `q` negates every rounded term), so both triangles see one value with
+/// opposite signs; a ray exactly on the edge's line is put on one side by the edge's endpoints
+/// in lexicographic order, the same for both. A triangle the ray runs along is not crossed.
+fn ray_crosses(a: Vec3, b: Vec3, c: Vec3, o: Vec3, dir: Vec3) -> bool {
+    let side = |p: Vec3, q: Vec3| {
+        let v = dir.dot((p - o).cross(q - o));
+        if v != 0.0 { v > 0.0 } else { (p.x, p.y, p.z) < (q.x, q.y, q.z) }
+    };
+    let normal = (b - a).cross(c - a);
+    let along = dir.dot(normal);
+    if along == 0.0 || !along.is_finite() {
+        return false;
+    }
+    let s = side(a, b);
+    side(b, c) == s && side(c, a) == s && (a - o).dot(normal) / along > 0.0
 }

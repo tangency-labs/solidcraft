@@ -128,23 +128,27 @@ mod sheets {
     /// SmBrep.cpp: "spine points"), as where pieces of material touch at a corner or an outline
     /// passes a point twice. So each loop, oriented (outer counter-clockwise, holes clockwise), is
     /// split where it passes a point twice into simple loops, and each simple loop is a face of its
-    /// own; those running counter-clockwise are material, the others holes. The sheet is the
-    /// material united less the holes united (SMLib's 2D boolean, which takes touching faces).
-    /// `tol` (mm): how close a loop's passes through one point are.
+    /// own; those running counter-clockwise are material, the others holes. Each region is its
+    /// material united less its holes united (SMLib's 2D boolean, which takes touching faces), and
+    /// the sheet is the regions united: a region may lie in another's hole (the island inside a
+    /// ring), where the other's hole must not take it. `tol` (mm): how close a loop's passes
+    /// through one point are.
     pub(super) fn sheet(regions: &[Region2], tol: f64) -> Result<Brep> {
-        let (mut material, mut holes) = (Vec::new(), Vec::new());
+        let mut sheets = Vec::with_capacity(regions.len());
         for r in regions {
+            let (mut material, mut holes) = (Vec::new(), Vec::new());
             let loops = std::iter::once(r.outer.ccw()).chain(r.holes.iter().map(|h| h.ccw().reversed()));
             for piece in loops.flat_map(|lp| simple_loops(lp, tol * 10.0)) {
                 let face = face(&piece)?;
                 if piece.signed_area() > 0.0 { material.push(face) } else { holes.push(face) }
             }
+            let Some(material) = united(material)? else { continue };
+            sheets.push(match united(holes)? {
+                Some(holes) => combine(&material, &holes, BoolOp::Cut)?.ok_or_else(|| failed("sheet", "the holes take all the material"))?,
+                None => material,
+            });
         }
-        let material = united(material)?.ok_or_else(|| failed("sheet", "the regions hold no material"))?;
-        match united(holes)? {
-            Some(holes) => combine(&material, &holes, BoolOp::Cut)?.ok_or_else(|| failed("sheet", "the holes take all the material")),
-            None => Ok(material),
-        }
+        united(sheets)?.ok_or_else(|| failed("sheet", "the regions hold no material"))
     }
 
     /// A simple closed loop as one planar face.
