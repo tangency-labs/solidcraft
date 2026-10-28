@@ -345,6 +345,22 @@ A point or a curve in a sketch.
 - **Elsewhere:** sketch entity, sketch geometry, sketch element.
 - **For translators:** "entity" names both points and curves.
 
+### small icons
+
+Toolbar commands shown as unlabelled icon cells, up to three rows high, beside a panel's large
+buttons.
+
+- **In SolidCraft:** Preferences › Interface › Ribbon › Small icons (`ribbon_small_icons`) adds
+  them to the Sketch tab's panels; a command's Show Small and Show Large menu items and the Small
+  column of Customize Toolbar choose them per command, kept as `small` in the toolbar settings
+  (`DESIGN/<tab>/<command>`). The constraint gallery of the Constrain panel is shown this way by
+  default.
+- **Don't use:** compact (that is the docked workspace layout), gallery (except for the constraint
+  gallery), grid on its own.
+- **Elsewhere:** small buttons, small icons.
+- **For translators:** not the Toolbar › Icons only setting, which hides the labels of the large
+  buttons, and not the interface scale.
+
 ### standard part
 
 A ready-made component, such as a screw, nut, washer, pin or bearing, that SolidCraft builds from
@@ -407,6 +423,8 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Part | a standard part | *standard part* | `parts.*` |
 | | a body, an occurrence or the design | *body*, *occurrence*, *design* | catalogue texts that say "part" |
 | | a design property | *part number* | Design Properties |
+| Grid | the grid drawn in the viewport and sketches | grid | "Grid follows the view" (`grid_follows_view`) |
+| | icon cells beside a panel's large buttons | *small icons* | Preferences › Interface › Ribbon |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |

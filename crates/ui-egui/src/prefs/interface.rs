@@ -104,6 +104,27 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             crate::scenario::publish_handle(&format!("prefs:dialog_buttons:{key}"), at);
                         }
                     }
+                    ui_kit::row(ui, app.tr("prefs.ribbon"), |ui| {
+                        let mut selected = usize::from(app.preferences.ribbon_small_icons);
+                        if ui_kit::segmented(
+                            ui,
+                            &mut selected,
+                            &[app.tr("prefs.ribbon_standard"), app.tr("prefs.ribbon_small_icons")],
+                            Default::default(),
+                        ) {
+                            app.preferences.ribbon_small_icons = selected == 1;
+                        }
+                    });
+                    ui_kit::row(ui, app.tr("prefs.tooltips"), |ui| {
+                        ui_kit::checkbox(ui, crate::i18n::tr("prefs.tooltip_descriptions"), &mut app.preferences.ribbon_help);
+                    });
+                    ui_kit::row(ui, "", |ui| {
+                        let customize = ui_kit::button(ui, app.tr("ui.customizeToolbar"), ui_kit::Button::Normal);
+                        crate::scenario::publish_target("prefs:customize_toolbar", customize.rect);
+                        if customize.clicked() {
+                            app.toolbar_custom.customizing = true;
+                        }
+                    });
                     ui_kit::row(ui, app.tr("prefs.history"), |ui| {
                         let mut selected = if app.preferences.timeline_left { if app.preferences.timeline_under_browser { 2 } else { 1 } } else { 0 };
                         if ui_kit::segmented(

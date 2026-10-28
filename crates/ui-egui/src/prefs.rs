@@ -930,6 +930,10 @@ preference_settings! {
     sketch_tab_always: bool = false, PAGE_INTERFACE => check_id("prefs.sketch_tab_always");
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_INTERFACE;
+    /// Ribbon panels add more commands as grids of small icons beside their large buttons.
+    ribbon_small_icons: bool = false, PAGE_INTERFACE;
+    /// Ribbon tooltips show a tool's description where it has one.
+    ribbon_help: bool = true, PAGE_INTERFACE;
     /// Interface scale (1 = 100 %).
     ui_scale: f32 = 1.0, PAGE_INTERFACE, accept(0.5..=2.5);
     /// Interface font: an installed font family (or a font file), or empty for the built-in one
@@ -4499,6 +4503,8 @@ mod tests {
             ("ribbon_labels", json!(false), PAGE_INTERFACE),
             ("sketch_tab_always", json!(true), PAGE_INTERFACE),
             ("dialog_buttons", json!("top"), PAGE_INTERFACE),
+            ("ribbon_small_icons", json!(true), PAGE_INTERFACE),
+            ("ribbon_help", json!(false), PAGE_INTERFACE),
             ("timeline_left", json!(true), PAGE_INTERFACE),
             ("timeline_under_browser", json!(true), PAGE_INTERFACE),
             ("history_sketches", json!("under_feature"), PAGE_INTERFACE),
