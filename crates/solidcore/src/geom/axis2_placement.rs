@@ -21,6 +21,8 @@
 //! | [`Axis2Placement::matrix`]                    | `GetMatrix`                                           |
 //! | [`Axis2Placement::mirror_matrix`]             | `GetMirrorMatrix`                                     |
 //! | `mult_matrix` (private)                       | `sm_MultMatrix`                                       |
+//! | [`Axis2Placement::mirror_point`]              | `MirrorPoint`                                         |
+//! | [`Axis2Placement::mirror_vector`]             | `MirrorVector`                                        |
 //! | (array copy)                                  | `sm_CopyMatrix`                                       |
 //! | [`Axis2Placement::translate`]                 | `Translate`                                           |
 //! | [`Axis2Placement::rotate_about_axis`]         | `RotateAboutAxis`                                     |
@@ -268,6 +270,26 @@ impl Axis2Placement {
         let mat3 = mult_matrix(&mat2, &mat1);
         let mat1 = inv.matrix();
         mult_matrix(&mat3, &mat1)
+    }
+
+    /// The mirror image of `point` about this placement's XY plane (`MirrorPoint`):
+    /// twice the signed distance to the plane is removed along the unit normal.
+    #[must_use]
+    pub fn mirror_point(&self, point: Point3) -> Point3 {
+        let n = self.z_axis();
+        let o = self.origin;
+        // a tad faster - double the distance from the point to the mirror plane
+        let k = 2.0 * ((point.x - o.x) * n.x + (point.y - o.y) * n.y + (point.z - o.z) * n.z);
+        Point3::new(point.x - k * n.x, point.y - k * n.y, point.z - k * n.z)
+    }
+
+    /// The mirror image of `vector` about this placement's XY plane (`MirrorVector`).
+    #[must_use]
+    pub fn mirror_vector(&self, vector: Vec3) -> Vec3 {
+        let n = self.z_axis();
+        // 2 times the to-mirror-plane vector component size
+        let k = 2.0 * vector.dot(n);
+        Vec3::new(vector.x - k * n.x, vector.y - k * n.y, vector.z - k * n.z)
     }
 
     /// Post-concatenate a translation: `origin += translation` (`Translate`).
@@ -615,5 +637,33 @@ mod tests {
         assert!(p.are_coaxial(&q, 1e-5, 1.0));
         let r = Axis2Placement::new(Vec3::new(1.0, 2.0, 9.0), Vec3::Y, Vec3::X);
         assert!(p.are_coaxial(&r, 1e-9, 10.0));
+    }
+}
+
+#[cfg(test)]
+mod mirror_tests {
+    use super::*;
+
+    #[test]
+    fn mirror_point_and_vector_reflect_in_the_xy_plane() {
+        // the plane z = 2
+        let p = Axis2Placement::new(Vec3::new(0.0, 0.0, 2.0), Vec3::X, Vec3::Y);
+        assert_eq!(
+            p.mirror_point(Vec3::new(1.0, 5.0, 3.0)),
+            Vec3::new(1.0, 5.0, 1.0)
+        );
+        assert_eq!(
+            p.mirror_vector(Vec3::new(1.0, 5.0, 3.0)),
+            Vec3::new(1.0, 5.0, -3.0)
+        );
+        // agrees with the mirror matrix
+        let m = p.mirror_matrix();
+        let q = Vec3::new(0.5, -1.5, 7.0);
+        let by_matrix = Vec3::new(
+            m[0][0] * q.x + m[0][1] * q.y + m[0][2] * q.z + m[0][3],
+            m[1][0] * q.x + m[1][1] * q.y + m[1][2] * q.z + m[1][3],
+            m[2][0] * q.x + m[2][1] * q.y + m[2][2] * q.z + m[2][3],
+        );
+        assert!((p.mirror_point(q) - by_matrix).length() < 1e-12);
     }
 }

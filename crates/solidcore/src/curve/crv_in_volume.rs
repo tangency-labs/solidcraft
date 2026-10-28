@@ -499,6 +499,22 @@ impl CrvInVolume {
         })
     }
 
+    /// `CreateMirrorCurve`: a copy of this curve whose volume is mirrored about
+    /// `mirror_plane`. The parts are held by value, so the copy never shares (and the
+    /// mirror never edits) this curve's volume, which upstream does for a volume the
+    /// curve does not own.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Volume::mirror`].
+    pub fn create_mirror_curve(&self, mirror_plane: &Axis2Placement) -> Result<Self> {
+        // copy this curve
+        let mut new_curve = self.copy()?;
+        // mirror the the volume
+        new_curve.volume.mirror(mirror_plane)?;
+        Ok(new_curve)
+    }
+
     // ---- simple access --------------------------------------------------------------
 
     /// The base curve (`GetCurve`).

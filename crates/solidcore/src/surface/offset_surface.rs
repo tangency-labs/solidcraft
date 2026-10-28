@@ -708,6 +708,29 @@ impl OffsetSurface {
         Ok(sur)
     }
 
+    /// `CreateMirrorSurface`: an offset of the mirrored base (owned by the new offset)
+    /// and of the mirrored extension, if any. The distance changes sign, as the mirror
+    /// reverses the base's orientation.
+    ///
+    /// # Errors
+    ///
+    /// Those of the base's and the extension's [`Surface::create_mirror_surface`] and of
+    /// [`OffsetSurface::new`].
+    pub fn create_mirror_surface(&self, k: &Kernel, mirror_plane: &Axis2Placement) -> Result<Self> {
+        let mirror = self.surface.create_mirror_surface(k, mirror_plane)?;
+        let mut off = Self::new(k, self.offset_distance.get(), mirror, true, SS_UNKNOWN)?;
+        off.allow_extension = self.allow_extension;
+        if let Some(e) = self.with_current_extension(|e| {
+            e.map(|e| e.create_mirror_surface(k, mirror_plane))
+                .transpose()
+        })? {
+            off.extended_surface = Some(Box::new(e));
+        }
+        // This needs to be done because mirror reverses orientation of the surface.
+        off.offset_distance.set(-self.offset_distance.get());
+        Ok(off)
+    }
+
     /// `operator==`: an offset surface (`SmSurface::operator==`) with the same distance
     /// (to the scaled zero), equal base surfaces, and the same periodicity flags and
     /// singularities.

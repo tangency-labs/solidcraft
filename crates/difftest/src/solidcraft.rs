@@ -27,6 +27,7 @@ use solidcore::blend::fillet_executive::api as fillet_api;
 use solidcore::boolean::api_brep as boolean;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
@@ -38,6 +39,7 @@ use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep as sweeps;
 use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::topology::brep::mirror::mirror;
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3;
@@ -284,7 +286,7 @@ pub enum Step {
         path: Seg,
     },
     /// Reflection of `body` in the plane `normal = at`; the original is not changed, join
-    /// the two with a `union` step. `SM_API` has no mirror, so this defers (see `step_rust`).
+    /// the two with a `union` step. Runs `SmBrep::Mirror` (`SM_API` has no mirror).
     Mirror {
         /// Body written.
         id: String,
@@ -1240,20 +1242,22 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 .map_err(|e| solid(&e))?
                 .brep
         }
-        // SM_API has no mirror and no matrix transform: SmBrep::Mirror and
-        // SmBrep::Transform(double[4][4]) are SMLib-level and not ported. The nearest
-        // SM_API route, SmApiScaleByPt with a reflecting scale, is refused for any body
-        // with a circular edge (SmEllipse::Transform takes uniform scales only), and a
-        // uniform -1 scale plus a half turn leaves bodies built by booleans inside out
-        // (negative volume): SmBrep::Transform skips the FindAndSetInfiniteRegion and
-        // UV-trim rebuild that SmBrep::Mirror does. Neither is run as a mirror.
-        Step::Mirror { .. } => {
-            return Err(Run::Deferred(Deferral {
-                blocked_by: "no SM_API entry point".into(),
-                symbol: "mirror of a body (SmBrep::Mirror is not in SM_API; SmApiScaleByPt \
-                          with a reflecting scale fails or inverts boolean results)"
-                    .into(),
-            }))
+        // `SmBrep::Mirror` on a copy of the body (SMLib-level, not in SM_API: the C++
+        // reference runs it only through unit `topology.brep_mirror`).
+        Step::Mirror {
+            body, normal, at, ..
+        } => {
+            let source = take(bodies, body)?;
+            let mut mirrored = copy(k, &source, bodies.len() as u64 + 1)?;
+            // origin on the plane; Z (the mirror normal) is X x Y
+            let (o, x, y) = match normal {
+                MirrorAxis::X => ([*at, 0.0, 0.0], Vec3::Y, Vec3::Z),
+                MirrorAxis::Y => ([0.0, *at, 0.0], Vec3::Z, Vec3::X),
+                MirrorAxis::Z => ([0.0, 0.0, *at], Vec3::X, Vec3::Y),
+            };
+            let plane = Axis2Placement::new(p3(o), x, y);
+            mirror(k, &mut mirrored, &plane).map_err(|e| solid(&e))?;
+            mirrored
         }
         // `SmApiFilletEdges(body, edges, radius, SM_FILLET_CIRCULAR)` with its default
         // G1 continuity and the documented default thumbweight 1.0 (unused for circular).

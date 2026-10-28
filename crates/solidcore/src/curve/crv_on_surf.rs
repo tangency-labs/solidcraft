@@ -511,6 +511,21 @@ impl CrvOnSurf {
         Ok(c)
     }
 
+    /// `CreateMirrorCurve`: the same parameter-space curve and domain on the mirrored
+    /// surface; the new curve owns both parts (owner flag 3).
+    ///
+    /// # Errors
+    ///
+    /// Those of the surface's [`Surface::create_mirror_surface`], the UV curve's `Copy`
+    /// and of [`CrvOnSurf::new`].
+    pub fn create_mirror_curve(&self, k: &Kernel, mirror_plane: &Axis2Placement) -> Result<Self> {
+        // Create the new geometry
+        let mirror_surface = self.surface.create_mirror_surface(k, mirror_plane)?;
+        let new_uv_curve = self.uv_curve.copy(k)?;
+        // Create the new curve on mirrored geometry. It owns the curve and surf
+        Self::new(k, new_uv_curve, mirror_surface, Some(self.uv_domain), 3)
+    }
+
     // ---- simple access --------------------------------------------------------------
 
     /// The parameter-space curve (`GetUVCurve`).

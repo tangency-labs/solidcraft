@@ -1981,6 +1981,29 @@ impl BSplineSurface {
         Ok(())
     }
 
+    /// A copy mirrored about the XY plane of `mirror_plane` (`CreateMirrorSurface`):
+    /// the copy constructor's compact NURB copy (knots fixed up), its control points
+    /// transformed by the 3x3-sized mirror matrix (`N_SrfTransform`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB (upstream dereferences a null one).
+    pub fn create_mirror_surface(&self, mirror_plane: &Axis2Placement) -> Result<Self> {
+        let mut rma = RealMatrix::new(3, 3, MatrixType::Full, 3)?;
+        for (i, row) in mirror_plane.mirror_matrix().iter().enumerate() {
+            for (j, &v) in row.iter().enumerate() {
+                rma.set(i, j, v)?;
+            }
+        }
+        let mut bss = self.copy();
+        // (N_SrfTransform status ignored)
+        let _ = bss
+            .get_or_create_gw_nurb()
+            .map_err(|_| SolidError::sm_err(OP_XFORM))?
+            .transform(&rma);
+        Ok(bss)
+    }
+
     // ---- inversion --------------------------------------------------------------------
 
     /// The parameters of `point_on_surf` (which must lie on the surface within

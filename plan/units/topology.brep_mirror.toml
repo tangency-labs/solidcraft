@@ -1,0 +1,12 @@
+id = "topology.brep_mirror"
+upstream = ["source/SMLib/src/SmBrep.cpp", "source/SMLib/src/SmAxis2Placement.cpp", "source/SMLib/src/SmBSplineSurface.cpp", "source/SMLib/src/SmOffsetSurface.cpp", "source/SMLib/src/SmCrvOnSurf.cpp", "source/SMLib/src/SmCrvInVolume.cpp"]
+rust_module = "topology::brep::mirror"
+depends_on = ["curve.curve_p2", "geom.axis2_placement", "nurbs.b_spline_curve_p1", "nurbs.b_spline_surface_p1", "surface.surface_p2", "topology.brep_p1", "topology.brep_p2", "topology.brep_p5", "topology.edge", "topology.face_p1", "topology.face_p3"]
+soft_depends_on = []
+est_lines = 330
+layer = 48
+tests = []
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN: difftest 196 cases (68 fixtures: 17 upstream .smb solids x 4 planes, + 128 generated), 196 pass, 0 deferred, 0 failed, max_rel_err=0e0 (--seeds 1000: 1068/1068; --perturb: 196/196 detected; 3 repeat runs identical, ASLR on). NOT IN callgraph/units.json: SmBrep::Mirror and its callees are in harness/callgraph/unused_functions.txt (no upstream test or SM_API entry point reaches them). Owns SmBrep::Mirror (SmBrep.cpp:23449), SmAxis2Placement::MirrorPoint / MirrorVector, and the CreateMirrorCurve / CreateMirrorSurface overrides of SmBSplineSurface, SmOffsetSurface, SmCrvOnSurf and SmCrvInVolume; the SmBSplineCurve and SmSrfInVolume overrides were ported earlier (nurbs.b_spline_curve_p1, surface.srf_in_volume). Rust: topology::brep::mirror::mirror; Axis2Placement::mirror_point / mirror_vector; Curve::create_mirror_curve and Surface::create_mirror_surface dispatch every kind (SM_ERR where upstream's base default applies: Hermite, projected, iso, offset, conic and composite curves; curve bounded and STEP surfaces). The runner compares status, the whole graph and samples of every edge curve, edge use UV trim curve and face surface (type code, domain, points). Uncertified, not reached by a fixture: the OffsetSurface, CrvOnSurf, CrvInVolume and SrfInVolume overrides, the SM_ERR kinds, and bodies with a composite edge (no arena model). Excluded: Solids/fillet_ts.smb (the native vertex list holds a vertex the import does not create) and SmallBox.smb (the runner's native import crashes the process). Deviation: make_missing_nurbs makes the NURBs of analytic surfaces before FindAndSetInfiniteRegion (upstream's bounding box makes them lazily; query.brep--boolean-results-need-their-analytic-nurbs). The runner recomputes Face::shell / Shell::faces on both sides (no upstream counterpart) and sets the native face / vertex list orders on the Rust import."

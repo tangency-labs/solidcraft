@@ -317,6 +317,7 @@ pub const fn is_kind_of(t: i64) -> bool {
 }
 
 const OP_BASE: &str = "surface::surface::p2::Surface";
+const OP_MIRROR: &str = "surface::surface::p2::Surface::create_mirror_surface";
 const OP_READ: &str = "surface::surface::p2::Surface::read_from_db";
 const OP_EVAL: &str = "surface::surface::p2::SurfaceEval::eval";
 const OP_DERIV: &str = "surface::surface::p2::DerivSurfDefinition";
@@ -1528,6 +1529,91 @@ impl Surface {
             // the base body: the virtual Copy
             SurfaceKind::OffsetSurface(s) => Ok(Self::from(s.copy(k)?)),
         }
+    }
+
+    /// A copy mirrored about the XY plane of `mirror_plane` (`CreateMirrorSurface`).
+    ///
+    /// Every `SmBSplineSurface`-derived kind (plane, cone, sphere, torus, surface of
+    /// revolution or extrusion) inherits the B-spline override: the result is a plain
+    /// B-spline surface over the NURB the kind makes first. The offset surface and the
+    /// surface in a volume mirror what they wrap; the base default is `SM_ERR`.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for the curve bounded and the STEP surface; those of the kind's NURB
+    /// construction and of the override.
+    pub fn create_mirror_surface(&self, k: &Kernel, mirror_plane: &Axis2Placement) -> Result<Self> {
+        self.check_evaluation_copy_depth(0)?;
+        // the copy constructor's `GetOrCreateGwNurbPointer` makes the NURB of the
+        // source first; a kind without one makes it on a copy
+        let base = match &self.kind {
+            SurfaceKind::BSpline(s) => s.create_mirror_surface(mirror_plane)?,
+            SurfaceKind::Plane(s) => {
+                if s.base().gw_nurb().is_some() {
+                    s.base().create_mirror_surface(mirror_plane)?
+                } else {
+                    let mut c = s.copy();
+                    c.make_nurb()?;
+                    c.base().create_mirror_surface(mirror_plane)?
+                }
+            }
+            SurfaceKind::SurfOfRevolution(s) => {
+                if s.base().gw_nurb().is_some() {
+                    s.base().create_mirror_surface(mirror_plane)?
+                } else {
+                    let mut c = s.copy();
+                    c.make_nurb(k)?;
+                    c.base().create_mirror_surface(mirror_plane)?
+                }
+            }
+            SurfaceKind::Cone(s) => {
+                if s.rev().base().gw_nurb().is_some() {
+                    s.rev().base().create_mirror_surface(mirror_plane)?
+                } else {
+                    let mut c = s.as_ref().clone();
+                    c.make_nurb(k)?;
+                    c.rev().base().create_mirror_surface(mirror_plane)?
+                }
+            }
+            SurfaceKind::Sphere(s) => {
+                if s.base().base().gw_nurb().is_some() {
+                    s.base().base().create_mirror_surface(mirror_plane)?
+                } else {
+                    let mut c = s.copy();
+                    c.make_nurb(k)?;
+                    c.base().base().create_mirror_surface(mirror_plane)?
+                }
+            }
+            SurfaceKind::Torus(s) => {
+                if s.base().base().gw_nurb().is_some() {
+                    s.base().base().create_mirror_surface(mirror_plane)?
+                } else {
+                    let mut c = s.copy();
+                    c.make_nurb(k)?;
+                    c.base().base().create_mirror_surface(mirror_plane)?
+                }
+            }
+            SurfaceKind::SurfOfExtrusion(s) => {
+                if s.base().gw_nurb().is_some() {
+                    s.base().create_mirror_surface(mirror_plane)?
+                } else {
+                    let mut c = s.copy()?;
+                    c.make_nurb(k)?;
+                    c.base().create_mirror_surface(mirror_plane)?
+                }
+            }
+            SurfaceKind::OffsetSurface(s) => {
+                return s.create_mirror_surface(k, mirror_plane).map(Self::from);
+            }
+            SurfaceKind::SrfInVolume(s) => {
+                return s.create_mirror_surface(k, mirror_plane).map(Self::from);
+            }
+            SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => {
+                // SmSurface::CreateMirrorSurface: SE(SM_ERR)
+                return Err(SolidError::sm_err(OP_MIRROR));
+            }
+        };
+        Ok(Self::from(base))
     }
 
     // ---- evaluation -----------------------------------------------------------------
