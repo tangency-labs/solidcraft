@@ -71,7 +71,7 @@ fn bezier([p0, p1, p2, p3]: [Vec2; 4], t: f64) -> Vec2 {
     p0 * (s * s * s) + p1 * (3.0 * s * s * t) + p2 * (3.0 * s * t * t) + p3 * (t * t * t)
 }
 
-const NONE: PdfOptions = PdfOptions { title: None, output_time: None };
+const NONE: PdfOptions = PdfOptions { layers: true, title: None, output_time: None };
 
 /// An A3 sheet's page is A3 in points, and the PDF says who made it.
 #[test]
@@ -102,12 +102,12 @@ fn the_same_scene_gives_the_same_bytes_and_dates_come_only_from_output_time() {
     let sheet = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 20.0), b: p(60.0, 20.0) }], false, 0.5, None)]);
     assert_eq!(pdf(&sheet, &NONE), pdf(&sheet, &NONE));
     assert!(!text(&pdf(&sheet, &NONE)).contains("Date"));
-    let leap_day = PdfOptions { title: Some("Sheet 1".into()), output_time: Some(951_782_400) };
+    let leap_day = PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(951_782_400) };
     let file = text(&pdf(&sheet, &leap_day));
     assert!(file.contains("/CreationDate (D:20000229000000Z)") && file.contains("/ModDate (D:20000229000000Z)"), "{file}");
     assert!(file.contains("/Title (Sheet 1)"), "{file}");
     assert_eq!(pdf(&sheet, &leap_day), pdf(&sheet, &leap_day));
-    let last = PdfOptions { title: Some(String::new()), output_time: Some(MAX_OUTPUT_TIME) };
+    let last = PdfOptions { layers: true, title: Some(String::new()), output_time: Some(MAX_OUTPUT_TIME) };
     let file = text(&pdf(&sheet, &last));
     assert!(file.contains("(D:99991231235959Z)") && !file.contains("/Title"), "{file}");
 }
@@ -202,14 +202,14 @@ fn check_number_grid(content: &str) -> std::result::Result<(), String> {
 fn every_cross_reference_points_at_its_object() {
     let sheet = scene(p(420.0, 297.0), vec![stroke(Loop2::circle(p(100.0, 100.0), 40.0).segs, true, 0.7, None)]);
     for title in ["ASCII", "\u{00c7}", "\u{65e5}\u{672c}\u{1f642}", "(sheet 1) \\ title"] {
-        let bytes = pdf(&sheet, &PdfOptions { title: Some(title.into()), output_time: Some(0) });
+        let bytes = pdf(&sheet, &PdfOptions { layers: true, title: Some(title.into()), output_time: Some(0) });
         assert!(check_xref(&bytes).is_ok(), "{title:?}: {:?}", check_xref(&bytes));
     }
 }
 
 #[test]
 fn the_byte_offset_oracle_refuses_shifted_or_corrupted_references() {
-    let bytes = pdf(&scene(p(420.0, 297.0), vec![]), &PdfOptions { title: Some("\u{00c7}".into()), output_time: None });
+    let bytes = pdf(&scene(p(420.0, 297.0), vec![]), &PdfOptions { layers: true, title: Some("\u{00c7}".into()), output_time: None });
     let start = check_xref(&bytes).unwrap();
     let mut shifted = bytes.clone();
     shifted.insert(9, b' ');
@@ -315,10 +315,10 @@ fn what_cannot_be_written_is_refused() {
     assert!(e.to_string().contains("at least 3 pt"), "{e}");
     let sheet = scene(p(210.0, 297.0), vec![]);
     let prepared = sheet.prepare().unwrap();
-    assert!(paper_pdf(&prepared, &PdfOptions { title: Some("x".repeat(1000)), output_time: None }).is_ok());
-    let e = paper_pdf(&prepared, &PdfOptions { title: Some("x".repeat(1001)), output_time: None }).unwrap_err();
+    assert!(paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1000)), output_time: None }).is_ok());
+    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: Some("x".repeat(1001)), output_time: None }).unwrap_err();
     assert!(e.to_string().contains("1000 characters"), "{e}");
-    let e = paper_pdf(&prepared, &PdfOptions { title: None, output_time: Some(MAX_OUTPUT_TIME + 1) }).unwrap_err();
+    let e = paper_pdf(&prepared, &PdfOptions { layers: true, title: None, output_time: Some(MAX_OUTPUT_TIME + 1) }).unwrap_err();
     assert!(e.to_string().contains("9999"), "{e}");
 }
 
@@ -511,4 +511,149 @@ fn pdf_layers_obey_content_budget_and_skip_empty_groups() {
     assert!(full.contains("/OC /L0 BDC") && full.contains("EMC"));
     assert_eq!(super::content_with_limit(&grid.groups, full.len()).unwrap(), full);
     assert!(super::content_with_limit(&grid.groups, full.len() - 1).is_err());
+}
+
+/// Flat PDF is the same ordered vector paint, not a hidden or rasterized layer.
+#[test]
+fn flat_pdf_omits_optional_content_and_preserves_vector_paint() {
+    let line = |y| vec![Seg2::Line { a: p(10.0, y), b: p(100.0, y) }];
+    let sheet = Scene {
+        size_mm: p(210.0, 297.0),
+        groups: vec![
+            Group { object: 1, kind: ObjectKind::TitleBlock, items: vec![stroke(line(10.0), false, 0.35, None)] },
+            Group {
+                object: 2,
+                kind: ObjectKind::DrawingBorder,
+                items: vec![stroke(line(20.0), false, 0.7, Some(Dashes { lengths_mm: vec![4.0, 2.0], phase_mm: 1.0 }))],
+            },
+            Group {
+                object: 3,
+                kind: ObjectKind::PartsList,
+                items: vec![Item::Fill {
+                    region: Region2 { outer: Loop2::polygon(&[p(10.0, 30.0), p(20.0, 30.0), p(20.0, 40.0), p(10.0, 40.0)]), holes: vec![] },
+                }],
+            },
+            Group { object: 4, kind: ObjectKind::RevisionTable, items: vec![stroke(line(50.0), false, 0.7, None)] },
+            Group { object: 5, kind: ObjectKind::SheetBorder, items: vec![] },
+            Group {
+                object: 6,
+                kind: ObjectKind::TitleBlock,
+                items: vec![stroke(vec![Seg2::Arc { center: p(50.0, 70.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 }], false, 0.35, None)],
+            },
+        ],
+    };
+    let layered_options = PdfOptions { title: Some("Flat Ç sheet".into()), output_time: Some(0), ..PdfOptions::default() };
+    assert!(layered_options.layers && PdfOptions::default().layers);
+    let flat_options = PdfOptions { layers: false, ..layered_options.clone() };
+    let layered = pdf(&sheet, &layered_options);
+    let flat = pdf(&sheet, &flat_options);
+    assert_eq!(pdf(&sheet, &flat_options), flat);
+    assert!(check_xref(&flat).is_ok());
+    let file = text(&flat);
+    for forbidden in ["/OCProperties", "/OCGs", "/Type /OCG", "/Properties", "/BaseState", "/Order", "/ON"] {
+        assert!(!file.contains(forbidden), "flat output contains {forbidden}");
+    }
+    let flat_stream = content(&flat);
+    assert!(!flat_stream.contains("BDC") && !flat_stream.contains("EMC"));
+    let without_layers =
+        content(&layered).lines().filter(|line| !line.ends_with(" BDC") && *line != "EMC").map(|line| format!("{line}\n")).collect::<String>();
+    assert_eq!(flat_stream, without_layers, "all geometry, styles and paint order retained");
+    let operators = ops(&flat_stream);
+    let paint: Vec<_> = operators.iter().filter(|(op, _)| ["S", "h", "f*"].contains(&op.as_str())).map(|(op, _)| op.as_str()).collect();
+    assert_eq!(paint, ["S", "S", "h", "f*", "S", "S"]);
+    assert!(operators.iter().any(|(op, _)| op == "c"), "arc stays vector cubic geometry");
+    assert!(check_number_grid(&flat_stream).is_ok());
+    // Dictionary entries are indented. Compare exact, uniquely present values
+    // as bytes, retaining the title's UTF-16BE rather than lossy UTF-8 text.
+    let property = |bytes: &[u8], key: &str| {
+        bytes
+            .split(|&byte| byte == b'\n')
+            .map(|line| line.trim_ascii_start())
+            .filter_map(|line| line.strip_prefix(key.as_bytes()))
+            .filter(|value| value.first().is_some_and(u8::is_ascii_whitespace))
+            .map(|value| value.trim_ascii().to_vec())
+            .collect::<Vec<_>>()
+    };
+    let producer = format!("(SolidCraft {})", env!("CARGO_PKG_VERSION"));
+    for (key, expected) in [
+        ("/MediaBox", "[0 0 595.2756 841.8898]"),
+        ("/Producer", producer.as_str()),
+        ("/Title", "<FEFF0046006C00610074002000C7002000730068006500650074>"),
+        ("/CreationDate", "(D:19700101000000Z)"),
+        ("/ModDate", "(D:19700101000000Z)"),
+    ] {
+        let flat_value = property(&flat, key);
+        let layered_value = property(&layered, key);
+        assert_eq!(flat_value, [expected.as_bytes().to_vec()], "flat {key} is present once with the expected value");
+        assert_eq!(layered_value, [expected.as_bytes().to_vec()], "layered {key} is present once with the expected value");
+        assert_eq!(flat_value, layered_value, "{key}");
+    }
+    // Optional independent-reader fixture, after all ordinary acceptance assertions.
+    if let Some(path) = std::env::var_os("SOLIDCRAFT_PDF_FLAT_REVIEW_OUTPUT") {
+        let written = std::fs::write(&path, &flat);
+        assert!(written.is_ok(), "could not write the asserted flat fixture to {path:?}: {written:?}");
+        let layered_path = std::path::PathBuf::from(&path).with_extension("layered.pdf");
+        let written = std::fs::write(&layered_path, &layered);
+        assert!(written.is_ok(), "could not write the matching layered fixture to {layered_path:?}: {written:?}");
+    }
+}
+
+#[test]
+fn flat_pdf_empty_scene_and_content_budget_keep_their_boundaries() {
+    let options = PdfOptions { layers: false, ..PdfOptions::default() };
+    let empty = scene(p(210.0, 297.0), vec![]);
+    assert_eq!(pdf(&empty, &options), pdf(&empty, &PdfOptions::default()), "empty groups invent no layer in either mode");
+    let line = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 10.0), b: p(100.0, 10.0) }], false, 0.35, None)]);
+    let grid = line.prepare().unwrap().on_grid(Grid::TEN_NANOMETRES).unwrap();
+    let flat = super::content_with_limit_and_layers(&grid.groups, None, MAX_DRAWING_BYTES).unwrap();
+    assert_eq!(super::content_with_limit_and_layers(&grid.groups, None, flat.len()).unwrap(), flat);
+    assert!(super::content_with_limit_and_layers(&grid.groups, None, flat.len() - 1).is_err());
+    assert!(
+        super::content_with_limit_and_layers(&grid.groups, Some(&[]), MAX_DRAWING_BYTES).is_err(),
+        "missing enabled layer is not silently flattened"
+    );
+    assert!(super::content_with_limit(&grid.groups, flat.len()).is_err(), "markers remain charged on the layered path");
+}
+
+/// Cam's original public-safe P1 sample is a byte oracle independent of the new
+/// flat path: no layer metadata or content marker may leak into this output.
+#[test]
+fn flat_pdf_reproduces_the_original_p1_a3_sample_bytes() {
+    use sha2::Digest as _;
+    let rect = |a: Vec2, b: Vec2| {
+        let c = [a, p(b.x, a.y), b, p(a.x, b.y)];
+        (0..4).map(|i| Seg2::Line { a: c[i], b: c[(i + 1) % 4] }).collect()
+    };
+    let centre = Some(Dashes { lengths_mm: vec![12.0, 3.0, 1.0, 3.0], phase_mm: 0.0 });
+    let sheet = Scene {
+        size_mm: p(420.0, 297.0),
+        groups: vec![
+            Group {
+                object: 1,
+                kind: ObjectKind::DrawingBorder,
+                items: vec![
+                    stroke(rect(p(20.0, 10.0), p(410.0, 287.0)), true, 0.7, None),
+                    Item::Fill { region: Region2 { outer: Loop2 { segs: rect(p(0.0, 287.0), p(10.0, 297.0)) }, holes: vec![] } },
+                    Item::Fill { region: Region2 { outer: Loop2 { segs: rect(p(410.0, 0.0), p(420.0, 10.0)) }, holes: vec![] } },
+                ],
+            },
+            Group {
+                object: 2,
+                kind: ObjectKind::DrawingBorder,
+                items: vec![
+                    stroke(rect(p(120.0, 90.0), p(300.0, 210.0)), true, 0.5, None),
+                    stroke(Loop2::circle(p(210.0, 150.0), 40.0).segs, true, 0.5, None),
+                    stroke(vec![Seg2::Line { a: p(160.0, 150.0), b: p(260.0, 150.0) }], false, 0.25, centre.clone()),
+                    stroke(vec![Seg2::Line { a: p(210.0, 100.0), b: p(210.0, 200.0) }], false, 0.25, centre),
+                    stroke(vec![Seg2::Arc { center: p(120.0, 90.0), radius: 15.0, start: 0.0, sweep: FRAC_PI_2 }], false, 0.35, None),
+                ],
+            },
+        ],
+    };
+    let options = PdfOptions { title: Some("A3 sample".into()), output_time: Some(1_800_000_000), layers: false };
+    let bytes = pdf(&sheet, &options);
+    assert_eq!(bytes.len(), 1063);
+    assert_eq!(format!("{:x}", sha2::Sha256::digest(&bytes)), "0de09bc342566206514754fc2ed7836156fbe10ba444e8ebb66427b10dd89c02");
+    assert_eq!(pdf(&sheet, &options), bytes);
+    assert!(check_xref(&bytes).is_ok());
 }

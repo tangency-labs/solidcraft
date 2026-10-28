@@ -19,6 +19,7 @@
 //!   distinct paper object kind. Group order remains the original paint order,
 //!   and each kind's PDF layer uses ObjectKind::layer, as in DXF. Empty
 //!   groups do not invent layers. All present layers start visible.
+//!   Set [`PdfOptions::layers`] to false for the same vector marks without layers.
 //! - **Content size:** every append checks the cumulative byte limit before growing the
 //!   buffer, including inside a path/arc and the final graphics-state restore. Allocation
 //!   failure is an error. The limit is for uncompressed content, not total export memory.
@@ -49,13 +50,22 @@ const MAX_OUTPUT_TIME: u64 = 253_402_300_799;
 const DECIMALS: u32 = 5;
 
 /// What a sheet PDF says beyond the scene.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PdfOptions {
     /// The document's title, left out when `None` or empty.
     pub title: Option<String>,
     /// When the PDF was made, in seconds since 1970 (UTC): its creation and modification dates.
     /// Without it the file has no dates.
     pub output_time: Option<u64>,
+    /// Include optional-content layers by object kind (default true). False writes
+    /// the same vector marks in paint order, without layer objects or markers.
+    pub layers: bool,
+}
+
+impl Default for PdfOptions {
+    fn default() -> Self {
+        Self { title: None, output_time: None, layers: true }
+    }
 }
 
 /// What writing a scene did that the scene didn't say: the grid's report.
@@ -74,8 +84,8 @@ pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, Pdf
         return Err(IoError::Invalid(format!("a sheet PDF's page is at least {MIN_PAGE_PT} pt (about 1.06 mm) a side")));
     }
 
-    let layers = collect_layers(&on.groups)?;
-    let content = content_with_limit_and_layers(&on.groups, &layers, MAX_DRAWING_BYTES)?;
+    let layers = if options.layers { collect_layers(&on.groups)? } else { Vec::new() };
+    let content = content_with_limit_and_layers(&on.groups, options.layers.then_some(layers.as_slice()), MAX_DRAWING_BYTES)?;
     let mut deflate = ZlibEncoder::new(Vec::new(), Compression::default());
     let compressed = deflate.write_all(content.as_bytes()).and_then(|()| deflate.finish());
     let compressed = compressed.map_err(|e| IoError::Invalid(format!("the sheet PDF: {e}")))?;
@@ -169,17 +179,19 @@ fn content(groups: &[GridGroup]) -> Result<String> {
 #[cfg(test)]
 fn content_with_limit(groups: &[GridGroup], max_bytes: usize) -> Result<String> {
     let layers = collect_layers(groups)?;
-    content_with_limit_and_layers(groups, &layers, max_bytes)
+    content_with_limit_and_layers(groups, Some(&layers), max_bytes)
 }
 
-fn content_with_limit_and_layers(groups: &[GridGroup], layers: &[Layer], max_bytes: usize) -> Result<String> {
+fn content_with_limit_and_layers(groups: &[GridGroup], layers: Option<&[Layer]>, max_bytes: usize) -> Result<String> {
     let mut w = Content::new(max_bytes)?;
     w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
     for group in groups.iter().filter(|group| !group.items.is_empty()) {
-        let layer = layers.iter().find(|layer| layer.kind == group.kind).ok_or_else(|| IoError::Invalid("missing paper PDF layer".into()))?;
-        w.append("/OC /")?;
-        w.append(&layer.tag)?;
-        w.append(" BDC\n")?;
+        if let Some(layers) = layers {
+            let layer = layers.iter().find(|layer| layer.kind == group.kind).ok_or_else(|| IoError::Invalid("missing paper PDF layer".into()))?;
+            w.append("/OC /")?;
+            w.append(&layer.tag)?;
+            w.append(" BDC\n")?;
+        }
         for item in &group.items {
             match item {
                 GridItem::Stroke { width, path, dashes } => {
@@ -205,7 +217,9 @@ fn content_with_limit_and_layers(groups: &[GridGroup], layers: &[Layer], max_byt
                 }
             }
         }
-        w.append("EMC\n")?;
+        if layers.is_some() {
+            w.append("EMC\n")?;
+        }
     }
     w.append("Q\n")?;
     Ok(w.out)
