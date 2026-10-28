@@ -35,6 +35,18 @@ pending. Scripts and agents do the same with `occurrence.drag {occurrence or pat
 which moves the placement by `point - at` in world coordinates and answers the placements it
 `moved`.
 
+**Place a part from parameters.** `occurrence.move` takes its `translate` as numbers or as length
+expressions over the design's parameters (`"translate": ["0 mm", "tube_front_y", 0]`), as
+`solid.move` does for bodies. An occurrence moved by expressions that name a parameter keeps them
+(`expressed_moves` in `component.list`) and, whenever such a parameter changes, moves on by the
+difference, along the axes the move was given in (`space: local` or `world`), so an imported STEP
+part placed at a station follows the station. Other moves of it (a drag, another move) stay, and
+undo, saving and opening keep the expressions. Renaming a parameter carries into them, and
+deleting one they use is refused. A move by expressions is captured at once (`capture: false` is
+refused with them). If an expression stops working out (say a parameter becomes an angle), the
+part stays where it is until it works out again. The rotation (`axis`, `angle`, `origin`) and a
+`matrix` are still worked out once, when the move is made.
+
 Paste New copies nested component definitions, sketches, feature histories and generated
 dimension parameters. Repeated child instances remain shared within the new copy. Materials,
 appearances and wholly internal joints/motion records receive copied references. Design-wide

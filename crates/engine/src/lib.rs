@@ -838,6 +838,15 @@ impl Session {
         }
         self.revision += 1;
         self.prune_occurrence_state();
+        // Occurrences moved by expressions follow the parameters they name (#8192); features that
+        // read where a part is placed are evaluated again for where it now is.
+        if cmd::follow_expressed_moves(self) {
+            self.model.evaluate(&self.doc);
+            #[cfg(test)]
+            {
+                self.evaluations += 1;
+            }
+        }
         // Joints follow the geometry their origins snap to.
         if !self.doc.assembly.joints.is_empty() {
             // A solve that moves parts changes what features reading where a part is placed

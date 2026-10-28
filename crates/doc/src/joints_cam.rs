@@ -941,7 +941,7 @@ mod tests {
             suppressed: false,
             exprs: Default::default(),
         };
-        let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded };
+        let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded, expressed_moves: Vec::new() };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
         let mut doc = Document { occurrences: (1..=10).map(|id| occ(id, id == 1)).collect(), ..Document::default() };
         let (r, v, s) = (JointKind::Rigid, JointKind::Revolute, JointKind::Slider);

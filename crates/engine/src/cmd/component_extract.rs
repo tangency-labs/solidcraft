@@ -104,6 +104,7 @@ fn prune_params(doc: &mut Document) {
             }
         }
         used.extend(doc.assembly.exprs().into_iter().flat_map(|(_, _, e)| references(e)));
+        used.extend(doc.occurrences.iter().flat_map(|o| &o.expressed_moves).flat_map(|m| m.exprs()).flat_map(|(_, e)| references(e)));
         used.extend(doc.params.iter().flat_map(|p| references(&p.expr)));
         let before = doc.params.len();
         doc.params.retain(|p| used.contains(&p.name));
