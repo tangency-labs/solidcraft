@@ -23,6 +23,24 @@
 //! interior, seam, pole and boundary points, with gaps up to and beyond the tolerance)
 //! and compare `FaceIntersect`'s touching points (`Point3DClassify` on both faces of the
 //! one B-rep) and curves with the C++.
+//!
+//! **Hermite edge-loop faces.** The inline `hermite_*` cases ([`hermite_degenerate_cases`])
+//! reach `IsDegenerate`'s edge-pair coincidence check: a one-face B-rep (block kind 14)
+//! whose single edge loop is an explicit list of curves, each edge with its own tolerance,
+//! built natively with `SmBrepConstructor` and on the Rust side from the same records.
+//! `SmHermiteCurve` is a curve kind without a NURB, so its curve cache measures the
+//! distance of its cubic spans and the tree the coincidence drops build depends on the
+//! edge's tolerance (a B-spline span is exact and skips that test). The cases pair a
+//! sliver face (its second edge retraces or nearly retraces the first at a mid-point
+//! separation around the tolerances), a retraced four-edge loop (pair (0, 1) coincident
+//! marks both edges, then the remaining pairs are skipped as both-known-coincident), a
+//! four-edge loop whose six pairs are all compared and none coincide, and an `SmLine`
+//! sliver as the exact-span control; the edge tolerances vary per edge (1e-10 to 1,
+//! separately, and the `SmLine` control at 1e-10 against 1) and the optional
+//! `IsDegenerate` zone tolerance is `None` and explicit. `skip_quick` is forced `true`
+//! where the coincidence check is under test; the `*_quick` controls run the quick point
+//! check instead. The native `SmBrepConstructor` vertex sharing is not replicated on the
+//! Rust side (its loop uses, face-use mates and edge-use pairs are).
 
 
 use serde::{Deserialize, Serialize};
@@ -187,11 +205,58 @@ enum FacesBrep {
     Faces { faces: Vec<FaceIn> },
 }
 
-/// The case's B-rep: the shared `topology.vertexuse` kinds, or several faces.
+/// A curve of an edge-loop face (block kind 14, `support/edge_loop_face_fixture.h`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "curve", rename_all = "snake_case")]
+enum LoopCurveIn {
+    /// `SmLine(a, b)`: an exact-span curve.
+    Line { a: [f64; 3], b: [f64; 3] },
+    /// `SmHermiteCurve(p1, d1, p2, d2, 3)`: a curve kind without a NURB, whose curve
+    /// cache measures the distance of its cubic spans, so its tree depends on the edge's
+    /// tolerance.
+    Hermite {
+        p1: [f64; 3],
+        d1: [f64; 3],
+        p2: [f64; 3],
+        d2: [f64; 3],
+    },
+}
+
+/// One edge of an edge-loop face: its curve, its interval and its own tolerance
+/// (`SmEdge::SetTolerance(tol, FALSE, FALSE)`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LoopEdgeIn {
+    curve: LoopCurveIn,
+    t: [f64; 2],
+    tol: f64,
+}
+
+/// A one-face B-rep with an edge loop of explicit curves and per-edge tolerances (block
+/// kind 14): an `SmPlane` face over `dom` whose one loop is `edges` in order, built with
+/// `SmBrepConstructor` natively and from the same records on the Rust side. Unlike the
+/// shared kinds this source keeps two near-coincident edge curves apart (the constructor
+/// does not merge them, unlike `MakeFaceWithCurves`), which `IsDegenerate`'s edge-pair
+/// coincidence check needs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EdgeLoopFaceIn {
+    /// The plane's origin.
+    o: [f64; 3],
+    /// The plane's normal.
+    n: [f64; 3],
+    /// The face's UV domain `u0 v0 u1 v1`.
+    dom: [f64; 4],
+    /// `SmFace::SetTolerance(tol, FALSE, FALSE)`.
+    face_tol: f64,
+    edges: Vec<LoopEdgeIn>,
+}
+
+/// The case's B-rep: the shared `topology.vertexuse` kinds, several faces, or an edge-loop
+/// face with per-edge tolerances.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum CaseBrep {
     Faces(FacesBrep),
+    EdgeLoop(EdgeLoopFaceIn),
     Shared(BrepIn),
 }
 
@@ -223,6 +288,34 @@ fn block(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             v.extend([10.0, faces.len() as f64]);
             for face in faces {
                 push_face(&mut v, face)?;
+            }
+            v.push(flag(i.validate_only));
+            v.push(flag(i.init_gaps));
+            return Ok(v);
+        }
+        CaseBrep::EdgeLoop(f) => {
+            v.push(14.0);
+            v.extend(f.o);
+            v.extend(f.n);
+            v.extend(f.dom);
+            v.push(f.face_tol);
+            v.push(f.edges.len() as f64);
+            for e in &f.edges {
+                match &e.curve {
+                    LoopCurveIn::Line { a, b } => {
+                        v.push(1.0);
+                        v.extend(a);
+                        v.extend(b);
+                    }
+                    LoopCurveIn::Hermite { p1, d1, p2, d2 } => {
+                        v.push(3.0);
+                        for q in [p1, d1, p2, d2] {
+                            v.extend(q);
+                        }
+                    }
+                }
+                v.extend(e.t);
+                v.push(e.tol);
             }
             v.push(flag(i.validate_only));
             v.push(flag(i.init_gaps));
@@ -296,7 +389,7 @@ struct Built {
 fn build(i: &Inputs) -> Result<Result<Built, Output>, HarnessError> {
     let path = match &i.brep {
         CaseBrep::Shared(b) => shared::path_of(b)?,
-        CaseBrep::Faces(_) => String::new(),
+        CaseBrep::Faces(_) | CaseBrep::EdgeLoop(_) => String::new(),
     };
     let block = block(i)?;
     let export = crate::export_memo::export("topology_vertexuse", &[&path], &block, || {
@@ -432,8 +525,17 @@ fn run_cpp_case(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(b) => b,
         Err(out) => return Ok(out),
     };
-    let (rb, _) = shared::import_raw(&b.export)?;
-    let Some(a) = args(&i.op, b.counts, |f| first_loop(&rb, f)) else {
+    // the Rust graph of the export is read only to resolve a face's first loop (the
+    // `LoopOrient` default selector); an edge-loop face's Hermite curves are not in the
+    // shared export, so no other op imports it
+    let imported = if matches!(i.op, OpIn::LoopOrient { .. }) {
+        Some(shared::import_raw(&b.export)?)
+    } else {
+        None
+    };
+    let Some(a) = args(&i.op, b.counts, |f| {
+        imported.as_ref().and_then(|(rb, _)| first_loop(rb, f))
+    }) else {
         return Ok(Output::err("no face"));
     };
     let v =
@@ -631,6 +733,10 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10
         (CaseBrep::Shared(src), _) => {
             super::topology_face_p1::own_built(src, i.validate_only, i.init_gaps)?
         }
+        (CaseBrep::EdgeLoop(f), _) => {
+            let raw = rust_edge_loop_face(&mut k, f);
+            finish(&mut k, raw, i.validate_only, i.init_gaps, conv)?
+        }
         (CaseBrep::Faces(FacesBrep::Faces { faces }), _) => {
             let mut surfaces = Vec::new();
             for face in faces {
@@ -661,6 +767,210 @@ fn own_brep(i: &Inputs) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10
             Output::err(format!("brep_build_status_{}", build_status(&e)))
         })),
     })
+}
+
+/// The Rust B-rep of an edge-loop face source (block kind 14): the records the shim's
+/// `SmBrepConstructor` realises (`support/edge_loop_face_fixture.h`), built on the Rust
+/// side — the ported `SmBrep(ctx)` root (`new_brep`: the infinite region on the region
+/// list, the context tolerance, the construction notification), its shell inserted into
+/// that region as `StartShell` does, then one face on a real `Plane` over the given UV
+/// domain, one loop with its two loop uses (the upward one and its mate), the given edge
+/// curves in loop order with one edge per curve and its own interval and tolerance, one
+/// edge use pair per edge (same then opposite orientation), and one vertex per edge start
+/// (a closed loop's consecutive edges share their vertex). The loop use starts at the
+/// first edge and its mate at that edge's mate, as `StartEdge` leaves them.
+fn rust_edge_loop_face(k: &mut Kernel, f: &EdgeLoopFaceIn) -> Result<Brep, SolidError> {
+    use solidcore::curve::hermite_curve::HermiteCurve;
+    use solidcore::curve::line::Line;
+    use solidcore::geom::vector2d::Point2;
+    use solidcore::geom::vector3d::Vec3;
+    use solidcore::surface::plane::Plane;
+    use solidcore::surface::surface::Surface;
+    use solidcore::topology::shell::ShellMembers;
+    use solidcore::topology::{
+        Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, Faceuse, FaceuseId, Loop, LoopEdge,
+        Loopuse, LoopuseId, LoopuseStart, ShellId, Vertex, VertexId, Vertexuse, VertexuseId,
+        VertexuseOwner,
+    };
+
+    let n = f.edges.len();
+    if n == 0 {
+        return Err(SolidError::invalid_input(
+            "difftest::face_p3::edge_loop_face",
+            "no edges",
+        ));
+    }
+    let index = |i: usize| u32::try_from(i).unwrap_or(u32::MAX);
+    let mut curves = Vec::with_capacity(n);
+    for e in &f.edges {
+        curves.push(match &e.curve {
+            LoopCurveIn::Line { a, b } => SmCurve::from(Line::from_points(
+                Vec3::from_array(*a),
+                Vec3::from_array(*b),
+                3,
+            )),
+            LoopCurveIn::Hermite { p1, d1, p2, d2 } => SmCurve::from(HermiteCurve::new(
+                Vec3::from_array(*p1),
+                Vec3::from_array(*d1),
+                Vec3::from_array(*p2),
+                Vec3::from_array(*d2),
+                3,
+            )),
+        });
+    }
+    // the vertices at the edges' interval starts (evaluated before the curves move into
+    // the edge records)
+    let mut starts = Vec::with_capacity(n);
+    for (e, c) in f.edges.iter().zip(&curves) {
+        starts.push(c.evaluate_point(k, e.t[0])?);
+    }
+
+    let uv_domain = Extent2d::from_points(
+        Point2::new(f.dom[0], f.dom[1]),
+        Point2::new(f.dom[2], f.dom[3]),
+    );
+    // `StartBrep`: the ported `SmBrep(ctx)` root -- infinite region on the B-rep's
+    // region list, the context tolerance, the construction notification
+    let mut b = solidcore::topology::brep::p3::new_brep(
+        k,
+        solidcore::geom::tol::USE_DEFAULT,
+        solidcore::geom::tol::USE_DEFAULT,
+    )?;
+    let region = b
+        .infinite_region()
+        .ok_or_else(|| SolidError::null_pointer("difftest::face_p3::edge_loop_face"))?;
+    b.add_shell_record(solidcore::topology::Shell {
+        faces: vec![FaceId::from_index(0)],
+        region: Some(region),
+        // `StartShell`'s `SetShellType(SmFaceuse_TYPE)`
+        shell_type: solidcore::topology::shell::ShellType::Faceuse,
+        members: ShellMembers::Faceuses(vec![FaceuseId::from_index(0), FaceuseId::from_index(1)]),
+    })?;
+    // `StartShell`'s `m_pOuterRegion->PostInsert(m_pOuterShell)`
+    b.region_mut(region)?.shells.push(ShellId::from_index(0));
+    b.add_face_record(Face {
+        loops: vec![LoopId::from_index(0)],
+        surface: Some(Surface::from(Plane::from_normal(
+            Vec3::from_array(f.o),
+            Vec3::from_array(f.n),
+        ))),
+        faceuse: Some(FaceuseId::from_index(0)),
+        uv_domain,
+        // SmFace::SetTolerance(tol, FALSE, FALSE)
+        tolerance: zone_tol3d(k, f.face_tol),
+        ..Face::new(ShellId::from_index(0))
+    })?;
+    b.add_loop_record(Loop {
+        face: FaceId::from_index(0),
+        edges: (0..n)
+            .map(|i| LoopEdge {
+                edge: EdgeId::from_index(index(i)),
+                forward: true,
+            })
+            .collect(),
+        loopuse: Some(LoopuseId::from_index(0)),
+    })?;
+    // the upward face use and its mate (both in the shell, as `StartFace` inserts them)
+    b.add_faceuse_record(Faceuse {
+        shell: Some(ShellId::from_index(0)),
+        face: Some(FaceId::from_index(0)),
+        mate: Some(FaceuseId::from_index(1)),
+        orientation: OrientType::Same,
+        loopuses: vec![LoopuseId::from_index(0)],
+        ..Faceuse::default()
+    })?;
+    b.add_faceuse_record(Faceuse {
+        shell: Some(ShellId::from_index(0)),
+        face: Some(FaceId::from_index(0)),
+        mate: Some(FaceuseId::from_index(0)),
+        orientation: OrientType::Opposite,
+        loopuses: vec![LoopuseId::from_index(1)],
+        ..Faceuse::default()
+    })?;
+    // the loop's two uses: the primary walks the edges' same-orientation edge uses from
+    // the first edge, its mate the opposite-orientation ones from that edge's mate
+    b.add_loopuse_record(Loopuse {
+        faceuse: Some(FaceuseId::from_index(0)),
+        loop_: Some(LoopId::from_index(0)),
+        mate: Some(LoopuseId::from_index(1)),
+        start: LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(0))),
+        orientation: OrientType::Same,
+    })?;
+    b.add_loopuse_record(Loopuse {
+        faceuse: Some(FaceuseId::from_index(1)),
+        loop_: Some(LoopId::from_index(0)),
+        mate: Some(LoopuseId::from_index(0)),
+        start: LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(index(n)))),
+        orientation: OrientType::Same,
+    })?;
+    // the brep tolerance the constructor gives its vertices (`m_pBrep->GetTolerance()`)
+    let vertex_tol = b.tolerance();
+    for (i, &point) in starts.iter().enumerate() {
+        b.add_vertex_record(Vertex {
+            point,
+            tolerance: vertex_tol,
+            vertexuses: vec![
+                VertexuseId::from_index(index(i)),
+                VertexuseId::from_index(index(n + (i + n - 1) % n)),
+            ],
+            poly_vertex: None,
+        })?;
+    }
+    // edge uses: [same, opposite] per edge, the same ones walking the loop counter
+    // clockwise and the opposite ones walking it the other way from their mate
+    for i in 0..n {
+        b.add_edgeuse_record(Edgeuse {
+            edge: Some(EdgeId::from_index(index(i))),
+            owner: EdgeuseOwner::Loopuse(Some(LoopuseId::from_index(0))),
+            ccw: Some(EdgeuseId::from_index(index((i + 1) % n))),
+            cw: Some(EdgeuseId::from_index(index((i + n - 1) % n))),
+            vertexuse: Some(VertexuseId::from_index(index(i))),
+            orientation: OrientType::Same,
+            ..Edgeuse::default()
+        })?;
+    }
+    for i in 0..n {
+        b.add_edgeuse_record(Edgeuse {
+            edge: Some(EdgeId::from_index(index(i))),
+            owner: EdgeuseOwner::Loopuse(Some(LoopuseId::from_index(1))),
+            ccw: Some(EdgeuseId::from_index(index(n + (i + n - 1) % n))),
+            cw: Some(EdgeuseId::from_index(index(n + (i + 1) % n))),
+            vertexuse: Some(VertexuseId::from_index(index(n + i))),
+            orientation: OrientType::Opposite,
+            ..Edgeuse::default()
+        })?;
+    }
+    for i in 0..n {
+        b.add_vertexuse_record(Vertexuse {
+            vertex: Some(VertexId::from_index(index(i))),
+            owner: VertexuseOwner::Edgeuse(Some(EdgeuseId::from_index(index(i)))),
+            ..Vertexuse::default()
+        })?;
+    }
+    for i in 0..n {
+        b.add_vertexuse_record(Vertexuse {
+            vertex: Some(VertexId::from_index(index((i + 1) % n))),
+            owner: VertexuseOwner::Edgeuse(Some(EdgeuseId::from_index(index(n + i)))),
+            ..Vertexuse::default()
+        })?;
+    }
+    for ((e, curve), i) in f.edges.iter().zip(curves).zip(0..n) {
+        b.add_edge_record(Edge {
+            vertices: [
+                VertexId::from_index(index(i)),
+                VertexId::from_index(index((i + 1) % n)),
+            ],
+            edgeuses: vec![
+                EdgeuseId::from_index(index(i)),
+                EdgeuseId::from_index(index(n + i)),
+            ],
+            interval: solidcore::geom::extent1d::Extent1d::from_min_max(e.t[0], e.t[1]),
+            // SmEdge::SetTolerance(tol, FALSE, FALSE)
+            tolerance: zone_tol3d(k, e.tol),
+            curve: Some(curve),
+        })?;
+    }
+    Ok(b)
 }
 
 /// A `topology.vertexuse` surface block as the Rust surface the shim's `read_surface`
@@ -972,6 +1282,194 @@ fn plane(o: [f64; 3], n: [f64; 3], dom: [f64; 4]) -> FaceIn {
         surface: SrfIn::Plane { o, n },
         dom,
     }
+}
+
+/// One edge of an edge-loop face case: `[0, 1]` of the curve and the edge's tolerance.
+fn loop_edge(curve: LoopCurveIn, tol: f64) -> LoopEdgeIn {
+    LoopEdgeIn {
+        curve,
+        t: [0.0, 1.0],
+        tol,
+    }
+}
+
+/// `SmHermiteCurve(p0, d0, p1, d1, 3)`: a cubic arc from `p0` to `p1`.
+fn hermite(p0: [f64; 3], d0: [f64; 3], p1: [f64; 3], d1: [f64; 3]) -> LoopCurveIn {
+    LoopCurveIn::Hermite {
+        p1: p0,
+        d1: d0,
+        p2: p1,
+        d2: d1,
+    }
+}
+
+/// The two curves of a sliver face on `z = 0`: a Hermite arc from `(0, 0, 0)` to
+/// `(s, 0, 0)` bending by `bend * s` in y, and the same path walked backwards with the
+/// two y derivatives moved apart so the reversed curve's mid point shifts by `sep`
+/// (cubic Hermite: `h10(0.5) = 0.125 = -h11(0.5)`, so `ds = 4 * sep` shifts it by
+/// `0.25 * ds`). `sep == 0` is exactly the reversed path.
+fn sliver_curves(s: f64, bend: f64, sep: f64) -> Vec<LoopCurveIn> {
+    let p0 = [0.0, 0.0, 0.0];
+    let p1 = [s, 0.0, 0.0];
+    let ds = 4.0 * sep;
+    vec![
+        hermite(p0, [0.5 * s, bend * s, 0.0], p1, [0.5 * s, -bend * s, 0.0]),
+        hermite(
+            p1,
+            [-0.5 * s, bend * s + ds, 0.0],
+            p0,
+            [-0.5 * s, -bend * s - ds, 0.0],
+        ),
+    ]
+}
+
+/// Four distinct Hermite arcs around a square of side `s`: each chord's end tangents
+/// are a third of the chord plus a bend perpendicular to it, so no two edges are
+/// coincident.
+fn quad_curves(s: f64) -> Vec<LoopCurveIn> {
+    let c = [[0.0, 0.0, 0.0], [s, 0.0, 0.0], [s, s, 0.0], [0.0, s, 0.0]];
+    c.iter()
+        .zip(c.iter().cycle().skip(1))
+        .map(|(&a, &b)| {
+            let v = [b[0] - a[0], b[1] - a[1], 0.0];
+            let d0 = [v[0] / 3.0 + 0.15 * v[1], v[1] / 3.0 - 0.15 * v[0], 0.0];
+            let d1 = [v[0] / 3.0 - 0.15 * v[1], v[1] / 3.0 + 0.15 * v[0], 0.0];
+            hermite(a, d0, b, d1)
+        })
+        .collect()
+}
+
+/// The edge-loop face case of `curves` (plane `z = 0` over a domain enclosing them) with
+/// the edges' tolerances and the `IsDegenerate` arguments.
+fn hermite_case(
+    curves: Vec<LoopCurveIn>,
+    tols: &[f64],
+    s: f64,
+    skip_quick: bool,
+    tol: Option<f64>,
+) -> Inputs {
+    let dom = [-1.0, -1.0, s + 1.0, s + 1.0];
+    Inputs {
+        brep: CaseBrep::EdgeLoop(EdgeLoopFaceIn {
+            o: [0.0, 0.0, 0.0],
+            n: [0.0, 0.0, 1.0],
+            dom,
+            face_tol: 1e-6,
+            edges: curves
+                .into_iter()
+                .enumerate()
+                .map(|(i, c)| loop_edge(c, tols.get(i).copied().unwrap_or(1e-3)))
+                .collect(),
+        }),
+        validate_only: false,
+        init_gaps: false,
+        vertex_loop: None,
+        op: OpIn::Degenerate {
+            face: 0,
+            skip_quick,
+            tol,
+        },
+    }
+}
+
+/// The inline Hermite edge-loop cases (see the module docs): real faces with at least two
+/// non-degenerate Hermite boundary edges, whose `IsDegenerate` runs the edge-pair
+/// coincidence check (`skip_quick`) and, as controls, the quick point check.
+fn hermite_degenerate_cases() -> Vec<(String, Value)> {
+    let sliver = |s, sep| sliver_curves(s, 0.25, sep);
+    let retraced_sliver = |s| {
+        let mut c = sliver_curves(s, 0.25, 0.0);
+        c.extend(sliver_curves(s, 0.25, 0.0));
+        c
+    };
+    let cases: Vec<(&str, Inputs)> = vec![
+        // edge 1 exactly retraces edge 0: every pair coincident, face degenerate
+        (
+            "hermite_sliver_exact_skip",
+            hermite_case(sliver(1.0, 0.0), &[1e-3, 1e-3], 1.0, true, None),
+        ),
+        (
+            "hermite_sliver_exact_asym_tol",
+            hermite_case(sliver(1.0, 0.0), &[1e-10, 1.0], 1.0, true, None),
+        ),
+        (
+            "hermite_sliver_exact_scale1e6",
+            hermite_case(sliver(1e6, 0.0), &[1e-10, 1e-3], 1e6, true, None),
+        ),
+        // the optional zone tolerance replaces the edge (and coincidence) tolerances
+        (
+            "hermite_sliver_opt_tol_small",
+            hermite_case(sliver(1.0, 0.0), &[1e-3, 1e-3], 1.0, true, Some(1e-6)),
+        ),
+        (
+            "hermite_sliver_opt_tol_big",
+            hermite_case(sliver(1.0, 0.0), &[1e-3, 1e-3], 1.0, true, Some(0.5)),
+        ),
+        // the quick check runs first: a zero-area face has no inside to step into
+        (
+            "hermite_sliver_quick",
+            hermite_case(sliver(1.0, 0.0), &[1e-3, 1e-3], 1.0, false, None),
+        ),
+        // edge 1 is 2e-3 away from edge 0: coincident within the edges' tolerances ...
+        (
+            "hermite_sliver_near_coincident",
+            hermite_case(sliver(1.0, 2e-3), &[1e-2, 1e-2], 1.0, true, None),
+        ),
+        // ... and apart with tighter ones, and one wide edge tolerance is enough
+        (
+            "hermite_sliver_near_separate",
+            hermite_case(sliver(1.0, 2e-3), &[1e-5, 1e-5], 1.0, true, None),
+        ),
+        (
+            "hermite_sliver_near_mixed",
+            hermite_case(sliver(1.0, 2e-3), &[1e-5, 1e-2], 1.0, true, None),
+        ),
+        // four distinct edges: the six pairs are checked and none is coincident
+        (
+            "hermite_quad_skip",
+            hermite_case(quad_curves(1.0), &[1e-3; 4], 1.0, true, None),
+        ),
+        (
+            "hermite_quad_skip_scale1e3",
+            hermite_case(quad_curves(1e3), &[1e-10, 1e-3, 1.0, 1e-7], 1e3, true, None),
+        ),
+        // the quick check classifies a point stepped into the face
+        (
+            "hermite_quad_quick",
+            hermite_case(quad_curves(1.0), &[1e-3; 4], 1.0, false, None),
+        ),
+        // both pairs retrace the same path: once pair (0, 1) marks both edges, the
+        // remaining pairs are skipped as "both known coincident"
+        (
+            "hermite_retraced_sliver_skip",
+            hermite_case(retraced_sliver(1.0), &[1e-3; 4], 1.0, true, None),
+        ),
+        // an exact-span curve kind (SmLine) as the control: its cache tree does not
+        // depend on the edge tolerance, and the pair is still coincident
+        (
+            "line_sliver_skip",
+            hermite_case(
+                vec![
+                    LoopCurveIn::Line {
+                        a: [0.0, 0.0, 0.0],
+                        b: [1.0, 0.0, 0.0],
+                    },
+                    LoopCurveIn::Line {
+                        a: [1.0, 0.0, 0.0],
+                        b: [0.0, 0.0, 0.0],
+                    },
+                ],
+                &[1e-10, 1.0],
+                1.0,
+                true,
+                None,
+            ),
+        ),
+    ];
+    cases
+        .into_iter()
+        .filter_map(|(name, i)| serde_json::to_value(i).ok().map(|v| (name.to_string(), v)))
+        .collect()
 }
 
 /// The inline touching-face cases (see the module docs): each B-rep's faces intersected
@@ -1291,6 +1789,14 @@ impl UnitDiff for Runner {
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
         let mut v = default_cases(self, ctx)?;
         for (name, inputs) in touching_cases() {
+            v.push(Case {
+                unit: self.id().into(),
+                name,
+                source: CaseSource::Inline,
+                inputs,
+            });
+        }
+        for (name, inputs) in hermite_degenerate_cases() {
             v.push(Case {
                 unit: self.id().into(),
                 name,

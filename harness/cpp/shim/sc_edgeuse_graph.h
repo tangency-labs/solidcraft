@@ -777,6 +777,13 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
                 edge->SetTolerance(SmZoneTol3d(tol), FALSE, FALSE);
         }
     }
+    else if (kind == 14)
+    {
+        // kind 14 (an edge-loop face with per-edge tolerances) exists only in
+        // sc_topology_fixture.h (topology.face_p3's source): never build it as a wire
+        // network here.
+        status = SM_ERR;
+    }
     else
     {
         status = build_wire_network(ctx, brep);

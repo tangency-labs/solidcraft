@@ -31,6 +31,14 @@
 //                                               along z, x or y (`axis` 0, 1, 2), over the
 //                                               fractions (f0, f1) of the natural domain (an
 //                                               unbounded direction clamped to [0, scale*c])
+//   `14 origin[3] normal[3] u0 v0 u1 v1 face_tol n_edges (curve t0 t1 tol)*n_edges
+//    validate_only init_gaps`                    one SmPlane face whose one edge loop is
+//                                               the given curves in order, each edge with
+//                                               its own tolerance (`SmBrepConstructor`;
+//                                               see support/edge_loop_face_fixture.h; a
+//                                               curve is `1 a[3] b[3]` SmLine or
+//                                               `3 p1[3] d1[3] p2[3] d2[3]`
+//                                               SmHermiteCurve)
 // `init_gaps` computes the cached vertex/face, vertex/edge, edge/face and edge/CCW-edge
 // gaps (C++ only) before the op, so their reset is observable.
 //
@@ -43,6 +51,7 @@
 #include "sc_exact_curve_export.h"
 #include "support/topology_fixture.h"
 #include "support/ellipse_face_fixture.h"
+#include "support/edge_loop_face_fixture.h"
 
 
 #include "StdAfx.h"
@@ -861,10 +870,20 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
         for (int64_t i = 0; i < nf && status == SM_SUCCESS; i++)
             status = analytic_or_surface_face(rd, ctx, brep);
     }
+    else if (kind == 14)
+    {
+        // one plane face with an edge loop of explicit curves and per-edge tolerances;
+        // the constructor makes the B-rep it builds into
+        delete brep;
+        brep = nullptr;
+        status = sc_topology_fixture::edge_loop_face(rd, ctx, brep);
+    }
     else
     {
         status = build_wire_network(ctx, brep);
     }
+    if (brep == nullptr)
+        return nullptr;
     brep->m_bValidateOnly = rd.bflag();
     bool init_gaps = rd.flag();
     if (status != SM_SUCCESS)
