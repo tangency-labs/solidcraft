@@ -178,7 +178,8 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     selected_occurrences.sort();
     selected_occurrences.dedup();
     for k in selected_occurrences {
-        let Some(o) = s.doc.occurrences.iter().find(|o| o.id.to_string() == k || o.name == k).cloned() else {
+        let id = super::component::find_occurrence(s, &k).map_err(|e| bad(cmd, e))?;
+        let Some(o) = s.doc.occurrences.iter().find(|o| o.id == id).cloned() else {
             return Err(bad(cmd, format!("no occurrence `{k}`")));
         };
         if s.doc.occurrences.iter().filter(|x| x.component == o.component).count() > 1 {

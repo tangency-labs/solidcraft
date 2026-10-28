@@ -238,6 +238,30 @@ fn component_rename_carries_into_placement_names() {
 }
 
 #[test]
+fn a_component_placed_once_names_its_occurrence_and_otherwise_the_error_lists_them() {
+    // #8197: `cap` is placed as `cap:1`; naming the component reaches it, and when it cannot the
+    // error says what the occurrences are called.
+    let mut s = Session::default();
+    let (component, first) = created(&mut s, "cap");
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2}));
+    let moved = run(&mut s, "occurrence.move", json!({"occurrence": "cap", "translate": [0, 10, 0]}));
+    assert_eq!(moved["occurrence"], first);
+    assert_eq!(run(&mut s, "occurrence.ground", json!({"occurrence": "cap", "grounded": true}))["occurrence"], first);
+    let second = run(&mut s, "occurrence.copy", json!({"component": component, "translate": [20, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let doc = s.doc.clone();
+    for command in ["occurrence.move", "occurrence.ground", "occurrence.properties"] {
+        let error = s.execute(command, &json!({"occurrence": "cap", "translate": [0, 1, 0]})).unwrap_err().to_string();
+        assert!(error.contains("no occurrence `cap`; component `cap` has `cap:1`, `cap:2`"), "{command}: {error}");
+    }
+    let error = s.execute("selection.delete", &json!({"occurrences": ["cap"]})).unwrap_err().to_string();
+    assert!(error.contains("component `cap` has `cap:1`, `cap:2`"), "{error}");
+    let error = s.execute("occurrence.move", &json!({"occurrence": "lid", "translate": [0, 1, 0]})).unwrap_err().to_string();
+    assert!(error.ends_with("no occurrence `lid`"), "{error}");
+    assert_eq!(s.doc, doc, "a refused name changes nothing");
+    assert_eq!(run(&mut s, "occurrence.move", json!({"occurrence": "cap:2", "translate": [0, 5, 0]}))["occurrence"], second);
+}
+
+#[test]
 fn instance_selection_delete_removes_only_selected_instance() {
     let mut s = Session::default();
     let (component, first) = created(&mut s, "Block");
