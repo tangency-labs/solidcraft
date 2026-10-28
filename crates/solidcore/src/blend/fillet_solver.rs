@@ -4,6 +4,7 @@
 //!
 //! Upstream: `source/SMLib/src/SmFilletSolver.cpp`, `source/SMLib/inc/SmFilletSolver.h`.
 
+pub mod ball_fit;
 pub mod curve_blend_sih;
 pub mod p1;
 pub mod p2;

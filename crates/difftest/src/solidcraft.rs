@@ -1378,6 +1378,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
         "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "fillet_refuse_crossing_rails" => &mut k.fixes.fillet_refuse_crossing_rails,
+        "fillet_refuse_ball_not_fitting" => &mut k.fixes.fillet_refuse_ball_not_fitting,
         "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "precise_properties_body_length_scale" => &mut k.fixes.precise_properties_body_length_scale,
@@ -1798,9 +1799,11 @@ mod tests {
         enable_fix(&mut k, "sweep_frame_on_planar_path_normal").unwrap();
         enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
         enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
+        enable_fix(&mut k, "fillet_refuse_ball_not_fitting").unwrap();
         assert!(k.fixes.sweep_frame_on_planar_path_normal);
         assert!(k.fixes.cover_refuses_folded_continuation);
         assert!(k.fixes.fillet_refuse_non_manifold_result);
+        assert!(k.fixes.fillet_refuse_ball_not_fitting);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 

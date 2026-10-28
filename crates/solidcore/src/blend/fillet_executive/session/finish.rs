@@ -612,3 +612,109 @@ mod stitch_identity_tests {
         );
     }
 }
+
+/// `fixes.fillet_refuse_ball_not_fitting` (WR-462, tangency-labs/solidcore#1172): a
+/// 60 x 40 x 20 box, its top edge at y = 40 rounded r5, then its top edge at x = 60
+/// rounded r3, then its vertical edge at x = 60, y = 40 with the two edges up into the
+/// corner (the side's arc on the r5 round, the seam between the rounds).
+#[cfg(test)]
+mod ball_fit_tests {
+    use super::*;
+    use crate::blend::fillet_geom::p1::FilletErrorType;
+    use crate::geom::global_solver::SolverOperation;
+    use crate::math::Point3;
+    use crate::topology::{edge, Brep};
+
+    const NO_ROOM: i32 = FilletErrorType::NoRoom as i32;
+
+    fn edge_near(k: &Kernel, b: &Brep, point: [f64; 3]) -> EdgeId {
+        let point = Point3::new(point[0], point[1], point[2]);
+        let mut nearest = (f64::MAX, None);
+        for id in p1::edges(b, None).unwrap() {
+            let Some(curve) = edge::curve(b, id).unwrap() else {
+                continue;
+            };
+            let interval = edge::interval(b, id).unwrap();
+            let d = curve
+                .drop_point(
+                    k,
+                    &interval,
+                    point,
+                    None,
+                    1e-6,
+                    None,
+                    SolverOperation::Minimize,
+                )
+                .unwrap();
+            if d.success && d.distance < nearest.0 {
+                nearest = (d.distance, Some(id));
+            }
+        }
+        assert!(nearest.0 < 2e-3, "no edge near {point:?}");
+        nearest.1.unwrap()
+    }
+
+    /// The executive's error code after the corner round of `radius` with the fix on or
+    /// off, and its result.
+    fn corner_round(radius: f64, fix: bool) -> (i32, Result<()>) {
+        let mut k = Kernel::default();
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0)
+                .unwrap();
+        for (point, r) in [([30.0, 40.0, 20.0], 5.0), ([60.0, 20.0, 20.0], 3.0)] {
+            let e = edge_near(&k, &body, point);
+            crate::blend::fillet_executive::api::fillet_edges(
+                &mut k,
+                &mut body,
+                &[e],
+                r,
+                1,
+                1,
+                1.0,
+            )
+            .unwrap();
+        }
+        let edges: Vec<_> = [
+            [60.0, 40.0, 7.5],
+            [60.0, 35.0 + 24.0_f64.sqrt(), 16.0],
+            [58.93224999673208, 37.56010200025561, 19.29486599217306],
+        ]
+        .into_iter()
+        .map(|p| edge_near(&k, &body, p))
+        .collect();
+        k.fixes.fillet_refuse_ball_not_fitting = fix;
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &edges, radius, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        (session.executive.error.code, result)
+    }
+
+    #[test]
+    fn a_ball_that_does_not_fit_is_no_room_before_the_corners() {
+        for radius in [3.1, 7.0] {
+            let (code, result) = corner_round(radius, false);
+            assert!(matches!(
+                result,
+                Err(SolidError::Upstream { code: 1001, .. })
+            ));
+            assert_ne!(code, NO_ROOM, "r{radius}: the corners fail on their own");
+            let (code, result) = corner_round(radius, true);
+            assert!(matches!(
+                result,
+                Err(SolidError::Upstream { code: 1001, .. })
+            ));
+            assert_eq!(code, NO_ROOM, "r{radius}: NoRoom");
+        }
+    }
+
+    #[test]
+    fn a_ball_that_fits_is_not_refused() {
+        let (code, result) = corner_round(2.0, true);
+        // the round past the gate completes (main wired SmFace::PointClassify, which this
+        // test used to stop at)
+        result.unwrap();
+        assert_ne!(code, NO_ROOM);
+    }
+}

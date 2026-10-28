@@ -1744,6 +1744,15 @@ pub trait BrepCreationAccess<O: ClassObject + SolutionObject + Ord>:
     /// Real smoothing or missing live tangent-collection context.
     fn creation_smooth(&mut self, k: &mut Kernel, executive: &mut FilletExecutive<O>)
         -> Result<()>;
+
+    /// `SmFilletSolver::BallFitsItsFaces` (SolidCraft change, WR-462, #1172) on this
+    /// solver: whether its rolling ball fits the faces it rolls on. Only a live session
+    /// has solvers to judge.
+    ///
+    /// # Errors
+    /// The judging's own errors; the adapter over [`ExecutiveAccess`] has no solver
+    /// geometry to judge.
+    fn creation_ball_fits(&mut self, k: &mut Kernel, solver: O) -> Result<bool>;
 }
 impl<O, A> BrepCreationAccess<O> for A
 where
@@ -1756,6 +1765,10 @@ where
         executive: &mut FilletExecutive<O>,
     ) -> Result<()> {
         ExecutiveAccess::process_smooth_edge_sequences(self, k, executive)
+    }
+
+    fn creation_ball_fits(&mut self, _k: &mut Kernel, _solver: O) -> Result<bool> {
+        Err(invalid("the ball-fit rule needs a live fillet session"))
     }
 }
 
@@ -2488,6 +2501,21 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             entity: None,
         })?;
         ignore(access.creation_smooth(k, self))?;
+
+        // Opt-in, not upstream (`fixes.fillet_refuse_ball_not_fitting`, WR-462, #1172):
+        // a blend whose rolling ball does not fit a face it rolls on has a rail turned
+        // back on itself; a corner where it ends looks for it where it cannot be.
+        if k.fixes.fillet_refuse_ball_not_fitting {
+            let mut index = 0;
+            while let Some(solver) = self.solvers.get(index).copied() {
+                if !access.creation_ball_fits(k, solver)? {
+                    self.error.code = FilletErrorType::NoRoom as i32;
+                    self.error.comment = "Fillet Error: a rail turns back on itself: the blend is wider than the face's curve allows (its rolling ball does not fit)".into();
+                    return Err(failure());
+                }
+                index += 1;
+            }
+        }
 
         self.create_corner_vertices(k, access)?;
         self.adjust_corner_topology(k, access)?;

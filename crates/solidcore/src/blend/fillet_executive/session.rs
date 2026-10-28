@@ -2359,6 +2359,23 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
     ) -> Result<()> {
         executive.process_smooth_edge_sequences_narrow(k, self)
     }
+
+    fn creation_ball_fits(&mut self, k: &mut Kernel, solver: FilletObject) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let index = id.0 as usize;
+        let current = self
+            .solvers
+            .get_mut(index)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        crate::blend::fillet_solver::ball_fit::ball_fits_its_faces(
+            live_solver_ops(current),
+            k,
+            self.target,
+        )
+    }
 }
 
 impl FaceShrinkAccess<FilletObject> for SessionObjects<'_> {
