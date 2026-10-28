@@ -1540,7 +1540,7 @@ fn faces_with_too_many_bounds_are_refused() {
 
     let start = std::time::Instant::now();
     let imp = step_import(&text).unwrap();
-    assert!(imp.warnings.iter().any(|w| w.contains("boundary loops")), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("face #900000 with 100000 bounds")), "{:?}", imp.warnings);
     assert!(start.elapsed() < std::time::Duration::from_secs(10), "took {:?}", start.elapsed());
 }
 
