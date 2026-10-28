@@ -6,5 +6,8 @@
  "what": "a 0.1 mm chamfer on all eight top-rim spans of a 20 x 20 pillow whose four sides are fit splines (two cubic spans each)",
  "source": "invariants",
  "method": "closed profile of four fit-point splines, each through (0,0), (10,-3), (20,0) and its quarter-turn rotations about (10,10), extruded 10: the rim is a smooth chain of eight spline spans meeting at the four corners. A 0.1 mm equal setback is tiny against every face (10 mm tall walls, a 20 mm top), so it must build, and the body stays one closed valid solid. The area inside the splines has no closed form here (the spline end conditions are not fixed by the construction), so only validity is graded.",
- "body_count": 1
+ "body_count": 1,
+ "continuity": {
+  "order": "g0"
+ }
 }

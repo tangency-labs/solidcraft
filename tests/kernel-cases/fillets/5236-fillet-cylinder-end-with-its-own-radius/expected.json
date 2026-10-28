@@ -8,5 +8,8 @@
  "method": "the round of radius equal to the cylinder's is the hemisphere r10 on the cylinder's first 20 mm: V = pi 100 20 + (2/3) pi 1000 = 8377.580. Faces: side, bottom, the spherical end = 3",
  "body_count": 1,
  "faces": 3,
- "volume_mm3": 8377.5804
+ "volume_mm3": 8377.5804,
+ "continuity": {
+  "order": "g1"
+ }
 }

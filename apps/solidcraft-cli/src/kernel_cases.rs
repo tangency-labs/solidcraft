@@ -169,6 +169,82 @@ fn curvature_jumps(body: &solidcraft_engine::kernel::Body, near: [f64; 3], withi
     Ok(json!({"seams": seams.len(), "stations_clear": stations, "worst_per_mm": worst, "worst_clear_per_mm": worst_clear}))
 }
 
+/// The seams a `continuity: {order, edges}` check measures on `b`, by edge index, with how each
+/// lies: `blend`, every seam of a face a fillet or chamfer made (a round, a chamfer face or a
+/// corner patch) with the faces either side of the edge it replaced, and every seam of a corner
+/// patch with the rounds it joins: what the blend is built to meet. Where two rounds meet
+/// without a patch, their seam is the input's (tangent only where the rounded edges were) and is
+/// not one. `corner`, those of them on a corner patch. An error for any other selection.
+fn blend_seams(b: &solidcraft_engine::doc::ModelBody, edges: &str) -> Result<Vec<solidcraft_engine::doc::naming::BlendSeam>, String> {
+    use solidcraft_engine::doc::naming::BlendSeamKind;
+    let all = solidcraft_engine::doc::naming::blend_seams(b).into_iter().filter(|s| s.kind == BlendSeamKind::Contact || s.corner);
+    match edges {
+        "blend" => Ok(all.collect()),
+        "corner" => Ok(all.filter(|s| s.corner).collect()),
+        _ => Err(format!("continuity `edges` must be \"blend\" or \"corner\", not {edges:?}")),
+    }
+}
+
+/// The `continuity: {order, edges}` check of `b`: its `edges` seams measured as Continuity
+/// Analysis (`inspect.continuity`) measures them, at its default stations and tolerances, and the
+/// lowest order among them with the seam that has it (the worst: of those, the one whose first
+/// failing metric is furthest past its tolerance), its faces' names and that metric's worst value.
+/// `Ok((report, ok))`, `ok` where every seam meets `want`.
+fn continuity_order(
+    b: &solidcraft_engine::doc::ModelBody,
+    want: solidcraft_engine::kernel::Continuity,
+    edges: &str,
+) -> Result<(Value, bool), String> {
+    use solidcraft_engine::kernel::{self as k, Continuity};
+    let seams = blend_seams(b, edges)?;
+    let selected: Vec<usize> = seams.iter().map(|s| s.edge).collect();
+    if selected.is_empty() {
+        return Ok((json!(format!("{}: no {edges} seams", b.name)), false));
+    }
+    let tol = k::ContinuityTolerances::default();
+    let report = k::seam_diagnostics(&b.body, &selected, k::DEFAULT_SAMPLES, tol).map_err(|e| e.to_string())?;
+    let limits = [tol.gap_mm, tol.angle_deg, tol.curvature_per_mm, tol.curvature_change_per_mm2, tol.curvature_change_rate_per_mm3];
+    let metric = ["gap_mm", "normal_angle_deg", "curvature_jump_per_mm", "curvature_change_jump_per_mm2", "curvature_change_rate_jump_per_mm3"];
+    // The metric a seam of this order fails first (none past G4), and how far past its tolerance.
+    let first_failing = |s: &k::SeamReport| -> Option<(usize, f64, k::SeamWorst)> {
+        let i = s.order.map_or(0, |o| o.order() + 1);
+        let w = [s.gap_mm, s.normal_angle_deg, s.curvature_jump_per_mm, s.curvature_change_jump_per_mm2, s.curvature_change_rate_jump_per_mm3];
+        let (worst, limit) = (*w.get(i)?, *limits.get(i)?);
+        Some((i, if limit > 0.0 { worst.value / limit } else { f64::INFINITY }, worst))
+    };
+    let worst = report.seams.iter().min_by(|a, b| {
+        a.order.cmp(&b.order).then_with(|| {
+            let past = |s: &k::SeamReport| first_failing(s).map_or(0.0, |(_, r, _)| r);
+            past(b).total_cmp(&past(a))
+        })
+    });
+    let edge_names = solidcraft_engine::doc::naming::edge_names(b);
+    let order_word = |o: Option<Continuity>| o.map_or("none (the faces do not meet)", Continuity::as_str);
+    // How many seams reach each order, by what the blend meets there.
+    let kind = |edge: usize| match seams.iter().find(|s| s.edge == edge) {
+        Some(s) if s.kind == solidcraft_engine::doc::naming::BlendSeamKind::Blend => "with_blends",
+        _ => "with_contact_faces",
+    };
+    let mut orders = json!({});
+    for s in &report.seams {
+        let n = &mut orders[kind(s.edge)][order_word(s.order)];
+        *n = json!(n.as_u64().unwrap_or(0) + 1);
+    }
+    let mut got = json!({
+        "body": b.name, "edges": edges, "seams": report.seams.len(), "unmeasured": report.unmeasured, "orders": orders,
+    });
+    if let Some(s) = worst {
+        got["order"] = json!(order_word(s.order));
+        got["worst_edge"] = json!({"edge": s.edge, "faces": edge_names.get(s.edge), "meets": kind(s.edge)});
+        if let Some((i, _, w)) = first_failing(s) {
+            got["worst_edge"]["next_order_metric"] =
+                json!({"metric": metric.get(i), "value": w.value, "tolerance": limits.get(i), "at": w.at, "edge_fraction": w.edge_fraction});
+        }
+    }
+    let ok = report.unmeasured == 0 && !report.seams.is_empty() && report.seams.iter().all(|s| s.order.is_some_and(|o| o >= want));
+    Ok((got, ok))
+}
+
 fn unsupported(e: &str) -> bool {
     e.contains("not supported yet")
 }
@@ -324,9 +400,21 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
                 open == 0 && over == 0,
             );
         }
+        // The order every blend seam reaches, as Continuity Analysis measures it.
+        if let Some(order) = want["continuity"].get("order").filter(|o| !o.is_null()) {
+            let edges = want["continuity"]["edges"].as_str().unwrap_or("blend");
+            let need = format!(">= {} at every {edges} seam", order.as_str().unwrap_or("?"));
+            match order.as_str().and_then(solidcraft_engine::kernel::Continuity::parse) {
+                Some(o) => match continuity_order(b, o, edges) {
+                    Ok((got, ok)) => c.push("continuity_order", got, json!(need), ok),
+                    Err(e) => c.push("continuity_order", json!(format!("{}: {e}", b.name)), json!(need), false),
+                },
+                None => c.push("continuity_order", json!(format!("continuity `order` {order} is not g0…g4")), json!("an order"), false),
+            }
+        }
         // Curvature continuity across the seams round a point: the worst jump clear of the
         // seams' turns must be within the case's bound.
-        if let Some(cont) = want.get("continuity").filter(|c| !c.is_null()) {
+        if let Some(cont) = want.get("continuity").filter(|c| !c.is_null() && c.get("order").is_none()) {
             let (near, within, clear, bound) =
                 (v3(&cont["near"]), cont["within_mm"].as_f64(), cont["clear_mm"].as_f64(), cont["curvature_jump_per_mm"].as_f64());
             match (near, within, clear, bound) {

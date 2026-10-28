@@ -5,5 +5,8 @@
  "what": "an R5 round on the corner edge left by a wedge cut through a body vertex next to a B-spline face",
  "source": "invariants",
  "method": "plate with a cubic B-spline ramp, a tapered wedge cut through all, then R5 on the sharp vertical corner edge the wedge leaves at (-28,39): a plain convex edge with room for R5 (the wedge walls are 5.5 mm and more). A retried boolean must not leave a micro-edge that makes the round fail. One closed valid solid is the only thing graded.",
- "body_count": 1
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
 }

@@ -5,5 +5,8 @@
  "what": "the concave arc where a boss (r10) stands on a rounded block, the boss overhanging the block's corner so the arc runs out at the outer wall, filleted r2: refused ('a vertex of the edge chain where other faces meet: only straight edges can be blended')",
  "source": "invariants",
  "method": "the round runs along the arc over the block and ends where the arc meets the block's outer wall; its end there has no closed form, so only the outcome is graded: one valid closed body (the reporter's standard test, rebuilt from its screenshot)",
- "body_count": 1
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
 }

@@ -8,8 +8,6 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
 use crate::{ContinuitySeam, Result, Session, SurfaceAnalysis, kernel};
 
-/// Stations along each edge when the call does not say (`samples`).
-const DEFAULT_SAMPLES: usize = 33;
 /// Most edges one call may pick, and most bodies one call may analyse at once.
 const MAX_PICKS: usize = 512;
 const MAX_BODIES: usize = 64;
@@ -119,7 +117,7 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({ "analysis": "continuity", "cleared": true }));
     }
     let samples = match p.get("samples") {
-        None => DEFAULT_SAMPLES,
+        None => kernel::DEFAULT_SAMPLES,
         Some(v) => match v.as_f64().filter(|n| n.is_finite() && n.fract() == 0.0 && (3.0..=257.0).contains(n)) {
             Some(n) => n as usize,
             None => return Err(bad(cmd, "`samples` must be 3…257 stations along each edge")),

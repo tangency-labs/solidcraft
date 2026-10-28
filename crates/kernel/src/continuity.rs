@@ -44,6 +44,8 @@ const PICK_SAMPLES: usize = 32;
 /// ends and the middle.
 pub const MIN_SAMPLES: usize = 3;
 pub const MAX_SAMPLES: usize = 257;
+/// Stations along one edge where a measurement does not say (`inspect.continuity`'s default).
+pub const DEFAULT_SAMPLES: usize = 33;
 
 /// How an edge is picked: a point on (or near) it, or its index in the display mesh's edge
 /// order ([`Body::edges`]), which is what a viewport pick carries.

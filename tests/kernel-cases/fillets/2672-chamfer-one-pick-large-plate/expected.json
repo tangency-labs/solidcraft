@@ -11,5 +11,8 @@
  "faces": 15,
  "tolerance": {
   "rel": 5e-06
+ },
+ "continuity": {
+  "order": "g0"
  }
 }

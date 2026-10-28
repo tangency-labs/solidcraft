@@ -80,7 +80,13 @@ fn split_top_level(s: &str) -> Vec<&str> {
 /// numbered pieces of older designs), so pieces of a split edge, or of an edge between split
 /// faces, match.
 pub(crate) fn strip_edge_piece(n: &str) -> String {
-    let n = strip_edge_number(n);
+    strip_qualifiers(strip_edge_number(n))
+}
+
+/// A name without any face's piece qualifiers (`#[…]`, and the numbered pieces of older designs),
+/// wherever they are in it: the face a piece name is a piece of, with every face it names
+/// unqualified too. An edge's own number (`~k`) stays.
+pub(crate) fn strip_qualifiers(n: &str) -> String {
     let mut out = String::with_capacity(n.len());
     let bytes = n.as_bytes();
     let mut i = 0;

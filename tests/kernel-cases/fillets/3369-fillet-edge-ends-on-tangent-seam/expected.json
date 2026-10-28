@@ -7,5 +7,8 @@
  "source": "analytic",
  "method": "bar with a stadium cross-section (rectangle 25 x 19 and two half discs of R9.5, area 25*19 + pi*9.5^2) extruded 14 along X; a slot x 3.5..9.5 cuts away the y<0 half of the round end (half disc, pi*9.5^2/2 * 6); the sharp edge left between the flat top and the slot floor (length 6) is rounded with R2, removing (1 - pi/4) r^2 L = (1 - pi/4)*4*6. V = 14*(475 + pi*90.25) - 6*pi*90.25/2 - 24*(1 - pi/4). The round ends on the slot walls, where only the 6 mm strip is affected.",
  "body_count": 1,
- "volume_mm3": 9763.665662772806
+ "volume_mm3": 9763.665662772806,
+ "continuity": {
+  "order": "g1"
+ }
 }

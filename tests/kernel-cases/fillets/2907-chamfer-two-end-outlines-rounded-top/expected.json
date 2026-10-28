@@ -7,5 +7,8 @@
  "source": "analytic",
  "method": "prism: 30 wide x 20 high section with the two top corners rounded R4 (area 600 - 2 (1-pi/4) 16), 40 long: V0 = 23725.310. Each end outline is an open chain: side 16 + arc (pi/2 R4 = 6.283) + top 22 + arc + side 16 = 66.566, total turning pi. Chamfer c=1.5 removes the triangle (c^2/2) along the chain at its centroid line, whose length is the chain length less (c/3) x turning (Pappus on the arcs): c^2/2 (66.566 - 0.5 pi) per end, and the chain ends on the bottom plane at both sides. Both ends: 146.2400. V = 23579.0696.",
  "body_count": 1,
- "volume_mm3": 23579.069607001715
+ "volume_mm3": 23579.069607001715,
+ "continuity": {
+  "order": "g0"
+ }
 }

@@ -6,5 +6,8 @@
  "source": "analytic",
  "method": "sector r6..10 (120 degrees) 20 tall joined with sector r3..6 18 tall: V0 = 1/2 (2 pi/3) (100-36) 20 + 1/2 (2 pi/3) (36-9) 18. The chamfer c=3 of the top outer arc (top face ring is 4 wide, wall 20 tall) removes the triangle (c^2/2) revolved over 120 degrees at its centroid radius R - c/3 = 9 (Pappus): 4.5 * (2 pi/3) * 9 = 84.82. It ends on the two radial end planes. V = V0 - 84.82 = 1764.528. The pick is the arc midpoint (5, 8.660, 20).",
  "body_count": 1,
- "volume_mm3": 1764.5278737662668
+ "volume_mm3": 1764.5278737662668,
+ "continuity": {
+  "order": "g0"
+ }
 }

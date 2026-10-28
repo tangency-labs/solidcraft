@@ -337,6 +337,31 @@ fn a_sketch_on_a_certified_face_survives_a_fillet_and_a_cut_upstream_of_it() {
     assert!((top(&s) - 20.0).abs() < 1e-6, "{}", top(&s));
 }
 
+/// A blend's seams are those with the faces either side of the edge it replaced and with other
+/// blends (a corner patch and its rounds); where a round runs into an end face is not one.
+#[test]
+fn blend_seams_are_a_rounds_contacts_and_the_blends_beside_it() {
+    use solidcraft_doc::naming::{BlendSeamKind, blend_seams};
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "tangent_chain": false}));
+    let state = s.model.state();
+    let seams = blend_seams(&state.bodies[0]);
+    assert_eq!(seams.len(), 2, "the round's two tangent seams, not its two ends: {seams:?}");
+    assert!(seams.iter().all(|x| x.kind == BlendSeamKind::Contact && !x.corner), "{seams:?}");
+
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 15, 10], [20, 30, 10], [40, 30, 5]], "radius": 2, "tangent_chain": false}));
+    let state = s.model.state();
+    let seams = blend_seams(&state.bodies[0]);
+    let contact = seams.iter().filter(|x| x.kind == BlendSeamKind::Contact).count();
+    let corner: Vec<_> = seams.iter().filter(|x| x.corner).collect();
+    assert_eq!(contact, 6, "each round's two faces: {seams:?}");
+    assert_eq!(corner.len(), 3, "the corner patch's seams with the three rounds: {seams:?}");
+    assert!(corner.iter().all(|x| x.kind == BlendSeamKind::Blend), "{seams:?}");
+}
+
 /// A fillet of a shell's inner corners names those edges. Thinning the wall past the outer
 /// round removes them. The fillet must say the names are gone, not blend the seam nearest
 /// the old pick, which now sits on the axis of the inner round (#775).

@@ -18,5 +18,9 @@
    40,
    20
   ]
+ },
+ "continuity": {
+  "order": "g2",
+  "edges": "corner"
  }
 }

@@ -291,6 +291,95 @@ pub fn face_name_exact(b: &ModelBody, index: usize) -> bool {
     names(b).verified(index)
 }
 
+/// What a face a fillet or chamfer made (a round, a chamfer face or a corner patch: named
+/// `F<feature>:blend:<edge>`) meets across one of its seams.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlendSeamKind {
+    /// A face either side of an edge the blend replaced: what it was made to meet along its
+    /// length (a round is tangent to it, a chamfer meets it at its angle).
+    Contact,
+    /// Another blend face: the next round of a chain, or a corner patch and the rounds it joins.
+    Blend,
+}
+
+/// A seam of a blend face ([`blend_seams`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlendSeam {
+    /// The edge, by mesh edge index (the body's edge order).
+    pub edge: usize,
+    pub kind: BlendSeamKind,
+    /// Whether one side is a corner patch: a blend face made from several replaced edges (its
+    /// name and its aliases each name one), where the rounds of those edges meet.
+    pub corner: bool,
+}
+
+/// The seams of a body's blend faces with what they were made to meet: the faces either side of
+/// each edge a blend replaced, and other blend faces. A blend's seam with any other face (an end
+/// face its round runs into) is not one. Read from the faces' names, so a body named from
+/// geometry ([`face_name_exact`] false) gives its blends' nearest edges.
+pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
+    const MARK: &str = ":blend:";
+    let n = names(b);
+    // Per face: the names it answers to, and the edges a blend face replaced (each as
+    // `<face>|<face>`, without qualifiers or numbers).
+    let all = |i: usize| -> Vec<&str> {
+        let aliases = n.info.get(i).map(|f| f.aliases.as_slice()).unwrap_or_default();
+        n.faces.get(i).map(String::as_str).into_iter().chain(aliases.iter().map(String::as_str)).collect()
+    };
+    let replaced: Vec<Vec<(String, String)>> = (0..n.faces.len())
+        .map(|i| {
+            all(i)
+                .into_iter()
+                .filter_map(|name| {
+                    let (core, instance) = split_instance(name);
+                    let (_, edge) = core.split_once(MARK)?;
+                    Some((crate::piece_names::strip_edge_piece(edge), instance.to_string()))
+                })
+                .collect()
+        })
+        .collect();
+    let blend = |i: usize| replaced.get(i).is_some_and(|r| !r.is_empty());
+    let corner = |i: usize| replaced.get(i).is_some_and(|r| r.len() > 1);
+    // Whether face `j` is a side of an edge blend face `i` replaced.
+    let contact = |i: usize, j: usize| -> bool {
+        let Some(edges) = replaced.get(i) else { return false };
+        all(j).into_iter().any(|name| {
+            let (core, instance) = split_instance(name);
+            let face = crate::piece_names::strip_qualifiers(core);
+            edges.iter().any(|(edge, at)| {
+                at == instance
+                    && (edge.strip_prefix(face.as_str()).is_some_and(|r| r.starts_with('|'))
+                        || edge.strip_suffix(face.as_str()).is_some_and(|r| r.ends_with('|')))
+            })
+        })
+    };
+    let mut out = Vec::new();
+    for (edge, faces) in b.mesh().edge_faces.iter().enumerate() {
+        let [f, g] = faces.as_slice() else { continue };
+        let (f, g) = (*f as usize, *g as usize);
+        let kind = if blend(f) && blend(g) {
+            BlendSeamKind::Blend
+        } else if (blend(f) && contact(f, g)) || (blend(g) && contact(g, f)) {
+            BlendSeamKind::Contact
+        } else {
+            continue;
+        };
+        out.push(BlendSeam { edge, kind, corner: corner(f) || corner(g) });
+    }
+    out
+}
+
+/// A name and the copy it names (`@F<feature>.<instance>`, a pattern's or a paste's copy of a
+/// tool face; empty for the original).
+fn split_instance(name: &str) -> (&str, &str) {
+    match name.rfind('@') {
+        Some(i) if name.get(i + 1..).is_some_and(|t| t.starts_with('F') && t.bytes().skip(1).all(|c| c.is_ascii_digit() || c == b'.')) => {
+            (name.get(..i).unwrap_or(name), name.get(i..).unwrap_or(""))
+        }
+        _ => (name, ""),
+    }
+}
+
 /// Prepare only names not yet known before a lookup reads several bodies. A ready cell is
 /// shared by snapshots and poses: dispatching threads just to read it costs more than a lookup.
 pub(crate) fn warm_names<'a>(bodies: impl Iterator<Item = &'a ModelBody>) {

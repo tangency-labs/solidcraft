@@ -7,5 +7,8 @@
  "method": "reduced to 7.5 (half the width, the largest that fits): removed 2 (1-pi/4) 7.5^2 20",
  "body_count": 1,
  "volume_mm3": 23517.14586764426,
- "faces": 6
+ "faces": 6,
+ "continuity": {
+  "order": "g1"
+ }
 }

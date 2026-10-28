@@ -9,5 +9,8 @@
  "source": "analytic",
  "method": "two 40x20x10 blocks, each with its two long top edges rounded R2 (each removes (1-pi/4) 4 x 40): V = 2 (8000 - 2*(1-pi/4)*4*40) = 15862.655. Two bodies.",
  "body_count": 2,
- "volume_mm3": 15862.654824574367
+ "volume_mm3": 15862.654824574367,
+ "continuity": {
+  "order": "g1"
+ }
 }
