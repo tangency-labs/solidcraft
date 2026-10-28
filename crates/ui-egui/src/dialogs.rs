@@ -1588,6 +1588,32 @@ impl Dialog {
         }
     }
 
+    /// A sketch picked whole, by its Browser or History row (#7381): the profiles an extrude of
+    /// the whole sketch takes, as one pick, so picking the sketch again takes them out. False when
+    /// the active input takes no profiles or the sketch has none.
+    pub fn pick_sketch(&mut self, s: &Session, sketch: u64) -> bool {
+        if !self.active_input().is_some_and(|i| i.accept & selection::PROFILES != 0) {
+            return false;
+        }
+        let picked = sketch_material_profiles(s, sketch);
+        if picked.is_empty() {
+            return false;
+        }
+        if self.active == 0 && matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. }) {
+            self.profile_selection_changed = true;
+        }
+        let loft = matches!(self.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. }));
+        let Some(inp) = self.inputs.get_mut(self.active) else { return false };
+        // Extrude and revolve take profiles of one sketch, as a pick in the view does.
+        if !loft {
+            inp.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if *other != sketch));
+        }
+        inp.toggle(picked);
+        self.focus = true;
+        self.error = None;
+        true
+    }
+
     /// Box selection result: replace (or add to) the active input.
     pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
@@ -1684,6 +1710,22 @@ fn default_profiles(s: &Session) -> Vec<Sel> {
         s.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).filter(|&id| !profiles_used(s, id))
     });
     sid.map(|id| single_profile(s, id)).unwrap_or_default()
+}
+
+/// The profiles of `sketch` an extrude of the whole sketch takes: every one but those inside an
+/// odd number of the others' holes, so a loop inside an outline stays its hole and a loop inside
+/// that hole is material again, as an extrude with no profiles picked has it.
+pub(crate) fn sketch_material_profiles(s: &Session, sketch: u64) -> Vec<Sel> {
+    let st = s.world_state();
+    let Some(ss) = st.sketch(sketch) else { return Vec::new() };
+    if ss.profiles.len() > 10_000 {
+        return Vec::new();
+    }
+    let around = |probe| ss.profiles.iter().filter(|other| other.region.holes.iter().any(|hole| hole.contains(probe))).count();
+    (0..ss.profiles.len())
+        .filter(|&index| ss.profiles.get(index).is_some_and(|p| around(p.region.interior_point()) % 2 == 0))
+        .map(|index| Sel::Profile { sketch, index })
+        .collect()
 }
 
 fn single_profile(s: &Session, sketch: u64) -> Vec<Sel> {

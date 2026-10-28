@@ -415,8 +415,16 @@ fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
 }
 
 /// Give a History feature click to a compatible active dialog input in any layout.
-/// Plain clicks keep an existing pick; Ctrl/Command clicks toggle it off.
+/// Plain clicks keep an existing pick; Ctrl/Command clicks toggle it off. A sketch goes into an
+/// input that takes profiles as the whole sketch (#7381); a second click takes it out again.
 pub(crate) fn pick_feature_into_dialog(app: &mut SolveApp, id: u64, modifiers: egui::Modifiers) -> bool {
+    let sketch = app.session.doc.feature(id).is_some_and(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. }));
+    if sketch
+        && let Some(d) = app.dialog.as_mut()
+        && d.pick_sketch(&app.session, id)
+    {
+        return true;
+    }
     let Some(d) = app.dialog.as_mut().filter(|d| d.active_input().is_some_and(|i| i.accept & crate::selection::FEATURES != 0)) else {
         return false;
     };

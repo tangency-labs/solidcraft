@@ -2499,9 +2499,20 @@ fn entry_row(
         }
     } else if r.clicked {
         let shift = ui.input(|i| i.modifiers.shift);
+        // A sketch row with a dialog taking profiles open picks the whole sketch (#7381).
+        let sketch_pick = folder == "sketches"
+            && !shift
+            && e.key.parse::<u64>().is_ok_and(|id| {
+                let Some(mut d) = app.dialog.take() else { return false };
+                let taken = d.pick_sketch(&app.session, id);
+                app.dialog = Some(d);
+                taken
+            });
         // A body row with a dialog open is a pick, as Combine does (#4452), unless Shift is
         // asking for the rows between this one and the anchor.
-        if folder == "construction" || (folder == "bodies" && !shift && app.dialog.is_some()) {
+        if sketch_pick {
+            // The dialog took the sketch.
+        } else if folder == "construction" || (folder == "bodies" && !shift && app.dialog.is_some()) {
             if let Some(s) = e.sel.clone() {
                 if matches!(s, Sel::Body { .. }) {
                     app.tree.anchor = Some(e.row_key.clone());

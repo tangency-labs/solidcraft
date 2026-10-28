@@ -2671,6 +2671,54 @@ fn combine_takes_bodies_clicked_in_the_browser() {
     }
 }
 
+/// #7381: with Extrude open, a sketch's row in the Browser or its item in the History picks the
+/// whole sketch: its profiles, but not a loop inside an outline (its hole), while a loop inside
+/// that hole is material again. Another sketch's row replaces them, and a second click takes
+/// them out again.
+#[test]
+fn extrude_takes_a_sketch_clicked_in_the_browser_or_the_history() {
+    use solidcraft_engine::geom::Vec2;
+    for history in [false, true] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.tree.expanded.insert("c0/sketches".into());
+        // An outline with a round hole, and an island in the hole.
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Plate"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [20, 15], "radius": 10})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [20, 15], "radius": 4})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "offset": 50, "name": "Disc"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 5})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.session.selection.clear();
+        h.app.start("solid.extrude");
+        h.frames(2);
+        let id = |h: &crate::scenario::Harness, name: &str| h.app.session.doc.find_feature(name).map(|f| f.id).unwrap();
+        let (plate, disc) = (id(&h, "Plate"), id(&h, "Disc"));
+        let click = |h: &mut crate::scenario::Harness, name: &str| {
+            let at = if history { json!({"click": {"handle": format!("timeline:{name}")}}) } else { json!({"click": {"browser": name}}) };
+            h.step(&at).unwrap();
+            h.frames(1);
+        };
+        let items = |h: &crate::scenario::Harness| h.app.dialog.as_ref().expect("Extrude stays open").inputs[0].items.clone();
+        // Which of the points (outline, hole, island) the picked profiles cover.
+        let covers = |h: &crate::scenario::Harness| {
+            let state = h.app.session.world_state();
+            let ss = state.sketch(plate).unwrap();
+            [Vec2::new(3.0, 3.0), Vec2::new(20.0, 22.0), Vec2::new(20.0, 15.0)].map(|q| {
+                items(h).iter().any(|x| matches!(x, Sel::Profile { sketch, index } if *sketch == plate && ss.profiles[*index].region.contains(q)))
+            })
+        };
+        click(&mut h, "Plate");
+        assert!(items(&h).iter().all(|x| matches!(x, Sel::Profile { sketch, .. } if *sketch == plate)), "history={history}: {:?}", items(&h));
+        assert_eq!(covers(&h), [true, false, true], "history={history}: the outline and the island, not the hole");
+        click(&mut h, "Disc");
+        assert_eq!(items(&h), vec![Sel::Profile { sketch: disc, index: 0 }], "history={history}: the other sketch replaces them");
+        click(&mut h, "Disc");
+        assert_eq!(items(&h), Vec::<Sel>::new(), "history={history}: a second click takes it out");
+    }
+}
+
 /// `control`: click the rows as the control channel's `ui.click` does (move, press and release
 /// in one frame), as an agent or a live screenshot run does.
 fn combine_takes_bodies_clicked_in_the_browser_in(layout: &str, control: bool) {
