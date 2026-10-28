@@ -69,14 +69,14 @@ fn through_all_never_reads_as_blind_and_blind_never_as_through() {
     let bore = callout(&mut s, "Bore");
     assert_eq!(bore["status"], "resolved", "{bore}");
     assert_eq!(bore["callout"]["extent"], json!({"type": "through"}), "{bore}");
-    assert_eq!(lines(&bore), ["Ø35.0 THRU"]);
+    assert_eq!(lines(&bore), ["Ø35.00 THRU"]);
     let blind = callout(&mut s, "Blind");
     assert_eq!(blind["callout"]["extent"]["type"], "blind", "{blind}");
     assert!(near(&blind["callout"]["extent"]["depth"], 12.0), "{blind}");
-    assert_eq!(lines(&blind), ["Ø8.0 ↧ 12.0"]);
+    assert_eq!(lines(&blind), ["Ø8.00 ↧ 12.00"]);
     let past = callout(&mut s, "PastTheBottom");
     assert_eq!(past["callout"]["extent"], json!({"type": "through"}), "{past}");
-    assert_eq!(lines(&past), ["Ø5.0 THRU"]);
+    assert_eq!(lines(&past), ["Ø5.00 THRU"]);
     // A drilled hole's floor is its drill point: blind to the shoulder, 15 deep.
     run(
         &mut s,
@@ -86,12 +86,12 @@ fn through_all_never_reads_as_blind_and_blind_never_as_through() {
     let drilled = callout(&mut s, "Drilled");
     assert_eq!(drilled["callout"]["form"]["type"], "drilled", "{drilled}");
     assert!(near(&drilled["callout"]["extent"]["depth"], 15.0), "{drilled}");
-    assert_eq!(lines(&drilled), ["Ø6.0 ↧ 15.0"]);
+    assert_eq!(lines(&drilled), ["Ø6.00 ↧ 15.00"]);
     // An 8 mm plate's Ø6.6 through hole reads as through, not as 8 deep.
     let mut plate = Session::default();
     run(&mut plate, "solid.box", json!({"length": 60, "width": 30, "height": 8, "name": "Bracket"}));
     run(&mut plate, "solid.hole", json!({"position": [15, 15, 8], "diameter": 6.6, "name": "H"}));
-    assert_eq!(lines(&callout(&mut plate, "H")), ["Ø6.6 THRU"]);
+    assert_eq!(lines(&callout(&mut plate, "H")), ["Ø6.60 THRU"]);
 }
 
 #[test]
@@ -110,10 +110,10 @@ fn a_hole_on_a_pocket_floor_takes_its_depth_from_the_floor() {
     // 10 deep from the floor (z 35 → 25), not from the block's top (z 40 → 30).
     let c = callout(&mut s, "OnFloor");
     assert!(near(&c["callout"]["extent"]["depth"], 10.0), "{c}");
-    assert_eq!(lines(&c), ["Ø10.0 ↧ 10.0"]);
+    assert_eq!(lines(&c), ["Ø10.00 ↧ 10.00"]);
     assert!(!solid_at(&s, 35.0, 20.0, 25.5) && solid_at(&s, 35.0, 20.0, 24.5), "the model's floor is at z = 25");
     // The Ø35 bore: through from the floor, never `x 35 deep`.
-    assert_eq!(lines(&callout(&mut s, "Bore")), ["Ø35.0 THRU"]);
+    assert_eq!(lines(&callout(&mut s, "Bore")), ["Ø35.00 THRU"]);
     // Drilled from a sketch on the block's top plane (z = 40) over the pocket: the hole starts on
     // the floor below the point, and its 10 mm go from there (z 35 → 25), not from the sketch.
     run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Top"}));
@@ -125,13 +125,13 @@ fn a_hole_on_a_pocket_floor_takes_its_depth_from_the_floor() {
     let face = c["callout"]["start_face"].as_str().unwrap_or_default().to_string();
     assert!(face.starts_with(&format!("F{pocket}:")), "{face}");
     assert!(near(&c["callout"]["extent"]["depth"], 10.0), "{c}");
-    assert_eq!(lines(&c), ["Ø10.0 ↧ 10.0"]);
+    assert_eq!(lines(&c), ["Ø10.00 ↧ 10.00"]);
     assert!(!solid_at(&s, 65.0, 40.0, 25.5) && solid_at(&s, 65.0, 40.0, 24.5), "the model's floor is at z = 25");
     // To Object: from the top (z = 40) to a point on the pocket floor (z = 35), 5 deep.
     run(&mut s, "solid.hole", json!({"position": [10, 30, 40], "diameter": 6, "to": [35, 20, 35], "name": "ToFloor"}));
     let c = callout(&mut s, "ToFloor");
     assert!(near(&c["callout"]["extent"]["depth"], 5.0), "{c}");
-    assert_eq!(lines(&c), ["Ø6.0 ↧ 5.0"]);
+    assert_eq!(lines(&c), ["Ø6.00 ↧ 5.00"]);
 }
 
 #[test]
@@ -153,13 +153,13 @@ fn counterbore_and_countersink_callouts_keep_their_hole() {
     assert_eq!(cb["callout"]["extent"], json!({"type": "through"}), "{cb}");
     assert_eq!(cb["callout"]["form"]["type"], "counterbore", "{cb}");
     assert!(near(&cb["callout"]["form"]["diameter"], 11.0) && near(&cb["callout"]["form"]["depth"], 6.8), "{cb}");
-    assert_eq!(lines(&cb), ["Ø6.6 THRU", "⌴ Ø11.0 ↧ 6.8"]);
+    assert_eq!(lines(&cb), ["Ø6.60 THRU", "⌴ Ø11.00 ↧ 6.80"]);
     let cs = callout(&mut s, "CS");
     assert!(near(&cs["callout"]["diameter"], 6.6), "{cs}");
     assert!(near(&cs["callout"]["extent"]["depth"], 15.0), "{cs}");
-    assert_eq!(lines(&cs), ["Ø6.6 ↧ 15.0", "⌵ Ø12.0 × 90.0°"]);
+    assert_eq!(lines(&cs), ["Ø6.60 ↧ 15.00", "⌵ Ø12.00 × 90.00°"]);
     // Words in the drawing's content language, numbers in its unit.
-    assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"language": "de-DE"}))), ["Ø6.6 DURCH", "⌴ Ø11.0 ↧ 6.8"]);
+    assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"language": "de-DE"}))), ["Ø6.60 DURCH", "⌴ Ø11.00 ↧ 6.80"]);
     assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"units": "in", "decimals": 2}))), ["Ø0.2598 THRU", "⌴ Ø0.4331 ↧ 0.2677"]);
 }
 
@@ -185,7 +185,7 @@ fn holes_at_sketch_points_count_and_a_deleted_point_is_lost() {
         let c = callout_with(&mut s, "Holes", Some(id), json!({}));
         assert_eq!(c["status"], "resolved", "{c}");
         assert_eq!(c["callout"]["count"], 6, "{c}");
-        assert_eq!(lines(&c), ["6× Ø9.0 THRU"]);
+        assert_eq!(lines(&c), ["6× Ø9.00 THRU"]);
         // Each callout is its own hole, at its own point.
         let a = std::f64::consts::TAU * i as f64 / 6.0;
         assert!(near(&c["callout"]["start"][0], 47.5 * a.cos()) && near(&c["callout"]["start"][1], 47.5 * a.sin()), "{id}: {c}");
@@ -204,7 +204,7 @@ fn holes_at_sketch_points_count_and_a_deleted_point_is_lost() {
     assert!(lost.get("callout").is_none(), "{lost}");
     // Today the whole Hole feature fails when one of its points is deleted, so the others read
     // failed, naming the point. When the feature drills the points that are left, this becomes
-    // `5× Ø9.0 THRU` with p2 at its own point.
+    // `5× Ø9.00 THRU` with p2 at its own point.
     let p2 = callout_with(&mut s, "Holes", Some("p2"), json!({}));
     assert_eq!(p2["status"], "failed", "{p2}");
     assert!(p2["reason"].as_str().is_some_and(|r| r.contains("p3")), "{p2}");
@@ -227,14 +227,14 @@ fn suppress_undo_and_parameter_edits_change_the_callout() {
         "solid.hole",
         json!({"position": [90, 30, 40], "diameter": "d", "depth": "deep", "type": "counterbore", "cb_diameter": 14, "cb_depth": "cbd", "name": "H"}),
     );
-    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.0 ↧ 12.0", "⌴ Ø14.0 ↧ 4.0"]);
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.00 ↧ 12.00", "⌴ Ø14.00 ↧ 4.00"]);
     run(&mut s, "parameters.change", json!({"name": "d", "expression": "10 mm"}));
-    assert_eq!(lines(&callout(&mut s, "H")), ["Ø10.0 ↧ 12.0", "⌴ Ø14.0 ↧ 4.0"]);
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø10.00 ↧ 12.00", "⌴ Ø14.00 ↧ 4.00"]);
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.0 ↧ 12.0", "⌴ Ø14.0 ↧ 4.0"]);
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.00 ↧ 12.00", "⌴ Ø14.00 ↧ 4.00"]);
     // Deeper than the block: through.
     run(&mut s, "parameters.change", json!({"name": "deep", "expression": "45 mm"}));
-    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.0 THRU", "⌴ Ø14.0 ↧ 4.0"]);
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.00 THRU", "⌴ Ø14.00 ↧ 4.00"]);
     run(&mut s, "edit.undo", json!({}));
     // Suppressed, and back.
     run(&mut s, "timeline.suppress", json!({"feature": "H", "suppressed": true}));
@@ -256,7 +256,7 @@ fn suppress_undo_and_parameter_edits_change_the_callout() {
     assert_eq!(gone["status"], "lost", "{gone}");
     assert_eq!(gone["hole"], json!({"feature": id}));
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.0 ↧ 12.0", "⌴ Ø14.0 ↧ 4.0"]);
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø8.00 ↧ 12.00", "⌴ Ø14.00 ↧ 4.00"]);
     // A later pocket, 15 deep around it, cuts the whole hole away (12 deep from z = 40): failed, saying so.
     run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Over"}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [80, 20], "p1": [100, 40]}));
@@ -282,7 +282,7 @@ fn a_single_hole_at_a_sketch_point_needs_no_point_and_is_lost_with_it() {
         assert_eq!(c["status"], "resolved", "{c}");
         assert!(near(&c["callout"]["start"][0], 15.0) && near(&c["callout"]["start"][1], 15.0), "{c}");
         assert_eq!(c["callout"]["count"], 1, "{c}");
-        assert_eq!(lines(&c), ["Ø6.0 ↧ 4.0"]);
+        assert_eq!(lines(&c), ["Ø6.00 ↧ 4.00"]);
     }
     // Another point of the sketch: the hole isn't drilled there.
     assert_eq!(callout_with(&mut s, "One", Some("d"), json!({}))["status"], "lost");
@@ -317,7 +317,7 @@ fn a_tapped_hole_shows_its_thread_not_the_tap_drill() {
     // The tap drill: major − pitch = 8 − 1.25.
     assert!(near(&c["callout"]["diameter"], 6.75), "{c}");
     assert_eq!(c["callout"]["thread"], "M8", "{c}");
-    assert_eq!(lines(&c), ["M8 ↧ 12.0"]);
+    assert_eq!(lines(&c), ["M8 ↧ 12.00"]);
     run(&mut s, "solid.hole", json!({"position": [10, 30, 40], "thread": "M6", "name": "TappedThrough"}));
     assert_eq!(lines(&callout(&mut s, "TappedThrough")), ["M6 THRU"]);
 }
