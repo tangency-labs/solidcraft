@@ -138,9 +138,12 @@ mod sheets {
         for r in regions {
             let (mut material, mut holes) = (Vec::new(), Vec::new());
             let loops = std::iter::once(r.outer.ccw()).chain(r.holes.iter().map(|h| h.ccw().reversed()));
-            for piece in loops.flat_map(|lp| simple_loops(lp, tol * 10.0)) {
-                let face = face(&piece)?;
-                if piece.signed_area() > 0.0 { material.push(face) } else { holes.push(face) }
+            for lp in loops {
+                let near = tol * 10.0;
+                for piece in simple_loops(lp.segs.into_iter().map(|s| (s.start(), s)).collect(), |a, b| a.dist(*b) < near) {
+                    let face = face(&piece)?;
+                    if piece.signed_area() > 0.0 { material.push(face) } else { holes.push(face) }
+                }
             }
             let Some(material) = united(material)? else { continue };
             sheets.push(match united(holes)? {
@@ -174,22 +177,23 @@ mod sheets {
         Ok(sheets.pop())
     }
 
-    /// A closed loop split where it passes a point twice (its segments' starts within `near`)
-    /// into loops that pass every point once.
-    fn simple_loops(lp: Loop2, near: f64) -> Vec<Loop2> {
-        let mut todo = vec![lp.segs];
+    /// A closed loop, each segment with where it starts, split where it passes a point twice
+    /// (`same` start for two of its segments) into loops that pass every point once.
+    fn simple_loops<K>(segs: Vec<(K, Seg2)>, same: impl Fn(&K, &K) -> bool) -> Vec<Loop2> {
+        let mut todo = vec![segs];
         let mut out = Vec::new();
         // Each split leaves two shorter loops, so the work is bounded by the segment count.
         while let Some(segs) = todo.pop() {
-            let starts: Vec<Vec2> = segs.iter().map(Seg2::start).collect();
-            let repeat = (0..starts.len()).find_map(|i| (i + 1..starts.len()).find(|&j| starts[i].dist(starts[j]) < near).map(|j| (i, j)));
+            let repeat = (0..segs.len()).find_map(|i| (i + 1..segs.len()).find(|&j| same(&segs[i].0, &segs[j].0)).map(|j| (i, j)));
             match repeat {
                 Some((i, j)) => {
-                    let (inner, rest) = (segs[i..j].to_vec(), [&segs[j..], &segs[..i]].concat());
+                    let mut rest = segs;
+                    let inner: Vec<(K, Seg2)> = rest.drain(i..j).collect();
+                    rest.rotate_left(i);
                     todo.push(inner);
                     todo.push(rest);
                 }
-                None => out.push(Loop2 { segs }),
+                None => out.push(Loop2 { segs: segs.into_iter().map(|(_, s)| s).collect() }),
             }
         }
         out
@@ -224,24 +228,29 @@ mod sheets {
             // Each loop as it runs in the plane, then split where it passes a point twice (a
             // cut-out touching the outline, material meeting at a corner): counter-clockwise
             // pieces are material, the others holes in the material that holds them.
+            // A loop passes a point twice where it passes one vertex of the record twice: the
+            // record's vertices, not their places, which may lie closer together than its
+            // tolerance at the ends of a short edge.
             let mut pieces = Vec::new();
             for lp in &face.loops {
                 let Loop::Edges { edges } = lp else { return Err(failed("face", format!("face {f} has a vertex loop"))) };
                 let mut segs = Vec::new();
                 for e in edges {
+                    let edge = record.edges.get(e.edge as usize).ok_or_else(|| failed("edge", format!("edge {} is missing", e.edge)))?;
                     let run = Run::of(&record, e.edge as usize, e.forward).ok_or_else(|| failed("edge", format!("edge {} is missing", e.edge)))?;
                     let read = projected(&run, &Plane::XY, tol, &mut work)
                         .ok_or_else(|| failed("edge", format!("edge {} of face {f} is not read exactly in the plane", e.edge)))?;
-                    segs.extend(read);
-                }
-                for e in edges.iter().filter_map(|e| record.edges.get(e.edge as usize)) {
-                    for v in e.vertices {
+                    // The first piece of the edge starts on the use's first vertex.
+                    let start = if e.forward { edge.vertices[0] } else { edge.vertices[1] };
+                    segs.extend(read.into_iter().enumerate().map(|(k, s)| ((k == 0).then_some(start), s)));
+                    for v in edge.vertices {
                         touching |= *owner.entry(v).or_insert(f) != f;
                     }
                 }
                 // Seen from the face's normal, the outer loop runs counter-clockwise and holes clockwise.
-                let lp = if up > 0.0 { Loop2 { segs } } else { Loop2 { segs }.reversed() };
-                pieces.extend(simple_loops(lp, tol * 10.0));
+                for piece in simple_loops(segs, |a, b| a.is_some() && a == b) {
+                    pieces.push(if up > 0.0 { piece } else { piece.reversed() });
+                }
             }
             let (outers, holes): (Vec<Loop2>, Vec<Loop2>) = pieces.into_iter().partition(|lp| lp.signed_area() > 0.0);
             let first = out.len();
@@ -330,6 +339,24 @@ mod planar_tests {
             assert!(result[0].outer.is_closed(1e-4));
             assert!((result[0].area() - a.area() - b.area()).abs() < 1e-6);
         }
+    }
+    #[test]
+    fn a_ledge_shorter_than_the_record_tolerance_reads_back_as_one_region() {
+        // A plate with a ledge 0.0001 tall along part of its lower edge: SMLib's record holds a
+        // tolerance of 2e-5 mm, so the ledge's short side has both ends within ten times that.
+        // Read back, its outline is one loop of six lines, not split into a loop of one line.
+        let ledged = Region2 {
+            outer: Loop2::polygon(
+                &[(100.0, 3.0), (100.0, 3.0001), (97.0, 3.0001), (97.0, 60.0), (0.0, 60.0), (0.0, 3.0)].map(|(x, y)| Vec2::new(x, y)),
+            ),
+            holes: vec![],
+        };
+        let below = rectangle(Vec2::new(0.0, -12.0), Vec2::new(100.0, 0.0));
+        let out = planar_regions_boolean(std::slice::from_ref(&ledged), std::slice::from_ref(&below), BoolOp::Union, 1e-7).unwrap();
+        assert_eq!(out.len(), 2, "{out:?}");
+        let top = out.iter().find(|r| r.outer.contains(Vec2::new(50.0, 30.0))).unwrap();
+        assert!(top.outer.segs.len() == 6 && top.outer.is_closed(1e-9), "{top:?}");
+        assert!((top.area() - ledged.area()).abs() < 1e-9, "{}", top.area());
     }
     fn rectangle(a: Vec2, b: Vec2) -> Region2 {
         Region2 { outer: Loop2::polygon(&[a, Vec2::new(b.x, a.y), b, Vec2::new(a.x, b.y)]), holes: vec![] }
