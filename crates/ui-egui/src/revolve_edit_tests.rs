@@ -627,7 +627,13 @@ fn dialog_axis_from_another_sketch_keeps_its_sketch() {
     h.app.dialog = Some(dialog);
     h.frames(4);
     h.step(&json!({"widget":"OK"})).unwrap();
-    assert!(h.app.dialog.is_none(), "error={:?} preview={:?} log={:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()), h.app.preview.error, h.app.session.log);
+    assert!(
+        h.app.dialog.is_none(),
+        "error={:?} preview={:?} log={:?}",
+        h.app.dialog.as_ref().and_then(|d| d.error.clone()),
+        h.app.preview.error,
+        h.app.session.log
+    );
     let FeatureKind::Revolve { axis, .. } = &h.app.session.doc.features.last().unwrap().kind else { panic!("revolve") };
     assert!(matches!(axis, AxisRef::SketchLine { curve, sketch: Some(owner) } if curve == "l1" && *owner == axis_sketch), "kept qualified: {axis:?}");
     // π · (20² − 10²) · 10 about x = 0, not the crossing error the colliding id used to give.
