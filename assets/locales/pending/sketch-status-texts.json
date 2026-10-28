@@ -1,0 +1,74 @@
+{
+  "en": {
+    "browser.sketch_attachment_lost": "{name}  (attachment lost)",
+    "browser.sketch_editing": "{name}  (editing)",
+    "sketch.status_conflict": "constraints conflict",
+    "sketch.status_fully_constrained": "fully constrained"
+  },
+  "ar": {
+    "browser.sketch_attachment_lost": "{name}  (فُقد الارتباط)",
+    "browser.sketch_editing": "{name}  (قيد التحرير)",
+    "sketch.status_conflict": "تعارض القيود",
+    "sketch.status_fully_constrained": "مقيّد بالكامل"
+  },
+  "de": {
+    "browser.sketch_attachment_lost": "{name}  (Bezug verloren)",
+    "browser.sketch_editing": "{name}  (in Bearbeitung)",
+    "sketch.status_conflict": "Bedingungen widersprechen sich",
+    "sketch.status_fully_constrained": "vollständig bestimmt"
+  },
+  "es": {
+    "browser.sketch_attachment_lost": "{name}  (fijación perdida)",
+    "browser.sketch_editing": "{name}  (en edición)",
+    "sketch.status_conflict": "restricciones en conflicto",
+    "sketch.status_fully_constrained": "totalmente restringido"
+  },
+  "fr": {
+    "browser.sketch_attachment_lost": "{name}  (attache perdue)",
+    "browser.sketch_editing": "{name}  (en cours de modification)",
+    "sketch.status_conflict": "contraintes en conflit",
+    "sketch.status_fully_constrained": "entièrement contrainte"
+  },
+  "he": {
+    "browser.sketch_attachment_lost": "{name}  (ההצמדה אבדה)",
+    "browser.sketch_editing": "{name}  (בעריכה)",
+    "sketch.status_conflict": "אילוצים סותרים",
+    "sketch.status_fully_constrained": "מאולץ במלואו"
+  },
+  "it": {
+    "browser.sketch_attachment_lost": "{name}  (aggancio perso)",
+    "browser.sketch_editing": "{name}  (in modifica)",
+    "sketch.status_conflict": "vincoli in conflitto",
+    "sketch.status_fully_constrained": "completamente vincolato"
+  },
+  "ja": {
+    "browser.sketch_attachment_lost": "{name}  (アタッチメント消失)",
+    "browser.sketch_editing": "{name}  (編集中)",
+    "sketch.status_conflict": "拘束が競合しています",
+    "sketch.status_fully_constrained": "完全拘束"
+  },
+  "ko": {
+    "browser.sketch_attachment_lost": "{name}  (부착 해제됨)",
+    "browser.sketch_editing": "{name}  (편집 중)",
+    "sketch.status_conflict": "구속 조건 충돌",
+    "sketch.status_fully_constrained": "완전 구속"
+  },
+  "vi": {
+    "browser.sketch_attachment_lost": "{name}  (mất liên kết)",
+    "browser.sketch_editing": "{name}  (đang sửa)",
+    "sketch.status_conflict": "ràng buộc xung đột",
+    "sketch.status_fully_constrained": "ràng buộc hoàn toàn"
+  },
+  "zh": {
+    "browser.sketch_attachment_lost": "{name}  (附着丢失)",
+    "browser.sketch_editing": "{name}  (编辑中)",
+    "sketch.status_conflict": "约束冲突",
+    "sketch.status_fully_constrained": "完全约束"
+  },
+  "zh-TW": {
+    "browser.sketch_attachment_lost": "{name}  (附著遺失)",
+    "browser.sketch_editing": "{name}  (編輯中)",
+    "sketch.status_conflict": "拘束衝突",
+    "sketch.status_fully_constrained": "完全拘束"
+  }
+}

@@ -384,3 +384,13 @@ fn browser_rows_still_fold_or_select_when_move_copy_is_not_open() {
     click(&mut h, "row:Bodies");
     assert!(h.app.tree.collapsed.contains("c0/bodies"));
 }
+
+/// The sketch being edited is marked in the user's language, not with an English "(editing)".
+#[test]
+fn the_edited_sketch_is_marked_in_the_users_language() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+    let _japanese = crate::i18n::scope("ja");
+    let rows = super::entries(&h.app, 0, "sketches");
+    assert_eq!(rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["Sketch1  (編集中)"]);
+}

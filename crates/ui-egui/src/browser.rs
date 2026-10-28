@@ -2138,9 +2138,9 @@ impl Entry {
             thing: Thing::Sketch(f.id),
             patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
-                format!("{}  (attachment lost)", f.name)
+                crate::i18n::format("browser.sketch_attachment_lost", &[("name", &f.name)])
             } else if active {
-                format!("{}  (editing)", f.name)
+                crate::i18n::format("browser.sketch_editing", &[("name", &f.name)])
             } else {
                 f.name.clone()
             },

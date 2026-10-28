@@ -5342,13 +5342,16 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     loose_end_markers(sk, &ss.ends, &ss.plane, painter, proj, &v);
     // Sketch status.
     if let Some(r) = app.viewport.layout.as_ref().map(|l| l.content) {
-        let msg = if !ss.report.ok() {
-            format!("{} — constraints conflict", ss.name)
+        let status = if !ss.report.ok() {
+            crate::i18n::tr("sketch.status_conflict").to_string()
         } else if ss.report.dof == 0 {
-            format!("{} — fully constrained", ss.name)
+            crate::i18n::tr("sketch.status_fully_constrained").to_string()
+        } else if ss.report.dof == 1 {
+            crate::i18n::tr("ui.1_degree_of_freedom").to_string()
         } else {
-            format!("{} — {} degrees of freedom", ss.name, ss.report.dof)
+            crate::i18n::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
         };
+        let msg = format!("{} — {status}", ss.name);
         let c = if ss.report.ok() { v.sketch_accent } else { v.error };
         painter.text(pos2(r.left() + 12.0, r.top() + 12.0), Align2::LEFT_TOP, msg, FontId::proportional(t.font_button), c);
     }
