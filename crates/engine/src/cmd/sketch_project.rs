@@ -486,7 +486,7 @@ pub(super) fn link_pieces(
     let anchor = attachment(doc, id);
     links
         .iter()
-        .filter_map(|l| doc.sketch(id).ok()?.link(l).cloned())
+        .filter_map(|l| sketch_store::read(doc, id).ok()?.link(l).cloned())
         .map(|link| {
             let pieces = match (&framed, &plane) {
                 (Ok(framed), Ok(plane)) => {

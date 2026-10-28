@@ -3391,9 +3391,9 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`entities` must list sketch entity ids"));
     }
     // Members deleted from a link stay deleted when it is next updated: by their source edges.
-    let pieces = target_sketch(s, p, cmd)
+    let pieces = sketch_store::target(s, p, cmd)
         .ok()
-        .and_then(|id| Some((id, s.doc.sketch(id).ok()?)))
+        .and_then(|id| Some((id, sketch_store::read(&s.doc, id).ok()?)))
         .map(|(id, sk)| super::sketch_project::link_pieces(s, &s.doc, id, &super::sketch_links::touched_links(sk, &ids)))
         .unwrap_or_default();
     let ((n, broken), info) = edit(s, p, cmd, false, |sk, doc| {
