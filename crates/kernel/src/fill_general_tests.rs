@@ -533,12 +533,44 @@ fn seam_jumps(open: &Body, fill: &Body) -> Vec<[f64; 4]> {
     out
 }
 
+/// The Continuity Analysis (`inspect.continuity`) of `fill` sewn into `open`, on the seams at
+/// `hole`: per seam, its order over the whole edge, its order over the stations from 30 % to 70 %
+/// (the corners left out), and the worst G3 jump there (1/mm²).
+fn continuity_analysis(open: &Body, fill: &Body, hole: &[Vec3]) -> Vec<(Option<Continuity>, Option<Continuity>, f64)> {
+    use crate::{ContinuityTolerances, EdgePick, pick_edges, seam_diagnostics};
+    let sewn = stitch(&[open, fill], 1e-3).unwrap();
+    let picks: Vec<EdgePick> = hole.iter().map(|p| EdgePick::Point(*p)).collect();
+    let edges = pick_edges(&sewn, &picks).unwrap();
+    let t = ContinuityTolerances::default();
+    let limits = [t.gap_mm, t.angle_deg, t.curvature_per_mm, t.curvature_change_per_mm2, t.curvature_change_rate_per_mm3];
+    let report = seam_diagnostics(&sewn, &edges, 33, t).unwrap();
+    report
+        .seams
+        .iter()
+        .map(|seam| {
+            let inside: Vec<_> = seam.stations.iter().filter(|s| (0.3..=0.7).contains(&s.edge_fraction)).collect();
+            let worst = |f: fn(&crate::SeamStation) -> f64| inside.iter().map(|s| f(s)).fold(0.0f64, f64::max);
+            let metrics = [
+                worst(|s| s.gap_mm),
+                worst(|s| s.normal_angle_deg),
+                worst(|s| s.curvature_jump_per_mm),
+                worst(|s| s.curvature_change_jump_per_mm2),
+                worst(|s| s.curvature_change_rate_jump_per_mm3),
+            ];
+            let met = metrics.iter().zip(limits).take_while(|(w, l)| **w <= *l).count();
+            (seam.order, met.checked_sub(1).and_then(Continuity::from_order), metrics[3])
+        })
+        .collect()
+}
+
 /// A box's corner where a round of 8 up the vertical edge meets the rounds of 4 along the top
 /// (one blend face rolls the top round over the vertical one); that face taken off, and the hole
-/// patched G2 and G3 to the rounds and the top around it. Read off the faces themselves in the
-/// middle of each seam: both meet the tangent planes and the curvature; the G3 patch also meets
-/// the curvature's rate of change, which the G2 patch leaves many times larger. G3 to an edge
-/// between two faces is refused.
+/// patched G2, G3 and G4 to the rounds and the top around it. Read off the faces themselves in
+/// the middle of each seam: all meet the tangent planes and the curvature; the G3 patch also meets
+/// the curvature's rate of change, which the G2 patch leaves many times larger. The Continuity
+/// Analysis reads each seam's middle at the order asked, and the whole seam G1: at the corners the
+/// rounds' curvatures differ, so no patch can meet both. G3 to an edge between two faces is
+/// refused.
 #[test]
 fn a_corner_of_three_rounds_patched_g3_holds_the_curvature_change_a_g2_patch_does_not() {
     let solid = box_solid(Vec3::ZERO, Vec3::new(40.0, 40.0, 30.0)).unwrap();
@@ -554,12 +586,19 @@ fn a_corner_of_three_rounds_patched_g3_holds_the_curvature_change_a_g2_patch_doe
     assert!(open.is_surface());
     let hole = [Vec3::new(34.828, 34.828, 30.0), Vec3::new(37.657, 37.657, 26.0), Vec3::new(38.828, 32.0, 28.828), Vec3::new(32.0, 38.828, 28.828)];
     let mut read = Vec::new();
-    for g in [Continuity::G2, Continuity::G3] {
+    for g in [Continuity::G2, Continuity::G3, Continuity::G4] {
         let name = format!("three-round corner {}", g.as_str());
         let (fill, r) = patch_edges_report(&open, &hole, &spec(g)).unwrap();
         report(&name, &r);
         let seams = seam_jumps(&open, &fill);
         eprintln!("{name}: jumps of the fill's report {:?}; read off the faces, per seam [angle°, H2, H3, H4] {seams:?}", r.jumps);
+        let analysed = continuity_analysis(&open, &fill, &hole);
+        eprintln!("{name}: Continuity Analysis, per seam [order over the edge, order 30-70 %, worst G3 jump 30-70 % /mm²] {analysed:?}");
+        assert_eq!(analysed.len(), 4, "{name}: four seams analysed");
+        for (whole, middle, _) in &analysed {
+            assert_eq!(*middle, Some(g), "{name}: the Continuity Analysis reads the order asked in the middle of each seam");
+            assert_eq!(*whole, Some(Continuity::G1), "{name}: the corners, where the rounds' curvatures differ, hold the tangent plane only");
+        }
         assert_eq!(seams.len(), 4, "{name}: four seams");
         for s in &seams {
             assert!(s[0] < PATCH_ANGLE_TOL_DEG, "{name}: the tangent planes meet: {s:?}");

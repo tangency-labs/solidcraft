@@ -132,9 +132,8 @@ impl Continuity {
 /// What builds geometry to a continuity order, and the orders each one builds today.
 ///
 /// HAND-OFF POINT: this table is the only place that says how far a construction goes. When a
-/// construction learns a higher order, raise its `highest` in [`Construction::orders`] (for the
-/// patch, from the fill's own `supported_orders` once it has one); every command, dialog and
-/// kernel entry point reads it from here, so nothing else changes.
+/// construction learns a higher order, raise its `highest` in [`Construction::orders`]; every
+/// command, dialog and kernel entry point reads it from here, so nothing else changes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Construction {
     /// A patch filling a loop of edges (`surface.patch`).
@@ -154,7 +153,7 @@ impl Construction {
     /// The lowest and the highest order this construction builds.
     pub fn orders(self) -> (Continuity, Continuity) {
         match self {
-            Construction::Patch => (Continuity::G0, Continuity::G2),
+            Construction::Patch => (Continuity::G0, Continuity::G4),
             Construction::Bridge => (Continuity::G0, Continuity::G3),
             Construction::Network => (Continuity::G0, Continuity::G2),
             Construction::Match => (Continuity::G1, Construction::Bridge.orders().1),
@@ -224,14 +223,15 @@ mod tests {
     fn a_construction_refuses_what_it_does_not_build_and_names_what_it_does() {
         assert_eq!(Continuity::words(Continuity::G0, Continuity::G2), "g0, g1 or g2");
         assert_eq!(Continuity::words(Continuity::G4, Continuity::G4), "g4");
-        assert_eq!(Continuity::G2.built_by(Construction::Patch).unwrap(), Continuity::G2);
-        let e = Continuity::G3.built_by(Construction::Patch).unwrap_err().to_string();
+        assert_eq!(Continuity::G4.built_by(Construction::Patch).unwrap(), Continuity::G4);
+        let e = Continuity::G3.built_by(Construction::Network).unwrap_err().to_string();
         assert!(e.contains("not supported yet") && e.contains("g0, g1 or g2") && e.contains("g3"), "{e}");
         let e = Continuity::G0.built_by(Construction::Match).unwrap_err().to_string();
         assert!(e.contains("g1, g2 or g3"), "{e}");
         assert!(Continuity::G4.built_by(Construction::Bridge).is_err());
         assert!(Continuity::G4.built_by(Construction::BlendCurve).is_ok());
-        assert_eq!(Construction::Patch.offered(), vec![Continuity::G0, Continuity::G1, Continuity::G2]);
+        assert_eq!(Construction::Patch.offered(), Continuity::ALL.to_vec());
+        assert_eq!(Construction::Network.offered(), vec![Continuity::G0, Continuity::G1, Continuity::G2]);
         assert_eq!(Construction::BlendCurve.offered().first(), Some(&Continuity::G1));
     }
 }
