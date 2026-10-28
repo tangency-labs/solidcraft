@@ -421,6 +421,47 @@ fn registry_dialog_inventory_has_no_unclassified_feature_forms() {
     }
 }
 
+/// Texts these dialogs draw themselves read in the user's language: the joints' Play button, the
+/// Motion Study's Loop, the Stitch tolerance hint, the Flange type and the Emboss note.
+#[test]
+fn hand_drawn_dialog_texts_are_translated() {
+    fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+            _ => {}
+        }
+    }
+    let mut h = fixture();
+    h.app.preferences.language = "ja".into();
+    let _japanese = crate::i18n::scope("ja");
+    for (command, english) in [
+        ("joint.gear", "▶ Play"),
+        ("motion.study", "Loop"),
+        ("surface.stitch", "tight"),
+        ("sheet.flange", "Base"),
+        ("solid.emboss", "Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target."),
+    ] {
+        let mut d = Dialog::for_command(&h.app, command).unwrap();
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            let mut out = h.ctx.run_ui(
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+                |ui| {
+                    ui.set_width(264.0);
+                    ui_kit::scope(ui, |ui| {
+                        rows(&mut h.app, &h.ctx, &mut d, ui);
+                    });
+                },
+            );
+            out.textures_delta.clear();
+            painted.clear();
+            out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
+        }
+        assert!(!painted.iter().any(|p| p == english), "{command} paints {english:?} in Japanese: {painted:?}");
+    }
+}
+
 #[test]
 fn revolve_layout_fixture_builds_a_valid_solid() {
     let mut h = fixture();
@@ -932,46 +973,5 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
         assert_eq!(used, vec![index], "the region clicked at x = {x}, and only it");
         let volume = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
         assert!(((volume - before) - area * 5.0).abs() < 5e-3 * area * 5.0, "x = {x}: {volume} - {before} vs {}", area * 5.0);
-    }
-}
-
-/// Texts these dialogs draw themselves read in the user's language: the joints' Play button, the
-/// Motion Study's Loop, the Stitch tolerance hint, the Flange type and the Emboss note.
-#[test]
-fn hand_drawn_dialog_texts_are_translated() {
-    fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
-        match shape {
-            egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
-            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
-            _ => {}
-        }
-    }
-    let mut h = fixture();
-    h.app.preferences.language = "ja".into();
-    let _japanese = crate::i18n::scope("ja");
-    for (command, english) in [
-        ("joint.gear", "▶ Play"),
-        ("motion.study", "Loop"),
-        ("surface.stitch", "tight"),
-        ("sheet.flange", "Base"),
-        ("solid.emboss", "Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target."),
-    ] {
-        let mut d = Dialog::for_command(&h.app, command).unwrap();
-        let mut painted = Vec::new();
-        for _ in 0..2 {
-            let mut out = h.ctx.run_ui(
-                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
-                |ui| {
-                    ui.set_width(264.0);
-                    ui_kit::scope(ui, |ui| {
-                        rows(&mut h.app, &h.ctx, &mut d, ui);
-                    });
-                },
-            );
-            out.textures_delta.clear();
-            painted.clear();
-            out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
-        }
-        assert!(!painted.iter().any(|p| p == english), "{command} paints {english:?} in Japanese: {painted:?}");
     }
 }
