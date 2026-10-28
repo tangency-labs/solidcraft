@@ -255,11 +255,8 @@ fn setbacks_reach(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f
         if *distance <= least * (1.0 + 1e-9) {
             let p = faces.point(v).unwrap_or(*at);
             let shown = format!("{:.4}", least).trim_end_matches('0').trim_end_matches('.').to_string();
-            let why = if (least - radius).abs() <= radius * 1e-9 {
-                format!("more than the radius ({shown} mm)")
-            } else {
-                format!("more than {shown} mm")
-            };
+            let why =
+                if (least - radius).abs() <= radius * 1e-9 { format!("more than the radius ({shown} mm)") } else { format!("more than {shown} mm") };
             return Err(KernelError::Invalid(format!(
                 "the setback must be {why} at the corner ({:.3}, {:.3}, {:.3}): the rounds' contact lines meet {shown} mm from it along its edges, \
                  and the corner's patch starts past that",
@@ -279,9 +276,8 @@ fn setbacks_reach(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f
 /// Exact for planar faces and straight edges; `None` for a corner with any other (left to SMLib)
 /// or one it cannot read.
 fn setback_minimum(faces: &Faces, vertex: u32, radius: f64) -> Option<f64> {
-    let at: Vec<usize> = (0..faces.rec.edges.len())
-        .filter(|e| faces.rec.edges.get(*e).is_some_and(|x| !x.uses.is_empty() && x.vertices.contains(&vertex)))
-        .collect();
+    let at: Vec<usize> =
+        (0..faces.rec.edges.len()).filter(|e| faces.rec.edges.get(*e).is_some_and(|x| !x.uses.is_empty() && x.vertices.contains(&vertex))).collect();
     if at.len() < 3 {
         return None;
     }
