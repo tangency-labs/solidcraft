@@ -638,3 +638,175 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
 }
+
+fn gusset_joint() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"name":"Post feature","body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"name":"Rail feature","body_name":"Rail"}));
+    s
+}
+fn gusset_pick(s: &Session, body: &str, point: [f64; 3], normal: [f64; 3]) -> Value {
+    let st = s.model.state();
+    let b = st.body(body).unwrap();
+    let at = solidcraft_geom::Vec3::new(point[0], point[1], point[2]);
+    let n = solidcraft_geom::Vec3::new(normal[0], normal[1], normal[2]);
+    let i = (0..b.body.face_count())
+        .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().dot(n) > 0.999 && (pl.origin - at).dot(n).abs() < 1e-6))
+        .unwrap();
+    json!({"body":body,"index":i,"face":point})
+}
+fn gusset_args(s: &Session) -> Value {
+    json!({"supports":[gusset_pick(s,"Post",[20.,0.,100.],[1.,0.,0.]),gusset_pick(s,"Rail",[100.,0.,40.],[0.,0.,1.])],"leg1":80,"leg2":100,"thickness":6,"body_name":"Gusset"})
+}
+fn gusset_volume(s: &Session) -> f64 {
+    s.model.state().body("Gusset").unwrap().mesh().measure().volume
+}
+
+#[test]
+fn gusset_triangle_and_clipped_relief_have_analytic_volumes() {
+    for (r, c) in [(0., 0.), (10., 0.), (0., 10.), (10., 10.)] {
+        let mut s = gusset_joint();
+        let mut p = gusset_args(&s);
+        p["relief"] = json!(r);
+        p["clip"] = json!(c);
+        run(&mut s, "frame.gusset", p);
+        let expected = (80. * 100. / 2. - r * r / 2. - c * c / 2. * 180. / 16400f64.sqrt()) * 6.;
+        assert!(rel(gusset_volume(&s), expected) < 1e-7, "{r} {c}: {} vs {expected}", gusset_volume(&s));
+        assert_eq!(s.model.state().bodies.len(), 3);
+    }
+}
+#[test]
+fn gusset_thickness_placement_and_offset_have_predictable_bounds() {
+    for (placement, lo, hi) in [("center", -8., -2.), ("positive", -11., -5.), ("negative", -5., 1.)] {
+        let mut s = gusset_joint();
+        let mut p = gusset_args(&s);
+        p["placement"] = json!(placement);
+        p["offset"] = json!(5);
+        run(&mut s, "frame.gusset", p);
+        let b = bodies(&mut s).into_iter().find(|b| b.0 == "Gusset").unwrap();
+        assert!(near3(b.2, [20., lo, 40.]), "{placement}: {b:?}");
+        assert!(near3(b.3, [120., hi, 120.]), "{placement}: {b:?}");
+    }
+}
+#[test]
+fn gusset_follows_support_edits_and_rename_then_undo_reopen() {
+    let mut s = gusset_joint();
+    let p = gusset_args(&s);
+    run(&mut s, "frame.gusset", p);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().body("Gusset").is_none());
+    run(&mut s, "edit.redo", json!({}));
+    assert!((gusset_volume(&s) - 24000.).abs() < 1e-5);
+    run(&mut s, "body.rename", json!({"body":"Post","name":"Column"}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Post feature","command":"solid.box","params":{"corner":[-20,-20,0],"length":60,"width":40,"height":300,"body_name":"Column"}}),
+    );
+    let b = bodies(&mut s).into_iter().find(|b| b.0 == "Gusset").unwrap();
+    assert!(near3(b.2, [40., -3., 40.]));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(rel(gusset_volume(&reopened), 24000.) < 1e-7);
+}
+#[test]
+fn gusset_refuses_bad_geometry_atomically() {
+    let mut s = gusset_joint();
+    let good = gusset_args(&s);
+    for (key, value) in [
+        ("leg1", json!(-1)),
+        ("leg2", json!(400)),
+        ("thickness", json!(41)),
+        ("offset", json!(100)),
+        ("relief", json!(80)),
+        ("clip", json!(80)),
+        ("placement", json!("elsewhere")),
+        ("leg1", json!("1e99 mm")),
+        ("unsupported", json!(true)),
+    ] {
+        let mut p = good.clone();
+        p[key] = value;
+        let before = s.doc.to_json();
+        assert!(s.execute("frame.gusset", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{key}");
+    }
+    let mut p = good;
+    p["supports"] = json!([p["supports"][0], p["supports"][0]]);
+    assert!(s.execute("frame.gusset", &p).is_err());
+}
+#[test]
+fn gusset_contact_detects_a_hole_between_its_endpoints() {
+    let mut s = gusset_joint();
+    run(&mut s, "solid.hole", json!({"position":[70,0,40],"direction":[0,0,-1],"diameter":10,"depth":40,"body":"Rail"}));
+    let p = gusset_args(&s);
+    let before = s.doc.to_json();
+    let e = s.execute("frame.gusset", &p).unwrap_err().to_string();
+    assert!(e.contains("contact"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn gusset_tracks_frame_member_profile_edits() {
+    let mut s = Session::default();
+    for (name, points) in [("Post", json!([[0, 0, 0], [0, 0, 300]])), ("Rail", json!([[20, 0, 20], [320, 0, 20]]))] {
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":format!("{name} path")}));
+        run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+        run(&mut s, "sketch.line3d", json!({"points":points}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(
+            &mut s,
+            "frame.member",
+            json!({"sketch":format!("{name} path"),"name":format!("{name} member"),"body_name":name,"profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0}}),
+        );
+    }
+    let p = gusset_args(&s);
+    run(&mut s, "frame.gusset", p);
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Post member","command":"frame.member","params":{"sketch":"Post path","body_name":"Post","profile":{"kind":"rect_tube","width":60,"height":40,"wall":3,"outer_radius":0}}}),
+    );
+    let b = bodies(&mut s).into_iter().find(|b| b.0 == "Gusset").unwrap();
+    assert!(near3(b.2, [30., -3., 40.]), "{b:?}");
+    assert!(rel(gusset_volume(&s), 24000.) < 1e-7);
+    // A saved support identity must not be silently replaced by another sketch line.
+    let mut broken = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    let gusset = broken.features.iter_mut().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameGusset { .. })).unwrap();
+    if let solidcraft_doc::FeatureKind::FrameGusset { supports, .. } = &mut gusset.kind {
+        supports[0].member.as_mut().unwrap().line = "a different line".into();
+    }
+    let broken = Session::new(broken);
+    assert!(broken.model.state().body("Gusset").is_none(), "a lost line must not be adopted by proximity");
+}
+#[test]
+fn gusset_nonorthogonal_faces_use_the_actual_included_angle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[-40,-20,-100],"length":40,"width":40,"height":400,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,-40],"length":320,"width":40,"height":40,"body_name":"Rail"}));
+    run(&mut s, "solid.move", json!({"bodies":["Rail"],"axis":[0,1,0],"angle":"30 deg"}));
+    let c = 30f64.to_radians().cos();
+    let p = json!({"supports":[gusset_pick(&s,"Post",[0.,0.,100.],[1.,0.,0.]),gusset_pick(&s,"Rail",[100.*c,0.,-50.],[0.5,0.,c])],"leg1":80,"leg2":100,"thickness":6,"body_name":"Gusset"});
+    run(&mut s, "frame.gusset", p);
+    assert!(rel(gusset_volume(&s), 24000. * c) < 1e-7);
+}
+#[test]
+fn gusset_component_motion_and_independent_copy_keep_attachments() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Part","grounded":false}))["component"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"}));
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    let p = gusset_args(&s);
+    let fid = run(&mut s, "frame.gusset", p)["feature"].as_u64().unwrap();
+    let occurrence = s.doc.occurrence_of(part).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[50,20,0],"axis":[0,0,1],"angle":"90 deg","capture":true}));
+    let world = s.world_state();
+    let b = world.bodies.iter().find(|b| b.feature == fid).unwrap().mesh().bounds();
+    assert!(near3([b.min.x, b.min.y, b.min.z], [47., 40., 40.]), "{b:?}");
+    let copied = run(&mut s, "component.paste_new", json!({"component":part,"translate":[500,0,0]}))["component"].as_u64().unwrap();
+    let f = s.doc.features.iter().find(|f| f.component == copied && matches!(f.kind, solidcraft_doc::FeatureKind::FrameGusset { .. })).unwrap();
+    let parameter = f.param_names[2].clone();
+    run(&mut s, "parameters.change", json!({"name":parameter,"expression":"8 mm"}));
+    let original = run(&mut s, "component.properties", json!({"component":part}))["total"]["volume_mm3"].as_f64().unwrap();
+    let copy = run(&mut s, "component.properties", json!({"component":copied}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((original - 984000.).abs() < 1e-4, "{original}");
+    assert!((copy - 992000.).abs() < 1e-4, "{copy}");
+}

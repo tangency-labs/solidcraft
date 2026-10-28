@@ -200,3 +200,45 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     d.inputs[0].items.push(Sel::ExternalSketchCurve { sketch: rails, id: ids[0].clone() });
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
 }
+
+#[test]
+fn gusset_preselection_preview_and_edit_keep_exact_supports() {
+    let mut app = app_with(&[
+        ("solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"})),
+        ("solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"})),
+    ]);
+    for (name, point, normal) in [("Post", [20., 0., 100.], [1., 0., 0.]), ("Rail", [100., 0., 40.], [0., 0., 1.])] {
+        let st = app.session.model.state();
+        let body = st.body(name).unwrap();
+        let point = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+        let normal = solidcraft_engine::geom::Vec3::new(normal[0], normal[1], normal[2]);
+        let index = (0..body.body.face_count())
+            .find(|i| body.body.planar_face(*i).is_some_and(|p| p.normal().dot(normal) > 0.999 && (p.origin - point).dot(normal).abs() < 1e-6))
+            .unwrap();
+        app.session.selection.push(Sel::Face { body: name.into(), index, point });
+    }
+    app.start("frame.gusset");
+    let mut d = app.dialog.clone().unwrap();
+    assert!(d.previews());
+    assert_eq!(d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 1]);
+    let Kind::Gusset(g) = &mut d.kind else { panic!("wrong dialog") };
+    g.leg1 = "80 mm".into();
+    g.leg2 = "100 mm".into();
+    let preview = crate::dialogs::preview_commands(&app, &d).unwrap();
+    assert_eq!(preview[0].0, "frame.gusset");
+    assert!(preview[0].1["supports"][0]["index"].is_number());
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let fid = app.session.doc.features.last().unwrap().id;
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    assert!(edit.inputs.iter().all(|i| i.items.len() == 1));
+    let Kind::Gusset(g) = &mut edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.leg2, "100 mm");
+    g.thickness = "8 mm".into();
+    let c = apply_commands(&app, &edit).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    run_all(&mut app, c);
+    let state = app.session.model.state();
+    let body = state.bodies.iter().find(|b| b.feature == fid).unwrap();
+    assert!((body.mesh().measure().volume - 32000.).abs() < 1e-5);
+}

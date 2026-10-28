@@ -31,6 +31,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
     vec![
         ("newer_file_feature", json!({"type": "newer_file_feature", "raw": {"type": "gyroid_lattice", "cell": 2}})),
         (
+            "frame_gusset",
+            json!({"type":"frame_gusset","supports":[{"plane":plane("gusset1"),"member":{"feature":7,"line":"l1"}},{"plane":plane("gusset2"),"member":null}],"leg1":"gusset.leg1","leg2":"gusset.leg2","thickness":"gusset.thickness","relief":"gusset.relief","clip":"gusset.clip","offset":"gusset.offset","placement":"center"}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),
