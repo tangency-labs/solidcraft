@@ -696,6 +696,18 @@ const ELEMENTS: &[Element] = &[
         crate::theme::TabAccent::publish(&app, ui.ctx());
         radial_menu(ui, r.center(), &crate::context_menu::radial_items(&app), Some(3));
     }),
+    element!("radial_menu_layers", |ui, _| {
+        let (r, _) = ui.allocate_exact_size(vec2(520.0, 520.0), egui::Sense::hover());
+        let app = crate::test_support::sample_app();
+        let outer: Vec<_> = ["solid.fillet", "solid.chamfer", "solid.shell"].iter().filter_map(|id| crate::mouse_gesture::item(&app, id)).collect();
+        radial_menu_layers(ui, r.center(), &crate::context_menu::radial_items(&app), &outer, Some((1, 1)), false);
+    }),
+    element!("radial_preview", |ui, _| {
+        let (r, _) = ui.allocate_exact_size(vec2(240.0, 240.0), egui::Sense::hover());
+        let app = crate::test_support::sample_app();
+        let outer: Vec<_> = ["solid.fillet", "solid.chamfer"].iter().filter_map(|id| crate::mouse_gesture::item(&app, id)).collect();
+        radial_preview(ui.painter(), r.center(), 0.44, &crate::context_menu::radial_items(&app), &outer, false, Some((1, 0)), true);
+    }),
     element!("workspace_menu", |ui, _| {
         let app = crate::test_support::sample_app();
         workspace_menu(ui, &crate::context_menu::items(&app, &crate::context_menu::Target::Workspace), None, 550.0);
