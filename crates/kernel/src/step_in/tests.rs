@@ -2477,3 +2477,82 @@ fn a_round_face_off_its_frames_quarter_lines_is_formed_within_one_turn() {
         assert!(rel(m.area, area) < 1e-6, "{start}: area {} vs {area}", m.area);
     }
 }
+
+/// A circle edge between two vertices its file's uncertainty does not tell apart is the short arc
+/// between them, not a full turn (the engine assembly's water pump housing has a 20.4 um arc
+/// between two vertices in a part whose uncertainty is 20.5 um). A can whose wall is
+/// split by two rulings 0.6 um apart, under the default 1 um: read as turns, the sliver of wall
+/// between them wound once round the can with no second bound and the can came in as surfaces.
+#[test]
+fn a_circle_edge_between_two_vertices_closer_than_the_tolerance_is_the_arc_between_them() {
+    let (r, h) = (5.0f64, 10.0f64);
+    let delta = 0.6e-3 / r;
+    let (c, s) = (r * delta.cos(), r * delta.sin());
+    let text = format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#5=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#6=CARTESIAN_POINT('',(0.,0.,{h:?}));
+#7=AXIS2_PLACEMENT_3D('',#6,#2,#3);
+#10=CARTESIAN_POINT('',({r:?},0.,0.));
+#11=CARTESIAN_POINT('',({c:?},{s:?},0.));
+#12=CARTESIAN_POINT('',({r:?},0.,{h:?}));
+#13=CARTESIAN_POINT('',({c:?},{s:?},{h:?}));
+#14=VERTEX_POINT('',#10);
+#15=VERTEX_POINT('',#11);
+#16=VERTEX_POINT('',#12);
+#17=VERTEX_POINT('',#13);
+#20=CIRCLE('',#5,{r:?});
+#21=CIRCLE('',#7,{r:?});
+#22=VECTOR('',#2,1.);
+#23=LINE('',#10,#22);
+#24=LINE('',#11,#22);
+#30=EDGE_CURVE('',#14,#15,#20,.T.);
+#31=EDGE_CURVE('',#15,#14,#20,.T.);
+#32=EDGE_CURVE('',#16,#17,#21,.T.);
+#33=EDGE_CURVE('',#17,#16,#21,.T.);
+#34=EDGE_CURVE('',#14,#16,#23,.T.);
+#35=EDGE_CURVE('',#15,#17,#24,.T.);
+#40=ORIENTED_EDGE('',*,*,#31,.F.);
+#41=ORIENTED_EDGE('',*,*,#30,.F.);
+#42=EDGE_LOOP('',(#40,#41));
+#43=FACE_OUTER_BOUND('',#42,.T.);
+#44=PLANE('',#5);
+#45=ADVANCED_FACE('Bottom',(#43),#44,.F.);
+#50=ORIENTED_EDGE('',*,*,#32,.T.);
+#51=ORIENTED_EDGE('',*,*,#33,.T.);
+#52=EDGE_LOOP('',(#50,#51));
+#53=FACE_OUTER_BOUND('',#52,.T.);
+#54=PLANE('',#7);
+#55=ADVANCED_FACE('Top',(#53),#54,.T.);
+#60=ORIENTED_EDGE('',*,*,#30,.T.);
+#61=ORIENTED_EDGE('',*,*,#35,.T.);
+#62=ORIENTED_EDGE('',*,*,#32,.F.);
+#63=ORIENTED_EDGE('',*,*,#34,.F.);
+#64=EDGE_LOOP('',(#60,#61,#62,#63));
+#65=FACE_OUTER_BOUND('',#64,.T.);
+#66=CYLINDRICAL_SURFACE('',#5,{r:?});
+#67=ADVANCED_FACE('Sliver',(#65),#66,.T.);
+#70=ORIENTED_EDGE('',*,*,#31,.T.);
+#71=ORIENTED_EDGE('',*,*,#34,.T.);
+#72=ORIENTED_EDGE('',*,*,#33,.F.);
+#73=ORIENTED_EDGE('',*,*,#35,.F.);
+#74=EDGE_LOOP('',(#70,#71,#72,#73));
+#75=FACE_OUTER_BOUND('',#74,.T.);
+#77=ADVANCED_FACE('Wall',(#75),#66,.T.);
+#80=CLOSED_SHELL('',(#45,#55,#67,#77));
+#81=MANIFOLD_SOLID_BREP('Can',#80);
+#82=SHAPE_REPRESENTATION('',(#81),$);
+{TAIL}"
+    );
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let can = &imp.bodies[0];
+    assert!(can.closed && can.refused.is_none() && !can.body.is_surface(), "{:?} {:?}", can.refused, imp.warnings);
+    let pi = std::f64::consts::PI;
+    let m = measure(&can.body).unwrap();
+    assert!(rel(m.volume, pi * r * r * h) < 1e-6, "{}", m.volume);
+    assert!(rel(m.area, 2.0 * pi * r * r + 2.0 * pi * r * h) < 1e-6, "{}", m.area);
+}

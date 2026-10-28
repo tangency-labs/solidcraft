@@ -699,8 +699,11 @@ impl<'b, 'a> Builder<'b, 'a> {
         let curve = self.edge_geometry(rid(p.get(3), "edge geometry")?, 0)?;
         let (ps, pe) = (self.point(vs)?, self.point(ve)?);
         let closed = vs == ve;
-        let near = closed || v3(ps).dist(v3(pe)) <= self.tol;
-        let mapped = map_edge(&curve, ps, pe, same_sense, closed, near, self.tol).map_err(|m| format!("edge #{id}: {m}"))?;
+        // A full turn when the edge has one vertex, or two at one point. Two vertices apart bound
+        // the arc between them, however short: a 20.4 um arc between vertices a 20.5 um uncertainty
+        // does not tell apart is that arc, not a turn around its face.
+        let full = closed || ps == pe;
+        let mapped = map_edge(&curve, ps, pe, same_sense, closed, full, self.tol).map_err(|m| format!("edge #{id}: {m}"))?;
         if mapped.sense_mismatch {
             self.sense_mismatches += 1;
         }
@@ -1654,9 +1657,9 @@ fn turn(x: f64) -> f64 {
 }
 
 /// The edge from `ps` to `pe` on `curve`: its schema curve and interval (min → max) and which
-/// way it runs. `closed`: the same vertex at both ends; `near`: the ends coincide within the
-/// tolerance (a full turn on a periodic curve).
-fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, near: bool, tol: f64) -> R<Mapped> {
+/// way it runs. `closed`: the same vertex at both ends; `full`: the ends are one point (a full
+/// turn on a periodic curve).
+fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, full: bool, tol: f64) -> R<Mapped> {
     match curve {
         Curve::Line { origin, direction, magnitude } => {
             if closed {
@@ -1675,11 +1678,11 @@ fn map_edge(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, near:
             Ok(Mapped { curve: BCurve::Line { start, end }, interval: [0.0, hi - lo], with_step, sense_mismatch: with_step != same_sense })
         }
         Curve::Circle { position, radius } => {
-            conic(BCurve::Circle { frame: frame(position), radius: *radius }, position, [*radius; 2], ps, pe, same_sense, near)
+            conic(BCurve::Circle { frame: frame(position), radius: *radius }, position, [*radius; 2], ps, pe, same_sense, full)
         }
         Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => {
             let radii = [*semi_axis_1, *semi_axis_2];
-            conic(BCurve::Ellipse { frame: frame(position), radii }, position, radii, ps, pe, same_sense, near)
+            conic(BCurve::Ellipse { frame: frame(position), radii }, position, radii, ps, pe, same_sense, full)
         }
         Curve::BSpline(b) => open_or_closed(map_bspline_curve(b)?, ps, pe, same_sense, closed, tol),
         Curve::Polyline(points) => {
@@ -1722,7 +1725,7 @@ fn open_conic(curve: &Curve, ps: P3, pe: P3, same_sense: bool, closed: bool, spl
 
 /// A circle or ellipse: the vertices' angles, the arc between them in the edge's sense (a full
 /// turn when they coincide).
-fn conic(curve: BCurve, position: &Placement, radii: [f64; 2], ps: P3, pe: P3, same_sense: bool, near: bool) -> R<Mapped> {
+fn conic(curve: BCurve, position: &Placement, radii: [f64; 2], ps: P3, pe: P3, same_sense: bool, full: bool) -> R<Mapped> {
     let y = position.y();
     let param = |p: P3| {
         let q = sub(p, position.origin);
@@ -1730,7 +1733,7 @@ fn conic(curve: BCurve, position: &Placement, radii: [f64; 2], ps: P3, pe: P3, s
     };
     let (ts, te) = (param(ps), param(pe));
     // Along the curve from `from` to `to`, increasing.
-    let span = |from: f64, to: f64| if near { TAU } else { turn(to - from) };
+    let span = |from: f64, to: f64| if full { TAU } else { turn(to - from) };
     let (lo, d) = if same_sense { (ts, span(ts, te)) } else { (te, span(te, ts)) };
     if !(d > 0.0) {
         return Err("a degenerate edge on a conic".into());
