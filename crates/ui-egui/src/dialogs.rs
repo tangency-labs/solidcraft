@@ -2566,14 +2566,56 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick"));
             return;
         }
+        // A fillet's refusal reads in plain words; the kernel's own text stays in the hover
+        // text, Copy Details and the issue report.
+        let plain = if matches!(d.kind, Kind::Fillet { chamfer: false, .. }) { fillet_plain_error(&error) } else { None };
         ui.vertical(|ui| {
-            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
-            let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
-            crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
-            if response.clicked() {
-                crate::issue_report::begin(app, ctx, Some(d), Some(&error));
+            match &plain {
+                Some(plain) => {
+                    crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).on_hover_text(shown_error(&error));
+                }
+                None => {
+                    crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
+                }
             }
+            ui.horizontal(|ui| {
+                if plain.is_some() {
+                    let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
+                    crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
+                    if copy.on_hover_text(tr("ui.copy_details_tip")).clicked() {
+                        ui.ctx().copy_text(error.clone());
+                    }
+                }
+                let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
+                crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
+                if response.clicked() {
+                    crate::issue_report::begin(app, ctx, Some(d), Some(&error));
+                }
+            });
         });
+    }
+}
+
+/// A fillet's refusal by the kernel in plain words, for the dialog: what happened and what may
+/// help, without SMLib's status codes, its check's test list or the command's parameter names.
+/// `None` for a refusal that is no kernel failure (an expression, a pick), shown as it is.
+pub(crate) fn fillet_plain_error(error: &str) -> Option<&'static str> {
+    // The kernel's refusals as the timeline records them (`KernelError`, `blend_smlib`).
+    let too_large = error.contains("larger than the faces beside its edges allow");
+    let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
+    let kernel = error.contains("SMLib")
+        || error.contains("the operation failed")
+        || error.contains("not supported yet")
+        || error.contains("kernel internal error")
+        || error.contains("the rounds would leave openings");
+    if too_large {
+        Some(tr("ui.fillet_error_too_large"))
+    } else if corner && kernel {
+        Some(tr("ui.fillet_error_corner"))
+    } else if kernel {
+        Some(tr("ui.fillet_error_failed"))
+    } else {
+        None
     }
 }
 
@@ -4067,7 +4109,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 // A smooth patch's setback, typed once, goes to each of the dialog's corners; left
                 // empty, the command sets them back by its default (1.5 × the radius).
-                if d.extra.get("corner").and_then(Value::as_str) == Some("g2") && !setback.trim().is_empty() {
+                if d.extra.get("corner").and_then(Value::as_str) == Some("g2")
+                    && dense::fillet_option_applies(&d.extra, "corner")
+                    && !setback.trim().is_empty()
+                {
                     let corners = fillet_corners(s, sels(d, 0));
                     if !corners.is_empty() {
                         p["setbacks"] = Value::Array(corners.into_iter().map(|v| json!({"vertex": pt3(v), "distance": setback.trim()})).collect());
@@ -4605,7 +4650,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
     let mut params = params;
     d.kind.fill_simple_params(&mut params);
     if let Value::Object(m) = &mut params {
+        // A fillet option that doesn't apply with the others is never sent.
+        let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
         for (k, v) in &d.extra {
+            if fillet && !dense::fillet_option_applies(&d.extra, k) {
+                continue;
+            }
             m.entry(k.clone()).or_insert_with(|| v.clone());
         }
     }
