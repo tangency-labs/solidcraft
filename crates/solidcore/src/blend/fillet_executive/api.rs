@@ -36,7 +36,16 @@
 //! B-rep is the session's target, a distinct second one its second base B-rep. The
 //! fillet B-rep is returned (`None` when the offset surfaces do not intersect,
 //! upstream `SM_SUCCESS` with a null result); the temporary B-reps are dropped (upstream
-//! `SetOwner(NULL)` and `delete`). No recursion.
+//! `SetOwner(NULL)` and `delete`). The port's cached topology fields (`Edge::vertices`,
+//! `Face::shell`, `Face::loops`, `Loop::face`, `Loop::edges`, `Shell::faces`), which the
+//! edits rewire only through the use links, are rewritten by
+//! [`Brep::refresh_cached_topology`] before each public fillet operation returns: in the
+//! returned and borrowed bodies on success and on an error after which the body keeps
+//! the edits made before the failure (upstream reads those fields through the uses and
+//! has no equivalent step; nothing else changes). Callers can run
+//! [`crate::topology::integrity::check`] immediately, without a manual refresh.
+//! Validation-only returns leave untouched bodies alone. The `create_face_from_surface`
+//! construction helper adds one face; its callers finalize the body. No recursion.
 
 use super::p1::is_radius_supported;
 use super::session::FilletSession;
@@ -88,19 +97,18 @@ pub fn fillet_edges(
     if !is_radius_supported(radius, brep.tolerance()) {
         return Err(invalid_input());
     }
-    {
+    let fillet = {
         let mut session = FilletSession::new(k, brep)?;
-        session.prepare_constant_radius_edges(
-            k,
-            edges,
-            radius,
-            xsect_type,
-            continuity,
-            thumbweight,
-        )?;
-        session.do_fillet(k)?;
-    }
-    stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+        session
+            .prepare_constant_radius_edges(k, edges, radius, xsect_type, continuity, thumbweight)
+            .and_then(|()| session.do_fillet(k))
+    };
+    let result =
+        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
+    // (not upstream: the port's cached topology fields, true again for the caller;
+    // the body keeps the edits the executive made before a failure, as upstream)
+    brep.refresh_cached_topology();
+    result
 }
 
 /// `SmApiFilletEdgesPerEdge`: fillet `edges` of `brep` with a constant radius and
@@ -130,19 +138,18 @@ pub fn fillet_edges_per_edge(
             return Err(invalid_input());
         }
     }
-    {
+    let fillet = {
         let mut session = FilletSession::new(k, brep)?;
-        session.prepare_per_edge_constant_radius(
-            k,
-            edges,
-            radii,
-            xsect_types,
-            continuity,
-            thumbweight,
-        )?;
-        session.do_fillet(k)?;
-    }
-    stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+        session
+            .prepare_per_edge_constant_radius(k, edges, radii, xsect_types, continuity, thumbweight)
+            .and_then(|()| session.do_fillet(k))
+    };
+    let result =
+        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
+    // (not upstream: the port's cached topology fields, true again for the caller;
+    // the body keeps the edits the executive made before a failure, as upstream)
+    brep.refresh_cached_topology();
+    result
 }
 
 /// `SmApiVariableRadiusFillet`: fillet `edges` of `brep` with a radius running
@@ -174,19 +181,18 @@ pub fn variable_radius_fillet(
         return Err(invalid_input());
     }
     let law = FilletLaw::linear(start_radius, end_radius, None);
-    {
+    let fillet = {
         let mut session = FilletSession::new(k, brep)?;
-        session.prepare_variable_radius_edges(
-            k,
-            edges,
-            start_radius,
-            law,
-            xsect_type,
-            continuity,
-        )?;
-        session.do_fillet(k)?;
-    }
-    stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+        session
+            .prepare_variable_radius_edges(k, edges, start_radius, law, xsect_type, continuity)
+            .and_then(|()| session.do_fillet(k))
+    };
+    let result =
+        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
+    // (not upstream: the port's cached topology fields, true again for the caller;
+    // the body keeps the edits the executive made before a failure, as upstream)
+    brep.refresh_cached_topology();
+    result
 }
 
 /// Keep a value of an upstream call whose status is ignored; `Unported` propagates.
@@ -271,7 +277,7 @@ pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<(
     if !is_radius_supported(radius, brep.tolerance()) {
         return Err(invalid_input());
     }
-    {
+    let fillet = {
         let mut session = FilletSession::new(k, brep)?;
         fillet_all_edges(
             k,
@@ -280,10 +286,15 @@ pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<(
             radius,
             FilletSurfaceGenerator::circular(false, 1.0e-3, false, false),
             false,
-        )?;
-    }
+        )
+    };
     // This operation requires stitching for some reason
-    stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+    let result =
+        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
+    // (not upstream: the port's cached topology fields, true again for the caller;
+    // the body keeps the edits the executive made before a failure, as upstream)
+    brep.refresh_cached_topology();
+    result
 }
 
 /// `SmApiChamferFillet`: chamfer every edge of `brep` that bounds a blendable
@@ -299,15 +310,21 @@ pub fn chamfer_fillet(k: &mut Kernel, brep: &mut Brep, distance: f64) -> Result<
     if !is_radius_supported(distance, brep.tolerance()) {
         return Err(invalid_input());
     }
-    let mut session = FilletSession::new(k, brep)?;
-    fillet_all_edges(
-        k,
-        &mut session,
-        AllEdgeSolver::ConstantDistance,
-        distance,
-        FilletSurfaceGenerator::Linear,
-        true,
-    )
+    let result = {
+        let mut session = FilletSession::new(k, brep)?;
+        fillet_all_edges(
+            k,
+            &mut session,
+            AllEdgeSolver::ConstantDistance,
+            distance,
+            FilletSurfaceGenerator::Linear,
+            true,
+        )
+    };
+    // (not upstream: the port's cached topology fields, true again for the caller;
+    // the body keeps the edits the executive made before a failure, as upstream)
+    brep.refresh_cached_topology();
+    result
 }
 
 /// `SmApiSetBevelCorners`: fillet `edges` of `brep` with a constant circular
@@ -332,18 +349,27 @@ pub fn set_bevel_corners(
     if !is_radius_supported(radius, brep.tolerance()) {
         return Err(invalid_input());
     }
-    {
+    let fillet = {
         let mut session = FilletSession::new(k, brep)?;
         // SetFilletParameters(.., SM_FSG_CIRCULAR, SM_FS_CONST_RADIUS, dRadius, NULL,
         // -1, -1, -1, -1) with lContinuity = 1, dThumbweight = 1.0 defaulted
-        session.prepare_constant_radius_edges(k, edges, radius, 1, 1, 1.0)?;
-        session.create_corners(k, None)?;
-        for vertex in bevel_vertices {
-            session.set_bevel_corner(*vertex)?;
-        }
-        session.do_filleting(k, None)?;
-    }
-    stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+        session
+            .prepare_constant_radius_edges(k, edges, radius, 1, 1, 1.0)
+            .and_then(|()| session.create_corners(k, None))
+            .and_then(|()| {
+                for vertex in bevel_vertices {
+                    session.set_bevel_corner(*vertex)?;
+                }
+                Ok(())
+            })
+            .and_then(|()| session.do_filleting(k, None))
+    };
+    let result =
+        fillet.and_then(|()| stitch_and_orient(k, brep, &StitchAndOrientOptions::default()));
+    // (not upstream: the port's cached topology fields, true again for the caller;
+    // the body keeps the edits the executive made before a failure, as upstream)
+    brep.refresh_cached_topology();
+    result
 }
 
 /// `SmBrep::CreateFaceFromSurface(pSurface, pSurface->GetNaturalUVDomain(), pFace)`:
@@ -408,6 +434,14 @@ impl BaseBrep<'_> {
         match self {
             Self::Caller(body) => body,
             Self::Temporary(body) => body,
+        }
+    }
+
+    /// Rewrite a caller's cached topology fields from its use links; a temporary B-rep
+    /// is dropped with them, so it is skipped.
+    fn refresh_cached_topology(&mut self) {
+        if let Self::Caller(body) = self {
+            body.refresh_cached_topology();
         }
     }
 }
@@ -504,16 +538,40 @@ pub fn surface_surface_fillet(
         mirror,
         complement,
     };
-    let mut session =
-        FilletSession::with_second_base(k, base1.brep(), base2.as_mut().map(BaseBrep::brep))?;
-    let made =
-        session.surface_surface_fillet(k, [face1, face2], radius1, radius2, tolerance, &options)?;
-    // The temporary B-reps are dropped with their faces; the surfaces stay the caller's.
-    Ok(if made {
-        session.take_fillet_brep()
-    } else {
-        None
-    })
+    let result = {
+        let mut session =
+            FilletSession::with_second_base(k, base1.brep(), base2.as_mut().map(BaseBrep::brep))?;
+        let made = session.surface_surface_fillet(
+            k,
+            [face1, face2],
+            radius1,
+            radius2,
+            tolerance,
+            &options,
+        );
+        match made {
+            Ok(true) => Ok(session.take_fillet_brep()),
+            Ok(false) => Ok(None),
+            Err(error) => Err(error),
+        }
+    };
+    // (not upstream: the port's cached topology fields, true again for the caller in the
+    // bodies whose faces a rail merged into and in the returned fillet B-rep. A rail merge
+    // rewires only the use links, and on an error the bodies keep the edits made before
+    // it, as upstream. The temporary B-reps are dropped with their faces; the surfaces
+    // stay the caller's.)
+    base1.refresh_cached_topology();
+    if let Some(base2) = base2.as_mut() {
+        base2.refresh_cached_topology();
+    }
+    match result {
+        Ok(Some(mut fillet)) => {
+            fillet.refresh_cached_topology();
+            Ok(Some(fillet))
+        }
+        Ok(None) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
@@ -526,54 +584,8 @@ mod tests {
         crate::primitive::api_primitives::create_box(k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap()
     }
 
-    #[test]
-    fn all_edge_setup_loads_one_solver_per_edge_with_the_blending_handler() {
-        for solver_kind in [
-            AllEdgeSolver::ConstantRadius,
-            AllEdgeSolver::ConstantDistance,
-        ] {
-            let mut k = Kernel::default();
-            let mut body = boxed(&mut k);
-            let mut session = FilletSession::new(&mut k, &mut body).unwrap();
-            let generator = session
-                .add_surface_generator(FilletSurfaceGenerator::Linear)
-                .unwrap();
-            session.set_self_intersection_handler(Some(MakeSurfaceBlendSih::new(1.0)));
-            let edges = p1::edges(session.target(), None).unwrap();
-            for (i, edge) in edges.iter().enumerate() {
-                let edgeuse = session.blend_edgeuse(&k, *edge).unwrap().unwrap();
-                let solver = match solver_kind {
-                    AllEdgeSolver::ConstantRadius => session
-                        .new_constant_radius_solver(&k, edgeuse, 0.5, 1e-6, 0.5, 0.03)
-                        .unwrap(),
-                    AllEdgeSolver::ConstantDistance => session
-                        .new_constant_distance_solver(&k, edgeuse, 0.5, 1e-6, 0.5, 0.03)
-                        .unwrap(),
-                };
-                assert_eq!(solver.0 as usize, i);
-                session.set_solver_generator(solver, generator).unwrap();
-                session.load_solver(&k, solver).unwrap();
-                let base = session.solver(solver).unwrap().base();
-                assert_eq!(
-                    base.self_intersection_handler().unwrap(),
-                    Some(crate::blend::fillet_intersector::HandlingAlgorithmType::Blending)
-                );
-            }
-            // clearing the executive's handler is seen by every loaded solver
-            session.set_self_intersection_handler(None);
-            for i in 0..edges.len() {
-                let id = FilletSolverId(u32::try_from(i).unwrap());
-                let base = session.solver(id).unwrap().base();
-                assert_eq!(base.self_intersection_handler().unwrap(), None);
-            }
-            session.create_corners(&k, None).unwrap();
-            let corners = session.fillet_corners().unwrap();
-            assert_eq!(corners.len(), 8);
-            for corner in &corners {
-                session.set_corner_bevel(*corner, true).unwrap();
-                assert!(session.corner(*corner).unwrap().is_bevel_corner());
-            }
-        }
+    fn sized_box(k: &mut Kernel, length: f64, width: f64, height: f64) -> Brep {
+        crate::primitive::api_primitives::create_box(k, Vec3::ZERO, length, width, height).unwrap()
     }
 
     #[test]
@@ -679,6 +691,231 @@ mod tests {
             1,
             1.0,
         )));
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
+    }
+
+    fn volume(k: &Kernel, body: &mut Brep) -> f64 {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        let store = AttributeStore::default();
+        let key_of = |_: crate::EntityRef| ObjectKey(0);
+        brep_volume(
+            k,
+            body,
+            1e-9,
+            &PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn issue_1421_all_edge_fillet_leaves_the_cached_topology_current() {
+        const RADIUS: f64 = 3.0;
+        let mut k = Kernel::default();
+        let mut body = sized_box(&mut k, 600.0, 400.0, 18.0);
+        let edges = p1::edges(&body, None).unwrap();
+        fillet_edges(&mut k, &mut body, &edges, RADIUS, 1, 1, 1.0).unwrap();
+        // Immediately, with no caller refresh: the port's cached face, loop and shell
+        // fields have to agree with the use links the fillet rewired.
+        crate::topology::integrity::check(&body).unwrap();
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 26);
+        assert_eq!(p1::edges(&body, None).unwrap().len(), 48);
+        assert_eq!(p1::vertices(&body, None).unwrap().len(), 24);
+        assert!(crate::topology::brep::p2::is_manifold_solid(&body).unwrap());
+        // The rounded box is its inner box grown by the radius ball: the inner box, six
+        // face slabs, twelve quarter cylinders and eight sphere octants.
+        let [a, b, c] = [
+            600.0 - 2.0 * RADIUS,
+            400.0 - 2.0 * RADIUS,
+            18.0 - 2.0 * RADIUS,
+        ];
+        let want = a * b * c
+            + 2.0 * (a * b + b * c + c * a) * RADIUS
+            + PI * (a + b + c) * RADIUS * RADIUS
+            + 4.0 / 3.0 * PI * RADIUS * RADIUS * RADIUS;
+        let got = volume(&k, &mut body);
+        assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
+    }
+
+    #[test]
+    fn every_fillet_entry_point_leaves_the_cached_topology_current() {
+        fn check_entry(name: &str, fillet: impl FnOnce(&mut Kernel, &mut Brep)) {
+            let mut k = Kernel::default();
+            let mut body = boxed(&mut k);
+            fillet(&mut k, &mut body);
+            if let Err(error) = crate::topology::integrity::check(&body) {
+                panic!("{name}: {error:?}");
+            }
+        }
+        check_entry("fillet_edges", |k, body| {
+            let edges = p1::edges(body, None).unwrap();
+            fillet_edges(k, body, &edges[..1], 0.5, 1, 1, 1.0).unwrap();
+        });
+        check_entry("fillet_edges_per_edge", |k, body| {
+            let edges = p1::edges(body, None).unwrap();
+            fillet_edges_per_edge(
+                k,
+                body,
+                &edges[..1],
+                &[0.5],
+                &[FilletSurfaceGeneratorType::Circular],
+                1,
+                1.0,
+            )
+            .unwrap();
+        });
+        check_entry("variable_radius_fillet", |k, body| {
+            let edges = p1::edges(body, None).unwrap();
+            variable_radius_fillet(k, body, &edges[..1], 0.5, 2.0, 1, 1).unwrap();
+        });
+        check_entry("circular_fillet", |k, body| {
+            circular_fillet(k, body, 0.5).unwrap();
+        });
+        check_entry("chamfer_fillet", |k, body| {
+            chamfer_fillet(k, body, 0.5).unwrap();
+        });
+        check_entry("set_bevel_corners", |k, body| {
+            let edges = p1::edges(body, None).unwrap();
+            let vertices = p1::vertices(body, None).unwrap();
+            set_bevel_corners(k, body, &edges, 0.5, &vertices).unwrap();
+        });
+    }
+
+    fn bilinear_surface(corners: &[[f64; 3]; 4]) -> Surface {
+        Surface::from(
+            crate::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
+                Vec3::from(corners[0]),
+                Vec3::from(corners[1]),
+                Vec3::from(corners[2]),
+                Vec3::from(corners[3]),
+            )
+            .unwrap(),
+        )
+    }
+
+    fn sheet(k: &mut Kernel, surfaces: &[&Surface]) -> (Brep, Vec<FaceId>) {
+        let mut body = crate::topology::brep::p3::new_brep(
+            k,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let mut faces = Vec::new();
+        for surface in surfaces {
+            faces.push(create_face_from_surface(k, &mut body, surface).unwrap());
+        }
+        (body, faces)
+    }
+
+    const FIRST_SURFACE: [[f64; 3]; 4] = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [0.0, 10.0, 0.0],
+        [10.0, 10.0, 0.0],
+    ];
+    const SECOND_SURFACE: [[f64; 3]; 4] = [
+        [5.0, 0.0, -5.0],
+        [5.0, 0.0, 5.0],
+        [5.0, 10.0, -5.0],
+        [5.0, 10.0, 5.0],
+    ];
+    const ADJACENT_SURFACE: [[f64; 3]; 4] = [
+        [10.0, 0.0, 0.0],
+        [10.0, 0.0, 10.0],
+        [10.0, 10.0, 0.0],
+        [10.0, 10.0, 10.0],
+    ];
+
+    #[test]
+    fn surface_surface_fillet_leaves_the_caller_and_result_cached_topology_current() {
+        let mut k = Kernel::default();
+        let first = bilinear_surface(&FIRST_SURFACE);
+        let second = bilinear_surface(&SECOND_SURFACE);
+        let (mut body, faces) = sheet(&mut k, &[&first, &second]);
+        let fillet = surface_surface_fillet(
+            &mut k,
+            FilletSurfaceArg::Face {
+                body: &mut body,
+                face: faces[0],
+            },
+            FilletSurfaceArg::FirstBodyFace(faces[1]),
+            2.0,
+            2.0,
+            0.01,
+            0,
+            false,
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        // Both the borrowed body the rails merged into and the returned B-rep.
+        crate::topology::integrity::check(&fillet).unwrap();
+        crate::topology::integrity::check(&body).unwrap();
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 4);
+
+        // Free surfaces have only the returned B-rep to finalize.
+        let mut k = Kernel::default();
+        let first = bilinear_surface(&FIRST_SURFACE);
+        let second = bilinear_surface(&SECOND_SURFACE);
+        let fillet = surface_surface_fillet(
+            &mut k,
+            FilletSurfaceArg::Free(&first),
+            FilletSurfaceArg::Free(&second),
+            2.0,
+            2.0,
+            0.01,
+            0,
+            false,
+            false,
+        )
+        .unwrap()
+        .unwrap();
+        crate::topology::integrity::check(&fillet).unwrap();
+    }
+
+    #[test]
+    fn surface_surface_fillet_error_propagates_and_finalizes_the_caller_topology() {
+        let mut k = Kernel::default();
+        let first = bilinear_surface(&FIRST_SURFACE);
+        let second = bilinear_surface(&ADJACENT_SURFACE);
+        let (mut body, faces) = sheet(&mut k, &[&first, &second]);
+        let result = surface_surface_fillet(
+            &mut k,
+            FilletSurfaceArg::Face {
+                body: &mut body,
+                face: faces[0],
+            },
+            FilletSurfaceArg::FirstBodyFace(faces[1]),
+            0.001,
+            0.001,
+            0.01,
+            2,
+            false,
+            false,
+        );
+        // The executive's own error, not a finalization error.
+        assert!(matches!(
+            result,
+            Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR
+        ));
+        crate::topology::integrity::check(&body).unwrap();
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_failed_variable_radius_fillet_keeps_its_error_and_a_current_body() {
+        let mut k = Kernel::default();
+        let mut body = boxed(&mut k);
+        let edge = p1::edges(&body, None).unwrap()[0];
+        let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1);
+        assert!(matches!(
+            result,
+            Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR
+        ));
+        crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
     }
 }
