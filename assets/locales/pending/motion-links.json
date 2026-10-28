@@ -1,13 +1,28 @@
 {
+  "ar": {
+    "browser.link.lift": "الارتفاع",
+    "browser.link.rise": "صعود",
+    "browser.link.no_profile": "لا يوجد مقطع كامة"
+  },
   "en": {
     "browser.link.lift": "Lift",
     "browser.link.rise": "rise",
     "browser.link.no_profile": "No cam profile"
   },
+  "he": {
+    "browser.link.lift": "הרמה",
+    "browser.link.rise": "עלייה",
+    "browser.link.no_profile": "אין פרופיל פיקה"
+  },
   "ja": {
     "browser.link.lift": "リフト",
     "browser.link.rise": "上昇",
     "browser.link.no_profile": "カム輪郭がありません"
+  },
+  "vi": {
+    "browser.link.lift": "Độ nâng",
+    "browser.link.rise": "mức tăng",
+    "browser.link.no_profile": "Không có biên dạng cam"
   },
   "zh": {
     "browser.link.lift": "升程",
