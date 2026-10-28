@@ -14,5 +14,17 @@
   "zh": {
     "dialog.new_sketch_hint": "为此特征绘制新草图：选择一个平面或平整的面。“完成草图”后返回此处，并选中其轮廓。",
     "dialog.new_sketch_return": "完成草图以返回 {command}"
+  },
+  "ar": {
+    "dialog.new_sketch_hint": "ارسم رسماً جديداً لهذه الميزة: اختر مستوى أو وجهاً مستوياً. يعود «إنهاء الرسم» إلى هنا مع تحديد مقاطعه.",
+    "dialog.new_sketch_return": "أنهِ الرسم للعودة إلى {command}"
+  },
+  "he": {
+    "dialog.new_sketch_hint": "שרטוט סקיצה חדשה עבור תכונה זו: יש לבחור מישור או פאה מישורית. „סיום סקיצה” חוזר לכאן כשהפרופילים שלה נבחרים.",
+    "dialog.new_sketch_return": "יש לסיים את הסקיצה כדי לחזור אל {command}"
+  },
+  "vi": {
+    "dialog.new_sketch_hint": "Vẽ một phác thảo mới cho tính năng này: chọn một mặt phẳng hoặc một mặt phẳng của vật thể. Hoàn tất phác thảo sẽ quay lại đây với các biên dạng của nó đã được chọn.",
+    "dialog.new_sketch_return": "Hoàn tất phác thảo để quay lại {command}"
   }
 }
