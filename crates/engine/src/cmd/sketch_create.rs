@@ -990,11 +990,12 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
             c.construction = true;
             centre_arc = Some(c.id.clone());
         }
+        // Each cap is tangent to both concentric sides, so its radius is half the gap between
+        // them: the two caps are equal without an Equal, which would only be redundant (#8355).
         let mut cons = Vec::new();
         for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
             cons.push(add_c(sk, ConstraintKind::Tangent { a, b })?);
         }
-        cons.push(add_c(sk, ConstraintKind::Equal { a: cap_s, b: cap_e })?);
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
     let mut out = result(out, info);
