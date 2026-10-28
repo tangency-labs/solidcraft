@@ -350,6 +350,25 @@ listed in `touching_at_start` and stop the sweep only once they pass into each o
 they start. The sweep runs on a copy (closed loops follow, contact sets don't stop it) and
 leaves the design as it was unless `apply` is true.
 
+**Find Limits.** In **Edit Joint**, the **Limits** section's **Find Limits** button fills in each
+value's Minimum and Maximum from where the parts the joint moves first touch another part,
+turning or sliding each way from where the joint is now, and ticks its limits. It searches the
+joint as the dialog has it (a type, flip or offset changed but not yet applied included), on a
+copy: nothing changes until **OK**, so the values can still be rounded or edited. They are
+rounded toward the joint's value (a tenth of a degree, a hundredth of the length unit) so they
+stay clear, and a line under each value says what stopped each side. An angle is searched a turn
+each way: a side that meets nothing is set a turn from the other side, or half a turn each way
+when nothing is met at all. A distance is searched as far as the parts reach; a side that meets
+nothing there keeps what it had, and the limits stay off until both sides are found. Parts
+already in each other where the joint is now are named, and stop the search only once they go
+deeper. The search runs while the window goes on (Cancel drops it). `joint.find_limits {joint,
+index?, refine?, step?, occurrences?, against?, contact_sets?}` answers the same: for each value
+its `min` and `max` (`null` where a distance meets nothing), what stopped each side (`min_by`,
+`max_by`: the two parts and where they touch, or `"loop"`, `"limit"` (the limit of
+another of its values, or of another joint through a motion link), `"turn"` or `"range"`), the `range` searched, and the parts `touching_at_start`
+and `overlapping_at_start` (with `depth_mm`). The joint's own limits are left out of the search,
+closed loops follow, and each side is bisected to `refine` as `joint.sweep` does.
+
 **Insert Design** (`component.insert_design {path, translate?}`, on the **ASSEMBLE** panel and
 in the **File** menu) adds a component linked to another saved design, so each part can live in
 its own document. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert

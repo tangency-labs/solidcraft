@@ -12,7 +12,11 @@ use solidcraft_kernel::Body;
 use super::CommandSpec;
 use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, place_holding, value};
 use crate::params::{bad, bool_, str_, vec3};
+use crate::schema::motion::{FindLimitsParams, FindLimitsResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
+
+const FIND_LIMITS_CONTRACT: TypedContract<FindLimitsParams> = TypedContract::new();
 
 #[path = "motion_analysis.rs"]
 mod analysis;
@@ -101,6 +105,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params(analysis::INTERFERENCE_DOC),
     CommandSpec::new("joint.sweep", "Sweep Joint", sweep::sweep).icon("interference").params(sweep::SWEEP_DOC),
+    CommandSpec::new("joint.find_limits", "Find Joint Limits", crate::checked!("joint.find_limits", sweep::find_limits))
+        .icon("interference")
+        .noundo()
+        .contract(&FIND_LIMITS_CONTRACT)
+        .output(output_schema_for::<FindLimitsResult>)
+        .params(sweep::FIND_LIMITS_DOC),
     CommandSpec::new("motion.list", "List Motion Studies", list_studies).icon("list").noundo(),
     CommandSpec::new("motion.delete", "Delete Motion Study", delete_study).icon("delete").params("study"),
     CommandSpec::new("explode.create", "Exploded View", explode_create).at("SOLID", "ASSEMBLE").icon("explode").params(
