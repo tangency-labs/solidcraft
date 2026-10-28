@@ -62,9 +62,9 @@
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::attribute::{
-    ids, Attribute, AttributeHandle, AttributeStore, Behavior, ObjectKey, TagData,
-};
+#[cfg(test)]
+use crate::geom::attribute::ObjectKey;
+use crate::geom::attribute::{ids, Attribute, AttributeHandle, AttributeStore, Behavior, TagData};
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
@@ -74,9 +74,7 @@ use crate::topology::brep_data::{
     read_curve_from_db, read_surface_from_db, AttributeSink, BrepData, Keyed, TopologyData,
 };
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
-use crate::topology::topology::Topology;
 use crate::topology::Brep;
-use std::collections::BTreeMap;
 
 const OP_PART: &str = "topology::part_file::read_part_from_db";
 const OP_ATTRIBUTE: &str = "topology::part_file::read_attribute_from_db";
@@ -128,7 +126,7 @@ pub struct PartEnv<'a> {
     /// file order).
     pub key_of: &'a dyn Fn(usize, EntityRef) -> ObjectRef,
     /// The `SmTopology` records of the topology objects built, by identity.
-    pub records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub records: &'a mut crate::topology::topology::NotifyRecords,
     /// The next free identity for a geometry object (read or copied); incremented per
     /// object.
     pub next_key: u64,
@@ -854,7 +852,7 @@ mod tests {
     fn read(text: &str) -> Result<Part> {
         let mut k = Kernel::default();
         let mut store = AttributeStore::new();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut env = PartEnv {
             attributes: &mut store,
             key_of: &key_of,

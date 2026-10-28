@@ -24,7 +24,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
@@ -1872,7 +1872,7 @@ fn run_rust_op(
             if let Some(d) = inexact(types, Some(&[]), Some(&edges)) {
                 return Ok(Err(d));
             }
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = solidcore::topology::edge::NotifyEnv {
                 records: &mut records,

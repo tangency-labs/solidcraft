@@ -25,6 +25,7 @@
 //! | [`Topology::is_marked`]                      | `SmTopology::IsMarked`                           |
 //! | [`destroy_topology`](crate::topology::proto_topology::p1::destroy_topology) | `SmTopology::~SmTopology` (unit `topology.proto_topology_p1`) |
 //! | [`TopologyRecords`]                          | the `SmTopology*` casts of `Notify`'s arguments  |
+//! | [`NotifyRecords`]                            | the `SmTopology` members of every object of a store |
 //! | [`notify`]                                   | `SmTopology::Notify`                             |
 //! | [`NotifyEvent`]                              | `SmNotifyEvent` (data only)                      |
 //! | [`TopologyChangeLists`]                      | the arrays `SmTopologyChangeCallback` points at  |
@@ -305,6 +306,136 @@ pub trait TopologyRecords {
     fn topology(&self, key: ObjectKey) -> Option<&Topology>;
     /// Mutable access to the record of `key`.
     fn topology_mut(&mut self, key: ObjectKey) -> Option<&mut Topology>;
+}
+
+/// The topology records of the objects a caller notifies through, keyed by their
+/// notification identities: upstream keeps one in every object (`SmTopology`'s
+/// members). Reads go through the map ([`Deref`](std::ops::Deref)); writes go through
+/// the methods here, so a store also remembers how far each B-rep's objects have been
+/// checked and given a record (`topology::brep::p3`), which a removal forgets.
+#[derive(Debug, Clone, Default)]
+pub struct NotifyRecords {
+    map: BTreeMap<ObjectKey, Topology>,
+    progress: Vec<SeedProgress>,
+}
+
+/// Which objects of one B-rep a [`NotifyRecords`] has already checked and seeded,
+/// under one identity: one flag per arena index of each entity kind
+/// (`topology::brep::p3`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SeedProgress {
+    /// The B-rep and the caller identity the flags hold for.
+    pub(crate) id: Vec<u64>,
+    /// Arena indices whose key has passed the reserved-key check, per kind.
+    pub(crate) checked: [Vec<bool>; 10],
+    /// Arena indices whose object has been given a record, per kind.
+    pub(crate) seeded: [Vec<bool>; 10],
+}
+
+impl std::ops::Deref for NotifyRecords {
+    type Target = BTreeMap<ObjectKey, Topology>;
+    fn deref(&self) -> &Self::Target {
+        &self.map
+    }
+}
+
+impl PartialEq for NotifyRecords {
+    fn eq(&self, other: &Self) -> bool {
+        self.map == other.map
+    }
+}
+
+impl From<BTreeMap<ObjectKey, Topology>> for NotifyRecords {
+    fn from(map: BTreeMap<ObjectKey, Topology>) -> Self {
+        Self {
+            map,
+            progress: Vec::new(),
+        }
+    }
+}
+
+impl FromIterator<(ObjectKey, Topology)> for NotifyRecords {
+    fn from_iter<I: IntoIterator<Item = (ObjectKey, Topology)>>(iter: I) -> Self {
+        Self::from(iter.into_iter().collect::<BTreeMap<_, _>>())
+    }
+}
+
+impl NotifyRecords {
+    /// An empty store.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The record of `key`, made default first if it has none.
+    pub fn or_default(&mut self, key: ObjectKey) -> &mut Topology {
+        self.map.entry(key).or_default()
+    }
+
+    /// Sets the record of `key`, returning the previous one.
+    pub fn insert(&mut self, key: ObjectKey, record: Topology) -> Option<Topology> {
+        self.map.insert(key, record)
+    }
+
+    /// Mutable access to the record of `key`.
+    pub fn get_mut(&mut self, key: &ObjectKey) -> Option<&mut Topology> {
+        self.map.get_mut(key)
+    }
+
+    /// Mutable access to every record, in key order.
+    pub fn values_mut(
+        &mut self,
+    ) -> std::collections::btree_map::ValuesMut<'_, ObjectKey, Topology> {
+        self.map.values_mut()
+    }
+
+    /// Removes the record of `key`.
+    pub fn remove(&mut self, key: &ObjectKey) -> Option<Topology> {
+        self.progress.clear();
+        self.map.remove(key)
+    }
+
+    /// Keeps the records `keep` accepts (it may also change them).
+    pub fn retain(&mut self, keep: impl FnMut(&ObjectKey, &mut Topology) -> bool) {
+        self.progress.clear();
+        self.map.retain(keep);
+    }
+
+    /// Removes every record.
+    pub fn clear(&mut self) {
+        self.progress.clear();
+        self.map.clear();
+    }
+
+    /// The records and the progress kept for `id` (made empty if there is none), for
+    /// `topology::brep::p3`'s per-edit check and seeding, which only adds records.
+    pub(crate) fn progress_for(
+        &mut self,
+        id: Vec<u64>,
+    ) -> Option<(&mut BTreeMap<ObjectKey, Topology>, &mut SeedProgress)> {
+        let at = self.progress.iter().position(|p| p.id == id);
+        let Self { map, progress } = self;
+        let p = if let Some(at) = at {
+            progress.get_mut(at)
+        } else {
+            progress.push(SeedProgress {
+                id,
+                ..SeedProgress::default()
+            });
+            progress.last_mut()
+        };
+        Some((map, p?))
+    }
+}
+
+impl TopologyRecords for NotifyRecords {
+    fn topology(&self, key: ObjectKey) -> Option<&Topology> {
+        self.map.get(&key)
+    }
+
+    fn topology_mut(&mut self, key: ObjectKey) -> Option<&mut Topology> {
+        self.map.get_mut(&key)
+    }
 }
 
 impl TopologyRecords for BTreeMap<ObjectKey, Topology> {
@@ -1178,7 +1309,7 @@ mod tests {
         }
     }
 
-    fn pool(n: u64) -> BTreeMap<ObjectKey, Topology> {
+    fn pool(n: u64) -> NotifyRecords {
         (0..n).map(|k| (ObjectKey(k), Topology::new())).collect()
     }
 
@@ -1284,7 +1415,7 @@ mod tests {
     #[test]
     fn destroy_unlisted_and_linked() {
         use crate::topology::proto_topology::p1::destroy_topology;
-        let mut recs: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+        let mut recs = NotifyRecords::new();
         recs.insert(ObjectKey(0), Topology::new());
         assert!(destroy_topology(&mut recs, ObjectKey(0)).is_ok());
         // an owner without list data (never an SmOwningTopology here)

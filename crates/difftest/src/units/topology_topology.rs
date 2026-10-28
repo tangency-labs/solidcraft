@@ -19,7 +19,6 @@
 //! context's marks and locks, the system callback and the type system; `d`: the
 //! tolerances asked for.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -144,7 +143,7 @@ fn mark_type(m: i64) -> Result<MarkType, HarnessError> {
 
 struct State {
     ctxs: Vec<Context>,
-    recs: BTreeMap<ObjectKey, Topology>,
+    recs: solidcore::topology::topology::NotifyRecords,
     n: usize,
     /// Per object: its stand-in type code (`SET_KIND`; `SmTopology_TYPE` initially).
     /// The change tracker classifies notification objects by this code only.

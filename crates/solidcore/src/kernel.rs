@@ -357,10 +357,7 @@ pub struct Kernel {
     /// (`topology::brep::p3`), kept only to reuse its allocation; every edit resets it
     /// to the records of a fresh seeding, so it never carries state between edits.
     #[doc(hidden)]
-    pub notify_records: std::collections::BTreeMap<
-        crate::geom::attribute::ObjectKey,
-        crate::topology::topology::Topology,
-    >,
+    pub notify_records: crate::topology::topology::NotifyRecords,
 }
 
 impl Default for Kernel {
@@ -382,7 +379,7 @@ impl Kernel {
             upstream_ub_passed: Vec::new(),
             memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
             fixes: UpstreamFixes::default(),
-            notify_records: std::collections::BTreeMap::new(),
+            notify_records: crate::topology::topology::NotifyRecords::new(),
         }
     }
 

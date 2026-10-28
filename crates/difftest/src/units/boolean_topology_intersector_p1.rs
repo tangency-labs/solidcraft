@@ -47,7 +47,6 @@
 //! The manager's construction with a zero approximation tolerance runs upstream's
 //! B-rep fallback (`SmBrep::GetTolerance`, `SmBrep::GetMinEdgeBBoxSize`) on both B-reps.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -763,14 +762,14 @@ pub(super) fn triple_to_h(t: Hin) -> Option<H> {
 /// The topology records, identities and attribute store a vertex notification runs
 /// with (the `topology.vertex` runner's environment).
 struct NotifyEnv {
-    records: BTreeMap<ObjectKey, Topology>,
+    records: solidcore::topology::topology::NotifyRecords,
     attributes: AttributeStore,
     this: ObjectRef,
 }
 
 impl NotifyEnv {
     fn new(b: Option<&Brep>) -> Self {
-        let mut records = BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         records.insert(ObjectKey(1), Topology::new());
         if let Some(b) = b {
             for id in b.vertexuses().ids() {
@@ -2188,7 +2187,7 @@ fn with_edit_env<R>(
     b: &mut Brep,
     f: impl FnOnce(&mut Brep, &mut solidcore::topology::edge::NotifyEnv<'_>) -> R,
 ) -> R {
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = |e: EntityRef| {
         let (kind, i) = match e {

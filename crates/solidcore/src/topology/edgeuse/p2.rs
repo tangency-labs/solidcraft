@@ -950,7 +950,7 @@ mod tests {
     #[test]
     fn notify_pre_edit_changes_nothing() {
         let (mut b, eu) = lone_edgeuse();
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::default();
         let this = ObjectRef {
             type_code: super::super::p1::TYPE,

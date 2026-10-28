@@ -57,7 +57,7 @@ pub trait OwningRecords: TopologyRecords {
 }
 
 /// A store without owning objects (plain topology records).
-impl OwningRecords for std::collections::BTreeMap<ObjectKey, Topology> {
+impl OwningRecords for crate::topology::topology::NotifyRecords {
     fn owning(&self, _key: ObjectKey) -> Option<OwningTopology> {
         None
     }

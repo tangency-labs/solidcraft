@@ -9,8 +9,6 @@
     dead_code
 )] // test helpers; each probe uses a subset
 
-use std::collections::BTreeMap;
-
 use solidcore::curve::curve::Curve;
 use solidcore::geom::a_object::BREP_TYPE;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -23,6 +21,7 @@ use solidcore::offset::offset_executive::p2::{
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::surface::plane::Plane;
 use solidcore::sweep::topology_sweep::store::SweepIdentities;
+use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::topology::Topology;
 use solidcore::topology::{Region, RegionId, Shell};
 use solidcore::{Brep, BrepId, EdgeId, EntityRef, FaceId, Kernel};
@@ -136,7 +135,7 @@ impl SweepIdentities for MergeBodies {
 
 /// The notification stores of one offset run on `original`.
 pub struct Notifications {
-    records: BTreeMap<ObjectKey, Topology>,
+    records: NotifyRecords,
     attributes: AttributeStore,
 }
 
@@ -145,7 +144,7 @@ impl Notifications {
     /// reserved result B-rep.
     pub fn new(original: &mut Brep) -> Self {
         original.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
-        let mut records = BTreeMap::new();
+        let mut records = NotifyRecords::new();
         records.insert(original.key(), Topology::new());
         records.insert(
             result_key(EntityRef::Brep(BrepId::from_index(0))).key,

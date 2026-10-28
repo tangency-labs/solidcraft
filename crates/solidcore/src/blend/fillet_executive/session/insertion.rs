@@ -15,8 +15,6 @@ use crate::blend::fillet_executive::topology_changes::TopologyChangesAccess;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
 use crate::geom::attribute::ObjectKey;
 use crate::geom::object::ObjectRef;
-use crate::topology::topology::Topology;
-use std::collections::BTreeMap;
 
 /// Disjoint borrows of one actual executive and its retained objects.
 pub struct InsertionState<'a> {
@@ -29,7 +27,7 @@ pub struct InsertionState<'a> {
     /// Actual attribute users and values.
     pub attributes: &'a mut AttributeStore,
     /// Actual topology records used by notification callbacks.
-    pub notification_records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub notification_records: &'a mut crate::topology::topology::NotifyRecords,
     /// Actual source pseudo topology.
     pub pseudo: &'a mut FilletBrep,
     /// Actual target receiving insertion.

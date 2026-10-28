@@ -29,7 +29,6 @@
 //! (`DeleteEdge` / `DeleteVertex` of `topology.brep_p4`, and further down the Euler
 //! operators' own deferrals).
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -709,7 +708,7 @@ fn rust_record(i: &Inputs) -> Result<Vec<f64>, Fail> {
         solidcore::geom::tol::USE_DEFAULT,
     )
     .map_err(hfail)?;
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attrs = AttributeStore::default();
     let mut env = NotifyEnv {
         records: &mut records,

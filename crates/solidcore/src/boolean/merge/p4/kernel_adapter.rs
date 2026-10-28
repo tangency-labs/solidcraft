@@ -40,6 +40,7 @@ use crate::math::Vec3;
 use crate::topology::brep::p1 as bp;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::shell::{RegionLookup, RegionRef};
+#[cfg(test)]
 use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use crate::EntityRef;
@@ -65,7 +66,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         upstream_ub_passed: Vec::new(),
         memoize_curve_caches: k.memoize_curve_caches,
         fixes: k.fixes,
-        notify_records: BTreeMap::new(),
+        notify_records: crate::topology::topology::NotifyRecords::new(),
     }
 }
 
@@ -261,7 +262,7 @@ pub struct ManifoldKernelAdapter<'a> {
     /// Canonical options, tag and relationships, shared with the ported stages.
     pub merge: MergeState<Relations>,
     /// Topology notification state for both operands, under [`Self::object_key`].
-    pub records: BTreeMap<ObjectKey, Topology>,
+    pub records: crate::topology::topology::NotifyRecords,
     /// `m_bTopologyDeleted`; dependency editing stages update this same flag.
     pub topology_deleted: bool,
     intersector: TopologyIntersector<H>,
@@ -278,7 +279,7 @@ pub type KernelManifoldIntersector = ManifoldKernelAdapter<'static>;
 
 struct NotificationRecordScope<'records, 'keys> {
     adapter: ManifoldKernelAdapter<'keys>,
-    caller: &'records mut BTreeMap<ObjectKey, Topology>,
+    caller: &'records mut crate::topology::topology::NotifyRecords,
 }
 
 impl Drop for NotificationRecordScope<'_, '_> {
@@ -324,7 +325,7 @@ impl KernelManifoldIntersector {
     /// adapter methods.
     pub fn with_notifications<T>(
         keys: ManifoldNotificationKeys<'_>,
-        records: &mut BTreeMap<ObjectKey, Topology>,
+        records: &mut crate::topology::topology::NotifyRecords,
         action: impl FnOnce(&mut ManifoldKernelAdapter<'_>) -> T,
     ) -> T {
         let mut scope = NotificationRecordScope {
@@ -340,7 +341,7 @@ impl KernelManifoldIntersector {
 /// unwinds. Borrowed key callbacks never escape the operation.
 struct RetainedNotificationScope<'state, 'records, 'keys> {
     retained: &'state mut KernelManifoldIntersector,
-    caller: &'records mut BTreeMap<ObjectKey, Topology>,
+    caller: &'records mut crate::topology::topology::NotifyRecords,
     adapter: ManifoldKernelAdapter<'keys>,
 }
 impl Drop for RetainedNotificationScope<'_, '_, '_> {
@@ -357,7 +358,7 @@ impl KernelManifoldIntersector {
         &mut self,
         keys: ManifoldNotificationKeys<'_>,
         body_ids: (BrepId, BrepId),
-        records: &mut BTreeMap<ObjectKey, Topology>,
+        records: &mut crate::topology::topology::NotifyRecords,
         action: impl FnOnce(&mut ManifoldKernelAdapter<'_>) -> T,
     ) -> T {
         let mut adapter = ManifoldKernelAdapter::from_keys(NotificationKeys::Caller(keys));
@@ -388,7 +389,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
     fn from_keys(keys: NotificationKeys<'keys>) -> Self {
         Self {
             merge: MergeState::new(Relations::default()),
-            records: BTreeMap::new(),
+            records: crate::topology::topology::NotifyRecords::new(),
             topology_deleted: false,
             keys,
             body_ids: match keys {
@@ -539,7 +540,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
         kernel: &mut Kernel,
         brep: &mut Brep,
         faces: &[FaceId],
-        records: &mut BTreeMap<ObjectKey, Topology>,
+        records: &mut crate::topology::topology::NotifyRecords,
         attributes: &mut AttributeStore,
         namespace: u32,
     ) -> Result<()> {
@@ -565,7 +566,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
         kernel: &mut Kernel,
         brep: &mut Brep,
         faces: &[FaceId],
-        records: &mut BTreeMap<ObjectKey, Topology>,
+        records: &mut crate::topology::topology::NotifyRecords,
         attributes: &mut AttributeStore,
         key_of: &dyn Fn(EntityRef) -> ObjectRef,
     ) -> Result<()> {
@@ -602,7 +603,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
         kernel: &mut Kernel,
         brep: &mut Brep,
         faces: &[FaceId],
-        records: &mut BTreeMap<ObjectKey, Topology>,
+        records: &mut crate::topology::topology::NotifyRecords,
         attributes: &mut AttributeStore,
         keys: NotificationKeys<'_>,
     ) -> Result<()> {
@@ -1961,7 +1962,7 @@ mod tests {
         let mut b = Brep::default();
         let v = a.add_vertex(Vec3::ZERO).unwrap();
         let ov = b.add_vertex(Vec3::X).unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         records.insert(
             notification_key(4, false, EntityRef::Vertex(v)).key,
             Topology::new(),
@@ -2056,7 +2057,10 @@ mod tests {
             let bv = b.add_vertex(Vec3::X).unwrap();
             let ak = primary_key(EntityRef::Vertex(av)).key;
             let bk = other_key(EntityRef::Vertex(bv)).key;
-            let mut records = BTreeMap::from([(ak, Topology::new()), (bk, Topology::new())]);
+            let mut records = crate::topology::topology::NotifyRecords::from(BTreeMap::from([
+                (ak, Topology::new()),
+                (bk, Topology::new()),
+            ]));
             let mut attributes = AttributeStore::new();
             let attr = attributes
                 .insert(Attribute::long(78, 99, Behavior::Reference))
@@ -2172,7 +2176,10 @@ mod tests {
         };
         let old = primary(EntityRef::Vertex(VertexId::from_index(0))).key;
         let added = primary(EntityRef::Vertex(VertexId::from_index(1))).key;
-        let mut records = BTreeMap::from([(old, Topology::new())]);
+        let mut records = crate::topology::topology::NotifyRecords::from(BTreeMap::from([(
+            old,
+            Topology::new(),
+        )]));
         let kernel = Kernel::default();
         let outcome = catch_unwind(AssertUnwindSafe(|| {
             KernelManifoldIntersector::with_notifications(keys, &mut records, |adapter| {

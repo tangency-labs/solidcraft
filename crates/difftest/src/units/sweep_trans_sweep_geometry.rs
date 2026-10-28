@@ -32,7 +32,6 @@ use solidcore::topology::edge::NotifyEnv;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{Brep, Edgeuse, EdgeuseOwner, FaceId, Vertexuse, VertexuseOwner};
 use solidcore::{EntityRef, Result, SolidError};
-use std::collections::BTreeMap;
 use solidcore_ffi::units::sweep_trans_sweep_geometry as ffi;
 
 /// Translational sweep differential runner.
@@ -218,7 +217,7 @@ pub(crate) fn create_face(
     s: Surface,
     domain: &Extent2d,
 ) -> Result<FaceId> {
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = super::topology_brep_p8::key_of;
     let mut env = NotifyEnv {

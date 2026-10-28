@@ -2630,7 +2630,7 @@ mod tests {
         let mut b = p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT).unwrap();
         let serial = p3::notify_serial(&mut k.context, &mut b).unwrap();
         let key_of = |entity| p3::topology_ref(serial, entity);
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         p3::seed_records(&mut records, &b, &key_of);
         let mut attributes = AttributeStore::default();
         let mut surface = Surface::new(SurfaceKind::Plane(Plane::from_normal(
@@ -2709,7 +2709,7 @@ mod tests {
             let mut b = p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT).unwrap();
             let serial = p3::notify_serial(&mut k.context, &mut b).unwrap();
             let key_of = |entity| p3::topology_ref(serial, entity);
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             p3::seed_records(&mut records, &b, &key_of);
             let mut attributes = AttributeStore::default();
             let mut surface = if mode == 2 {

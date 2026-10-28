@@ -1295,7 +1295,6 @@ mod tests {
     use crate::geom::attribute::AttributeStore;
     use crate::math::Point2;
     use crate::surface::plane::Plane;
-    use std::collections::BTreeMap;
 
     fn code(e: &SolidError) -> Option<i32> {
         match e {
@@ -1310,7 +1309,7 @@ mod tests {
     ) -> (R, Brep) {
         let mut k = Kernel::default();
         let mut b = p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT).unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let mut env = NotifyEnv {
             records: &mut records,

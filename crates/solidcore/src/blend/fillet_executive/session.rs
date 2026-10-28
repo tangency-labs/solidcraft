@@ -254,8 +254,7 @@ struct SessionObjects<'target> {
     pseudo: FilletBrep,
     intermediate: Option<Brep>,
     insertion_curves: insertion::curves::InsertionCurves,
-    notification_records:
-        BTreeMap<crate::geom::attribute::ObjectKey, crate::topology::topology::Topology>,
+    notification_records: crate::topology::topology::NotifyRecords,
     solvers: Vec<Option<SolverObject>>,
     corners: Vec<FilletCorner>,
     generators: Vec<FilletSurfaceGenerator>,
@@ -1157,7 +1156,7 @@ impl<'target> FilletSession<'target> {
                 pseudo,
                 intermediate: None,
                 insertion_curves: insertion::curves::InsertionCurves::default(),
-                notification_records: BTreeMap::new(),
+                notification_records: crate::topology::topology::NotifyRecords::new(),
                 solvers: Vec::new(),
                 corners: Vec::new(),
                 generators: Vec::new(),

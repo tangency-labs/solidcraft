@@ -93,7 +93,7 @@
 //!   `IsEmbedded`, `ContainsUVPoint`, `RebuildFromEdgeCurves`, `AssertValid`, `Draw`
 //!   and `Dump` are not part of this unit.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::ops::Deref;
 
 use crate::curve::curve::Curve;
@@ -1034,7 +1034,7 @@ pub(crate) fn face_notify_data(
     operation: NotifyOperation,
     data: [Option<EntityRef>; 3],
 ) -> Result<()> {
-    let mut records = BTreeMap::new();
+    let mut records = crate::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = |e: EntityRef| notify_ref(e);
     let mut env = NotifyEnv {
@@ -1055,7 +1055,7 @@ pub(crate) fn face_notify_as(
     this: ObjectRef,
     operation: NotifyOperation,
 ) -> Result<()> {
-    let mut records = BTreeMap::new();
+    let mut records = crate::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = |e: EntityRef| {
         if e == EntityRef::Face(f) {

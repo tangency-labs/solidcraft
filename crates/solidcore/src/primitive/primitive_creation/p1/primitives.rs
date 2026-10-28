@@ -1408,7 +1408,7 @@ mod tests {
     #[test]
     fn boolean_2d_covers_plane_domains_before_intersection() {
         let mut k = Kernel::default();
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let mut notifications = NotifyEnv {
             records: &mut records,
@@ -1483,7 +1483,7 @@ mod tests {
             (180.0, false),
         ] {
             let mut k = Kernel::default();
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             let mut attributes = crate::geom::attribute::AttributeStore::default();
             let mut notifications = NotifyEnv {
                 records: &mut records,

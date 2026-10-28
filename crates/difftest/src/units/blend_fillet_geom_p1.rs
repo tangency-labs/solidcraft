@@ -34,7 +34,6 @@
 //! harness error; HANG-20 bounds the four global-solver ops at `MAX_SOLVER_MAGNITUDE`).
 //! Every run has at least [`MIN_GENERATED`] generated cases.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1365,7 +1364,7 @@ pub(crate) fn natural_face(
     surface: Surface,
 ) -> Result<FaceId, HarnessError> {
     let domain = surface.natural_uv_domain_with_nurb(k).map_err(|e| HarnessError::new(e.to_string()))?;
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = super::topology_brep_p8::key_of;
     let mut env = NotifyEnv {
@@ -3323,6 +3322,7 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     /// Mutates generated and fixture programs and feeds them to the FFI: every program
     /// the guards accept must run without crashing (a crash kills the test process) or

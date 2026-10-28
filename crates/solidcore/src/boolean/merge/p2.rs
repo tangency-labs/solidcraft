@@ -2176,7 +2176,7 @@ mod tests {
             key: ObjectKey(4_000_000),
             type_code: crate::topology::face::p2::TYPE,
         };
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let source = ObjectRef {
             key: ObjectKey(3_000_000),
             type_code: edge::TYPE,
@@ -2293,7 +2293,7 @@ mod tests {
     fn null_edgeuse_merges_nothing() {
         let mut brep = Brep::new();
         let mut other = Brep::new();
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::new();
         let key = |_: VertexId| ObjectRef {
             key: crate::geom::attribute::ObjectKey(1),

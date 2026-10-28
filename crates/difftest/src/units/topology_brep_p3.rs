@@ -1348,7 +1348,7 @@ fn run_rust_op_in(
             .ok_or_else(|| Fail::Harness(harness("args too short")))
     };
     // (the edits seed every object's SmTopology record the caller keeps none for)
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attrs = AttributeStore::default();
     let mut env = NotifyEnv {
         records: &mut records,

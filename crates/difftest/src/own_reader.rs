@@ -68,7 +68,7 @@ pub(crate) fn read_file(k: &mut Kernel, path: &str) -> Result<SolidResult<Brep>,
 fn read_bytes(k: &mut Kernel, bytes: Vec<u8>) -> SolidResult<Brep> {
     let mut body = Brep::new_with_infinite_region()?;
     let mut attributes = AttributeStore::default();
-    let mut records = std::collections::BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,

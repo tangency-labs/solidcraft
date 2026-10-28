@@ -1074,7 +1074,7 @@ fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResu
 /// filleted body as B-rep 0 of one namespace, results in another, merge bodies and
 /// curves in their own (all disjoint).
 mod shell_notifications {
-    use std::collections::BTreeMap;
+    
 
     use solidcore::curve::curve::Curve;
     use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -1178,14 +1178,14 @@ mod shell_notifications {
 
     /// The topology records and attributes of one shell run.
     pub(super) struct Stores {
-        records: BTreeMap<ObjectKey, Topology>,
+        records: solidcore::topology::topology::NotifyRecords,
         attributes: AttributeStore,
     }
     impl Stores {
         /// Keys `body` as B-rep 0 of the original namespace and registers it.
         pub(super) fn new(body: &mut Brep) -> Self {
             body.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             records.insert(body.key(), Topology::new());
             records.insert(
                 result_key(EntityRef::Brep(BrepId::from_index(0))).key,

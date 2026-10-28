@@ -50,7 +50,6 @@
 //! the import holds only approximately (analytic surfaces and curves) is deferred like
 //! `topology.edgeuse_p2`'s (`inexact_geometry`).
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -990,7 +989,7 @@ fn corner_rust_status_gs(
     let mut fillet_brep = Brep::new_with_infinite_region().map_err(h)?;
     let mut exec = FilletExecutiveData::default();
     let r = {
-        let mut records = BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         let mut attributes = solidcore::geom::attribute::AttributeStore::default();
         let mut env = CornerEnv {
             k: &mut rm.k,
@@ -1056,10 +1055,7 @@ fn fillet_key_of(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef 
 /// The corner's [`CornerFilletBrep`] over `brep` (the executive's `m_pFilletBrep`).
 pub(super) fn fillet_env<'a>(
     brep: &'a mut Brep,
-    records: &'a mut BTreeMap<
-        solidcore::geom::attribute::ObjectKey,
-        solidcore::topology::topology::Topology,
-    >,
+    records: &'a mut solidcore::topology::topology::NotifyRecords,
     attributes: &'a mut solidcore::geom::attribute::AttributeStore,
 ) -> CornerFilletBrep<'a> {
     CornerFilletBrep {

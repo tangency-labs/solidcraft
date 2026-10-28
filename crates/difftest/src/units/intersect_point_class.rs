@@ -907,7 +907,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                             let key_of = |e: EntityRef| {
                                 super::boolean_topology_intersector_p1::p9_entity_ref(e)
                             };
-                            let mut records = std::collections::BTreeMap::new();
+                            let mut records = solidcore::topology::topology::NotifyRecords::new();
                             let mut attributes =
                                 solidcore::geom::attribute::AttributeStore::default();
                             let mut env = solidcore::topology::edge::NotifyEnv {
@@ -1032,7 +1032,7 @@ fn rust_run(s: &Script) -> Result<Vec<f64>, Fail> {
                                     ),
                                     type_code,
                                 };
-                            let mut records = std::collections::BTreeMap::new();
+                            let mut records = solidcore::topology::topology::NotifyRecords::new();
                             let mut attributes =
                                 solidcore::geom::attribute::AttributeStore::default();
                             let mut env = solidcore::topology::edge::NotifyEnv {

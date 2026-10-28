@@ -758,7 +758,7 @@ fn register_entities(env: &mut edge::NotifyEnv<'_>, entities: &[EntityRef]) {
 
 fn register_state_entities(state: &mut edge::NotifyState<'_>, entities: &[EntityRef]) {
     for &entity in entities {
-        state.records.entry((state.key_of)(entity).key).or_default();
+        state.records.or_default((state.key_of)(entity).key);
     }
 }
 
@@ -2733,7 +2733,7 @@ mod tests {
                     type_code: original.type_code(),
                 };
                 let before = (b.edge_list().len(), b.vertex_list().len());
-                let mut records = BTreeMap::new();
+                let mut records = crate::topology::topology::NotifyRecords::new();
                 crate::topology::brep::p3::seed_records(&mut records, &b, &key_of);
                 let mut attributes = AttributeStore::default();
                 let label = attributes
@@ -2862,7 +2862,9 @@ mod tests {
                     let mut record = Topology::default();
                     record.set_user_index1(912);
                     record.mark(Some(&k.context), mark);
-                    let mut records = BTreeMap::from([(edge_ref.key, record)]);
+                    let mut records = crate::topology::topology::NotifyRecords::from(
+                        BTreeMap::from([(edge_ref.key, record)]),
+                    );
                     for (id, _) in b.vertices().iter() {
                         records.insert(split_key(EntityRef::Vertex(id)).key, Topology::default());
                     }
@@ -3040,7 +3042,7 @@ mod tests {
             let region = b
                 .add_region_record(crate::topology::Region::default())
                 .unwrap();
-            let mut records = BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             let mut attributes = AttributeStore::default();
             let result = make_shell_vertex_with_kernel_context(
                 &mut k,
@@ -3105,7 +3107,10 @@ mod tests {
                 let events = callbacks::install(&mut k.context);
                 let (mut b, edge) = split_wire();
                 let mut records =
-                    BTreeMap::from([(split_key(EntityRef::Edge(edge)).key, Topology::default())]);
+                    crate::topology::topology::NotifyRecords::from(BTreeMap::from([(
+                        split_key(EntityRef::Edge(edge)).key,
+                        Topology::default(),
+                    )]));
                 let mut attributes = AttributeStore::default();
                 let mut stores = edge::NotificationStores {
                     records: &mut records,
@@ -3225,7 +3230,7 @@ mod tests {
             Point3::new(uv_end.x, uv_end.y, 0.0),
             3,
         ));
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let key_of = |e: EntityRef| crate::topology::loopuse::notify_ref(e);
         let mut env = edge::NotifyEnv {
@@ -3321,7 +3326,7 @@ mod tests {
             b.vertex_mut(vertex).unwrap().vertexuses.push(vu);
             b.edge_mut(e).unwrap().edgeuses.push(eu);
         }
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let mut env = edge::NotifyEnv {
             records: &mut records,

@@ -422,7 +422,7 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
             // `new (ctx) SmBrep()`: the constructor makes the void infinite region the
             // face makers put the face in
             let mut brep = Brep::new_with_infinite_region().map_err(h)?;
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attributes = solidcore::geom::attribute::AttributeStore::default();
             // distinct identities for the face makers' notifications, keyed as the
             // face reference make_face_brep passes (faces from 1)

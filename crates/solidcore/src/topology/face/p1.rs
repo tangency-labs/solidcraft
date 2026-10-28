@@ -409,7 +409,7 @@ fn replace_surface(
     this: ObjectRef,
     new_surface: Surface,
 ) -> Result<()> {
-    let mut records = std::collections::BTreeMap::new();
+    let mut records = crate::topology::topology::NotifyRecords::new();
     let mut attributes = crate::geom::attribute::AttributeStore::default();
     let key_of = |e: EntityRef| {
         if e == EntityRef::Face(f) {
@@ -2677,7 +2677,7 @@ mod tests {
             let actual_key = |entity| topology_ref(serial, entity);
             let this = actual_key(EntityRef::Face(f));
             let events = callbacks::install(&mut k.context);
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             let mut metadata = Topology::new();
             metadata.set_user_index1(42);
             records.insert(this.key, metadata);

@@ -4,7 +4,6 @@
 //! follows the native-face probes, but no exported native topology or results are
 //! needed: the landed p8 constructor consumes the original B-spline input.
 
-use std::collections::BTreeMap;
 
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::tol::USE_DEFAULT;
@@ -36,7 +35,7 @@ fn object_kind(object: Option<EntityRef>) -> f64 {
 
 pub(super) fn run(k: &mut Kernel, surface: BSplineSurface, build: bool, points: &[PtIn]) -> Run {
     let mut brep = p3::new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = super::super::topology_brep_p8::key_of;
     let this_face = |face| key_of(EntityRef::Face(face));

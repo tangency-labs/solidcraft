@@ -18,7 +18,6 @@ use solidcore::topology::topology::Topology;
 use solidcore::topology::topology_traverser::{Entity, Marks};
 use solidcore::topology::{edge, vertex, vertexuse, Brep, EdgeId, VertexId, VertexuseId};
 use solidcore_ffi::units::boolean_merge_p5::{self as ffi, Operand, Request};
-use std::collections::BTreeMap;
 
 /// Differential runner for `SmMerge::ProcessWiresAndShellVertices`.
 pub struct Runner;
@@ -394,7 +393,7 @@ impl UnitDiff for Runner {
         }
         // A fresh SmTopology record per vertex and edge of both operands, under the
         // identities the copies are notified with (a copy propagates its flags).
-        let mut records = BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         for (base, brep) in [(0, &a), (1_000_000, &b)] {
             for v in brep.vertices().ids() {
                 records.insert(ObjectKey(base + u64::from(v.index())), Topology::new());

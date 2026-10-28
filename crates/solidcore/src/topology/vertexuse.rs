@@ -75,10 +75,10 @@
 //!   `IsSectorGapFreeAndOriented`, `AssertValid`, `Draw*` and the `Dump`s are not
 //!   part of this unit.
 
-use std::collections::BTreeMap;
-
 use crate::error::{EntityRef, Result, SolidError, SM_ERR_NULL_POINTER};
-use crate::geom::attribute::{AttributeStore, ObjectKey};
+use crate::geom::attribute::AttributeStore;
+#[cfg(test)]
+use crate::geom::attribute::ObjectKey;
 use crate::geom::context::Context;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -95,7 +95,9 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::p7::drop_vectors_at;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
-use crate::topology::topology::{self as topo, Topology};
+#[cfg(test)]
+use crate::topology::topology::Topology;
+use crate::topology::topology::{self as topo};
 use crate::topology::vertex;
 use crate::topology::{
     Brep, EdgeId, EdgeuseId, EdgeuseOwner, FaceId, FaceuseId, LoopuseId, ShellId, VertexId,
@@ -1684,7 +1686,7 @@ pub fn is_on_pole(k: &Kernel, b: &mut Brep, vu: VertexuseId) -> Result<bool> {
 pub fn notify(
     b: &mut Brep,
     vu: VertexuseId,
-    records: &mut BTreeMap<ObjectKey, Topology>,
+    records: &mut crate::topology::topology::NotifyRecords,
     attributes: &mut AttributeStore,
     context: Option<&mut Context>,
     operation: NotifyOperation,
@@ -1892,7 +1894,7 @@ mod tests {
     #[test]
     fn notify_clears_gaps() {
         let (mut b, vu, _) = wire();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let this = ObjectRef {
             type_code: TYPE,
             key: ObjectKey(7),

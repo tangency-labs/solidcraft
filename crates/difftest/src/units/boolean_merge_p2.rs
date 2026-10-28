@@ -41,7 +41,6 @@ use solidcore::topology::{
 };
 use solidcore::SolidError;
 use solidcore_ffi::units::boolean_merge_p2::{self as ffi, Mates, Request};
-use std::collections::BTreeMap;
 
 /// Differential runner for `boolean.merge_p2`.
 pub struct Runner;
@@ -600,7 +599,7 @@ fn run_rust(i: &Inputs, p: &Prepared) -> Result<Output, HarnessError> {
             let mut relations = relate(&mut a, b, &p.mates)?;
             // A fresh SmTopology record per vertex, edge and face of both operands,
             // under the identities notified below (copies propagate their flags).
-            let mut records = BTreeMap::new();
+            let mut records = topology::topology::NotifyRecords::new();
             for (base, brep) in [(0, &a), (1_000_000, &*b)] {
                 for v in brep.vertices().ids() {
                     records.insert(ObjectKey(base + u64::from(v.index())), Topology::new());

@@ -397,7 +397,7 @@ fn deref<T>(value: Option<T>) -> Result<T> {
 
 // `new (this) Sm*()`: every new topology object has its `SmTopology` part.
 fn register(env: &mut NotifyState<'_>, entity: EntityRef) {
-    env.records.entry((env.key_of)(entity).key).or_default();
+    env.records.or_default((env.key_of)(entity).key);
 }
 
 // `pSurface->SetOwner(pNewOwner)` on the new face's surface, with the

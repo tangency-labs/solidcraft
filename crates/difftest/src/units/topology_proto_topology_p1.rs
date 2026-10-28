@@ -1682,7 +1682,7 @@ impl ProtoBrep<H> for Pool {
             let i = ents.iter().position(|t| *t == Some(e)).unwrap_or(usize::MAX);
             H(i, class_kind_of(kinds.get(i).copied().unwrap_or(-1)))
         };
-        let mut records = BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let mut env = solidcore::topology::edge::NotifyEnv {
             records: &mut records,

@@ -473,7 +473,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                     let face = {
                         use crate::units::topology_brep_p8::key_of;
                         use solidcore::EntityRef;
-                        let mut records = std::collections::BTreeMap::new();
+                        let mut records = solidcore::topology::topology::NotifyRecords::new();
                         let mut attributes = solidcore::geom::attribute::AttributeStore::default();
                         let mut env = solidcore::topology::edge::NotifyEnv {
                             records: &mut records,

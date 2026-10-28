@@ -71,9 +71,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::intersect::curve_class::p5::ClassGeometryMut;
 use solidcore::intersect::curve_class::p6::{MergeContext, MergeIntervalBrep};
 use solidcore::topology::edge::NotifyEnv;
-use solidcore::topology::topology::Topology;
 use solidcore::topology::{Brep, EdgeId};
-use std::collections::BTreeMap;
 use solidcore_ffi::units::heal_face_props::FaceSpec;
 use solidcore_ffi::units::intersect_curve_class_p3::{self as ffi, kind, op};
 
@@ -597,7 +595,7 @@ struct Pool {
     bare: BareTopology,
     /// The notification records and attributes of the B-rep edits
     /// ([`MergeIntervalBrep`]: `Combine`'s `SmVertex::SetPoint`).
-    records: BTreeMap<ObjectKey, Topology>,
+    records: solidcore::topology::topology::NotifyRecords,
     attributes: AttributeStore,
 }
 
@@ -779,7 +777,7 @@ fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
         handles: Vec::new(),
         topo: None,
         bare: BareTopology::default(),
-        records: BTreeMap::new(),
+        records: solidcore::topology::topology::NotifyRecords::new(),
         attributes: AttributeStore::default(),
     };
     for (i, o) in objects.iter().enumerate() {

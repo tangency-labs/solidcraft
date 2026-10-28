@@ -155,11 +155,9 @@ use crate::topology::face::p2::{
     review_start_and_stop_on_seam_crv_classifies, UvLineHandle, UvLineObjects,
 };
 use crate::topology::loopuse::{self, AttributeFilter};
-use crate::topology::topology::Topology;
 use crate::topology::vertex;
 use crate::topology::vertexuse;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseId, VertexId, VertexuseId};
-use std::collections::BTreeMap;
 
 const OP: &str = "topology::face::p4";
 
@@ -2226,7 +2224,7 @@ pub struct BrepSeamObjects<'b, O, B = &'b Brep> {
     face: O,
     surface: Option<O>,
     /// The notification records of the merge's edits (see [`MergeIntervalBrep`]).
-    records: BTreeMap<ObjectKey, Topology>,
+    records: crate::topology::topology::NotifyRecords,
     /// The attribute store of the merge's edits.
     attributes: AttributeStore,
 }
@@ -2284,7 +2282,7 @@ impl<'b, O: LoopObject, B: FaceBrep> BrepSeamObjects<'b, O, B> {
             f,
             face: O::from_face(f).ok_or_else(no)?,
             surface,
-            records: BTreeMap::new(),
+            records: crate::topology::topology::NotifyRecords::new(),
             attributes: AttributeStore::default(),
         })
     }

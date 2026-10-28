@@ -1239,10 +1239,7 @@ mod tests {
 
     #[derive(Default)]
     struct Access {
-        records: std::collections::BTreeMap<
-            crate::geom::attribute::ObjectKey,
-            crate::topology::topology::Topology,
-        >,
+        records: crate::topology::topology::NotifyRecords,
         attributes: crate::geom::attribute::AttributeStore,
         kernel: Kernel,
         breps: Vec<Brep>,

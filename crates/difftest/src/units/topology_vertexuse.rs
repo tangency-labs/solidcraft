@@ -1635,7 +1635,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
                 type_code: vu1::TYPE,
                 key: ObjectKey(1),
             };
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             records.insert(this.key, Topology::new());
             let mut attrs = AttributeStore::default();
             vu1::notify(

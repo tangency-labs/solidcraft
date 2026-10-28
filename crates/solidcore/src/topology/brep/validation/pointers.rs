@@ -1329,7 +1329,7 @@ mod issue_891_tests {
                 ..Region::default()
             })
             .unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let mut env = ed::NotifyEnv {
             records: &mut records,

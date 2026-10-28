@@ -110,10 +110,7 @@ struct Geometry {
     curve: Curve,
     brep: Brep,
     first: [EntityRef; 4],
-    records: std::collections::BTreeMap<
-        solidcore::geom::attribute::ObjectKey,
-        solidcore::topology::topology::Topology,
-    >,
+    records: solidcore::topology::topology::NotifyRecords,
     attributes: solidcore::geom::attribute::AttributeStore,
 }
 /// The box B-rep and its faces, edges, vertices and regions (in `GetFaces`, `GetEdges`,
@@ -331,7 +328,7 @@ fn geometry(k: &Kernel, kind: i32, scale: f64, pick: [i32; 4]) -> Result<Geometr
         curve: c,
         brep: b.0.clone(),
         first,
-        records: std::collections::BTreeMap::new(),
+        records: solidcore::topology::topology::NotifyRecords::new(),
         attributes: solidcore::geom::attribute::AttributeStore::default(),
     })
 }

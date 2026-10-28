@@ -649,14 +649,14 @@ fn triple_to_h(t: Hin) -> Option<H> {
 /// The topology records, identities and attribute store the notifications run with
 /// (the `topology.vertex` / `topology.edge` runners' environment).
 struct NotifyEnv {
-    records: BTreeMap<ObjectKey, Topology>,
+    records: solidcore::topology::topology::NotifyRecords,
     attributes: AttributeStore,
     this: ObjectRef,
 }
 
 impl NotifyEnv {
     fn new(b: Option<&Brep>) -> Self {
-        let mut records = BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         records.insert(ObjectKey(1), Topology::new());
         if let Some(b) = b {
             for id in b.vertexuses().ids() {

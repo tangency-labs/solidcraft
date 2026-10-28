@@ -664,8 +664,7 @@ impl FilletSession<'_> {
             };
             let inside_fillet = is_void == 0;
             records
-                .entry(region_key(region))
-                .or_default()
+                .or_default(region_key(region))
                 .mark(Some(&k.context), mark);
             target
                 .region_mut(region)?

@@ -11,7 +11,6 @@
 //! as a status only. The B-reps go through `MakeTopologyFromData`, so a case defers
 //! wherever that path still reaches an unported call.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -143,7 +142,7 @@ fn rust(rel: &str) -> Result<Output, HarnessError> {
         std::fs::read(path_of(rel)).map_err(|e| HarnessError::new(format!("{rel}: {e}")))?;
     let mut k = Kernel::default();
     let mut store = AttributeStore::new();
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut env = PartEnv {
         attributes: &mut store,
         key_of: &key_of,

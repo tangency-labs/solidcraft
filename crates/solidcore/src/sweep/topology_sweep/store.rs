@@ -23,7 +23,6 @@
 pub(crate) mod classification;
 mod merge;
 
-use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::{atomic::AtomicU64, Arc};
 
@@ -47,6 +46,8 @@ use crate::topology::edge::NotifyEnv;
 use crate::topology::topology::Topology;
 use crate::topology::topology_traverser::{self as traverser, Entity, FaceTraversalMarks};
 use crate::topology::{Brep, BrepId, EdgeId, FaceId};
+#[cfg(test)]
+use std::collections::BTreeMap;
 
 const OP: &str = "sweep::topology_sweep::store";
 
@@ -224,7 +225,7 @@ pub struct SweepStore<'a> {
     kernels: Vec<KernelEntry<'a>>,
     bodies: BodySlots<'a>,
     identities: Identities<'a>,
-    records: Storage<'a, BTreeMap<ObjectKey, Topology>>,
+    records: Storage<'a, crate::topology::topology::NotifyRecords>,
     attributes: Storage<'a, AttributeStore>,
     geometry_sequence: Arc<AtomicU64>,
     cleanup_errors: Vec<SolidError>,
@@ -341,7 +342,7 @@ impl<'a> SweepStore<'a> {
     /// Keep `next_handle` across sessions; registrations never reuse a handle.
     pub fn new(
         identities: &'a dyn SweepIdentities,
-        records: &'a mut BTreeMap<ObjectKey, Topology>,
+        records: &'a mut crate::topology::topology::NotifyRecords,
         attributes: &'a mut AttributeStore,
         next_handle: &'a mut u32,
     ) -> Self {
@@ -774,7 +775,7 @@ fn body_keys(
     identities: Identities<'_>,
     id: BrepId,
     body: &Brep,
-    records: &BTreeMap<ObjectKey, Topology>,
+    records: &crate::topology::topology::NotifyRecords,
 ) -> Vec<ObjectKey> {
     let mut keys = if let Some(provider) = identities.0 {
         provider.owned_auxiliary_objects(id, body)
@@ -817,7 +818,7 @@ fn body_keys(
 }
 
 struct RecordMarks<'a> {
-    records: &'a mut BTreeMap<ObjectKey, Topology>,
+    records: &'a mut crate::topology::topology::NotifyRecords,
     namespace: u32,
     identities: Identities<'a>,
 }
@@ -846,12 +847,11 @@ impl FaceTraversalMarks for RecordMarks<'_> {
     }
     fn mark(&mut self, k: &Kernel, e: Entity, mark: MarkType) {
         self.records
-            .entry(
+            .or_default(
                 self.identities
                     .object(self.namespace, traversal_entity(e))
                     .key,
             )
-            .or_default()
             .mark(Some(&k.context), mark);
     }
 }
@@ -1183,10 +1183,7 @@ impl SweepAccess for SweepStore<'_> {
             .get(c.0 as usize)
             .ok_or_else(|| invalid("unknown context"))?
             .kernel;
-        self.records
-            .entry(key)
-            .or_default()
-            .mark(Some(&k.context), mark);
+        self.records.or_default(key).mark(Some(&k.context), mark);
         Ok(())
     }
     fn collect_faces(
@@ -1998,7 +1995,7 @@ mod borrowed_tests {
         let mut k = Kernel::default();
         let mut b = Brep::new();
         b.set_key(ObjectKey(991));
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::new();
         let mut next = 15;
         let mut store = SweepStore::new(&Identities, &mut records, &mut attributes, &mut next);
@@ -2010,7 +2007,7 @@ mod borrowed_tests {
     #[test]
     fn adopted_bodies_keep_their_identities_and_can_be_taken_back() {
         let mut k = Kernel::default();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::new();
         let mut next = 4;
         let mut store = SweepStore::new(&Identities, &mut records, &mut attributes, &mut next);
@@ -2049,7 +2046,7 @@ mod borrowed_tests {
         let mut b = Brep::new();
         let mut c = Brep::new();
         a.set_editing_enabled(true);
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::new();
         let mut next_handle = 0;
         let mut store =
@@ -2110,7 +2107,7 @@ mod borrowed_tests {
         face.loops.push(LoopId::from_index(99));
         face.faceuse = Some(FaceuseId::from_index(99));
         let f = b.add_face_record(face).unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::new();
         let mut next_handle = 0;
         let mut store =
@@ -2217,7 +2214,7 @@ mod bounding_box_tests {
         let interval = curve.natural_interval();
         brep_p5::create_wire_edge_from_curve(&mut k, &mut b, curve, interval).unwrap();
         let vertex = b.vertices().ids().next().unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::new();
         let mut next = 0;
         {
@@ -2269,7 +2266,7 @@ mod bounding_box_tests {
             BSplineSurface::from_data(2, 2, 2, 2, 5, 5, &net, &knots, &knots).unwrap(),
         );
         let domain = Extent2d::from_bounds(0.2, 0.25, 0.8, 0.75);
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::new();
         let face = {
             let key_of = |entity| Identities.topology(id, entity);
@@ -2355,7 +2352,7 @@ mod production_path_tests {
             k2.context.set_doing_boolean(true);
             let mut original = Brep::new_with_infinite_region().unwrap();
             let mut destination = Brep::new_with_infinite_region().unwrap();
-            let mut records = BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::new();
             let mut next_handle = 0;
             let mut store =
@@ -2410,7 +2407,7 @@ mod production_path_tests {
     fn hcr_scene_access_and_idempotent_release() {
         let mut k = Kernel::default();
         let mut original = Brep::new_with_infinite_region().unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::new();
         let mut next_handle = 0;
         let mut store = SweepStore::new(&Identities, &mut records, &mut attrs, &mut next_handle);
@@ -2496,7 +2493,7 @@ mod persistence_tests {
         )
         .unwrap();
         let mut b = Brep::new();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::new();
         let mut next = 0;
         {
@@ -2580,7 +2577,7 @@ mod persistence_tests {
         edge.curve =
             Some(Line::from_points(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0), 3).into());
         let edge = original.add_edge_record(edge).unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::new();
         let mut next = 0;
         let old_temporary;
@@ -2672,7 +2669,7 @@ mod borrowed_wire_tests {
             let v = original
                 .add_vertex_record(crate::topology::Vertex::default())
                 .unwrap();
-            let mut records = BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             let mut attributes = AttributeStore::new();
             let mut next = 0;
             let mut store = SweepStore::new(&Identities, &mut records, &mut attributes, &mut next);
@@ -2740,8 +2737,11 @@ mod borrowed_wire_tests {
                 (Kernel::default(), Kernel::default());
             let mut source_body = Brep::new_with_infinite_region().unwrap();
             let mut destination_body = Brep::new_with_infinite_region().unwrap();
-            let (mut records, mut attributes, mut next) =
-                (BTreeMap::new(), AttributeStore::new(), 29);
+            let (mut records, mut attributes, mut next) = (
+                crate::topology::topology::NotifyRecords::new(),
+                AttributeStore::new(),
+                29,
+            );
             let mut store = SweepStore::new(&Identities, &mut records, &mut attributes, &mut next);
             let source_context = store.register_kernel(&mut source_kernel).unwrap();
             let destination_context = if shared {

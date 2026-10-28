@@ -215,7 +215,7 @@ mod tests {
     /// A store of owning objects keyed by index.
     #[derive(Default)]
     struct Store {
-        recs: BTreeMap<ObjectKey, Topology>,
+        recs: crate::topology::topology::NotifyRecords,
         lists: BTreeMap<ObjectKey, OwningTopology>,
     }
 

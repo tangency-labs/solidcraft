@@ -85,8 +85,6 @@
 //!   `GetMemoryUsed`, `AssertValid`, the graphics and the `Dump`s are not part of this
 //!   unit.
 
-use std::collections::BTreeMap;
-
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::Context;
@@ -99,7 +97,9 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::poly::PolyVertexId;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::proto_topology::p1::owning_topology;
-use crate::topology::topology::{self as topo, Topology};
+#[cfg(test)]
+use crate::topology::topology::Topology;
+use crate::topology::topology::{self as topo};
 use crate::topology::vertexuse;
 use crate::topology::{
     Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, LoopuseStart, RegionId, ShellId,
@@ -1189,7 +1189,7 @@ pub fn refresh_tolerance(b: &mut Brep, v: VertexId, nested_refreshes: bool) -> R
 pub fn notify(
     b: &mut Brep,
     v: VertexId,
-    records: &mut BTreeMap<ObjectKey, Topology>,
+    records: &mut crate::topology::topology::NotifyRecords,
     attributes: &mut AttributeStore,
     mut context: Option<&mut Context>,
     operation: NotifyOperation,
@@ -1234,7 +1234,7 @@ pub fn set_point(
     b: &mut Brep,
     v: VertexId,
     new_point: Point3,
-    records: &mut BTreeMap<ObjectKey, Topology>,
+    records: &mut crate::topology::topology::NotifyRecords,
     attributes: &mut AttributeStore,
     context: Option<&mut Context>,
     this: ObjectRef,
@@ -1533,7 +1533,7 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
 
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::default();
         let r = |key: u64| ObjectRef {
             type_code: TYPE,

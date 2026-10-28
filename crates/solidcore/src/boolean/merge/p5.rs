@@ -541,7 +541,7 @@ mod tests {
     use super::*;
     use crate::geom::attribute::{AttributeStore, ObjectKey};
     use crate::geom::object::ObjectRef;
-    use crate::topology::topology::Topology;
+
     use std::collections::BTreeMap;
 
     use crate::curve::line::Line;
@@ -550,7 +550,7 @@ mod tests {
     use crate::topology::{Edge, Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
 
     fn copy<'a>(
-        records: &'a mut BTreeMap<ObjectKey, Topology>,
+        records: &'a mut crate::topology::topology::NotifyRecords,
         attributes: &'a mut AttributeStore,
     ) -> TopologyCopy<'a> {
         TopologyCopy {
@@ -644,7 +644,7 @@ mod tests {
         bm.mark(&k, Entity::Edge(be), mt);
         let mut relations = Relations::default();
         relations.edges.record(ae, be).unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::new();
         let mut keep = vec![EdgeId::from_index(u32::MAX)];
         let result = process_wires_and_shell_vertices(
@@ -691,7 +691,7 @@ mod tests {
             for (&other, &primary) in &edges {
                 relations.edges.record(primary, other).unwrap();
             }
-            let mut records = BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::new();
             for operation in [
                 BooleanOperation::Union,

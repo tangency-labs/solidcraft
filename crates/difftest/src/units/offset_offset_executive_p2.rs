@@ -74,7 +74,6 @@
 //! `tests/prog_test/src/smOffsetTest.cpp:190-295`, not volume parity assertions.
 //! No new input-dependent recursion is introduced.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -735,7 +734,7 @@ fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64)
                 point2(scale),
                 &domain,
             ));
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attributes = AttributeStore::default();
             let key_of = |entity| notification_key(entity, namespace);
             let mut env = solidcore::topology::edge::NotifyEnv {
@@ -1631,7 +1630,7 @@ const NAMESPACE_SOURCE: u64 = 1;
 /// The notification namespace of the foreign fixture's identities.
 const NAMESPACE_FOREIGN: u64 = 2;
 fn register_notification_brep(
-    records: &mut BTreeMap<ObjectKey, Topology>,
+    records: &mut solidcore::topology::topology::NotifyRecords,
     brep: &mut Brep,
     namespace: u64,
 ) {
@@ -1700,7 +1699,7 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .as_ref()
         .map(|fixture| build(&mut kernel, fixture, input.tolerance, NAMESPACE_FOREIGN))
         .transpose()?;
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     if let Some(brep) = source.as_mut() {
         register_notification_brep(&mut records, brep, NAMESPACE_SOURCE);
@@ -2224,7 +2223,7 @@ mod tests {
             .all(|h| h.type_code == 0));
         let mut source = build(&mut Kernel::default(), &sheet([0.0; 3], 1.0, 0), 1e-6, NAMESPACE_SOURCE).unwrap();
         let mut foreign = build(&mut Kernel::default(), &sheet([0.0; 3], 1.0, 0), 1e-6, NAMESPACE_FOREIGN).unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         register_notification_brep(&mut records, &mut source, NAMESPACE_SOURCE);
         let source_count = records.len();
         register_notification_brep(&mut records, &mut foreign, NAMESPACE_FOREIGN);

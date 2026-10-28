@@ -56,7 +56,6 @@ use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2::{self as fl, PPF_AREA};
 use solidcore::topology::part_file::{read_part_from_file, PartEnv};
-use solidcore::topology::topology::Topology;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::corpus_parity as ffi;
@@ -234,12 +233,12 @@ fn key_of(brep: usize, e: EntityRef) -> ObjectRef {
 struct Read {
     breps: Vec<Brep>,
     attributes: AttributeStore,
-    records: std::collections::BTreeMap<ObjectKey, Topology>,
+    records: solidcore::topology::topology::NotifyRecords,
 }
 
 /// The B-reps of a model file: one from a B-rep file, any number from a part file.
 fn read_breps(k: &mut Kernel, bytes: Vec<u8>) -> solidcore::Result<Read> {
-    let mut records = std::collections::BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     if bytes.starts_with(b"//[Output Summary]") {
         let mut env = PartEnv {

@@ -30,7 +30,6 @@
 //! part (analytic surfaces and curves) is deferred as `topology.edgeuse_p2`'s runner
 //! defers it.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -2284,7 +2283,7 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
             // m_pFilletBrep: a new SmBrep for the face makers, the Model's fillet B-rep
             // (holding the corner edges' fillet-B-rep edges) for the insertion
             let mut new_brep = Brep::new_with_infinite_region().map_err(h)?;
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attributes = solidcore::geom::attribute::AttributeStore::default();
             let r = {
                 let fillet_brep = &mut new_brep;
@@ -3014,6 +3013,7 @@ fn gen_const_rad_corner(rng: &mut Rng) -> Inputs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     /// Prints the face / fillet corner fixtures (`fixtures/blend.fillet_corner_p1/faces.json`).
     #[test]

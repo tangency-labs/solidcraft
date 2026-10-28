@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::attribute::{AttributeStore, ObjectKey};
+use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{Context, MarkType};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -45,7 +45,6 @@ use crate::topology::edge::{self, NotifyEnv, SetCurveOptions};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2, p3 as eu3};
 use crate::topology::face::{p1 as face1, p2 as face2};
 use crate::topology::proto_topology::ProtoGeometry;
-use crate::topology::topology::Topology;
 use crate::topology::{vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 use super::p1::OffsetExecutive;
@@ -213,7 +212,7 @@ struct EdgeBrep<'a> {
     offset: &'a mut Brep,
     curves: Vec<Curve>,
     surfaces: Vec<Option<Surface>>,
-    records: &'a mut BTreeMap<ObjectKey, Topology>,
+    records: &'a mut crate::topology::topology::NotifyRecords,
     attributes: &'a mut AttributeStore,
     context: Option<&'a mut Context>,
     original_key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
@@ -1217,7 +1216,7 @@ impl CreatorExecutive<Handle> for Executive<'_> {
 
 /// The caller's notification data for an edge cap's edits.
 pub(super) struct CapNotifications<'a> {
-    pub(super) records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub(super) records: &'a mut crate::topology::topology::NotifyRecords,
     pub(super) attributes: &'a mut AttributeStore,
     pub(super) context: Option<&'a mut Context>,
     pub(super) original_key_of: &'a dyn Fn(EntityRef) -> ObjectRef,

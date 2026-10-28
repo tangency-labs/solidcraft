@@ -812,7 +812,7 @@ fn run_input(bytes: Vec<u8>, ft: FileType, stage: Stage) -> String {
     let Ok(mut b) = Brep::new_with_infinite_region() else {
         return "harness-error".into();
     };
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attrs = AttributeStore::default();
     let mut env = p10::TopologyEnv {
         all_attributes: &[],

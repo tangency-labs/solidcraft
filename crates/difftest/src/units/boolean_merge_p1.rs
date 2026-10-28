@@ -876,7 +876,7 @@ fn run_rust(i: &Inputs, b: &mut Brep, other: &mut Brep) -> Result<Vec<f64>, Soli
                 }
             }
             let mut attrs = AttributeStore::new();
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut src = Topology::new();
             src.set_all_flags(16);
             let mut dst = Topology::new();

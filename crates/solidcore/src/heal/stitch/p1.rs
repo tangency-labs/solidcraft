@@ -72,8 +72,6 @@
 //!   is `topology::brep::p2::notify` on an empty notify state (no B-rep cache, no
 //!   attribute state on the heal path).
 
-use std::collections::BTreeMap;
-
 use crate::boolean::merge::p1::MergeState;
 use crate::boolean::merge::p2::MergeOperand;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
@@ -97,6 +95,7 @@ use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{self as eu3, BinormalOptions};
 use crate::topology::face::p1 as fp1;
 use crate::topology::face::p2 as fp2;
+#[cfg(test)]
 use crate::topology::topology::Topology;
 use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::{
@@ -2323,7 +2322,7 @@ pub(crate) fn sort_by_param(
 /// `SmVertex::SetPoint`: the change notification (on records local to the call), then
 /// the new position.
 pub(crate) fn set_point(k: &mut Kernel, b: &mut Brep, v: VertexId, point: Point3) -> Result<()> {
-    let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+    let mut records = crate::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let this = arena_identity(CacheObject::Vertex(v));
     let vertexuse_ref = |vu: crate::topology::VertexuseId| ObjectRef {
@@ -2472,7 +2471,7 @@ pub(crate) fn make_vertex_split_edge(
     e: EdgeId,
     t: f64,
 ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
-    let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+    let mut records = crate::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = |entity: EntityRef| match entity {
         EntityRef::Edge(id) => arena_identity(CacheObject::Edge(id)),
@@ -2802,7 +2801,7 @@ mod tests {
                 .geometry_key(original.notify_identity_slot())
                 .unwrap();
             let before = (b.edge_list().len(), b.vertex_list().len());
-            let mut records = BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             p3::seed_records(&mut records, &b, &key_of);
             let mut attributes = AttributeStore::default();
             let marker = attributes
@@ -2920,7 +2919,7 @@ mod tests {
             .unwrap();
         attributes.add_attribute(face_key, marker).unwrap();
         attributes.add_attribute(vertex_key, marker).unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         records.insert(face_key, Topology::new());
         records.insert(copied_face_key, Topology::new());
         records.insert(vertex_key, Topology::new());

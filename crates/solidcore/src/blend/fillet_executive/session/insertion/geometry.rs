@@ -21,10 +21,8 @@ use crate::surface::surface::Surface;
 use crate::surface::volume::Volume;
 use crate::topology::brep::p3::topology_ref;
 use crate::topology::proto_topology::p1::{ProtoGeometry, ProtoTopology};
-use crate::topology::topology::Topology;
 use crate::topology::{Brep, BrepId, FaceId};
 use crate::{EntityRef, Result, SolidError};
-use std::collections::BTreeMap;
 
 const OP: &str = "blend::fillet_executive::insertion_geometry";
 fn invalid(reason: &'static str) -> SolidError {
@@ -146,7 +144,7 @@ impl BodyKeys<'_> {
 /// Actual retained edit stores and the already lent notification context.
 pub struct InsertionNotifications<'a> {
     /// Actual topology notification records.
-    pub records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub records: &'a mut crate::topology::topology::NotifyRecords,
     /// Actual attributes, including executive E and active face markers.
     pub attributes: &'a mut AttributeStore,
     /// Actual context lease, supplied by `with_lent_context`.
@@ -1210,7 +1208,7 @@ mod tests {
         let caller = topology_ref(serial, EntityRef::Vertex(vertex));
         let changed = Point3::new(17.0, 18.0, 19.0);
         let mut curves = InsertionCurves::default();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let events = Arc::new(Mutex::new(Vec::new()));
         k.context
@@ -1288,7 +1286,7 @@ mod tests {
             intermediate.notify_serial(),
         ];
         let mut curves = InsertionCurves::default();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let result = InsertionGeometry::new(&mut target, &mut pseudo, &mut intermediate)
             .unwrap()
@@ -1481,7 +1479,7 @@ mod tests {
         let mut pseudo = FilletBrep::new();
         *pseudo.brep_mut() = box_at(&mut k, 200.0);
         let mut curves = InsertionCurves::default();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         crate::topology::brep::p3::with_lent_context(&mut k, |k, context| -> Result<()> {
             let mut view = InsertionGeometry::new(&mut target, &mut pseudo, &mut intermediate)?

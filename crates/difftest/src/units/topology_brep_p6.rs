@@ -6,7 +6,6 @@
 //! then compares every call's status and outputs, the context marks and the whole
 //! post-operation graph (the `topology.brep_p10` traversal, with edge marks).
 
-use std::collections::BTreeMap;
 
 use super::topology_brep_p10::{orient_code, Graph};
 use super::topology_vertexuse::{self as shared, BrepIn, CrvIn, SrfIn};
@@ -1027,7 +1026,7 @@ fn make_faces_rust(i: &Inputs) -> Result<Output, HarnessError> {
 
 /// A default `SmTopology` record for every object of `b` (and the B-rep), keyed by
 /// [`key_of`]; the port adds those of the objects it makes.
-fn seeded_records(b: &Brep) -> BTreeMap<ObjectKey, Topology> {
+fn seeded_records(b: &Brep) -> solidcore::topology::topology::NotifyRecords {
     let mut all = vec![EntityRef::Brep(solidcore::topology::BrepId::from_index(0))];
     all.extend(b.regions().ids().map(EntityRef::Region));
     all.extend(b.shells().ids().map(EntityRef::Shell));

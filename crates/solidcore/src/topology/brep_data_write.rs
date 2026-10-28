@@ -1096,7 +1096,7 @@ pub struct FromBrepEnv<'a> {
     pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
     /// The `SmTopology` records (flags, user indices) by identity; a missing record is
     /// a fresh `SmTopology()`.
-    pub records: &'a BTreeMap<ObjectKey, Topology>,
+    pub records: &'a crate::topology::topology::NotifyRecords,
     /// The identity of an edge's curve.
     pub curve_key: &'a dyn Fn(EdgeId) -> ObjectKey,
     /// The identity of the UV trim curve held by an edge use.

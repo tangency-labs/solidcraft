@@ -166,7 +166,7 @@ fn topology_key(e: EntityRef) -> solidcore::geom::object::ObjectRef {
 
 fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
     let mut k = Kernel::default();
-    let mut records = std::collections::BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = solidcore::geom::attribute::AttributeStore::default();
     let mut notifications = solidcore::topology::edge::NotifyEnv {
         records: &mut records,

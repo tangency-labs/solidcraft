@@ -2044,7 +2044,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             }
         }
         OpIn::Notify { e, operation } => {
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = ed::NotifyEnv {
                 records: &mut records,
@@ -2069,7 +2069,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
         } => {
             let e = eid(*e);
             let nc = curve.as_ref().map(rust_curve).transpose()?;
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = ed::NotifyEnv {
                 records: &mut records,

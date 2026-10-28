@@ -108,8 +108,6 @@
 //!   two face surfaces are moved out of their faces for the call and back, so the
 //!   covering surface keeps any expansion, as upstream.
 
-use std::collections::BTreeMap;
-
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, EntityRef, Result, SolidError};
 use crate::geom::a_object;
@@ -135,7 +133,9 @@ use crate::topology::edgeuse::p2 as eu2;
 use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::face::p2 as face2;
 use crate::topology::proto_topology::p1::owning_topology;
-use crate::topology::topology::{self as topo, Topology};
+#[cfg(test)]
+use crate::topology::topology::Topology;
+use crate::topology::topology::{self as topo};
 use crate::topology::vertexuse as vu1;
 use crate::topology::{
     Brep, Edge, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopuseId, RegionId, ShellId, VertexId,
@@ -2243,7 +2243,7 @@ pub fn orient_edge_sequence(k: &Kernel, b: &mut Brep, edges: &[EdgeId]) -> Resul
 /// different B-reps, and must remain stable for newly allocated entities.
 pub struct NotificationStores<'a> {
     /// The topology records (`SmTopology` members) of the notified objects.
-    pub records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub records: &'a mut topo::NotifyRecords,
     /// The actual attribute store of the notified objects.
     pub attributes: &'a mut AttributeStore,
     /// The identity each topology entity is notified under.
@@ -2268,7 +2268,7 @@ pub struct NotifyEnv<'a> {
     /// (`geom::context`), so a store holding them belongs to one domain: not shared
     /// across two contexts, nor across a `Context::take_notify_lease` that is not given
     /// back.
-    pub records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub records: &'a mut topo::NotifyRecords,
     /// The attribute store (keyed like [`NotifyEnv::records`], and scoped the same way).
     pub attributes: &'a mut AttributeStore,
     /// The context of the objects (`GetContext`).
@@ -2295,7 +2295,7 @@ enum NotifyContext<'a> {
 /// Reborrowed notification data shared by legacy and kernel-context algorithms.
 /// The kernel variant never retains a borrow of the kernel or its context.
 pub(crate) struct NotifyState<'a> {
-    pub(crate) records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub(crate) records: &'a mut crate::topology::topology::NotifyRecords,
     pub(crate) attributes: &'a mut AttributeStore,
     pub(crate) key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
     context: NotifyContext<'a>,
@@ -2992,7 +2992,7 @@ mod tests {
             .unwrap()
             .evaluate_point(&k, interval.evaluate(0.37))
             .unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         crate::topology::brep::p3::seed_records(&mut records, &b, &key_of);
         let mut attributes = AttributeStore::default();
         let marker = attributes
@@ -3087,10 +3087,11 @@ mod tests {
             let result = result_key(EntityRef::Edge(id));
             let mut source_record = Topology::default();
             source_record.set_user_index1(71);
-            let mut records = BTreeMap::from([
-                (original.key, source_record),
-                (result.key, Topology::default()),
-            ]);
+            let mut records =
+                crate::topology::topology::NotifyRecords::from(std::collections::BTreeMap::from([
+                    (original.key, source_record),
+                    (result.key, Topology::default()),
+                ]));
             let mut attributes = AttributeStore::default();
             let mut stores = NotificationStores {
                 records: &mut records,
@@ -3166,7 +3167,7 @@ mod tests {
                 if let Some(previous) = external {
                     context.set_doing_boolean(previous);
                 }
-                let mut records = BTreeMap::new();
+                let mut records = crate::topology::topology::NotifyRecords::new();
                 let mut attributes = AttributeStore::default();
                 let key = |_| ObjectRef {
                     key: ObjectKey(123),

@@ -89,7 +89,7 @@
 
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::a_object::BREP_TYPE;
-use crate::geom::attribute::{AttributeStore, ObjectKey};
+use crate::geom::attribute::AttributeStore;
 use crate::geom::context::{Context, MarkLock, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -112,14 +112,12 @@ use crate::topology::face::p1 as face1;
 use crate::topology::face::p2 as face2;
 use crate::topology::face::p3 as face3;
 use crate::topology::shell::{self, ShellMembers, ShellType};
-use crate::topology::topology::Topology;
 use crate::topology::topology_traverser::{self, Entity, Marks};
 use crate::topology::{
     loopuse, vertex, vertexuse, Brep, EdgeId, EdgeuseId, EdgeuseOwner, FaceId, FaceuseId, Loop,
     LoopId, Loopuse, LoopuseId, LoopuseStart, RegionId, Shell, ShellId, VertexId, VertexuseId,
     VertexuseOwner,
 };
-use std::collections::BTreeMap;
 
 const OP_DELETE_EDGE: &str = "topology::brep::p4::delete_edge";
 const OP_DELETE_VERTEX: &str = "topology::brep::p4::delete_vertex";
@@ -131,7 +129,7 @@ const OP_DESTROY: &str = "topology::brep::p4::destroy";
 /// go through (as [`NotifyEnv`], with the kernel's context).
 pub struct DeleteEnv<'a> {
     /// The topology records (`SmTopology` members) of the notified objects.
-    pub records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub records: &'a mut crate::topology::topology::NotifyRecords,
     /// The attribute store.
     pub attributes: &'a mut AttributeStore,
     /// The identity each topology entity is notified under.
@@ -166,7 +164,7 @@ impl core::fmt::Debug for DeleteEnv<'_> {
 /// notification state (the B-rep keeps no attributes for its records; upstream on
 /// objects without attributes).
 pub(crate) fn with_local_env<T>(f: impl FnOnce(&mut DeleteEnv<'_>) -> Result<T>) -> Result<T> {
-    let mut records = BTreeMap::new();
+    let mut records = crate::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let mut env = DeleteEnv {
         records: &mut records,
@@ -1966,7 +1964,7 @@ mod tests {
             assert_ne!(legacy_key, body.key);
             let edge = b.edge_list()[0];
             let vertex = b.vertex_list()[0];
-            let mut records = BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             super::super::p3::seed_records(&mut records, &b, &key_of);
             let mut attributes = AttributeStore::default();
             let marker = attributes
@@ -2056,7 +2054,7 @@ mod tests {
             &crate::geom::axis2_placement::Axis2Placement::IDENTITY,
         )
         .unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let face = {
             let mut marks = Marks::default();

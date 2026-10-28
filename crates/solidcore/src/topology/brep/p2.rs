@@ -715,7 +715,7 @@ pub fn region_only_key(e: EntityRef) -> ObjectRef {
 #[derive(Debug, Default)]
 pub struct RegionNotifyState {
     /// The regions' `SmTopology` records.
-    pub records: BTreeMap<ObjectKey, Topology>,
+    pub records: crate::topology::topology::NotifyRecords,
     /// The (empty) attribute store.
     pub attributes: AttributeStore,
 }
@@ -763,7 +763,7 @@ impl RegionNotifyState {
 #[derive(Debug, Default)]
 pub struct ArenaNotifyState {
     /// Each object's default `SmTopology` record.
-    pub records: BTreeMap<ObjectKey, Topology>,
+    pub records: crate::topology::topology::NotifyRecords,
     /// The (empty) attribute store.
     pub attributes: AttributeStore,
 }
@@ -801,7 +801,7 @@ impl ArenaNotifyState {
             return;
         }
         for e in all {
-            self.records.entry(notify_ref(e).key).or_default();
+            self.records.or_default(notify_ref(e).key);
         }
     }
 
@@ -2948,7 +2948,7 @@ mod tests {
     #[test]
     fn notify_without_cache_only_propagates() {
         let (b, _, e, _) = brep();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attrs = AttributeStore::default();
         let key_of = |x: EntityRef| ObjectRef {
             type_code: 0,

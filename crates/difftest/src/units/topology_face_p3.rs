@@ -32,7 +32,6 @@
 //! and compare `FaceIntersect`'s touching points (`Point3DClassify` on both faces of the
 //! one B-rep) and curves with the C++.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -739,7 +738,7 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
             let operation = *NOTIFY_OPS
                 .get(a[1] as usize)
                 .ok_or_else(|| harness("notify operation"))?;
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attributes = AttributeStore::default();
             let mut env = solidcore::topology::edge::NotifyEnv {
                 records: &mut records,

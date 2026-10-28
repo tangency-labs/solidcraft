@@ -22,7 +22,6 @@
 //! The vertex selector is taken modulo the vertex count (so generated cases need no
 //! counts); other selectors likewise, `-1` selecting null.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1590,14 +1589,14 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
 /// The topology records, identities and attribute store a notification runs with: the
 /// vertex is key 1, vertex use `i` key `100 + i`.
 struct NotifyEnv {
-    records: BTreeMap<ObjectKey, Topology>,
+    records: solidcore::topology::topology::NotifyRecords,
     attributes: AttributeStore,
     this: ObjectRef,
 }
 
 impl NotifyEnv {
     fn new(b: &Brep) -> Self {
-        let mut records = BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         records.insert(ObjectKey(1), Topology::new());
         for id in b.vertexuses().ids() {
             records.insert(ObjectKey(100 + u64::from(id.index())), Topology::new());

@@ -1200,7 +1200,7 @@ fn original_copy_rust(k: &Kernel, steps: &[(u8, bool)], composite: bool) -> Resu
     let source_shell = rs(source.add_shell_record(Shell::default()))?;
     let mut faces = Vec::new();
     let mut context = Context::default();
-    let mut records = std::collections::BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::new();
     for i in 0..2 {
         faces.push(rs(source.add_face_record(Face::new(source_shell)))?);

@@ -472,7 +472,7 @@ fn prepare_trim_cache(
     built?;
     if mode == CacheMode::Modified {
         let key_of = super::boolean_topology_intersector_p1::p9_entity_ref;
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
         let mut attributes = solidcore::geom::attribute::AttributeStore::default();
         let mut env = solidcore::topology::edge::NotifyEnv {
             records: &mut records,

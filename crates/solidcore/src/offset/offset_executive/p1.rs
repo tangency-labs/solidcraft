@@ -2928,7 +2928,7 @@ mod tests {
 
     /// Runs `run` with empty notification stores keyed by arena identity.
     fn with_state<R>(run: impl FnOnce(&mut NotifyState<'_>) -> R) -> R {
-        let mut records = BTreeMap::new();
+        let mut records = topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let key = |entity| loopuse::notify_ref(entity);
         let mut env = NotifyEnv {
@@ -3073,7 +3073,8 @@ mod tests {
                 type_code,
             }
         };
-        let mut records = BTreeMap::from([(brep_key, topology::Topology::new())]);
+        let mut records =
+            topology::NotifyRecords::from(BTreeMap::from([(brep_key, topology::Topology::new())]));
         for &entity in entities {
             records.insert(key(entity).key, topology::Topology::new());
         }
@@ -3637,7 +3638,8 @@ mod tests {
         assert!(original.editing_enabled());
         // ShrinkGeometry trims the two edge curves; without offset surfaces the
         // continuation's loops are empty (SM_SUCCESS)
-        let (mut records, mut attributes) = (BTreeMap::new(), AttributeStore::default());
+        let (mut records, mut attributes) =
+            (topology::NotifyRecords::new(), AttributeStore::default());
         OffsetExecutive::replace_implicit_offsets(
             &mut Kernel::default(),
             &mut result,
@@ -3766,7 +3768,8 @@ mod tests {
         let mut brep = Brep::new();
         let (plain, _) = add_face(&mut brep, plane(0.0));
         let (offset_face, _) = add_face(&mut brep, Surface::from(offset));
-        let (mut records, mut attributes) = (BTreeMap::new(), AttributeStore::default());
+        let (mut records, mut attributes) =
+            (topology::NotifyRecords::new(), AttributeStore::default());
         let mut kernel = kernel;
         OffsetExecutive::replace_implicit_offsets(
             &mut kernel,
@@ -4240,7 +4243,7 @@ mod tests {
     fn face_env<R>(
         run: impl FnOnce(&mut NotifyEnv<'_>, &dyn Fn(EntityRef) -> ObjectRef) -> R,
     ) -> R {
-        let mut records = BTreeMap::new();
+        let mut records = topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let key = |_: EntityRef| ObjectRef {
             key: ObjectKey(1),
@@ -4387,7 +4390,7 @@ mod tests {
         let kernel_events = callbacks::install(&mut kernel.context);
         let mut external_context = Context::default();
         let external_events = callbacks::install(&mut external_context);
-        let mut records = BTreeMap::<ObjectKey, Topology>::new();
+        let mut records = topology::NotifyRecords::new();
         records.insert(caller.key, Topology::default());
         let mut attributes = AttributeStore::new();
         let key_of = |_entity| result_key;
@@ -4694,7 +4697,7 @@ mod tests {
             value.key.0 += 100;
             value
         };
-        let mut records = BTreeMap::new();
+        let mut records = topology::NotifyRecords::new();
         for (entity, metadata) in [
             (EntityRef::Edge(EdgeId::from_index(0)), 37),
             (EntityRef::Vertex(VertexId::from_index(0)), 11),

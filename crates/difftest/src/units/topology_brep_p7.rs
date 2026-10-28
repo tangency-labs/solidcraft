@@ -38,7 +38,6 @@
 //! inside the operation. No kernel clone change is implied by this coverage.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
@@ -930,7 +929,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
             let bytes = read_bytes(file, *damage)?;
             // a B-rep as `new SmBrep(ctx)` makes it (with the infinite region)
             let mut b = Brep::new_with_infinite_region().map_err(hfail)?;
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = p10::TopologyEnv {
                 all_attributes: &[],
@@ -994,7 +993,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 2 => Some(true),
                 _ => return Err(hfail("crv_on_surf code")),
             };
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = ed::NotifyEnv {
                 records: &mut records,
@@ -1049,7 +1048,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 )
                 .map_err(defer)?;
                 let inf = b.infinite_region();
-                let mut records = BTreeMap::new();
+                let mut records = solidcore::topology::topology::NotifyRecords::new();
                 let mut attrs = AttributeStore::default();
                 let mut env = ed::NotifyEnv {
                     records: &mut records,
@@ -1146,7 +1145,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 ))
             });
             let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = ed::NotifyEnv {
                 records: &mut records,
@@ -1201,7 +1200,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                     }
                 }
             }
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = ed::NotifyEnv {
                 records: &mut records,
@@ -1233,7 +1232,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
             let (mut b, _) = shared::import(ex)?;
             let faces: Vec<FaceId> = b.faces().ids().take(*n as usize).collect();
             let (mut dest, _) = native_brep()?;
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = ed::NotifyEnv {
                 records: &mut records,
@@ -1272,7 +1271,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                     solidcore::geom::tol::USE_DEFAULT,
                 )
                 .map_err(hfail)?;
-                let mut records = BTreeMap::new();
+                let mut records = solidcore::topology::topology::NotifyRecords::new();
                 let mut attrs = AttributeStore::default();
                 let mut env = ed::NotifyEnv {
                     records: &mut records,
@@ -1311,7 +1310,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                     "SmBrep::MergeSelfIntersectionCurves",
                 ));
             }
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attrs = AttributeStore::default();
             let mut env = ed::NotifyEnv {
                 records: &mut records,

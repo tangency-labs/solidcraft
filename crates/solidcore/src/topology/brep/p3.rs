@@ -98,7 +98,6 @@
 //!   split loop removes at least one vertex per pass.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
@@ -402,7 +401,7 @@ pub(super) enum DeletionMarks<'a> {
 }
 
 struct RecordMarks<'a> {
-    records: &'a mut BTreeMap<ObjectKey, topo::Topology>,
+    records: &'a mut crate::topology::topology::NotifyRecords,
     key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
 }
 
@@ -427,16 +426,13 @@ impl FaceTraversalMarks for RecordMarks<'_> {
     }
     fn mark(&mut self, k: &Kernel, entity: Entity, mark: MarkType) {
         let key = self.key(entity);
-        self.records
-            .entry(key)
-            .or_default()
-            .mark(Some(&k.context), mark);
+        self.records.or_default(key).mark(Some(&k.context), mark);
     }
 }
 impl DeletionMarks<'_> {
     pub(super) fn with_marks<T>(
         &mut self,
-        records: &mut BTreeMap<ObjectKey, topo::Topology>,
+        records: &mut crate::topology::topology::NotifyRecords,
         key_of: &dyn Fn(EntityRef) -> ObjectRef,
         body: impl FnOnce(&mut dyn FaceTraversalMarks) -> T,
     ) -> T {
@@ -477,11 +473,11 @@ fn brep_notify_with_identity(
     for d in data.into_iter().flatten() {
         if let NotifyArg::Entity(e) = d {
             let key = (env.key_of)(e).key;
-            env.records.entry(key).or_default();
+            env.records.or_default(key);
         }
     }
     let identity = body.unwrap_or_else(|| p2::brep_ref(b));
-    env.records.entry(identity.key).or_default();
+    env.records.or_default(identity.key);
     match body {
         Some(body) => p2::notify_with_body_identity(b, env, None, operation, data, body),
         None => p2::notify(b, env, None, operation, data),
@@ -724,7 +720,7 @@ pub fn copy_brep(
 /// Every edit seeds them ([`with_caller_identities`]), as a B-rep built upstream
 /// already has them; a record the caller keeps is left as it is.
 pub(crate) fn seed_records(
-    records: &mut BTreeMap<ObjectKey, topo::Topology>,
+    records: &mut crate::topology::topology::NotifyRecords,
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
@@ -738,9 +734,9 @@ pub(crate) fn seed_records(
         return;
     }
     for e in entities(b) {
-        records.entry(key_of(e).key).or_default();
+        records.or_default(key_of(e).key);
     }
-    records.entry(p2::brep_ref(b).key).or_default();
+    records.or_default(p2::brep_ref(b).key);
 }
 
 /// Leaves `records` exactly as [`seed_records`] does on an empty map (a default record
@@ -748,7 +744,7 @@ pub(crate) fn seed_records(
 /// objects that are still there are reset in place and the rest is added or dropped, so
 /// an edit that notifies through the same B-rep again reuses most of the map.
 fn reseed_records(
-    records: &mut BTreeMap<ObjectKey, topo::Topology>,
+    records: &mut crate::topology::topology::NotifyRecords,
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
@@ -773,7 +769,7 @@ fn reseed_records(
     });
     if records.len() != keys.len() {
         for key in keys {
-            records.entry(key).or_default();
+            records.or_default(key);
         }
     }
 }
@@ -1014,20 +1010,173 @@ pub(crate) fn with_caller_identities_for<R>(
     inputs: usize,
     edit: impl FnOnce(&mut Kernel, &mut Brep, &mut NotifyEnv<'_>) -> Result<R>,
 ) -> Result<R> {
-    {
+    let serial = {
         let context = env.context.as_deref().unwrap_or(&k.context);
+        context.issued_brep_serial(b.notify_identity())
+    };
+    let id = progress_id(b, serial, env.key_of);
+    {
         let window = allocation_window(b, source.map(|(src, _)| src), inputs);
-        check_keys(context, b, env.key_of, window)?;
+        check_keys_once(env.records, id.clone(), serial, b, env.key_of, window)?;
         if let Some((src, key_of)) = source {
             // (a source is read, never added to)
+            let context = env.context.as_deref().unwrap_or(&k.context);
             check_keys(context, src, key_of, 0)?;
         }
     }
-    seed_records(env.records, b, env.key_of);
+    seed_records_once(env.records, id, b, env.key_of)?;
     if let Some((src, key_of)) = source {
         seed_records(env.records, src, key_of);
     }
     edit(k, b, env)
+}
+
+/// The kinds of topology object, in [`entities`]' order.
+const KINDS: usize = 10;
+
+/// The object of kind `kind` (in [`entities`]' order) at arena index `index`.
+fn kind_entity(kind: usize, index: u32) -> EntityRef {
+    match kind {
+        0 => EntityRef::Region(RegionId::from_index(index)),
+        1 => EntityRef::Shell(ShellId::from_index(index)),
+        2 => EntityRef::Faceuse(FaceuseId::from_index(index)),
+        3 => EntityRef::Face(FaceId::from_index(index)),
+        4 => EntityRef::Loopuse(LoopuseId::from_index(index)),
+        5 => EntityRef::Loop(crate::topology::LoopId::from_index(index)),
+        6 => EntityRef::Edgeuse(EdgeuseId::from_index(index)),
+        7 => EntityRef::Edge(EdgeId::from_index(index)),
+        8 => EntityRef::Vertexuse(VertexuseId::from_index(index)),
+        _ => EntityRef::Vertex(VertexId::from_index(index)),
+    }
+}
+
+/// The kind (in [`entities`]' order) and arena index of a topology object.
+fn entity_slot(e: EntityRef) -> Option<(usize, usize)> {
+    let (kind, index) = match e {
+        EntityRef::Region(x) => (0, x.index()),
+        EntityRef::Shell(x) => (1, x.index()),
+        EntityRef::Faceuse(x) => (2, x.index()),
+        EntityRef::Face(x) => (3, x.index()),
+        EntityRef::Loopuse(x) => (4, x.index()),
+        EntityRef::Loop(x) => (5, x.index()),
+        EntityRef::Edgeuse(x) => (6, x.index()),
+        EntityRef::Edge(x) => (7, x.index()),
+        EntityRef::Vertexuse(x) => (8, x.index()),
+        EntityRef::Vertex(x) => (9, x.index()),
+        EntityRef::Brep(_) => return None,
+    };
+    Some((kind, usize::try_from(index).ok()?))
+}
+
+/// The live-object count of each kind (what [`prospective_entities`] counts from).
+fn live_counts(b: &Brep) -> [usize; KINDS] {
+    [
+        b.regions().len(),
+        b.shells().len(),
+        b.faceuses().len(),
+        b.faces().len(),
+        b.loopuses().len(),
+        b.loops().len(),
+        b.edgeuses().len(),
+        b.edges().len(),
+        b.vertexuses().len(),
+        b.vertices().len(),
+    ]
+}
+
+/// What a [`topo::NotifyRecords`]' progress for `b` is valid under: the B-rep's key,
+/// its serial in the edit's context, and the key `key_of` gives the first index of
+/// every kind (a caller's identities are a fixed function of kind and index).
+fn progress_id(b: &Brep, serial: Option<u64>, key_of: &dyn Fn(EntityRef) -> ObjectRef) -> Vec<u64> {
+    let mut id = vec![p2::brep_ref(b).key.0, serial.unwrap_or(u64::MAX)];
+    id.extend((0..KINDS).map(|kind| key_of(kind_entity(kind, 0)).key.0));
+    id
+}
+
+/// Whether `flags[at]` is set; sets it (growing `flags`) and returns `false` if not.
+fn first_visit(flags: &mut Vec<bool>, at: usize) -> bool {
+    if flags.len() <= at {
+        flags.resize(at + 1, false);
+    }
+    flags
+        .get_mut(at)
+        .is_some_and(|f| !std::mem::replace(f, true))
+}
+
+/// [`check_keys`] of `b` (no source) for one edit, deciding each arena index once
+/// per store: an index's key depends on the index alone (`key_of`, under the same
+/// [`progress_id`]), so the objects and prospective indices the check covers are
+/// the same, and only those not yet passed are asked. A refusal marks nothing.
+fn check_keys_once(
+    records: &mut topo::NotifyRecords,
+    id: Vec<u64>,
+    serial: Option<u64>,
+    b: &Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    window: usize,
+) -> Result<()> {
+    let own = |e: EntityRef, key: ObjectKey| {
+        !is_reserved_key(key) || serial.is_some_and(|s| topology_entity(s, key) == Some(e))
+    };
+    let (_, progress) = records.progress_for(id).ok_or(RESERVED_KEY)?;
+    // (the flags are only set once every index this edit covers has passed)
+    let mut passed: Vec<(usize, usize)> = Vec::new();
+    let mut check = |progress: &topo::SeedProgress, kind: usize, at: usize, e: EntityRef| {
+        let seen = progress.checked.get(kind).and_then(|f| f.get(at)).copied() == Some(true);
+        if seen {
+            return true;
+        }
+        passed.push((kind, at));
+        own(e, key_of(e).key)
+    };
+    let mut all_own =
+        entities(b).all(|e| entity_slot(e).is_some_and(|(kind, at)| check(progress, kind, at, e)));
+    let live = live_counts(b);
+    for (kind, &count) in live.iter().enumerate() {
+        if !all_own {
+            break;
+        }
+        all_own = (count..count.saturating_add(window))
+            .map_while(|i| u32::try_from(i).ok())
+            .all(|i| check(progress, kind, i as usize, kind_entity(kind, i)));
+    }
+    if !(all_own && own(brep_entity(), p2::brep_ref(b).key)) {
+        return Err(RESERVED_KEY);
+    }
+    for (kind, at) in passed {
+        if let Some(flags) = progress.checked.get_mut(kind) {
+            first_visit(flags, at);
+        }
+    }
+    Ok(())
+}
+
+/// [`seed_records`] of `b` for one edit, giving each live object its record once per
+/// store: records are only removed through [`topo::NotifyRecords`]' own methods,
+/// which forget the progress, so an object seeded under the same [`progress_id`]
+/// still has its record and the store ends exactly as a full seeding leaves it.
+fn seed_records_once(
+    records: &mut topo::NotifyRecords,
+    id: Vec<u64>,
+    b: &Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<()> {
+    let brep_key = p2::brep_ref(b).key;
+    let (map, progress) = records.progress_for(id).ok_or(RESERVED_KEY)?;
+    for e in entities(b) {
+        let Some((kind, at)) = entity_slot(e) else {
+            continue;
+        };
+        if progress
+            .seeded
+            .get_mut(kind)
+            .is_some_and(|f| first_visit(f, at))
+        {
+            map.entry(key_of(e).key).or_default();
+        }
+    }
+    map.entry(brep_key).or_default();
+    Ok(())
 }
 
 /// Lends the kernel context's notify callbacks and identity domain to a stand-in
@@ -1248,7 +1397,7 @@ pub(crate) fn notify_copy_with_context(
     // (a new object's SmTopology constructor makes its record; an object the caller
     // keeps no record for has the constructor's values)
     for key in core::iter::once(this.key).chain(to.map(|t| t.key)) {
-        env.records.entry(key).or_default();
+        env.records.or_default(key);
     }
     ignore_soft(topo::notify(
         &mut *env.records,
@@ -4194,7 +4343,6 @@ fn brep_curve_solve(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
     /// `TurnToNURBS`' copy of a B-spline kind surface (`new SmBSplineSurface(*pBSS)`)
     /// and its offset arm's `ApproximateOffsetSurface` read the NURB through
@@ -4227,7 +4375,7 @@ mod tests {
                 // Defined NER after the actual public-edit notification prefix.
                 b.face_mut(face).unwrap().faceuse = None;
             }
-            let mut records = BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             seed_records(&mut records, &b, &key_of);
             records.get_mut(&face_ref.key).unwrap().set_user_index1(73);
             let mut attributes = AttributeStore::default();
@@ -4509,7 +4657,7 @@ mod tests {
     fn squeeze_through(k: &mut Kernel, ctx: &mut Context, seen: &Seen) -> Vec<ObjectKey> {
         let (mut b, [a, _, _], [e0, _]) = test_support::wire_chain(true);
         let first = seen.lock().unwrap().len();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let mut env = NotifyEnv {
             records: &mut records,
@@ -4556,7 +4704,7 @@ mod tests {
         b2.set_key(topology_ref(serial, brep_entity()).key);
         let forged = move |e: EntityRef| topology_ref(serial, e);
         let edges = b2.edges().len();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         for key_of in [&forged as &dyn Fn(EntityRef) -> ObjectRef, &dest_key] {
             let mut env = NotifyEnv {
@@ -4602,7 +4750,7 @@ mod tests {
         let mut k = Kernel::default();
         let (mut src, _, [e0, _]) = test_support::wire_chain(true);
         src.set_key(ObjectKey(100));
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let edge = source_key(EntityRef::Edge(e0)).key;
         let mut t = topo::Topology::new();
@@ -4642,7 +4790,7 @@ mod tests {
             )
             .unwrap();
         }
-        let carried = |records: &BTreeMap<ObjectKey, topo::Topology>,
+        let carried = |records: &crate::topology::topology::NotifyRecords,
                        b: &Brep,
                        key_of: &dyn Fn(EntityRef) -> ObjectRef| {
             b.edges()
@@ -4798,7 +4946,7 @@ mod tests {
     }
 
     fn with_env<R>(f: impl FnOnce(&mut NotifyEnv<'_>) -> R) -> R {
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let key_of = |e: EntityRef| {
             arena_identity(match e {
@@ -4828,7 +4976,7 @@ mod tests {
             type_code: vertex::TYPE,
             key: ObjectKey(2),
         };
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut src = topo::Topology::new();
         src.set_all_flags(5);
         records.insert(from.key, src);
@@ -4982,7 +5130,7 @@ mod tests {
         let curve = Curve::from(Line::from_points(pa, pc, 3));
         let ivl = curve.natural_interval();
         let edges = b.edges().len();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let mut env = NotifyEnv {
             records: &mut records,
@@ -5017,7 +5165,7 @@ mod tests {
         let (mut src2, _, _) = test_support::wire_chain(true);
         src1.set_key(ObjectKey(100));
         src2.set_key(ObjectKey(200));
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         for (key, value) in [(src1.key(), 73), (src2.key(), 91)] {
             let h = attributes
@@ -5126,7 +5274,7 @@ mod tests {
     fn copy_vertices_checks_a_key_for_every_entry() {
         let mut k = Kernel::default();
         let mut src = Brep::new_with_infinite_region().unwrap();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let inf = src.infinite_region();
         let (_, v) = {

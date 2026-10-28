@@ -131,9 +131,7 @@ fn notified_transform_and_brep_query_respect_proven_owners_and_filter_foreign() 
     use solidcore::query::brep::BrepQuery;
     use solidcore::topology::brep::p5::transform_with_notifications;
     use solidcore::topology::edge::NotifyEnv;
-    use solidcore::topology::topology::Topology;
     use solidcore::topology::NamingScheme;
-    use std::collections::BTreeMap;
 
     let mut k = Kernel::default();
     let origin = Point3::new(120.0, -210.0, 5.0);
@@ -188,7 +186,7 @@ fn notified_transform_and_brep_query_respect_proven_owners_and_filter_foreign() 
         .unwrap()
         .set_owner(Some(foreign_owner));
 
-    let mut records: BTreeMap<ObjectKey, Topology> = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let custom_key = |entity: EntityRef| ObjectRef {
         type_code: p3::topology_ref(1, entity).type_code,

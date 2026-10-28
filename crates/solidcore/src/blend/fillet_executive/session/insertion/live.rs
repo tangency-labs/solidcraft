@@ -16,9 +16,8 @@ use crate::blend::fillet_geom::p4::{IntersectionFaceRole, IntersectionTopologyCo
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_solver::p2::SolverErrorObject;
 use crate::boolean::topology_intersector::{p1::TopologyIntersector, p3::CurveOnSurfaces};
-use crate::geom::{attribute::ObjectKey, context::Context, object::ObjectRef};
-use crate::topology::{brep::p3::topology_ref, edgeuse, topology::Topology, BrepId};
-use std::collections::BTreeMap;
+use crate::geom::{context::Context, object::ObjectRef};
+use crate::topology::{brep::p3::topology_ref, edgeuse, BrepId};
 
 /// The fillet surface `SmFilletGeom::GetFilletSurface()` names during insertion: the
 /// surface of the fillet B-rep face that took it over, or, when no face took it over,
@@ -59,7 +58,7 @@ pub(super) struct LiveGeometryInsertion<'a> {
     pub(super) intermediate: &'a mut Brep,
     pub(super) curves: &'a mut super::curves::InsertionCurves,
     pub(super) attributes: &'a mut AttributeStore,
-    pub(super) records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub(super) records: &'a mut crate::topology::topology::NotifyRecords,
     pub(super) solvers: &'a [Option<SolverObject>],
     pub(super) corners: &'a [FilletCorner],
     pub(super) solver_order: &'a [FilletObject],

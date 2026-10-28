@@ -177,10 +177,7 @@ fn ruled(data: &[f64]) -> Result<Vec<f64>> {
 #[cfg(test)]
 struct EmptyModel {
     k: Kernel,
-    notification_records: std::collections::BTreeMap<
-        solidcore::geom::attribute::ObjectKey,
-        solidcore::topology::topology::Topology,
-    >,
+    notification_records: solidcore::topology::topology::NotifyRecords,
     notification_attributes: solidcore::geom::attribute::AttributeStore,
     // `SmAObject` tag attributes of the swept topology (none on the fresh B-rep).
     tags: std::collections::BTreeMap<SweepEntity, TagData>,
@@ -219,7 +216,7 @@ impl EmptyModel {
         b.set_infinite_region(Some(region));
         Ok(Self {
             k: Kernel::default(),
-            notification_records: std::collections::BTreeMap::default(),
+            notification_records: solidcore::topology::topology::NotifyRecords::new(),
             notification_attributes: solidcore::geom::attribute::AttributeStore::default(),
             tags: std::collections::BTreeMap::default(),
             b,

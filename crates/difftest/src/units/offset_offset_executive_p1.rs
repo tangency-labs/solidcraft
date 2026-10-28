@@ -1506,7 +1506,7 @@ fn rust_sync(k: &Kernel, input: &Synchronize) -> RResult<Output> {
     };
     let first_lookup = lookup(first);
     let second_lookup = lookup(second);
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let mut notifications = NotifyEnv {
         records: &mut records,
@@ -2111,7 +2111,7 @@ fn rust_face_tail(input: &FaceTailIn) -> RResult<Output> {
     guard(ffi::validate_face_tail(&input.ffi()))?;
     let mut kernel = Kernel::default();
     let mut original = Brep::new_with_infinite_region().map_err(setup)?;
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let original_key = |entity| entity_key(entity, 1);
     let offset_key = |entity| entity_key(entity, 2);
@@ -2324,7 +2324,7 @@ fn vertex_point(brep: &Brep, edgeuse: EdgeuseId) -> HResult<Vec3> {
 
 /// A notification environment keyed like [`rust_face_tail`]'s.
 fn probe_env<R>(run: impl FnOnce(&mut NotifyEnv<'_>, &dyn Fn(EntityRef) -> ObjectRef) -> R) -> R {
-    let mut records = BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let original_key = |entity| entity_key(entity, 1);
     let mut env = NotifyEnv {
@@ -2460,7 +2460,7 @@ fn rust_probe(k: &Kernel, branch: Probe, tolerance: f64) -> RResult<Output> {
             let uses = &original.edge(edge).map_err(setup)?.edgeuses;
             let first = *at(uses, 0)?;
             let other = *at(uses, 1)?;
-            let mut records = BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attributes = AttributeStore::default();
             let key_of = |entity| match entity {
                 EntityRef::Edge(id) => ObjectRef {

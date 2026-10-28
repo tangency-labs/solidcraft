@@ -2691,7 +2691,7 @@ mod tests {
         let mut fb = FilletBrep::new();
         let g = fb.add_geom(FilletGeom::new(&k, None, FilletGeomType::Default).unwrap());
         let mut b = Brep::new();
-        let mut records = std::collections::BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut attributes = crate::geom::attribute::AttributeStore::default();
         let key_of = |_e: EntityRef| crate::geom::object::ObjectRef {
             type_code: 0,

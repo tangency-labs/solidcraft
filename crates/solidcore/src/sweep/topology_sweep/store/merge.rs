@@ -99,7 +99,7 @@ pub(super) struct Driver<'a, 'caller> {
     identities: Identities<'caller>,
     session: &'a mut Session,
     bodies: &'a mut BodySlots<'caller>,
-    records: &'a mut BTreeMap<ObjectKey, Topology>,
+    records: &'a mut crate::topology::topology::NotifyRecords,
     attributes: &'a mut AttributeStore,
     cleanup_errors: &'a mut Vec<SolidError>,
     other_kernel: Option<(ContextId, &'a mut Kernel)>,
@@ -429,7 +429,7 @@ fn curve_key(
 }
 
 fn clear_deleted(
-    records: &mut BTreeMap<ObjectKey, Topology>,
+    records: &mut crate::topology::topology::NotifyRecords,
     attributes: &mut AttributeStore,
     keys: &[ObjectKey],
 ) -> Result<()> {
@@ -455,7 +455,7 @@ struct BooleanBodies<'a, 'caller> {
     other_meta: (BrepId, ContextId, u32),
     primary_keys: Vec<ObjectKey>,
     other_keys: Vec<ObjectKey>,
-    records: &'a mut BTreeMap<ObjectKey, Topology>,
+    records: &'a mut crate::topology::topology::NotifyRecords,
     attributes: &'a mut AttributeStore,
     cleanup_errors: &'a mut Vec<SolidError>,
 }

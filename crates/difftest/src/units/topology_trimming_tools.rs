@@ -1339,7 +1339,7 @@ fn run_rust_geom(k: &mut Kernel, op: &OpIn) -> Result<Vec<f64>, Fail> {
                 surface_orientation: OrientType::Same,
             };
             let mut b = Brep::new();
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
             let mut attributes = solidcore::geom::attribute::AttributeStore::default();
             let key_of = |_| solidcore::geom::object::ObjectRef {
                 type_code: 0,

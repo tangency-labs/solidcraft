@@ -62,7 +62,6 @@ use crate::topology::face::p3::{FaceIntersectOptions, IntersectObject};
 use crate::topology::loopuse as lu;
 use crate::topology::proto_topology::p1::ProtoTopology;
 use crate::topology::proto_topology::{ProtoBrep, ProtoGeometry};
-use crate::topology::topology::Topology;
 use crate::topology::vertex as vx;
 use crate::topology::{
     Brep, BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, VertexId,
@@ -70,7 +69,6 @@ use crate::topology::{
 };
 use crate::{EntityRef, SolidError};
 use std::cell::Cell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 const K_VERTEX: u8 = 0;
 const K_EDGE: u8 = 1;
@@ -190,7 +188,7 @@ pub(super) struct ArenaPair<'a> {
     breps: [Option<&'a mut Brep>; 2],
     curves: &'a mut Vec<SmCurve>,
     extra: &'a mut Vec<SmCurve>,
-    records: &'a mut BTreeMap<ObjectKey, Topology>,
+    records: &'a mut crate::topology::topology::NotifyRecords,
     attributes: &'a mut AttributeStore,
     primary_context: &'a mut Context,
     other_context: Option<&'a mut Context>,
@@ -267,7 +265,7 @@ impl ArenaPair<'_> {
         other: Option<&'a mut Brep>,
         curves: &'a mut Vec<SmCurve>,
         extra: &'a mut Vec<SmCurve>,
-        records: &'a mut BTreeMap<ObjectKey, Topology>,
+        records: &'a mut crate::topology::topology::NotifyRecords,
         attributes: &'a mut AttributeStore,
         cache_kernels: [Kernel; 2],
         primary_context: &'a mut Context,

@@ -49,7 +49,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::boolean::topology_intersector::p1::Relations;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::a_object::{self, BooleanOperation};
-use crate::geom::attribute::{ids, AttributeStore, ObjectKey};
+#[cfg(test)]
+use crate::geom::attribute::ObjectKey;
+use crate::geom::attribute::{ids, AttributeStore};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::Context;
 use crate::geom::object::{NotifyOperation, ObjectRef};
@@ -61,7 +63,7 @@ use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepQuery};
 use crate::topology::brep::p4;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell;
-use crate::topology::topology::{self as topo, Topology};
+use crate::topology::topology::{self as topo};
 use crate::topology::topology_traverser::face_edges;
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, ShellId, VertexId};
 
@@ -370,7 +372,7 @@ pub fn edge_borders_solid(b: &Brep, e: EdgeId) -> Result<Option<ShellId>> {
 /// Keys must be distinct across operands even when their arena ids coincide.
 pub struct VertexCopy<'a> {
     /// Topology base-class records of both operands.
-    pub records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub records: &'a mut crate::topology::topology::NotifyRecords,
     /// Attributes of both operands.
     pub attributes: &'a mut AttributeStore,
     /// Notification identity of each other-operand vertex.
@@ -423,8 +425,8 @@ pub fn merge_vertex(
     // yet (a vertex the merge did not create) is the default one.
     let source_ref = (copy.source_key)(source);
     let dest_ref = (copy.destination_key)(EntityRef::Vertex(dest));
-    copy.records.entry(source_ref.key).or_default();
-    copy.records.entry(dest_ref.key).or_default();
+    copy.records.or_default(source_ref.key);
+    copy.records.or_default(dest_ref.key);
     topo::notify(
         copy.records,
         copy.attributes,

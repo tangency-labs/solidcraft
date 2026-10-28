@@ -89,10 +89,7 @@ impl OriginalSurfaceDeletionAccess<FilletObject> for DeleteAccess<'_, '_> {
 }
 
 struct TrimMarks<'a> {
-    records: &'a mut std::collections::BTreeMap<
-        crate::geom::attribute::ObjectKey,
-        crate::topology::topology::Topology,
-    >,
+    records: &'a mut crate::topology::topology::NotifyRecords,
     fillet_serial: u64,
     target_serial: u64,
 }
@@ -130,10 +127,7 @@ impl TrimOriginalSurfacesMarks for TrimMarks<'_> {
     }
     fn mark(&mut self, k: &Kernel, body: TrimOriginalBody, entity: Entity, mark: MarkType) {
         let key = self.key(body, entity);
-        self.records
-            .entry(key)
-            .or_default()
-            .mark(Some(&k.context), mark);
+        self.records.or_default(key).mark(Some(&k.context), mark);
     }
 }
 
@@ -546,8 +540,7 @@ mod tests {
         let existing = session
             .objects
             .notification_records
-            .entry(existing_key)
-            .or_default();
+            .or_default(existing_key);
         existing.set_user_index1(73);
         existing.mark(Some(&k.context), MarkType::Mark2);
         let prior_mark = existing.get_mark(MarkType::Mark2);

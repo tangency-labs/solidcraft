@@ -1692,7 +1692,7 @@ fn manifold_boolean_translated(
         if let Some(a) = primary.as_mut() {
             let editing = a.editing_enabled();
             a.set_editing_enabled(true);
-            let mut records = std::collections::BTreeMap::new();
+            let mut records = crate::topology::topology::NotifyRecords::new();
             let mut env = edge::NotifyEnv {
                 records: &mut records,
                 attributes: &mut *attributes,

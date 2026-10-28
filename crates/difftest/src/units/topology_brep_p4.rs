@@ -48,7 +48,6 @@ use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p4::{self, DeleteEnv};
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};
 use solidcore::topology::shell::ShellMembers;
-use solidcore::topology::topology::Topology as SmTopologyRecord;
 use solidcore::topology::{
     ArenaId, Brep, EdgeId, EdgeuseOwner, FaceId, LoopuseStart, ShellId, VertexId, VertexuseId,
     VertexuseOwner,
@@ -757,7 +756,7 @@ impl UnitDiff for Runner {
         b.set_editing_enabled(i.editing);
         let pre = record_counts(&b);
         let mut k = Kernel::default();
-        let mut records: BTreeMap<ObjectKey, SmTopologyRecord> = BTreeMap::new();
+        let mut records: solidcore::topology::topology::NotifyRecords = solidcore::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let mut env = DeleteEnv {
             records: &mut records,

@@ -110,7 +110,6 @@ use crate::topology::{
     FaceuseId, Loop, LoopId, Loopuse, LoopuseId, LoopuseStart, Region, RegionId, Shell, ShellId,
     Vertex, VertexId, Vertexuse, VertexuseId, VertexuseOwner,
 };
-use std::collections::BTreeMap;
 
 const OP_MAKE: &str = "topology::brep::p10::make_topology_from_data";
 const OP_PROJECT: &str = "topology::brep::p10::project_and_trim";
@@ -171,7 +170,7 @@ pub struct TopologyEnv<'a> {
     pub key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
     /// The `SmTopology` records (flags, user values) of the topology objects, by
     /// identity; one is added for each object built.
-    pub records: &'a mut BTreeMap<ObjectKey, Topology>,
+    pub records: &'a mut crate::topology::topology::NotifyRecords,
     /// The next free identity for a geometry copy; incremented per copy.
     pub next_key: u64,
 }
@@ -232,13 +231,13 @@ fn new_record(env: &mut TopologyEnv<'_>, entity: EntityRef) {
 fn set_topology(env: &mut TopologyEnv<'_>, entity: EntityRef, t: &TopologyData) {
     set_flags(env, entity, t.flags, t.user_index1, t.user_index2);
     let key = (env.key_of)(entity).key;
-    env.records.entry(key).or_default().set_user_ptr1(0);
+    env.records.or_default(key).set_user_ptr1(0);
 }
 
 /// `SetAllFlags`, `SetUserIndex1`, `SetUserIndex2`.
 fn set_flags(env: &mut TopologyEnv<'_>, entity: EntityRef, flags: u64, user1: u64, user2: u64) {
     let key = (env.key_of)(entity).key;
-    let r = env.records.entry(key).or_default();
+    let r = env.records.or_default(key);
     r.set_all_flags(flags);
     r.set_user_index1(user1);
     r.set_user_index2(user2);
@@ -2745,7 +2744,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut b = Brep::new_with_infinite_region()?;
         let mut store = AttributeStore::new();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut env = TopologyEnv {
             all_attributes: &[],
             attributes: &mut store,
@@ -2868,7 +2867,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut b = Brep::new();
         let mut store = AttributeStore::new();
-        let mut records = BTreeMap::new();
+        let mut records = crate::topology::topology::NotifyRecords::new();
         let mut env = TopologyEnv {
             all_attributes: &[],
             attributes: &mut store,
