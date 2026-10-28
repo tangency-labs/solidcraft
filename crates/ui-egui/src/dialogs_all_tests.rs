@@ -988,6 +988,42 @@ fn rectangular_pattern_distance_type_per_direction() {
     assert!(sent(&h).unwrap().get("to2").is_none());
 }
 
+/// Reopened, a pattern's To Objects show their faces, not stored points, each pick row under its
+/// own direction's Distance Type and above its To Offset, as an extrude's does (#7780, #8523).
+#[test]
+fn reopened_rectangular_pattern_shows_each_to_object_under_its_distance_type() {
+    let mut h = Harness::new();
+    for (id, p) in [
+        ("solid.box", json!({"length":120,"width":120,"height":5,"name":"Plate","body_name":"Plate"})),
+        ("solid.hole", json!({"position":[60,60,5],"diameter":2,"name":"Hole"})),
+        ("solid.box", json!({"length":10,"width":10,"height":5,"corner":[100,130,0],"name":"Stop","body_name":"Stop"})),
+        (
+            "solid.pattern.rectangular",
+            json!({"features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[100,135,2.5],"to_offset1":"-2 mm",
+                   "dir2":[0,1,0],"count2":2,"type2":"extent","spacing2":30,"name":"Pattern"}),
+        ),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.frames(4);
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Pattern"}})).unwrap();
+    h.frames(8);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.extra.get("type1"), Some(&json!("to_object")));
+    assert_eq!(d.extra.get("type2"), Some(&json!("extent")));
+    let to = d.inputs.iter().find(|i| i.label == "To Object").and_then(|i| i.items.first()).cloned();
+    assert!(matches!(&to, Some(Sel::Face { body, .. }) if body == "Stop"), "{to:?}");
+    assert!(matches!(&d.kind, Kind::PatternRect { to_offset, spacing2, .. } if to_offset == "-2 mm" && spacing2 == "30"), "{:?}", d.kind);
+    let y = |name: &str| h.widget(name).unwrap_or_else(|| panic!("{name}"))[1];
+    let to_row = crate::scenario::handle_at("dialog:clear:To Object").unwrap().y as f64;
+    assert!(y("Distance Type") < to_row && to_row < y("To Offset") && y("To Offset") < y("Quantity 2"), "To Object's row is under Direction 1's Distance Type");
+    assert!(y("Distance Type 2") < y("Extent 2"));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let saved = h.app.session.doc.to_json();
+    assert!(saved.contains("\"extent2\":true") && saved.contains("\"to_offset1\""), "{saved}");
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();

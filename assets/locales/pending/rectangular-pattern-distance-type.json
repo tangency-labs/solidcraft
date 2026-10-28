@@ -6,7 +6,8 @@
     "ui.pattern_extent_2": "Extent 2",
     "ui.pattern_to_object_2": "To Object 2",
     "select the face or point the pattern runs to": "select the face or point the pattern runs to",
-    "select the face or point Direction 2 runs to": "select the face or point Direction 2 runs to"
+    "select the face or point Direction 2 runs to": "select the face or point Direction 2 runs to",
+    "ui.pattern_to_offset_2": "To Offset 2"
   },
   "de": {
     "ui.pattern_distance_type": "Abstandsart",
@@ -15,20 +16,23 @@
     "ui.pattern_extent_2": "Gesamtlänge 2",
     "ui.pattern_to_object_2": "Bis Objekt 2",
     "select the face or point the pattern runs to": "Fläche oder Punkt wählen, bis zu dem das Muster reicht",
-    "select the face or point Direction 2 runs to": "Fläche oder Punkt wählen, bis zu dem Richtung 2 reicht"
+    "select the face or point Direction 2 runs to": "Fläche oder Punkt wählen, bis zu dem Richtung 2 reicht",
+    "ui.pattern_to_offset_2": "Bis Versatz 2"
   },
   "fr": {
     "ui.pattern_distance_type": "Type de distance",
     "ui.pattern_distance_type_2": "Type de distance 2",
     "ui.pattern_extent": "Étendue",
     "ui.pattern_extent_2": "Étendue 2",
-    "ui.pattern_to_object_2": "Jusqu'à l'objet 2"
+    "ui.pattern_to_object_2": "Jusqu'à l'objet 2",
+    "ui.pattern_to_offset_2": "Jusqu'au décalage 2"
   },
   "es": {
     "ui.pattern_distance_type": "Tipo de distancia",
     "ui.pattern_distance_type_2": "Tipo de distancia 2",
     "ui.pattern_extent": "Extensión",
     "ui.pattern_extent_2": "Extensión 2",
-    "ui.pattern_to_object_2": "Hasta objeto 2"
+    "ui.pattern_to_object_2": "Hasta objeto 2",
+    "ui.pattern_to_offset_2": "Hasta desfase 2"
   }
 }

@@ -87,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; type1?, type2?: spacing|extent|to_object (default spacing: between neighbours; extent: spacing<k> is the distance from the first copy to the last; to_object: the copy furthest along the direction reaches to<k>, measured from the middle of what is copied, and follows it; no spacing<k> needed); to1?, to2?: [x,y,z] (a point on the face, vertex or point to go to; implies to_object; not with components); alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip; To Object takes its side from the object)"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; type1?, type2?: spacing|extent|to_object (default spacing: between neighbours; extent: spacing<k> is the distance from the first copy to the last; to_object: the copy furthest along the direction reaches to<k>, measured from the middle of what is copied, and follows it; no spacing<k> needed); to1?, to2?: [x,y,z] (a point on the face, vertex or point to go to; implies to_object; not with components; a face along the direction is reached where it begins); to_offset1?, to_offset2?: expr (past the object, the way the copies go; negative stops short); alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip; To Object takes its side from the object)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
@@ -2077,6 +2077,11 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(c) = &spacing2 {
         check_expr(s, c, Kind::Length, cmd, "spacing2")?;
     }
+    for k in ["to_offset1", "to_offset2"] {
+        if let Some(e) = expr(p, k) {
+            check_expr(s, &e, Kind::Length, cmd, k)?;
+        }
+    }
     if (to1.is_some() || to2.is_some()) && !string_list(cmd, p, "components")?.is_empty() {
         return Err(bad(cmd, "not supported yet: To Object in a pattern of components"));
     }
@@ -2091,6 +2096,8 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         alignment2: super::alignment_param(p, "alignment2", cmd)?,
         reversed: super::reversed_param(p, "reversed", cmd)?,
         reversed2: super::reversed_param(p, "reversed2", cmd)?,
+        to_offset1: to1.and(expr(p, "to_offset1")),
+        to_offset2: to2.and(expr(p, "to_offset2")),
         extent1,
         extent2,
         to1,

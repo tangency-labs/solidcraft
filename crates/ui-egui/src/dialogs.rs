@@ -205,6 +205,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 spacing: String,
                 count2: String,
                 spacing2: String,
+                /// Past each direction's To Object (#8523), as an extrude's To Offset.
+                to_offset: String,
+                to_offset2: String,
             },
             /// Circular pattern of bodies around an axis.
             PatternCirc {
@@ -963,7 +966,14 @@ impl Dialog {
                 )],
             ),
             "solid.pattern.rectangular" => Dialog::new(
-                Kind::PatternRect { count: "3".into(), spacing: length_default(s, "20"), count2: "1".into(), spacing2: length_default(s, "20") },
+                Kind::PatternRect {
+                    count: "3".into(),
+                    spacing: length_default(s, "20"),
+                    count2: "1".into(),
+                    spacing2: length_default(s, "20"),
+                    to_offset: String::new(),
+                    to_offset2: String::new(),
+                },
                 vec![
                     SelInput::new("Objects", BODIES, true),
                     SelInput::new("Direction", AXES | EDGES, false),
@@ -2551,6 +2561,8 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                         spacing: length_default(session, "20"),
                         count2: "1".into(),
                         spacing2: length_default(session, "20"),
+                        to_offset: String::new(),
+                        to_offset2: String::new(),
                     },
                     vec![
                         SelInput::new("Objects", BODIES, true),
@@ -4739,7 +4751,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.mirror", p)
         }
-        Kind::PatternRect { count, spacing, count2, spacing2 } => {
+        Kind::PatternRect { count, spacing, count2, spacing2, to_offset, to_offset2 } => {
             need(0, "objects")?;
             let kept = d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d1 = match (sels(d, 1).first(), kept) {
@@ -4750,7 +4762,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = json!({"dir1": pt(d1), "count1": count, "spacing1": spacing});
             pattern_objects(s, sels(d, 0), &mut p);
             match pattern_to_object(d, 0) {
-                (true, Some(to)) => p["to1"] = to,
+                (true, Some(to)) => {
+                    p["to1"] = to;
+                    if !to_offset.trim().is_empty() {
+                        p["to_offset1"] = json!(to_offset);
+                    }
+                }
                 (true, None) => return Err("select the face or point the pattern runs to".into()),
                 _ => {}
             }
@@ -4765,7 +4782,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     p["count2"] = json!(count2);
                     p["spacing2"] = json!(spacing2);
                     match pattern_to_object(d, 1) {
-                        (true, Some(to)) => p["to2"] = to,
+                        (true, Some(to)) => {
+                            p["to2"] = to;
+                            if !to_offset2.trim().is_empty() {
+                                p["to_offset2"] = json!(to_offset2);
+                            }
+                        }
                         (true, None) => return Err("select the face or point Direction 2 runs to".into()),
                         _ => {}
                     }
@@ -6457,19 +6479,27 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     extent2,
                     to1,
                     to2,
+                    to_offset1,
+                    to_offset2,
                 } => {
                     let mut d = start("solid.pattern.rectangular")?;
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("alignment2".into(), json!(alignment2));
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.extra.insert("reversed2".into(), json!(reversed2));
-                    // Each direction's distance type (#8523); To Object shows its pick.
+                    // Each direction's distance type (#8523); To Object shows the face it goes to,
+                    // where the model shows it (as an extrude's does, #7780), not a bare point.
                     let active = d.active;
+                    let frame = feature_frame(s, f.component);
                     for (index, (extent, to)) in [(*extent1, *to1), (*extent2, *to2)].into_iter().enumerate() {
                         let [_, _, key, object, ..] = PATTERN_DISTANCE[index];
-                        if to.is_some() {
+                        if let Some(to) = to {
                             d.extra.insert(key.into(), json!("to_object"));
-                            with_object(&mut d, s, object, to.map(|p| p.0));
+                            set_object(&mut d.inputs, &mut d.active, object, true);
+                            let point = solidcraft_engine::doc::apply_point(&frame, to.0);
+                            if let Some(input) = d.inputs.iter_mut().find(|i| i.label == object) {
+                                input.items = vec![shown_face_sel(s, point).unwrap_or(Sel::Vertex { body: String::new(), point })];
+                            }
                         } else if extent {
                             d.extra.insert(key.into(), json!("extent"));
                         }
@@ -6480,6 +6510,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         spacing: spacing1.to_string(),
                         count2: count2.as_deref().map(str::to_string).unwrap_or_else(|| "1".into()),
                         spacing2: spacing2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "20")),
+                        to_offset: to_offset1.as_deref().map(str::to_string).unwrap_or_default(),
+                        to_offset2: to_offset2.as_deref().map(str::to_string).unwrap_or_default(),
                     };
                     // Directions along the origin axes show as those axes; others are kept as is.
                     for (i, (key, dir)) in [("dir1", Some(*dir1)), ("dir2", *dir2)].into_iter().enumerate() {

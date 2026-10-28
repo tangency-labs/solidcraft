@@ -2240,6 +2240,14 @@ pub enum PatternKind {
         to1: Option<FacePick>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to2: Option<FacePick>,
+        /// Past each To Object by this much, along the way the copies go (negative stops short),
+        /// as an extrude's To offset.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "To offset")]
+        to_offset1: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "To offset 2")]
+        to_offset2: Option<Expr>,
     },
     Circular {
         origin: Position,

@@ -129,25 +129,30 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
-/// A rectangular pattern direction's Distance Type (#8523) and its value: the Spacing between
-/// neighbours, the Extent from the first copy to the last, or To Object (a pick instead of a
-/// value, the input added below the others).
-fn pattern_distance_rows(
-    ui: &mut egui::Ui,
-    extra: &mut serde_json::Map<String, Value>,
-    inputs: &mut Vec<SelInput>,
-    active: &mut usize,
-    index: usize,
-    value: &mut String,
-) -> bool {
-    let [label, id, key, object, spacing, extent] = PATTERN_DISTANCE[index.min(1)];
-    let ty = form_row(ui, label, |ui| extra_choice(ui, extra, id, key, &PATTERN_DISTANCE_TYPES));
-    set_object(inputs, active, object, ty == 2);
-    match ty {
-        0 => expr_row(ui, spacing, value),
-        1 => expr_row(ui, extent, value),
-        _ => false,
+/// A rectangular pattern direction (`index` 0 or 1): its Quantity, its Distance Type (#8523) and
+/// what that takes: the Spacing between neighbours, the Extent from the first copy to the last,
+/// or To Object, whose pick and To Offset show under the choice that adds them, as an
+/// extrude's do (#7780).
+fn pattern_direction_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
+    let [label, id, key, object, spacing_label, extent_label] = PATTERN_DISTANCE[index.min(1)];
+    let [quantity_label, offset_label] = if index == 0 { ["Quantity", "To Offset"] } else { ["Quantity 2", "To Offset 2"] };
+    let mut enter = false;
+    if let Kind::PatternRect { count, count2, .. } = &mut d.kind {
+        enter |= quantity_row(ui, &app.session.doc, quantity_label, if index == 0 { count } else { count2 });
     }
+    let ty = form_row(ui, label, |ui| extra_choice(ui, &mut d.extra, id, key, &PATTERN_DISTANCE_TYPES));
+    set_object(&mut d.inputs, &mut d.active, object, ty == 2);
+    if ty == 2 {
+        input_row(d, ui, &app.session, app.preferences.origin_plane_names, object);
+    }
+    let Kind::PatternRect { spacing, spacing2, to_offset, to_offset2, .. } = &mut d.kind else { return enter };
+    let (value, offset) = if index == 0 { (spacing, to_offset) } else { (spacing2, to_offset2) };
+    enter |= match ty {
+        0 => expr_row(ui, spacing_label, value),
+        1 => expr_row(ui, extent_label, value),
+        _ => expr_row(ui, offset_label, offset),
+    };
+    enter
 }
 
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
@@ -418,11 +423,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 });
             }
         }
-        Kind::PatternRect { count, spacing, count2, spacing2 } => {
-            enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
-            enter |= pattern_distance_rows(ui, &mut d.extra, &mut d.inputs, &mut d.active, 0, spacing);
-            enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
-            enter |= pattern_distance_rows(ui, &mut d.extra, &mut d.inputs, &mut d.active, 1, spacing2);
+        Kind::PatternRect { .. } => {
+            enter |= pattern_direction_rows(app, d, ui, 0);
+            enter |= pattern_direction_rows(app, d, ui, 1);
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
                 feature_pattern_alignment_row(ui, &mut d.extra, 1);

@@ -6515,6 +6515,8 @@ fn pattern_transforms(
             extent2,
             to1,
             to2,
+            to_offset1,
+            to_offset2,
         } => {
             let n1 = count(count1)?;
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
@@ -6531,16 +6533,25 @@ fn pattern_transforms(
             // The To Object faces' names follow `face_points`: `to1`, then `to2`.
             let names = feature.map(|f| f.face_names.as_slice()).unwrap_or_default();
             let to_name = |k: usize| names.get(k).map(String::as_str);
-            let reach = |to: Vec3, name: Option<&str>, d: Vec3| -> Result<f64> {
+            let reach = |to: Vec3, name: Option<&str>, d: Vec3, offset: &Option<crate::Expr>| -> Result<f64> {
                 let f = feature.ok_or_else(|| DocError::Invalid("not supported yet: To Object in a pattern of components".into()))?;
-                pattern_reach(doc, st, f, component, to, name, d)
+                let off = offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                let h = pattern_reach(doc, st, f, component, to, name, d)?;
+                // Past the object by the offset, the way the copies go.
+                let reach = h + if h >= 0.0 { off } else { -off };
+                if reach.abs() < 1e-9 {
+                    return Err(DocError::Invalid("the To object with its offset is where the pattern starts".into()));
+                }
+                Ok(reach)
             };
             let s1 = match to1 {
-                Some(p) => step_to(reach(p.0, to_name(0), d1)?, n1, *alignment, *reversed),
+                Some(p) => step_to(reach(p.0, to_name(0), d1, to_offset1)?, n1, *alignment, *reversed),
                 None => step_of(val(vals, spacing1, Kind::Length)?, n1, *extent1),
             };
             let (s2, d2) = match (second, to2, spacing2) {
-                (Some((n2, d2)), Some(p), _) => (step_to(reach(p.0, to_name(usize::from(to1.is_some())), d2)?, n2, *alignment2, *reversed2), d2),
+                (Some((n2, d2)), Some(p), _) => {
+                    (step_to(reach(p.0, to_name(usize::from(to1.is_some())), d2, to_offset2)?, n2, *alignment2, *reversed2), d2)
+                }
                 (Some((n2, d2)), None, Some(sp)) => (step_of(val(vals, sp, Kind::Length)?, n2, *extent2), d2),
                 _ => (0.0, Vec3::Y),
             };
