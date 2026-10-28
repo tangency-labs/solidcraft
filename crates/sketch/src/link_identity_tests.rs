@@ -360,3 +360,38 @@ fn edge_on_face_lays_out_as_one_silhouette_line_and_stays_current() {
     assert_eq!(sk.link_curves(&link).len(), 4);
     assert!(!sk.link(&link).unwrap().lost);
 }
+
+/// #5388: a circle the user drew on a projected hole's centre survives when the face changes
+/// shape and its projection is rebuilt (a second hole added to the face).
+#[test]
+fn rebuilt_face_keeps_a_users_circle_on_its_projected_centre() {
+    let mut sk = Sketch::new();
+    let hole = |c: Vec2| LinkGeom::Circle(c, 2.1);
+    let face_with = |holes: &[Vec2]| square(15.0).into_iter().chain(holes.iter().map(|c| hole(*c))).collect::<Vec<_>>();
+    let link = sk.add_link(LinkKind::Project, face(), &face_with(&[Vec2::ZERO])).unwrap();
+    // The projected hole's centre point.
+    let centre = sk
+        .link_curves(&link)
+        .into_iter()
+        .find_map(|i| match sk.curves[i].kind {
+            CurveKind::Circle { c, .. } => Some(c),
+            _ => None,
+        })
+        .unwrap();
+    let mine = sk.add_curve(CurveKind::Circle { c: centre, r: 5.25 }, Some("c_mine")).unwrap();
+    assert!(sk.curves[mine].link.is_none());
+    // The face gains two more holes: the projection's shape changes, so it is rebuilt.
+    assert!(sk.update_link(&link, &face_with(&[Vec2::ZERO, Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0)])).unwrap());
+    let kept = sk.curves.iter().find(|c| c.id == "c_mine").expect("the user's circle survives the rebuild");
+    assert!(kept.link.is_none());
+    match kept.kind {
+        CurveKind::Circle { c, r } => {
+            assert_eq!(r, 5.25);
+            let p = &sk.points[c];
+            assert!(p.link.is_none(), "it sits on a point of its own, not a projected one");
+            assert!(p.pos.len() < 1e-9, "still at the hole's centre: {:?}", p.pos);
+        }
+        ref k => panic!("not a circle: {k:?}"),
+    }
+    assert_eq!(sk.link_curves(&link).len(), 4 + 3, "the projection is the new outline and holes");
+}
