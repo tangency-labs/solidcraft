@@ -1,0 +1,38 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 20,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      60,
+      20,
+      20
+     ],
+     [
+      30,
+      40,
+      20
+     ],
+     [
+      60,
+      40,
+      10
+     ]
+    ],
+    "radius": 2,
+    "corner": "g2",
+    "fit": "taper"
+   }
+  }
+ ]
+}

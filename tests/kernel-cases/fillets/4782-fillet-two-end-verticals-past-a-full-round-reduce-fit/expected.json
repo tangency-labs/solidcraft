@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4782"
+ ],
+ "what": "both vertical edges of a 15 mm wide box end rounded r10 with fit reduce: reduced to the full round, 7.5",
+ "source": "analytic",
+ "method": "reduced to 7.5 (half the width, the largest that fits): removed 2 (1-pi/4) 7.5^2 20",
+ "body_count": 1,
+ "volume_mm3": 23517.14586764426,
+ "faces": 6
+}

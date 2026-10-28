@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#9"
+ ],
+ "what": "three r2 rounds at a box corner, curvature (g2) corner, fit taper (the radius fits)",
+ "source": "invariants",
+ "method": "the radius fits, so fit taper would keep r2 and the corner is 07-fillets/015's at r2: one valid body, 10 faces",
+ "missing": "solid.fillet builds `corner: g2` with `fit: exact` only",
+ "body_count": 1,
+ "faces": 10
+}

@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#9"
+ ],
+ "what": "three r2 rounds at a box corner, rolling-ball corner, set back 1.5: not past where the rounds meet (r): refused",
+ "source": "invariants",
+ "method": "a setback must reach past where the corner's rounds meet without one, past r = 2 on a corner of faces square to each other (smlib_blend_setback, solid.fillet `setbacks`); 1.5 is not, so the right answer is a clean refusal",
+ "outcome": "refused"
+}
