@@ -2553,11 +2553,17 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         // into view once: on OK at once, a preview's once no field is being typed in (so the
         // field never moves away while it is typed in).
         let typing = ui.ctx().memory(|m| m.focused().is_some());
-        if (d.error.as_ref() == Some(&error) || !typing) && ui.data(|m| m.get_temp::<String>(shown_id)).as_ref() != Some(&error) {
+        if reveal_refusal(d.error.as_ref() == Some(&error), typing, ui.data(|m| m.get_temp::<String>(shown_id)).as_deref(), &error) {
             ui.scroll_to_rect(rect, None);
             ui.data_mut(|m| m.insert_temp(shown_id, error));
         }
     }
+}
+
+/// Whether a dialog scrolls `error` into view this frame: once per refusal, a refusal on OK at once
+/// and a preview's once no field is typed in.
+fn reveal_refusal(on_ok: bool, typing: bool, shown: Option<&str>, error: &str) -> bool {
+    (on_ok || !typing) && shown != Some(error)
 }
 
 /// A refusal as the dialog shows it: without the engine's "invalid parameters for `id`: "
@@ -6377,7 +6383,7 @@ fn face_point(x: &Sel) -> Option<Value> {
 
 #[cfg(test)]
 mod awaiting_selection_tests {
-    use super::{awaiting_selection, missing_pick};
+    use super::{awaiting_selection, missing_pick, reveal_refusal};
 
     #[test]
     fn missing_selection_messages_are_guidance_and_real_failures_are_not() {
@@ -6412,44 +6418,32 @@ mod awaiting_selection_tests {
     }
 
     /// A long refusal sits under the fold of a dialog its fields fill, so only its first line
-    /// showed, or none, and no Create Issue (#8454). The dialog scrolls it into view: a preview's
-    /// once no field is typed in, a refusal on OK at once.
+    /// showed, or none, and no Create Issue (#8454). The dialog scrolls it into view once: a
+    /// refusal on OK at once, a preview's once no field is typed in.
     #[test]
     fn a_long_refusal_scrolls_into_view_with_its_issue_button() {
         let reason = "boolean Cut: the operation failed: no result; the operation failed: not supported yet: the exact fallback for \
                       where the bodies meet (faces that touch, or cross at a shallow angle) takes planar faces only, and the target \
                       has 24 curved faces (cylinder, torus) and the tool has 8 curved faces (cylinder); "
             .repeat(3);
-        let in_view = |what: &str| {
-            let viewport = crate::scenario::rect_of("dialog:body:viewport").expect("the dialog's fields");
-            let issue = crate::scenario::handle_at("dialog:create_issue").expect("Create Issue");
-            let error = crate::scenario::rect_of("dialog:report:error").expect("the refusal");
-            assert!(viewport.contains(issue) && viewport.contains_rect(error), "{what}: {error:?} and Create Issue at {issue:?} in {viewport:?}");
-        };
-        let open = || {
-            let mut h = crate::scenario::Harness::new();
-            h.step(&serde_json::json!({"start":"solid.extrude"})).unwrap();
-            h.frames(2);
-            h
-        };
-        let mut h = open();
-        h.app.preview.error = Some(reason.clone());
-        h.frames(6);
-        in_view("a preview's error");
-        // While a field is typed in, a preview's error waits; a refusal on OK doesn't.
-        let mut h = open();
+        let mut h = crate::scenario::Harness::new();
+        h.step(&serde_json::json!({"start":"solid.extrude"})).unwrap();
+        h.frames(2);
         let field = crate::scenario::rect_of("dialog:control:Distance").expect("the Distance field").center();
         h.step(&serde_json::json!({"click": [field.x, field.y]})).unwrap();
-        h.app.preview.error = Some(reason.clone());
-        h.frames(6);
-        assert!(h.ctx.memory(|m| m.focused().is_some()), "the Distance field is typed in");
-        assert_eq!(crate::scenario::count_of("dialog:body:scroll_y"), Some(0.0), "the field stays where it is");
-        h.app.preview.error = None;
         if let Some(d) = h.app.dialog.as_mut() {
-            d.error = Some(reason);
+            d.error = Some(reason.clone());
         }
-        h.frames(6);
-        in_view("a refusal on OK");
+        // The scroll is animated.
+        h.frames(30);
+        let viewport = crate::scenario::rect_of("dialog:body:viewport").expect("the dialog's fields");
+        let issue = crate::scenario::handle_at("dialog:create_issue").expect("Create Issue");
+        let error = crate::scenario::rect_of("dialog:report:error").expect("the refusal");
+        assert!(viewport.contains(issue) && viewport.contains_rect(error), "{error:?} and Create Issue at {issue:?} in {viewport:?}");
+        assert!(reveal_refusal(true, true, None, &reason), "a refusal on OK, while a field is typed in");
+        assert!(!reveal_refusal(false, true, None, &reason), "a preview's error waits while a field is typed in");
+        assert!(reveal_refusal(false, false, None, &reason), "and shows once no field is");
+        assert!(!reveal_refusal(true, false, Some(&reason), &reason), "once: the user may scroll away from it");
     }
 
     /// A missing-pick hint reads in the user's language: the dialogs return it as English text,
