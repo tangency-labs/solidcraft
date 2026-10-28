@@ -1555,7 +1555,10 @@ where
 /// `pCrvClass->MergeIntervals(&faces, &edges, &vertices, this)` of
 /// `SmFace::SplitAtSeam` on face `f`'s own B-rep ([`BrepSeamObjects::for_merge`]), for
 /// the `dir` seam classification [`has_seam_problem`] made: the merge's status with its
-/// partial output ([`CurveClassification::merge_intervals_mut`]).
+/// partial output ([`CurveClassification::merge_intervals_mut`]). `vertices_only` is
+/// upstream's `bMergeVerticesOnly` (`FALSE` in `SplitAtSeam`, `TRUE` in
+/// `SmHealData::Fix_SplitEdgesAtSeam`); the merge's edits are notified through `notify`
+/// when given ([`BrepSeamObjects::for_merge_notified`]).
 ///
 /// Upstream's classification owns its seam curve; the port's names it with a
 /// temporary handle ([`ClassObject::temporary`]), so the seam curve and its UV curve
@@ -1570,9 +1573,11 @@ where
 pub(crate) fn merge_seam_intervals<O: LoopObject>(
     k: &mut Kernel,
     b: &mut Brep,
+    notify: Option<&mut edge::NotifyEnv<'_>>,
     f: FaceId,
     dir: SurfParamType,
     c: &mut CurveClassification<O>,
+    vertices_only: bool,
 ) -> Result<core::result::Result<MergedTopology<O>, PartialMergeError<O>>> {
     // (a failure to rebuild the seam leaves it unresolved, as above)
     let seam = match b.face(f)?.surface.as_ref() {
@@ -1585,7 +1590,19 @@ pub(crate) fn merge_seam_intervals<O: LoopObject>(
     } else {
         SEAM_U_TEMPS
     };
-    let mut inner = BrepSeamObjects::for_merge(b, f)?;
+    let mut inner = match notify {
+        Some(n) => BrepSeamObjects::for_merge_notified(
+            b,
+            f,
+            edge::NotifyEnv {
+                records: &mut *n.records,
+                attributes: &mut *n.attributes,
+                context: n.context.as_deref_mut(),
+                key_of: n.key_of,
+            },
+        )?,
+        None => BrepSeamObjects::for_merge(b, f)?,
+    };
     let mut objects = WithSeam {
         inner: &mut inner,
         seam: seam
@@ -1595,7 +1612,7 @@ pub(crate) fn merge_seam_intervals<O: LoopObject>(
             .as_ref()
             .and_then(|(uv, _)| O::temporary(ui, ClassObjectKind::Curve).map(|h| (h, uv))),
     };
-    Ok(c.merge_intervals_mut_with_partial(k, &mut objects, false))
+    Ok(c.merge_intervals_mut_with_partial(k, &mut objects, vertices_only))
 }
 
 /// The inputs of [`has_seam_problem`] after the face (`HasSeamProblem`'s optional
@@ -2227,6 +2244,11 @@ pub struct BrepSeamObjects<'b, O, B = &'b Brep> {
     records: crate::topology::topology::NotifyRecords,
     /// The attribute store of the merge's edits.
     attributes: AttributeStore,
+    /// The caller's notification environment of the merge's edits (its records,
+    /// attributes, context callbacks and identities), when the caller tracks them
+    /// ([`BrepSeamObjects::for_merge_notified`]); `None` keeps them in
+    /// [`Self::records`] / [`Self::attributes`] without context callbacks.
+    notify: Option<edge::NotifyEnv<'b>>,
 }
 
 impl<'b, O: LoopObject, B: FaceBrep> BrepSeamObjects<'b, O, B> {
@@ -2284,6 +2306,7 @@ impl<'b, O: LoopObject, B: FaceBrep> BrepSeamObjects<'b, O, B> {
             surface,
             records: crate::topology::topology::NotifyRecords::new(),
             attributes: AttributeStore::default(),
+            notify: None,
         })
     }
 
@@ -2470,6 +2493,23 @@ impl<'b, O: LoopObject> BrepSeamObjects<'b, O, &'b mut Brep> {
     pub fn for_merge(b: &'b mut Brep, f: FaceId) -> Result<Self> {
         Self::build(None, b, f)
     }
+
+    /// [`Self::for_merge`] notifying the merge's edits through `notify` (upstream's
+    /// `SmObject::Notify` reaches the context's system callback, e.g. a healer's
+    /// `SmTrackTopologyChanges`), under `notify`'s identities.
+    ///
+    /// # Errors
+    ///
+    /// As [`BrepSeamObjects::new`].
+    pub fn for_merge_notified(
+        b: &'b mut Brep,
+        f: FaceId,
+        notify: edge::NotifyEnv<'b>,
+    ) -> Result<Self> {
+        let mut objects = Self::build(None, b, f)?;
+        objects.notify = Some(notify);
+        Ok(objects)
+    }
 }
 
 /// The face's own B-rep for every topology handle: `MergeIntervals` edits the
@@ -2494,11 +2534,19 @@ impl<O: LoopObject> MergeIntervalBrep<O> for BrepSeamObjects<'_, O, &mut Brep> {
                 EntityRef::Face(x) if x == f => face,
                 _ => O::from_topology(e).unwrap_or(face),
             }),
-            notifications: edge::NotifyEnv {
-                records: &mut self.records,
-                attributes: &mut self.attributes,
-                context: None,
-                key_of: &loopuse::notify_ref,
+            notifications: match self.notify.as_mut() {
+                Some(n) => edge::NotifyEnv {
+                    records: &mut *n.records,
+                    attributes: &mut *n.attributes,
+                    context: n.context.as_deref_mut(),
+                    key_of: n.key_of,
+                },
+                None => edge::NotifyEnv {
+                    records: &mut self.records,
+                    attributes: &mut self.attributes,
+                    context: None,
+                    key_of: &loopuse::notify_ref,
+                },
             },
             curve_ref: &merge_curve_ref,
         })

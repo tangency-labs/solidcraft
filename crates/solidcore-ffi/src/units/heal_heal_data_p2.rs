@@ -7,7 +7,13 @@
 //! A B-rep block is one of [`super::topology_vertexuse`]'s (kinds `0..=3`),
 //! `4 dx dy dz validate_only init_gaps` (`SmPrimitiveCreation::CreateBox`) or
 //! `5 radius swap_uv validate_only init_gaps` (a face on the full
-//! `SmSphere::CreateCanonical` domain); `init_gaps` computes the cached gaps first. The shim replaces analytic face surfaces and edge curves other than
+//! `SmSphere::CreateCanonical` domain), `6 radius swap_uv surface validate_only
+//! init_gaps` (an `SmBrepConstructor` face with one vertex loop on a sphere, plane or
+//! torus: `surface` 0, 1, 2) or `7 r0 r1 height a0 a1 seam quintic validate_only
+//! init_gaps` (`prog_test` `my_test_move_seam_refreshes_face_props`: an
+//! `SmBSplineSurface::CreateConePatch` face over `a0..a1` degrees whose surface is
+//! replaced by the full patch with its seam turned by `seam` degrees);
+//! `init_gaps` computes the cached gaps first. The shim replaces analytic face surfaces and edge curves other than
 //! `SmPlane` / `SmLine` by plain B-spline copies before anything runs.
 //!
 //! | [`Op`]   | input | output |
@@ -161,6 +167,30 @@ pub(crate) fn check_block(path: &str, block: &[f64]) -> Result<(), FfiError> {
         let r = rd.num()?;
         if !(1e-3..=1e3).contains(&r) {
             return Err(bad("sphere radius out of range"));
+        }
+        rd.flag()?;
+        if kind == 6.0 {
+            rd.index(2)?;
+        }
+        rd.flag()?;
+        rd.flag()?;
+        return rd.done();
+    }
+    if kind == 7.0 {
+        let (r0, r1, height) = (rd.num()?, rd.num()?, rd.num()?);
+        if !(1e-3..=1e3).contains(&r0) || !(0.0..=1e3).contains(&r1) {
+            return Err(bad("cone patch radius out of range"));
+        }
+        if !(1e-3..=1e3).contains(&height) {
+            return Err(bad("cone patch height out of range"));
+        }
+        let (a0, a1, seam) = (rd.num()?, rd.num()?, rd.num()?);
+        let angles_ok = (-360.0..=360.0).contains(&a0)
+            && a1 > a0
+            && a1 - a0 <= 360.0
+            && (-360.0..=360.0).contains(&seam);
+        if !angles_ok {
+            return Err(bad("cone patch angles out of range"));
         }
         rd.flag()?;
         rd.flag()?;

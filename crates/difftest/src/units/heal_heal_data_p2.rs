@@ -13,7 +13,9 @@
 //!   op's result, the array and every object's linked members.
 //! - `heal`: an `SmHealData` built on a B-rep (an upstream `.smb` file, a wire edge, a
 //!   one-face B-rep, the `my_test_topology` wire network, an `SmPrimitiveCreation`
-//!   box or a full sphere face) with target lists, then a script of heal steps;
+//!   box, a full sphere face, a one-vertex-loop face on a sphere, plane or torus, or
+//!   `prog_test` `my_test_move_seam_refreshes_face_props`' seam-crossing cone patch) with
+//!   target lists, then a script of heal steps;
 //!   outputs each step's status and results and, at the end, the whole healer state
 //!   (targets, every props record ever allocated, every problem array with its labels,
 //!   histograms, statistics and the vertex voxel model). The C++ side preserves exactly
@@ -22,6 +24,10 @@
 //!   B-splines the Rust import rebuilds; the Rust side imports the C++ export (the
 //!   `topology.vertexuse` importer) and restores each vertex's vertex use order from the
 //!   shim.
+//!   A repair step that edits the B-rep (a nonempty queue) ends the script; when it
+//!   succeeds, a summary read from the live B-rep and the healer follows it (target,
+//!   new-object and repair problem list sizes, face/edge/vertex counts, per-face loop
+//!   and edge counts, sorted vertex points), since the fixture graph may be stale.
 //!
 //! Deferred: `Fix_TolSizes` (`SmBrep::GetThisModelSizeEstimate`, `topology.brep_p1`),
 //! `Cache_DegenFaces` with a face (`SmFace::IsDegenerate` classifies its edges with
@@ -179,6 +185,22 @@ pub(crate) enum Prim {
         radius: f64,
         #[serde(default)]
         swap: bool,
+        /// The face's surface: 0 the sphere, 1 a plane over `[-radius, radius]^2`, 2 a
+        /// torus (major `radius`, minor `radius / 4`); the vertex lies on it.
+        #[serde(default)]
+        surface: u8,
+    },
+    /// `prog_test` `my_test_move_seam_refreshes_face_props`: a
+    /// `SmBSplineSurface::CreateConePatch` face over `angles` (degrees) whose surface
+    /// is replaced by the full 0..360 patch with its seam turned by `seam` degrees, so
+    /// the seam crosses the face.
+    SeamCone {
+        radii: [f64; 2],
+        height: f64,
+        angles: [f64; 2],
+        seam: f64,
+        #[serde(default)]
+        quintic: bool,
     },
     /// `SmPrimitiveCreation::CreateBox(dx, dy, dz, SmAxis2Placement())`.
     Box { size: [f64; 3] },
@@ -378,8 +400,23 @@ fn block_of(
             v.extend(size);
             String::new()
         }
-        BIn::Prim(Prim::SingleVertexSphere { radius, swap }) => {
-            v.extend([6.0, *radius, flag(*swap)]);
+        BIn::Prim(Prim::SingleVertexSphere {
+            radius,
+            swap,
+            surface,
+        }) => {
+            v.extend([6.0, *radius, flag(*swap), f64::from(*surface)]);
+            String::new()
+        }
+        BIn::Prim(Prim::SeamCone {
+            radii,
+            height,
+            angles,
+            seam,
+            quintic,
+        }) => {
+            v.extend([7.0, radii[0], radii[1], *height, angles[0], angles[1], *seam]);
+            v.push(flag(*quintic));
             String::new()
         }
         BIn::Prim(Prim::Sphere { radius, swap }) => {
@@ -988,6 +1025,63 @@ fn entity(kind: u64, index: u64, c: [usize; 10]) -> Option<EntityRef> {
 
 /// The healer state, as the shim's `dump`.
 #[allow(clippy::too_many_lines)]
+/// The shim's `put_repair_summary`: after a successful repair step (which may have
+/// edited the fixture topology), `-101`, the target and new-object list sizes, the
+/// repair problem list sizes, the B-rep's face, edge and vertex counts, per face
+/// (sorted) its loop and edge counts, and the vertex points in lexicographic order.
+fn put_repair_summary(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
+    use solidcore::topology::brep::p1 as bp1;
+    use solidcore::topology::face::{p2 as fp2, p4 as fp4};
+    o.push(-101.0);
+    for n in [
+        h.tgt_vertices.len(),
+        h.tgt_edges.len(),
+        h.tgt_faces.len(),
+        h.new_faces_from_fix_degen_faces.len(),
+        h.new_edges_from_split_edges_at_seams.len(),
+        h.new_vertices_from_split_edges_at_seams.len(),
+        h.new_faces_from_split_face_at_seams.len(),
+        h.new_edges_on_seams_from_split_face_at_seams.len(),
+        h.new_vertices_from_split_face_at_seams.len(),
+        h.bad_face_props_degen_faces.len(),
+        h.bad_face_props_crossed_seam.len(),
+        h.bad_face_props_missing_seam.len(),
+        h.bad_face_props_near_miss_seam.len(),
+        h.ran_face_props_move_seam.base.len(),
+        h.ran_face_props_split_edges_at_seam.base.len(),
+    ] {
+        o.push(n as f64);
+    }
+    let faces = bp1::faces(b, None)?;
+    let edges = bp1::edges(b, None)?;
+    let vertices = bp1::vertices(b, None)?;
+    o.extend([faces.len() as f64, edges.len() as f64, vertices.len() as f64]);
+    let mut per_face = Vec::new();
+    for &f in &faces {
+        let loops = fp2::loops(b, f, false, None)?.len();
+        let face_edges = fp4::edges(b, f, None, false, None)?.len();
+        per_face.push((loops, face_edges));
+    }
+    per_face.sort_unstable();
+    for (loops, face_edges) in per_face {
+        o.extend([loops as f64, face_edges as f64]);
+    }
+    let mut pts = Vec::new();
+    for &v in &vertices {
+        let p = b.vertex(v)?.point;
+        pts.push([p.x, p.y, p.z]);
+    }
+    pts.sort_by(|a, b| {
+        a[0].total_cmp(&b[0])
+            .then(a[1].total_cmp(&b[1]))
+            .then(a[2].total_cmp(&b[2]))
+    });
+    for p in pts {
+        o.extend(p);
+    }
+    Ok(())
+}
+
 fn dump(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
     o.push(STATE);
     o.push(h.tgt_vertices.len() as f64);
@@ -1434,6 +1528,16 @@ fn rust_heal(
                 Step::FixSplitFaceAtSeams => !h.bad_face_props_missing_seam.is_empty(),
                 _ => false,
             };
+        let repair = last_without_state
+            && matches!(
+                s,
+                Step::FixCoinVertices
+                    | Step::FixDegenFaces
+                    | Step::FixDegenEdges
+                    | Step::FixMoveSeam
+                    | Step::FixSplitEdgesAtSeam
+                    | Step::FixSplitFaceAtSeams
+            );
         o.push(f64::from(code));
         let r: Result<bool, SolidError> = match s {
             Step::CacheEdgeProps => h.cache_edge_props(&k, &mut b, HealerOpType::CacheEdgeprops),
@@ -1869,6 +1973,9 @@ fn rust_heal(
         }
         match r {
             Ok(new_probs) if last_without_state => {
+                if repair {
+                    put_repair_summary(&h, &b, &mut o).map_err(|e| harness(e.to_string()))?;
+                }
                 o.extend([0.0, flag(new_probs)]);
                 stop = true;
                 break;

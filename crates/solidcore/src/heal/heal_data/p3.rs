@@ -27,7 +27,8 @@
 //! for p5 edits are captured by the actual context callback (`capture_changes`).
 //! Nonempty captures still require the owning notification adapter's key-to-id map;
 //! they defer rather than guessing identities from arena indices. The ported p3/p4/face edits
-//! (`SqueezeEdge`, `DeleteEdge`, `DeleteVertex`, `MakeVertexSplitEdge`, `MoveSeam`) run under a
+//! (`SqueezeEdge`, `DeleteEdge`, `DeleteVertex`, `MakeVertexSplitEdge`, `DeleteFace`, `CreateFaceInRegionFromSurface`, `MoveSeam`,
+//! `SplitAtSeam` and `Fix_SplitEdgesAtSeam`'s vertex-only `MergeIntervals`) run under a
 //! real `SmTrackTopologyChanges` on a context of their own (`tracked_edit`), one per edit
 //! (upstream keeps one per heal loop; the lists merge to the same result with `Changes::append`); the kernel
 //! context's callbacks and identity domain are lent to that context, and the edits
@@ -39,9 +40,10 @@
 //! Errors from nested `HealTgts` propagate after the healer state is restored.
 //! Bare/SE mutation statuses are
 //! ignored except `Unported`; failed calls with no output skip uses of that output.
-//! `Fix_BadLoops` stays disabled. Opaque nonempty classification outputs (including
-//! p7 `FindEdgeObjects`) require a typed resolver and are rejected if unresolved
-//! (currently unreachable behind missing callees).
+//! `Fix_BadLoops` stays disabled. Classification handles of the seam splits
+//! (`FindEdgeObjects`, `MergeIntervals` outputs, `SplitAtSeam`'s vertex lookups) name
+//! B-rep topology through `LoopObject::as_topology`; a handle that names none is
+//! `InvalidInput`.
 //! Partial lists from completed merge intervals survive ignored failures.
 //! `Fix_SplitEdgesAtSeam` does not format the diagnostic of a pole split refused at
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
@@ -990,40 +992,63 @@ impl<O: LoopObject> HealData<O> {
                     p.crv_class_v.as_mut()
                 }
                 .ok_or_else(|| invalid("crossed seam without classification"))?;
-                let (merged, success) =
-                    match class.merge_intervals_with_partial(k, &NoGeometry, true) {
-                        Ok(merged) => (merged, true),
-                        Err(failure) => {
-                            ignore_soft::<()>(Err(failure.error))?;
-                            (*failure.merged, false)
-                        }
-                    };
+                let dir = if u {
+                    SurfParamType::U
+                } else {
+                    SurfParamType::V
+                };
+                // MergeIntervals(&faces, &edges, &vertices, pThisFace, TRUE /* vertices
+                // only */) edits the face's B-rep under the loop's topology tracker.
+                let (merge, edits) = tracked_edit(k, b, |k, b, env| {
+                    crate::topology::face::p4::merge_seam_intervals(
+                        k,
+                        b,
+                        Some(env),
+                        f,
+                        dir,
+                        class,
+                        true,
+                    )
+                });
+                changes.append(edits);
+                let (merged, success) = match merge? {
+                    Ok(merged) => (merged, true),
+                    Err(failure) => {
+                        ignore_soft::<()>(Err(failure.error))?;
+                        (*failure.merged, false)
+                    }
+                };
                 if let Some(status) = merge_ok.get_mut(usize::from(!u)) {
                     *status = success;
                 }
                 // Native retains lists appended before an ignored merge failure.
-                // Opaque handles still require the topology adapter's resolver.
-                let edits = merged_changes(b, &merged)?;
-                self.new_edges_from_split_edges_at_seams.extend(
-                    edits.added.iter().flatten().filter_map(|e| {
-                        if let EntityRef::Edge(x) = e {
-                            Some(*x)
-                        } else {
-                            None
+                for o in &merged.edges {
+                    match o.as_topology() {
+                        Some(EntityRef::Edge(x)) => {
+                            self.new_edges_from_split_edges_at_seams.push(x);
                         }
-                    }),
-                );
-                self.new_vertices_from_split_edges_at_seams.extend(
-                    edits.added.iter().flatten().filter_map(|e| {
-                        if let EntityRef::Vertex(x) = e {
-                            Some(*x)
-                        } else {
-                            None
+                        _ => return Err(invalid("MergeIntervals made an edge without B-rep edge")),
+                    }
+                }
+                for o in &merged.vertices {
+                    match o.as_topology() {
+                        Some(EntityRef::Vertex(x)) => {
+                            self.new_vertices_from_split_edges_at_seams.push(x);
                         }
-                    }),
-                );
-                changes.append(edits);
-                // The next direction obtains the classification again.
+                        _ => {
+                            return Err(invalid(
+                                "MergeIntervals made a vertex without B-rep vertex",
+                            ))
+                        }
+                    }
+                }
+                self.ran_face_props_split_edges_at_seam.add(
+                    &mut self.face_props,
+                    id,
+                    TriedLinkType::Ran,
+                )?;
+                // End the arena borrow before adding the tried record.
+                // The next direction obtains the classification again below.
             }
             if merge_ok == [true, true] {
                 let p = &mut self.face_props.props_mut(id)?.props;
@@ -1077,9 +1102,10 @@ impl<O: LoopObject> HealData<O> {
                     continue;
                 }
             }
-            let (new_faces, edits) =
-                ignore_soft(split_face_at_seam(k, b, f, p))?.unwrap_or_default();
+            let (split, edits) = split_face_at_seam(k, b, f, p);
+            // (status ignored upstream; the tracker keeps what was edited before a failure)
             changes.append(edits);
+            let new_faces = ignore_soft(split)?.unwrap_or_default();
             if new_faces.is_empty() {
                 self.ran_face_props_split_face_at_seam.add(
                     &mut self.face_props,
@@ -1314,60 +1340,36 @@ fn classification_has_dead_topology<O: LoopObject>(
 }
 fn classified_edges<O: LoopObject>(class: Option<&CurveClassification<O>>) -> Result<Vec<EdgeId>> {
     let class = class.ok_or_else(|| invalid("crossed seam without classification"))?;
-    let edges = class.find_edge_objects(&NoGeometry, None, 2)?;
-    if edges.is_empty() {
-        Ok(Vec::new())
-    } else {
-        Err(invalid(
-            "classified edge handles require a typed B-rep resolver",
-        ))
-    }
-}
-fn merged_changes<O: LoopObject>(
-    _b: &Brep,
-    merged: &crate::intersect::curve_class::p5::MergedTopology<O>,
-) -> Result<Changes> {
-    if merged.faces.is_empty() && merged.edges.is_empty() && merged.vertices.is_empty() {
-        return Ok(Changes::default());
-    }
-    // Classification handles have caller-chosen meaning (ClassObject). The
-    // current MergeIntervals implementation cannot return newly created topology
-    // before its missing classification callees are wired. Refuse unresolved
-    // handles rather than inventing ids when that implementation is extended.
-    Err(invalid(
-        "merged topology handles require a typed B-rep resolver",
-    ))
+    // FindEdgeObjects(sThisSplitEdges, NULL, 2): the handles name the B-rep's edges
+    class
+        .find_edge_objects(&NoGeometry, None, 2)?
+        .into_iter()
+        .map(|o| match o.as_topology() {
+            Some(EntityRef::Edge(e)) => Ok(e),
+            _ => Err(invalid("classified edge object is not a B-rep edge")),
+        })
+        .collect()
 }
 /// `pThisFace->SplitAtSeam(*m_pCrvClassU, *m_pCrvClassV, m_eBadCrossedSeam,
-/// m_eBadMissingSeam, m_eBadNearMissSeam, &sThisNewFaces, NULL, NULL, pThisFaceProps)`:
-/// the new faces, and the new faces, edges and vertices as added topology. Classification
-/// handles have no B-rep meaning here (as in [`merged_changes`]): a merge that makes
-/// topology is `InvalidInput` from the resolver, never an invented id.
+/// m_eBadMissingSeam, m_eBadNearMissSeam, &sThisNewFaces, NULL, NULL, pThisFaceProps)`
+/// under the loop's topology tracker ([`tracked_edit`]): the new faces, and what the
+/// tracker recorded. The classification handles name the B-rep's own topology
+/// ([`LoopObject::as_topology`]).
 fn split_face_at_seam<O: LoopObject>(
     k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
     p: &mut FaceProps<O>,
-) -> Result<(Vec<FaceId>, Changes)> {
+) -> (Result<Vec<FaceId>>, Changes) {
     let problem = props_seam_problem(p);
-    let split = with_classes(p, |cu, cv, p| {
-        fp1::split_at_seam(k, b, f, cu, cv, problem, Some(p), &|_| None)
-    })?;
-    let added = split
-        .faces
-        .iter()
-        .map(|&x| EntityRef::Face(x))
-        .chain(split.edges.iter().map(|&x| EntityRef::Edge(x)))
-        .chain(split.vertices.iter().map(|&x| EntityRef::Vertex(x)))
-        .map(Some)
-        .collect();
-    Ok((
-        split.faces,
-        Changes {
-            removed: Vec::new(),
-            added,
-        },
-    ))
+    let (split, changes) = tracked_edit(k, b, |k, b, env| {
+        with_classes(p, |cu, cv, p| {
+            fp1::split_at_seam_notified(k, b, Some(env), f, cu, cv, problem, Some(p), &|o: O| {
+                o.as_topology()
+            })
+        })
+    });
+    (split.map(|s| s.faces), changes)
 }
 
 #[cfg(test)]
