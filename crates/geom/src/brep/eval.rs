@@ -294,20 +294,8 @@ impl SurfaceEval {
     /// period (or its whole range) moves the point no more than `reach` (a boundary point that
     /// lies at a pole to within a tolerance, where its periodic parameter is free).
     pub fn pole_within(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
-        let mut out = self.pole(uv);
-        let Some((_, su, sv)) = self.derivs(uv[0], uv[1]) else { return out };
-        let dom = self.domain();
-        for (d, speed) in [su.len(), sv.len()].into_iter().enumerate() {
-            let span = match (dom.period.get(d).copied().flatten(), dom.range.get(d).copied().flatten()) {
-                (Some(period), _) => 0.5 * period,
-                (None, Some((a, b))) => (b - a).abs(),
-                (None, None) => continue,
-            };
-            if let Some(flag) = out.get_mut(d) {
-                *flag |= speed * span <= reach;
-            }
-        }
-        out
+        let Some((_, su, sv)) = self.derivs(uv[0], uv[1]) else { return [false; 2] };
+        uv::collapsed([su.len(), sv.len()], &self.domain(), reach)
     }
 }
 

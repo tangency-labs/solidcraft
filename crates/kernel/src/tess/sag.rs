@@ -14,12 +14,15 @@ use solidcraft_geom::tess::EvalSurface;
 
 /// Split the triangles `tris` of a face (indices into `uv`; the first `fixed.len()` points sit
 /// at `fixed`, the rest on the surface at their parameters) until none of them lies farther
-/// than `tol` from the surface `s`, adding at most `max_points` points to `uv`.
-pub(crate) fn refine(s: &EvalSurface, tol: f64, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
+/// than `tol` from the surface `s`, adding at most `max_points` points to `uv`. `reach`: how near
+/// a pole a point is taken as one (see [`super::uv::degenerate_within`]).
+pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: &mut Vec<[f64; 2]>, tris: &mut Vec<[u32; 3]>, max_points: usize) {
     if !(tol.is_finite() && tol > 0.0) || tris.is_empty() {
         return;
     }
     let at = |q: [f64; 2]| s.eval(q[0], q[1]).0;
+    let dom = super::uv::domain(s);
+    let mean = |qs: &[[f64; 2]]| mean(s, &dom, reach, qs);
     // How far the flat point `c` lies from the surface, measured along the normal at the surface
     // point of the same parameters: those parameters need not be the nearest (a straight line in
     // the parameters is no geodesic near a pole), and only the departure across the surface
@@ -64,7 +67,7 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, fixed: &[Vec3], uv: &mut Vec<[f6
             if len <= shortest {
                 continue;
             }
-            let sag = *sag_of.entry(e).or_insert_with(|| off(mean(s, &[ua, ub]), (xa + xb) * 0.5));
+            let sag = *sag_of.entry(e).or_insert_with(|| off(mean(&[ua, ub]), (xa + xb) * 0.5));
             inner.push((sag, len, e));
         }
         // The surface's departure from a flat triangle is about quadratic over it: at the
@@ -72,7 +75,7 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, fixed: &[Vec3], uv: &mut Vec<[f6
         // inside the face divides by four. A triangle whose middle is off splits its side inside
         // the face that sags most, while that side still contributes; what is left comes from
         // its boundary sides, which the edges' own sampling keeps within the tolerance.
-        let centroid = mean(s, &[qa, qb, qc]);
+        let centroid = mean(&[qa, qb, qc]);
         let worst = inner.iter().max_by(|x, y| x.0.total_cmp(&y.0)).copied();
         let split = match worst {
             Some((sag, _, e)) if sag > tol => e,
@@ -80,7 +83,7 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, fixed: &[Vec3], uv: &mut Vec<[f6
             _ => continue,
         };
         let (Some(ua), Some(ub)) = (q(split.0), q(split.1)) else { continue };
-        let m = mean(s, &[ua, ub]);
+        let m = mean(&[ua, ub]);
         let mi = uv.len() as u32;
         uv.push(m);
         pos.push(at(m));
@@ -92,10 +95,10 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, fixed: &[Vec3], uv: &mut Vec<[f6
 /// The mean of parameter points, as the surface point between them: at a pole the parameter
 /// along the degenerate direction is free (the pole copy carries a neighbour's), so there the
 /// mean takes it from the other points alone.
-fn mean(s: &EvalSurface, qs: &[[f64; 2]]) -> [f64; 2] {
+fn mean(s: &EvalSurface, dom: &super::uv::Domain, reach: f64, qs: &[[f64; 2]]) -> [f64; 2] {
     let mut out = [0.0; 2];
     for (d, slot) in out.iter_mut().enumerate() {
-        let free: Vec<f64> = qs.iter().filter(|q| !super::uv::degenerate(s, **q, d)).map(|q| q[d]).collect();
+        let free: Vec<f64> = qs.iter().filter(|q| !super::uv::degenerate_within(s, dom, **q, d, reach)).map(|q| q[d]).collect();
         let pick: Vec<f64> = if free.is_empty() { qs.iter().map(|q| q[d]).collect() } else { free };
         *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
     }

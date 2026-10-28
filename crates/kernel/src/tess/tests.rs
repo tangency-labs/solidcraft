@@ -99,7 +99,7 @@ fn a_box_is_a_regular_grid_on_every_face() {
 fn primitives_are_watertight_with_the_right_volume() {
     for tol in [0.05, 0.005] {
         let s = check("box", &ok(crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 6.0, 4.0))), tol, 240.0);
-        assert_eq!(s, PlanStats { planar: 6, structured: 0, delaunay: 0, lenient: Vec::new() });
+        assert_eq!(s, PlanStats { planar: 6, ..PlanStats::default() });
         let s = check("cylinder", &ok(crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0)), tol, PI * 2.5 * 2.5 * 7.0);
         assert_eq!(s.delaunay, 0, "cylinder walls are structured");
         let s = check("torus", &ok(crate::torus(Vec3::ZERO, 6.0, 1.5)), tol, 2.0 * PI * PI * 6.0 * 1.5 * 1.5);
@@ -725,8 +725,8 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let loops = std::slice::from_ref(&l);
     let mut stats = PlanStats::default();
-    assert!(plan_face(0, "spline", &s, loops, &rules, size, &mut stats, Lenient::No).is_err());
-    let Ok(fp) = plan_face(0, "spline", &s, loops, &rules, size, &mut stats, Lenient::Yes) else { panic!("a lenient fill") };
+    assert!(plan_face(0, "spline", &s, loops, &rules, size, 0.0, &mut stats, Lenient::No).is_err());
+    let Ok(fp) = plan_face(0, "spline", &s, loops, &rules, size, 0.0, &mut stats, Lenient::Yes) else { panic!("a lenient fill") };
     assert!(!fp.triangles.is_empty());
     assert!(fp.uv.len() > fp.fixed.len(), "{} points, {} on the boundary", fp.uv.len(), fp.fixed.len());
     // Each point inside the face on the surface where its parameters put it.
@@ -743,7 +743,7 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
 fn a_face_filled_leniently_is_named_in_the_stats() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, None) else { panic!("filled leniently") };
+    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, 0.0, None) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     assert_eq!((stats.planar, stats.structured, stats.delaunay), (0, 0, 0));
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
@@ -760,7 +760,7 @@ fn a_face_untangling_cannot_resolve_is_filled_leniently_and_named() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
     let why = "face 7 (spline): boundary crosses itself: edges [1, 2] run closer together than their chords can follow";
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, Some(why)) else { panic!("filled leniently") };
+    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, 0.0, Some(why)) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
     assert_eq!(lenient.face, 7);
@@ -806,4 +806,60 @@ fn a_face_bounded_by_two_short_arcs_keeps_an_area_to_mesh() {
     let (plan, _) = ok(plan(&made.brep, 0.5, None));
     let lens = made.faces.first().and_then(|&f| plan.faces.get(f)).expect("the lens's plan");
     assert!(!lens.triangles.is_empty(), "the lens has triangles");
+}
+
+/// Half of a square pyramid's sides as one spline face: degree 1, closed round the square
+/// (u in [0, 4], a corner at each whole u) and from the base (v = 0) up to a top side collapsed
+/// to a square 1e-7 mm across, not to a point, as the patch's side in Poppy Humanoid's connector
+/// a quarter of a sphere cap's corner sits on. Its loop runs down the side at u = 0, along the
+/// base to u = 2 and up again, then across the top back to the corner it started at, half a
+/// period along. Taken for no pole, that step is taken as the nearest copy, and the loop winds
+/// once round the surface with no partner to cut it along.
+fn pyramid_past_a_near_pole(pole_tolerance: f64) -> solidcraft_geom::brep::Brep {
+    use solidcraft_geom::brep::{self as b, Curve, Curve2, Surface};
+    let top = 1e-7;
+    let corner = |u: usize, r: f64, z: f64| {
+        let [x, y] = [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]][u % 4];
+        [r * x, r * y, z]
+    };
+    let points: Vec<Vec<[f64; 3]>> = (0..5).map(|u| vec![corner(u, 1.0, 0.0), corner(u, top, 1.0)]).collect();
+    let surface = Surface::Spline { u_knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], points };
+    let edge = |curve: Curve, interval: [f64; 2], vertices: [u32; 2]| b::Edge { nurbs: None, curve, interval, vertices, tolerance: 1e-6, uses: Vec::new() };
+    let edges = vec![
+        edge(Curve::Line { start: corner(0, 1.0, 0.0), end: corner(0, top, 1.0) }, [0.0, 1.0], [1, 0]),
+        edge(Curve::Polyline { points: vec![corner(0, 1.0, 0.0), corner(1, 1.0, 0.0), corner(2, 1.0, 0.0)] }, [0.0, 2.0], [1, 2]),
+        edge(Curve::Line { start: corner(2, 1.0, 0.0), end: corner(2, top, 1.0) }, [0.0, 1.0], [2, 0]),
+    ];
+    let line = |t: [f64; 2], a: [f64; 2], z: [f64; 2]| Curve2::Spline { knots: vec![t[0], t[0], t[1], t[1]], points: vec![a, z] };
+    let uses = vec![
+        b::OrientedEdge { edge: 0, forward: false, pcurve: line([0.0, 1.0], [0.0, 0.0], [0.0, 1.0]) },
+        b::OrientedEdge { edge: 1, forward: true, pcurve: line([0.0, 2.0], [0.0, 0.0], [2.0, 0.0]) },
+        b::OrientedEdge { edge: 2, forward: true, pcurve: line([0.0, 1.0], [2.0, 0.0], [2.0, 1.0]) },
+    ];
+    let face = b::Face { nurbs: None, surface, domain: [[0.0, 2.0], [0.0, 1.0]], loops: vec![b::Loop::Edges { edges: uses }] };
+    let vertex = |point: [f64; 3], tolerance: f64| b::Vertex { point, tolerance };
+    let loose = b::Brep {
+        version: b::VERSION,
+        tolerance: 1e-7,
+        regions: vec![b::Region { shells: vec![0], void: false }],
+        shells: vec![b::Shell::Faces { faces: vec![b::OrientedFace { face: 0, forward: true }], wires: Vec::new() }],
+        faces: vec![face],
+        edges,
+        vertices: vec![vertex([0.0, 0.0, 1.0], pole_tolerance), vertex(corner(0, 1.0, 0.0), 1e-7), vertex(corner(2, 1.0, 0.0), 1e-7)],
+    };
+    ok(loose.canonical().map_err(|e| crate::KernelError::Invalid(format!("{e:?}")))).brep
+}
+
+/// The corner of [`pyramid_past_a_near_pole`] within its vertex's tolerance of the collapsed top
+/// side is a pole, and the face plans strictly over both its sides; with a tolerance short of
+/// the top's size it is no pole, and the loop winds.
+#[test]
+fn a_loop_corner_within_its_tolerance_of_a_pole_is_a_pole() {
+    let (made, stats) = ok(plan(&pyramid_past_a_near_pole(1e-6), 0.01, None));
+    assert!(stats.lenient.is_empty() && stats.unmeshed.is_empty(), "{stats:?}");
+    // Two of the pyramid's sides, each a triangle of area √3 / 2.
+    let area = made.evaluate().measure().area;
+    assert!((area - 3f64.sqrt()).abs() < 0.01 * 3f64.sqrt(), "area {area}");
+    let Err(e) = plan(&pyramid_past_a_near_pole(1e-8), 0.01, None) else { panic!("no pole without the tolerance") };
+    assert!(e.to_string().contains("winds around the surface"), "{e}");
 }
