@@ -1,0 +1,47 @@
+{
+  "en": {
+    "cmd.inspect_section_delete": "Delete Section Analysis",
+    "cmd.inspect_section_edit": "Edit Section Analysis",
+    "cmd.inspect_section_list": "List Section Analyses",
+    "cmd.inspect_section_rename": "Rename Section Analysis",
+    "cmd.inspect_section_visibility": "Show/Hide Section Analysis",
+    "section.default_name": "Section {n}",
+    "section.not_found": "This section does not cut: {why}"
+  },
+  "de": {
+    "cmd.inspect_section_delete": "Querschnittsanalyse löschen",
+    "cmd.inspect_section_edit": "Querschnittsanalyse bearbeiten",
+    "cmd.inspect_section_list": "Querschnittsanalysen auflisten",
+    "cmd.inspect_section_rename": "Querschnittsanalyse umbenennen",
+    "cmd.inspect_section_visibility": "Querschnittsanalyse ein-/ausblenden",
+    "section.default_name": "Schnitt {n}",
+    "section.not_found": "Dieser Schnitt ist nicht wirksam: {why}"
+  },
+  "ja": {
+    "cmd.inspect_section_delete": "断面解析を削除",
+    "cmd.inspect_section_edit": "断面解析を編集",
+    "cmd.inspect_section_list": "断面解析の一覧",
+    "cmd.inspect_section_rename": "断面解析の名前を変更",
+    "cmd.inspect_section_visibility": "断面解析の表示/非表示",
+    "section.default_name": "断面 {n}",
+    "section.not_found": "この断面は無効です: {why}"
+  },
+  "zh": {
+    "cmd.inspect_section_delete": "删除截面分析",
+    "cmd.inspect_section_edit": "编辑截面分析",
+    "cmd.inspect_section_list": "列出截面分析",
+    "cmd.inspect_section_rename": "重命名截面分析",
+    "cmd.inspect_section_visibility": "显示/隐藏截面分析",
+    "section.default_name": "截面 {n}",
+    "section.not_found": "此截面无效：{why}"
+  },
+  "ko": {
+    "cmd.inspect_section_delete": "단면 분석 삭제",
+    "cmd.inspect_section_edit": "단면 분석 편집",
+    "cmd.inspect_section_list": "단면 분석 목록",
+    "cmd.inspect_section_rename": "단면 분석 이름 바꾸기",
+    "cmd.inspect_section_visibility": "단면 분석 표시/숨기기",
+    "section.default_name": "단면 {n}",
+    "section.not_found": "이 단면은 적용되지 않습니다: {why}"
+  }
+}

@@ -155,15 +155,6 @@ pub struct TreeState {
     pub cloud_panel: Option<CloudPanel>,
     /// The plane a row at the top of the history lights this frame, kept the same way (#6975).
     history_plane: Option<String>,
-    /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
-    /// normal), so the eye can bring it back (#822).
-    pub hidden_section: Option<(solidcraft_engine::geom::Vec3, solidcraft_engine::geom::Vec3)>,
-    /// What the Section Analysis dialog's OK last made, for Edit to start from.
-    pub section_dialog: Option<crate::dialogs::SectionDraft>,
-    /// The Analysis folder hidden with its own eye, and the Section Analysis hidden with its
-    /// own: the section shows only while neither is, and each eye keeps its state.
-    pub analysis_hidden: bool,
-    pub section_hidden: bool,
     /// What waits for the Capture Position question: a command id, or [`SAVE`].
     pub capture_prompt: Option<String>,
     /// The design, undo depth and visibility when the button last went down: a drag over the eyes
@@ -1999,22 +1990,18 @@ pub fn view_items(app: &SolveApp, name: &str) -> Vec<Item> {
     ]
 }
 
-/// The Analysis folder: the Section Analysis, while there is one (shown or hidden), with an eye
-/// to hide and show it, a double-click to edit it and a menu to delete it (#822).
+/// The Analysis folder: the design's Section Analyses, while it has any (#822, #3977). The
+/// folder's eye hides them all and brings back the one shown; each section's eye shows it and
+/// hides the one shown before (only one cuts the view). A double-click edits one, and its menu
+/// renames, shows or hides, or deletes it. A section whose plane or face is gone is marked and
+/// says why.
 fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    if app.session.section.is_some() {
-        // A section made (or remade) while an older one was hidden replaces it, shown.
-        app.tree.hidden_section = None;
-        app.tree.analysis_hidden = false;
-        app.tree.section_hidden = false;
-    }
-    if app.session.section.is_none() && app.tree.hidden_section.is_none() {
-        app.tree.analysis_hidden = false;
-        app.tree.section_hidden = false;
+    let all = app.session.doc.section_analyses.clone();
+    if all.items.is_empty() {
         return;
     }
-    // Each eye is its own: the folder's never follows the section's, nor the other way round.
-    let (folder_shown, section_shown) = (!app.tree.analysis_hidden, !app.tree.section_hidden);
+    // Each eye is its own: the folder's never follows a section's, nor the other way round.
+    let folder_shown = !all.folder_hidden;
     let key = "analysis";
     let open = is_open(app, key, true);
     let r = draw_row(
@@ -2026,73 +2013,55 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
         toggle(app, key, true);
     }
     if r.eye {
-        app.tree.analysis_hidden = folder_shown;
-        sync_section(app);
+        let _ = app.run("inspect.section.visibility", json!({ "visible": !folder_shown }));
     }
     if !open {
         return;
     }
-    let r = draw_row(
-        ui,
-        ui.id().with("section_analysis"),
-        &Row {
-            depth: depth + 1,
-            eye: Some(section_shown),
-            icon: "section",
-            label: "Section Analysis",
-            dim: !section_shown || !folder_shown,
-            ..Default::default()
-        },
-    );
-    if r.eye {
-        set_section_shown(app, !section_shown);
-    }
-    if r.double {
-        crate::dialogs::edit_section(app);
-    }
-    if let Some(p) = r.secondary {
-        acts.menu = Some((p, Target::Section));
-    }
-}
-
-/// Show or hide the Section Analysis itself (its eye): a hidden Analysis folder still keeps it
-/// off.
-pub fn set_section_shown(app: &mut SolveApp, shown: bool) {
-    app.tree.section_hidden = !shown;
-    sync_section(app);
-}
-
-/// The section is on while both the Analysis folder and the section itself are shown.
-fn sync_section(app: &mut SolveApp) {
-    let on = !app.tree.analysis_hidden && !app.tree.section_hidden;
-    set_section_visible(app, on);
-}
-
-/// Hide the Section Analysis (keeping its plane to show it again) or show the hidden one.
-pub fn set_section_visible(app: &mut SolveApp, visible: bool) {
-    if visible {
-        if let Some((origin, normal)) = app.tree.hidden_section {
-            let plane = json!({"origin": [origin.x, origin.y, origin.z], "normal": [normal.x, normal.y, normal.z]});
-            if app.run("inspect.section", json!({"plane": plane, "hatch": app.session.section_hatch})).is_ok() {
-                app.tree.hidden_section = None;
-            }
+    let t = Tokens::get();
+    for sec in &all.items {
+        let shown = all.shown == Some(sec.id);
+        let problem = solidcraft_engine::cmd::section::status(&app.session, sec.id).and_then(Result::err);
+        let r = draw_row(
+            ui,
+            ui.id().with(("section_analysis", sec.id)),
+            &Row {
+                depth: depth + 1,
+                eye: Some(shown),
+                icon: if problem.is_some() { "warning" } else { "section" },
+                label: &sec.name,
+                name: true,
+                dim: !shown || !folder_shown,
+                color: problem.is_some().then_some(t.error),
+                ..Default::default()
+            },
+        );
+        if let (Some(why), Some(resp)) = (&problem, &r.resp) {
+            let tip = crate::i18n::format("section.not_found", &[("why", why)]);
+            resp.clone().on_hover_text(tip);
         }
-    } else if let Some(section) = app.session.section
-        && app.run("inspect.section", json!({"clear": true})).is_ok()
-    {
-        app.tree.hidden_section = Some(section);
+        if r.eye {
+            let _ = app.run("inspect.section.visibility", json!({ "section": sec.id, "visible": !shown }));
+        }
+        if r.double {
+            crate::dialogs::edit_section(app, sec.id);
+        }
+        if let Some(p) = r.secondary {
+            acts.menu = Some((p, Target::Section { id: sec.id }));
+        }
     }
 }
 
-/// The menu of the Section Analysis row.
-pub fn section_items(app: &SolveApp) -> Vec<Item> {
-    let visible = !app.tree.section_hidden;
+/// The menu of a Section Analysis row.
+pub fn section_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    let visible = app.session.doc.section_analyses.shown == Some(id);
     vec![
-        Item::action("ui.editSection", "Edit Section Analysis", "section"),
+        Item::action("ui.editSection", "Edit Section Analysis", "section").with(json!({ "section": id })),
+        Item::action("ui.rename", "Rename", "rename").with(json!({ "section": id })),
         Item::sep(),
-        Item::action("ui.unsection", "Delete", "delete"),
+        Item::action("inspect.section.visibility", "Show/Hide", "eye").key("V").with(json!({ "section": id, "visible": !visible })),
         Item::sep(),
-        Item::action("ui.sectionVisible", "Show/Hide", "eye").key("V").with(json!({ "visible": !visible })),
+        Item::action("inspect.section.delete", "Delete", "delete").with(json!({ "section": id })),
     ]
 }
 

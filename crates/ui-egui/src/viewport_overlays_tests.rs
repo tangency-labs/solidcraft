@@ -1837,7 +1837,8 @@ fn section_status_preserves_legacy_three_items_and_dialog_escape_ownership() {
         let item = crate::viewport_status::presentation(&h.app, effect).unwrap();
         assert!(crate::scenario::rect_of(&format!("viewport_status:{}:item", item.id)).is_some());
     }
-    crate::dialogs::edit_section(&mut h.app);
+    let shown = h.app.session.doc.section_analyses.shown.unwrap();
+    crate::dialogs::edit_section(&mut h.app, shown);
     h.frames(3);
     let cut = h.app.session.section;
     h.step(&json!({"key":"Escape"})).unwrap();
