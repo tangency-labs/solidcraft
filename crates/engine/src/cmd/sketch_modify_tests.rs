@@ -1852,12 +1852,54 @@ fn an_ellipse_comes_with_its_axes_as_construction_lines() {
     let lengths = axes(&s);
     assert!(lengths.len() == 2 && close(lengths[0], 16.0) && close(lengths[1], 40.0), "{lengths:?}");
     assert!(profiles(&s).len() == 1 && close(profiles(&s)[0], std::f64::consts::PI * 160.0), "{:?}", profiles(&s));
+    // Dragging either axis moves the ellipse and its axes as one, sizes kept, as dragging a
+    // Center Rectangle's diagonal moves the rectangle.
+    let half_axes = |s: &Session| {
+        let sk = sketch(s);
+        let Some(CurveKind::Ellipse { c, m, r }) = sk.curves.iter().map(|x| x.kind.clone()).find(|k| matches!(k, CurveKind::Ellipse { .. })) else {
+            panic!("the ellipse")
+        };
+        (sk.point(c).unwrap(), sk.point(c).unwrap().dist(sk.point(m).unwrap()), r)
+    };
+    let (centre, ..) = half_axes(&s);
+    let (major, minor) = {
+        let sk = sketch(&s);
+        let mut lines: Vec<(f64, String)> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Line { a, b } => Some((sk.point(a).unwrap().dist(sk.point(b).unwrap()), c.id.clone())),
+                _ => None,
+            })
+            .collect();
+        lines.sort_by(|x, y| y.0.total_cmp(&x.0));
+        (lines[0].1.clone(), lines[1].1.clone())
+    };
+    let mut moved = centre;
+    for (line, by) in [(&major, Vec2::new(4.0, 6.0)), (&minor, Vec2::new(-3.0, 2.0))] {
+        let from = moved + if *line == major { Vec2::new(-12.0, 0.0) } else { Vec2::new(0.0, 4.0) };
+        run(&mut s, "sketch.drag", json!({"entity": line, "from": [from.x, from.y], "to": [from.x + by.x, from.y + by.y]}));
+        run(&mut s, "sketch.drag_end", json!({}));
+        moved += by;
+        let (at, a, b) = half_axes(&s);
+        assert!(at.dist(moved) < 1e-6 && close(a, 20.0) && close(b, 8.0), "dragging {line}: centre {at:?}, half-axes {a} {b}");
+        let lengths = axes(&s);
+        assert!(close(lengths[0], 16.0) && close(lengths[1], 40.0), "dragging {line}: {lengths:?}");
+    }
     // Sizing the ellipse resizes its axes, and they stay through its centre.
     run(&mut s, "sketch.dimension", json!({"entities": [&e], "type": "major", "value": 30}));
     run(&mut s, "sketch.dimension", json!({"entities": [&e], "type": "minor", "value": 10}));
     let lengths = axes(&s);
     assert!(close(lengths[0], 20.0) && close(lengths[1], 60.0), "{lengths:?}");
     assert!(close(profiles(&s)[0], std::f64::consts::PI * 300.0), "{:?}", profiles(&s));
+    // A double-click on the ellipse or on either axis selects all three, as one on a Center
+    // Rectangle's edge or diagonal selects its edges and both diagonals.
+    let curves: Vec<String> = sketch(&s).curves.iter().map(|c| c.id.clone()).collect();
+    for id in &curves {
+        let mut chain = ids(&run(&mut s, "sketch.chain", json!({"curve": id}))["curves"]);
+        chain.sort();
+        assert_eq!(chain, curves, "double-click on {id}");
+    }
     // Deleting it leaves the two axes, still construction and still perpendicular.
     run(&mut s, "sketch.delete", json!({"entities": [&e]}));
     let sk = sketch(&s);
@@ -1867,6 +1909,7 @@ fn an_ellipse_comes_with_its_axes_as_construction_lines() {
     // The same as a Center Rectangle whose edges are deleted: its diagonals stay.
     let mut s = new_sketch();
     let edges = ids(&run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 10]}))["curves"]);
+    assert_eq!(ids(&run(&mut s, "sketch.chain", json!({"curve": &edges[0]}))["curves"]).len(), 6);
     run(&mut s, "sketch.delete", json!({"entities": edges}));
     let sk = sketch(&s);
     assert!(sk.curves.len() == 2 && sk.curves.iter().all(|c| c.construction), "{:?}", sk.curves);

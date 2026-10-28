@@ -660,6 +660,15 @@ impl ConstraintKind {
     }
 }
 
+/// An ellipse's construction axes (see [`Sketch::ellipse_axes`]): the two lines, and the axis
+/// ends: the major end, the point opposite it, the minor end on the ellipse, the one opposite.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EllipseAxes {
+    pub major: usize,
+    pub minor: usize,
+    pub ends: [usize; 4],
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Constraint {
     pub id: String,
@@ -1261,8 +1270,40 @@ impl Sketch {
         out
     }
 
+    /// The construction axes `sketch.ellipse` draws with an ellipse: the major axis line from
+    /// the point opposite the major end to the major end, the minor axis line held on the
+    /// ellipse at one end, both bisected by the centre. None for an ellipse without them (one
+    /// from an older design, or whose axes were deleted).
+    pub fn ellipse_axes(&self, e: usize) -> Option<EllipseAxes> {
+        let Some(CurveKind::Ellipse { c, m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };
+        let line = |l: usize| match self.curves.get(l).map(|x| &x.kind) {
+            Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+            _ => None,
+        };
+        let held =
+            |l: usize| self.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::Midpoint { p, l: on } if p == *c && on == l));
+        let on =
+            |q: usize| self.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::PointOnCurve { p, c: on } if p == q && on == e));
+        let (major, m2) = (0..self.curves.len()).find_map(|l| match line(l) {
+            Some((a, b)) if held(l) && (a == *m || b == *m) => Some((l, if a == *m { b } else { a })),
+            _ => None,
+        })?;
+        let (minor, n1, n2) = (0..self.curves.len()).filter(|l| *l != major && held(*l)).find_map(|l| {
+            let (a, b) = line(l)?;
+            if on(a) {
+                Some((l, a, b))
+            } else if on(b) {
+                Some((l, b, a))
+            } else {
+                None
+            }
+        })?;
+        Some(EllipseAxes { major, minor, ends: [*m, m2, n1, n2] })
+    }
+
     /// The curves joined end to end with curve `ci` (through shared or coincident end points),
-    /// `ci` first, then the others in sketch order: what a double-click selects.
+    /// `ci` first, then the others in sketch order: what a double-click selects. An ellipse and
+    /// its construction axes count as joined, as a rectangle's edges and its diagonals are.
     pub fn chain(&self, ci: usize) -> Vec<usize> {
         if ci >= self.curves.len() {
             return Vec::new();
@@ -1276,6 +1317,7 @@ impl Sketch {
         }
         let ends: Vec<Vec<usize>> =
             self.curves.iter().map(|c| c.kind.ends().map(|(a, b)| vec![find(&mut root, a), find(&mut root, b)]).unwrap_or_default()).collect();
+        let ellipses: Vec<(usize, EllipseAxes)> = (0..self.curves.len()).filter_map(|e| Some((e, self.ellipse_axes(e)?))).collect();
         let mut seen = vec![false; self.curves.len()];
         let mut stack = vec![ci];
         let mut out = Vec::new();
@@ -1291,6 +1333,11 @@ impl Sketch {
             for (j, e) in ends.iter().enumerate() {
                 if !seen.get(j).copied().unwrap_or(true) && e.iter().any(|p| mine.contains(p)) {
                     stack.push(j);
+                }
+            }
+            for (e, axes) in &ellipses {
+                if [*e, axes.major, axes.minor].contains(&i) {
+                    stack.extend([*e, axes.major, axes.minor]);
                 }
             }
         }

@@ -786,8 +786,18 @@ fn plan(sk: &Sketch, e: Ent, from: Vec2, to: Vec2) -> Option<(Path, Hold)> {
                     Path::ConicRho { c, from: rho, to: to_rho }
                 }
                 k => {
-                    // Lines and splines slide with the cursor.
+                    // Lines and splines slide with the cursor. An ellipse's construction axis
+                    // takes the ellipse and the other axis along, keeping their sizes, as a
+                    // rectangle's diagonal does through the corners it shares with the edges.
                     let mut ids = k.point_ids();
+                    if let Some((e, axes)) =
+                        (0..sk.curves.len()).find_map(|e| sk.ellipse_axes(e).filter(|axes| axes.major == c || axes.minor == c).map(|axes| (e, axes)))
+                        && let Some(kind) = sk.curves.get(e).map(|x| &x.kind)
+                    {
+                        ids.extend(kind.point_ids());
+                        ids.extend(axes.ends);
+                        hold.radii.push(e);
+                    }
                     ids.sort_unstable();
                     ids.dedup();
                     let pts = ids.iter().filter(|q| free(q)).filter_map(|&q| Some((q, sk.point(q)?))).collect();

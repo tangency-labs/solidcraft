@@ -2867,7 +2867,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 };
                 // One drawn with its axes: a half-axis is the distance from the centre to an axis end.
                 if ty != "radius"
-                    && let Some(ends) = ellipse_axis_ends(sk, c)
+                    && let Some(ends) = sk.ellipse_axes(c).map(|axes| axes.ends)
                 {
                     let (which, end) = ellipse_half_axis(sk, cp, &ends, r, &ty, text_at, previous_axis.as_deref());
                     axis = Some(which);
@@ -3148,38 +3148,6 @@ fn auto_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
         (true, false) => "horizontal",
         (false, true) => "vertical",
         _ => ty,
-    }
-}
-
-/// The axis ends of an ellipse drawn with its axes (`sketch.ellipse` adds them): the major end
-/// and the point opposite it, then the minor end held on the ellipse and the one opposite it.
-/// None for an ellipse without them (one from an older design, or whose axes were deleted).
-fn ellipse_axis_ends(sk: &Sketch, e: usize) -> Option<[usize; 4]> {
-    let Some(CurveKind::Ellipse { c, m, .. }) = sk.curves.get(e).map(|x| &x.kind) else { return None };
-    let held = |l: usize| sk.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::Midpoint { p, l: on } if p == *c && on == l));
-    let major = (0..sk.curves.len()).find_map(|l| match line_ends_of(sk, l) {
-        Some((a, b)) if held(l) && (a == *m || b == *m) => Some((l, if a == *m { b } else { a })),
-        _ => None,
-    })?;
-    let minor = (0..sk.curves.len()).filter(|l| *l != major.0 && held(*l)).find_map(|l| {
-        let (a, b) = line_ends_of(sk, l)?;
-        let on =
-            |q: usize| sk.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::PointOnCurve { p, c: on } if p == q && on == e));
-        if on(a) {
-            Some((a, b))
-        } else if on(b) {
-            Some((b, a))
-        } else {
-            None
-        }
-    })?;
-    Some([*m, major.1, minor.0, minor.1])
-}
-
-fn line_ends_of(sk: &Sketch, l: usize) -> Option<(usize, usize)> {
-    match sk.curves.get(l)?.kind {
-        CurveKind::Line { a, b } => Some((a, b)),
-        _ => None,
     }
 }
 
