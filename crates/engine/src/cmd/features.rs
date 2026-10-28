@@ -128,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face); handedness?: right|left (default right); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
+        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face); handedness?: right|left (default right); modeled?: bool (default false); clearance?: expr, a modelled thread's fit clearance (its groove's flanks and root move out this far: positive is looser, for printed threads; negative tighter; default 0, under a quarter of the pitch). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -2951,13 +2951,17 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, l, Kind::Length, cmd, "length")?;
     }
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    let clearance = expr(p, "clearance");
+    if let Some(c) = &clearance {
+        check_expr(s, c, Kind::Length, cmd, "clearance")?;
+    }
     if designation.is_none()
         && let Some(msg) = beyond_coarse_range(&s.model.state(), face)
     {
         return Err(bad(cmd, msg));
     }
     let handedness = thread_handedness(p, cmd)?;
-    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness })?;
+    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness, clearance })?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
     Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))

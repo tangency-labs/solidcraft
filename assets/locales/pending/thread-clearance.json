@@ -1,0 +1,44 @@
+{
+  "en": {
+    "thread.clearance_amount": "Clearance amount",
+    "thread.fit_wider": "Wider",
+    "thread.fit_narrower": "Narrower",
+    "thread.fit_wider_help": "Looser fit for printed threads: the groove grows by the amount",
+    "thread.fit_narrower_help": "Tighter fit: the groove shrinks by the amount"
+  },
+  "ar": {
+    "thread.clearance_amount": "مقدار الخلوص",
+    "thread.fit_wider": "أوسع",
+    "thread.fit_narrower": "أضيق",
+    "thread.fit_wider_help": "ملاءمة أرخى للأسنان المطبوعة: يتسع الأخدود بهذا المقدار",
+    "thread.fit_narrower_help": "ملاءمة أحكم: يضيق الأخدود بهذا المقدار"
+  },
+  "he": {
+    "thread.clearance_amount": "מידת המרווח",
+    "thread.fit_wider": "רחב יותר",
+    "thread.fit_narrower": "צר יותר",
+    "thread.fit_wider_help": "התאמה רפויה יותר להברגות מודפסות: החריץ מתרחב בשיעור זה",
+    "thread.fit_narrower_help": "התאמה הדוקה יותר: החריץ מצטמצם בשיעור זה"
+  },
+  "ja": {
+    "thread.clearance_amount": "クリアランス量",
+    "thread.fit_wider": "広く",
+    "thread.fit_narrower": "狭く",
+    "thread.fit_wider_help": "印刷ねじ向けのゆるいはめあい：溝がこの量だけ広がります",
+    "thread.fit_narrower_help": "きついはめあい：溝がこの量だけ狭まります"
+  },
+  "vi": {
+    "thread.clearance_amount": "Độ hở",
+    "thread.fit_wider": "Rộng hơn",
+    "thread.fit_narrower": "Hẹp hơn",
+    "thread.fit_wider_help": "Lắp lỏng hơn cho ren in 3D: rãnh rộng thêm một lượng bằng độ hở",
+    "thread.fit_narrower_help": "Lắp chặt hơn: rãnh hẹp lại một lượng bằng độ hở"
+  },
+  "zh": {
+    "thread.clearance_amount": "间隙量",
+    "thread.fit_wider": "加宽",
+    "thread.fit_narrower": "收窄",
+    "thread.fit_wider_help": "适合打印螺纹的较松配合：螺纹槽按此量加宽",
+    "thread.fit_narrower_help": "较紧配合：螺纹槽按此量收窄"
+  }
+}

@@ -830,6 +830,12 @@ pub enum FeatureKind {
         modeled: bool,
         #[serde(default, skip_serializing_if = "ThreadHandedness::is_right")]
         handedness: ThreadHandedness,
+        /// Fit clearance of a modelled thread: its groove's flanks and root move this far out
+        /// along their normals. Positive widens the groove for a looser fit (a hole's thread
+        /// grows, a shaft's thins), as printed threads need; negative tightens it. `None` = 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Clearance")]
+        clearance: Option<Expr>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {

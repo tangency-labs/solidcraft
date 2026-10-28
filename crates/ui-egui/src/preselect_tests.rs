@@ -2840,3 +2840,46 @@ fn construction_points_fill_three_point_plane_dialog() {
     assert!((planes[0].2.origin.z - 10.0).abs() < 1e-9);
     assert!(planes[0].2.normal().dot(Vec3::Z).abs() > 1.0 - 1e-9);
 }
+
+#[test]
+fn modeled_thread_clearance_tiles_warn_apply_and_reopen() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+    h.app.run("solid.cylinder", json!({"radius":4,"height":4})).unwrap();
+    let Sel::Face { point, .. } = thread_face(&h.app, "Body1") else { panic!("face") };
+    let id = h.app.run("solid.thread", json!({"face":point,"designation":"M8x1","modeled":true})).unwrap()["feature"].as_u64().unwrap();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"timeline:Thread1"},"double":true})).unwrap();
+    h.frames(4);
+    assert!(crate::scenario::handle_at("dialog:thread_fit:Wider").is_some(), "a modelled thread offers the fit tiles");
+    assert!(crate::scenario::handle_at("dialog:thread_fit_warning").is_none());
+    // 0.2 mm wider on a 1 mm pitch trims the tooth tips: the warning shows.
+    h.step(&json!({"click":{"handle":"dialog:Clearance amount"}})).unwrap();
+    h.step(&json!({"text":"0.2"})).unwrap();
+    h.frames(3);
+    assert!(crate::scenario::handle_at("dialog:thread_fit_warning").is_some(), "wider 0.2 mm on M8x1 warns");
+    h.step(&json!({"click":{"handle":"dialog:thread_fit:Narrower"}})).unwrap();
+    h.frames(3);
+    if h.app.dialog.as_ref().unwrap().previews() {
+        wait_feature_preview(&mut h);
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while h.app.applying.is_some() && std::time::Instant::now() < deadline {
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(4);
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    let solidcraft_engine::doc::FeatureKind::Thread { clearance, .. } = &h.app.session.doc.feature(id).unwrap().kind else { panic!("thread") };
+    assert_eq!(clearance.as_deref(), Some("-(0.2)"), "narrower is saved as the negated amount");
+    assert!(h.app.session.model.result(id).unwrap().error.is_none());
+    h.app.edit_feature(id);
+    h.frames(2);
+    assert!(
+        matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Thread { clearance, narrower: true, .. } if clearance == "0.2"),
+        "{:?}",
+        h.app.dialog.as_ref().unwrap().kind
+    );
+}

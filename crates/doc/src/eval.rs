@@ -392,6 +392,14 @@ pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
 }
 
 /// "M8" or "M8x1" → (nominal diameter, pitch).
+/// Whether a modelled thread's `clearance` (mm, positive = wider) at this `pitch` widens its
+/// grooves past where the ISO teeth leave room, so the tooth tips are trimmed (`thread_groove`).
+/// Measured at a shaft's crest, the tighter case: the groove's half width there, 7P/16, grows
+/// by c / cos 30° up to the 0.49 P a groove is held at.
+pub fn thread_clearance_trims_teeth(pitch: f64, clearance: f64) -> bool {
+    clearance > 0.0 && 7.0 * pitch / 16.0 + clearance / (std::f64::consts::PI / 6.0).cos() > 0.49 * pitch
+}
+
 pub fn parse_metric_thread(s: &str) -> Option<(f64, f64)> {
     let t = s.trim().to_ascii_uppercase();
     let body = t.strip_prefix('M')?;
@@ -526,8 +534,11 @@ fn thread_on_impl(
 /// profile, 60° flanks): cut from the shaft (external) or the hole wall (internal), running from
 /// `start` to `end` along the axis. `radius` is the face's own radius; `open` says which ends
 /// of the threaded length are free ends of the face.
-fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<solidcraft_geom::Mesh> {
+fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool), clearance: f64) -> Result<solidcraft_geom::Mesh> {
     let (p, d) = (t.pitch, t.major_diameter);
+    if !(clearance.is_finite() && clearance.abs() < p / 4.0) {
+        return Err(DocError::Invalid(format!("a thread's clearance must be under a quarter of its pitch ({} mm)", show_mm(p / 4.0))));
+    }
     let h = p * 3f64.sqrt() / 2.0;
     let slope = (std::f64::consts::PI / 6.0).tan();
     let len = t.end - t.start;
@@ -592,7 +603,38 @@ fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<soli
     let (s0, s1) = (if open.0 { t.start - p } else { t.start }, if open.1 { t.end + p } else { t.end });
     let base = t.axis_point + k * s0;
     let plane = Plane { origin: base, x: u, y: *k };
-    let section = [Vec2::new(r0, -w0), Vec2::new(r1, -w1), Vec2::new(r1, w1), Vec2::new(r0, w0)];
+    // The clearance moves the flanks out along their normals (half widths grow by c / cos 30°)
+    // and the root, which is the groove's deep end, away from the material by c.
+    let grow = clearance / (std::f64::consts::PI / 6.0).cos();
+    let (r0, w0, r1, w1) = if t.internal { (r0, w0 + grow, r1 + clearance, w1 + grow) } else { (r0 - clearance, w0 + grow, r1, w1 + grow) };
+    // A narrower fit can bring the flanks together before the groove's narrow end (a shaft's
+    // root, a hole's major diameter): the groove then ends where they meet, a little shallower.
+    let tip = 0.01 * p;
+    if w0.max(w1) <= tip {
+        return Err(DocError::Invalid("the thread's clearance closes its groove".into()));
+    }
+    let meet = r0 + (tip - w0) / (w1 - w0) * (r1 - r0);
+    let (r0, w0, r1, w1) = if w0 < tip {
+        (meet, tip, r1, w1)
+    } else if w1 < tip {
+        (r0, w0, meet, tip)
+    } else {
+        (r0, w0, r1, w1)
+    };
+    // Where the grown groove gets wider than a turn leaves room for, it is held just under half a
+    // pitch, so neighbouring turns never overlap. Held inside the material (a large clearance,
+    // see `thread_clearance_trims_teeth`), the tooth tips are cut down to a thin ridge: printed
+    // threads accept that, and the dialog warns about it.
+    let cap = 0.49 * p;
+    let mut section = vec![Vec2::new(r0, -w0), Vec2::new(r1, -w1), Vec2::new(r1, w1), Vec2::new(r0, w0)];
+    if w0.max(w1) > cap {
+        let at = r0 + (cap - w0) / (w1 - w0) * (r1 - r0);
+        section = if t.internal {
+            vec![Vec2::new(r0, -cap), Vec2::new(at, -cap), Vec2::new(r1, -w1), Vec2::new(r1, w1), Vec2::new(at, cap), Vec2::new(r0, cap)]
+        } else {
+            vec![Vec2::new(r0, -w0), Vec2::new(at, -cap), Vec2::new(r1, -cap), Vec2::new(r1, cap), Vec2::new(at, cap), Vec2::new(r0, w0)]
+        };
+    }
     // Keep radial chord error below 1% of the pitch, rather than a fixed fraction of the
     // diameter. At 48 stations a large fine thread cuts too deeply; its outer tool facets
     // can even dip under the shaft surface. The existing coarse sizes still use 48.
@@ -639,9 +681,9 @@ mod thread_handedness_tests {
                     start: 1.3,
                     end: 4.3,
                 };
-                let right = thread_groove(&info, radius, (false, true)).unwrap();
+                let right = thread_groove(&info, radius, (false, true), 0.0).unwrap();
                 info.handedness = crate::ThreadHandedness::Left;
-                let left = thread_groove(&info, radius, (false, true)).unwrap();
+                let left = thread_groove(&info, radius, (false, true), 0.0).unwrap();
                 // Reflection in the radial plane of the initial profile, independent of the
                 // helix parameterization: the projected coordinate along the axis stays fixed.
                 let seed = if axis.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
@@ -7262,10 +7304,14 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
-        FeatureKind::Thread { face, designation, length, modeled, handedness } => {
+        FeatureKind::Thread { face, designation, length, modeled, handedness, clearance } => {
             let l = match length {
                 Some(e) => Some(val(vals, e, Kind::Length)?),
                 None => None,
+            };
+            let clearance = match clearance {
+                Some(e) => val(vals, e, Kind::Length)?,
+                None => 0.0,
             };
             let t = thread_on(st, f.id, face.0, designation.as_deref(), l, *modeled, *handedness)?;
             if !*modeled {
@@ -7286,7 +7332,8 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 }
                 None => (input, cyl.radius),
             };
-            let groove = thread_groove(&t, radius, ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol))?;
+            let ends = ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol);
+            let groove = thread_groove(&t, radius, ends, clearance)?;
             // The B-rep boolean can't take helical walls in reasonable time: the body is cut
             // faceted (curved faces within a two-hundredth of the pitch).
             let nb = kernel::faceted_boolean(&input.body, &groove, BoolOp::Cut, t.pitch * 0.005)?

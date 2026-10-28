@@ -240,6 +240,84 @@ pub(crate) fn rows(ui: &mut egui::Ui, designation: &mut String, suggested: &mut 
     (enter, reset)
 }
 
+/// A modelled thread's fit: two tiles, **Wider** (the default: the groove grows for a looser fit,
+/// as printed threads need) or **Narrower**, each with a picture of the teeth's flanks moving
+/// out or in, then the amount. Returns whether Enter was pressed in the amount.
+pub(crate) fn clearance_rows(ui: &mut egui::Ui, designation: &str, clearance: &mut String, narrower: &mut bool) -> bool {
+    // A row tall enough for the tiles, which share its width.
+    crate::ui_kit::sized_row(ui, "Clearance", TILE_HEIGHT + 4.0, |ui| {
+        let width = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).clamp(40.0, 64.0);
+        for (label, tight) in [("Wider", false), ("Narrower", true)] {
+            if fit_tile(ui, label, tight, *narrower == tight, width).clicked() {
+                *narrower = tight;
+            }
+        }
+    });
+    let enter = crate::ui_kit::expr_row(ui, "Clearance amount", clearance);
+    // A plain number can be checked here; an expression is checked when it applies.
+    let amount = clearance.trim().trim_end_matches("mm").trim().parse::<f64>().ok();
+    if let (Some(c), Some((_, pitch))) = (amount, parse_metric_thread(designation))
+        && !*narrower
+        && solidcraft_engine::doc::thread_clearance_trims_teeth(pitch, c)
+    {
+        form_row(ui, "", |ui| {
+            trims_teeth_warning(ui, pitch);
+        });
+    }
+    enter
+}
+
+/// A yellow warning triangle: this much clearance trims the tooth tips. Hover explains.
+fn trims_teeth_warning(ui: &mut egui::Ui, pitch: f64) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(18.0, 16.0), egui::Sense::hover());
+    crate::scenario::publish_handle("dialog:thread_fit_warning", rect.center());
+    let t = crate::theme::Tokens::get();
+    // The "!" in whichever of the theme's text and panel colours reads better on the warning.
+    let ink = if crate::theme::contrast_ratio(t.text, t.warning) >= crate::theme::contrast_ratio(t.panel, t.warning) { t.text } else { t.panel };
+    let p = ui.painter_at(rect);
+    let (top, left, right) =
+        (egui::pos2(rect.center().x, rect.top() + 1.0), rect.left_bottom() + egui::vec2(1.0, -1.0), rect.right_bottom() - egui::vec2(1.0, 1.0));
+    p.add(egui::Shape::convex_polygon(vec![top, right, left], t.warning, egui::Stroke::NONE));
+    p.text(rect.center() + egui::vec2(0.0, 2.0), egui::Align2::CENTER_CENTER, "!", egui::FontId::proportional(t.font_badge), ink);
+    response.on_hover_text(format!(
+        "At this clearance the widened grooves meet before the tooth tips, so the tips are trimmed to a thin ridge and the thread is no longer an exact ISO {pitch} mm pitch profile. Printed threads usually fit anyway; check with a test print."
+    ))
+}
+
+/// One fit choice: a tooth profile (muted) and where the clearance moves its flanks (accent).
+const TILE_HEIGHT: f32 = 50.0;
+
+fn fit_tile(ui: &mut egui::Ui, label: &str, tight: bool, selected: bool, width: f32) -> egui::Response {
+    let size = egui::vec2(width, TILE_HEIGHT);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    crate::scenario::publish_handle(&format!("dialog:thread_fit:{label}"), rect.center());
+    let v = ui.visuals();
+    let (fill, edge) =
+        if selected { (v.selection.bg_fill.gamma_multiply(0.35), v.selection.stroke) } else { (v.faint_bg_color, v.widgets.inactive.bg_stroke) };
+    let painter = ui.painter_at(rect);
+    painter.rect(rect.shrink(1.0), 4.0, fill, edge, egui::StrokeKind::Inside);
+    // Three teeth between y = top and y = top + 16: the thread as drawn, then moved.
+    let teeth = |dy: f32| -> Vec<egui::Pos2> {
+        let (x0, w, top) = (rect.left() + 8.0, (rect.width() - 16.0) / 6.0, rect.top() + 9.0);
+        (0..=6).map(|i| egui::pos2(x0 + i as f32 * w, top + if i % 2 == 0 { 16.0 } else { 0.0 } + dy)).collect()
+    };
+    painter.add(egui::Shape::line(teeth(0.0), egui::Stroke::new(1.5, v.weak_text_color())));
+    // Wider: the groove grows, so the teeth's profile drops away from the mating part.
+    painter.add(egui::Shape::line(teeth(if tight { -3.5 } else { 3.5 }), egui::Stroke::new(1.5, v.selection.stroke.color)));
+    painter.text(
+        egui::pos2(rect.center().x, rect.bottom() - 9.0),
+        egui::Align2::CENTER_CENTER,
+        crate::i18n::tr_label(label),
+        egui::FontId::proportional(crate::theme::Tokens::get().font_badge),
+        v.text_color(),
+    );
+    response.on_hover_text(crate::i18n::tr_label(if tight {
+        "Tighter fit: the groove shrinks by the amount"
+    } else {
+        "Looser fit for printed threads: the groove grows by the amount"
+    }))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod contribution_tests {

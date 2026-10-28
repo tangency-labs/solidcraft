@@ -129,7 +129,7 @@ pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usiz
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
-pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
     let mut passthrough = false;
     if crate::prefs_search::querying(ui) {
         crate::prefs_search::set_control(ui, text);

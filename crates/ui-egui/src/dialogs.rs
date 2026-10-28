@@ -248,6 +248,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 suggested: Option<String>,
                 /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
                 of: Vec<Sel>,
+                /// A modelled thread's fit clearance amount (empty = none) and its direction:
+                /// wider (looser, the default) unless `narrower`.
+                clearance: String,
+                narrower: bool,
             },
             /// A rib (one wall along open curves) or a web (a wall per curve).
             Rib {
@@ -877,6 +881,8 @@ impl Dialog {
                     handedness: ThreadHandedness::Right,
                     suggested: None,
                     of: Vec::new(),
+                    clearance: String::new(),
+                    narrower: false,
                 },
                 vec![SelInput::new("Cylindrical face", FACES, false)],
             ),
@@ -4341,7 +4347,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("solid.offset_face", json!({"faces": face_points(0)}))
         }
-        Kind::Thread { designation, length, suggested, handedness, .. } => {
+        Kind::Thread { designation, length, suggested, handedness, clearance, narrower, .. } => {
             need(0, "a cylindrical face")?;
             let mut p = json!({"face": face_points(0).into_iter().next().unwrap_or(Value::Null)});
             if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
@@ -4350,6 +4356,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             put(&mut p, &[("length", length)]);
             if !handedness.is_right() {
                 p["handedness"] = json!(handedness);
+            }
+            // Only a modelled thread has a groove to widen; a narrower fit is the negated amount.
+            let c = clearance.trim();
+            if !c.is_empty() && d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false) {
+                p["clearance"] = json!(if *narrower { format!("-({c})") } else { c.to_string() });
             }
             ("solid.thread", p)
         }
@@ -5926,17 +5937,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Thread { face, designation, length, modeled, handedness } => {
+        FeatureKind::Thread { face, designation, length, modeled, handedness, clearance } => {
             let mut d = start("solid.thread")?;
             if *modeled {
                 d.extra.insert("modeled".into(), json!(true));
             }
+            let (clearance, narrower) = thread_fit(clearance.as_deref().unwrap_or(""));
             d.kind = Kind::Thread {
                 designation: designation.clone().unwrap_or_default(),
                 length: length.as_deref().map(str::to_string).unwrap_or_default(),
                 handedness: *handedness,
                 suggested: None,
                 of: Vec::new(),
+                clearance,
+                narrower,
             };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = face_sel(s, face.0).into_iter().collect();
@@ -6597,5 +6611,18 @@ mod construct_ask_tests {
         assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
         assert!(status_error(&h.app).is_none(), "{:?}", status_error(&h.app));
         assert!(!solidcraft_engine::view::construction_planes(&h.app.session).is_empty(), "the tangent plane is created");
+    }
+}
+
+/// A saved thread clearance as the dialog shows it: the amount and whether it narrows. The
+/// dialog writes a narrower fit as `-(amount)`; any other negative expression shows as it is.
+fn thread_fit(saved: &str) -> (String, bool) {
+    let s = saved.trim();
+    match s.strip_prefix("-(").and_then(|r| r.strip_suffix(')')) {
+        Some(inner) => (inner.trim().to_string(), true),
+        None => match s.strip_prefix('-') {
+            Some(n) if n.trim().parse::<f64>().is_ok() => (n.trim().to_string(), true),
+            _ => (s.to_string(), false),
+        },
     }
 }

@@ -722,3 +722,49 @@ fn fillet_beside_a_modelled_thread_finishes() {
     }
     assert!(faces > 1000, "the thread is faceted: {faces} faces");
 }
+
+/// A threaded M6 shaft or hole with the given clearance (`None` = none); the body's volume.
+fn fit_volume(hole: bool, clearance: Option<&str>) -> f64 {
+    let mut s = Session::default();
+    let face = if hole {
+        run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+        run(&mut s, "solid.hole", json!({"position":[10,10,10],"direction":[0,0,-1],"diameter":5}));
+        json!([12.5, 10, 5])
+    } else {
+        run(&mut s, "solid.cylinder", json!({"radius":3,"height":10}));
+        json!([3, 0, 5])
+    };
+    let mut p = json!({"face": face, "designation": "M6", "modeled": true});
+    if let Some(c) = clearance {
+        p["clearance"] = json!(c);
+    }
+    run(&mut s, "solid.thread", p);
+    let b = s.model.state().bodies[0].name.clone();
+    volume(&mut s, &b)
+}
+
+#[test]
+fn clearance_widens_or_narrows_a_modelled_threads_groove() {
+    for hole in [false, true] {
+        let (exact, wider, narrower) = (fit_volume(hole, None), fit_volume(hole, Some("0.2")), fit_volume(hole, Some("-(0.2)")));
+        // Wider cuts more away (a looser hole thread, a thinner shaft thread); narrower, less.
+        assert!(exact - wider > 5.0, "hole {hole}: wider {wider} vs exact {exact}");
+        assert!(narrower - exact > 5.0, "hole {hole}: narrower {narrower} vs exact {exact}");
+        assert!((fit_volume(hole, Some("0")) - exact).abs() < 1e-6, "hole {hole}: zero clearance is the exact groove");
+    }
+}
+
+#[test]
+fn a_clearance_of_a_quarter_pitch_or_more_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius":3,"height":10}));
+    let e = s.execute("solid.thread", &json!({"face":[3,0,5],"designation":"M6","modeled":true,"clearance":"0.25"})).unwrap_err();
+    assert!(e.to_string().contains("quarter of its pitch"), "{e}");
+}
+
+#[test]
+fn only_a_clearance_past_the_teeths_room_is_flagged_as_trimming_them() {
+    use solidcraft_doc::thread_clearance_trims_teeth as trims;
+    assert!(!trims(1.0, 0.0) && !trims(1.0, 0.04) && !trims(1.0, -0.2));
+    assert!(trims(1.0, 0.2) && trims(1.25, 0.1));
+}

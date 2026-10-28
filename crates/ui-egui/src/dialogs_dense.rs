@@ -776,7 +776,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
         }
-        Kind::Thread { designation, length, suggested, of, handedness } => {
+        Kind::Thread { designation, length, suggested, of, handedness, clearance, narrower } => {
             let mut full = length.trim().is_empty();
             let was_full = full;
             let mut modeled = d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
@@ -795,6 +795,9 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             }
             if !full {
                 enter |= expr_row(ui, "Length", length);
+            }
+            if modeled {
+                enter |= crate::dialogs_thread::clearance_rows(ui, designation, clearance, narrower);
             }
         }
         Kind::Loft { operation, rail_fit } => {
