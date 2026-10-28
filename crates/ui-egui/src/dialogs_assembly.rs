@@ -59,6 +59,16 @@ const TYPE_LABELS: [&str; 13] = [
     "Point on line",
     "Line on plane",
 ];
+/// A joint type's label, as the Type box lists it ("Pin-slot", "Point on plane").
+pub(crate) fn kind_label(kind: JointKind) -> &'static str {
+    TYPES.iter().position(|t| JointKind::parse(t) == Some(kind)).and_then(|i| TYPE_LABELS.get(i)).copied().unwrap_or("")
+}
+
+/// A joint as the joint lists name it: its name, and its type in the user's language.
+pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
+    format!("{name} ({})", crate::i18n::tr_label(kind_label(kind)))
+}
+
 /// What a joint origin input accepts (snaps on faces, edges and vertices).
 pub const SNAPS: u16 = FACES | EDGES | VERTICES;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
@@ -580,8 +590,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = if f.animate { "■ Stop" } else { "▶ Play" };
-                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).on_hover_text("Play the joint's motion in the view").clicked()
+                    let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
+                        .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
+                        .clicked()
                     {
                         f.animate = !f.animate;
                     }
@@ -640,8 +652,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 }
                 return false;
             }
-            let labels: Vec<String> =
-                list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| format!("{} ({:?})", j.name, j.kind)).collect();
+            let labels: Vec<String> = list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| joint_choice(&j.name, j.kind)).collect();
             let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
             // On a rigid joint the box shows none of the joints that move until one is chosen.
             let mut pos = list.iter().position(|i| i == joint).unwrap_or(list.len());

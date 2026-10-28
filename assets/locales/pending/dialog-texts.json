@@ -1,0 +1,122 @@
+{
+  "en": {
+    "bom.group_children": "Sub-parts in their part's row",
+    "sheet.flange_type_base": "Base",
+    "sheet.flange_type_contour": "Contour",
+    "sheet.flange_type_edge": "Edge",
+    "ui.emboss_wrap_note": "Orthogonal line profiles tangent to one supported cylinder wrap automatically. Pick a wall to choose a target.",
+    "ui.joint_play": "▶ Play",
+    "ui.joint_stop": "■ Stop",
+    "ui.stitch_tolerance_hint": "tight"
+  },
+  "ar": {
+    "bom.group_children": "الأجزاء الفرعية في صف الجزء الأصلي",
+    "sheet.flange_type_base": "أساسية",
+    "sheet.flange_type_contour": "محيط",
+    "sheet.flange_type_edge": "حافة",
+    "ui.emboss_wrap_note": "تلتف ملامح الخطوط المتعامدة المماسة لأسطوانة مدعومة تلقائيًا. اختر جدارًا لتحديد الهدف.",
+    "ui.joint_play": "▶ تشغيل",
+    "ui.joint_stop": "■ إيقاف",
+    "ui.stitch_tolerance_hint": "دقيقة"
+  },
+  "de": {
+    "bom.group_children": "Unterteile in der Zeile ihres Teils",
+    "sheet.flange_type_base": "Basislasche",
+    "sheet.flange_type_contour": "Konturlasche",
+    "sheet.flange_type_edge": "Kantenlasche",
+    "ui.emboss_wrap_note": "Senkrechte Linienprofile, die einen unterstützten Zylinder berühren, werden automatisch aufgewickelt. Eine Wand auswählen, um ein Ziel festzulegen.",
+    "ui.joint_play": "▶ Abspielen",
+    "ui.joint_stop": "■ Stopp",
+    "ui.stitch_tolerance_hint": "eng"
+  },
+  "es": {
+    "bom.group_children": "Subpiezas en la fila de su pieza",
+    "sheet.flange_type_base": "Base",
+    "sheet.flange_type_contour": "Contorno",
+    "sheet.flange_type_edge": "Arista",
+    "ui.emboss_wrap_note": "Los perfiles de líneas ortogonales tangentes a un cilindro compatible se envuelven automáticamente. Elegir una pared para definir el destino.",
+    "ui.joint_play": "▶ Reproducir",
+    "ui.joint_stop": "■ Detener",
+    "ui.stitch_tolerance_hint": "estricta"
+  },
+  "fr": {
+    "bom.group_children": "Sous-pièces dans la ligne de leur pièce",
+    "sheet.flange_type_base": "Base",
+    "sheet.flange_type_contour": "Contour",
+    "sheet.flange_type_edge": "Arête",
+    "ui.emboss_wrap_note": "Les profils de lignes orthogonales tangents à un cylindre pris en charge s'enroulent automatiquement. Choisir une paroi pour définir une cible.",
+    "ui.joint_play": "▶ Lire",
+    "ui.joint_stop": "■ Arrêter",
+    "ui.stitch_tolerance_hint": "serrée"
+  },
+  "he": {
+    "bom.group_children": "תת-חלקים בשורת החלק שלהם",
+    "sheet.flange_type_base": "בסיס",
+    "sheet.flange_type_contour": "מתאר",
+    "sheet.flange_type_edge": "מקצוע",
+    "ui.emboss_wrap_note": "פרופילי קווים ניצבים המשיקים לגליל נתמך נכרכים אוטומטית. יש לבחור דופן כדי לקבוע יעד.",
+    "ui.joint_play": "▶ הפעלה",
+    "ui.joint_stop": "■ עצירה",
+    "ui.stitch_tolerance_hint": "הדוקה"
+  },
+  "it": {
+    "bom.group_children": "Sottoparti nella riga della loro parte",
+    "sheet.flange_type_base": "Base",
+    "sheet.flange_type_contour": "Contorno",
+    "sheet.flange_type_edge": "Spigolo",
+    "ui.emboss_wrap_note": "I profili di linee ortogonali tangenti a un cilindro supportato si avvolgono automaticamente. Scegliere una parete per definire la destinazione.",
+    "ui.joint_play": "▶ Riproduci",
+    "ui.joint_stop": "■ Ferma",
+    "ui.stitch_tolerance_hint": "stretta"
+  },
+  "ja": {
+    "bom.group_children": "サブパーツを親パーツの行に含める",
+    "sheet.flange_type_base": "ベース",
+    "sheet.flange_type_contour": "輪郭",
+    "sheet.flange_type_edge": "エッジ",
+    "ui.emboss_wrap_note": "サポートされる円柱に接する直交線のプロファイルは自動的に巻き付けられます。対象を選ぶには壁を選択してください。",
+    "ui.joint_play": "▶ 再生",
+    "ui.joint_stop": "■ 停止",
+    "ui.stitch_tolerance_hint": "厳密"
+  },
+  "ko": {
+    "bom.group_children": "하위 부품을 상위 부품 행에 표시",
+    "sheet.flange_type_base": "베이스",
+    "sheet.flange_type_contour": "윤곽",
+    "sheet.flange_type_edge": "모서리",
+    "ui.emboss_wrap_note": "지원되는 원통에 접하는 직교 선 프로파일은 자동으로 감깁니다. 대상을 고르려면 벽을 선택하세요.",
+    "ui.joint_play": "▶ 재생",
+    "ui.joint_stop": "■ 정지",
+    "ui.stitch_tolerance_hint": "엄격"
+  },
+  "vi": {
+    "bom.group_children": "Chi tiết con trong hàng của chi tiết cha",
+    "sheet.flange_type_base": "Cơ sở",
+    "sheet.flange_type_contour": "Đường viền",
+    "sheet.flange_type_edge": "Cạnh",
+    "ui.emboss_wrap_note": "Các biên dạng đường trực giao tiếp xúc với một hình trụ được hỗ trợ sẽ tự động quấn. Chọn một thành để chọn mục tiêu.",
+    "ui.joint_play": "▶ Phát",
+    "ui.joint_stop": "■ Dừng",
+    "ui.stitch_tolerance_hint": "chặt"
+  },
+  "zh": {
+    "bom.group_children": "子零件并入所属零件的行",
+    "sheet.flange_type_base": "基体",
+    "sheet.flange_type_contour": "轮廓",
+    "sheet.flange_type_edge": "边线",
+    "ui.emboss_wrap_note": "与受支持圆柱相切的正交线轮廓会自动缠绕。选择一个壁以指定目标。",
+    "ui.joint_play": "▶ 播放",
+    "ui.joint_stop": "■ 停止",
+    "ui.stitch_tolerance_hint": "严格"
+  },
+  "zh-TW": {
+    "bom.group_children": "子零件併入所屬零件的列",
+    "sheet.flange_type_base": "基材",
+    "sheet.flange_type_contour": "輪廓",
+    "sheet.flange_type_edge": "邊線",
+    "ui.emboss_wrap_note": "與受支援圓柱相切的正交線輪廓會自動纏繞。選取一個壁以指定目標。",
+    "ui.joint_play": "▶ 播放",
+    "ui.joint_stop": "■ 停止",
+    "ui.stitch_tolerance_hint": "嚴格"
+  }
+}

@@ -115,7 +115,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 d.by_definition = grouping == 1;
                 ui.separator();
-                crate::ui_kit::checkbox(ui, "Sub-parts in their part's row", &mut d.group_children);
+                crate::ui_kit::checkbox(ui, crate::i18n::tr("bom.group_children"), &mut d.group_children);
                 if was != (d.top, d.by_definition, d.group_children) {
                     d.picked = None;
                 }

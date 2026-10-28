@@ -599,7 +599,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 *playing = false;
             }
             ui.add_space(t.space_6);
-            crate::ui_kit::checkbox(ui, "Loop", looping);
+            crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Loop"), looping);
             let names: Vec<String> = SPEEDS.iter().map(|x| format!("{x}×")).collect();
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             ui.allocate_ui(vec2(t.form_label_width, t.control_height), |ui| combo(ui, "ms_speed", &refs, speed));

@@ -23,7 +23,8 @@ const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_s
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
-const FLANGE_TYPES: [&str; 3] = ["Base", "Edge", "Contour"];
+/// The flange types' messages, by the type's index (Base, Edge, Contour).
+const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
 const POSITIONS: [&str; 5] = ["inside", "outside", "middle", "material_outside", "tangent"];
 const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Outside", "Tangent to Edge"];
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
@@ -242,7 +243,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
-                ui.label(FLANGE_TYPES.get(*ty).copied().unwrap_or(""));
+                ui.label(FLANGE_TYPES.get(*ty).copied().map(crate::i18n::tr).unwrap_or(""));
             });
             match *ty {
                 1 => {

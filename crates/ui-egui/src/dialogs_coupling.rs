@@ -46,7 +46,7 @@ fn joints_that(s: &Session, turn: bool) -> Vec<(u64, String)> {
         .joints
         .iter()
         .filter(|j| (0..j.kind.dofs().len()).any(|i| j.kind.is_angle(i) == turn))
-        .map(|j| (j.id, format!("{} ({:?})", j.name, j.kind)))
+        .map(|j| (j.id, crate::dialogs_assembly::joint_choice(&j.name, j.kind)))
         .collect()
 }
 
@@ -206,7 +206,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CouplingForm, inputs:
         ui.label(RichText::new(shown.unwrap_or_else(|| "-".into())).color(t.text_dim));
     });
     form_row(ui, "Animate", |ui| {
-        let label = if f.animate { "■ Stop" } else { "▶ Play" };
+        let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
             .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());

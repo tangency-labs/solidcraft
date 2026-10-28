@@ -46,7 +46,7 @@ pub struct CamForm {
 
 /// Joints of a kind: (id, label).
 fn joints_of(s: &Session, kinds: &[JointKind]) -> Vec<(u64, String)> {
-    s.doc.assembly.joints.iter().filter(|j| kinds.contains(&j.kind)).map(|j| (j.id, format!("{} ({:?})", j.name, j.kind))).collect()
+    s.doc.assembly.joints.iter().filter(|j| kinds.contains(&j.kind)).map(|j| (j.id, crate::dialogs_assembly::joint_choice(&j.name, j.kind))).collect()
 }
 
 pub fn start(app: &SolveApp) -> (Asm, Vec<SelInput>) {
@@ -133,7 +133,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     }
     crate::ui_kit::options(ui, "cam_options", &mut [("Other side", &mut f.flip)]);
     form_row(ui, "Animate", |ui| {
-        let label = if f.animate { "■ Stop" } else { "▶ Play" };
+        let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
             .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());
