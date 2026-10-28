@@ -46,6 +46,8 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     let once = ours.clone().find(|u| ours.clone().filter(|v| v.edge == u.edge).count() == 1).ok_or("a face of seam edges only")?;
     let at = edge_of(once.edge)?;
     let reversed = made_uses.iter().find(|m| m.edge as usize == at).ok_or("a use SMLib did not keep")?.forward != once.forward;
+    // Each edge's tolerance as SMLib held it (raised where it lies off the surface).
+    let held = arrays.reals.get(&crate::flat::EDGE_TOLERANCE).ok_or("edge tolerances")?;
     let mut result = Vec::with_capacity(face.loops.len());
     for l in &face.loops {
         let mut pcs = Vec::with_capacity(l.len());
@@ -55,7 +57,8 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
             let ours = face.edges.get(u.edge as usize).ok_or("edge reference")?;
             let found = made_uses.iter().find(|m| m.edge as usize == e && m.forward == (u.forward != reversed));
             let pc = found.ok_or("a use SMLib did not keep")?.pcurve.clone();
-            pcs.push(on_our_interval(pc, ours, edge.interval)?);
+            let tolerance = held.get(u.edge as usize).copied().unwrap_or(ours.tolerance).max(ours.tolerance);
+            pcs.push(on_our_interval(pc, ours, edge.interval, tolerance)?);
         }
         result.push(pcs);
     }
@@ -97,12 +100,19 @@ fn cover_gaps(body: &crate::Brep, face: &TrimFace<'_>, bare: &HashSet<(u32, u32,
 }
 
 /// A pcurve SMLib made on its edge's interval `theirs`, on ours. SMLib may set an edge's end to
-/// a parameter of its own (a knot its vertex lies at, the end of the part on the face): where
-/// each end it chose is within the edge's tolerance of ours on the edge's curve, the pcurve is
-/// mapped onto our interval by the affine change of parameter (exact for a B-spline: its knots
-/// move), and the record's check measures it against the edge as any pcurve. Farther is SMLib
-/// trimming the edge, refused with how far.
-pub(crate) fn on_our_interval(pc: Curve2, ours: &solidcraft_geom::brep::pcurve::TrimEdge<'_>, theirs: [f64; 2]) -> Result<Curve2, String> {
+/// a parameter of its own (a knot its vertex lies at, the end of the part on the face: where an
+/// edge runs past its face's patch, SMLib ends it where its drop onto the patch ends, when that
+/// is within the edge's cross-section tolerance of its vertex): where each end it chose is
+/// within `tolerance` of ours on the edge's curve (the edge's tolerance as SMLib held it,
+/// [`cover_gaps`]), the pcurve is mapped onto our interval by the affine change of parameter
+/// (exact for a B-spline: its knots move), and the record's check measures it against the edge
+/// as any pcurve. Farther is SMLib trimming the edge, refused with how far.
+pub(crate) fn on_our_interval(
+    pc: Curve2,
+    ours: &solidcraft_geom::brep::pcurve::TrimEdge<'_>,
+    theirs: [f64; 2],
+    tolerance: f64,
+) -> Result<Curve2, String> {
     let [a, b] = ours.interval;
     let [c, d] = theirs;
     if a == c && b == d {
@@ -111,10 +121,10 @@ pub(crate) fn on_our_interval(pc: Curve2, ours: &solidcraft_geom::brep::pcurve::
     let curve = solidcraft_geom::brep::eval::CurveEval::new(ours.nurbs.unwrap_or(ours.curve)).map_err(|e| e.to_string())?;
     let at = |t: f64| curve.point(t).ok_or_else(|| format!("the edge's curve has no point at {t}"));
     let shift = at(a)?.dist(at(c)?).max(at(b)?.dist(at(d)?));
-    if !(shift <= ours.tolerance) || !(d > c) {
+    if !(shift <= tolerance) || !(d > c) {
         return Err(format!(
-            "SMLib moved an edge's interval from {:?} to {:?}, its ends {shift} mm along its curve (tolerance {} mm)",
-            ours.interval, theirs, ours.tolerance
+            "SMLib moved an edge's interval from {:?} to {:?}, its ends {shift} mm along its curve (tolerance {tolerance} mm)",
+            ours.interval, theirs
         ));
     }
     let map = |k: f64| {
