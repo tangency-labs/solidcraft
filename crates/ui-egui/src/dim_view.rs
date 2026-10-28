@@ -112,11 +112,13 @@ impl DimensionDraft {
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
+        previous_axis(&self.entities, &mut params);
         params
     }
     fn evaluate(&self, app: &SolveApp, expr: &str) -> Result<solidcraft_engine::Session, String> {
         let mut scratch = app.session.scratch();
         let result = scratch.execute("sketch.dimension", &self.params(expr)).map_err(|e| shown_error("sketch.dimension", &e.to_string()))?;
+        remember_axis(&self.entities, &result);
         let param = result.get("param").and_then(serde_json::Value::as_str).ok_or("The dimension value is unavailable")?;
         let state = scratch.world_state();
         let solved = state.sketch(self.sketch).ok_or("The dimension sketch is unavailable")?;
@@ -144,6 +146,25 @@ fn shown_error(id: &str, e: &str) -> String {
 pub fn cancel() {
     EDIT.with(|edit| *edit.borrow_mut() = None);
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
+    AXIS.with(|axis| *axis.borrow_mut() = None);
+}
+
+/// Near the boundary between an ellipse's two half-axes, a dimension being placed keeps the
+/// one it had (`sketch.dimension`'s `previous_axis`), so the preview does not flip.
+fn previous_axis(entities: &[String], params: &mut serde_json::Value) {
+    AXIS.with(|axis| {
+        if let Some((picked, axis)) = axis.borrow().as_ref()
+            && picked.as_slice() == entities
+        {
+            params["previous_axis"] = json!(axis);
+        }
+    });
+}
+
+fn remember_axis(entities: &[String], result: &serde_json::Value) {
+    if let Some(chosen) = result.get("axis").and_then(serde_json::Value::as_str) {
+        AXIS.with(|axis| *axis.borrow_mut() = Some((entities.to_vec(), chosen.to_string())));
+    }
 }
 
 /// Infer the measured value through the same command as scripts, without creating a real
@@ -293,7 +314,9 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
     if let Some(at) = at {
         params["text_at"] = json!([at.x, at.y]);
     }
+    previous_axis(entities, &mut params);
     let result = scratch.execute("sketch.dimension", &params).map_err(|e| e.to_string())?;
+    remember_axis(entities, &result);
     let (param, expr) = if driven {
         let before =
             app.session.doc.sketch(sketch).ok().map(|sk| sk.constraints.iter().map(|c| c.id.clone()).collect::<Vec<_>>()).unwrap_or_default();
@@ -375,6 +398,8 @@ thread_local! {
     static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
     static PLACEMENT: RefCell<Option<Placement>> = const { RefCell::new(None) };
+    /// The half-axis of an ellipse the last draft for these picks measured (see `previous_axis`).
+    static AXIS: RefCell<Option<(Vec<String>, String)>> = const { RefCell::new(None) };
     /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
     /// drew them last frame: sketch, constraint id, parameter (None: driven), text box.
     static MODEL: RefCell<Vec<ModelDim>> = const { RefCell::new(Vec::new()) };

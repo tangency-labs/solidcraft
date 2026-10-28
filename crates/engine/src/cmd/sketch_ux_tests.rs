@@ -160,7 +160,8 @@ fn fixing_curves_holds_their_points_and_radius() {
     assert_eq!(r["result"]["changed"], 4);
     assert_eq!(dof(&mut s), free - 17);
     let si = run(&mut s, "sketch.inspect", json!({}));
-    assert!(si["curves"].as_array().is_some_and(|c| c.iter().all(|c| c["fixed"] == true)), "{si}");
+    // The ellipse's construction axes were not picked.
+    assert!(si["curves"].as_array().is_some_and(|c| c.iter().filter(|c| c["construction"] != true).all(|c| c["fixed"] == true)), "{si}");
     // A fixed circle keeps centre and radius; a dimension on it conflicts.
     run(&mut s, "sketch.move_point", json!({"point": "c1.center", "to": [0, 0]}));
     assert_eq!(pt(&s, "c1.center"), solidcraft_geom::Vec2::new(10.0, 10.0));
@@ -1510,6 +1511,122 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
     let end = sk.point(sk.resolve_point("l1.end").expect("end")).expect("end point");
     let start = sk.point(sk.resolve_point("l1.start").expect("start")).expect("start point");
     assert!(((end.x - start.x).abs() - 24.0).abs() < 1e-6 && ((end.y - start.y).abs() - 40.0).abs() < 1e-6, "{start:?} {end:?}");
+}
+
+/// An ellipse with half-axes 20 and 8, turned by 45 degrees when asked: its id, and its
+/// construction axis lines, major first.
+fn ellipse_with_axes(s: &mut Session, turn: bool) -> (String, String, String) {
+    let at = |x: f64, y: f64| if turn { [std::f64::consts::FRAC_1_SQRT_2 * (x - y), std::f64::consts::FRAC_1_SQRT_2 * (x + y)] } else { [x, y] };
+    let e = run(s, "sketch.ellipse", json!({"center": [0, 0], "major": at(20.0, 0.0), "minor_radius": 8}))["curves"][0]
+        .as_str()
+        .expect("the ellipse")
+        .to_string();
+    let sk = sketch(s);
+    let mut lines: Vec<(f64, String)> = sk
+        .curves
+        .iter()
+        .filter_map(|c| match c.kind {
+            solidcraft_sketch::CurveKind::Line { a, b } if c.construction => Some((sk.point(a)?.dist(sk.point(b)?), c.id.clone())),
+            _ => None,
+        })
+        .collect();
+    lines.sort_by(|x, y| y.0.total_cmp(&x.0));
+    let [(_, major), (_, minor)] = <[(f64, String); 2]>::try_from(lines).expect("two axis lines");
+    (e, major, minor)
+}
+
+/// D on an ellipse's outline gives a half-axis, the distance from the centre to an axis end,
+/// chosen as a line chooses horizontal or vertical, in the ellipse's own frame: text pulled
+/// across the major axis measures along it, text pulled out past an end of it measures across
+/// it. Near the boundary a placement keeps the half-axis it had. D on an axis line gives the
+/// whole axis. An ellipse without axes keeps its minor radius.
+#[test]
+fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
+    use solidcraft_sketch::ConstraintKind;
+    let dimension = |turn: bool, extra: Value| {
+        let mut s = new_sketch();
+        let (e, ..) = ellipse_with_axes(&mut s, turn);
+        let mut p = json!({"entities": [e]});
+        if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+            p.extend(extra.clone());
+        }
+        let r = run(&mut s, "sketch.dimension", p);
+        let sk = sketch(&s);
+        let kind = sk.constraints.iter().find(|c| c.kind.is_dimension()).map(|c| c.kind.clone()).expect("a dimension");
+        let ConstraintKind::Distance { p, q, .. } = kind else { return ("radius".to_string(), 0.0, r) };
+        let (pc, end) = (sk.point(p).expect("centre"), sk.point(q).expect("axis end"));
+        assert!(pc.len() < 1e-9, "measured from the centre: {pc:?}");
+        let which = if (pc.dist(end) - 20.0).abs() < 1e-6 { "major" } else { "minor" };
+        assert_eq!(r["axis"], json!(which), "{r}");
+        // The end on the text's side.
+        let side = extra.get("text_at").and_then(Value::as_array).map(|t| (t[0].as_f64().unwrap_or(0.0), t[1].as_f64().unwrap_or(0.0)));
+        (which.to_string(), side.map_or(1.0, |(x, y)| end.x * x + end.y * y), r)
+    };
+    let turned = |x: f64, y: f64, turn: bool| {
+        if turn { [std::f64::consts::FRAC_1_SQRT_2 * (x - y), std::f64::consts::FRAC_1_SQRT_2 * (x + y)] } else { [x, y] }
+    };
+    for turn in [false, true] {
+        for ((x, y), expected) in [
+            ((3.0, 16.0), "major"),
+            ((-4.0, -14.0), "major"),
+            ((18.0, 12.0), "major"),
+            ((30.0, 3.0), "minor"),
+            ((-28.0, -2.0), "minor"),
+            ((24.0, 6.0), "minor"),
+        ] {
+            let (which, side, r) = dimension(turn, json!({"text_at": turned(x, y, turn)}));
+            assert_eq!(which, expected, "turned {turn}, text at ({x}, {y}): {r}");
+            assert!(side > 0.0, "turned {turn}, text at ({x}, {y}): the end on the other side");
+        }
+        // Near the boundary (0.5 of the major half-axis along, 0.55 of the minor across) the
+        // half-axis a placement had is kept; well past it, it is not.
+        let near = json!(turned(10.0, 4.4, turn));
+        assert_eq!(dimension(turn, json!({"text_at": near})).0, "major");
+        assert_eq!(dimension(turn, json!({"text_at": near, "previous_axis": "minor"})).0, "minor");
+        assert_eq!(dimension(turn, json!({"text_at": turned(16.0, 4.0, turn), "previous_axis": "major"})).0, "minor");
+    }
+    // An explicit type wins; with no text, the minor half-axis; radius stays the minor radius.
+    assert_eq!(dimension(false, json!({"type": "major", "text_at": [30, 3]})).0, "major");
+    assert_eq!(dimension(false, json!({"type": "minor", "text_at": [3, 16]})).0, "minor");
+    assert_eq!(dimension(false, json!({})).0, "minor");
+    assert_eq!(dimension(false, json!({"type": "radius", "text_at": [3, 16]})).0, "radius");
+    // An axis line is a line: its length is the whole axis.
+    let mut s = new_sketch();
+    let (_, major, minor) = ellipse_with_axes(&mut s, true);
+    assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [major]}))["measured"], json!(40.0));
+    assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [minor]}))["measured"], json!(16.0));
+    // Without its axes (an older design), the ellipse keeps today's minor radius.
+    let mut s = new_sketch();
+    let (e, major, minor) = ellipse_with_axes(&mut s, false);
+    run(&mut s, "sketch.delete", json!({"entities": [major, minor]}));
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": [3, 16]}));
+    assert!(r.get("axis").is_none(), "{r}");
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Radius { .. })), "{r}");
+}
+
+/// A half-axis and its whole axis are one dimension: whichever comes second is determined by
+/// the first, so the Dimension tool's `if_redundant: "driven"` adds it as a reference, and
+/// without it the command refuses it. Both orders, both axes.
+#[test]
+fn an_ellipse_half_axis_and_its_whole_axis_determine_each_other() {
+    for (axis, text_at) in [("major", [3.0, 16.0]), ("minor", [30.0, 3.0])] {
+        for half_first in [true, false] {
+            let mut s = new_sketch();
+            let (e, major, minor) = ellipse_with_axes(&mut s, false);
+            let line = if axis == "major" { major } else { minor };
+            let half = json!({"entities": [e], "text_at": text_at});
+            let whole = json!({"entities": [line]});
+            let (first, second) = if half_first { (half, whole) } else { (whole, half) };
+            let r = run(&mut s, "sketch.dimension", first);
+            assert!(r["param"].is_string(), "{axis}: the first one drives: {r}");
+            let refused = s.execute("sketch.dimension", &second).expect_err("the second one is determined").to_string();
+            assert!(refused.contains("already determined"), "{axis}: {refused}");
+            let mut second = second;
+            second["if_redundant"] = json!("driven");
+            let r = run(&mut s, "sketch.dimension", second);
+            assert_eq!((r["redundant"].clone(), r["driven"].clone()), (json!(true), json!(true)), "{axis}, half first {half_first}: {r}");
+        }
+    }
 }
 
 /// A two-link arm (B, elbow E, hand H) hanging off a rigid triangle A B C that only the cluster

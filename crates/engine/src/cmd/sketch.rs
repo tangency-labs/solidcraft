@@ -128,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse drawn with its axes: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen); radius gives the minor radius. An ellipse without axes: the minor radius, or the major half-axis with major. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -2800,6 +2800,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         None => (None, value),
     };
     let scale_sketch = bool_(p, "scale_sketch").unwrap_or(false);
+    let previous_axis = str_(p, "previous_axis").map(str::to_ascii_lowercase);
+    let mut axis = None;
     let mut scaled = None;
     let mut before = None;
     let (mut residual, mut new_id) = (None, String::new());
@@ -2863,7 +2865,15 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let Some(CurveKind::Ellipse { c: cp, m, r }) = sk.curves.get(c).map(|x| x.kind.clone()) else {
                     return Err(bad(cmd, "ellipse"));
                 };
-                if ty == "major" {
+                // One drawn with its axes: a half-axis is the distance from the centre to an axis end.
+                if ty != "radius"
+                    && let Some(ends) = ellipse_axis_ends(sk, c)
+                {
+                    let (which, end) = ellipse_half_axis(sk, cp, &ends, r, &ty, text_at, previous_axis.as_deref());
+                    axis = Some(which);
+                    let d = sk.point(cp).zip(sk.point(end)).map(|(a, b)| a.dist(b)).unwrap_or(0.0);
+                    (ConstraintKind::Distance { p: cp, q: end, value: d }, d)
+                } else if ty == "major" {
                     let d = sk.point(cp).zip(sk.point(m)).map(|(a, b)| a.dist(b)).unwrap_or(0.0);
                     (ConstraintKind::Distance { p: cp, q: m, value: d }, d)
                 } else {
@@ -3064,7 +3074,11 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     // Report what the dimension measures once the sketch is solved, not the geometry before.
     let current = solved_measure(s, p, cmd).unwrap_or(current);
     if driven {
-        return Ok(json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info}));
+        let mut out = json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info});
+        if let Some(axis) = axis {
+            out["axis"] = json!(axis);
+        }
+        return Ok(out);
     }
     // A dimension the sketch already determines cannot drive it: it is refused, or with
     // `if_redundant: "driven"` placed as a driven (reference) dimension instead.
@@ -3093,6 +3107,9 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let mut out = json!({"param": param, "type": kind_name, "expression": v, "measured": current.0, "unit": current.1, "sketch": info});
     if let Some(factor) = scaled {
         out["scaled"] = json!(round6(factor));
+    }
+    if let Some(axis) = axis {
+        out["axis"] = json!(axis);
     }
     if let Some((name, _)) = defines {
         out["defined"] = json!(name);
@@ -3131,6 +3148,92 @@ fn auto_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
         (true, false) => "horizontal",
         (false, true) => "vertical",
         _ => ty,
+    }
+}
+
+/// The axis ends of an ellipse drawn with its axes (`sketch.ellipse` adds them): the major end
+/// and the point opposite it, then the minor end held on the ellipse and the one opposite it.
+/// None for an ellipse without them (one from an older design, or whose axes were deleted).
+fn ellipse_axis_ends(sk: &Sketch, e: usize) -> Option<[usize; 4]> {
+    let Some(CurveKind::Ellipse { c, m, .. }) = sk.curves.get(e).map(|x| &x.kind) else { return None };
+    let held = |l: usize| sk.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::Midpoint { p, l: on } if p == *c && on == l));
+    let major = (0..sk.curves.len()).find_map(|l| match line_ends_of(sk, l) {
+        Some((a, b)) if held(l) && (a == *m || b == *m) => Some((l, if a == *m { b } else { a })),
+        _ => None,
+    })?;
+    let minor = (0..sk.curves.len()).filter(|l| *l != major.0 && held(*l)).find_map(|l| {
+        let (a, b) = line_ends_of(sk, l)?;
+        let on =
+            |q: usize| sk.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::PointOnCurve { p, c: on } if p == q && on == e));
+        if on(a) {
+            Some((a, b))
+        } else if on(b) {
+            Some((b, a))
+        } else {
+            None
+        }
+    })?;
+    Some([*m, major.1, minor.0, minor.1])
+}
+
+fn line_ends_of(sk: &Sketch, l: usize) -> Option<(usize, usize)> {
+    match sk.curves.get(l)?.kind {
+        CurveKind::Line { a, b } => Some((a, b)),
+        _ => None,
+    }
+}
+
+/// Inside this band around the boundary between the two half-axes (the ratio of how far the
+/// text is pulled across the major axis to how far past its end, both scaled by the half-axes),
+/// a dimension being placed keeps the half-axis it had, so the preview does not flip back and
+/// forth while the pointer crosses slowly.
+const HALF_AXIS_DEAD_ZONE: f64 = 1.25;
+
+/// Which half-axis of an ellipse with axes a dimension measures, and the axis end it goes to.
+/// With `auto` and `text_at` it follows the rule for a line, in the ellipse's own frame: text
+/// pulled across the major axis measures along it (the major half-axis), text pulled out past
+/// an end of the major axis measures across it (the minor one). The end is the one on the
+/// text's side. Without `text_at` it is the minor half-axis, as for an ellipse without axes.
+fn ellipse_half_axis(
+    sk: &Sketch,
+    c: usize,
+    ends: &[usize; 4],
+    minor: f64,
+    ty: &str,
+    text_at: Option<Vec2>,
+    previous: Option<&str>,
+) -> (&'static str, usize) {
+    let [m, m2, n1, n2] = *ends;
+    let (pc, pm) = (sk.point(c).unwrap_or_default(), sk.point(m).unwrap_or_default());
+    let d = pm - pc;
+    let major = d.len();
+    let rel = text_at.map(|t| t - pc);
+    let along = rel.map(|v| v.dot(d) / (major * major)).filter(|v| v.is_finite()).unwrap_or(0.0);
+    let across = rel.map(|v| d.cross(v) / (major * minor)).filter(|v| v.is_finite()).unwrap_or(0.0);
+    let which = match ty {
+        "major" => "major",
+        "minor" => "minor",
+        _ if text_at.is_none() || (along == 0.0 && across == 0.0) => "minor",
+        _ => {
+            let (x, y) = (along.abs(), across.abs());
+            match previous {
+                Some(keep @ ("major" | "minor")) if y < x * HALF_AXIS_DEAD_ZONE && x < y * HALF_AXIS_DEAD_ZONE => {
+                    if keep == "major" {
+                        "major"
+                    } else {
+                        "minor"
+                    }
+                }
+                _ if y > x => "major",
+                _ => "minor",
+            }
+        }
+    };
+    if which == "major" {
+        (which, if along < 0.0 { m2 } else { m })
+    } else {
+        let side = sk.point(n1).map(|q| d.cross(q - pc)).unwrap_or(1.0);
+        (which, if across * side < 0.0 { n2 } else { n1 })
     }
 }
 
