@@ -1420,9 +1420,9 @@ fn pipe_and_sweep_follow_3d_sketch_curves() {
 }
 
 /// Between two points, or on a line, that don't line up with an axis, an `auto` dimension takes
-/// its orientation from where its text goes relative to the box the two span: inside it the
-/// distance between them, above or below it the horizontal distance, beside it the vertical
-/// one, in its outer corners the distance again (#257, #7295).
+/// its orientation from where its text goes: across from the two (and a tenth of their distance
+/// past) the distance between them; pulled further past an end, up or down from it the
+/// horizontal distance, sideways the vertical one (#257, #7295).
 #[test]
 fn auto_dimension_orientation_follows_where_its_text_is_placed() {
     use solidcraft_sketch::ConstraintKind;
@@ -1439,8 +1439,8 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
         (kind, r["measured"].as_f64().unwrap_or(f64::NAN), sk)
     };
     let points = json!(["l1.start", "l1.end"]);
-    // A 30 × 40 line (50 long), and a shallow one, 50 × 10, whose box is a thin strip: above
-    // the middle of it is horizontal, not the distance between its ends.
+    // A 30 × 40 line (50 long), and a shallow one, 50 × 10: above or below the middle of it is
+    // the distance between its ends, and past its ends both other types have wide zones.
     let shallow = 2600_f64.sqrt();
     let cases: [([f64; 2], [f64; 2], [f64; 3], &[([f64; 2], &str)]); 2] = [
         (
@@ -1449,16 +1449,18 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
             [30.0, 40.0, 50.0],
             &[
                 ([15.0, 60.0], "horizontal"),
-                ([15.0, 41.0], "horizontal"),
                 ([15.0, -20.0], "horizontal"),
+                ([-20.0, -25.0], "horizontal"),
+                ([40.0, 55.0], "horizontal"),
                 ([-30.0, 5.0], "vertical"),
                 ([55.0, 38.0], "vertical"),
-                ([-20.0, 25.0], "vertical"),
-                ([45.0, 10.0], "vertical"),
+                ([-25.0, -20.0], "vertical"),
                 ([20.0, 10.0], "aligned"),
                 ([10.0, 30.0], "aligned"),
-                ([-20.0, -20.0], "aligned"),
-                ([40.0, 50.0], "aligned"),
+                ([15.0, 41.0], "aligned"),
+                ([-20.0, 25.0], "aligned"),
+                ([45.0, 10.0], "aligned"),
+                ([32.0, 43.0], "aligned"),
             ],
         ),
         (
@@ -1466,14 +1468,18 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
             [60.0, 0.0],
             [50.0, 10.0, shallow],
             &[
-                ([35.0, 30.0], "horizontal"),
-                ([35.0, -20.0], "horizontal"),
-                ([12.0, 40.0], "horizontal"),
+                ([80.0, 40.0], "horizontal"),
+                ([65.0, -30.0], "horizontal"),
+                ([0.0, -10.0], "horizontal"),
+                ([2.0, 30.0], "horizontal"),
                 ([80.0, 5.0], "vertical"),
+                ([90.0, -2.0], "vertical"),
                 ([0.0, 3.0], "vertical"),
+                ([35.0, 30.0], "aligned"),
+                ([35.0, -20.0], "aligned"),
                 ([35.0, 6.0], "aligned"),
-                ([80.0, 40.0], "aligned"),
-                ([0.0, -10.0], "aligned"),
+                ([12.0, 40.0], "aligned"),
+                ([63.0, 5.0], "aligned"),
             ],
         ),
     ];
