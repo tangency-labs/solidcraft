@@ -175,15 +175,7 @@ fn disagreement_except(cpp: &[&[f64]], rust: &[&[f64]], skip: &[&str]) -> Option
 
 /// Files where upstream's result is a known C++ defect and the port's is right: the file,
 /// the quantities the defect affects (empty: the whole result) and the evidence.
-const KNOWN_CPP_DEFECTS: [(&str, &[&str], &str); 2] = [
-    (
-        "Fillet/sphere_diff_3cylinders.smb",
-        &["area", "volume"],
-        "plan/upstream-issues/WR-449--sphere-diff-3cylinders-one-fillet-face-integrates-0-6-too-large.md: \
-         upstream's fillet face 7 integrates 0.60 more area and 2.14 more volume than its five \
-         symmetric siblings, which the port matches; the trims differ on edge 30, made on demand \
-         (CreateUVTrimCurve / DropCurve / sm_FixUVTrimCurves), the diverging step not yet pinned",
-    ),
+const KNOWN_CPP_DEFECTS: [(&str, &[&str], &str); 1] = [
     (
         "Solids/fillet_ts.smb",
         &[],
