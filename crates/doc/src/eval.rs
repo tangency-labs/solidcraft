@@ -73,8 +73,9 @@ pub struct ModelBody {
     /// [`kernel::measure`] of `body` (with the body it was measured on), worked out once and
     /// shared by clones: inspecting a design again measures only the bodies that changed.
     measured: Arc<OnceLock<(Body, kernel::Result<kernel::BodyMeasure>)>>,
-    /// [`Body::is_surface`] of `body` (with the body it was measured on), worked out once and
-    /// shared by clones.
+    /// Whether `body` is open (with the body it was measured on): a B-rep one a surface body
+    /// ([`Body::is_surface`]), a mesh one with a side only one triangle has
+    /// ([`Body::is_closed_mesh`]); worked out once and shared by clones.
     surface: Arc<OnceLock<(Body, bool)>>,
     /// [`ModelBody::iso_lines`] worked out so far, shared by clones.
     iso: Arc<std::sync::Mutex<IsoLines>>,
@@ -110,10 +111,22 @@ impl ModelBody {
 
     /// A surface body: some shell does not close ([`Body::is_surface`]), worked out once.
     pub fn is_surface(&self) -> bool {
-        match self.surface.get_or_init(|| (self.body.clone(), self.body.is_surface())) {
+        !self.body.is_mesh() && self.is_open()
+    }
+
+    /// The body encloses a volume: a solid whose shells all close ([`ModelBody::is_surface`]),
+    /// or a mesh body every side of which two triangles share ([`Body::is_closed_mesh`]).
+    /// Worked out once.
+    pub fn is_closed(&self) -> bool {
+        !self.is_open()
+    }
+
+    fn is_open(&self) -> bool {
+        let open = |b: &Body| if b.is_mesh() { !b.is_closed_mesh() } else { b.is_surface() };
+        match self.surface.get_or_init(|| (self.body.clone(), open(&self.body))) {
             (measured, s) if measured.same(&self.body) => *s,
             // The body was replaced in this cell's holder since: look again.
-            _ => self.body.is_surface(),
+            _ => open(&self.body),
         }
     }
 

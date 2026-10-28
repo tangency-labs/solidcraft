@@ -163,6 +163,10 @@ pub struct PlannedBody {
     /// How the whole body is drawn: opaque with the model, or faded or see-through blended
     /// order-independently (only on a renderer that does that: [`GpuTarget::oit`]).
     pub class: TriClass,
+    /// The body encloses a volume (a solid, a closed mesh). Only closed bodies take part in a
+    /// section's crossing count ([`Cut`]): an open one has no inside, so it neither gets a cap
+    /// nor takes one from the body it lies in.
+    pub closed: bool,
 }
 
 /// What the viewport's last frame drew, counted as it was drawn (the performance overlay, #2548).
@@ -403,6 +407,8 @@ pub struct InstancedMesh {
     /// in the part's frame): a placement small on screen is drawn from the coarsest whose error
     /// stays under [`LOD_PX`] there ([`Batches::cull`]).
     pub levels: Vec<(Arc<SharedTris>, f32)>,
+    /// The triangles enclose a volume (see [`PlannedBody::closed`]).
+    pub closed: bool,
 }
 
 impl InstancedMesh {
@@ -447,6 +453,9 @@ pub struct GpuScene {
     pub palette: Arc<Palette>,
     /// Opaque triangles. A zero normal draws the colour flat (unlit).
     pub tris: Vec<u8>,
+    /// Opaque triangles of open bodies, drawn as `tris` but left out of a section's crossing
+    /// count (see [`PlannedBody::closed`]).
+    pub open_tris: Vec<u8>,
     /// Opaque product PBR vertices; linear base color and explicit optical parameters.
     pub pbr: Vec<u8>,
     /// Translucent triangles (alpha from the colour), drawn after the opaque ones without
@@ -538,6 +547,7 @@ impl GpuScene {
             }
         }
         out.tris.append(&mut self.tris);
+        out.tris.append(&mut self.open_tris);
         out.trans.append(&mut self.trans);
         out.lines.append(&mut self.lines);
         out.hidden.append(&mut self.hidden);
@@ -603,6 +613,9 @@ pub enum TriClass {
 pub struct BlockBytes {
     pub vertices: Arc<Vec<u8>>,
     pub opaque: Arc<Vec<std::ops::Range<u32>>>,
+    /// The opaque runs of closed bodies: what a section's crossing count draws (see
+    /// [`PlannedBody::closed`]).
+    pub closed: Arc<Vec<std::ops::Range<u32>>>,
     pub glass: Arc<Vec<std::ops::Range<u32>>>,
     pub faded: Arc<Vec<std::ops::Range<u32>>>,
     pub lines: Arc<Vec<u8>>,
@@ -634,6 +647,9 @@ pub fn extend_runs(runs: &mut Vec<std::ops::Range<u32>>, at: u32) {
 pub struct BlockBuilder {
     vertices: Vec<u8>,
     opaque: Vec<std::ops::Range<u32>>,
+    closed: Vec<std::ops::Range<u32>>,
+    /// The triangles being added belong to an open body ([`BlockBuilder::open_body`]).
+    open: bool,
     glass: Vec<std::ops::Range<u32>>,
     faded: Vec<std::ops::Range<u32>>,
     lines: Vec<u8>,
@@ -664,6 +680,16 @@ impl BlockBuilder {
             TriClass::Faded => &mut self.faded,
         };
         extend_runs(runs, at);
+        if class == TriClass::Opaque && !self.open {
+            extend_runs(&mut self.closed, at);
+        }
+    }
+
+    /// Whether the triangles added from now on belong to an open body (a surface body, a mesh
+    /// that does not close): those are left out of a section's crossing count. Closed until
+    /// said otherwise.
+    pub fn open_body(&mut self, open: bool) {
+        self.open = open;
     }
 
     /// The runs of `class` that fall within `vertices` (a body's share of the block).
@@ -705,6 +731,7 @@ impl BlockBuilder {
         Arc::new(BlockBytes {
             vertices: Arc::new(self.vertices),
             opaque: Arc::new(self.opaque),
+            closed: Arc::new(self.closed),
             glass: Arc::new(self.glass),
             faded: Arc::new(self.faded),
             lines: Arc::new(self.lines),
@@ -726,6 +753,13 @@ impl GpuScene {
             self.tris.extend_from_slice(&v.to_le_bytes());
         }
         self.tris.extend_from_slice(&c.0.to_le_bytes());
+    }
+    /// A vertex of an open body's opaque triangle (see [`GpuScene::open_tris`]).
+    pub fn open_tri(&mut self, p: [f32; 3], n: [f32; 3], c: PaletteIndex) {
+        for v in p.iter().chain(&n) {
+            self.open_tris.extend_from_slice(&v.to_le_bytes());
+        }
+        self.open_tris.extend_from_slice(&c.0.to_le_bytes());
     }
     /// A vertex of the ground-plane shadow (see [`GpuScene::shadow`]).
     pub fn shadow_tri(&mut self, p: [f32; 3], c: PaletteIndex) {
@@ -1003,8 +1037,10 @@ struct Batch {
 struct PlannedDraw {
     mesh: Arc<crate::GpuMesh>,
     colors: wgpu::Buffer,
-    /// Its bodies' class: a chunk holds bodies of one class.
+    /// Its bodies' class and whether they are closed: a chunk holds bodies of one class, all
+    /// closed or all open.
     class: TriClass,
+    closed: bool,
     /// The address of each plan in the chunk, in `mesh.parts` order: a whole-body highlight
     /// finds the evaluated triangles of the body it lights.
     plans: Vec<usize>,
@@ -1141,6 +1177,8 @@ struct LevelDraw {
 /// while they come back), and the placements in view, each drawn from its level.
 struct InstancedDraw {
     look: InstanceLook,
+    /// Its triangles enclose a volume ([`InstancedMesh::closed`]).
+    closed: bool,
     /// The full triangles first, then coarser ones.
     levels: Vec<LevelDraw>,
     bounds: [[f32; 3]; 2],
@@ -1206,6 +1244,9 @@ struct BlockGpu {
     bytes: Arc<BlockBytes>,
     vertices: Option<wgpu::Buffer>,
     opaque: Option<ClassGpu>,
+    /// The opaque runs of closed bodies ([`BlockBytes::closed`]): `opaque`'s own when they are
+    /// all of them.
+    closed: Option<ClassGpu>,
     glass: Option<ClassGpu>,
     faded: Option<ClassGpu>,
     lines: Option<Batch>,
@@ -1272,6 +1313,12 @@ impl BlockGpu {
             class_gpu(device, fits, &bytes.vertices, bytes.runs(class), old_pair, same_vertices, uploaded)
         };
         let (opaque, glass, faded) = (class(TriClass::Opaque), class(TriClass::Glass), class(TriClass::Faded));
+        let closed = if bytes.closed == bytes.opaque {
+            opaque.clone()
+        } else {
+            let old_pair = old.as_ref().and_then(|o| o.closed.as_ref().map(|c| (c, &o.bytes.closed)));
+            class_gpu(device, fits, &bytes.vertices, &bytes.closed, old_pair, same_vertices, uploaded)
+        };
         let keep = |old: Option<&BlockGpu>, pick: fn(&BlockBytes) -> &Arc<Vec<u8>>, old_lines: fn(&BlockGpu) -> Option<&Batch>| {
             old.filter(|o| Arc::ptr_eq(pick(&o.bytes), pick(&bytes))).and_then(old_lines).cloned()
         };
@@ -1281,7 +1328,7 @@ impl BlockGpu {
         };
         let lines = keep(old.as_ref(), |b| &b.lines, |b| b.lines.as_ref()).or_else(|| fresh(&bytes.lines, "sc_block_lines"));
         let hidden = keep(old.as_ref(), |b| &b.hidden, |b| b.hidden.as_ref()).or_else(|| fresh(&bytes.hidden, "sc_block_hidden"));
-        BlockGpu { bytes, vertices, opaque, glass, faded, lines, hidden }
+        BlockGpu { bytes, vertices, opaque, closed, glass, faded, lines, hidden }
     }
 
     fn class(&self, class: TriClass) -> Option<&ClassGpu> {
@@ -1294,7 +1341,16 @@ impl BlockGpu {
 
     /// Draw `class`'s triangles with the pipeline already set (`tally`: what is counted).
     fn draw(&self, pass: &mut wgpu::RenderPass<'_>, class: TriClass, tally: &Tally) {
-        match self.class(class) {
+        self.draw_runs(pass, self.class(class), tally);
+    }
+
+    /// Draw the closed bodies' opaque triangles ([`BlockBytes::closed`]), as [`BlockGpu::draw`].
+    fn draw_closed(&self, pass: &mut wgpu::RenderPass<'_>, tally: &Tally) {
+        self.draw_runs(pass, self.closed.as_ref(), tally);
+    }
+
+    fn draw_runs(&self, pass: &mut wgpu::RenderPass<'_>, runs: Option<&ClassGpu>, tally: &Tally) {
+        match runs {
             Some(ClassGpu::Runs(runs)) => {
                 let Some(vertices) = &self.vertices else { return };
                 pass.set_vertex_buffer(0, vertices.slice(..));
@@ -1485,6 +1541,8 @@ struct Batches {
     block_order: Vec<u64>,
     key: Option<u64>,
     tris: Option<Batch>,
+    /// [`GpuScene::open_tris`].
+    open_tris: Option<Batch>,
     pbr: Option<Batch>,
     trans: Option<Batch>,
     shadow: Option<Batch>,
@@ -1576,6 +1634,7 @@ impl Batches {
                 upload(device, label, data, stride)
             };
             self.tris = own("sc_tris", &sc.tris, TRI_SIZE);
+            self.open_tris = own("sc_open_tris", &sc.open_tris, TRI_SIZE);
             self.pbr = own("sc_pbr", &sc.pbr, PBR_SIZE);
             self.trans = own("sc_trans", &sc.trans, TRI_SIZE);
             self.shadow = own("sc_shadow", &sc.shadow, TRI_SIZE);
@@ -1658,7 +1717,7 @@ impl Batches {
                 self.instanced_tris.insert(key, gpu);
             }
             if !levels.is_empty() {
-                out.push(InstancedDraw { look: m.look, levels, bounds: m.tris.bounds, placements, shown: None });
+                out.push(InstancedDraw { look: m.look, closed: m.closed, levels, bounds: m.tris.bounds, placements, shown: None });
             }
         }
         out
@@ -1741,7 +1800,9 @@ impl Batches {
         for b in bodies {
             let n = b.plan.vertex_count();
             match chunks.last_mut() {
-                Some(c) if open && filled + n <= crate::MAX_BATCH && c.first().is_some_and(|f| f.class == b.class) => c.push(b),
+                Some(c) if open && filled + n <= crate::MAX_BATCH && c.first().is_some_and(|f| (f.class, f.closed) == (b.class, b.closed)) => {
+                    c.push(b)
+                }
                 _ => {
                     chunks.push(vec![b]);
                     filled = 0;
@@ -1785,8 +1846,8 @@ impl Batches {
             }
             self.uploads.planned += bytes.len() as u64;
             if let Some((colors, _)) = upload(device, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
-                let class = chunk.first().map_or(TriClass::Opaque, |b| b.class);
-                out.push(PlannedDraw { mesh, colors, class, plans: key(chunk) });
+                let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
+                out.push(PlannedDraw { mesh, colors, class, closed, plans: key(chunk) });
             }
         }
         out
@@ -3134,8 +3195,9 @@ impl Renderer {
         pass.set_bind_group(1, &res.access_bind, &[]);
         pass.set_bind_group(2, &res.ao.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline| {
-            for d in m.planned.iter().filter(|d| d.class == TriClass::Opaque) {
+        // `counting`: only closed bodies, for a section's crossing count ([`Cut::count`]).
+        let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, counting: bool| {
+            for d in m.planned.iter().filter(|d| d.class == TriClass::Opaque && (d.closed || !counting)) {
                 pass.set_pipeline(p);
                 pass.set_vertex_buffer(0, d.mesh.vertices.slice(..));
                 pass.set_vertex_buffer(1, d.colors.slice(..));
@@ -3145,8 +3207,8 @@ impl Renderer {
             }
         };
         // Instanced meshes, with the pipeline for smooth and for flat triangles.
-        let instanced = |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline| {
-            for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Opaque) {
+        let instanced = |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, counting: bool| {
+            for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Opaque && (d.closed || !counting)) {
                 d.draw(pass, smooth, flat, tally);
             }
         };
@@ -3198,32 +3260,46 @@ impl Renderer {
             (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some(base)) => {
                 // The model's own triangles, blocks, plans and instances with its palette, then the
                 // preview's with its own.
-                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline| {
+                // `counting`: the crossing count, which leaves open bodies out.
+                let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, counting: bool| {
                     pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
                     tris(pass, pick(cut), &m.tris);
-                    block_class(pass, pick(cut), TriClass::Opaque);
-                    planned(pass, pick(cut_planned));
-                    instanced(pass, pick(cut_instanced), pick(cut_flat));
+                    if counting {
+                        for block in m.block_order.iter().filter_map(|k| m.blocks.get(k)).filter(|b| b.closed.is_some()) {
+                            pass.set_pipeline(pick(cut));
+                            block.draw_closed(pass, tally);
+                        }
+                    } else {
+                        tris(pass, pick(cut), &m.open_tris);
+                        block_class(pass, pick(cut), TriClass::Opaque);
+                    }
+                    planned(pass, pick(cut_planned), counting);
+                    instanced(pass, pick(cut_instanced), pick(cut_flat), counting);
                     pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                     tris(pass, pick(cut), &pv.tris);
+                    if !counting {
+                        tris(pass, pick(cut), &pv.open_tris);
+                    }
                 };
                 pass.set_stencil_reference(STENCIL_BASE);
                 pass.set_pipeline(base);
                 pass.draw(0..3, 0..1);
                 tally.call();
-                all(pass, |c| &c.count);
-                all(pass, |c| &c.fill);
-                all(pass, |c| &c.cap);
-                all(pass, |c| &c.rest);
+                all(pass, |c| &c.count, true);
+                all(pass, |c| &c.fill, false);
+                all(pass, |c| &c.cap, false);
+                all(pass, |c| &c.rest, false);
             }
             _ => {
                 pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
                 tris(pass, &res.tri, &m.tris);
+                tris(pass, &res.tri, &m.open_tris);
                 block_class(pass, &res.tri, TriClass::Opaque);
-                planned(pass, &res.tri_planned);
-                instanced(pass, &res.tri_instanced, &res.tri_instanced_flat);
+                planned(pass, &res.tri_planned, false);
+                instanced(pass, &res.tri_instanced, &res.tri_instanced_flat, false);
                 pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                 tris(pass, &res.tri, &pv.tris);
+                tris(pass, &res.tri, &pv.open_tris);
             }
         }
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);

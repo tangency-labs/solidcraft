@@ -424,7 +424,7 @@ mod tests {
 
     /// A front panel over a back one, with a line between them, seen from the front.
     fn two_panels(front_opacity: f32) -> (Scene, Camera) {
-        let glass = SceneMesh { mesh: Arc::new(panel(-5.0)), color: Rgb(255, 0, 0), face_colors: Vec::new(), opacity: front_opacity };
+        let glass = SceneMesh { mesh: Arc::new(panel(-5.0)), color: Rgb(255, 0, 0), face_colors: Vec::new(), opacity: front_opacity, closed: true };
         let scene = Scene {
             meshes: vec![SceneMesh::solid(Arc::new(panel(5.0)), Rgb(0, 255, 0)), glass],
             lines: vec![SceneLine {
