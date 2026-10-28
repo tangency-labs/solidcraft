@@ -5,7 +5,11 @@
 //! file, optionally with rebuilt UV trim curves, or `CreateFaceFromSurface` over a
 //! B-spline surface or a real `SmPlane`), optionally overwrites stored face, edge and
 //! vertex tolerances, then runs `SmFace::PointClassify`, `sm_ClassifyParamOnFaces` (a
-//! verbatim copy) or `SmFace::CurveOnClassify`. The Rust side imports the edited graph
+//! verbatim copy) or `SmFace::CurveOnClassify`. For an `.smb` file the Rust side reads
+//! the file itself (`crate::own_builder::read_with`: the Rust reader, renumbered into
+//! the shim's walk order) and applies the edits itself (`apply_edits`), so no C++ export
+//! reaches it, and computes its own points and selectors from that B-rep. For the other
+//! sources it imports the edited graph
 //! the shim exports using `topology.face_p2`'s importer: topology, tolerances, UV
 //! domains, planes, B-splines and losslessly round-tripped analytic surfaces and EDGE
 //! curves. UV trim curves retain their ordinary B-spline export. The shared exporters
@@ -250,6 +254,88 @@ fn model(i: &Inputs) -> Result<Result<Model, Output>, HarnessError> {
         exact,
         edit_block,
     }))
+}
+
+/// The Rust side's model of the case: for an `.smb` file the Rust reader's B-rep,
+/// renumbered into the shim's walk order ([`crate::own_builder::read_with`]), with the
+/// edits applied by the Rust side as the shim's `apply_edits` applies them, so no C++
+/// export reaches the Rust side; every other source is still imported ([`model`]).
+fn rust_model(k: &mut Kernel, i: &Inputs) -> Result<Result<Model, Output>, HarnessError> {
+    use crate::own_builder::{build_status, read_with, Built, Conventions};
+    let Some(src @ BrepIn::File { rebuild, .. }) = i.brep.as_ref() else {
+        return model(i);
+    };
+    let mut edit_block = vec![i.edits.len() as f64];
+    for e in &i.edits {
+        if e.sel < 0 {
+            return Err(harness("negative edit selector"));
+        }
+        edit_block.extend([f64::from(e.kind.min(3)), e.sel as f64, e.value]);
+    }
+    let path = path_of(Some(src))?;
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    let mut b = match read_with(k, &path, *rebuild, i.validate_only, i.init_gaps, conv)? {
+        Built::Brep(b) => *b,
+        Built::Failed(e) => {
+            return Ok(Err(Output::unported(&e).unwrap_or_else(|| {
+                Output::err(format!("brep_build_status_{}", build_status(&e)))
+            })))
+        }
+    };
+    if let Err(e) = apply_edits(k, &mut b, &i.edits) {
+        return Ok(Err(rust_err(&e)));
+    }
+    // the Rust side reads its own geometry: nothing is lost in an export
+    let exact = Exact {
+        faces: vec![true; b.faces().len()],
+        edges: vec![true; b.edges().len()],
+    };
+    Ok(Ok(Model {
+        brep: b,
+        exact,
+        edit_block,
+    }))
+}
+
+/// The shim's `apply_edits` on the Rust B-rep (arena order is the shim's walk order):
+/// kind 0/1/2 set the raw stored zone tolerance of the face / edge / vertex `sel`
+/// modulo its count (`SmZoneTol3d(value)`); kind 3 calls `GetOrCreateUVTrimCurve` on
+/// every loop edge use of face `sel` (statuses ignored, as there). An edit of an absent
+/// kind is skipped.
+fn apply_edits(k: &Kernel, b: &mut Brep, edits: &[Edit]) -> Result<(), SolidError> {
+    use solidcore::topology::edgeuse::p3 as eu3;
+    for e in edits {
+        let kind = e.kind.min(3);
+        let n = match kind {
+            1 => b.edges().len(),
+            2 => b.vertices().len(),
+            _ => b.faces().len(),
+        };
+        if n == 0 {
+            continue;
+        }
+        let at = u32::try_from(e.sel.unsigned_abs() % n as u64)
+            .map_err(|_| SolidError::sm_err("query_face_p2::apply_edits"))?;
+        match kind {
+            3 => {
+                let f = FaceId::from_index(at);
+                let eus: Vec<EdgeuseId> = b.edgeuses().ids().collect();
+                for eu in eus {
+                    if eu1::is_loop_edgeuse(b, eu)? && eu1::face(b, eu)? == Some(f) {
+                        if let Err(err) = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true) {
+                            if err.is_unported() {
+                                return Err(err);
+                            }
+                        }
+                    }
+                }
+            }
+            0 => b.face_mut(FaceId::from_index(at))?.tolerance = zone_tol3d(k, e.value),
+            1 => b.edge_mut(EdgeId::from_index(at))?.tolerance = zone_tol3d(k, e.value),
+            _ => b.vertex_mut(VertexId::from_index(at))?.tolerance = zone_tol3d(k, e.value),
+        }
+    }
+    Ok(())
 }
 
 /// The face selected by `s`.
@@ -808,7 +894,7 @@ fn rust_err(e: &SolidError) -> Output {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     if let OpIn::ProtoVertex {
         approx,
         capture,
@@ -851,7 +937,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         ];
         return Ok(Output::new().values("proto", out));
     }
-    let mut m = match model(i)? {
+    let mut m = match rust_model(&mut k, i)? {
         Ok(m) => m,
         Err(o) => return Ok(o),
     };

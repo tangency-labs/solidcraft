@@ -17,8 +17,10 @@
 //! **B-rep ops** use the B-reps of unit `topology.vertexuse` (upstream `.smb` files and
 //! faces of B-spline surfaces or real `SmPlane`s): the C++ side builds a real `SmBrep`
 //! and preserves exactly exported analytic surfaces. Other surfaces and edge curves
-//! get the plain B-spline copies the Rust import rebuilds; the Rust side imports the
-//! graph that unit's shim exports. Loop,
+//! get the plain B-spline copies the Rust import rebuilds. The Rust side reads an `.smb`
+//! file itself (`crate::own_builder::read_with`: the Rust reader, renumbered into the
+//! shim's walk order; no C++ export reaches the Rust side) and imports the graph that
+//! unit's shim exports for the other sources. Loop,
 //! face and edge use selectors are taken modulo their counts. The mutating ops compare
 //! every edge use's UV trim curve afterwards.
 //!
@@ -2123,6 +2125,25 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
         };
     }
     let r = match brep_of(i) {
+        Some(brep @ BrepIn::File { rebuild, .. }) => {
+            // an `.smb` file: read by the Rust reader and renumbered into the shim's
+            // walk order (no C++ export reaches the Rust side)
+            use crate::own_builder::{build_status, counts, read_with, Built, Conventions};
+            let path = shared::path_of(brep)?;
+            let conv = &Conventions::EDGEUSE_GRAPH;
+            let mut b = match read_with(&mut k, &path, *rebuild, false, false, conv)? {
+                Built::Brep(b) => *b,
+                Built::Failed(e) => {
+                    return Ok(Output::unported(&e).unwrap_or_else(|| {
+                        Output::new().values("out", vec![-1.0, build_status(&e)])
+                    }))
+                }
+            };
+            let Some(op) = resolve_op(i, counts(&b)) else {
+                return Ok(Output::err("no_entity_of_that_kind"));
+            };
+            run_rust_brep(&mut k, &mut b, &op)
+        }
         Some(brep) => {
             let ex = export_of(brep)?;
             let Some(c) = fixture::counts(&ex) else {

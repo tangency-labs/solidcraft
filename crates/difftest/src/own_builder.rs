@@ -9,8 +9,9 @@
 //! order ([`walk`], the shim's `walk`), so selector indices taken modulo the entity
 //! counts name the same entities on both sides. No C++ state reaches the Rust side.
 //!
-//! `.smb` file sources ([`BrepIn::File`]) are not built here: [`build`] returns
-//! `None` for them and the caller keeps its import.
+//! `.smb` file sources ([`BrepIn::File`]) are not built by [`build`] (it returns
+//! `None` for them): [`read_with`] reads them with the Rust reader and renumbers the
+//! result the same way.
 
 use std::collections::BTreeMap;
 
@@ -39,7 +40,7 @@ use solidcore::topology::{
     LoopEdge, LoopId, Loopuse, LoopuseId, LoopuseStart, Region, RegionId, Shell, ShellId, Vertex,
     VertexId, Vertexuse, VertexuseId, VertexuseOwner,
 };
-use solidcore::SolidError;
+use solidcore::{EntityRef, SolidError};
 
 use crate::units::topology_edgeuse_p1::{bspline_of, surface_of, BrepIn, SrfIn};
 use crate::HarnessError;
@@ -233,6 +234,38 @@ pub(crate) fn build_with(
         }
     }
     Ok(Some(Built::Brep(Box::new(b))))
+}
+
+/// The B-rep of an `.smb` file source as the shim's `build` makes it: `new SmBrep`,
+/// `ReadFromFile(path, SM_ASCII, rebuild)` read by the Rust reader
+/// ([`crate::own_reader::read_file_rebuild`]), `m_bValidateOnly`, then (with
+/// `init_gaps`) the shim's gap initialisation walk, renumbered into the shim's
+/// traversal order under `conv`. No C++ state reaches the Rust side.
+///
+/// # Errors
+///
+/// A harness error when the file cannot be opened or the renumbering finds a dangling
+/// reference; a failed Rust read is [`Built::Failed`].
+pub(crate) fn read_with(
+    k: &mut Kernel,
+    path: &str,
+    rebuild: bool,
+    validate_only: bool,
+    init_gaps: bool,
+    conv: &Conventions<'_>,
+) -> Result<Built, HarnessError> {
+    let mut raw = match crate::own_reader::read_file_rebuild(k, path, rebuild)? {
+        Ok(b) => b,
+        Err(e) => return Ok(Built::Failed(e)),
+    };
+    raw.set_validate_only(validate_only);
+    let mut b = renumber_with(&raw, conv)?;
+    if init_gaps {
+        if let Err(e) = init_gap_walk(k, &mut b, conv.vertex_edge_gaps) {
+            return Ok(Built::Failed(e));
+        }
+    }
+    Ok(Built::Brep(Box::new(b)))
 }
 
 /// `new (ctx) SmBrep()` then `f` on it: the B-rep, or the build's error.
@@ -450,8 +483,8 @@ fn set_point(
         env.records,
         env.attributes,
         Some(&mut k.context),
-        key_of(solidcore::EntityRef::Vertex(v)),
-        &|vu| key_of(solidcore::EntityRef::Vertexuse(vu)),
+        key_of(EntityRef::Vertex(v)),
+        &|vu| key_of(EntityRef::Vertexuse(vu)),
     )
 }
 
@@ -914,6 +947,24 @@ impl Map<'_> {
     mapper!(edge, edges, EdgeId);
     mapper!(vertexuse, vertexuses, VertexuseId);
     mapper!(vertex, vertices, VertexId);
+
+    /// An entity of the source B-rep under its new id (a whole B-rep keeps its id).
+    fn entity(&self, e: EntityRef) -> Result<EntityRef, SolidError> {
+        let unreached = |_| SolidError::invalid_input("renumber", "unreached cache entity");
+        Ok(match e {
+            EntityRef::Brep(x) => EntityRef::Brep(x),
+            EntityRef::Region(x) => EntityRef::Region(self.region(x).map_err(unreached)?),
+            EntityRef::Shell(x) => EntityRef::Shell(self.shell(x).map_err(unreached)?),
+            EntityRef::Faceuse(x) => EntityRef::Faceuse(self.faceuse(x).map_err(unreached)?),
+            EntityRef::Face(x) => EntityRef::Face(self.face(x).map_err(unreached)?),
+            EntityRef::Loopuse(x) => EntityRef::Loopuse(self.loopuse(x).map_err(unreached)?),
+            EntityRef::Loop(x) => EntityRef::Loop(self.loop_(x).map_err(unreached)?),
+            EntityRef::Edgeuse(x) => EntityRef::Edgeuse(self.edgeuse(x).map_err(unreached)?),
+            EntityRef::Edge(x) => EntityRef::Edge(self.edge(x).map_err(unreached)?),
+            EntityRef::Vertexuse(x) => EntityRef::Vertexuse(self.vertexuse(x).map_err(unreached)?),
+            EntityRef::Vertex(x) => EntityRef::Vertex(self.vertex(x).map_err(unreached)?),
+        })
+    }
 }
 
 fn opt<T, F: Fn(T) -> Result<T, HarnessError>>(
@@ -1006,6 +1057,12 @@ pub(crate) fn renumber_with(src: &Brep, conv: &Conventions<'_>) -> Result<Brep, 
         let new = m.face(id)?;
         if let Some(s) = surface.as_mut().filter(|_| owned) {
             let _ = s.set_owner(Some((conv.face_owner)(new)));
+        }
+        // the face surface's cache slot as the Rust read left it (its tree state and
+        // kept trimmed cache, renamed into the new ids): the copy stands for the same
+        // surface object, and `Surface::clone` gives it an empty slot
+        if let (Some(s), Some(from)) = (surface.as_ref(), f.surface.as_ref()) {
+            s.copy_cache_slot_of(from, |e| m.entity(e)).map_err(solid)?;
         }
         b.add_face_record(Face {
             shell: m.shell(f.shell)?,

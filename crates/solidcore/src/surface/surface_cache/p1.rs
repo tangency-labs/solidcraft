@@ -1785,6 +1785,20 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         self.trimmed_dispatch
     }
 
+    /// Keys a face binding to the cache surface's owner as it is now: after the surface
+    /// and its face were renamed together (a B-rep copied into new arenas, its handles
+    /// mapped), the bound face is that surface's face again.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::face`].
+    pub(crate) fn rekey_trimmed_face(&mut self) -> Result<()> {
+        if self.trimmed_face_key.is_some() {
+            self.trimmed_face_key = self.surface.face()?;
+        }
+        Ok(())
+    }
+
     /// Records a face handle only after checking the source surface's owner key.
     pub(crate) fn bind_trimmed_face(&mut self, key: object::ObjectRef, face: O) -> Result<()> {
         if self.surface.face()? != Some(key) {

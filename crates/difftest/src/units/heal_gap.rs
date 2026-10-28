@@ -17,8 +17,11 @@
 //! * `gap_array`: `SmGapArray::Add` / `Append` / `ReSet` and the gap comparisons.
 //! * `topo`: a gap record (`SmVertexEdgeGap` ... `SmEdgeFaceGap`) set on a real
 //!   `SmBrep` built as the `topology.vertexuse` runner builds it (an upstream `.smb`
-//!   file, a wire edge, a face from a surface, the `my_test_topology` network), whose
-//!   export the Rust side imports with that runner's importer; compares the gap, its
+//!   file, a wire edge, a face from a surface, the `my_test_topology` network). The Rust
+//!   side reads an `.smb` file itself (`crate::own_builder::read_with`: the Rust reader,
+//!   renumbered into the shim's walk order, so selectors name the same entities and no
+//!   C++ export reaches the Rust side); other sources are still imported from the shim's
+//!   export with that runner's importer. Compares the gap, its
 //!   accessors, `GetGapEndPoints` and `CacheGap`. Parameters are given as fractions of
 //!   the selected edge's interval or face's surface domain (or `SM_UNDEF_DOUBLE`), so
 //!   both sides read them from the same graph.
@@ -1023,7 +1026,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let mut o = Vec::new();
     match i {
         Inputs::Gf {
@@ -1148,11 +1151,26 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             uv,
         } => {
             let spec = topo_brep(brep.as_ref(), ellipse_face.as_ref())?;
-            let (_, _, ex) = topo_graph(spec)?;
-            let Some(c) = counts(&ex) else {
-                return Ok(state(vec![-1.0, ex.get(1).copied().unwrap_or(0.0)]));
+            let (mut b, c) = if let TopoBrep::Shared(src @ BrepIn::File { rebuild, .. }) = spec {
+                // an `.smb` file: read by the Rust reader and renumbered into the
+                // shim's walk order (no C++ export reaches the Rust side)
+                use crate::own_builder::{build_status, counts as own_counts, read_with, Built};
+                let conv = &crate::own_builder::Conventions::EDGEUSE_GRAPH;
+                match read_with(&mut k, &path_of(src)?, *rebuild, false, false, conv)? {
+                    Built::Brep(b) => {
+                        let c = own_counts(&b);
+                        (*b, c)
+                    }
+                    Built::Failed(e) if e.is_unported() => return rust_fail(&e),
+                    Built::Failed(e) => return Ok(state(vec![-1.0, build_status(&e)])),
+                }
+            } else {
+                let (_, _, ex) = topo_graph(spec)?;
+                let Some(c) = counts(&ex) else {
+                    return Ok(state(vec![-1.0, ex.get(1).copied().unwrap_or(0.0)]));
+                };
+                (import(&ex)?.0, c)
             };
-            let (mut b, _) = import(&ex)?;
             let args = topo_args(&b, c, *kind, *sel0, *sel1, *f0, *f1, *uv)?;
             match topo_rust(&k, &mut b, &args) {
                 Ok(v) => o = v,

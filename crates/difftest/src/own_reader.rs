@@ -59,13 +59,22 @@ pub(crate) fn read_key_of(e: EntityRef) -> ObjectRef {
 /// reads it. The outer error is a harness failure (the file cannot be opened); the
 /// inner one is the Rust reader's own result.
 pub(crate) fn read_file(k: &mut Kernel, path: &str) -> Result<SolidResult<Brep>, HarnessError> {
-    let bytes = std::fs::read(path).map_err(|e| HarnessError::new(format!("{path}: {e}")))?;
-    Ok(read_bytes(k, bytes))
+    read_file_rebuild(k, path, false)
 }
 
-/// [`read_file`] on the file's bytes. (Sources with `rebuild` set, `ReadFromFile`'s
-/// `bRebuildUVTrimCurves`, pass that flag here once a runner using them switches.)
-fn read_bytes(k: &mut Kernel, bytes: Vec<u8>) -> SolidResult<Brep> {
+/// [`read_file`] with `ReadFromFile`'s `bRebuildUVTrimCurves` flag: `rebuild` rebuilds
+/// the UV trim curves instead of checking and fixing them.
+pub(crate) fn read_file_rebuild(
+    k: &mut Kernel,
+    path: &str,
+    rebuild: bool,
+) -> Result<SolidResult<Brep>, HarnessError> {
+    let bytes = std::fs::read(path).map_err(|e| HarnessError::new(format!("{path}: {e}")))?;
+    Ok(read_bytes(k, bytes, rebuild))
+}
+
+/// [`read_file_rebuild`] on the file's bytes.
+fn read_bytes(k: &mut Kernel, bytes: Vec<u8>, rebuild: bool) -> SolidResult<Brep> {
     let mut body = Brep::new_with_infinite_region()?;
     let mut attributes = AttributeStore::default();
     let mut records = solidcore::topology::topology::NotifyRecords::new();
@@ -76,7 +85,7 @@ fn read_bytes(k: &mut Kernel, bytes: Vec<u8>) -> SolidResult<Brep> {
         records: &mut records,
         next_key: 1u64 << 50,
     };
-    p7::read_from_file(k, &mut body, bytes, FileType::Ascii, false, &mut env)?;
+    p7::read_from_file(k, &mut body, bytes, FileType::Ascii, rebuild, &mut env)?;
     // Record the geometry owners under arena identities, as a kernel-built B-rep
     // does, so `GetFace` / `GetEdge` on that geometry resolve to the owning topology.
     body.use_arena_naming()?;

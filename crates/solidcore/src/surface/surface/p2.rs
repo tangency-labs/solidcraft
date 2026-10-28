@@ -1165,6 +1165,47 @@ impl Surface {
             .with(|s| matches!(s.trim, TrimCacheSlot::CheckedOut))
     }
 
+    /// Gives this surface (a copy of `src` standing for it in a B-rep copied into new
+    /// arenas, its owner already renamed) what `src`'s cache slot holds: its tree state
+    /// and its kept trimmed surface cache, the cache's topology handles renamed by
+    /// `map` and its face binding keyed to this surface's owner. `src` keeps its own.
+    /// Upstream has one surface object, so nothing is copied there; this keeps a copy's
+    /// later cache lookups seeing the cache the original's earlier ones made
+    /// ([`Clone`] gives a copy an empty slot).
+    ///
+    /// # Errors
+    ///
+    /// Those of `map` and of the cache copy; [`SolidError::InvalidInput`] when `src`'s
+    /// trimmed cache is in use.
+    pub fn copy_cache_slot_of(
+        &self,
+        src: &Self,
+        map: impl Fn(EntityRef) -> Result<EntityRef>,
+    ) -> Result<()> {
+        match src.take_trim_cache() {
+            TrimCacheSlot::Empty => {}
+            TrimCacheSlot::CheckedOut => {
+                return Err(SolidError::invalid_input(
+                    "surface::copy_cache_slot_of",
+                    "the trimmed surface cache is in use",
+                ))
+            }
+            TrimCacheSlot::Stored(cache) => {
+                let copied = cache.map_handles(&map).and_then(|mut copy| {
+                    let surface = copy.base_mut().surface_mut();
+                    surface.cache_slot = self.cache_slot.share();
+                    surface.adopt_owner_of(self);
+                    copy.base_mut().rekey_trimmed_face()?;
+                    Ok(copy)
+                });
+                Self::store_trim_cache(*cache);
+                Self::store_trim_cache(copied?);
+            }
+        }
+        self.set_cache_tree_state(src.cache_tree_state());
+        Ok(())
+    }
+
     /// Makes this surface share `other`'s cache slot: `self` is a copy that stands for
     /// the same surface object (a private snapshot of a B-rep standing for the B-rep
     /// itself).
