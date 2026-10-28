@@ -2003,3 +2003,30 @@ fn a_dimension_measures_a_model_edge() {
     let sk = sketch(&s);
     assert_eq!(sk.links.len(), 1, "{:?}", sk.links);
 }
+
+/// #7912: a dimension refuses a long list of entities before projecting any of them, so one
+/// request cannot make the engine resolve thousands of model edges.
+#[test]
+fn a_dimension_refuses_a_long_list_of_entities() {
+    // The most entities one call may project (the engine's `MAX_PROJECTED_ENTITIES`).
+    const MAX_PROJECTED: usize = 1_000;
+    let mut s = Session::default();
+    // A sheet-metal base flange: a 100 x 50 plate whose front edge runs along y = 0.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Flange"}));
+    // A sketch with a point 25 above the flange's front edge.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Near"}));
+    let point = run(&mut s, "sketch.point", json!({"point": [50, 25]}))["point"].as_str().unwrap().to_string();
+    // More entities than a call may project, every one of them a model edge to project.
+    let mut entities = vec![json!(point)];
+    for _ in 0..MAX_PROJECTED {
+        entities.push(json!({"edge": [50, 0, 0], "body": "Flange"}));
+    }
+    let before = serde_json::to_value(&s.doc).unwrap();
+    let error = s.execute("sketch.dimension", &json!({"entities": entities})).unwrap_err();
+    assert!(error.to_string().contains("at most"), "{error}");
+    // The refused request leaves the design as it was.
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
+}

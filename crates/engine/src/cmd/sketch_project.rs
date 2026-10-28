@@ -418,11 +418,19 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
         .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))
 }
 
+/// Most model references one call may project into a sketch: each one is a link and a resolve,
+/// so the count is capped before any of them is projected.
+const MAX_PROJECTED_ENTITIES: usize = 1_000;
+
 /// A dimension's entities may be model geometry (#7912): an `{edge: [x,y,z], body?}` or
 /// `{vertex: [x,y,z], body?}` among them is projected into the sketch first, as Project does,
 /// and stands for the projected curve (or point) in the entities returned.
 pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let Some(Value::Array(entities)) = p.get("entities") else { return Ok(p.clone()) };
+    // A long list is refused before anything is projected, so it costs nothing.
+    if entities.len() > MAX_PROJECTED_ENTITIES {
+        return Err(bad(cmd, format!("`entities` may list at most {MAX_PROJECTED_ENTITIES} entities")));
+    }
     if !entities.iter().any(model_ref) {
         return Ok(p.clone());
     }
@@ -431,7 +439,7 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
     let mut sk = doc.sketch(id)?.clone();
     refresh(s, &doc, id, &mut sk);
     let mut out = entities.clone();
-    for entity in out.iter_mut() {
+    for entity in out.iter_mut().take(MAX_PROJECTED_ENTITIES) {
         if !model_ref(entity) {
             continue;
         }
