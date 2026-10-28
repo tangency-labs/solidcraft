@@ -5425,9 +5425,14 @@ mod tests {
         let expected = (6000.0 - std::f64::consts::PI * 120.0) * 2.5 - std::f64::consts::PI * 60.0;
         assert!((vol(&s.solid().unwrap()) - expected).abs() < 0.5, "{}", vol(&s.solid().unwrap()));
         assert!((vol(&s.flat_solid().unwrap()) - expected).abs() < 0.5, "{}", vol(&s.flat_solid().unwrap()));
-        // The machining record keeps the pocket's exact outline.
+        // The machining record keeps the pocket's exact outline: its four conics in their order,
+        // the loop started at any of them.
         let machined = s.machining().unwrap();
-        assert!(machined.len() == 1 && machined[0].region.outer == pocket.outer, "{} records", machined.len());
+        let same_loop = |l: &Loop2| {
+            let n = pocket.outer.segs.len();
+            l.segs.len() == n && (0..n).any(|k| (0..n).all(|i| l.segs[(i + k) % n] == pocket.outer.segs[i]))
+        };
+        assert!(machined.len() == 1 && same_loop(&machined[0].region.outer), "{machined:?}");
     }
 
     #[test]
@@ -7006,10 +7011,12 @@ mod tests {
             assert!((length - outline).abs() < 1e-9, "{position}: {length} vs {outline}");
             assert!((s.base.area() - (whole - below(line))).abs() < 1e-9, "{position}: {} vs {}", s.base.area(), whole - below(line));
             // The flat pattern: the base and f.len × (BA + 37) of flange, its outline the base's
-            // with the flange's two sides (bend and panel, a line each) in place of nothing.
+            // with the flange's two sides and its end in place of the trimmed line. Each side is
+            // one line through the bend and the panel: the union of the two has no vertex where
+            // their sides meet in line.
             let regions = s.flat_regions().unwrap();
             let (arcs, edges, length, shortest) = arcs_and_edges(&regions[0].outer);
-            assert!(regions[0].outer.is_line_arc() && (arcs, edges) == (4, 12) && shortest > 2.0, "{position}: {:?}", regions[0].outer);
+            assert!(regions[0].outer.is_line_arc() && (arcs, edges) == (4, 10) && shortest > 2.0, "{position}: {:?}", regions[0].outer);
             assert!((length - (outline + 2.0 * (ba + panel))).abs() < 1e-9, "{position}: {length}");
             let flat = whole - below(line) + f.len * (ba + panel);
             assert!((regions[0].area() - flat).abs() < 1e-9, "{position}: {} vs {flat}", regions[0].area());
@@ -7168,13 +7175,12 @@ mod tests {
     }
 
     #[test]
-    fn a_base_trimmed_through_a_free_form_curve_follows_it_with_arcs() {
+    fn a_base_trimmed_through_a_free_form_curve_keeps_it_exact() {
         // A 200 x 60 plate under a parabola 40 high: y = 60 + 160·(x/200)·(1 − x/200), a conic
         // of weight 1. A flange 40 high inside on the right edge trims the base to x = 197,
         // through the curve's end: 183.564 goes (∫ y from 197 to 200), and the bend runs up the
-        // line x = 197 to the curve, at y = 62.364. The planar booleans follow a curve they
-        // cut with tangent arcs within 0.001 mm: over the parabola's 220 mm that is at most
-        // 0.22 mm² of the base, and 0.001/cos 38° = 0.0013 of the bend where it meets the curve.
+        // line x = 197 to the curve, at y = 62.364. The planar booleans cut the curve exactly:
+        // the base keeps what is left of it as one conic, so the strip and the bend are exact.
         // It used to become about 200 chords.
         let (ba, quarter) = (std::f64::consts::PI, std::f64::consts::FRAC_PI_2);
         let crowned = || {
@@ -7197,11 +7203,12 @@ mod tests {
             let mut s = crowned();
             let i = s.add_flange(pick, 40.0, quarter, 1.0, "inside", false).unwrap();
             let outer = &s.base.outer;
-            let arcs = outer.segs.iter().filter(|e| matches!(e, Seg2::Arc { .. })).count();
-            assert!(outer.is_line_arc() && arcs > 1 && outer.segs.len() == arcs + 3 && arcs < 64, "{what}: {arcs} arcs of {}", outer.segs.len());
-            assert!((s.base.area() - (whole - strip)).abs() < 0.22, "{what}: {} vs {}", s.base.area(), whole - strip);
+            let conics = outer.segs.iter().filter(|e| matches!(e, Seg2::Conic { .. })).count();
+            let lines = outer.segs.iter().filter(|e| matches!(e, Seg2::Line { .. })).count();
+            assert!((conics, lines) == (1, 3), "{what}: {:?}", outer.segs);
+            assert!((s.base.area() - (whole - strip)).abs() < 1e-6, "{what}: {} vs {}", s.base.area(), whole - strip);
             let f = s.flanges[i].clone();
-            assert!(f.p.dist(start) < 1e-9 && (f.len - len).abs() < 2e-3, "{what}: {f:?}");
+            assert!(f.p.dist(start) < 1e-9 && (f.len - len).abs() < 1e-9, "{what}: {f:?}");
             assert!((flat_area(&s) - (s.base.area() + f.len * (ba + 37.0))).abs() < 1e-6, "{what}: {}", flat_area(&s));
             holds_the_flat_material(&s, what);
             let mut c = chorded(&crowned());
