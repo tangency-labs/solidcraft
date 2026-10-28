@@ -1,5 +1,5 @@
 //! A paper scene as a vector PDF (#4890, P1): one page the sheet's size, its lines and fills,
-//! geometry only (text follows with P2).
+//! geometry and optional-content layers (text follows with P2).
 //!
 //! - **The file** comes from `pdf-writer`: a catalog, one page whose MediaBox is the sheet in
 //!   points, its content deflated, and an Info dictionary with the Producer, the Title when there
@@ -15,6 +15,10 @@
 //! - **Paint:** strokes at their width `w` (the walk never gives 0, which 8.4.3.2 says is a device
 //!   pixel and shouldn't be used), butt caps, miter joins and a miter limit of 4, dashed by `d`;
 //!   fills black, even-odd (`f*`). Black on no background, as SVG.
+//! - **Layers:** nonempty groups share one PDF optional-content group for each
+//!   distinct paper object kind. Group order remains the original paint order,
+//!   and each kind's PDF layer uses ObjectKind::layer, as in DXF. Empty
+//!   groups do not invent layers. All present layers start visible.
 //! - **Content size:** every append checks the cumulative byte limit before growing the
 //!   buffer, including inside a path/arc and the final graphics-state restore. Allocation
 //!   failure is an error. The limit is for uncompressed content, not total export memory.
@@ -24,8 +28,8 @@ use std::io::Write as _;
 
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
-use pdf_writer::{Date, Filter, Pdf, Rect, Ref, TextStr};
-use solidcraft_geom::paper::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, Piece, Prepared};
+use pdf_writer::{Date, Filter, Name, Pdf, Rect, Ref, TextStr};
+use solidcraft_geom::paper::{Grid, GridDashes, GridGroup, GridItem, GridPath, GridPoint, GridReport, ObjectKind, Piece, Prepared};
 use solidcraft_geom::{Seg2, Vec2};
 
 use super::push_mm;
@@ -70,7 +74,8 @@ pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, Pdf
         return Err(IoError::Invalid(format!("a sheet PDF's page is at least {MIN_PAGE_PT} pt (about 1.06 mm) a side")));
     }
 
-    let content = content(&on.groups)?;
+    let layers = collect_layers(&on.groups)?;
+    let content = content_with_limit_and_layers(&on.groups, &layers, MAX_DRAWING_BYTES)?;
     let mut deflate = ZlibEncoder::new(Vec::new(), Compression::default());
     let compressed = deflate.write_all(content.as_bytes()).and_then(|()| deflate.finish());
     let compressed = compressed.map_err(|e| IoError::Invalid(format!("the sheet PDF: {e}")))?;
@@ -78,11 +83,32 @@ pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, Pdf
     // Each object's number, used once (pdf-writer panics on a number written twice).
     let (catalog, tree, page_id, contents, info) = (Ref::new(1), Ref::new(2), Ref::new(3), Ref::new(4), Ref::new(5));
     let mut pdf = Pdf::new();
-    pdf.catalog(catalog).pages(tree);
+    {
+        let mut root = pdf.catalog(catalog);
+        root.pages(tree);
+        if !layers.is_empty() {
+            // PDF 1.5 optional content: one group per used paper object kind.
+            // The default configuration orders all layers and starts them ON.
+            let mut properties = root.insert(Name(b"OCProperties")).dict();
+            properties.insert(Name(b"OCGs")).array().items(layers.iter().map(|l| l.reference));
+            let mut default = properties.insert(Name(b"D")).dict();
+            default.insert(Name(b"Order")).array().items(layers.iter().map(|l| l.reference));
+            default.insert(Name(b"ON")).array().items(layers.iter().map(|l| l.reference));
+            default.pair(Name(b"BaseState"), Name(b"ON"));
+        }
+    }
     pdf.pages(tree).kids([page_id]).count(1);
     let mut writer = pdf.page(page_id);
     writer.parent(tree).media_box(Rect::new(0.0, 0.0, page[0] as f32, page[1] as f32)).contents(contents);
-    writer.resources();
+    {
+        let mut resources = writer.resources();
+        if !layers.is_empty() {
+            let mut properties = resources.insert(Name(b"Properties")).dict();
+            for layer in &layers {
+                properties.pair(Name(layer.tag.as_bytes()), layer.reference);
+            }
+        }
+    }
     drop(writer);
     pdf.stream(contents, &compressed).filter(Filter::FlateDecode);
     let mut doc = pdf.document_info(info);
@@ -94,6 +120,11 @@ pub fn paper_pdf(scene: &Prepared, options: &PdfOptions) -> Result<(Vec<u8>, Pdf
         doc.creation_date(date).modified_date(date);
     }
     drop(doc);
+    for layer in &layers {
+        let mut group = pdf.indirect(layer.reference).dict();
+        group.pair(Name(b"Type"), Name(b"OCG"));
+        group.pair(Name(b"Name"), TextStr(layer.kind.layer()));
+    }
     Ok((pdf.finish(), on.report))
 }
 
@@ -108,39 +139,73 @@ fn date(secs: u64) -> Result<Date> {
     Ok(Date::new(u16::try_from(year).unwrap_or(0)).month(month).day(day).hour(hour).minute(minute).second(second).utc_offset_hour(0))
 }
 
+/// One PDF layer for every kind with actual paper marks, in first paint order.
+struct Layer {
+    kind: ObjectKind,
+    reference: Ref,
+    tag: String,
+}
+
+fn collect_layers(groups: &[GridGroup]) -> Result<Vec<Layer>> {
+    let mut layers: Vec<Layer> = Vec::new();
+    for group in groups.iter().filter(|group| !group.items.is_empty()) {
+        if layers.iter().any(|layer| layer.kind == group.kind) {
+            continue;
+        }
+        layers.try_reserve(1).map_err(|_| IoError::Invalid("the sheet PDF: cannot allocate its layer list".into()))?;
+        let index = i32::try_from(layers.len()).ok().and_then(|n| n.checked_add(6)).ok_or_else(|| IoError::Invalid("too many PDF layers".into()))?;
+        layers.push(Layer { kind: group.kind, reference: Ref::new(index), tag: format!("L{}", layers.len()) });
+    }
+    Ok(layers)
+}
+
 /// The page's content stream: the scene in millimetres, scaled to points once.
+#[cfg(test)]
 fn content(groups: &[GridGroup]) -> Result<String> {
     content_with_limit(groups, MAX_DRAWING_BYTES)
 }
 
 // The private seam permits smaller test limits, never a higher production cap.
+#[cfg(test)]
 fn content_with_limit(groups: &[GridGroup], max_bytes: usize) -> Result<String> {
+    let layers = collect_layers(groups)?;
+    content_with_limit_and_layers(groups, &layers, max_bytes)
+}
+
+fn content_with_limit_and_layers(groups: &[GridGroup], layers: &[Layer], max_bytes: usize) -> Result<String> {
     let mut w = Content::new(max_bytes)?;
     w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
-    for item in groups.iter().flat_map(|g| &g.items) {
-        match item {
-            GridItem::Stroke { width, path, dashes } => {
-                if w.width != Some(*width) {
-                    w.number(*width)?;
-                    w.append(" w\n")?;
-                    w.width = Some(*width);
+    for group in groups.iter().filter(|group| !group.items.is_empty()) {
+        let layer = layers.iter().find(|layer| layer.kind == group.kind).ok_or_else(|| IoError::Invalid("missing paper PDF layer".into()))?;
+        w.append("/OC /")?;
+        w.append(&layer.tag)?;
+        w.append(" BDC\n")?;
+        for item in &group.items {
+            match item {
+                GridItem::Stroke { width, path, dashes } => {
+                    if w.width != Some(*width) {
+                        w.number(*width)?;
+                        w.append(" w\n")?;
+                        w.width = Some(*width);
+                    }
+                    if w.dashes.as_ref() != dashes.as_ref() {
+                        w.dashes(dashes.as_ref())?;
+                        w.dashes.clone_from(dashes);
+                    }
+                    w.path(path)?;
+                    // A closed path's closing line, then the stroke: `s`.
+                    w.append(if path.closed { "s\n" } else { "S\n" })?;
                 }
-                if w.dashes.as_ref() != dashes.as_ref() {
-                    w.dashes(dashes.as_ref())?;
-                    w.dashes.clone_from(dashes);
+                GridItem::Fill { loops } => {
+                    for l in loops {
+                        w.path(l)?;
+                        w.append("h\n")?;
+                    }
+                    w.append("f*\n")?;
                 }
-                w.path(path)?;
-                // A closed path's closing line, then the stroke: `s`.
-                w.append(if path.closed { "s\n" } else { "S\n" })?;
-            }
-            GridItem::Fill { loops } => {
-                for l in loops {
-                    w.path(l)?;
-                    w.append("h\n")?;
-                }
-                w.append("f*\n")?;
             }
         }
+        w.append("EMC\n")?;
     }
     w.append("Q\n")?;
     Ok(w.out)

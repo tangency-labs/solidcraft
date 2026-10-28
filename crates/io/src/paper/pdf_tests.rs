@@ -120,9 +120,22 @@ fn check_xref(bytes: &[u8]) -> std::result::Result<usize, String> {
     let number = bytes.get(at..).ok_or("missing xref offset")?.split(|b| b.is_ascii_whitespace()).next().ok_or("missing xref offset")?;
     let start: usize = std::str::from_utf8(number).map_err(|_| "xref offset is not ASCII")?.parse().map_err(|_| "invalid xref offset")?;
     let tail = bytes.get(start..).ok_or("xref offset outside file")?;
-    let table = tail.strip_prefix(b"xref\n0 6\n").ok_or("xref offset is not the expected subsection")?;
-    let entries = table.get(..120).ok_or("truncated xref entries")?;
-    for (n, entry) in entries.as_chunks::<20>().0.iter().enumerate() {
+    let rest = tail.strip_prefix(b"xref\n0 ").ok_or("xref offset is not the expected subsection")?;
+    let end_of_count = rest.iter().position(|&c| c == b'\n').ok_or("truncated xref count")?;
+    let count: usize =
+        std::str::from_utf8(&rest[..end_of_count]).map_err(|_| "xref count is not ASCII")?.parse().map_err(|_| "invalid xref count")?;
+    // Five fixed objects plus up to five distinct current ObjectKinds, and the free object.
+    if !(6..=11).contains(&count) {
+        return Err(format!("unexpected PDF object count {count}"));
+    }
+    let table = rest.get(end_of_count + 1..).ok_or("truncated xref table")?;
+    let entry_bytes = count.checked_mul(20).ok_or("xref count overflow")?;
+    let entries = table.get(..entry_bytes).ok_or("truncated xref entries")?;
+    let (entries, remainder) = entries.as_chunks::<20>();
+    if !remainder.is_empty() {
+        return Err("xref entry does not occupy 20 bytes".into());
+    }
+    for (n, entry) in entries.iter().enumerate() {
         if ![&b" \n"[..], &b"\r\n"[..]].contains(&&entry[18..]) {
             return Err(format!("entry {n} does not occupy 20 bytes"));
         }
@@ -392,4 +405,110 @@ fn content_budget_reuses_the_original_formatter_at_integer_extremes() {
         assert!(too_small.number(n).is_err());
         assert!(too_small.out.is_empty());
     }
+}
+/// P3: one optional-content group per nonempty kind, shared across repeats.
+/// The scene's drawing order remains the content stream's paint order.
+#[test]
+fn pdf_layers_share_object_kinds_and_keep_noncontiguous_paint_order() {
+    let path = |y: f64| vec![Seg2::Line { a: p(10.0, y), b: p(100.0, y) }];
+    let sheet = Scene {
+        size_mm: p(210.0, 297.0),
+        groups: vec![
+            Group { object: 10, kind: ObjectKind::TitleBlock, items: vec![stroke(path(10.0), false, 0.35, None)] },
+            Group { object: 20, kind: ObjectKind::DrawingBorder, items: vec![stroke(path(20.0), false, 0.35, None)] },
+            Group { object: 11, kind: ObjectKind::TitleBlock, items: vec![stroke(path(30.0), false, 0.35, None)] },
+            Group { object: 30, kind: ObjectKind::SheetBorder, items: vec![] },
+        ],
+    };
+    let bytes = pdf(&sheet, &NONE);
+    assert!(check_xref(&bytes).is_ok(), "{:?}", check_xref(&bytes));
+    assert_eq!(pdf(&sheet, &NONE), bytes, "layer order and object ids must be deterministic");
+    let file = text(&bytes);
+    assert!(file.contains("/OCProperties"), "the catalog must declare optional content");
+    assert!(file.contains("/OCGs [6 0 R 7 0 R]"), "the same kind must reuse its OCG: {file}");
+    assert!(file.contains("/Order [6 0 R 7 0 R]"), "the visible layers are ordered");
+    assert!(file.contains("/ON [6 0 R 7 0 R]"), "both are visible by default");
+    assert!(file.contains("/BaseState /ON"), "the default state is ON");
+    assert!(file.contains("/Name (TITLE_BLOCK)") && file.contains("/Name (DRAWING_BORDER)"));
+    assert!(!file.contains("/Name (SHEET_BORDER)"), "an empty group has no painted layer");
+    assert!(file.contains("/Properties") && file.contains("/L0 6 0 R") && file.contains("/L1 7 0 R"));
+    let stream = content(&bytes);
+    let markers: Vec<_> = stream.lines().filter(|line| line.ends_with(" BDC") || *line == "EMC").collect();
+    assert_eq!(markers, ["/OC /L0 BDC", "EMC", "/OC /L1 BDC", "EMC", "/OC /L0 BDC", "EMC"]);
+    assert_eq!(stream.lines().filter(|line| *line == "S").count(), 3);
+    assert!(check_number_grid(&stream).is_ok());
+}
+
+/// Every current paper kind has one independently named layer, without sorting
+/// noncontiguous groups or losing graphics state across marked-content boundaries.
+#[test]
+fn pdf_layers_cover_all_five_kinds_and_preserve_paint_and_styles() {
+    let line = |y: f64| vec![Seg2::Line { a: p(10.0, y), b: p(100.0, y) }];
+    let dashed = Some(Dashes { lengths_mm: vec![4.0, 2.0], phase_mm: 0.0 });
+    let square = Loop2::polygon(&[p(10.0, 30.0), p(20.0, 30.0), p(20.0, 40.0), p(10.0, 40.0)]);
+    let sheet = Scene {
+        size_mm: p(210.0, 297.0),
+        groups: vec![
+            Group { object: 10, kind: ObjectKind::TitleBlock, items: vec![stroke(line(10.0), false, 0.35, None)] },
+            Group { object: 20, kind: ObjectKind::DrawingBorder, items: vec![stroke(line(20.0), false, 0.7, dashed.clone())] },
+            Group { object: 30, kind: ObjectKind::PartsList, items: vec![Item::Fill { region: Region2 { outer: square, holes: vec![] } }] },
+            Group { object: 40, kind: ObjectKind::RevisionTable, items: vec![stroke(line(50.0), false, 0.7, dashed)] },
+            Group { object: 50, kind: ObjectKind::SheetBorder, items: vec![stroke(line(60.0), false, 0.35, None)] },
+            Group { object: 11, kind: ObjectKind::TitleBlock, items: vec![stroke(line(70.0), false, 0.35, None)] },
+            Group { object: 60, kind: ObjectKind::DrawingBorder, items: vec![] },
+        ],
+    };
+    let bytes = pdf(&sheet, &NONE);
+    assert_eq!(pdf(&sheet, &NONE), bytes);
+    assert!(check_xref(&bytes).is_ok(), "{:?}", check_xref(&bytes));
+    let file = text(&bytes);
+    for key in ["OCGs", "Order", "ON"] {
+        assert!(file.contains(&format!("/{key} [6 0 R 7 0 R 8 0 R 9 0 R 10 0 R]")), "{file}");
+    }
+    assert!(file.contains("/BaseState /ON"));
+    assert_eq!(file.matches("/Type /OCG\n").count(), 5, "one OCG per kind, with no empty-group duplicate");
+    // Literal expected names and references are independent of ObjectKind::layer.
+    for (number, name) in [(6, "TITLE_BLOCK"), (7, "DRAWING_BORDER"), (8, "PARTS_LIST"), (9, "REVISION_TABLE"), (10, "SHEET_BORDER")] {
+        let header = format!("{number} 0 obj\n");
+        let object = file.split_once(&header).unwrap().1.split_once("endobj").unwrap().0;
+        assert!(object.contains("/Type /OCG") && object.contains(&format!("/Name ({name})")), "{object}");
+        assert_eq!(file.matches(&format!("/Name ({name})")).count(), 1);
+        assert!(file.contains(&format!("/L{} {number} 0 R", number - 6)));
+    }
+    let stream = content(&bytes);
+    let markers: Vec<_> = stream.lines().filter(|line| line.ends_with(" BDC") || *line == "EMC").collect();
+    assert_eq!(
+        markers,
+        ["/OC /L0 BDC", "EMC", "/OC /L1 BDC", "EMC", "/OC /L2 BDC", "EMC", "/OC /L3 BDC", "EMC", "/OC /L4 BDC", "EMC", "/OC /L0 BDC", "EMC",]
+    );
+    let operators = ops(&stream);
+    let paints: Vec<_> = operators.iter().map(|(op, _)| op.as_str()).filter(|op| ["S", "h", "f*"].contains(op)).collect();
+    assert_eq!(paints, ["S", "S", "h", "f*", "S", "S", "S"]);
+    let starts: Vec<_> = operators.iter().filter(|(op, _)| op == "m").map(|(_, n)| (n[0], n[1])).collect();
+    assert_eq!(starts, [(10.0, 10.0), (10.0, 20.0), (10.0, 30.0), (10.0, 50.0), (10.0, 60.0), (10.0, 70.0)]);
+    let styles: Vec<(&str, &[f64])> = operators.iter().filter(|(op, _)| op == "w" || op == "d").map(|(op, n)| (op.as_str(), n.as_slice())).collect();
+    assert_eq!(styles, [("w", &[0.35][..]), ("w", &[0.7][..]), ("d", &[4.0, 2.0, 0.0][..]), ("w", &[0.35][..]), ("d", &[0.0][..])]);
+    assert!(check_number_grid(&stream).is_ok());
+    // A reviewer may retain these exact asserted bytes for independent PDF readers.
+    if let Some(path) = std::env::var_os("SOLIDCRAFT_PDF_LAYER_REVIEW_OUTPUT") {
+        let written = std::fs::write(&path, &bytes);
+        assert!(written.is_ok(), "could not write the asserted layer fixture to {path:?}: {written:?}");
+    }
+}
+
+/// P3: no phantom layer dictionary on a truly empty scene, and content
+/// limits include all OCG markers instead of silently cutting them off.
+#[test]
+fn pdf_layers_obey_content_budget_and_skip_empty_groups() {
+    let empty = scene(p(210.0, 297.0), vec![]);
+    let bytes = pdf(&empty, &NONE);
+    assert!(check_xref(&bytes).is_ok());
+    assert!(!text(&bytes).contains("/OCProperties"));
+    assert!(!content(&bytes).contains(" BDC"));
+    let line = scene(p(210.0, 297.0), vec![stroke(vec![Seg2::Line { a: p(10.0, 10.0), b: p(100.0, 10.0) }], false, 0.35, None)]);
+    let grid = line.prepare().unwrap().on_grid(Grid::TEN_NANOMETRES).unwrap();
+    let full = super::content_with_limit(&grid.groups, MAX_DRAWING_BYTES).unwrap();
+    assert!(full.contains("/OC /L0 BDC") && full.contains("EMC"));
+    assert_eq!(super::content_with_limit(&grid.groups, full.len()).unwrap(), full);
+    assert!(super::content_with_limit(&grid.groups, full.len() - 1).is_err());
 }
