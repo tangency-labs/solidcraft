@@ -24,6 +24,7 @@ mod grid;
 mod mesh;
 pub mod mesh_distance;
 pub mod network;
+pub mod pixel_grid;
 mod plane;
 mod profile;
 pub mod section;

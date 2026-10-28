@@ -45,7 +45,10 @@ pub use host::{
     CpuHost, HostKind, ImageHost, JobEnvironmentInfo, JobHandle, JobStatus, LinearAlphaConvention, LinearColourEncoding, LinearMasterInfo,
     PreviewInfo, RenderFrame, RenderPreview,
 };
-pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry, admit_geometry_with_limits};
+pub use image::{
+    Admission, BodyRole, ImageTask, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample, TaskPoll,
+    admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+};
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, MAX_AREA_LIGHTS, StudioLighting, Sun, ToneMap};
 pub use png::PngTask;
