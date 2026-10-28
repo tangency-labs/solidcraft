@@ -50,6 +50,16 @@ pub fn families(v: &Value) -> Vec<Family> {
         .collect()
 }
 
+/// A family's name in the user's language, by its id in the library: the library's own (English)
+/// name for a family the catalogs don't know.
+pub(crate) fn family_name(f: &Family) -> String {
+    let id = format!("parts.family.{}", f.id);
+    match crate::i18n::tr(&id) {
+        shown if shown == id => f.name.clone(),
+        shown => shown.to_string(),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Pt {
     pub family: usize,
@@ -212,16 +222,6 @@ pub fn commands(app: &SolveApp, k: &Pt, inputs: &[SelInput]) -> Result<Vec<(Stri
     Ok(vec![(id.into(), p)])
 }
 
-/// A family's name in the user's language, by its id in the library: the library's own (English)
-/// name for a family the catalogs don't know.
-pub(crate) fn family_name(f: &Family) -> String {
-    let id = format!("parts.family.{}", f.id);
-    match crate::i18n::tr(&id) {
-        shown if shown == id => f.name.clone(),
-        shown => shown.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +244,20 @@ mod tests {
         assert!(l[1].lengths.is_none());
     }
 
+    /// The library's families are named in the user's language, and a family the catalogs
+    /// don't know keeps the library's name.
+    #[test]
+    fn family_names_follow_the_language() {
+        let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
+        assert!(l.len() >= 7, "{}", l.len());
+        let _german = crate::i18n::scope("de");
+        for f in &l {
+            assert_ne!(family_name(f), f.name, "{}", f.id);
+        }
+        let unknown = Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), sizes: vec![], lengths: None };
+        assert_eq!(family_name(&unknown), "Spring");
+    }
+
     /// A hole pick seats the part (`at`); without one it goes to the origin along Z.
     #[test]
     fn insert_params_for_picks() {
@@ -258,19 +272,5 @@ mod tests {
         assert_eq!(p["name"], "Front bearing");
         assert!(p.get("length").is_none());
         assert!(insert_params(&[], &k, None).is_err());
-    }
-
-    /// The library's families are named in the user's language, and a family the catalogs
-    /// don't know keeps the library's name.
-    #[test]
-    fn family_names_follow_the_language() {
-        let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
-        assert!(l.len() >= 7, "{}", l.len());
-        let _german = crate::i18n::scope("de");
-        for f in &l {
-            assert_ne!(family_name(f), f.name, "{}", f.id);
-        }
-        let unknown = Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), sizes: vec![], lengths: None };
-        assert_eq!(family_name(&unknown), "Spring");
     }
 }
