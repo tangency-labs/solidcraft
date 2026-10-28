@@ -1887,7 +1887,7 @@
   "sample.flange.name": "Schraubflansch",
   "sample.hinge.about": "Zwei Komponenten und ein Drehgelenk, auf 60° angetrieben",
   "sample.hinge.name": "Scharnierbaugruppe",
-  "sample.plate.about": "Parametrische Platte mit Vollrundungen, Bohrungen und einer aufgebohrten Ansatz",
+  "sample.plate.about": "Parametrische Platte mit Vollrundungen, Bohrungen und einem aufgebohrten Ansatz",
   "sample.plate.name": "Beispielplatte",
   "sample.vents.about": "Langlöcher in einem Rechteckmuster: Zeilen, Spalten und Abstand sind Parameter",
   "sample.vents.name": "Lüftungsplatte",
