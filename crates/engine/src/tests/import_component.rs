@@ -193,6 +193,11 @@ fn a_step_assembly_comes_in_as_nested_components_with_its_instances() {
     run(&mut again, "doc.open", json!({"path": design}));
     assert_eq!(shown_boxes(&again), file_boxes(&path));
     assert_eq!(again.doc.components.len(), 5);
+    let mut authored = Session::default();
+    run(&mut authored, "file.insert_step", json!({"path":path,"share_parts":false}));
+    let arm = |name| authored.doc.occurrences.iter().find(|o| o.name == name).unwrap().component;
+    assert_eq!(arm("Arm-1"), arm("Arm-2"), "turning off deduplication preserves the file's authored instances");
+    assert_eq!(shown_boxes(&authored), file_boxes(&path));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

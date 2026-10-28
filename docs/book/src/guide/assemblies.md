@@ -16,6 +16,9 @@ STEP imports keep repeated parts linked. Identical geometry can share display bu
 when its names or appearances differ. Repeated sibling instances in an imported assembly
 appear in a collapsed group; expand it to pick one placement, or use its row or eye to select
 or show/hide the whole group. Groups stay within their original assembly parent.
+Turn off **Share repeated STEP parts** in **Preferences → Interface** to keep separately
+defined parts independent on new imports and list each instance separately in the browser.
+Parts already linked stay linked until you use **Make independent**.
 
 Use **Make independent** on a placement's context menu before editing just that copy. It
 keeps the placement and its position, and copies its history; for a nested placement it copies

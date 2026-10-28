@@ -1197,6 +1197,8 @@ preference_settings! {
     /// Each tree row's eye between its fold arrow and its radio, as before #8718, instead of in a
     /// column at the rows' right end. Off by default.
     browser_eye_left: bool = false, PAGE_INTERFACE => check_id("prefs.browser_eye_left");
+    /// Link identical parts on new STEP imports and group their instances in the browser.
+    share_imported_parts: bool = true, PAGE_INTERFACE => check_id("prefs.share_imported_parts");
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.

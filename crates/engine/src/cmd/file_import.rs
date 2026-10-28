@@ -38,6 +38,7 @@ struct Place {
 /// How a STEP file's tree becomes components.
 #[derive(Default)]
 struct Plan {
+    share_parts: bool,
     slots: Vec<Slot>,
     places: Vec<Place>,
     /// Body index → the slot it goes to, and the transform from that slot's frame to the import
@@ -58,7 +59,7 @@ pub(crate) enum Tree<'a> {
     /// Nothing: every body in the import's component.
     Flat,
     /// A STEP file's products and placements.
-    Step(&'a StepImport),
+    Step { import: &'a StepImport, share_parts: bool },
     /// A mesh file's components (glTF nodes), bodies already in their component's frame
     /// (checked with [`mesh_plan_fits`] first).
     Mesh(&'a solidcraft_io::MeshPlan),
@@ -90,11 +91,11 @@ impl Plan {
         }
         let slots = plan.slots.iter().take(made).map(|n| Slot { name: n.clone() }).collect();
         let bodies = plan.bodies.iter().enumerate().filter_map(|(b, slot)| slot.map(|s| (b, s, IDENTITY))).collect();
-        Some(Plan { slots, places, bodies, skip: Vec::new() })
+        Some(Plan { slots, places, bodies, skip: Vec::new(), share_parts: false })
     }
 
-    fn of(imp: &StepImport) -> Plan {
-        let mut plan = Plan::default();
+    fn of(imp: &StepImport, share_parts: bool) -> Plan {
+        let mut plan = Plan { share_parts, ..Plan::default() };
         // One root product is the import's own component; several are components under it.
         let nodes: Vec<&StepNode> = match imp.tree.as_slice() {
             [root] => root.children.iter().collect(),
@@ -129,10 +130,12 @@ impl Plan {
             self.flatten(node, parent, parent_world);
             return;
         };
-        let key = node_key(imp, node, &world, 0);
+        let key = node_key(imp, node, &world, self.share_parts, 0);
         if let Some(slot) = seen
             .get(&key)
-            .and_then(|candidates| candidates.iter().find(|(_, other, other_world)| same_node(imp, node, &world, other, other_world, 0)))
+            .and_then(|candidates| {
+                candidates.iter().find(|(_, other, other_world)| same_node(imp, node, &world, other, other_world, self.share_parts, 0))
+            })
             .map(|(slot, _, _)| *slot)
         {
             // Another placement of a part already made: an occurrence of its component, and the
@@ -192,7 +195,7 @@ fn body_placement(body: &solidcraft_doc::kernel::ImportedBody, world: &Mat, inve
     local.iter().flatten().all(|v| v.is_finite()).then_some(local)
 }
 
-fn node_key(imp: &StepImport, node: &StepNode, world: &Mat, depth: usize) -> u64 {
+fn node_key(imp: &StepImport, node: &StepNode, world: &Mat, share_parts: bool, depth: usize) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let inverse = solidcraft_doc::mat_inverse(world);
     node.name.hash(&mut h);
@@ -202,7 +205,8 @@ fn node_key(imp: &StepImport, node: &StepNode, world: &Mat, depth: usize) -> u64
     }
     for b in &node.bodies {
         if let Some(b) = imp.bodies.get(*b) {
-            b.geometry_item.hash(&mut h);
+            let item = if share_parts { b.geometry_item } else { b.source_item };
+            item.hash(&mut h);
             b.geometry_units.map(f64::to_bits).hash(&mut h);
             body_placement(b, world, inverse.as_ref()).map(|m| m.map(|column| column.map(f64::to_bits))).hash(&mut h);
             b.name.hash(&mut h);
@@ -219,7 +223,7 @@ fn node_key(imp: &StepImport, node: &StepNode, world: &Mat, depth: usize) -> u64
     }
     if depth < 64 {
         for c in &node.children {
-            node_key(imp, c, &solidcraft_doc::mat_mul(world, &c.transform), depth + 1).hash(&mut h);
+            node_key(imp, c, &solidcraft_doc::mat_mul(world, &c.transform), share_parts, depth + 1).hash(&mut h);
             for v in c.transform.iter().flatten() {
                 v.to_bits().hash(&mut h);
             }
@@ -228,7 +232,7 @@ fn node_key(imp: &StepImport, node: &StepNode, world: &Mat, depth: usize) -> u64
     h.finish()
 }
 
-fn same_node(imp: &StepImport, a: &StepNode, a_world: &Mat, b: &StepNode, b_world: &Mat, depth: usize) -> bool {
+fn same_node(imp: &StepImport, a: &StepNode, a_world: &Mat, b: &StepNode, b_world: &Mat, share_parts: bool, depth: usize) -> bool {
     let a_inverse = solidcraft_doc::mat_inverse(a_world);
     let b_inverse = solidcraft_doc::mat_inverse(b_world);
     depth < 64
@@ -240,6 +244,7 @@ fn same_node(imp: &StepImport, a: &StepNode, a_world: &Mat, b: &StepNode, b_worl
         && a.bodies.iter().zip(&b.bodies).all(|(a, b)| match (imp.bodies.get(*a), imp.bodies.get(*b)) {
             (Some(a), Some(b)) => {
                 a.geometry_item == b.geometry_item
+                    && (share_parts || a.source_item == b.source_item)
                     && a.geometry_units == b.geometry_units
                     && body_placement(a, a_world, a_inverse.as_ref())
                         .is_some_and(|local| Some(local) == body_placement(b, b_world, b_inverse.as_ref()))
@@ -252,7 +257,15 @@ fn same_node(imp: &StepImport, a: &StepNode, a_world: &Mat, b: &StepNode, b_worl
         })
         && a.children.iter().zip(&b.children).all(|(a, b)| {
             a.transform == b.transform
-                && same_node(imp, a, &solidcraft_doc::mat_mul(a_world, &a.transform), b, &solidcraft_doc::mat_mul(b_world, &b.transform), depth + 1)
+                && same_node(
+                    imp,
+                    a,
+                    &solidcraft_doc::mat_mul(a_world, &a.transform),
+                    b,
+                    &solidcraft_doc::mat_mul(b_world, &b.transform),
+                    share_parts,
+                    depth + 1,
+                )
         })
 }
 
@@ -316,7 +329,7 @@ pub(crate) fn add_in_component(
     let (top, top_occ) = new_component(s, name)?;
     let (mut plan, imp) = match tree {
         Tree::Flat => (Plan::default(), None),
-        Tree::Step(imp) => (Plan::of(imp), Some(imp)),
+        Tree::Step { import, share_parts } => (Plan::of(import, share_parts), Some(import)),
         Tree::Mesh(m) => (Plan::of_mesh(m).ok_or_else(|| EngineError::Other("import: the file's node tree can't be placed".into()))?, None),
     };
     // The components, each made at its first placement; the others are further occurrences.

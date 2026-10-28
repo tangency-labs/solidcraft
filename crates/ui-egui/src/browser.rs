@@ -1771,7 +1771,7 @@ fn occurrence_children(
 ) {
     let Some(model) = app.tree.model.as_mut() else { return };
     // A truncated or cyclic child list keeps the cache's placement budget and filtering.
-    if placement.children.len() != model.children.get(&placement.component).map_or(0, Vec::len) {
+    if !app.preferences.share_imported_parts || placement.children.len() != model.children.get(&placement.component).map_or(0, Vec::len) {
         for child in &placement.children {
             occurrence_rows(app, ui, child, depth, acts, cache);
         }

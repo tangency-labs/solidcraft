@@ -199,7 +199,7 @@ fn source_duplicates_with_different_mapped_placements_keep_their_product_geometr
         "Mapped bolts",
         imported.body_names,
         "Mapped bolts",
-        crate::cmd::file::import::Tree::Step(&imported.import),
+        crate::cmd::file::import::Tree::Step { import: &imported.import, share_parts: true },
     )
     .unwrap();
     let mut x: Vec<_> = s.world_state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().centroid.x).collect();
@@ -249,11 +249,34 @@ fn duplicate_step_definitions_share_geometry_and_survive_independence_and_source
         "Properties",
         separate.body_names,
         "Properties",
-        crate::cmd::file::import::Tree::Step(&separate.import),
+        crate::cmd::file::import::Tree::Step { import: &separate.import, share_parts: true },
     )
     .unwrap();
     properties.refresh();
     assert_eq!(properties.model.state().bodies.len(), 3, "an uninterpreted property through a shape definition keeps the part independent");
+    let separate = solidcraft_io::step_import_feature(text.as_bytes(), "bolts.step").unwrap();
+    let mut authored = Session::default();
+    crate::cmd::file::import::add_in_component(
+        &mut authored,
+        separate.kind,
+        "Bolts",
+        separate.body_names,
+        "Bolts",
+        crate::cmd::file::import::Tree::Step { import: &separate.import, share_parts: false },
+    )
+    .unwrap();
+    let first = authored.doc.occurrences.iter().find(|o| o.name == "Bolt:1").unwrap();
+    let second = authored.doc.occurrences.iter().find(|o| o.name == "Bolt:2").unwrap();
+    assert_ne!(first.component, second.component);
+    let (first, second, component) = (authored.doc.first_path(first.component), authored.doc.first_path(second.component), first.component);
+    let world = authored.world_state();
+    assert_eq!(world.bodies.len(), 3);
+    let meshes: Vec<_> = world.bodies.iter().map(|b| b.mesh_in_place().0).collect();
+    assert!(meshes.windows(2).all(|m| Arc::ptr_eq(&m[0], &m[1])), "independent edit identities still share display geometry");
+    run(&mut authored, "component.activate", json!({"component":component}));
+    run(&mut authored, "solid.box", json!({"length":1,"width":1,"height":1,"corner":[50,0,0]}));
+    assert_eq!(authored.occurrence_bodies(&first, false).unwrap().len(), 2);
+    assert_eq!(authored.occurrence_bodies(&second, false).unwrap().len(), 1, "editing one definition leaves the other unchanged");
     let mut s = Session::default();
     let (_, placed) = crate::cmd::file::import::add_in_component(
         &mut s,
@@ -261,7 +284,7 @@ fn duplicate_step_definitions_share_geometry_and_survive_independence_and_source
         "Bolts",
         imported.body_names,
         "Bolts",
-        crate::cmd::file::import::Tree::Step(&imported.import),
+        crate::cmd::file::import::Tree::Step { import: &imported.import, share_parts: true },
     )
     .unwrap();
     s.refresh();
