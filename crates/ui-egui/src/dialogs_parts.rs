@@ -150,7 +150,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
             k.length = i.checked_sub(1);
         });
     }
-    text_row(ui, "Name", &mut k.name, "automatic");
+    text_row(ui, "Name", &mut k.name, crate::i18n::tr("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
     let tex_id = egui::Id::new("sc_part_picture");
