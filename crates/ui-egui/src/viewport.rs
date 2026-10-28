@@ -3352,6 +3352,8 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     // selection's outline.
     for (body, face) in &app.viewport.refused_ring {
         let Some(b) = st.body(body).filter(|_| app.session.body_visible(body)) else { continue };
+        // The face itself tinted (a face whose edges are two small circles still reads as one).
+        face_tris(&mut sc, &shown(b), *face, c4(t.error.gamma_multiply(0.35)), false);
         let m = drawn_mesh(app, b);
         let hidden = sc.color(c4(t.error.gamma_multiply(0.45)));
         for (ei, e) in m.edges.iter().enumerate() {
