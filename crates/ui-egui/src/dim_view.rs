@@ -1388,6 +1388,34 @@ mod tests {
         cancel();
     }
 
+    /// Placing an ellipse's half-axis: near the boundary between the major and the minor
+    /// half-axis the preview keeps the one it had, from either side, so it does not flip.
+    #[test]
+    fn an_ellipse_half_axis_preview_keeps_its_axis_near_the_boundary() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        h.step(&json!({"click":{"sketch":[14.142,-5.657]}})).unwrap();
+        h.frames(4);
+        h.step(&json!({"key":"Tab"})).unwrap();
+        // Across the major axis, then on the boundary: the major half-axis; past its end, then
+        // on the boundary again: the minor one.
+        for (at, half) in [([3., 16.], 20.), ([10., 4.4], 20.), ([16., 4.], 8.), ([10., 4.4], 8.)] {
+            h.step(&json!({"move":{"sketch":at}})).unwrap();
+            h.settle();
+            let (param, draft) = placement_preview(&h.app).expect("an ellipse has a dimension preview");
+            let sk = &draft.preview.sketch(draft.sketch).unwrap().sketch;
+            let c = sk.constraints.iter().find(|c| c.param.as_deref() == Some(&param)).unwrap();
+            assert!(matches!(c.kind, ConstraintKind::Distance {value,..} if (value-half).abs()<1e-6), "text at {at:?}: {:?}", c.kind);
+        }
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        cancel();
+    }
+
     /// Two dimensions whose texts were placed on the same spot: the later one steps to the
     /// next row instead of sitting on the first (#44).
     #[test]
