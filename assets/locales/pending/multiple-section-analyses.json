@@ -43,5 +43,32 @@
     "cmd.inspect_section_visibility": "단면 분석 표시/숨기기",
     "section.default_name": "단면 {n}",
     "section.not_found": "이 단면은 적용되지 않습니다: {why}"
+  },
+  "ar": {
+    "cmd.inspect_section_delete": "حذف تحليل المقطع",
+    "cmd.inspect_section_edit": "تعديل تحليل المقطع",
+    "cmd.inspect_section_list": "قائمة تحليلات المقطع",
+    "cmd.inspect_section_rename": "إعادة تسمية تحليل المقطع",
+    "cmd.inspect_section_visibility": "إظهار/إخفاء تحليل المقطع",
+    "section.default_name": "مقطع {n}",
+    "section.not_found": "هذا المقطع لا يقطع: {why}"
+  },
+  "he": {
+    "cmd.inspect_section_delete": "מחיקת ניתוח חתך",
+    "cmd.inspect_section_edit": "עריכת ניתוח חתך",
+    "cmd.inspect_section_list": "רשימת ניתוחי חתך",
+    "cmd.inspect_section_rename": "שינוי שם ניתוח חתך",
+    "cmd.inspect_section_visibility": "הצגה/הסתרה של ניתוח חתך",
+    "section.default_name": "חתך {n}",
+    "section.not_found": "חתך זה אינו חותך: {why}"
+  },
+  "vi": {
+    "cmd.inspect_section_delete": "Xóa phân tích mặt cắt",
+    "cmd.inspect_section_edit": "Chỉnh sửa phân tích mặt cắt",
+    "cmd.inspect_section_list": "Danh sách phân tích mặt cắt",
+    "cmd.inspect_section_rename": "Đổi tên phân tích mặt cắt",
+    "cmd.inspect_section_visibility": "Hiện/Ẩn phân tích mặt cắt",
+    "section.default_name": "Mặt cắt {n}",
+    "section.not_found": "Mặt cắt này không có tác dụng: {why}"
   }
 }
