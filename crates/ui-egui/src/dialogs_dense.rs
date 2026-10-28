@@ -108,9 +108,19 @@ const FILLET_TYPES: [(&str, &str); 5] = [
     ("Spline", "spline"),
 ];
 
-/// How a fillet's corners where three or more rounded edges meet continue the rounds: tangent (a
-/// rolling ball, the `corner` default) or curvature continuous (`corner: g2`, a smooth patch).
-const FILLET_CORNERS: [Continuity; 2] = [Continuity::G1, Continuity::G2];
+/// How a fillet's corners where three or more rounded edges meet continue the rounds, with the
+/// hover line that says what each builds: tangent (a rolling ball, the `corner` default) or
+/// curvature continuous (`corner: g2`, a smooth patch set back along each edge).
+const FILLET_CORNERS: [(Continuity, &str); 2] =
+    [(Continuity::G1, "ui.fillet_corner_tangent_tip"), (Continuity::G2, "ui.fillet_corner_curvature_tip")];
+
+/// The default setback of a smooth-patch corner, as a multiple of the radius.
+const SETBACK_FACTOR: &str = "1.5";
+
+/// The Corners row's hover text: a line for each choice.
+fn fillet_corner_tip() -> String {
+    FILLET_CORNERS.map(|(_, tip)| crate::i18n::format(tip, &[("factor", SETBACK_FACTOR)])).join("\n")
+}
 
 /// A fillet's Corners row (`corner`) and, with a smooth patch, its Setback (`setbacks`, one
 /// distance for every corner). Shown only while the edges have a corner where three or more
@@ -132,7 +142,7 @@ fn fillet_corner_rows(
     let mut enter = false;
     ui.add_enabled_ui(rtype == 0 && exact, |ui| {
         let mut corner = if patch { Continuity::G2 } else { Continuity::G1 };
-        ui_kit::continuity_row(ui, "ui.corners", "fi_corner", &mut corner, &FILLET_CORNERS);
+        ui_kit::continuity_row_explained(ui, "ui.corners", "fi_corner", &mut corner, &FILLET_CORNERS.map(|(g, _)| g), &fillet_corner_tip());
         if (corner == Continuity::G2) != patch {
             if corner == Continuity::G2 {
                 extra.insert("corner".into(), json!(Continuity::G2.as_str()));
@@ -142,11 +152,11 @@ fn fillet_corner_rows(
         }
         if extra.get("corner").and_then(Value::as_str) == Some("g2") {
             ui.scope(|ui| {
-                let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", "1.5")]);
+                let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", SETBACK_FACTOR)]);
                 enter |= hint_row(ui, "ui.fillet_setback", setback, &hint);
             })
             .response
-            .on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", "1.5")]));
+            .on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", SETBACK_FACTOR)]));
         }
     })
     .response
@@ -1208,12 +1218,14 @@ mod tests {
     #[test]
     fn fillet_labels_use_words_not_continuity_codes() {
         let coded = |text: &str| ["G0", "G1", "G2", "G3"].iter().any(|code| text.contains(code));
-        for label in FILLET_TYPES.map(|(label, _)| label).into_iter().chain(FILLET_CORNERS.map(Continuity::label_id)) {
+        for label in FILLET_TYPES.map(|(label, _)| label).into_iter().chain(FILLET_CORNERS.map(|(g, _)| g.label_id())) {
             assert!(!coded(crate::i18n::tr_label(label)), "{label}: {}", crate::i18n::tr_label(label));
         }
-        for tip in FILLET_CORNERS.map(Continuity::tip_id) {
-            assert!(coded(crate::i18n::tr(tip)), "the hover text keeps the code for those who know it: {tip}");
+        for (g, tip) in FILLET_CORNERS {
+            assert!(crate::i18n::tr(tip).contains(g.code()), "the hover text keeps the code for those who know it: {tip}");
         }
+        let tip = fillet_corner_tip();
+        assert!(tip.contains("rolling") && tip.contains("1.5") && tip.contains("Setback"), "what each corner builds: {tip}");
         let mut h = fillet_harness();
         set_edges(&mut h, 3);
         choose(&mut h, "ui.corners", Continuity::G2.label_id());

@@ -98,13 +98,19 @@ pub(crate) fn choice_row(ui: &mut Ui, label: &str, id: &str, selected: &mut usiz
 /// plain words and its hover text a line per order naming its code, both from the kernel's one
 /// table of orders; a value not in `allowed` shows the first. Tokens: `row, dropdown`.
 pub(crate) fn continuity_row(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity]) -> Response {
+    continuity_row_explained(ui, label, id, value, allowed, &continuity_tip(allowed))
+}
+
+/// [`continuity_row`] whose hover text says what each order builds there (`tip`, which names
+/// each order's code), for a choice whose orders stand for constructions (a fillet's corners).
+pub(crate) fn continuity_row_explained(ui: &mut Ui, label: &str, id: &str, value: &mut Continuity, allowed: &[Continuity], tip: &str) -> Response {
     let labels: Vec<&str> = allowed.iter().map(|g| g.label_id()).collect();
     let mut index = allowed.iter().position(|g| g == value).unwrap_or(0);
     let response = choice_row(ui, label, id, &mut index, &labels);
     if let Some(g) = allowed.get(index) {
         *value = *g;
     }
-    response.on_hover_text(continuity_tip(allowed))
+    response.on_hover_text(tip)
 }
 
 /// The hover text of a continuity choice: each order's own line, which names its code.
