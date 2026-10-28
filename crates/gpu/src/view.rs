@@ -3628,6 +3628,9 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         tris(pass, &res.ghost, &m.ghost);
         tris(pass, &res.trans, &m.shadow);
+        pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
+        tris(pass, &res.trans, &sk.shadow);
+        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         if phase == Phase::BeforeSeeThrough {
             return;
         }
@@ -4401,18 +4404,35 @@ mod glass_tests {
             scene.shadow_tri(p, shadow_color);
         }
         for samples in [1, 4] {
-            let Some(shadow) = middle_pixel_with_samples(scene.clone(), true, samples) else {
-                eprintln!("skipping: no GPU adapter");
-                return;
-            };
-            assert!(shadow[..3].iter().all(|c| (125..=129).contains(c)), "{samples}× alpha-blended shadow: {shadow:?}");
-            let mut occluded = scene.clone();
-            let green = occluded.color([0, 255, 0, 255]);
-            for mut p in square {
-                p[2] = 5.0;
-                occluded.tri(p, [0.0; 3], green);
+            for view_dependent in [false, true] {
+                let draw = |mut scene: GpuScene| {
+                    let sketch = if view_dependent {
+                        GpuScene { shadow: std::mem::take(&mut scene.shadow), palette: scene.palette.clone(), ..Default::default() }
+                    } else {
+                        GpuScene::default()
+                    };
+                    if view_dependent {
+                        // The shadow must use its own palette, not the model's same-numbered slot.
+                        assert!(Arc::make_mut(&mut scene.palette).set(shadow_color, [255, 0, 0, 255]));
+                    }
+                    middle_pixel_in_slots_with_samples(scene, sketch, true, samples)
+                };
+                let Some(shadow) = draw(scene.clone()) else {
+                    eprintln!("skipping: no GPU adapter");
+                    return;
+                };
+                assert!(
+                    shadow[..3].iter().all(|c| (125..=129).contains(c)),
+                    "{samples}x view-dependent={view_dependent} alpha-blended shadow: {shadow:?}"
+                );
+                let mut occluded = scene.clone();
+                let green = occluded.color([0, 255, 0, 255]);
+                for mut p in square {
+                    p[2] = 5.0;
+                    occluded.tri(p, [0.0; 3], green);
+                }
+                assert_eq!(draw(occluded), Some([0, 255, 0, 255]), "opaque geometry hides the ground shadow");
             }
-            assert_eq!(middle_pixel_with_samples(occluded, true, samples), Some([0, 255, 0, 255]), "opaque geometry hides the ground shadow");
         }
     }
 
@@ -4519,6 +4539,10 @@ mod glass_tests {
     }
 
     fn middle_pixel_with_samples(scene: GpuScene, oit: bool, samples: u32) -> Option<[u8; 4]> {
+        middle_pixel_in_slots_with_samples(scene, GpuScene::default(), oit, samples)
+    }
+
+    fn middle_pixel_in_slots_with_samples(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless().ok()?;
         let depth = crate::depth_format(&device, true);
@@ -4533,8 +4557,8 @@ mod glass_tests {
             product: false,
             key: 1,
             slot: Arc::new(Mutex::new(Some(scene))),
-            sketch_key: 0,
-            sketch_slot: none(),
+            sketch_key: 2,
+            sketch_slot: Arc::new(Mutex::new(Some(sketch))),
             hl_key: 0,
             hl_slot: none(),
             pv_key: 0,
