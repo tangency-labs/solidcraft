@@ -364,6 +364,26 @@ impl Drop for Nested {
 
 /// `params` with world picks mapped into component frames (`None`: nothing to change).
 pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
+    if id == "solid.move" && ["translate", "origin", "axis"].iter().any(|k| params.get(k).is_some_and(Value::is_object)) {
+        let mut normalized = params.clone();
+        let mut changed = false;
+        for key in ["translate", "origin", "axis"] {
+            if let Some(o) = params.get(key).and_then(Value::as_object)
+                && let Some(coords) = ["x", "y", "z"].iter().map(|k| o.get(*k).cloned()).collect::<Option<Vec<_>>>()
+            {
+                normalized[key] = Value::Array(coords);
+                changed = true;
+            }
+        }
+        if changed {
+            return Some(to_local(s, id, &normalized).unwrap_or(normalized));
+        }
+    }
+    if id == "solid.move"
+        && let Ok(Some(normalized)) = crate::cmd::move_matrix_params(params)
+    {
+        return Some(to_local(s, id, &normalized).unwrap_or(normalized));
+    }
     if id == "library.apply" {
         // Library targets are the same world selections as appearance.assign,
         // nested one level down. Convert at the outer boundary exactly once;
@@ -455,7 +475,10 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         .flatten()
         .and_then(|b| command_frames.bodies(s).iter().find(|(world, own, _)| world == b || own == b).map(|(.., m)| *m));
     let mut obj = obj.clone();
-    if first.is_some() && obj.contains_key("axis") && !obj.contains_key("origin") {
+    if id == "solid.move" && !obj.contains_key("matrix") && obj.contains_key("angle") {
+        obj.entry("axis").or_insert_with(|| serde_json::json!([0, 0, 1]));
+    }
+    if id == "solid.move" && !obj.contains_key("matrix") && obj.contains_key("axis") && !obj.contains_key("origin") {
         obj.insert("origin".into(), serde_json::json!([0.0, 0.0, 0.0]));
     }
     let obj = &obj;
@@ -474,10 +497,18 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
                 Pick => m.pick(v, body.as_deref()),
                 Picks => m.picks(v, body.as_deref()),
                 Make => m.make(v),
+                Dir if id == "solid.move" && *k == "translate" && vec3(v).is_none() => {
+                    let mut frame = m.first.unwrap_or(m.f.active);
+                    frame[3] = [0.0, 0.0, 0.0, 1.0];
+                    m.make_expr(&frame, v)
+                }
                 Dir => m.dir(v),
                 Moved => {
                     let frame = m.first.unwrap_or(m.f.active);
-                    vec3(v).and_then(|p| m.local_point(&frame, p))
+                    match vec3(v) {
+                        Some(p) => m.local_point(&frame, p),
+                        None => m.make_expr(&frame, v),
+                    }
                 }
                 Axis => {
                     if let Some(axis) = v.as_object() {

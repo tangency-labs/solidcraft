@@ -36,6 +36,7 @@ mod face;
 mod features;
 mod features_more;
 pub(crate) use face::{FaceRefForm, face_ref_form};
+pub(crate) use features::move_matrix_params;
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, axis_dir_form, edge_ref_form, sketch_key};
 pub use features::{auto_operation, extrude_reach};

@@ -119,3 +119,30 @@ fn inverse_transpose(r: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
     }
     Some(cof.map(|row| row.map(|x| x / det)))
 }
+
+/// Axis and angle of an already validated rotation (column-major). Near a half turn the
+/// largest diagonal gives the axis without dividing by sin(angle), which is then nearly zero.
+pub fn axis_angle(m: &Mat) -> (solidcraft_geom::Vec3, f64) {
+    use solidcraft_geom::Vec3;
+    let skew = Vec3::new(m[1][2] - m[2][1], m[2][0] - m[0][2], m[0][1] - m[1][0]);
+    let cosine = ((m[0][0] + m[1][1] + m[2][2] - 1.0) * 0.5).clamp(-1.0, 1.0);
+    let angle = (skew.len() * 0.5).atan2(cosine);
+    if cosine > -0.999999 {
+        return (if skew.len() > 0.0 { skew / skew.len() } else { Vec3::Z }, angle);
+    }
+    let i = if m[0][0] >= m[1][1] && m[0][0] >= m[2][2] {
+        0
+    } else if m[1][1] >= m[2][2] {
+        1
+    } else {
+        2
+    };
+    let j = (i + 1) % 3;
+    let k = (i + 2) % 3;
+    let mut a = [0.0; 3];
+    a[i] = ((m[i][i] - cosine) / (1.0 - cosine)).max(0.0).sqrt();
+    a[j] = (m[i][j] + m[j][i]) / (2.0 * (1.0 - cosine) * a[i]);
+    a[k] = (m[i][k] + m[k][i]) / (2.0 * (1.0 - cosine) * a[i]);
+    let axis = Vec3::new(a[0], a[1], a[2]).normalized().unwrap_or(Vec3::Z);
+    (if axis.dot(skew) < 0.0 { -axis } else { axis }, angle)
+}

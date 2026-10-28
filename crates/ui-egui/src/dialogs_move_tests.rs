@@ -142,9 +142,10 @@ fn rotate_handle_follows_an_offset_axis_and_preserves_full_turns() {
         let p = params(&h.app, d).unwrap();
         let actual = ang(&h.app, p["angle"].as_str().unwrap()).unwrap();
         assert!((actual.to_degrees() - expected).abs() < 0.11, "{p}");
-        let translation: [String; 3] = serde_json::from_value(p["translate"].clone()).unwrap();
-        let translation = translation.map(|v| len(&h.app, &v).unwrap());
-        let moved_origin = gizmo::apply(&gizmo::rotation(axis, actual), origin) + Vec3::new(translation[0], translation[1], translation[2]);
+        let pivot: [String; 3] = serde_json::from_value(p["origin"].clone()).unwrap();
+        let pivot = pivot.map(|v| len(&h.app, &v).unwrap());
+        let pivot = Vec3::new(pivot[0], pivot[1], pivot[2]);
+        let moved_origin = gizmo::apply(&gizmo::rotation(axis, actual), origin - pivot) + pivot;
         assert!((moved_origin - origin).len() < 1e-5, "the selected axis stays fixed");
         h.step(&json!({"widget": "Cancel"})).unwrap();
         assert_eq!(serde_json::to_value(&*h.app.session.doc).unwrap(), before);
@@ -413,4 +414,41 @@ fn a_body_pick_goes_on_to_the_point_or_axis() {
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items.len(), 1, "the body is still picked");
     assert!(matches!(d.inputs[1].items.as_slice(), [Sel::Vertex { .. }]), "{:?}", d.inputs[1].items);
+}
+
+#[test]
+fn editing_a_move_keeps_its_parametric_origin() {
+    for axis in [[0, 0, 1], [1, 1, 0]] {
+        let mut s = Session::default();
+        s.execute("parameters.change", &json!({"name": "pivot", "expression": "10 mm"})).unwrap();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "B"})).unwrap();
+        let result = s.execute("solid.move", &json!({"bodies": ["B"], "origin": ["pivot", "10 mm", 0], "axis": axis, "angle": "90 deg"})).unwrap();
+        let feature = s.doc.feature(result["feature"].as_u64().unwrap()).unwrap().kind.clone();
+        let app = SolveApp::new(s, Services::default());
+        let mut d = move_dialog(FREE);
+        for_feature(&app.session.doc, &mut d, &feature, &solidcraft_engine::doc::IDENTITY);
+        let p = params(&app, &d).unwrap();
+        assert_eq!(p["origin"], json!(["pivot", "10 mm", "0"]));
+        assert_eq!(p["angle"], "90 deg");
+    }
+}
+
+#[test]
+fn editing_a_placed_body_move_preserves_its_world_transform() {
+    let mut s = Session::default();
+    let part = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 8, "corner": [100,0,0], "body_name": "B"})).unwrap();
+    s.execute("occurrence.move", &json!({"occurrence": part["occurrence"], "axis": [1,0,0], "angle": "90 deg", "translate": [10,20,30]})).unwrap();
+    s.execute("component.activate", &json!({"component": 0})).unwrap();
+    let result =
+        s.execute("solid.move", &json!({"bodies": ["B"], "origin": ["120 mm", "16 mm", "35 mm"], "angle": "90 deg", "translate": [0,0,7]})).unwrap();
+    let id = result["feature"].as_u64().unwrap();
+    let before = s.world_state().body("B").unwrap().mesh().bounds();
+    let mut app = SolveApp::new(s, Services::default());
+    let d = crate::dialogs::for_feature(&app, id, None).unwrap();
+    for (command, params) in crate::dialogs::apply_commands(&app, &d).unwrap() {
+        app.run(&command, params).unwrap();
+    }
+    let after = app.session.world_state().body("B").unwrap().mesh().bounds();
+    assert!(before.min.dist(after.min) < 1e-6 && before.max.dist(after.max) < 1e-6, "{before:?} -> {after:?}");
 }

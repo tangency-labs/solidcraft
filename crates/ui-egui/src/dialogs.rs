@@ -6012,17 +6012,18 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy } => {
+        kind @ FeatureKind::Move { bodies, .. } => {
             let mut d = start("solid.move")?;
-            crate::dialogs_move::for_feature(
-                &s.doc,
-                &mut d,
-                &solidcraft_engine::doc::plain(bodies),
-                translate,
-                rotate_axis.map(Vec3::from),
-                angle.as_ref(),
-                *copy,
-            );
+            // Move's inputs are in its first body's frame, including when the feature was
+            // added from the assembly root. Show the same world inputs the command accepts.
+            let frame = s
+                .placed_document()
+                .body_frames_with_source(&s.model.state())
+                .into_iter()
+                .find(|(world, own, ..)| bodies.first().is_some_and(|b| b.as_ref() == world.as_str() || b.as_ref() == own.as_str()))
+                .map(|(.., frame)| frame)
+                .unwrap_or_else(|| feature_frame(s, f.component));
+            crate::dialogs_move::for_feature(&s.doc, &mut d, kind, &frame);
             d
         }
         other => {
