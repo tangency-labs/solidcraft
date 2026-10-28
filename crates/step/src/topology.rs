@@ -940,6 +940,9 @@ impl<'b, 'a> Builder<'b, 'a> {
     fn finish(mut self, item: u64, name: String, shells: Vec<Vec<(u32, bool)>>, kind: Kind) -> R<Solid> {
         let _span = solidcraft_profile::span("import", "step.solid_record");
         let mut notes = Vec::new();
+        // A whole sphere bounded by one seam has its frame on that seam, before anything is
+        // measured on the frame.
+        self.seat_spheres_on_seams()?;
         let at_poles = self.split_at_poles()?;
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
