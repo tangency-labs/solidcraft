@@ -6,5 +6,6 @@
  "what": "a rectangle that straddles the revolve axis (x from -5 to 15 about the sketch y axis)",
  "source": "invariants",
  "method": "a profile on both sides of the axis would sweep over itself, so no solid exists: the right behaviour is a clean refusal (invalid input), with no body made.",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "the profile crosses the revolve axis"
 }

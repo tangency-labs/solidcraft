@@ -3,5 +3,6 @@
  "what": "rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them: refused, the r7 cannot exist",
  "source": "invariants",
  "method": "the r7 runs on (tangent chain) up the side x=60 along its arc on the r5 round, a circle of radius 5 about the r5 axis: the r7's contact line on that face would be the arc offset 7 towards its centre, radius 5 - 7 < 0, so the blend passes through itself; and along the seam of the r5 and r3 rounds no ball over r3 fits the r3 round. No such round exists, so the right answer is a clean refusal (SMLib: no room for the rolling ball). 018 is the same corner with a radius that fits.",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "the fillet is larger than the faces beside its edges allow"
 }
