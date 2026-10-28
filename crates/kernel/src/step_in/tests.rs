@@ -2164,8 +2164,8 @@ fn a_patch_side_shrunk_within_its_vertexs_tolerance_is_a_pole_of_the_loop() {
     assert!(rel(m.area, area) < 1e-6, "{} vs {area}", m.area);
 }
 
-/// A can of radius 5 and height 10: its bottom, its wall, and its lid on the plane `lid_z`
-/// (10 where the lid's rim lies on it).
+/// A can of radius 5 and height 10: its bottom (on a plane facing up, the face against it), its
+/// wall, and its lid on the plane `lid_z` (10 where the lid's rim lies on it).
 fn can_with_its_lid_at(lid_z: f64) -> String {
     format!(
         "{HEAD}
@@ -2182,8 +2182,8 @@ fn can_with_its_lid_at(lid_z: f64) -> String {
 #11=ORIENTED_EDGE('',*,*,#10,.F.);
 #12=EDGE_LOOP('',(#11));
 #13=FACE_OUTER_BOUND('',#12,.T.);
-#14=PLANE('',#6);
-#15=ADVANCED_FACE('Bottom',(#13),#14,.T.);
+#14=PLANE('',#5);
+#15=ADVANCED_FACE('Bottom',(#13),#14,.F.);
 #16=ORIENTED_EDGE('',*,*,#10,.T.);
 #17=EDGE_LOOP('',(#16));
 #18=FACE_BOUND('',#17,.T.);
@@ -2234,6 +2234,19 @@ fn a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read() {
     assert!(why.contains("face #45") && why.contains("off the face's surface"), "{why}");
     assert_eq!((can.file_faces, can.body.face_count()), (3, 2));
     assert_eq!(can.face_origin, [15, 20]);
+    // The bottom faces down as the file has it, against its plane's natural normal (SMLib gives
+    // a sheet's faces back on their natural side; the import turns it back).
+    let r = can.body.record();
+    let bottom = can.face_origin.iter().position(|f| *f == 15).unwrap();
+    let uses: Vec<bool> = r
+        .shells
+        .iter()
+        .flat_map(|s| match s {
+            solidcraft_geom::brep::Shell::Faces { faces, .. } => faces.iter().filter(|f| f.face as usize == bottom).map(|f| f.forward).collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    assert_eq!(uses, [false], "the bottom's use");
     // The report keeps the refusal and names the face left out; no "open body" warning on top.
     assert!(imp.warnings.iter().any(|w| w.contains("'Can': imported as surfaces: ") && w.contains(why)), "{:?}", imp.warnings);
     assert!(imp.warnings.iter().any(|w| w.contains("'Can': left out: ") && w.contains("face #45")), "{:?}", imp.warnings);

@@ -966,13 +966,9 @@ impl<'b, 'a> Builder<'b, 'a> {
         if flipped > 0 {
             notes.push(format!("{flipped} faces turned over: their loops disagree with their same_sense"));
         }
-        // What is left of a solid with faces left out is a sheet whose faces face their surfaces'
-        // natural normals: SMLib holds both sides of a sheet's faces and gives each back on that
-        // side, so the record is the one SMLib's body of it numbers alike.
-        let open = kind == Kind::Open;
         let shells: Vec<Vec<(u32, bool)>> = shells
             .into_iter()
-            .map(|s| s.into_iter().map(|(f, fwd)| (f, open || if turned.get(f as usize).copied().unwrap_or(false) { !fwd } else { fwd })).collect())
+            .map(|s| s.into_iter().map(|(f, fwd)| (f, if turned.get(f as usize).copied().unwrap_or(false) { !fwd } else { fwd })).collect())
             .collect();
 
         // Regions: which shells are closed (every edge used at least twice among its faces).

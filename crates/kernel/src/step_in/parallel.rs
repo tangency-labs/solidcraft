@@ -100,26 +100,88 @@ pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result:
 }
 
 /// The part SMLib makes of a solid (or sheet) record the reader made.
+///
+/// SMLib holds both sides of a sheet's faces and gives each back facing its surface's natural
+/// normal, so a sheet whose file uses some faces the other way is given to SMLib with those faces
+/// turned over (exactly, on the record) and they are turned back on SMLib's body: the body faces
+/// as the file does, and each of its faces is known to be the record's face it was.
 fn solid_part(solid: &solidcraft_step::topology::Solid) -> std::result::Result<Part, Failure> {
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
-    let (brep, smlib_order) = crate::native::smlib_record_ordered(&solid.brep).map_err(failed)?;
-    let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;
-    // The file face of each body face: SMLib's face i is the record's `smlib_order` face and the
-    // body's `body_order` face (an empty order is the same one).
-    let (Some(smlib_order), Some(body_order)) = (smlib_order, body_order) else {
-        return Err(Failure { read: false, msg: "not supported yet: SMLib renumbered the solid's faces".into() });
-    };
-    let at = |order: &[usize], i: usize| if order.is_empty() { Some(i) } else { order.get(i).copied() };
-    let faces = brep.counts().map_err(|e| failed(KernelError::Failed(format!("SMLib: {e}"))))?[0];
-    let mut face_origin = vec![0u64; body.face_count()];
-    for i in 0..faces {
-        let file_face = at(&smlib_order.faces, i).and_then(|r| solid.face_origin.get(r)).copied();
-        match (at(&body_order.faces, i).and_then(|b| face_origin.get_mut(b)), file_face) {
-            (Some(slot), Some(f)) => *slot = f,
-            _ => return Err(Failure { read: false, msg: "not supported yet: SMLib renumbered the solid's faces".into() }),
+    let r = &solid.brep;
+    let mut reversed = vec![false; r.faces.len()];
+    if solid.sheet {
+        for s in &r.shells {
+            if let solidcraft_geom::brep::Shell::Faces { faces, .. } = s {
+                for f in faces.iter().filter(|f| !f.forward) {
+                    if let Some(slot) = reversed.get_mut(f.face as usize) {
+                        *slot = true;
+                    }
+                }
+            }
         }
     }
+    let (body, of_record) = if reversed.iter().any(|r| *r) {
+        let turn = |body: &Body, by: &dyn Fn(usize) -> bool| -> crate::Result<(Body, Vec<usize>)> {
+            let picked: Vec<(usize, bool)> = (0..body.face_count()).map(|f| (f, by(f))).collect();
+            let turned = crate::surfaces::taken(body, body.record(), &picked)?;
+            let from = kept_faces(&turned).ok_or_else(|| KernelError::Failed("a face turned over from no one face".into()))?;
+            Ok((turned, from))
+        };
+        let as_read = Body::from_record(r.clone()).map_err(failed)?;
+        // `natural`'s face j is the record's `to_record[j]`; SMLib's body's face k is `natural`'s
+        // `of_natural[k]`; the body turned back's face i is SMLib's `back[i]`.
+        let (natural, to_record) = turn(&as_read, &|f| reversed.get(f).copied().unwrap_or(false)).map_err(failed)?;
+        let (smlib, of_natural) = smlib_body(natural.record())?;
+        let record_of = |k: usize| of_natural.get(k).and_then(|j| to_record.get(*j)).copied();
+        let (back, from) = turn(&smlib, &|k| record_of(k).and_then(|f| reversed.get(f)).copied().unwrap_or(false)).map_err(failed)?;
+        let of_record = from.iter().map(|k| record_of(*k)).collect::<Option<Vec<usize>>>().ok_or_else(renumbered)?;
+        (back.without_history(), of_record)
+    } else {
+        smlib_body(r)?
+    };
+    let face_origin = of_record.iter().map(|f| solid.face_origin.get(*f).copied()).collect::<Option<Vec<u64>>>().ok_or_else(renumbered)?;
     Ok(Part { body, closed: !solid.sheet, file_faces: solid.face_origin.len(), face_origin, refused: None })
+}
+
+fn renumbered() -> Failure {
+    Failure { read: false, msg: "not supported yet: SMLib renumbered the solid's faces".into() }
+}
+
+/// The body SMLib makes of `record` as given, and the record's face each of its faces is.
+fn smlib_body(record: &solidcraft_geom::brep::Brep) -> std::result::Result<(Body, Vec<usize>), Failure> {
+    let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
+    let (brep, smlib_order) = crate::native::smlib_record_ordered(record).map_err(failed)?;
+    let (body, body_order) = crate::native::body_from_smlib_ordered(&brep).map_err(failed)?;
+    // SMLib's face i is the record's `smlib_order` face and the body's `body_order` face (an
+    // empty order is the same one).
+    let (Some(smlib_order), Some(body_order)) = (smlib_order, body_order) else { return Err(renumbered()) };
+    let at = |order: &[usize], i: usize| if order.is_empty() { Some(i) } else { order.get(i).copied() };
+    let faces = brep.counts().map_err(|e| failed(KernelError::Failed(format!("SMLib: {e}"))))?[0];
+    let mut of_record = vec![usize::MAX; body.face_count()];
+    for i in 0..faces {
+        match (at(&body_order.faces, i).and_then(|b| of_record.get_mut(b)), at(&smlib_order.faces, i).filter(|r| *r < record.faces.len())) {
+            (Some(slot), Some(r)) => *slot = r,
+            _ => return Err(renumbered()),
+        }
+    }
+    if of_record.contains(&usize::MAX) {
+        return Err(renumbered());
+    }
+    Ok((body, of_record))
+}
+
+/// The face of its one operand each face of `body` is, from its history.
+fn kept_faces(body: &Body) -> Option<Vec<usize>> {
+    let h = body.history()?;
+    let from: Vec<usize> = h
+        .faces
+        .iter()
+        .map(|f| match f.origins.as_slice() {
+            [crate::history::FaceOrigin::Face { operand: 0, face }] => Some(*face),
+            _ => None,
+        })
+        .collect::<Option<_>>()?;
+    (from.len() == body.face_count()).then_some(from)
 }
 
 /// Most reads of a refused solid without faces, each leaving out the face the refusal before names.
