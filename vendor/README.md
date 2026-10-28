@@ -365,3 +365,18 @@ SolidCraft changes:
   (the `wp::pointer_gestures` module); drop the example and test targets.
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
+
+## eframe 0.36.2 (MIT OR Apache-2.0, Emil Ernerfeldt and contributors)
+
+Original package sources from https://github.com/emilk/egui/tree/0.36.2/crates/eframe,
+with both original licence texts retained. egui's logo (`data/icon.png`) and the bundled README
+are not copied.
+
+SolidCraft changes:
+- `src/native/file_storage.rs`: `save_to_disk` writes the settings (`app.ron`) to a temporary
+  file beside them, syncs it and renames it over them, so the file always holds one whole save.
+  Two windows saving at once each truncated and wrote the same file, and a shorter save left the
+  tail of a longer one behind it (#4164). `src/lib.rs` re-exports it, hidden, for SolidCraft's tests.
+- `src/native/epi_integration.rs`: with no window icon given, the default is an empty one instead
+  of egui's logo. SolidCraft always gives its own.
+- `Cargo.toml`: no README, and the licence texts and no logo in `include`.
