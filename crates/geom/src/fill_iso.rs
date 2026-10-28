@@ -37,9 +37,10 @@
 //!   spokes starting as straight lines to the centre, the mean of the midpoints.
 //! - **The inside**: with the loop's rows held, the other control points (each patch's interior,
 //!   the spokes' and the centre, each once) minimise, by least squares, the misfit to the
-//!   conditions plus a vanishing multiple of the patches' thin-plate energy
-//!   `∫∫ |S_uu|² + 2|S_uv|² + |S_vv|²` (of the control net on the polynomial basis; it alone
-//!   decides a G0 fill). The conditions are those of G^n continuity in the linkage-curve
+//!   conditions plus a vanishing multiple of the patches' fairing energy of order n + 1,
+//!   `∫∫ Σ_r C(n+1, r) |∂ᵘʳ ∂ᵥⁿ⁺¹⁻ʳ S|²` (the thin plate `∫∫ |S_uu|² + 2|S_uv|² + |S_vv|²` for G0
+//!   and G1, of the control net on the polynomial basis; it alone decides a G0 fill), so the
+//!   change of curvature the conditions ask at the edges is spread over the fill. The conditions are those of G^n continuity in the linkage-curve
 //!   formulation ([`crate::linkage`]): at stations along an edge, the iso-parameter curve `c`
 //!   of the fill leaving across it (σ growing into the fill) must have its height above the
 //!   neighbour vanish to order n:
@@ -51,6 +52,9 @@
 //!     the normal curvature (G2), its rate of change (G3) and that rate's (G4) are the
 //!     neighbour's, in the fill's own leave direction. The right-hand side reads `c′ … c⁽ᵏ⁻¹⁾`
 //!     from the last solution, so the rows are solved again, a few rounds;
+//!   - across a patch's own C0 knot lines (a side's break where it is only C0 in its
+//!     parameter), the derivatives either side in the ratio of the crossing sides' speeds
+//!     ([`knot_line_rows`]): the fill is tangent continuous there too;
 //!   - across each spoke, the two patches' derivatives away from it opposed (`∂S_k/∂u + ∂S_{k+1}/∂v
 //!     = 0` on the shared parameter): the patches join tangent there;
 //!   - points the fill passes through, located on the last solution (nearest point of any patch)
@@ -67,7 +71,10 @@
 //!   has too few rows for the conditions from opposite sides to stay apart, the spans that way are
 //!   halved (both ways where a point is missed, a patch folds, or the patches share one space),
 //!   up to [`MAX_ISO_SPANS`] and the free points one solve takes ([`MAX_BANDED_POINTS`] for one
-//!   patch, whose system is banded, [`MAX_UNKNOWN_POINTS`] about a centre, whose is dense).
+//!   patch, whose system is banded, [`MAX_UNKNOWN_POINTS`] about a centre, whose is dense). A
+//!   fill that then still misses the angle tolerance or a point, or folds, is refused; one that
+//!   misses only an order above G1 is the closest the finest space holds, its jumps reported
+//!   ([`Achieved::jumps`]).
 //! - **A crown** fills the middle out along the normals, on control points clear of the rows the
 //!   conditions hold, so the loop and the conditions across it do not move.
 //!
@@ -113,12 +120,15 @@ const CORNER_SHARE: f64 = 0.1;
 const FOLD_SAMPLES: usize = 24;
 /// How far, relative to one, the corners' weights may disagree once the edges are scaled.
 const WEIGHT_TOL: f64 = 1e-9;
-/// Four-point Gauss–Legendre nodes and weights on `[−1, 1]` (exact to degree 7).
-const GAUSS4: [(f64, f64); 4] = [
-    (-0.861_136_311_594_052_6, 0.347_854_845_137_453_8),
-    (-0.339_981_043_584_856_3, 0.652_145_154_862_546_2),
-    (0.339_981_043_584_856_3, 0.652_145_154_862_546_2),
-    (0.861_136_311_594_052_6, 0.347_854_845_137_453_8),
+/// Six-point Gauss–Legendre nodes and weights on `[−1, 1]` (exact to degree 11: the Gram
+/// matrices of quintics).
+const GAUSS6: [(f64, f64); 6] = [
+    (-0.932_469_514_203_152, 0.171_324_492_379_170),
+    (-0.661_209_386_466_265, 0.360_761_573_048_139),
+    (-0.238_619_186_083_197, 0.467_913_934_572_691),
+    (0.238_619_186_083_197, 0.467_913_934_572_691),
+    (0.661_209_386_466_265, 0.360_761_573_048_139),
+    (0.932_469_514_203_152, 0.171_324_492_379_170),
 ];
 
 /// One edge of the loop: a B-spline from the loop's corner before it to the one after (the
@@ -381,9 +391,21 @@ impl Patch {
     /// rational basis `R_ij = w_ij N_i N_j / W`, by the Leibniz rule for `w_ij N_i N_j = R_ij W`:
     /// `R^(a,b) = (f^(a,b) − Σ_{(k,l) ≠ (0,0)} C(a,k) C(b,l) W^(k,l) R^(a−k,b−l)) / W`.
     fn row(&self, u: f64, v: f64, du: usize, dv: usize) -> SplineResult<Vec<(usize, usize, f64)>> {
+        self.row_sided(u, v, du, dv, [false; 2])
+    }
+
+    /// The basis of the space along `d` at `t`, from the left of a knot when `left`.
+    fn basis(&self, d: usize, t: f64, r: usize, left: bool) -> SplineResult<(usize, Vec<f64>)> {
+        let space = self.spaces.get(d).ok_or_else(|| SplineError::Invalid("a patch has two directions".into()))?;
+        if left { space.basis_left(t, r) } else { space.basis(t, r) }
+    }
+
+    /// [`Patch::row`] with each direction's basis taken from the left of a knot where `left`
+    /// says so: the derivative of the piece ending there.
+    fn row_sided(&self, u: f64, v: f64, du: usize, dv: usize, left: [bool; 2]) -> SplineResult<Vec<(usize, usize, f64)>> {
         if !self.rational {
-            let (iu, bu) = self.spaces[0].basis(u, du)?;
-            let (iv, bv) = self.spaces[1].basis(v, dv)?;
+            let (iu, bu) = self.basis(0, u, du, left[0])?;
+            let (iv, bv) = self.basis(1, v, dv, left[1])?;
             let mut out = Vec::with_capacity(bu.len() * bv.len());
             for (b, nv) in bv.iter().enumerate() {
                 for (a, nu) in bu.iter().enumerate() {
@@ -397,7 +419,7 @@ impl Patch {
             let mut first = 0;
             let mut out = Vec::with_capacity(top + 1);
             for r in 0..=top {
-                let (f, b) = self.spaces[d].basis(t, r)?;
+                let (f, b) = self.basis(d, t, r, left.get(d).copied().unwrap_or(false))?;
                 first = f;
                 out.push(b);
             }
@@ -704,6 +726,7 @@ fn coons(spaces: [Space; 2], c0: &[HPoint], c1: &[HPoint], d0: &[HPoint], d1: &[
 }
 
 /// One condition row: `Σ along·P = value` over its terms' control points, and its weight.
+#[derive(Clone)]
 struct Row {
     terms: Vec<Term>,
     value: f64,
@@ -742,8 +765,11 @@ struct Station {
     t: f64,
     across: Across,
     /// The continuity order asked here: the neighbour's, or less near a corner whose neighbours
-    /// do not agree to it.
+    /// do not agree to it ([`Asked`]): orders up to `full` at their full weight, those above it
+    /// up to `order` at `fade` of it.
     order: usize,
+    full: usize,
+    fade: f64,
     /// How far (radians) the edge itself leans out of the neighbour's tangent plane here: the
     /// fill holds the edge, so its normal can come no nearer the neighbour's than that.
     tilt: f64,
@@ -756,6 +782,44 @@ impl Station {
     /// The continuity order its conditions ask: 1 (G1) … 4 (G4).
     fn order(&self) -> usize {
         self.order
+    }
+}
+
+/// What a station asks, by how near it is to corners whose neighbours agree to less (see
+/// [`corner_orders`]): within [`CLASH_SHARE`] of such a corner the orders above the corner's
+/// agreement (at least G1) are not asked, and over the next [`CLASH_SHARE`] they come back
+/// smoothly (`fade` from 0 to 1, a smoothstep), so the fill is not strained where they start;
+/// where the corner's tangent planes disagree the station is not held to the angle tolerance.
+struct Asked {
+    asked: usize,
+    full: usize,
+    fade: f64,
+    held: bool,
+}
+
+impl Asked {
+    /// For a station asking `asked`, at fraction `distance` of its side from each of the side's
+    /// two corners, whose neighbours agree to `agreement` (`None`: no cap).
+    fn near(asked: usize, ends: [(Option<usize>, f64); 2]) -> Asked {
+        let mut a = Asked { asked, full: asked, fade: 1.0, held: true };
+        for (agreement, distance) in ends {
+            let Some(agreed) = agreement.filter(|g| *g < asked) else { continue };
+            if distance >= 2.0 * CLASH_SHARE {
+                continue;
+            }
+            a.full = a.full.min(agreed.max(1));
+            let x = ((distance - CLASH_SHARE) / CLASH_SHARE).clamp(0.0, 1.0);
+            a.fade = a.fade.min(x * x * (3.0 - 2.0 * x));
+            if agreed == 0 && distance < CLASH_SHARE {
+                a.held = false;
+            }
+        }
+        a
+    }
+
+    /// The highest order asked at all.
+    fn order(&self) -> usize {
+        if self.fade > 0.0 { self.asked } else { self.full }
     }
 }
 
@@ -936,11 +1000,15 @@ pub fn iso_fill(
         if folded || report.point_deviation > spec.tol {
             wanted = [true; 2];
         }
-        if !wanted.iter().any(|w| *w) {
+        // The tangent plane, the points and an unfolded fill are what a patch must have; the
+        // orders above G1 are held as tightly as the finest space allows, and reported.
+        let must = !folded && report.point_deviation <= spec.tol && along.angle.iter().all(|a| *a <= spec.angle_tol);
+        let refine = refinable(&spans, wanted, shared, quilt.unknowns);
+        if !wanted.iter().any(|w| *w) || (must && !refine) {
             let quilt = crowned(quilt, &stations, spec.crown, size)?;
             return finished(quilt, edges, report);
         }
-        if !refinable(&spans, wanted, shared, quilt.unknowns) {
+        if !refine {
             let jumps =
                 report.jumps.get(2..=order).filter(|_| order >= 2).map(|j| format!(", jumps of orders 2 to {order} {j:?}")).unwrap_or_default();
             let folded = if folded { ", and it folds" } else { "" };
@@ -1059,12 +1127,9 @@ fn stations(
             let Some(c) = c else { continue };
             let t = (param - a) / (b - a);
             let f = (param - ea) / (eb - ea);
-            // What the corners near the station let it ask.
             let asked = c.jet.map_or(1, |j| j.order);
-            let near = |corner: usize, close: bool| if close { corners.get(corner).copied().unwrap_or(usize::MAX) } else { usize::MAX };
-            let cap = near(k, f < CLASH_SHARE).min(near((k + 1) % n, f > 1.0 - CLASH_SHARE));
-            let order = asked.min(cap.max(1));
-            let clear = f > CORNER_SHARE && f < 1.0 - CORNER_SHARE && order == asked;
+            let ask = Asked::near(asked, [(corners.get(k).copied(), f), (corners.get((k + 1) % n).copied(), 1.0 - f)]);
+            let clear = f > CORNER_SHARE && f < 1.0 - CORNER_SHARE && ask.full == asked;
             let (uv, (du, dv, sign)) = station_on(side, t);
             // How fast the Coons start leaves into the leave direction: it blends the sides
             // across, so it leaves as fast as the opposite sides lie apart; the side's own speed
@@ -1072,7 +1137,7 @@ fn stations(
             let along = p.eval(uv[0], uv[1], dv, du).map(|d| d.len()).unwrap_or(0.0);
             let speed = p.eval(uv[0], uv[1], du, dv).map(|d| (d * sign).dot(c.leave)).ok().filter(|x| *x > 0.0).unwrap_or(along);
             let tilt = edges.get(k).and_then(|e| e.tangent(param)).map_or(0.0, |d| d.dot(c.normal).abs().clamp(0.0, 1.0).asin());
-            out.push(Station { patch, side, t, across: c, order, tilt, held: cap > 0, clear, speed });
+            out.push(Station { patch, side, t, across: c, order: ask.order(), full: ask.full, fade: ask.fade, tilt, held: ask.held, clear, speed });
         }
     }
     Ok(out)
@@ -1087,7 +1152,8 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     if quilt.unknowns > most {
         return Err(SplineError::TooLarge(format!("{} free control points (at most {most})", quilt.unknowns)));
     }
-    let energy: Vec<Vec<(usize, usize, f64)>> = quilt.patches.iter().map(energy).collect::<SplineResult<_>>()?;
+    let fairing = stations.iter().map(Station::order).max().unwrap_or(1).max(1) + 1;
+    let energy: Vec<Vec<(usize, usize, f64)>> = quilt.patches.iter().map(|p| energy(p, fairing)).collect::<SplineResult<_>>()?;
     let mut located: Vec<(usize, [f64; 2])> = Vec::new();
     let mut report = Achieved::default();
     let mut along = Along::default();
@@ -1096,8 +1162,9 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     // The mean span of each space (the same in every patch).
     let span = quilt.patches.first().map_or([1.0; 2], |p| p.spaces.clone().map(|s| 1.0 / breaks(&s).len().saturating_sub(1).max(1) as f64));
     let rounds = if top >= 2 { ROUNDS_PER_ORDER * top } else { ROUNDS };
+    let smooth = knot_line_rows(&quilt, spec.angle_tol)?;
     for round in 0..rounds {
-        let mut rows: Vec<Row> = Vec::new();
+        let mut rows: Vec<Row> = smooth.clone();
         for s in stations {
             let Some(patch) = quilt.patches.get(s.patch) else { continue };
             // The span across the side: of v for sides 0 and 2, of u for 1 and 3.
@@ -1125,6 +1192,58 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
         }
     }
     Ok((quilt, report, along))
+}
+
+/// Rows that keep a patch tangent continuous across its own C0 knot lines (a break where a
+/// side is only C0 in its parameter, such as a circle's quarter joint once in homogeneous form):
+/// along the line `u = x` (or `v = x`), at stations, the derivative across it from the right is
+/// the one from the left times `r`, the ratio the two sides crossing the line have there (they
+/// are tangent continuous, their speeds may differ), blended linearly between them; at the sides
+/// the rows hold by construction. A line where a crossing side turns a corner is left alone: no
+/// surface is tangent across it there. A three-sided patch's pole takes the other side's ratio.
+fn knot_line_rows(quilt: &Quilt, angle_tol: f64) -> SplineResult<Vec<Row>> {
+    let mut rows = Vec::new();
+    for (k, patch) in quilt.patches.iter().enumerate() {
+        for d in 0..2 {
+            let (Some(space), Some(other)) = (patch.spaces.get(d), patch.spaces.get(1 - d)) else { continue };
+            let count = station_count(other);
+            for (x, m) in interior_knots(space) {
+                if m < space.degree() {
+                    continue;
+                }
+                // The point (x, t) in the patch's (u, v), and its one-sided derivatives across.
+                let at = |t: f64| if d == 0 { [x, t] } else { [t, x] };
+                let across = |t: f64, left: bool| -> SplineResult<Vec<(usize, usize, f64)>> {
+                    let [u, v] = at(t);
+                    let (du, dv) = if d == 0 { (1, 0) } else { (0, 1) };
+                    patch.row_sided(u, v, du, dv, if d == 0 { [left, false] } else { [false, left] })
+                };
+                let speed = |row: &[(usize, usize, f64)]| row.iter().fold(Vec3::ZERO, |s, (i, j, c)| s + patch.at(*i, *j) * *c);
+                let ratio = |t: f64| -> SplineResult<Option<f64>> {
+                    let (a, b) = (speed(&across(t, true)?), speed(&across(t, false)?));
+                    let (la, lb) = (a.len(), b.len());
+                    if !(la > 0.0 && lb > 0.0) {
+                        return Ok(None);
+                    }
+                    Ok((a.dot(b) / (la * lb) >= angle_tol.cos()).then_some(lb / la))
+                };
+                let ends = [ratio(0.0)?, ratio(1.0)?];
+                let (r0, r1) = match ends {
+                    [Some(a), Some(b)] => (a, b),
+                    [Some(a), None] | [None, Some(a)] if patch.pole && d == 1 => (a, a),
+                    _ => continue,
+                };
+                for i in 0..count {
+                    let t = (i as f64 + 0.5) / count as f64;
+                    let r = r0 * (1.0 - t) + r1 * t;
+                    let mut terms = across(t, false)?;
+                    terms.extend(across(t, true)?.into_iter().map(|(i, j, c)| (i, j, -r * c)));
+                    on_each_axis(&mut rows, &[(k, terms)], Vec3::ZERO, 1.0);
+                }
+            }
+        }
+    }
+    Ok(rows)
 }
 
 /// A station's rows (module docs), linearised about the patch as it stands:
@@ -1166,23 +1285,46 @@ fn linkage_rows(rows: &mut Vec<Row>, patch: &Patch, s: &Station, span: f64) -> S
             terms.extend(along(s.patch, cj, (t * g[0] + w * g[1]) * -1.0));
             value -= g[0] * x[0] + g[1] * x[1];
         }
-        rows.push(Row { terms, value, weight: span.powi(k as i32 - 1) });
+        let fade = if k <= s.full { 1.0 } else { s.fade };
+        rows.push(Row { terms, value, weight: fade * span.powi(k as i32 - 1) });
     }
     Ok(())
 }
 
-/// A patch's thin-plate energy coefficients between its control points (flat indices), of the
-/// terms `G⁽ʳ⁾ ⊗ G⁽ˢ⁾` with `(r, s)` = (2, 0), (1, 1) twice, (0, 2).
-fn energy(patch: &Patch) -> SplineResult<Vec<(usize, usize, f64)>> {
-    let (gu, gv) = (gram(&patch.spaces[0])?, gram(&patch.spaces[1])?);
-    let at = |g: &[Vec<Vec<f64>>; 3], r: usize, a: usize, b: usize| g.get(r).and_then(|x| x.get(a)).and_then(|x| x.get(b)).copied().unwrap_or(0.0);
+/// A patch's fairing energy for a fill asked G^n, between its control points (flat indices): the
+/// thin plate (order 2) plus, for n ≥ 2, the energy of order `m = n + 1`, each scaled to unit
+/// trace ([`energy_of`]). The higher order leaves the change the conditions ask (of curvature,
+/// of its rate…) spread over the fill rather than squeezed into the first span along its edges;
+/// the thin plate, whose null space (the planes) the loop pins, keeps the system definite where
+/// the higher order's (polynomials of degree below m) is not.
+fn energy(patch: &Patch, m: usize) -> SplineResult<Vec<(usize, usize, f64)>> {
+    let thin = energy_of(patch, 2)?;
+    if m <= 2 {
+        return Ok(thin);
+    }
+    let high = energy_of(patch, m)?;
+    let trace = |e: &[(usize, usize, f64)]| e.iter().filter(|(a, b, _)| a == b).map(|(_, _, x)| *x).sum::<f64>();
+    let (t2, tm) = (trace(&thin), trace(&high));
+    if !(t2 > 0.0 && tm > 0.0) {
+        return Ok(thin);
+    }
+    Ok(thin.into_iter().map(|(a, b, x)| (a, b, x / t2)).chain(high.into_iter().map(|(a, b, x)| (a, b, x / tm))).collect())
+}
+
+/// A patch's fairing energy of order `m` between its control points (flat indices):
+/// `∫∫ Σ_r C(m, r) |∂ᵘʳ ∂ᵥᵐ⁻ʳ S|²`, the terms `G⁽ʳ⁾ ⊗ G⁽ᵐ⁻ʳ⁾` of the spaces' Gram matrices (order 2
+/// is the thin plate `∫∫ |S_uu|² + 2|S_uv|² + |S_vv|²`).
+fn energy_of(patch: &Patch, m: usize) -> SplineResult<Vec<(usize, usize, f64)>> {
+    let (gu, gv) = (gram(&patch.spaces[0], m)?, gram(&patch.spaces[1], m)?);
+    let at = |g: &[Vec<Vec<f64>>], r: usize, a: usize, b: usize| g.get(r).and_then(|x| x.get(a)).and_then(|x| x.get(b)).copied().unwrap_or(0.0);
+    let binom = |n: usize, k: usize| (0..k).fold(1.0, |c, i| c * (n - i) as f64 / (i + 1) as f64);
     let [cu, cv] = patch.counts();
     let mut out = Vec::new();
     for j in 0..cv {
         for l in 0..cv {
             for i in 0..cu {
                 for k in 0..cu {
-                    let e = at(&gu, 2, i, k) * at(&gv, 0, j, l) + 2.0 * at(&gu, 1, i, k) * at(&gv, 1, j, l) + at(&gu, 0, i, k) * at(&gv, 2, j, l);
+                    let e: f64 = (0..=m).map(|r| binom(m, r) * at(&gu, r, i, k) * at(&gv, m - r, j, l)).sum();
                     if e != 0.0 {
                         out.push((i + cu * j, k + cu * l, e));
                     }
@@ -1193,14 +1335,14 @@ fn energy(patch: &Patch) -> SplineResult<Vec<(usize, usize, f64)>> {
     Ok(out)
 }
 
-/// The Gram matrices `∫ N_a⁽ʳ⁾ N_b⁽ʳ⁾` of a space's basis for r = 0, 1, 2 (Gauss–Legendre on
+/// The Gram matrices `∫ N_a⁽ʳ⁾ N_b⁽ʳ⁾` of a space's basis for r = 0 … m (Gauss–Legendre on
 /// each span, exact for the degrees used).
-fn gram(s: &Space) -> SplineResult<[Vec<Vec<f64>>; 3]> {
+fn gram(s: &Space, m: usize) -> SplineResult<Vec<Vec<Vec<f64>>>> {
     let n = s.count();
-    let mut g: [Vec<Vec<f64>>; 3] = std::array::from_fn(|_| vec![vec![0.0; n]; n]);
+    let mut g: Vec<Vec<Vec<f64>>> = vec![vec![vec![0.0; n]; n]; m + 1];
     for w in breaks(s).windows(2) {
         let (lo, hi) = (w[0], w[1]);
-        for (x, wt) in GAUSS4 {
+        for (x, wt) in GAUSS6 {
             let t = 0.5 * (lo + hi) + 0.5 * (hi - lo) * x;
             let weight = 0.5 * (hi - lo) * wt;
             for (r, gr) in g.iter_mut().enumerate() {

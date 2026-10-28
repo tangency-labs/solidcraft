@@ -158,7 +158,7 @@ fn a_sphere_window_on_rational_arcs_holds_each_order_asked_and_not_the_next() {
         }
         if (2..4).contains(&order) {
             let (held, next) = (measured[order - 2], measured[order - 1]);
-            assert!(next > 100.0 * held.max(1e-12), "G{order} leaves order {} to the energy: {next:e} vs {held:e}", order + 1);
+            assert!(next > 10.0 * held.max(1e-12), "G{order} leaves order {} to the energy: {next:e} vs {held:e}", order + 1);
         }
         // Not the sphere (nothing asks for it), but a cap over the window, not a dent.
         assert!(off_sphere(&fill) < 0.05 * R, "G{order} near the sphere: {}", off_sphere(&fill));

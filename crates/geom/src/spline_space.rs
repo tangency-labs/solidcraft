@@ -192,6 +192,27 @@ impl Space {
         Ok((first, values.collect()))
     }
 
+    /// [`Space::basis`] from the left of `t`: at an interior knot, the derivatives of the
+    /// polynomial piece that ends there (elsewhere the same as from the right).
+    pub fn basis_left(&self, t: f64, der: usize) -> SplineResult<(usize, Vec<f64>)> {
+        let [a, b] = self.domain();
+        if !t.is_finite() {
+            return invalid("a parameter is not a finite number");
+        }
+        let t = t.clamp(a, b);
+        if t <= a {
+            return self.basis(t, der);
+        }
+        let p = self.degree;
+        // The span [k_s, k_{s+1}) with k_s < t ≤ k_{s+1}.
+        let below = self.knots.partition_point(|&x| x < t);
+        let span = below.checked_sub(1).filter(|s| *s >= p).ok_or_else(|| SplineError::Invalid(format!("{t} is outside the domain")))?;
+        let first = span - p;
+        let values =
+            (first..=span).map(|i| self.knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, t, Side::Left, der).get(der).copied().unwrap_or(0.0)));
+        Ok((first, values.collect()))
+    }
+
     /// The `der`-th derivative at `t` of the spline with control values `ctrl`.
     pub fn eval<T: Linear>(&self, ctrl: &[T], t: f64, der: usize) -> SplineResult<T> {
         if ctrl.len() != self.count() {
