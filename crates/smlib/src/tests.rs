@@ -109,3 +109,47 @@ fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() 
     let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99]).unwrap_err();
     assert!(err.contains("SMLib moved an edge's interval") && err.contains("tolerance"), "{err}");
 }
+
+/// An edge whose curve runs 2.5 um past its vertex and its face's patch (as Poppy Humanoid's
+/// Congé19 has them), with a tolerance of 0.5 um: SMLib trims such an edge back to the patch
+/// when it makes its trim, unless the edge's tolerance covers its gap. The gap is measured
+/// (SMLib's own, over the patch) and covered, so the face's pcurves come back on the edge's
+/// own interval, ending at the patch's corner.
+#[cfg(feature = "native")]
+#[test]
+fn an_edge_a_few_um_past_its_patch_keeps_its_interval() {
+    use solidcraft_geom::brep::pcurve::{TrimEdge, TrimFace, TrimUse, Trims};
+    use solidcraft_geom::brep::{Curve, Surface};
+    // S(u, v) = (10u, 10v, 2v^2), bicubic
+    let g = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0];
+    let z = [0.0, 0.0, 2.0 / 3.0, 2.0];
+    let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let points: Vec<Vec<[f64; 3]>> = (0..4).map(|i| (0..4).map(|j| [10.0 * g[i], 10.0 * g[j], z[j]]).collect()).collect();
+    let surface = Surface::Spline { u_knots: bezier.clone(), v_knots: bezier.clone(), points: points.clone() };
+    let past = 2.5e-3;
+    let spline = |p: Vec<[f64; 3]>| Curve::Spline { knots: bezier.clone(), points: p };
+    let curves = [
+        spline((0..4).map(|i| [(10.0 + past) * g[i], 0.0, 0.0]).collect()),
+        spline((0..4).map(|j| points[3][j]).collect()),
+        spline((0..4).map(|i| points[3 - i][3]).collect()),
+        spline((0..4).map(|j| points[0][3 - j]).collect()),
+    ];
+    let ends = [[0, 1], [1, 2], [2, 3], [3, 0]];
+    let edges = (0..4)
+        .map(|k| TrimEdge { curve: &curves[k], nurbs: None, interval: [0.0, 1.0], vertices: ends[k], tolerance: if k == 0 { 1e-3 } else { 1e-5 } })
+        .collect();
+    let face = TrimFace {
+        surface: &surface,
+        nurbs: None,
+        domain: [[0.0, 1.0], [0.0, 1.0]],
+        edges,
+        vertices: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [10.0, 10.0, 2.0], [0.0, 10.0, 2.0]],
+        loops: vec![(0..4).map(|k| TrimUse { edge: k, forward: true, pcurve: None }).collect()],
+        tolerance: 1e-5,
+    };
+    let pcs = crate::pcurves::SmlibTrims.trims(&face).unwrap();
+    let pc = &pcs[0][0];
+    assert_eq!(pc.interval(), Some([0.0, 1.0]));
+    let [u, v] = pc.eval(1.0).unwrap();
+    assert!((u - 1.0).abs() < 1e-9 && v.abs() < 1e-9, "{u} {v}");
+}
