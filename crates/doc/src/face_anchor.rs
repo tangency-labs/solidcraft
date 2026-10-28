@@ -183,6 +183,11 @@ impl Document {
                     return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
                 }
                 let indices = self.configuration_face_indices(body, &target)?;
+                // A copy a pattern or mirror made on the same body carries its seed's certificate,
+                // which finds the seed's face: the copy is attached by its own history name below.
+                if !indices.contains(&index) {
+                    return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
+                }
                 self.coplanar_pieces(body, &indices, |_| true)?;
                 Ok(target)
             });
