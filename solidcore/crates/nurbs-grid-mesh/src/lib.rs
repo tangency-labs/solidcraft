@@ -37,6 +37,24 @@
 //! it has to be taken on trust.
 //!
 //! Library code never panics, unwraps or indexes: bad input comes back as a [`MeshError`].
+//!
+//! ## LOD and scheduling
+//!
+//! [`MeshOptions::tolerance`] is a world-space maximum sag. A viewer should derive it
+//! from a screen-space error target:
+//!
+//! ```text
+//! requested_sag = desired_pixels * world_units_per_pixel_at_target
+//! ```
+//!
+//! and clamp it by the model extent only as a safety bound. Meshing should not be
+//! driven by a fixed line count or by model units alone.
+//!
+//! SolidCraft is expected to run exact geometry and display meshing on independent
+//! thread pools. Mesh jobs therefore need to be immutable-input, revisioned,
+//! cancellable and coalesced by target + quality. Close/selected work uses a small
+//! screen-space sag; normal uses a bounded budget; far/interactive work is coarse.
+//! The mesher receives an explicit tolerance and does not select LOD itself.
 #![forbid(unsafe_code)]
 
 mod deviation;
