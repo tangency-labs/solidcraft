@@ -2,7 +2,9 @@
 //! torus face's NURBS form spans the quarters of its frame's quarter grid that its angle interval
 //! needs (`brep::form`); a face of less than one turn that does not start on a quarter line and
 //! has more than three quarters left spills into a fifth, so its form runs past one turn and
-//! covers part of its surface twice, which no kernel takes as a face. The file's reference
+//! covers part of its surface twice, which no kernel takes as a face. A whole turn whose seam is
+//! off a quarter line spills the same way: its form is the four quarters from the one it starts
+//! in, and the seam's second use lies past their end, off the form. The file's reference
 //! direction is the writer's: the face's frame is turned about its own axis (the same surface,
 //! its angle parameter measured from further on) so that the face starts on a quarter line, and
 //! its form spans the four quarters (or fewer) it covers.

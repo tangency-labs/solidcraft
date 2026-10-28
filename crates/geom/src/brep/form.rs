@@ -172,15 +172,17 @@ fn reaches(s: &Surface, v: [f64; 2], tolerance: f64) -> (f64, f64) {
 }
 
 /// How many quarters a cylinder, cone, sphere or torus face over `[u, v]` (its box on the label,
-/// as for [`surface_within`]) spans about the axis on its frame's quarter grid: four for a whole
-/// turn, up to five for less, when the face does not start on a quarter line and more than three
-/// quarters are left to it, so that its form runs past one turn (a NURBS that covers part of its
-/// surface twice). [`turned`] puts its start on a quarter line. `None` for another surface.
+/// as for [`surface_within`]) spans about the axis on its frame's quarter grid: five when the face
+/// does not start on a quarter line and more than three quarters are left to it. A face of less
+/// than one turn then has a form past one turn (a NURBS that covers part of its surface twice); a
+/// whole turn has a form of four quarters from the one it starts in, which ends short of the
+/// face's seam, so the seam's second use lies off the form. [`turned`] puts its start on a quarter
+/// line. `None` for another surface.
 pub fn turn_quarters(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<usize> {
     if !matches!(s, Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. }) {
         return None;
     }
-    Some(face_quarters(u, reaches(s, v, tolerance).0)?.0.1)
+    Some(quarters(u, reaches(s, v, tolerance).0)?.1)
 }
 
 /// A cylinder, cone, sphere or torus with its frame turned by `angle` about its own axis (its x
