@@ -24,7 +24,7 @@ pub struct Body {
     pub(crate) record: std::sync::Arc<Brep>,
     /// The body in SMLib, built from `record` on first use (or kept from the operation that
     /// made it), shared by clones because they share the record.
-    pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, String>>>,
+    pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
@@ -379,6 +379,61 @@ pub(crate) fn empty_record() -> Brep {
     }
 }
 
+/// Why SMLib refuses a body, and the face it refuses on its own when one does: SMLib's import
+/// says only that it refuses the body, so each face is then sent on its own to find which.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refusal {
+    /// The first face (in the body's face order) SMLib refuses on its own; `None` when it takes
+    /// each face alone (the faces do not fit together) or the body has too many to try.
+    pub face: Option<usize>,
+    /// That face's surface.
+    pub surface: Option<SurfaceKind>,
+    /// SMLib's reason for the whole body, as the log words it.
+    pub why: String,
+}
+
+/// The kind of surface a face lies on, as a person modelling would name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SurfaceKind {
+    Plane,
+    Cylinder,
+    Cone,
+    Sphere,
+    Torus,
+    /// A B-spline or NURBS surface, or a revolution of a spline.
+    Freeform,
+}
+
+/// Most faces sent into SMLib one by one to find the one it refuses.
+const MAX_REFUSAL_PROBES: usize = 20_000;
+
+impl Refusal {
+    /// The refusal of `record` for `error`, with the face SMLib refuses on its own.
+    fn of(record: &Brep, error: &solidcraft_smlib::Error) -> Refusal {
+        let _span = solidcraft_profile::span("kernel", "smlib_refusal_face");
+        let alone = |f: usize| crate::surfaces::Parts::of(record, &[(f, false)]).and_then(|p| p.canonical()).map(|c| c.brep);
+        let face = (record.faces.len() <= MAX_REFUSAL_PROBES)
+            .then(|| (0..record.faces.len()).find(|&f| alone(f).is_ok_and(|r| solidcraft_smlib::Brep::from_record(&r, true).is_err())))
+            .flatten();
+        let surface = face.and_then(|f| record.faces.get(f)).map(|f| SurfaceKind::of(&f.surface));
+        Refusal { face, surface, why: error.to_string() }
+    }
+}
+
+impl SurfaceKind {
+    fn of(surface: &solidcraft_geom::brep::Surface) -> SurfaceKind {
+        use solidcraft_geom::brep::Surface as S;
+        match surface {
+            S::Plane { .. } | S::PlaneThrough { .. } => SurfaceKind::Plane,
+            S::Cylinder { .. } => SurfaceKind::Cylinder,
+            S::Cone { .. } => SurfaceKind::Cone,
+            S::Sphere { .. } => SurfaceKind::Sphere,
+            S::Torus { .. } => SurfaceKind::Torus,
+            S::Spline { .. } | S::RationalSpline { .. } | S::PlacedRevolution { .. } => SurfaceKind::Freeform,
+        }
+    }
+}
+
 impl Body {
     /// A body with `record` and nothing else set.
     fn bare(record: Brep, smlib: Option<solidcraft_smlib::Brep>, mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>) -> Body {
@@ -433,9 +488,27 @@ impl Body {
     pub fn smlib(&self) -> Result<&solidcraft_smlib::Brep> {
         self.require_brep("an SMLib operation")?;
         self.smlib
-            .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| e.to_string()))
+            .get_or_init(|| solidcraft_smlib::Brep::from_record(&self.record, true).map_err(|e| Refusal::of(&self.record, &e)))
             .as_ref()
-            .map_err(|e| KernelError::Failed(format!("SMLib: {e}")))
+            .map_err(|r| KernelError::Failed(format!("SMLib: {}", r.why)))
+    }
+
+    /// Why SMLib refuses the body, if it does: the body is sent into SMLib as an operation
+    /// would send it (and kept there for the operations to come). `None` for a body SMLib takes,
+    /// and for a mesh body (no operation sends one).
+    pub fn smlib_refusal(&self) -> Option<&Refusal> {
+        if self.is_mesh() {
+            return None;
+        }
+        let _ = self.smlib();
+        self.smlib_refused()
+    }
+
+    /// Why SMLib refused the body when it was last sent there (by an operation, or by
+    /// [`Self::smlib_refusal`]); `None` when it took it or the body was not sent yet. Sends
+    /// nothing.
+    pub fn smlib_refused(&self) -> Option<&Refusal> {
+        self.smlib.get().and_then(|r| r.as_ref().err())
     }
 
     /// The very same body (shared data), not just an equal-looking one. Its history (how an

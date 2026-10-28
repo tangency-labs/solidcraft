@@ -200,6 +200,7 @@ pub mod preview;
 mod primitive_units_tests;
 pub mod recovery_ui;
 pub mod ref_images;
+pub(crate) mod refused_part;
 pub mod render_workspace;
 #[cfg(test)]
 mod revolve_edit_tests;

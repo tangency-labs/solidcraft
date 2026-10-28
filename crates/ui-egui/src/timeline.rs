@@ -403,6 +403,7 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
         ("import_report.left_out", faces_of(IssueKind::FaceLeftOut)),
         ("import_report.open", parts_of(IssueKind::OpenBody)),
         ("import_report.not_shown", faces_of(IssueKind::FacesNotShown)),
+        ("import_report.needs_repair", parts_of(IssueKind::NeedsRepair)),
         ("import_report.repaired", parts_of(IssueKind::Repaired)),
         ("import_report.file", file),
     ];

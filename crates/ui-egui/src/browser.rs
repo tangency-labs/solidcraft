@@ -1982,12 +1982,13 @@ impl Entry {
             key: b.name.clone(),
             row_key: format!("b:{world}"),
             patterns: None,
-            label: b.name.clone(),
+            // A part the modelling kernel refuses says so (Repair Part is in its menu).
+            label: if b.body.smlib_refused().is_some() { crate::i18n::format("browser.needs_repair", &[("name", &b.name)]) } else { b.name.clone() },
             // An open shell is a surface body, not a solid.
             icon: if b.is_surface() { "surface" } else { "body" },
             visible: !app.session.visibility.hidden_bodies.contains(&world),
             selected: app.session.selection.iter().any(|s| matches!(s, Sel::Body { name } if name == &world)),
-            color: None,
+            color: b.body.smlib_refused().map(|_| Tokens::get().warning),
             locked: app.session.visibility.locked_bodies.contains(&world),
             sel: Some(Sel::Body { name: world.clone() }),
             target: Some(Target::Body { name: world.clone() }),

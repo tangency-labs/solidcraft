@@ -19,6 +19,10 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("body.rename", "Rename Body", rename_body).icon("rename").params("body: its name, name: the new name (features that use the body follow)"),
+    // The import and failed operations offer it for a part the modelling kernel refuses.
+    planned!("body.repair", "Repair Part", "TBD")
+        .icon("body")
+        .params("planned: body: its name (a part the modelling kernel refuses: one its import marks as needing repair)"),
     CommandSpec::new("sketch.redefine", "Redefine Sketch Plane", redefine_sketch)
         .icon("plane")
         .params("sketch: id or name; plane: as sketch.create; frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),

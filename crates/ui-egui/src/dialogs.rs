@@ -2595,6 +2595,32 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick"));
             return;
         }
+        // An operation on a part the kernel refuses: the part, what is wrong with it, and what
+        // to do, instead of the kernel's words and an issue report.
+        if let Some(part) = refused_operand(app, d) {
+            let operation =
+                dialog_commands(app, d).ok().and_then(|c| c.iter().find_map(|(_, p)| p.get("operation").and_then(Value::as_str).map(str::to_string)));
+            ui.vertical(|ui| {
+                crate::ui_kit::text(ui, &crate::refused_part::message(&part, operation.as_deref()), crate::ui_kit::Text::Report("error", true));
+                ui.horizontal(|ui| {
+                    let ready = solidcraft_engine::find_command(crate::refused_part::REPAIR).map(|c| c.info(&app.session));
+                    let enabled = ready.as_ref().is_some_and(|i| i.enabled);
+                    let repair = crate::ui_kit::button(ui, crate::i18n::tr("refused.repair"), crate::ui_kit::Button::Enabled(enabled));
+                    crate::scenario::publish_handle("dialog:repair_part", repair.rect.center());
+                    if repair.clicked() {
+                        crate::refused_part::repair(app, &part.body);
+                    }
+                    if part.face.is_some() {
+                        let show = crate::ui_kit::button(ui, crate::i18n::tr("refused.show_face"), crate::ui_kit::Button::Normal);
+                        crate::scenario::publish_handle("dialog:show_face", show.rect.center());
+                        if show.clicked() {
+                            crate::refused_part::show_face(app, &part);
+                        }
+                    }
+                });
+            });
+            return;
+        }
         // A fillet's refusal reads in plain words, or not at all where its Setback field already
         // says what is wrong; the kernel's own text stays in the hover text, Copy Details and the
         // issue report.
@@ -2667,6 +2693,13 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     } else {
         None
     }
+}
+
+/// The part a failed dialog's operation uses that the kernel refused, if one did.
+fn refused_operand(app: &SolveApp, d: &Dialog) -> Option<crate::refused_part::RefusedPart> {
+    let commands = dialog_commands(app, d).unwrap_or_default();
+    let names = crate::refused_part::operands(app, &commands, &d.items());
+    crate::refused_part::refused_among(&app.session.model.state(), names.iter().map(String::as_str))
 }
 
 /// A refusal as the dialog shows it: without the engine's "invalid parameters for `id`: "
