@@ -37,20 +37,23 @@ fn fields(h: &Harness) -> Vec<(&'static str, String)> {
     }
 }
 
-/// Every field shows its text in its row, as a person sees it.
+/// Every field shows its text in its row, as a person sees it, under a label in words
+/// ("Section size"), not the command's parameter name.
 fn assert_shown(h: &Harness, fields: &[(&str, String)]) {
-    for (label, text) in fields {
+    for (key, text) in fields {
+        let label = crate::i18n::tr(crate::dialogs::primitive_label(key));
+        assert!(label.starts_with(char::is_uppercase) && !label.contains('_'), "the {key} row is labelled {label:?}");
         let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
         assert!(
-            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(*label) && n.value() == Some(text)),
+            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && n.value() == Some(text)),
             "the {label} editor shows {text:?}"
         );
     }
 }
 
 /// Replace a field's text by typing, as a person does.
-fn type_into(h: &mut Harness, label: &str, text: &str) {
-    h.step(&json!({"click": {"handle": format!("dialog:{label}")}})).unwrap();
+fn type_into(h: &mut Harness, key: &str, text: &str) {
+    h.step(&json!({"click": {"handle": format!("dialog:{}", crate::dialogs::primitive_label(key))}})).unwrap();
     h.step(&json!({"key": "A", "cmd": true})).unwrap();
     h.step(&json!({"text": text})).unwrap();
 }
@@ -423,6 +426,7 @@ fn cone_dialog_makes_a_cone_and_edits_it_into_a_frustum() {
     h.frames(3);
     let shown = fields(&h);
     assert_eq!(shown, vec![("radius", "(20 mm) / 2".to_string()), ("top_radius", "(0 mm) / 2".to_string()), ("height", "20 mm".to_string())]);
+    assert_shown(&h, &shown);
     type_into(&mut h, "top_radius", "4");
     h.frames(2);
     ok(&mut h);

@@ -283,7 +283,7 @@ fn switching_from_a_sketch_to_a_feature_applies_with_one_undo_and_redo() {
     let undo = h.app.session.undo.len();
     until_settled(&mut h);
     h.frames(2);
-    h.step(&json!({"click":{"handle":"dialog:length"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:ui.length"}})).unwrap();
     h.step(&json!({"key":"A","cmd":true})).unwrap();
     h.step(&json!({"text":"12 mm"})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();

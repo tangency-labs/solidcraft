@@ -268,7 +268,7 @@ mod delete {
         crate::dialogs_assembly::pick_joint(&mut h.app, hinge, false);
         assert!(h.app.dialog.is_some());
         assert_eq!(h.app.tree.picked_joints, [hinge], "the dialog guard must protect an actual joint selection");
-        click(&mut h, "dialog:length");
+        click(&mut h, "dialog:ui.length");
         h.step(&json!({"key": "Delete"})).unwrap();
         assert_eq!(h.app.session.doc.assembly.joints.len(), 2, "Delete belongs to the focused field");
         assert_eq!(h.app.tree.picked_joints, [hinge]);

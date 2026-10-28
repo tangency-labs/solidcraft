@@ -575,6 +575,26 @@ fn extra_options(ui: &mut egui::Ui, id: &str, extra: &mut serde_json::Map<String
     }
 }
 
+/// The message a primitive's size field is labelled with, by its parameter name: "Section size",
+/// not `section_size`.
+pub(crate) fn primitive_label(key: &str) -> &str {
+    match key {
+        "length" => "ui.length",
+        "width" => "ui.width",
+        "height" => "ui.height",
+        "diameter" => "ui.diameter",
+        "radius" => "ui.radius",
+        "top_diameter" => "ui.top_diameter",
+        "top_radius" => "ui.top_radius",
+        "major" => "ui.major_radius",
+        "minor" => "ui.minor_radius",
+        "revolutions" => "ui.revolutions",
+        "pitch" => "ui.pitch",
+        "section_size" => "ui.section_size",
+        _ => key,
+    }
+}
+
 /// The coil's section, where the section sits on the diameter, the way it turns and where it
 /// starts (#3862). A default stays out of the parameters, so OK on an unchanged edit keeps the coil.
 fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
@@ -799,7 +819,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
                     continue;
                 }
-                enter |= expr_row(ui, k, v);
+                enter |= expr_row(ui, primitive_label(k), v);
             }
             if *cmd == "solid.coil" {
                 enter |= coil_rows(ui, &mut d.extra);

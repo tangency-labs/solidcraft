@@ -1,0 +1,225 @@
+{
+  "en": {
+    "ui.length": "Length",
+    "ui.width": "Width",
+    "ui.height": "Height",
+    "ui.pitch": "Pitch",
+    "ui.top_diameter": "Top diameter",
+    "ui.top_radius": "Top radius",
+    "ui.major_radius": "Major radius",
+    "ui.minor_radius": "Minor radius",
+    "ui.revolutions": "Revolutions",
+    "ui.section_size": "Section size"
+  },
+  "ar": {
+    "ui.length": "الطول",
+    "ui.width": "العرض",
+    "ui.height": "الارتفاع",
+    "ui.pitch": "الخطوة",
+    "ui.top_diameter": "القطر العلوي",
+    "ui.top_radius": "نصف القطر العلوي",
+    "ui.major_radius": "نصف القطر الأكبر",
+    "ui.minor_radius": "نصف القطر الأصغر",
+    "ui.revolutions": "عدد اللفات",
+    "ui.section_size": "حجم المقطع"
+  },
+  "cs": {
+    "ui.length": "Délka",
+    "ui.width": "Šířka",
+    "ui.height": "Výška"
+  },
+  "da": {
+    "ui.length": "Længde",
+    "ui.width": "Bredde",
+    "ui.height": "Højde",
+    "ui.pitch": "Stigning"
+  },
+  "de": {
+    "ui.length": "Länge",
+    "ui.width": "Breite",
+    "ui.height": "Höhe",
+    "ui.pitch": "Steigung",
+    "ui.top_diameter": "Oberer Durchmesser",
+    "ui.top_radius": "Oberer Radius",
+    "ui.major_radius": "Großer Radius",
+    "ui.minor_radius": "Kleiner Radius",
+    "ui.revolutions": "Windungen",
+    "ui.section_size": "Querschnittsgröße"
+  },
+  "es": {
+    "ui.length": "Longitud",
+    "ui.width": "Anchura",
+    "ui.height": "Altura",
+    "ui.top_diameter": "Diámetro superior",
+    "ui.top_radius": "Radio superior",
+    "ui.major_radius": "Radio mayor",
+    "ui.minor_radius": "Radio menor",
+    "ui.revolutions": "Vueltas",
+    "ui.section_size": "Tamaño de la sección"
+  },
+  "fr": {
+    "ui.length": "Longueur",
+    "ui.width": "Largeur",
+    "ui.height": "Hauteur",
+    "ui.pitch": "Pas",
+    "ui.top_diameter": "Diamètre supérieur",
+    "ui.top_radius": "Rayon supérieur",
+    "ui.major_radius": "Grand rayon",
+    "ui.minor_radius": "Petit rayon",
+    "ui.revolutions": "Tours",
+    "ui.section_size": "Taille de la section"
+  },
+  "gl": {
+    "ui.length": "Lonxitude",
+    "ui.width": "Largura",
+    "ui.height": "Altura"
+  },
+  "he": {
+    "ui.length": "אורך",
+    "ui.width": "רוחב",
+    "ui.height": "גובה",
+    "ui.pitch": "פסיעה",
+    "ui.top_diameter": "קוטר עליון",
+    "ui.top_radius": "רדיוס עליון",
+    "ui.major_radius": "רדיוס גדול",
+    "ui.minor_radius": "רדיוס קטן",
+    "ui.revolutions": "סיבובים",
+    "ui.section_size": "גודל החתך"
+  },
+  "hu": {
+    "ui.length": "Hossz",
+    "ui.width": "Szélesség",
+    "ui.height": "Magasság"
+  },
+  "id": {
+    "ui.length": "Panjang",
+    "ui.width": "Lebar",
+    "ui.height": "Tinggi"
+  },
+  "it": {
+    "ui.length": "Lunghezza",
+    "ui.width": "Larghezza",
+    "ui.height": "Altezza",
+    "ui.pitch": "Passo",
+    "ui.top_diameter": "Diametro superiore",
+    "ui.top_radius": "Raggio superiore",
+    "ui.major_radius": "Raggio maggiore",
+    "ui.minor_radius": "Raggio minore",
+    "ui.revolutions": "Giri",
+    "ui.section_size": "Dimensione della sezione"
+  },
+  "ja": {
+    "ui.length": "長さ",
+    "ui.width": "幅",
+    "ui.height": "高さ",
+    "ui.pitch": "ピッチ",
+    "ui.top_diameter": "上面の直径",
+    "ui.top_radius": "上面の半径",
+    "ui.major_radius": "大半径",
+    "ui.minor_radius": "小半径",
+    "ui.revolutions": "巻き数",
+    "ui.section_size": "断面サイズ"
+  },
+  "ko": {
+    "ui.length": "길이",
+    "ui.width": "너비",
+    "ui.height": "높이",
+    "ui.pitch": "피치",
+    "ui.top_diameter": "윗면 지름",
+    "ui.top_radius": "윗면 반지름",
+    "ui.major_radius": "큰 반지름",
+    "ui.minor_radius": "작은 반지름",
+    "ui.revolutions": "권수",
+    "ui.section_size": "단면 크기"
+  },
+  "ms": {
+    "ui.length": "Panjang",
+    "ui.width": "Lebar",
+    "ui.height": "Ketinggian"
+  },
+  "nb": {
+    "ui.length": "Lengde",
+    "ui.width": "Bredde",
+    "ui.height": "Høyde",
+    "ui.pitch": "Stigning"
+  },
+  "nl": {
+    "ui.length": "Lengte",
+    "ui.width": "Breedte",
+    "ui.height": "Hoogte"
+  },
+  "pl": {
+    "ui.length": "Długość",
+    "ui.width": "Szerokość",
+    "ui.height": "Wysokość",
+    "ui.pitch": "Skok"
+  },
+  "pt-BR": {
+    "ui.length": "Comprimento",
+    "ui.width": "Largura",
+    "ui.height": "Altura",
+    "ui.pitch": "Passo"
+  },
+  "ro": {
+    "ui.length": "Lungime",
+    "ui.width": "Lățime",
+    "ui.height": "Înălțime"
+  },
+  "ru": {
+    "ui.length": "Длина",
+    "ui.width": "Ширина",
+    "ui.height": "Высота"
+  },
+  "sv": {
+    "ui.length": "Längd",
+    "ui.width": "Bredd",
+    "ui.height": "Höjd"
+  },
+  "tr": {
+    "ui.length": "Uzunluk",
+    "ui.width": "Genişlik",
+    "ui.height": "Yükseklik",
+    "ui.pitch": "Adım"
+  },
+  "uk": {
+    "ui.length": "Довжина",
+    "ui.width": "Ширина",
+    "ui.height": "Висота",
+    "ui.pitch": "Крок"
+  },
+  "vi": {
+    "ui.length": "Chiều dài",
+    "ui.width": "Bề rộng",
+    "ui.height": "Chiều cao",
+    "ui.pitch": "Bước xoắn",
+    "ui.top_diameter": "Đường kính đỉnh",
+    "ui.top_radius": "Bán kính đỉnh",
+    "ui.major_radius": "Bán kính lớn",
+    "ui.minor_radius": "Bán kính nhỏ",
+    "ui.revolutions": "Số vòng",
+    "ui.section_size": "Kích thước mặt cắt"
+  },
+  "zh": {
+    "ui.length": "长度",
+    "ui.width": "宽度",
+    "ui.height": "高度",
+    "ui.pitch": "螺距",
+    "ui.top_diameter": "顶部直径",
+    "ui.top_radius": "顶部半径",
+    "ui.major_radius": "大半径",
+    "ui.minor_radius": "小半径",
+    "ui.revolutions": "圈数",
+    "ui.section_size": "截面尺寸"
+  },
+  "zh-TW": {
+    "ui.length": "長度",
+    "ui.width": "寬度",
+    "ui.height": "高度",
+    "ui.top_diameter": "頂部直徑",
+    "ui.top_radius": "頂部半徑",
+    "ui.major_radius": "大半徑",
+    "ui.minor_radius": "小半徑",
+    "ui.revolutions": "圈數",
+    "ui.section_size": "截面尺寸"
+  }
+}
