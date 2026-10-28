@@ -2210,8 +2210,8 @@ fn grid_action(
     match action {
         Some((id, RowAction::Menu(at))) => *menu = Some((at, id)),
         Some((id, RowAction::TogglePin)) => *toggle = Some(id),
-        Some((id, RowAction::Start)) => {
-            app.start(id);
+        Some((id, RowAction::Start(rect))) => {
+            app.start_at(id, Some(rect));
             ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
         }
         Some((_, RowAction::None)) | None => {}
@@ -2542,7 +2542,7 @@ fn dropdown_cell(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engin
         return RowAction::Menu(resp.interact_pointer_pos().unwrap_or(rect.left_bottom()));
     }
     if resp.clicked() && info.enabled {
-        return RowAction::Start;
+        return RowAction::Start(rect);
     }
     RowAction::None
 }

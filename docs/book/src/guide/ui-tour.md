@@ -188,6 +188,7 @@ component's Bodies folder and the Origin (planes, axes and point) at the top of 
 it sits on the left or under the browser and is wide enough for names. They are the browser's own
 rows: the same eyes, folds and right-click menus, so one list is enough for single-part work. The
 History at the bottom is unchanged.
+
 Interface › **Menus** › **Large icons** (the default is **List**) shows a section's
 command menu as rows of large icons instead of a list of names. Point at an icon for its name,
 shortcut and help; the arrow keys move across and between rows. Rest the pointer on an icon for
