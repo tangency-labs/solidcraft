@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4782"
+ ],
+ "what": "the top edge of a 10x10 box end rounded r5, half the wall",
+ "source": "analytic",
+ "method": "removed (1-pi/4) r^2 W",
+ "body_count": 1,
+ "volume_mm3": 7946.349540849362,
+ "faces": 7
+}

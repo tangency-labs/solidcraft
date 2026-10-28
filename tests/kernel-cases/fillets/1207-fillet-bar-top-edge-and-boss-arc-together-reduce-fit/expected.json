@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1207"
+ ],
+ "what": "the bar's top edge and the partial base arc of a boss standing out over the bar's side, rounded r2 together (the radius fits: fit reduce keeps it): they meet at a vertex whose third edge (the boss's line on the side face) is concave",
+ "source": "analytic",
+ "method": "bar 100x30x10 (y -15..15) joined with a diameter 40 boss 20 tall at the origin, standing out over both sides (V0 = 49756.1794, as 1207-fillet-concave-arc-at-boss). The bar's front top edge (y=-15, z=10) and the boss's base arc over the bar (its two edges, split at the cylinder's seam: the tangent chain) rounded r2 together meet at (13.229, -15, 10), where the third edge, the boss's line on the front face, is concave and runs down. Away from that corner the body is V0 plus the arc round's spandrel strip ending on y=+-15 (integral over rho of [r - sqrt(r^2-(20+r-rho)^2)] rho 2 asin(15/rho) = 28.9190, Simpson) less the front round's spandrel out to the boss wall (integral over y of [r - sqrt(r^2-(y+15-r)^2)] (100 - sqrt(400-y^2)) = 74.0736); the corner patch lies within the cube of side 2r about the vertex, so V is graded as V0 + add - removed with (2r)^3 as its tolerance (the radius fits: fit reduce keeps it)",
+ "body_count": 1,
+ "volume_mm3": 49711.02481940043,
+ "tolerance": {
+  "rel": 0.0012874407685721878
+ }
+}
