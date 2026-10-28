@@ -1490,10 +1490,10 @@ fn countersink_exports_one_cone() {
     assert_eq!(imp.bodies[0].file_faces, 8);
 }
 
-/// Knot multiplicities are expanded into one value each before the knot count is compared with
-/// the control points, so the sum has to be checked first: 1,000,000 knots of multiplicity 64
-/// against two control points asked for a 500 MB vector (20,000,000 for 10 GB) only to reject
-/// it afterwards, and an allocation failure aborts the process where an error does not.
+/// Knot multiplicities are checked before anything is expanded: 1,000,000 knots of multiplicity
+/// 64 against two control points asked for a 500 MB vector (20,000,000 for 10 GB) only to reject
+/// it afterwards, and an allocation failure aborts the process where an error does not. A knot
+/// above degree + 1 is refused on its own; knots each within it are refused by their sum.
 #[test]
 fn knot_multiplicities_are_checked_before_they_are_expanded() {
     let curve = |n: usize, mult: usize| {
@@ -1510,8 +1510,10 @@ fn knot_multiplicities_are_checked_before_they_are_expanded() {
         let ex = p21::parse(text).unwrap();
         solidcraft_step::read::Reader::new(&ex, Default::default()).curve(3).map(|_| ())
     };
+    // These diagnostics come from the checks before expansion; wall-clock time depends on CI load.
     let error = read(&curve(1_000_000, 64)).unwrap_err();
-    // This diagnostic comes from the check before expansion; wall-clock time depends on CI load.
+    assert!(error.contains("bad knot multiplicity"), "{error}");
+    let error = read(&curve(1_000_000, 2)).unwrap_err();
     assert!(error.contains("knot multiplicities do not match"), "{error}");
     // A degree-1 curve with two control points needs exactly four knot values.
     assert!(read(&curve(2, 2)).is_ok());
@@ -1538,7 +1540,7 @@ fn faces_with_too_many_bounds_are_refused() {
 
     let start = std::time::Instant::now();
     let imp = step_import(&text).unwrap();
-    assert!(imp.warnings.iter().any(|w| w.contains("boundary loops")), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("face #900000 with 100000 bounds")), "{:?}", imp.warnings);
     assert!(start.elapsed() < std::time::Duration::from_secs(10), "took {:?}", start.elapsed());
 }
 
@@ -1848,11 +1850,17 @@ fn explicit_outer_bound_keeps_shallow_cylinder_patch_trimmed() {
     }
 }
 
+/// The strip's one bound, not marked outer, on a face whose same_sense runs against it: the
+/// loop bounds the face and the face is turned over. Its complement is no face: the cylinder is
+/// unbounded along its axis, so the loop as a hole would leave a face with no outer boundary.
 #[test]
-fn implicit_bound_can_still_describe_the_complement_of_a_patch() {
+fn implicit_bound_against_its_face_sense_turns_the_face_over() {
     let imp = step_import(&shallow_cylinder_patch(false, false)).unwrap();
-    let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(0.1)).unwrap();
-    assert!(mesh.bounds().diagonal() > 5000.0, "without an explicit outer bound the loop is a hole");
+    assert!(imp.warnings.iter().any(|w| w.contains("1 faces turned over: their loops disagree with their same_sense")), "{:?}", imp.warnings);
+    let mesh = imp.bodies[0].body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    assert!(mesh.bounds().diagonal() < 10.0, "{:?}", mesh.bounds());
+    assert!((mesh.measure().area - 42.0).abs() < 0.01, "area {}", mesh.measure().area);
+    assert!(mesh.normals.iter().all(|n| n.x > 0.99), "the loop determines the face normal");
 }
 
 #[test]
@@ -1909,7 +1917,11 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert!(text.contains(&old));
             let text = text.replacen(&old, &surface, 1);
             let imported = step_import(&text).unwrap();
-            assert_eq!(imported.warnings, ["solid 'Strip': imported as an open body (the shell is not closed)"]);
+            // Against its loop (same_sense false) the face is turned over, and the import says so.
+            let open = "solid 'Strip': imported as an open body (the shell is not closed)";
+            let turned = "solid 'Strip': 1 faces turned over: their loops disagree with their same_sense";
+            let want: &[&str] = if sense { &[open] } else { &[turned, open] };
+            assert_eq!(imported.warnings, want, "sense={sense}, outer={outer}, radius={radius}");
             assert_eq!(imported.bodies.len(), 1);
             let body = &imported.bodies[0].body;
             assert_eq!(imported.bodies[0].file_faces, 1);
@@ -1935,30 +1947,38 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
 /// tessellation work) and the 1.4 MB `plate_900_holes`.
 #[test]
 fn step_conformance_parts_read_back_their_exact_shape() {
-    // (file, exact volume (mm³), box (min, max), kernel faces, bodies)
+    // (file, exact volume (mm³), box (min, max), kernel faces, bodies, seam edges the reader adds
+    // to the items it reads: `cylinder_twice` places one item twice)
     #[rustfmt::skip]
-    let parts: [(&str, &str, f64, [f64; 6], usize, usize); 17] = [
-        ("cone_point", include_str!("../../../../tests/step-conformance/cone_point.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1),
-        ("cone_point_vertex", include_str!("../../../../tests/step-conformance/cone_point_vertex.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1),
-        ("cylinder", include_str!("../../../../tests/step-conformance/cylinder.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_inch", include_str!("../../../../tests/step-conformance/cylinder_inch.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_nurbs", include_str!("../../../../tests/step-conformance/cylinder_nurbs.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_placed", include_str!("../../../../tests/step-conformance/cylinder_placed.step"), 9424.778, [31.835, -33.165, 1.835, 65.485, 0.485, 35.485], 3, 1),
-        ("cylinder_seam", include_str!("../../../../tests/step-conformance/cylinder_seam.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1),
-        ("cylinder_twice", include_str!("../../../../tests/step-conformance/cylinder_twice.step"), 18849.556, [-10.0, -10.0, 0.0, 90.0, 10.0, 30.0], 6, 2),
-        ("dome", include_str!("../../../../tests/step-conformance/dome.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1),
-        ("dome_nurbs", include_str!("../../../../tests/step-conformance/dome_nurbs.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1),
-        ("far_cylinder", include_str!("../../../../tests/step-conformance/far_cylinder.step"), 9424.778, [99990.0, -10.0, 0.0, 100010.0, 10.0, 30.0], 3, 1),
-        ("grooved_shaft", include_str!("../../../../tests/step-conformance/grooved_shaft.step"), 153532.251, [-10.0, -10.0, 0.0, 10.0, 10.0, 501.0], 753, 1),
-        ("plate_100_holes", include_str!("../../../../tests/step-conformance/plate_100_holes.step"), 71588.321, [0.0, 0.0, 0.0, 100.0, 100.0, 10.0], 110, 1),
-        ("sheet_disc", include_str!("../../../../tests/step-conformance/sheet_disc.step"), 193396443.755, [-1800.0, -1800.0, 0.0, 1800.0, 1800.0, 19.0], 3, 1),
-        ("tiny_pin", include_str!("../../../../tests/step-conformance/tiny_pin.step"), std::f64::consts::FRAC_PI_8, [-0.25, -0.25, 0.0, 0.25, 0.25, 2.0], 3, 1),
-        ("torus_ring_nurbs", include_str!("../../../../tests/step-conformance/torus_ring_nurbs.step"), 4934.802, [-25.0, -25.0, 0.0, 25.0, 25.0, 5.0], 2, 1),
-        ("washer", include_str!("../../../../tests/step-conformance/washer.step"), 3534.292, [-20.0, -20.0, 0.0, 20.0, 20.0, 3.0], 4, 1),
+    let parts: [(&str, &str, f64, [f64; 6], usize, usize, usize); 17] = [
+        ("cone_point", include_str!("../../../../tests/step-conformance/cone_point.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1, 1),
+        ("cone_point_vertex", include_str!("../../../../tests/step-conformance/cone_point_vertex.step"), 1000.0 * std::f64::consts::PI, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 2, 1, 1),
+        ("cylinder", include_str!("../../../../tests/step-conformance/cylinder.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 1),
+        ("cylinder_inch", include_str!("../../../../tests/step-conformance/cylinder_inch.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 1),
+        ("cylinder_nurbs", include_str!("../../../../tests/step-conformance/cylinder_nurbs.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 1),
+        ("cylinder_placed", include_str!("../../../../tests/step-conformance/cylinder_placed.step"), 9424.778, [31.835, -33.165, 1.835, 65.485, 0.485, 35.485], 3, 1, 1),
+        ("cylinder_seam", include_str!("../../../../tests/step-conformance/cylinder_seam.step"), 9424.778, [-10.0, -10.0, 0.0, 10.0, 10.0, 30.0], 3, 1, 0),
+        ("cylinder_twice", include_str!("../../../../tests/step-conformance/cylinder_twice.step"), 18849.556, [-10.0, -10.0, 0.0, 90.0, 10.0, 30.0], 6, 2, 1),
+        ("dome", include_str!("../../../../tests/step-conformance/dome.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1, 1),
+        ("dome_nurbs", include_str!("../../../../tests/step-conformance/dome_nurbs.step"), 16755.161, [-20.0, -20.0, 0.0, 20.0, 20.0, 20.0], 2, 1, 1),
+        ("far_cylinder", include_str!("../../../../tests/step-conformance/far_cylinder.step"), 9424.778, [99990.0, -10.0, 0.0, 100010.0, 10.0, 30.0], 3, 1, 1),
+        ("grooved_shaft", include_str!("../../../../tests/step-conformance/grooved_shaft.step"), 153532.251, [-10.0, -10.0, 0.0, 10.0, 10.0, 501.0], 753, 1, 0),
+        ("plate_100_holes", include_str!("../../../../tests/step-conformance/plate_100_holes.step"), 71588.321, [0.0, 0.0, 0.0, 100.0, 100.0, 10.0], 110, 1, 0),
+        ("sheet_disc", include_str!("../../../../tests/step-conformance/sheet_disc.step"), 193396443.755, [-1800.0, -1800.0, 0.0, 1800.0, 1800.0, 19.0], 3, 1, 1),
+        ("tiny_pin", include_str!("../../../../tests/step-conformance/tiny_pin.step"), std::f64::consts::FRAC_PI_8, [-0.25, -0.25, 0.0, 0.25, 0.25, 2.0], 3, 1, 1),
+        ("torus_ring_nurbs", include_str!("../../../../tests/step-conformance/torus_ring_nurbs.step"), 4934.802, [-25.0, -25.0, 0.0, 25.0, 25.0, 5.0], 2, 1, 1),
+        ("washer", include_str!("../../../../tests/step-conformance/washer.step"), 3534.292, [-20.0, -20.0, 0.0, 20.0, 20.0, 3.0], 4, 1, 2),
     ];
-    for (name, text, volume, bbox, faces, bodies) in parts {
+    for (name, text, volume, bbox, faces, bodies, seams) in parts {
         let imp = step_import(text).unwrap_or_else(|e| panic!("{name}: {e}"));
-        assert!(imp.warnings.is_empty(), "{name}: {:?}", imp.warnings);
+        // A face that winds around its surface without a seam edge (a cone or a dome bounded by
+        // its base circle alone, a cylinder by its two rims) gets one, and the import says so.
+        let added: Option<usize> = imp
+            .warnings
+            .iter()
+            .map(|w| w.strip_suffix(" seam edges added to faces that wind around their surface")?.rsplit(": ").next()?.parse::<usize>().ok())
+            .sum();
+        assert_eq!(added, Some(seams), "{name}: {:?}", imp.warnings);
         assert_eq!(imp.bodies.len(), bodies, "{name}");
         let (mut v, mut n) = (0.0, 0);
         let mut b = solidcraft_geom::Aabb3::EMPTY;
