@@ -46,11 +46,15 @@
 #include <cmath>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
 constexpr int64_t max_selections = 1024;
 constexpr int64_t max_input = 4096;
+constexpr int64_t max_file_path = 1024;
+// Selection bound for a file fixture, whose face count is known only once read.
+constexpr int64_t max_file_faces = 1024;
 constexpr size_t max_output = 262144;
 constexpr size_t no_allocation = static_cast<size_t>(-1);
 struct Argument {};
@@ -83,13 +87,21 @@ void interval(double a, double b, bool strict) {
 struct Spec {
     int kind = 0;
     std::array<double, 15> v{};
+    std::string path; // kind 7: an ASCII .smb file
     int64_t faces() const {
-        return kind == 3 ? 1 : kind == 4 ? 6 : kind == 5 ? 3 : kind == 6 ? 1 : 0;
+        return kind == 3 ? 1 : kind == 4 ? 6 : kind == 5 ? 3 : kind == 6 ? 1
+            : kind == 7 ? max_file_faces : 0;
     }
 };
 Spec read_spec(Reader& rd) {
     Spec s;
-    s.kind = (int)rd.integer(0, 6);
+    s.kind = (int)rd.integer(0, 7);
+    if (s.kind == 7) {
+        // the byte count, then one value per byte (no NUL)
+        int64_t n = rd.integer(1, max_file_path);
+        for (int64_t i=0; i<n; ++i) s.path.push_back((char)rd.integer(1, 255));
+        return s;
+    }
     int n = s.kind == 2 ? 10 : s.kind == 3 ? 15 : s.kind == 4 ? 6 : s.kind == 5 ? 5
         : s.kind == 6 ? 4 : 0;
     for (int i=0; i<n; ++i) s.v[i] = rd.number();
@@ -163,7 +175,7 @@ Program read_program(Reader& rd) {
     // Parse everything before allocating native geometry. No input-sized reserve.
     for (int64_t i=0; i<count; ++i) {
         int origin = (int)rd.integer(0, 2);
-        int64_t index = rd.integer(-1, 6);
+        int64_t index = rd.integer(-1, max_file_faces);
         if (origin == 2) { if (index != -1) throw Argument{}; }
         else if (index < 0 || index >= (origin == 0 ? p.source.faces() : p.foreign.faces()))
             throw Argument{};
@@ -277,6 +289,11 @@ SmBrep* build(const Spec& s, SmContext& ctx, double tolerance) {
         return result;
     }
     result = new (ctx) SmBrep();
+    if (s.kind == 7) {
+        // smOffsetTest.cpp ShellBrep: ReadFromFile, keeping the file's tolerance.
+        constructed(result->ReadFromFile(ctx, s.path.c_str(), SM_ASCII));
+        return result;
+    }
     result->SetTolerance(tolerance, FALSE);
     if (s.kind == 2) {
         SmExtent1d domain(v[6], v[7]), trim(v[8], v[9]);

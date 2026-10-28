@@ -173,6 +173,12 @@ enum Fixture {
     },
     /// `SmApiCreateSphere(origin, radius)`.
     Sphere { origin: [f64; 3], radius: f64 },
+    /// An upstream ASCII `.smb` file (`{"$upstream_file": ..}` in the fixture):
+    /// `SmBrep::ReadFromFile` in the shim, read by the Rust reader on the Rust side
+    /// (`own_reader::read_file_or_fail`). The file keeps its own
+    /// tolerance, as `smOffsetTest.cpp`'s `ShellBrep` reads it; the case's
+    /// `tolerance` is not applied.
+    File { path: String },
 }
 impl Fixture {
     fn native(&self) -> ffi::Fixture {
@@ -213,21 +219,26 @@ impl Fixture {
                 height,
             },
             Self::Sphere { origin, radius } => ffi::Fixture::Sphere { origin, radius },
+            Self::File { ref path } => ffi::Fixture::File { path: path.clone() },
         }
     }
-    /// Built by a native primitive constructor (and its Rust port).
+    /// Built by a native primitive constructor (and its Rust port), or read from an
+    /// upstream file: projected as a solid (face, edge and vertex counts and bounds).
     const fn primitive(&self) -> bool {
         matches!(
             self,
-            Self::Box { .. } | Self::Cylinder { .. } | Self::Sphere { .. }
+            Self::Box { .. } | Self::Cylinder { .. } | Self::Sphere { .. } | Self::File { .. }
         )
     }
+    /// The face count a selection index is checked against; a file's faces are
+    /// only known once it is read, so its selections are checked when built.
     const fn face_count(&self) -> usize {
         match self {
             Self::Empty | Self::Wire { .. } => 0,
             Self::PlaneSheet { .. } | Self::Sphere { .. } => 1,
             Self::Box { .. } => 6,
             Self::Cylinder { .. } => 3,
+            Self::File { .. } => ffi::MAX_FILE_FACES,
         }
     }
 }
@@ -435,7 +446,7 @@ fn validate(input: &Inputs) -> HResult<()> {
     }
     for fixture in input.source.iter().chain(&input.foreign) {
         match *fixture {
-            Fixture::Empty => {}
+            Fixture::Empty | Fixture::File { .. } => {}
             Fixture::Wire {
                 start,
                 end,
@@ -642,6 +653,12 @@ fn primitive_finite(origin: [f64; 3], radius: f64) -> HResult<()> {
 }
 
 fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64) -> HResult<Brep> {
+    if let Fixture::File { path } = fixture {
+        // The Rust reader alone (`SmBrep::ReadFromFile` into `new SmBrep(ctx)`, as the
+        // shim reads it); it records the geometry owners under arena identities, as a
+        // kernel-built B-rep does.
+        return crate::own_reader::read_file_or_fail(kernel, path);
+    }
     if let Fixture::Box { origin, size } = *fixture {
         return build_box(kernel, origin, size, tolerance);
     }
@@ -759,7 +776,10 @@ fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64)
             )
             .map_err(setup)?;
         }
-        Fixture::Box { .. } | Fixture::Cylinder { .. } | Fixture::Sphere { .. } => {
+        Fixture::Box { .. }
+        | Fixture::Cylinder { .. }
+        | Fixture::Sphere { .. }
+        | Fixture::File { .. } => {
             return Err(bad("primitive fixtures use the primitive constructors"))
         }
     }
@@ -788,8 +808,10 @@ fn build_box(
 
 const SOURCE: BrepId = BrepId::from_index(17);
 const FOREIGN: BrepId = BrepId::from_index(43);
+/// The `index`th face of the native `GetFaces` list (the order `observe_selections`
+/// reports): a file import's arena order need not follow it.
 fn face_at(brep: Option<&Brep>, index: usize) -> HResult<FaceId> {
-    brep.and_then(|brep| brep.faces().iter().nth(index).map(|(id, _)| id))
+    brep.and_then(|brep| brep.face_list().get(index).copied())
         .ok_or_else(|| bad("selected face absent from Rust origin traversal"))
 }
 fn selections(

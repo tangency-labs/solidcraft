@@ -140,6 +140,12 @@ use crate::{call_with_buffer, FfiError};
 pub const MAX_SELECTIONS: usize = 1024;
 /// Aggregate input budget (geometry is fixed-size; selections are bounded).
 pub const MAX_PACKED_VALUES: usize = 4096;
+/// Adapter limit on a [`Fixture::File`] path, in bytes.
+pub const MAX_FILE_PATH: usize = 1024;
+/// Selection index bound of a [`Fixture::File`] source, whose face count is only
+/// known once the shim has read it (a selection past its faces is then rejected
+/// as a fixture-construction error).
+pub const MAX_FILE_FACES: usize = 1024;
 /// Maximum native snapshot size, bounding buffer retries and decoding allocation.
 pub const MAX_OUTPUT_VALUES: usize = 262_144;
 /// Unmodified `SM_SUCCESS`, not the transport status `SC_OK`.
@@ -226,6 +232,12 @@ pub enum Fixture {
         /// Radius; degenerate radii reach native rejection.
         radius: f64,
     },
+    /// An ASCII `.smb` file read by `SmBrep::ReadFromFile(ctx, path, SM_ASCII)`; the
+    /// file's own tolerance is kept. A read failure is a construction rejection.
+    File {
+        /// Path of the file: non-empty, at most [`MAX_FILE_PATH`] bytes, no NUL.
+        path: String,
+    },
 }
 
 impl Fixture {
@@ -235,6 +247,7 @@ impl Fixture {
             Self::PlaneSheet { .. } | Self::Sphere { .. } => 1,
             Self::Box { .. } => 6,
             Self::Cylinder { .. } => 3,
+            Self::File { .. } => MAX_FILE_FACES,
         }
     }
 }
@@ -510,6 +523,16 @@ fn pack_fixture(fixture: Option<&Fixture>, out: &mut Vec<f64>) -> Result<(), Ffi
             out.push(6.0);
             out.extend_from_slice(origin);
             out.push(*radius);
+        }
+        Fixture::File { path } => {
+            // kind 7, the byte count, then one value per byte (the protocol is f64s)
+            let bytes = path.as_bytes();
+            if bytes.is_empty() || bytes.len() > MAX_FILE_PATH || bytes.contains(&0) {
+                return Err(invalid("file fixture path empty, too long or with NUL"));
+            }
+            out.push(7.0);
+            out.push(bytes.len() as f64);
+            out.extend(bytes.iter().map(|&b| f64::from(b)));
         }
     }
     Ok(())

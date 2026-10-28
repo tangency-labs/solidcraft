@@ -343,6 +343,20 @@ impl Drop for NotificationScope<'_> {
     }
 }
 
+/// Lend the callbacks back to the stand-in even when the caller unwinds
+/// ([`Context::with_lease_returned`]).
+struct ReturnedLease<'a> {
+    kernel: &'a mut Kernel,
+    lent: &'a mut Context,
+}
+impl Drop for ReturnedLease<'_> {
+    fn drop(&mut self) {
+        let lease = self.kernel.context.take_lease();
+        self.kernel.context.identities.lent = true;
+        self.lent.install_lease(lease);
+    }
+}
+
 /// The refusal of a context whose callbacks a crate edit has lent out
 /// ([`Context::lend_notify`]): a nested edit through it would notify no callback, in
 /// another domain.
@@ -475,6 +489,25 @@ impl Context {
             notifications,
         };
         Ok(action(scope.kernel, &mut scope.notifications))
+    }
+
+    /// Gives the callbacks and identity domain `lent` holds (the stand-in of
+    /// [`Context::with_notification_context`]) back to the kernel context for
+    /// `action`, and lends them to `lent` again afterwards, also when `action`
+    /// unwinds: upstream has one context, so an edit nested in the lend notifies
+    /// and names through it like any other. With no stand-in, or a kernel context
+    /// that is not lent, `action` runs as is.
+    pub(crate) fn with_lease_returned<T>(
+        k: &mut Kernel,
+        lent: Option<&mut Self>,
+        action: impl FnOnce(&mut Kernel) -> T,
+    ) -> T {
+        let Some(lent) = lent.filter(|_| k.context.identities.lent) else {
+            return action(k);
+        };
+        k.context.install_lease(lent.take_lease());
+        let scope = ReturnedLease { kernel: k, lent };
+        action(scope.kernel)
     }
 
     /// An immutable metadata snapshot, without copying callback ownership.
