@@ -3369,14 +3369,19 @@ impl Renderer {
             }
         }
         tris(pass, &res.tri_hl, &h.tris);
-        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
-        lines(pass, &res.line, &m.lines);
-        pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
-        lines(pass, &res.line, &sk.lines);
+        // Hidden edges before the visible ones, so a visible edge is drawn over them. An edge
+        // within a pixel of a nearer face's outline (a face seen edge on beside it) is hidden
+        // under part of its own width; drawn after, its light hidden copy covered the visible
+        // edge beside it there with a light line.
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line_hidden, &m.hidden);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         lines(pass, &res.line_hidden, &h.hidden);
+        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        lines(pass, &res.line, &m.lines);
+        pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
+        lines(pass, &res.line, &sk.lines);
+        pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         lines(pass, &res.line, &h.lines);
         lines(pass, &res.guide_line, &h.guide_lines);
         pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);

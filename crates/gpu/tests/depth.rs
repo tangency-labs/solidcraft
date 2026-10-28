@@ -575,3 +575,84 @@ fn touching_caps_are_hatched_apart_and_keep_their_hatch() {
         assert!(!oa.1, "{mode} depth: one hatch runs at 45 degrees");
     }
 }
+
+/// A 40 × 20 × 30 mm box centred on the origin, a flat-shaded face per side, and its 12 edges
+/// with the outward normals of the two faces beside each.
+fn shaded_box() -> (Mesh, Vec<(Vec3, Vec3, [Vec3; 2])>) {
+    let h = Vec3::new(20.0, 10.0, 15.0);
+    let corner = |i: usize| Vec3::new(if i & 1 == 0 { -h.x } else { h.x }, if i & 2 == 0 { -h.y } else { h.y }, if i & 4 == 0 { -h.z } else { h.z });
+    // Each side: its normal and its corners, counter-clockwise seen from outside.
+    let sides = [
+        (Vec3::new(-1.0, 0.0, 0.0), [0, 4, 6, 2]),
+        (Vec3::new(1.0, 0.0, 0.0), [1, 3, 7, 5]),
+        (Vec3::new(0.0, -1.0, 0.0), [0, 1, 5, 4]),
+        (Vec3::new(0.0, 1.0, 0.0), [2, 6, 7, 3]),
+        (Vec3::new(0.0, 0.0, -1.0), [0, 2, 3, 1]),
+        (Vec3::new(0.0, 0.0, 1.0), [4, 5, 7, 6]),
+    ];
+    let mut mesh = Mesh::default();
+    for (f, (n, c)) in sides.iter().enumerate() {
+        let base = mesh.positions.len() as u32;
+        mesh.positions.extend(c.iter().map(|i| corner(*i)));
+        mesh.normals.extend([*n; 4]);
+        mesh.triangles.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
+        mesh.tri_face.extend([f as u32; 2]);
+    }
+    let mut edges = Vec::new();
+    for (i, (n, c)) in sides.iter().enumerate() {
+        for k in 0..4 {
+            let (a, b) = (c[k], c[(k + 1) % 4]);
+            // Each edge once: from the side that runs it from the lower corner.
+            if a > b {
+                continue;
+            }
+            let other = sides.iter().enumerate().find(|(j, (_, d))| *j != i && (0..4).any(|m| d[m] == b && d[(m + 1) % 4] == a));
+            if let Some((_, (m, _))) = other {
+                edges.push((corner(a), corner(b), [*n, *m]));
+            }
+        }
+    }
+    (mesh, edges)
+}
+
+/// The shaded-with-hidden-edges style: every edge drawn depth-tested and, in a light colour,
+/// where the model hides it (`GpuScene::hidden_line`). A box turned so one side is seen almost
+/// edge on (yaw 1.565): the side is under a pixel wide, so the edges along it lie within a pixel
+/// of the nearer face beside it, which hides part of their width. Their hidden copy shows nowhere:
+/// drawn after the visible edges, it covered the visible edge of that nearer face with a light
+/// line along some 100 px. The box's back edges, which are hidden, still show.
+#[test]
+fn a_visible_edge_beside_a_face_seen_edge_on_has_no_hidden_copy() {
+    let (mesh, edges) = shaded_box();
+    let (w, h) = (400, 300);
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            for yaw in [1.565_f64, 0.35] {
+                let cam = Camera { yaw, distance: 120.0, fov, ..Default::default() };
+                let toward = |p: Vec3| if fov > 0.0 { cam.eye() - p } else { cam.back() };
+                let back = |(a, b, n): &(Vec3, Vec3, [Vec3; 2])| n.iter().all(|n| n.dot(toward((*a + *b) * 0.5)) < 0.0);
+                let lines = edges
+                    .iter()
+                    .map(|(a, b, _)| SceneLine { points: vec![*a, *b], color: Rgb(20, 20, 20), alpha: 1.0, width: 1.3, on_top: false })
+                    .collect();
+                let scene =
+                    Scene { meshes: vec![SceneMesh::solid(Arc::new(mesh.clone()), Rgb(160, 165, 175))], lines, radius: 40.0, ..Default::default() };
+                let hidden = |keep: &dyn Fn(&(Vec3, Vec3, [Vec3; 2])) -> bool| {
+                    let mut sc = solidcraft_gpu::view::GpuScene::default();
+                    let col = sc.color([0, 255, 0, 255]);
+                    for e in edges.iter().filter(|e| keep(e)) {
+                        sc.hidden_line(e.0.to_f32(), e.1.to_f32(), col, 1.0);
+                    }
+                    c.rgba_highlighted(&scene, Some(sc), &cam, w, h).unwrap()
+                };
+                let green = |p: [u8; 4]| p[1] > 150 && p[0] < 120 && p[2] < 120;
+                let (all, back_only, none) = (hidden(&|_| true), hidden(&back), hidden(&|_| false));
+                let doubled = differing(&all, &back_only);
+                assert_eq!(doubled, 0, "{mode} depth, fov {fov}, yaw {yaw}: a visible edge's hidden copy shows in {doubled} px");
+                let behind = pixels(&back_only).filter(|p| green(*p)).count();
+                assert!(behind > 100, "{mode} depth, fov {fov}, yaw {yaw}: the back edges show in {behind} px");
+                assert_eq!(pixels(&none).filter(|p| green(*p)).count(), 0);
+            }
+        }
+    }
+}
