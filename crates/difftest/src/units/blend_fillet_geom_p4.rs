@@ -456,8 +456,8 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
         }
         Query::Blending { g } => {
             let gid = rm.geom(*g)?;
-            let target = rm.target.clone();
-            let r = rm.fb.calc_blending_geom(&k, gid, &solvers, &target);
+            let mut target = rm.target.clone();
+            let r = rm.fb.calc_blending_geom(&k, gid, &solvers, &mut target);
             o.push(status_of!(r));
         }
     }

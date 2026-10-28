@@ -2143,6 +2143,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 })
             }
             // An object key is not a typed arena index or a caller handle.
+            // UNPORTED(topology.face_p2): SmSurface::GetFace (the SmFace handle of a
+            // face-owned surface whose cache was made without its face). Reachable: a
+            // solve on a B-rep face's surface without face context lands here (seen in
+            // blend.fillet_geom_p6 on own-reader targets, which now pass the face's
+            // B-rep through BrepFaceServices). Callers thread it with the
+            // `*_with_context` variants or `get_surface_cache_with_face`.
             Some(_) if self.trimmed_face_key.is_none() => Err(SolidError::unported(
                 "SmFace handle of a surface's face",
                 "topology.face_p2",

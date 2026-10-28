@@ -101,12 +101,14 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{BlendNeighbour, OrientType};
 use crate::nurbs::crv_fit::p1::ParamMethod;
+use crate::query::brep::BrepFaceServices;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p1::map_to_2d_dir;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p7::{
     make_face_with_curves, make_face_with_curves_transfer, FaceCurvesInput, NewFace,
 };
+use crate::topology::brep_cache::CacheObject;
 use crate::topology::edge;
 use crate::topology::edgeuse::p1::{self as eu1, primary_edgeuse};
 use crate::topology::trimming_tools::{trim_surface_with_model_space_curves, TrimInput};
@@ -2313,7 +2315,7 @@ impl FilletBrep {
         k: &Kernel,
         g: FilletGeomId,
         solvers: &[FilletSolver],
-        target: &Brep,
+        target: &mut Brep,
     ) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_BLEND);
         let sid = self.geom(g)?.fillet_solver().ok_or_else(nul)?;
@@ -2336,7 +2338,7 @@ impl FilletBrep {
         k: &Kernel,
         g: FilletGeomId,
         fil_solver: &FilletSolver,
-        target: &Brep,
+        target: &mut Brep,
     ) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_BLEND);
         if self.geom(g)?.fillet_solver().is_none() {
@@ -2361,7 +2363,14 @@ impl FilletBrep {
                 .cloned()
                 .ok_or_else(nul)?;
             let face = self.fillet_edge(rail)?.original_face().ok_or_else(nul)?;
-            let base_surf = target.face(face)?.surface.as_ref().ok_or_else(nul)?;
+            // the face's own surface (evaluated as a copy: the lift's trimmed surface
+            // cache is made on `target` through the face, as upstream's GetFace())
+            let base_surf = &target
+                .face(face)?
+                .surface
+                .as_ref()
+                .ok_or_else(nul)?
+                .clone_for_evaluation()?;
             let ivl = rail_curve.natural_interval();
             let accuracy = approx_tol_3d / 10.0;
             let crv_len = rail_curve.length(k, &ivl, accuracy)?;
@@ -2400,13 +2409,15 @@ impl FilletBrep {
             // Lift it to 3D
             let uv_domain = base_surf.natural_uv_domain_with_nurb(k)?;
             let face_tol = crate::topology::face::p2::tolerance(target, face)?;
-            let lifted = base_surf.lift_curve(
+            let lifted = base_surf.lift_curve_with_context(
                 k,
                 &uv_domain,
                 &Curve::from(new_uv_curve.clone()),
                 &ivl,
                 crate::geom::tol::approx_tol3d(k, face_tol),
                 false,
+                &mut BrepFaceServices::new(target),
+                Some(CacheObject::Surface(face)),
             )?;
             let crv_ivl = lifted.curve.natural_interval();
             set_edge_curve(self.brep_mut(), rail, Some(lifted.curve))?;
@@ -2711,6 +2722,6 @@ mod tests {
         let k = kernel();
         let mut fb = FilletBrep::new();
         let g = fb.add_geom(FilletGeom::new(&k, None, FilletGeomType::Blends).unwrap());
-        assert!(fb.calc_blending_geom(&k, g, &[], &Brep::new()).is_err());
+        assert!(fb.calc_blending_geom(&k, g, &[], &mut Brep::new()).is_err());
     }
 }
