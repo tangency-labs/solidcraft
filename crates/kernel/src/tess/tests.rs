@@ -743,12 +743,28 @@ fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
 fn a_face_filled_leniently_is_named_in_the_stats() {
     let (s, l, rules) = a_face_crossing_itself();
     let size = size::face_size(&s, &uv::domain(&s), &rules);
-    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size) else { panic!("filled leniently") };
+    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, None) else { panic!("filled leniently") };
     assert!(!fp.triangles.is_empty());
     assert_eq!((stats.planar, stats.structured, stats.delaunay), (0, 0, 0));
     let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
     assert_eq!(lenient.face, 7);
     assert!(lenient.reason.contains("face 7 (spline)"), "{}", lenient.reason);
+}
+
+/// A face whose boundary still crosses itself after untangling (two edges leaving a vertex
+/// tangentially: their chords cross however often they are halved, as on one of Poppy
+/// Humanoid's faces) is filled leniently straight away with that reason, and named: the body's
+/// other faces are planned as usual instead of the whole body failing with it.
+#[test]
+fn a_face_untangling_cannot_resolve_is_filled_leniently_and_named() {
+    let (s, l, rules) = a_face_crossing_itself();
+    let size = size::face_size(&s, &uv::domain(&s), &rules);
+    let why = "face 7 (spline): boundary crosses itself: edges [1, 2] run closer together than their chords can follow";
+    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size, Some(why)) else { panic!("filled leniently") };
+    assert!(!fp.triangles.is_empty());
+    let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
+    assert_eq!(lenient.face, 7);
+    assert!(lenient.reason.contains(why), "{}", lenient.reason);
 }
 
 #[test]

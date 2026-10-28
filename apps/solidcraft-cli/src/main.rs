@@ -9,7 +9,7 @@
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
 //!                                 [--timeout-s 300] [--json out.json] [--markdown out.md]
 //!                                                             the standard Assistant model test (#4851) on a running app
-//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes]
+//! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--quality LEVEL]
 //!                                                             [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]
 //! solidcraft-cli exec <command> [json-params]                 run one command on an empty design
 //! solidcraft-cli commands                                     the command registry as JSON
@@ -71,7 +71,7 @@ const USAGE_BENCH_AGENT: &str = "  solidcraft-cli bench-agent [--scale F] [--sav
 /// `bench-assistant`'s lines in the usage.
 const USAGE_BENCH_ASSISTANT: &str = "  solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N] [--timeout-s 300] [--json out.json] [--markdown out.md]\n";
 /// `snapshot`'s lines in the usage.
-const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.solidcraft|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]\n  solidcraft-cli snapshot --in <design.solidcraft|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON)\n";
+const USAGE_SNAPSHOT: &str = "  solidcraft-cli snapshot <script|design> [--in design.solidcraft|part.step] --out shot.png [--width W] [--height H] [--view NAME | --camera JSON] [--no-grid] [--no-axes]\n      [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27] [--quality coarse|normal|fine|ultra]\n  solidcraft-cli snapshot --in <design.solidcraft|part.step> --out shot.png ...\n      (as with run, --in starts from a design and the script runs on top of it; an option snapshot doesn't take is an error;\n       --view: iso, front, back, top, bottom, left, right, or the name of a view saved in the design with view.save;\n       --camera: {target: [x,y,z], yaw, pitch, distance, fov?} in mm and radians, as the MCP screenshot takes it (docs/mcp.md);\n       --no-grid and --no-axes leave the ground grid (on Z 0) and the origin's axes out of the picture;\n       --body: how one body is drawn, as appearance.assign takes it: opacity 0-1 (below 1 is see-through, so what is inside\n         it shows) and color #rrggbb, either or both, once per body;\n       --tool: draw this body solid in the tool colour and every other body see-through, so a cut's or a join's tool body\n         is visible inside the material it meets; a later --body overrides it;\n       --section: cut the model as inspect.section does, so the inside shows: z=27 (the plane through that world\n         coordinate, keeping the smaller side), add ,flip to keep the other side, or XY, XZ, YZ, or its own JSON;\n       --quality: the display quality the bodies are meshed at, as the app's setting (default normal))\n";
 /// `render`'s lines in the usage.
 const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.png [--setup NAME] [--width W] [--height H] [--transparent] [--overwrite] [--timeout SECONDS]\n      [--progressive] [--samples N] [--max-depth N] [--seed N] [--exposure EV] [--lighting FILE.json] [--environment FILE.json] [--tone-map reinhard|aces_fitted]\n";
 /// `exec`'s lines in the usage.
@@ -569,7 +569,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
     known_args(
         "snapshot",
         args,
-        &["--in", "--out", "--width", "--height", "--view", "--camera", "--body", "--tool", "--section"],
+        &["--in", "--out", "--width", "--height", "--view", "--camera", "--body", "--tool", "--section", "--quality"],
         &["--no-grid", "--no-axes"],
         true,
     )?;
@@ -582,6 +582,16 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         Some(x) => x.parse().ok().filter(|n| (16..=8192).contains(n)).ok_or_else(|| format!("{name} must be 16 to 8192 pixels, not `{x}`")),
     };
     let (w, h) = (size("--width", 1280)?, size("--height", 800)?);
+    // The display quality the bodies are meshed at, as the app's Display Quality setting: set
+    // before the design opens, so every display plan is made at it.
+    if let Some(q) = flag(args, "--quality") {
+        use solidcraft_engine::doc::display_quality::{DisplayQuality, set_current};
+        let level = DisplayQuality::parse(q).ok_or_else(|| {
+            let ids: Vec<&str> = DisplayQuality::ALL.iter().map(|q| q.id()).collect();
+            format!("--quality must be one of {}, not `{q}`", ids.join(", "))
+        })?;
+        set_current(level);
+    }
     let mut s = open(flag(args, "--in"), positional(args))?;
     // How the bodies are drawn and where the model is cut, through the commands the app's
     // Appearance dialog and Section Analysis run (`preview`).

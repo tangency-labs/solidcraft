@@ -207,6 +207,69 @@ impl Builder<'_, '_> {
         Ok(added)
     }
 
+    /// Split every edge that passes through a pole of a face it bounds (a sphere's, a revolved
+    /// face's on its axis) inside its interval: a great circle from the equator over the pole to a
+    /// vertex just past it. On the face's parameters the pole is a line, along which the edge's
+    /// pcurve would have to jump half a turn; split there, the jump is at a vertex on the pole,
+    /// where a loop may run along the pole's line. Returns how many edges were split.
+    pub(super) fn split_at_poles(&mut self) -> R<usize> {
+        let mut splits = 0;
+        for fi in 0..self.faces.len() {
+            let Some(face) = self.faces.get(fi) else { continue };
+            let Some(ax) = axis(&face.surface) else { continue };
+            let poles: Vec<Vec3> = ax.poles.iter().flatten().copied().collect();
+            if poles.is_empty() {
+                continue;
+            }
+            let mut edges: Vec<u32> =
+                face.loops.iter().filter_map(|l| if let LoopB::Edges(es) = l { Some(es) } else { None }).flatten().map(|u| u.0).collect();
+            edges.sort_unstable();
+            edges.dedup();
+            for e in edges {
+                for pole in &poles {
+                    let Some(t) = self.through_at(e, *pole)? else { continue };
+                    splits += 1;
+                    if splits > MAX_SPLITS {
+                        return Err(format!("more than {MAX_SPLITS} edges split at poles"));
+                    }
+                    let v = self.split_edge(e, t)?;
+                    // The new vertex is the pole, as the face's parameters have it.
+                    if let Some(x) = self.vertices.get_mut(v as usize) {
+                        let gap = Vec3::from(x.point).dist(*pole);
+                        x.point = arr(*pole);
+                        x.tolerance = x.tolerance.max(1.5 * gap);
+                    }
+                }
+            }
+        }
+        Ok(splits)
+    }
+
+    /// Where edge `e` passes through `pole` inside its interval (within the tolerance, away from
+    /// its ends), if it does: its nearest point to the pole, refined by golden-section search.
+    fn through_at(&self, e: u32, pole: Vec3) -> R<Option<f64>> {
+        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+        let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+        let [lo, hi] = edge.interval;
+        let reach = self.tol.max(edge.tolerance);
+        let d = |t: f64| c.point(t).map_or(f64::INFINITY, |p| p.dist(pole));
+        let step = (hi - lo) / SAMPLES as f64;
+        let k = (0..=SAMPLES).min_by(|&i, &j| d(lo + step * i as f64).total_cmp(&d(lo + step * j as f64))).unwrap_or(0);
+        let (mut a, mut b) = (lo + step * k.saturating_sub(1) as f64, (lo + step * (k + 1) as f64).min(hi));
+        let g = 0.5 * (5f64.sqrt() - 1.0);
+        for _ in 0..100 {
+            let (x, y) = (b - g * (b - a), a + g * (b - a));
+            if d(x) < d(y) {
+                b = y;
+            } else {
+                a = x;
+            }
+        }
+        let t = 0.5 * (a + b);
+        let ends = [lo, hi].map(|s| c.point(s).map_or(0.0, |p| p.dist(pole)));
+        Ok((d(t) <= reach && ends.iter().all(|x| *x > reach) && t > lo && t < hi).then_some(t))
+    }
+
     /// Turns (in u, in v) a loop makes around a periodic surface.
     fn winding(&self, eval: &SurfaceEval, es: &[(u32, bool)], periods: [Option<f64>; 2]) -> R<[i64; 2]> {
         let mut last: Option<[f64; 2]> = None;

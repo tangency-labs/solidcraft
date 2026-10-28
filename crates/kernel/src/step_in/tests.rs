@@ -2039,3 +2039,60 @@ fn spline_edges_off_their_plane_by_less_than_the_file_states_get_their_closed_fo
     let m = measure(&imp.bodies[0].body).unwrap();
     assert!(rel(m.area, 900.0) < 1e-6, "{}", m.area);
 }
+
+/// A spherical triangle (radius 0.5) whose edge runs from the equator over the sphere's pole to
+/// a vertex 1.8° past it, as a corner ball meets its rounds (Poppy Humanoid writes one): on the
+/// sphere's parameters the pole is a line where that edge's pcurve would jump half a turn. The
+/// edge is split at the pole, and the face reads with its area by the spherical excess.
+#[test]
+fn an_edge_over_a_spheres_pole_is_split_there() {
+    let r = 0.5f64;
+    let over = (91.8f64).to_radians();
+    let a = [r, 0.0, 0.0];
+    let b = [0.0, r, 0.0];
+    let p = [r * over.cos(), 0.0, r * over.sin()];
+    let f = |x: f64| format!("{x:.17E}");
+    let pt = |id: u64, q: [f64; 3]| format!("#{id}=CARTESIAN_POINT('',({},{},{}));\n", f(q[0]), f(q[1]), f(q[2]));
+    let dir = |id: u64, q: [f64; 3]| format!("#{id}=DIRECTION('',({},{},{}));\n", f(q[0]), f(q[1]), f(q[2]));
+    let mut t = String::from(HEAD);
+    t += &pt(1, [0.0; 3]);
+    t += &dir(2, [0.0, 0.0, 1.0]);
+    t += &dir(3, [1.0, 0.0, 0.0]);
+    t += "#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n#5=SPHERICAL_SURFACE('',#4,0.5);\n";
+    t += &pt(10, a);
+    t += &pt(11, b);
+    t += &pt(12, p);
+    t += "#13=VERTEX_POINT('',#10);\n#14=VERTEX_POINT('',#11);\n#15=VERTEX_POINT('',#12);\n";
+    // A to P in the x–z plane over the pole (normal −y, from x towards z); P to B (normal P × B,
+    // from P); B to A on the equator (normal −z, from y towards x).
+    let n = |u: [f64; 3], v: [f64; 3]| {
+        let c = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        let l = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+        [c[0] / l, c[1] / l, c[2] / l]
+    };
+    let unit = |u: [f64; 3]| [u[0] / r, u[1] / r, u[2] / r];
+    t += &dir(20, [0.0, -1.0, 0.0]);
+    t += "#21=AXIS2_PLACEMENT_3D('',#1,#20,#3);\n#22=CIRCLE('',#21,0.5);\n#23=EDGE_CURVE('',#13,#15,#22,.T.);\n";
+    t += &dir(30, n(p, b));
+    t += &dir(31, unit(p));
+    t += "#32=AXIS2_PLACEMENT_3D('',#1,#30,#31);\n#33=CIRCLE('',#32,0.5);\n#34=EDGE_CURVE('',#15,#14,#33,.T.);\n";
+    t += &dir(40, [0.0, 0.0, -1.0]);
+    t += &dir(41, [0.0, 1.0, 0.0]);
+    t += "#42=AXIS2_PLACEMENT_3D('',#1,#40,#41);\n#43=CIRCLE('',#42,0.5);\n#44=EDGE_CURVE('',#14,#13,#43,.T.);\n";
+    // Counter-clockwise seen from outside: A, B, P, so every edge the other way round.
+    t += "#50=ORIENTED_EDGE('',*,*,#44,.F.);\n#51=ORIENTED_EDGE('',*,*,#34,.F.);\n#52=ORIENTED_EDGE('',*,*,#23,.F.);\n";
+    t += "#53=EDGE_LOOP('',(#50,#51,#52));\n#54=FACE_OUTER_BOUND('',#53,.T.);\n#55=ADVANCED_FACE('',(#54),#5,.T.);\n";
+    t += "#60=OPEN_SHELL('',(#55));\n#61=SHELL_BASED_SURFACE_MODEL('Ball corner',(#60));\n#62=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#61),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("1 edges split where they pass through a face's pole")), "{:?}", imp.warnings);
+    // The spherical excess of the unit vectors' triangle, tan(E/2) = |a·(b×c)| / (1 + a·b + b·c + c·a).
+    let (ua, ub, up) = (unit(a), unit(b), unit(p));
+    let dot = |u: [f64; 3], v: [f64; 3]| u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    let triple = dot(ua, n(ub, up)) * (1.0 - dot(ub, up).powi(2)).sqrt();
+    let excess = 2.0 * triple.abs().atan2(1.0 + dot(ua, ub) + dot(ub, up) + dot(up, ua));
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, excess * r * r) < 1e-3, "{} vs {}", m.area, excess * r * r);
+}

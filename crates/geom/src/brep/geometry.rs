@@ -166,11 +166,17 @@ impl Brep {
                             ends.push(if u.forward { [uv[0], uv[2]] } else { [uv[2], uv[0]] });
                         }
                         // Each use continues the one before it (the last closes the loop), except
-                        // along a direction that collapses there (a pole).
+                        // along a direction that collapses there (a pole): at the vertex where
+                        // they meet, to within the vertex's tolerance.
                         for (position, pair) in ends.iter().enumerate() {
                             let before = ends.get(position.checked_sub(1).unwrap_or(ends.len().saturating_sub(1)));
                             let (Some([_, end]), [start, _]) = (before, pair) else { continue };
-                            let pole = surface.pole(*start);
+                            let reach = edges
+                                .get(position)
+                                .and_then(|u| self.edges.get(u.edge as usize).map(|e| e.vertices[if u.forward { 0 } else { 1 }]))
+                                .and_then(|v| self.vertices.get(v as usize))
+                                .map_or(0.0, |v| v.tolerance);
+                            let pole = surface.pole_within(*start, reach);
                             for d in 0..2 {
                                 let (Some(Some(p)), Some(false)) = (period.get(d), pole.get(d)) else { continue };
                                 let gap = (start[d] - end[d]).abs();

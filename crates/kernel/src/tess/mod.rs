@@ -192,12 +192,13 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     };
     let mut boundaries: Vec<Boundary> =
         crate::par::map("face boundaries", &indexed, curved >= PARALLEL_FACES, |&fi| face_boundary(fi, &nodes)).into_iter().collect::<Result<_>>()?;
-    untangle(b, &evals, &edge_faces, &mut nodes, &mut boundaries, &face_boundary)?;
+    let tangled = untangle(b, &evals, &edge_faces, &mut nodes, &mut boundaries, &face_boundary)?;
     let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
         let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
             return Err(unsupported(format!("face {fi}: missing")));
         };
-        let (fp, stats) = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size)?;
+        let refused = tangled.iter().find(|(f, _)| *f == fi).map(|(_, why)| why.as_str());
+        let (fp, stats) = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, refused)?;
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
@@ -356,7 +357,7 @@ fn untangle(
     nodes: &mut [edges::Nodes],
     boundaries: &mut [Boundary],
     face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
-) -> Result<()> {
+) -> Result<Vec<(usize, String)>> {
     let crossing = |fi: usize, fb: &Boundary| -> Vec<(u32, u32)> {
         let Some(s) = evals.get(fi) else { return Vec::new() };
         tangle::crossing(s, &fb.loops).into_iter().filter_map(|(l, k)| fb.segments.get(l)?.get(k).copied()).collect()
@@ -370,15 +371,21 @@ fn untangle(
     .collect::<Result<_>>()?;
     let mut tangled: Vec<(usize, Vec<(u32, u32)>)> = found.into_iter().enumerate().filter(|(_, c)| !c.is_empty()).collect();
     for round in 0..=MAX_UNTANGLE {
-        let Some((fi, first)) = tangled.first() else { return Ok(()) };
+        if tangled.is_empty() {
+            return Ok(Vec::new());
+        }
         if round == MAX_UNTANGLE {
-            let mut es: Vec<u32> = first.iter().map(|(e, _)| *e).collect();
-            es.sort_unstable();
-            es.dedup();
-            let kind = b.faces.get(*fi).map_or("?", |f| kind(&f.surface));
-            return Err(unsupported(format!(
-                "face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} halvings"
-            )));
+            // Each face still crossing, with why: planned leniently, and named (`plan_or_fill`).
+            return Ok(tangled
+                .iter()
+                .map(|(fi, c)| {
+                    let mut es: Vec<u32> = c.iter().map(|(e, _)| *e).collect();
+                    es.sort_unstable();
+                    es.dedup();
+                    let kind = b.faces.get(*fi).map_or("?", |f| kind(&f.surface));
+                    (*fi, format!("face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} halvings"))
+                })
+                .collect());
         }
         let mut split: Vec<(u32, u32)> = tangled.iter().flat_map(|(_, c)| c.iter().copied()).collect();
         split.sort_unstable();
@@ -405,7 +412,7 @@ fn untangle(
             }
         }
     }
-    Ok(())
+    Ok(Vec::new())
 }
 
 /// Bounded work for the facet angle: a face whose boundary would get more than
@@ -626,7 +633,9 @@ fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
 /// One face, planned by [`plan_face`]; a face it refuses because its loops cross in (u, v) is
 /// planned once more leniently (see [`Lenient`]) and named in the stats with the first refusal,
 /// so the defect upstream is still reported. When the lenient fill refuses too, the first
-/// refusal is the error.
+/// refusal is the error. `refused`: a face whose boundary still crosses itself after
+/// [`untangle`] (two edges meeting tangentially at a cusp, whose chords cross however often
+/// they are halved), filled leniently straight away with that reason.
 fn plan_or_fill(
     fi: usize,
     kind: &str,
@@ -634,9 +643,14 @@ fn plan_or_fill(
     loops: &[seam::Loop],
     rules: &size::Rules,
     size: (f64, [f64; 2]),
+    refused: Option<&str>,
 ) -> Result<(FacePlan, PlanStats)> {
     let mut stats = PlanStats::default();
-    match plan_face(fi, kind, s, loops, rules, size, &mut stats, Lenient::No) {
+    let strict = match refused {
+        Some(why) => Err(unsupported(why.to_string())),
+        None => plan_face(fi, kind, s, loops, rules, size, &mut stats, Lenient::No),
+    };
+    match strict {
         Ok(fp) => Ok((fp, stats)),
         Err(first) => {
             let mut stats = PlanStats::default();
