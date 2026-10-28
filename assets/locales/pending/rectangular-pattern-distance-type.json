@@ -34,5 +34,55 @@
     "ui.pattern_extent_2": "Extensión 2",
     "ui.pattern_to_object_2": "Hasta objeto 2",
     "ui.pattern_to_offset_2": "Hasta desfase 2"
+  },
+  "ar": {
+    "ui.pattern_distance_type": "نوع المسافة",
+    "ui.pattern_distance_type_2": "نوع المسافة 2",
+    "ui.pattern_extent": "الامتداد",
+    "ui.pattern_extent_2": "الامتداد 2",
+    "ui.pattern_to_object_2": "إلى كائن 2",
+    "ui.pattern_to_offset_2": "إلى الإزاحة 2",
+    "select the face or point the pattern runs to": "حدد الوجه أو النقطة التي يمتد إليها النمط",
+    "select the face or point Direction 2 runs to": "حدد الوجه أو النقطة التي يمتد إليها الاتجاه 2"
+  },
+  "he": {
+    "ui.pattern_distance_type": "סוג מרחק",
+    "ui.pattern_distance_type_2": "סוג מרחק 2",
+    "ui.pattern_extent": "טווח",
+    "ui.pattern_extent_2": "טווח 2",
+    "ui.pattern_to_object_2": "עד אובייקט 2",
+    "ui.pattern_to_offset_2": "עד היסט 2",
+    "select the face or point the pattern runs to": "יש לבחור את הפאה או הנקודה שעד אליה מגיע הדפוס",
+    "select the face or point Direction 2 runs to": "יש לבחור את הפאה או הנקודה שעד אליה מגיע כיוון 2"
+  },
+  "ja": {
+    "ui.pattern_distance_type": "距離タイプ",
+    "ui.pattern_distance_type_2": "距離タイプ 2",
+    "ui.pattern_extent": "全長",
+    "ui.pattern_extent_2": "全長 2",
+    "ui.pattern_to_object_2": "オブジェクトまで 2",
+    "ui.pattern_to_offset_2": "オフセットまで 2",
+    "select the face or point the pattern runs to": "パターンが届く面または点を選択してください",
+    "select the face or point Direction 2 runs to": "方向 2 が届く面または点を選択してください"
+  },
+  "vi": {
+    "ui.pattern_distance_type": "Kiểu khoảng cách",
+    "ui.pattern_distance_type_2": "Kiểu khoảng cách 2",
+    "ui.pattern_extent": "Tổng chiều dài",
+    "ui.pattern_extent_2": "Tổng chiều dài 2",
+    "ui.pattern_to_object_2": "Tới đối tượng 2",
+    "ui.pattern_to_offset_2": "Tới khoảng dời (Offset) 2",
+    "select the face or point the pattern runs to": "hãy chọn mặt hoặc điểm mà mẫu chạy tới",
+    "select the face or point Direction 2 runs to": "hãy chọn mặt hoặc điểm mà Hướng 2 chạy tới"
+  },
+  "zh": {
+    "ui.pattern_distance_type": "距离类型",
+    "ui.pattern_distance_type_2": "距离类型 2",
+    "ui.pattern_extent": "总长",
+    "ui.pattern_extent_2": "总长 2",
+    "ui.pattern_to_object_2": "到对象 2",
+    "ui.pattern_to_offset_2": "偏移 2",
+    "select the face or point the pattern runs to": "请选择阵列延伸到的面或点",
+    "select the face or point Direction 2 runs to": "请选择方向 2 延伸到的面或点"
   }
 }
