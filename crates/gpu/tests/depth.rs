@@ -287,6 +287,50 @@ fn an_edge_on_the_cut_face_draws_over_the_cap() {
     }
 }
 
+/// A cut body's cap covers the body it touches behind the cut. A block whose far face (y = 30)
+/// lies on a larger plate's front face, cut at y = 15: through the cut the block's far wall and
+/// the plate's face are at one depth. When the cap went to the nearer of the two by depth, the
+/// plate showed through 2721 of its 4350 px here (an engine's sleeves in their bores, pins in
+/// their bosses); counted by crossings, the cap is the same with the plate as without it.
+#[test]
+fn a_cap_covers_the_body_its_cut_body_touches() {
+    let block = ("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "block"}));
+    let plate = ("solid.box", json!({"length": 70, "width": 10, "height": 50, "corner": [-15, 30, -15], "operation": "new", "body_name": "plate"}));
+    let cut = ("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}}));
+    let alone = session(&[block.clone(), cut.clone()]);
+    let touching = session(&[block, plate, cut]);
+    let (w, h) = (360, 280);
+    for (mode, c) in capturers() {
+        for fov in [0.0, 0.6] {
+            let mut cam = view::home_camera(&touching).unwrap();
+            (cam.fov, cam.yaw, cam.pitch) = (fov, -0.3, 0.2);
+            let radius = view::scene(&touching, &cam).unwrap().radius;
+            let shot = |s: &Session| c.rgba(&Scene { grid: Vec::new(), lines: Vec::new(), radius, ..view::scene(s, &cam).unwrap() }, &cam, w, h).unwrap();
+            let (a, b) = (shot(&alone), shot(&touching));
+            // The cap on screen: the cut's rectangle (x 0..40, z 0..20 at y = 15), 2 px in.
+            let corner = |x: f64, z: f64| cam.to_screen(Vec3::new(x, 15.0, z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y));
+            let cap: Vec<(f64, f64)> = [(0.0, 0.0), (40.0, 0.0), (40.0, 20.0), (0.0, 20.0)].iter().filter_map(|(x, z)| corner(*x, *z)).collect();
+            assert_eq!(cap.len(), 4, "fov {fov}: the cut is on screen");
+            let turn = (0..4).map(|i| cap[i].0 * cap[(i + 1) % 4].1 - cap[(i + 1) % 4].0 * cap[i].1).sum::<f64>().signum();
+            let inside = |x: f64, y: f64| {
+                (0..4).all(|i| {
+                    let ((ax, ay), (bx, by)) = (cap[i], cap[(i + 1) % 4]);
+                    ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay) * turn >= 2.0
+                })
+            };
+            let (mut shown, mut all) = (0, 0);
+            for (i, (p, q)) in pixels(&a).zip(pixels(&b)).enumerate() {
+                if inside((i % w as usize) as f64 + 0.5, (i / w as usize) as f64 + 0.5) {
+                    all += 1;
+                    shown += usize::from(p.iter().zip(q).any(|(u, v)| u.abs_diff(v) > 24));
+                }
+            }
+            assert!(all > 3000, "{mode}, fov {fov}: the cap ({all} px)");
+            assert_eq!(shown, 0, "{mode} depth, fov {fov}: the touching plate shows through {shown} of {all} cap px");
+        }
+    }
+}
+
 /// Pixels of the model's edges lying behind the section plane (recoloured red) that draw over
 /// the cap: the cap's pixels are where the picture without lines shows the hatch (warm, with
 /// warm pixels 3 px around, so the cut's outline doesn't count).

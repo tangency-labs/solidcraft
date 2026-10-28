@@ -213,13 +213,43 @@ fn fs_solid(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f3
     return c;
 }
 
+/// A section's crossing count (`Cut::count` in `view.rs`): nothing but the cut itself, so the
+/// stencil counts only the faces behind the section plane. The colour is not written.
+@fragment
+fn fs_clip(i: TOut) -> @location(0) vec4<f32> {
+    if (clipped(i.wp)) { discard; }
+    return vec4<f32>(0.0);
+}
+
+@fragment
+fn fs_clip_flat(i: FOut) -> @location(0) vec4<f32> {
+    if (clipped(i.rp + u.eye.xyz)) { discard; }
+    return vec4<f32>(0.0);
+}
+
+/// Faces where the section plane is outside every closed body (`Cut::rest`): a back face seen
+/// there is the inside of an open body (a surface body, a solid with faces left out), lit as it
+/// is without a section rather than hatched, since there is no cut face to show.
+@fragment
+fn fs_solid_open(i: TOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = solid(i, true);
+    return c;
+}
+
+@fragment
+fn fs_solid_open_flat(i: FOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let t = flat_fragment(i, front);
+    let c = solid(t, true);
+    return c;
+}
+
 struct CutOut {
     @location(0) c: vec4<f32>,
     @builtin(frag_depth) depth: f32,
 };
 
-/// The section cap (the inside seen through the cut, drawn on the far walls' back faces where
-/// they are the visible surface) again, at the depth of the section plane rather than of the
+/// The section cap (where the section plane lies inside a body, drawn on the far walls' back
+/// faces) again, at the depth of the section plane rather than of the
 /// far wall, so the cut face hides what lies inside the body instead of showing it like a
 /// pane of glass.
 @fragment

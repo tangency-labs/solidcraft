@@ -1793,18 +1793,34 @@ impl Batches {
     }
 }
 
-/// The section's pipelines (see `Renderer::tri_cut`).
+/// Where a section's crossing count starts (`Cut::count`): half the stencil's range, so a count
+/// that goes below it (more faces entered than left: an open sheet's front) stays apart from one
+/// above it.
+const STENCIL_BASE: u32 = 128;
+
+/// The section's pipelines (see `Renderer::tri_cut`), drawn in this order. The cap shows where
+/// the section plane lies inside a body: where the faces behind the plane, on the view ray
+/// through the pixel, are left by the ray more often than entered. The stencil counts them, so
+/// no depth is compared where bodies touch: a cut body's far wall and the face of the body it
+/// rests on lie at one depth, and settling that by depth let the other body show through the
+/// cap in specks, stripes and triangles. The display meshes are watertight, so the count is
+/// exact for closed bodies; an open one (a surface body, a solid with faces left out) gets no
+/// cap.
 struct Cut {
-    /// Draws the faces and marks the stencil by their true depth: 1 where a back face (the cap)
-    /// is the visible surface. Unpushed: `FACE_BIAS`'s slope part would let a front face win a
-    /// band along its edge with a back face seen through the cut, and the cap would skip it (#6328).
-    mark: wgpu::RenderPipeline,
-    /// The faces' depth again, pushed back by `FACE_BIAS` as unsectioned faces are (after
-    /// `Renderer::section_reset`), so their edges draw over them (#1434). No colour, no stencil.
-    push: wgpu::RenderPipeline,
-    /// The cap again, only where marked, at the section plane's depth: depth only, as the mark
-    /// drew the cap's colour (#6728).
+    /// Counts the crossings in the stencil from [`STENCIL_BASE`]: a back face behind the plane
+    /// adds one, a front face takes one away. No colour, no depth. Above the base, the plane is
+    /// inside a body; at or below it, outside (an open sheet seen from its front counts below).
+    count: wgpu::RenderPipeline,
+    /// Where the count is above the base, the nearest back face, by its true depth, in its body's cut
+    /// colour (the body the plane lies inside: the ray leaves it there).
+    fill: wgpu::RenderPipeline,
+    /// The cap again, only there, at the section plane's depth (pushed as faces are), so what
+    /// lies on the cut face draws over it: depth only, as `fill` drew its colour (#6728).
     cap: wgpu::RenderPipeline,
+    /// Elsewhere, the faces as they are drawn without a section, pushed back by
+    /// `FACE_BIAS` so their edges draw over them (#1434); a back face there is an open body's
+    /// inside, lit, not hatched.
+    rest: wgpu::RenderPipeline,
 }
 
 /// The viewport's pipelines and the scenes uploaded to one device, for one kind of target.
@@ -1835,8 +1851,8 @@ pub struct Renderer {
     /// The tessellation compute pipeline, where the device runs compute shaders.
     tess: Option<crate::TessGpu>,
     /// While a section is shown (when the depth buffer has a stencil), in place of `tri`: the
-    /// faces marking where the cap shows, their depth pushed back, then the cap again at the
-    /// section plane's depth, so it hides the inside ([`Cut`]).
+    /// faces behind the plane counted where the cap shows, the cap in its colour and at the
+    /// section plane's depth, so it hides the inside, then the other faces ([`Cut`]).
     tri_cut: Option<Cut>,
     /// Highlight triangles over the model (depth test ≤, no depth write).
     tri_hl: wgpu::RenderPipeline,
@@ -1924,9 +1940,9 @@ pub struct Renderer {
     /// Reversed depth drawn into the window's pass: egui clears its depth to 1, which is the near
     /// plane then, so the viewport first sets its rectangle to the far plane (0).
     depth_reset: Option<wgpu::RenderPipeline>,
-    /// The scene target's depth back to the far plane between the section's marking and push
-    /// passes ([`Cut`]); stencil and colour untouched.
-    section_reset: Option<wgpu::RenderPipeline>,
+    /// The scene target's stencil set to [`STENCIL_BASE`] before a section's crossing count
+    /// ([`Cut`]); depth and colour untouched.
+    section_stencil: Option<wgpu::RenderPipeline>,
 }
 
 /// A triangle over the whole viewport at the far plane's depth (`FAR`), writing no colour:
@@ -2456,36 +2472,40 @@ impl Renderer {
         let solid = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource| {
             solid_writes(label, fs, cull, ds, source, true)
         };
-        // While a section is shown: the stencil marking and the cap (see `Renderer::tri_cut`).
+        // While a section is shown: the crossing count and the cap (see `Cut`), drawn with the
+        // stencil reference `STENCIL_BASE`.
         let cut = |source: TriSource| {
             t.depth.filter(|f| f.has_stencil_aspect()).map(|format| {
-                // The visible surface, by its true depth, marks the stencil: 1 where it is a back face (the cap).
-                use wgpu::StencilOperation::{Keep, Replace, Zero};
-                let face = |pass_op| wgpu::StencilFaceState { compare: wgpu::CompareFunction::Always, fail_op: Keep, depth_fail_op: Keep, pass_op };
-                let mark = wgpu::DepthStencilState {
+                use wgpu::CompareFunction::{Always, GreaterEqual, Less};
+                use wgpu::StencilOperation::{DecrementWrap, IncrementWrap, Keep};
+                let face = |compare, pass_op| wgpu::StencilFaceState { compare, fail_op: Keep, depth_fail_op: Keep, pass_op };
+                let stencil = |front, back, write_mask| wgpu::StencilState { front, back, read_mask: 0xff, write_mask };
+                let count = wgpu::DepthStencilState {
                     format,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(Always),
+                    stencil: stencil(face(Always, DecrementWrap), face(Always, IncrementWrap), 0xff),
+                    bias: Default::default(),
+                };
+                // The reference (`STENCIL_BASE`) below the count: the plane is inside a body.
+                let inside = stencil(face(Less, Keep), face(Less, Keep), 0);
+                let fill = wgpu::DepthStencilState {
                     depth_write_enabled: Some(true),
                     depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::Less)),
-                    stencil: wgpu::StencilState { front: face(Zero), back: face(Replace), read_mask: 0xff, write_mask: 0xff },
-                    bias: Default::default(),
+                    stencil: inside.clone(),
+                    ..count.clone()
                 };
-                // Then the cap's back faces again, only there, at the section plane's depth.
-                let only = wgpu::StencilFaceState { compare: wgpu::CompareFunction::Equal, ..face(Keep) };
-                let cap = wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
-                    stencil: wgpu::StencilState { front: only, back: only, read_mask: 0xff, write_mask: 0 },
-                    bias: Default::default(),
-                };
+                let cap = wgpu::DepthStencilState { depth_write_enabled: Some(true), stencil: inside, ..count.clone() };
+                let outside = stencil(face(GreaterEqual, Keep), face(GreaterEqual, Keep), 0);
+                let rest = pushed(wgpu::CompareFunction::Less, true, FACE_BIAS).map(|d| wgpu::DepthStencilState { stencil: outside, ..d });
                 Cut {
-                    mark: solid("sc_tris_mark", "fs_solid", None, Some(mark), source),
-                    push: solid_writes("sc_tris_push", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), source, false),
-                    // Depth only: every back face behind a marked pixel draws here, so writing
+                    count: solid_writes("sc_tris_count", "fs_clip", None, Some(count), source, false),
+                    fill: solid("sc_tris_fill", "fs_solid", Some(wgpu::Face::Front), Some(fill), source),
+                    // Depth only: every back face behind a cap pixel draws here, so writing
                     // colour let the last one drawn paint the cut, other bodies behind it
-                    // included (their colours and outlines showed through it, #6328). The
-                    // marking pass already drew the nearest back face's colour.
+                    // included (their colours and outlines showed through it, #6328).
                     cap: solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap), source, false),
+                    rest: solid("sc_tris_rest", "fs_solid_open", None, rest, source),
                 }
             })
         };
@@ -2557,7 +2577,7 @@ impl Renderer {
         Renderer {
             ao,
             depth_reset,
-            section_reset: t.depth.filter(|f| f.has_stencil_aspect()).and_then(|_| depth_reset_pipeline(device, t)),
+            section_stencil: stencil_set_pipeline(device, t),
             target: GpuTarget { oit: oit.is_some(), ..t },
             window,
             max_texture: device.limits().max_texture_dimension_2d,
@@ -2676,25 +2696,51 @@ const GHOST_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FA
 /// leaving colour and stencil as they are. None without a depth buffer.
 fn depth_reset_pipeline(device: &wgpu::Device, t: GpuTarget) -> Option<wgpu::RenderPipeline> {
     let format = t.depth?;
+    let reset = wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: Some(true),
+        depth_compare: Some(wgpu::CompareFunction::Always),
+        stencil: Default::default(),
+        bias: Default::default(),
+    };
+    Some(viewport_pipeline(device, t, "sc_depth_reset", reset))
+}
+
+/// A pipeline that sets the stencil of the viewport in a pass of `t`'s kind to the reference,
+/// leaving colour and depth as they are: a section's crossing count starts from it ([`Cut`]).
+/// None without a stencil.
+fn stencil_set_pipeline(device: &wgpu::Device, t: GpuTarget) -> Option<wgpu::RenderPipeline> {
+    let format = t.depth.filter(|f| f.has_stencil_aspect())?;
+    let replace = wgpu::StencilFaceState {
+        compare: wgpu::CompareFunction::Always,
+        fail_op: wgpu::StencilOperation::Keep,
+        depth_fail_op: wgpu::StencilOperation::Keep,
+        pass_op: wgpu::StencilOperation::Replace,
+    };
+    let set = wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: Some(false),
+        depth_compare: Some(wgpu::CompareFunction::Always),
+        stencil: wgpu::StencilState { front: replace, back: replace, read_mask: 0xff, write_mask: 0xff },
+        bias: Default::default(),
+    };
+    Some(viewport_pipeline(device, t, "sc_stencil_set", set))
+}
+
+/// A triangle over the whole viewport in a pass of `t`'s kind, writing no colour, with `ds`.
+fn viewport_pipeline(device: &wgpu::Device, t: GpuTarget, label: &str, ds: wgpu::DepthStencilState) -> wgpu::RenderPipeline {
     let far = if t.reversed_depth() { "0.0" } else { "1.0" };
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("sc_depth_reset"),
+        label: Some(label),
         source: wgpu::ShaderSource::Wgsl(DEPTH_RESET_SHADER.replace("FAR", far).into()),
     });
-    let layout =
-        device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("sc_depth_reset"), bind_group_layouts: &[], immediate_size: 0 });
-    Some(device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("sc_depth_reset"),
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some(label), bind_group_layouts: &[], immediate_size: 0 });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
         layout: Some(&layout),
         vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), buffers: &[], compilation_options: Default::default() },
         primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Always),
-            stencil: Default::default(),
-            bias: Default::default(),
-        }),
+        depth_stencil: Some(ds),
         multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
         fragment: Some(wgpu::FragmentState {
             module: &module,
@@ -2704,7 +2750,7 @@ fn depth_reset_pipeline(device: &wgpu::Device, t: GpuTarget) -> Option<wgpu::Ren
         }),
         multiview_mask: None,
         cache: None,
-    }))
+    })
 }
 
 fn upload(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize) -> Option<Batch> {
@@ -3147,9 +3193,9 @@ impl Renderer {
             res.tri_cut_planned.as_ref(),
             res.tri_cut_instanced.as_ref(),
             res.tri_cut_instanced_flat.as_ref(),
-            res.section_reset.as_ref(),
+            res.section_stencil.as_ref(),
         ) {
-            (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some(reset)) => {
+            (Some(cut), Some(cut_planned), Some(cut_instanced), Some(cut_flat), Some(base)) => {
                 // The model's own triangles, blocks, plans and instances with its palette, then the
                 // preview's with its own.
                 let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline| {
@@ -3161,13 +3207,14 @@ impl Renderer {
                     pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                     tris(pass, pick(cut), &pv.tris);
                 };
-                pass.set_stencil_reference(1);
-                all(pass, |c| &c.mark);
-                pass.set_pipeline(reset);
+                pass.set_stencil_reference(STENCIL_BASE);
+                pass.set_pipeline(base);
                 pass.draw(0..3, 0..1);
                 tally.call();
-                all(pass, |c| &c.push);
+                all(pass, |c| &c.count);
+                all(pass, |c| &c.fill);
                 all(pass, |c| &c.cap);
+                all(pass, |c| &c.rest);
             }
             _ => {
                 pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
