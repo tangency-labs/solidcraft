@@ -6,22 +6,23 @@
 //! The C++ side builds a B-rep of unit `topology.edgeuse_p1`'s block (here a box, a face,
 //! points and lines, or a wire network), applies the case's edits (stored tolerances,
 //! vertex points, UV trim curves) and, with edge mates, builds it a second time and
-//! relates the edges through an `SmTopologyIntersector`. The Rust side imports both
-//! exports (unit `topology.edgeuse_p1`'s importer) and runs
+//! relates the edges through an `SmTopologyIntersector`. The Rust side builds the same
+//! B-reps with the Rust kernel and makes the same edits ([`resolve_own`]; no C++ export
+//! reaches it) and runs
 //! [`insert_solutions_mut`] / [`CurveClassification::intersect_vertices_mut`] on them,
 //! with the classification curve and the B-reps owned by the adapter, so the edits
 //! upstream makes in place (an edge-end vertex's tolerance, the classification curve
 //! through a surf/surf/surf point, the deleted UV trim curves of the vertex's edges and
 //! their mates) are made and compared.
 //!
-//! Geometry is resolved on the imported B-rep and passed to both sides as numbers: the
+//! Geometry is resolved on the Rust build and passed to both sides as numbers: the
 //! line of an edge case crosses the edge at a fraction of its interval (plus an
 //! offset), and the curve of a vertex case is given in a frame at a vertex (along the
 //! intersection of the two classification planes through it). Both sides compare the
 //! status, the whole classification, the solutions, the classification curve and the
 //! state of every vertex tolerance and edge-use UV trim curve.
 //!
-//! Large-gap vertex/face gaps are computed on the imported B-rep before the call (C++
+//! Large-gap vertex/face gaps are computed on the Rust B-rep before the call (C++
 //! computes them lazily during it); generated large-gap cases have no classification
 //! surfaces, so no UV trim curve changes in between.
 
@@ -336,9 +337,148 @@ struct Resolved {
     exact: bool,
 }
 
-/// Builds and imports the case's B-reps; `Err(Output)` when one cannot be built (the
-/// same outcome on both sides).
-fn resolve(i: &TopoIn) -> Result<Result<Resolved, Output>, HarnessError> {
+/// The shim's `apply_edits` on a Rust B-rep in the shim's traversal order (arena index =
+/// walk index): kind 0, 1, 2 the raw stored zone tolerance of a face, edge or vertex set
+/// to `SmZoneTol3d(value)` (a face's also on its surface, which upstream reads through
+/// the owner), kind 3 `GetOrCreateUVTrimCurve` on every loop edge use of the face
+/// (status ignored, as the shim's), kinds 4 to 6 the raw vertex point's x, y or z moved
+/// by `value`. The entity is `sel` modulo the count of its kind; a kind with no entity
+/// is skipped.
+fn apply_own_edits(k: &Kernel, b: &mut Brep, edits: &[Edit]) -> Result<(), SolidError> {
+    use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
+    for e in edits {
+        if e.sel < 0 {
+            continue;
+        }
+        let n = match e.kind {
+            1 => b.edges().len(),
+            0 | 3 => b.faces().len(),
+            _ => b.vertices().len(),
+        };
+        if n == 0 {
+            continue;
+        }
+        let at = (e.sel as u64 % n as u64) as u32;
+        match e.kind {
+            3 => {
+                let f = FaceId::from_index(at);
+                let uses: Vec<_> = b.edgeuses().ids().collect();
+                for eu in uses {
+                    if eu1::is_loop_edgeuse(b, eu)? && eu1::face(b, eu)? == Some(f) {
+                        if let Err(x) = eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true) {
+                            if x.is_unported() {
+                                return Err(x);
+                            }
+                        }
+                    }
+                }
+            }
+            0 => {
+                let f = FaceId::from_index(at);
+                b.face_mut(f)?.tolerance = zone_tol3d(k, e.value);
+                b.sync_face_surface_tolerance(f)?;
+            }
+            1 => b.edge_mut(EdgeId::from_index(at))?.tolerance = zone_tol3d(k, e.value),
+            2 => b.vertex_mut(VertexId::from_index(at))?.tolerance = zone_tol3d(k, e.value),
+            kind => {
+                let p = &mut b.vertex_mut(VertexId::from_index(at))?.point;
+                match kind {
+                    4 => p.x += e.value,
+                    5 => p.y += e.value,
+                    _ => p.z += e.value,
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The case's B-reps built by the Rust kernel as the shim's `build_model` builds them
+/// ([`crate::own_builder::build_any`]: the Rust `.smb` reader or constructors,
+/// renumbered into the shim's traversal order, then [`apply_own_edits`]; with mates
+/// built a second time with the same edits), with the C++ input; no C++ export reaches
+/// the Rust side. `Err(Output)` when one cannot be built.
+fn resolve_own(i: &TopoIn) -> Result<Result<Resolved, Output>, HarnessError> {
+    use crate::own_builder::{build_any, failed_output, Built, Conventions};
+    let path = path_of(Some(&i.brep))?;
+    let block = brep_block_of(Some(&i.brep), false, false)?;
+    let mut k = Kernel::default();
+    let one = |k: &mut Kernel| -> Result<Result<Brep, Output>, HarnessError> {
+        match build_any(k, &i.brep, false, false, &Conventions::EDGEUSE_GRAPH)? {
+            Built::Brep(b) => {
+                let mut b = *b;
+                if let Err(e) = apply_own_edits(k, &mut b, &i.edits) {
+                    return Ok(Err(failed_output(&e)));
+                }
+                Ok(Ok(b))
+            }
+            Built::Failed(e) => Ok(Err(failed_output(&e))),
+        }
+    };
+    let first = match one(&mut k)? {
+        Ok(b) => b,
+        Err(o) => return Ok(Err(o)),
+    };
+    let n_e = first.edges().len();
+    let mut prefix = block;
+    prefix.push(i.edits.len() as f64);
+    for e in &i.edits {
+        if e.sel < 0 {
+            return Err(harness("negative edit selector"));
+        }
+        prefix.extend([f64::from(e.kind.min(6)), e.sel as f64, e.value]);
+    }
+    let mut mates: Vec<(i64, i64)> = Vec::new();
+    for &[a, b] in &i.mates {
+        let (a, b) = (sel(a, n_e), sel(b, n_e));
+        if a < 0 || b < 0 || mates.iter().any(|&(x, y)| x == a || y == b) {
+            continue;
+        }
+        mates.push((a, b));
+    }
+    prefix.push(mates.len() as f64);
+    for &(a, b) in &mates {
+        prefix.extend([a as f64, b as f64]);
+    }
+    let mut breps = vec![first];
+    if !mates.is_empty() {
+        match one(&mut k)? {
+            Ok(b) => breps.push(b),
+            Err(o) => return Ok(Err(o)),
+        }
+    }
+    let mates = mates
+        .iter()
+        .map(|&(a, b)| {
+            Ok((
+                EdgeId::from_index(u32::try_from(a).map_err(hx)?),
+                EdgeId::from_index(u32::try_from(b).map_err(hx)?),
+            ))
+        })
+        .collect::<Result<Vec<_>, HarnessError>>()?;
+    Ok(Ok(Resolved {
+        path,
+        prefix,
+        breps,
+        mates,
+        exact: true,
+    }))
+}
+
+/// The case resolved for one side: on the Rust build ([`resolve_own`]) for both sides,
+/// so they get the same numbers; the C++ side on the import of its own exports
+/// ([`resolve_import`]) only when the Rust build fails.
+fn resolve(i: &TopoIn, rust: bool) -> Result<Result<Resolved, Output>, HarnessError> {
+    match resolve_own(i)? {
+        Ok(r) => Ok(Ok(r)),
+        Err(o) if rust => Ok(Err(o)),
+        Err(_) => resolve_import(i),
+    }
+}
+
+/// Builds and imports the case's B-reps (the C++ side's fallback of [`resolve`]);
+/// `Err(Output)` when one cannot be built.
+fn resolve_import(i: &TopoIn) -> Result<Result<Resolved, Output>, HarnessError> {
     let path = path_of(Some(&i.brep))?;
     let block = brep_block_of(Some(&i.brep), false, false)?;
     let plain = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
@@ -665,7 +805,7 @@ fn op_args(k: &Kernel, r: &Resolved, op: &TopoOpIn) -> Result<Op, HarnessError> 
 
 pub(super) fn cpp(i: &TopoIn) -> Result<Output, HarnessError> {
     let k = Kernel::default();
-    let r = match resolve(i)? {
+    let r = match resolve(i, false)? {
         Ok(r) => r,
         Err(o) => return Ok(o),
     };
@@ -701,7 +841,7 @@ pub(super) fn valid(i: &TopoIn) -> bool {
 }
 
 fn cpp_checked(k: &Kernel, i: &TopoIn) -> Result<bool, HarnessError> {
-    let Ok(r) = resolve(i)? else {
+    let Ok(r) = resolve(i, false)? else {
         return Ok(false);
     };
     if !r.exact {
@@ -831,7 +971,7 @@ fn classification(
 
 pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
     let k = Kernel::default();
-    let r = match resolve(i)? {
+    let r = match resolve(i, true)? {
         Ok(r) => r,
         Err(o) => return Ok(o),
     };

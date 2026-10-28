@@ -5,22 +5,18 @@
 //! a face or the `prog_test` wire network (the B-rep blocks of `topology.edgeuse_p1`),
 //! unstitched sheets (one face per surface in one B-rep; generated as grids of
 //! bilinear or biquadratic patches whose shared corners and edges are pulled apart by
-//! a gap), or `SmApiCreateBox` (the upstream tests' box). The Rust side imports the
-//! export of unit `topology.brep_p1` (the graph of `topology.edgeuse_p1` plus list
-//! orders and vertex use lists) into a [`Brep`]. Every op's C++ output after the build
-//! status is compared with the Rust side's as one float array (`out`): statuses (`0`,
+//! a gap), or `SmApiCreateBox` (the upstream tests' box). The Rust side builds the same
+//! B-rep with the Rust kernel ([`own_brep`]: the Rust `.smb` reader, the Rust
+//! constructors), renumbered into the shim's traversal order, so no C++ export reaches
+//! it. Every op's C++ output after the build status is compared with the Rust side's as one float array (`out`): statuses (`0`,
 //! an `SmStatus` code), traversal indices, flags and values; `-2` (the shim's guard on
 //! input upstream would dereference null or free twice) is an error on both sides.
 //!
 //! Selectors are taken modulo the entity count; an op needing an entity the B-rep
 //! lacks is rejected (nothing runs on either side). Edge parameters are given normalised to the
-//! edge's interval and split points as an offset from the edge, resolved on the
-//! imported B-rep (identically for both sides).
-//!
-//! **Inexact geometry.** The export carries B-spline curves, `SmLine`s, B-spline
-//! surfaces, `SmPlane`s and `SmSurfOfRevolution`s exactly; other analytic kinds arrive
-//! as their B-spline part,
-//! so the ops evaluating geometry defer on B-reps holding them (as `topology.brep_p1`).
+//! edge's interval and split points as an offset from the edge, resolved on the Rust
+//! build for both sides (on the C++ side's import of its export only when the Rust
+//! build fails).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -36,7 +32,7 @@ use solidcore_ffi::units::heal_stitch_p1::{self as ffi, Op, TY_EDGE, TY_FACE, TY
 use solidcore_ffi::units::topology_brep_p1::counts;
 
 use super::topology_edgeuse_p1::{
-    brep_block_of, flag, gen_brep, path_of, push_surface, sel, BrepIn, ImportTypes, SrfIn,
+    brep_block_of, flag, gen_brep, path_of, push_surface, sel, BrepIn, SrfIn,
 };
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
@@ -52,14 +48,6 @@ pub(crate) const NULL_DEREF: f64 = -2.0;
 
 /// `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: f64 = 1007.0;
-
-/// `SmBSplineSurface_TYPE`, `SmPlane_TYPE`; `SmBSplineCurve_TYPE`, `SmLine_TYPE`.
-const EXACT_SURFACES: [i64; 2] = [15002, 15011];
-const EXACT_CURVES: [i64; 2] = [14033, 14010];
-
-/// The deferral label of B-reps whose analytic geometry the shared export flattens to
-/// B-spline parts (a harness limitation, as in `topology.brep_p1`).
-const HARNESS_ANALYTIC_IMPORT: &str = "harness:analytic-geometry-export";
 
 /// Largest `SmApi*` selector (`which` of [`OpIn::Api`]).
 const MAX_API: u8 = 6;
@@ -217,6 +205,84 @@ pub(crate) fn export(b: &StitchBrep) -> Result<Vec<f64>, HarnessError> {
         ffi::eval(Op::Export, &path, &block)
     })
     .map_err(|e| harness(format!("c++ export: {e}")))
+}
+
+/// The Rust B-rep of the case's block, built by the Rust kernel as the shim's
+/// `build_block` builds it (no C++ export reaches the Rust side): a B-rep block of
+/// `topology.edgeuse_p1` ([`crate::own_builder::build_any`]: an `.smb` file read by the
+/// Rust reader, every other kind by the Rust constructors), the sheets
+/// (`CreateFaceFromSurface` per surface into `new (ctx) SmBrep()`, stopping at the
+/// first failure) or `SmApiCreateBox`. It is renumbered into the shim's traversal
+/// order (`walk` then `walk_more`, the `sc_edgeuse_graph.h` walk) and names its
+/// geometry under arena identities ([`Brep::use_arena_naming`], as the import did). The
+/// output of a failed build otherwise.
+///
+/// # Errors
+///
+/// A harness error for a source the shim would not accept either or a dangling
+/// reference in the renumbering.
+pub(crate) fn own_brep(k: &mut Kernel, b: &StitchBrep) -> Result<Result<Brep, Output>, HarnessError> {
+    use crate::own_builder::{build_any, build_status, finish, in_new_brep, Built, Conventions};
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    let built = match b {
+        StitchBrep::Brep {
+            brep,
+            validate_only,
+            init_gaps,
+        } => build_any(k, brep, *validate_only, *init_gaps, conv)?,
+        StitchBrep::Sheets { faces } => {
+            let surfaces = faces
+                .iter()
+                .map(|f| super::topology_edgeuse_p1::surface_of(&f.surface).map(|s| (s, f.dom)))
+                .collect::<Result<Vec<_>, _>>()?;
+            let raw = in_new_brep(k, |k, b| {
+                for (s, dom) in surfaces {
+                    crate::own_builder::create_face(k, b, s, dom)?;
+                }
+                Ok(())
+            })?;
+            finish(k, raw, false, false, conv)?
+        }
+        StitchBrep::Box { p, size } => {
+            let raw = solidcore::primitive::api_primitives::create_box(
+                k,
+                Point3::new(p[0], p[1], p[2]),
+                size[0],
+                size[1],
+                size[2],
+            );
+            finish(k, raw, false, false, conv)?
+        }
+    };
+    match built {
+        Built::Brep(b) => {
+            let mut b = *b;
+            b.use_arena_naming()
+                .map_err(|e| harness(format!("rust naming: {e}")))?;
+            Ok(Ok(b))
+        }
+        Built::Failed(e) => Ok(Err(Output::unported(&e).unwrap_or_else(|| {
+            Output::err(format!("brep_build_status_{}", build_status(&e)))
+        }))),
+    }
+}
+
+/// The Rust B-rep of the `SmApiCreateBox(origin, 1, 1, 1)` block ([`own_brep`]), for
+/// the runners that run on the shim's unit box; a failed build is a harness error.
+///
+/// # Errors
+///
+/// As [`own_brep`], and when the box cannot be built.
+pub(crate) fn own_unit_box(origin: [f64; 3]) -> Result<Brep, HarnessError> {
+    let mut k = Kernel::default();
+    own_brep(
+        &mut k,
+        &StitchBrep::Box {
+            p: origin,
+            size: [1.0; 3],
+        },
+    )?
+    .map_err(|o| harness(format!("rust box build failed: {o:?}")))
 }
 
 pub(crate) fn build_failure(export: &[f64]) -> Output {
@@ -571,43 +637,6 @@ fn args(op: &Resolved) -> (Op, Vec<f64>) {
     (code, v)
 }
 
-/// The deferral of an op evaluating geometry on a B-rep with inexact geometry.
-pub(crate) fn inexact(types: &ImportTypes) -> Option<Output> {
-    if let Some(t) = (0..types.face_surface_types.len())
-        .filter_map(|f| types.inexact_surface(f))
-        .find(|t| !EXACT_SURFACES.contains(t))
-    {
-        return Some(Output::deferred(
-            HARNESS_ANALYTIC_IMPORT,
-            format!(
-                "{} face surface exported as its B-spline part",
-                super::topology_edgeuse_p1::surface_class_name(t)
-            ),
-        ));
-    }
-    if (0..types.edge_curve_types.len())
-        .filter_map(|e| types.inexact_curve(e))
-        .any(|t| t >= 0 && !EXACT_CURVES.contains(&t))
-    {
-        return Some(Output::deferred(
-            HARNESS_ANALYTIC_IMPORT,
-            "analytic edge curve exported as its B-spline part",
-        ));
-    }
-    None
-}
-
-/// Whether the op evaluates curves or surfaces (and so defers on inexact geometry).
-fn evaluates_geometry(op: &Resolved) -> bool {
-    match op {
-        Resolved::Export | Resolved::VPairs { .. } => false,
-        Resolved::Api {
-            null_brep, which, ..
-        } => !*null_brep && *which != 5,
-        _ => true,
-    }
-}
-
 // ---- C++ side ---------------------------------------------------------------------------
 
 fn guarded_output(o: Vec<f64>) -> Output {
@@ -623,15 +652,16 @@ fn run_cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let Some((_, graph_at)) = counts(&ex) else {
         return Ok(build_failure(&ex));
     };
-    let (b, types) = super::topology_brep_p1::import_raw(&ex, graph_at)?;
+    // both sides resolve the selectors and parameters on the Rust build ([`own_brep`]),
+    // so they get the same numbers; the C++ side on the import of its export only when
+    // the Rust build fails
+    let b = match own_brep(&mut Kernel::default(), &i.brep)? {
+        Ok(b) => b,
+        Err(_) => super::topology_brep_p1::import_raw(&ex, graph_at)?.0,
+    };
     let Some(op) = resolve(k, &i.op, &b)? else {
         return Ok(no_entity());
     };
-    if evaluates_geometry(&op) {
-        if let Some(d) = inexact(&types) {
-            return Ok(d);
-        }
-    }
     let (code, a) = args(&op);
     let mut input = block_of(&i.brep)?;
     input.extend(a);
@@ -886,24 +916,19 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
     }
 }
 
-fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
-    let ex = export(&i.brep)?;
-    let Some((_, graph_at)) = counts(&ex) else {
-        return Ok(build_failure(&ex));
+fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
+    // one context for the build, the resolution and the op, as the shim's
+    let mut k = Kernel::default();
+    let mut b = match own_brep(&mut k, &i.brep)? {
+        Ok(b) => b,
+        Err(o) => return Ok(o),
     };
-    let (mut b, types) = super::topology_brep_p1::import(&ex, graph_at)?;
-    let Some(op) = resolve(k, &i.op, &b)? else {
+    let Some(op) = resolve(&k, &i.op, &b)? else {
         return Ok(no_entity());
     };
-    if evaluates_geometry(&op) {
-        if let Some(d) = inexact(&types) {
-            return Ok(d);
-        }
-    }
     if matches!(op, Resolved::Export) {
         return Ok(Output::new().values("out", Vec::new()));
     }
-    let mut k = Kernel::default();
     match run_rust_op(&mut k, &mut b, &op) {
         Ok(o) => Ok(guarded_output(o)),
         Err(e) => match Output::unported(&e) {
@@ -1080,8 +1105,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
-        run_rust(k, &case.parse::<Inputs>()?)
+        run_rust(&case.parse::<Inputs>()?)
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {

@@ -1013,19 +1013,6 @@ impl ImportTypes {
     }
 }
 
-/// The upstream class of an `SmBSplineSurface` subclass type code, for deferral symbols.
-pub(crate) const fn surface_class_name(t: i64) -> &'static str {
-    match t {
-        15012 => "SmCone",
-        15013 => "SmCylinder",
-        15014 => "SmSphere",
-        15015 => "SmTorus",
-        15030 => "SmSurfOfExtrusion",
-        15020 => "SmSurfOfRevolution",
-        _ => "analytic",
-    }
-}
-
 /// A face's surface block: an exact analytic head (`2 ...`,
 /// [`crate::util::read_exact_surface`]) and the regular block after it, or the regular
 /// block alone. Returns the surface and whether the export carried it exactly (the

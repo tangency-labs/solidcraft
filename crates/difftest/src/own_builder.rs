@@ -336,27 +336,6 @@ pub(crate) fn finish(
     Ok(Built::Brep(Box::new(b)))
 }
 
-/// A shim's `.smb` file source (`SmBrep::ReadFromFile(ctx, path, SM_ASCII, rebuild)`
-/// into `new (ctx) SmBrep()`), read by the Rust reader ([`crate::own_reader`]) and
-/// finished as a built source ([`finish`]): renumbered into the shim's traversal order
-/// under `conv`, so selector indices name the same entities on both sides. A failed
-/// Rust read is the build's error, as the shim's NULL build reports its status.
-///
-/// # Errors
-///
-/// A harness error when the file cannot be opened, or as [`finish`].
-pub(crate) fn read_as(
-    k: &mut Kernel,
-    path: &str,
-    rebuild: bool,
-    validate_only: bool,
-    init_gaps: bool,
-    conv: &Conventions<'_>,
-) -> Result<Built, HarnessError> {
-    let raw = crate::own_reader::read_file_rebuild(k, path, rebuild)?;
-    finish(k, raw, validate_only, init_gaps, conv)
-}
-
 /// The B-rep of an `.smb` file source as the shim's `build` makes it: `new SmBrep`,
 /// `ReadFromFile(path, SM_ASCII, rebuild)` read by the Rust reader
 /// ([`crate::own_reader::read_file_rebuild`]), `m_bValidateOnly`, then (with
@@ -387,6 +366,48 @@ pub(crate) fn read_with(
         }
     }
     Ok(Built::Brep(Box::new(b)))
+}
+
+/// A shim's `.smb` file source (`SmBrep::ReadFromFile(ctx, path, SM_ASCII, rebuild)`
+/// into `new (ctx) SmBrep()`), read by the Rust reader ([`crate::own_reader`]) and
+/// finished as a built source ([`finish`]): renumbered into the shim's traversal order
+/// under `conv`, so selector indices name the same entities on both sides. A failed
+/// Rust read is the build's error, as the shim's NULL build reports its status.
+///
+/// # Errors
+///
+/// A harness error when the file cannot be opened, or as [`finish`].
+pub(crate) fn read_as(
+    k: &mut Kernel,
+    path: &str,
+    rebuild: bool,
+    validate_only: bool,
+    init_gaps: bool,
+    conv: &Conventions<'_>,
+) -> Result<Built, HarnessError> {
+    let raw = crate::own_reader::read_file_rebuild(k, path, rebuild)?;
+    finish(k, raw, validate_only, init_gaps, conv)
+}
+
+/// Any source of the shim's `build` under `conv`: an `.smb` file read by the Rust
+/// reader ([`read_as`]), every other kind built by the Rust kernel ([`build_with`]).
+///
+/// # Errors
+///
+/// As [`read_as`] and [`build_with`].
+pub(crate) fn build_any(
+    k: &mut Kernel,
+    src: &BrepIn,
+    validate_only: bool,
+    init_gaps: bool,
+    conv: &Conventions<'_>,
+) -> Result<Built, HarnessError> {
+    if let BrepIn::File { rebuild, .. } = src {
+        let path = crate::units::topology_edgeuse_p1::path_of(Some(src))?;
+        return read_as(k, &path, *rebuild, validate_only, init_gaps, conv);
+    }
+    build_with(k, src, validate_only, init_gaps, conv)?
+        .ok_or_else(|| harness("own builder: a non-file source was not built"))
 }
 
 /// `new (ctx) SmBrep()` then `f` on it: the B-rep, or the build's error.
@@ -787,7 +808,11 @@ fn ellipse_face(k: &mut Kernel, b: &mut Brep, i: &EllipseIn) -> Result<(), Solid
 /// (the arena order of a [`renumber_with`]ed B-rep); with `vertex_edge_gaps` each vertex
 /// use's `GetVertexEdgeGap` follows when `HasVertexEdgeGap`. Their statuses are
 /// ignored, as there; an unported callee is returned.
-fn init_gap_walk(k: &Kernel, b: &mut Brep, vertex_edge_gaps: bool) -> Result<(), SolidError> {
+pub(crate) fn init_gap_walk(
+    k: &Kernel,
+    b: &mut Brep,
+    vertex_edge_gaps: bool,
+) -> Result<(), SolidError> {
     use solidcore::topology::vertexuse as vu1;
     let vus: Vec<VertexuseId> = b.vertexuses().ids().collect();
     for vu in vus {

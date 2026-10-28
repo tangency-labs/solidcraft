@@ -1,6 +1,6 @@
 //! Actual paired classifications; each role resolves into one retained real box.
 use super::{
-    brep_p1, counts, ffi, h, status, topo_edge, Brep, ClassGeometry, ClassGeometryMut, ClassObject,
+    brep_p1, ffi, h, status, topo_edge, Brep, ClassGeometry, ClassGeometryMut, ClassObject,
     ClassObjectKind, Curve, CurveClassification, CurveInterval, EntityRef, HarnessError, Kernel,
     MergeContext, MergeIntervalBrep, Output, PointClassType, PointClassification, Surface, Vec3,
     Volume,
@@ -135,13 +135,8 @@ impl MergeIntervalBrep<Object> for Pair {
     }
 }
 fn box_at(origin: [f64; 3]) -> Result<Brep, HarnessError> {
-    let ex =
-        super::super::heal_stitch_p1::export(&super::super::heal_stitch_p1::StitchBrep::Box {
-            p: origin,
-            size: [1.; 3],
-        })?;
-    let (_, at) = counts(&ex).ok_or_else(|| h("paired box export failed"))?;
-    Ok(super::super::topology_brep_p1::import(&ex, at)?.0)
+    // built by the Rust kernel (no C++ export reaches the Rust side)
+    super::super::heal_stitch_p1::own_unit_box(origin)
 }
 fn selected(b: &Brep) -> Result<(EdgeId, [VertexId; 2]), HarnessError> {
     let e = *brep_p1::edges(b, None)

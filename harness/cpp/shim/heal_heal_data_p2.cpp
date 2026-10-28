@@ -11,12 +11,11 @@
 // plus kind 4 (SmPrimitiveCreation::CreateBox, as prog_test
 // my_test_squeeze_edge_tracks_removal) and kind 5 (a full SmSphere face, as prog_test
 // my_test_closed_sphere_properties), kind 6 (an SmBrepConstructor face with one vertex
-// loop on a sphere, plane or torus) and kind 7 (prog_test
-// my_test_move_seam_refreshes_face_props' cone patch with a seam inside the trim). Surfaces and edge curves the shared exporters can
-// carry as their exact analytic kind (planes, circles and ellipses) are kept; any other
-// surface or edge curve is replaced by a plain B-spline copy (what the Rust import
-// rebuilds, as the heal.gap shim does). Then the graph is walked (with the vertex
-// lists) and exported, followed by each vertex's vertex use list.
+// loop on a sphere, plane or torus, as smHealTest.cpp) and kind 7 (prog_test
+// my_test_move_seam_refreshes_face_props' cone patch with a seam inside the trim). The
+// B-rep keeps its native geometry (the difftest runner builds the same B-rep with the
+// Rust kernel); the graph is walked (with the vertex lists) and exported only for its
+// entity counts.
 #include "sc_topology_fixture.h"
 
 #include <SmHashTable.h>
@@ -41,76 +40,7 @@ enum P2Op : int32_t
     P2_EXPORT = 0,
     P2_PROB = 1,
     P2_HEAL = 2,
-    P2_VLISTS = 3,
 };
-
-struct EdgePeek : SmEdge
-{
-    static SmCurve* SmEdge::*curve() { return &EdgePeek::m_pCurve; }
-};
-
-// A plain SmBSplineCurve of `c`'s NURB, or nullptr when `c` already is one (or a line)
-// or has no NURB.
-SmBSplineCurve* plain_curve(SmCurve* c)
-{
-    if (c == nullptr || !c->IsKindOf(SmBSplineCurve_TYPE) || c->GetType() == SmBSplineCurve_TYPE ||
-        c->GetType() == SmLine_TYPE)
-        return nullptr;
-    SmBSplineCurve* b = (SmBSplineCurve*)c;
-    gw_CURVE* nurb = b->GetGwNurbPointer();
-    if (nurb == nullptr)
-        return nullptr;
-    return new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
-}
-
-// Whether the shared graph exporter transports `c` as its exact analytic kind.
-// Probe that exporter instead of duplicating its eligibility and round-trip rules,
-// so normalise() keeps exactly the curves the Rust import rebuilds natively.
-bool exact_curve(const SmCurve* c)
-{
-    if (c == nullptr || (c->GetType() != SmEllipse_TYPE && c->GetType() != SmCircle_TYPE))
-        return false;
-    std::vector<double> head;
-    sc_exact_curve_export::put_export_curve(head, c, the_context(), put_curve);
-    return !head.empty() && head.front() == -3.0;
-}
-
-// Match the shared export/import: preserve exact analytic surfaces and edge curves,
-// and replace other surfaces and edge curves with plain B-splines, as the heal.gap
-// shim does. Replaced originals are left unowned and leaked.
-void normalise(Graph& g)
-{
-    for (SmFace* f : g.faces)
-    {
-        SmSurface* s = f->*FPeek::srf();
-        if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
-            s->GetType() == SmPlane_TYPE)
-            continue;
-        // Preserve every surface the shared export imports as its exact analytic kind.
-        std::vector<double> head;
-        if (sc_analytic_export::put_exact_head(head, s, the_context()))
-            continue;
-        SmBSplineSurface* b = (SmBSplineSurface*)s;
-        gw_SURFACE* nurb = b->GetGwNurbPointer();
-        if (nurb == nullptr)
-            continue;
-        SmBSplineSurface* nb = new (the_context()) SmBSplineSurface(sm_AllocateAndCopyNurbSurface(nurb), FALSE, NULL);
-        nb->GetOutOfBoundsEnabled() = b->GetOutOfBoundsEnabled();
-        nb->SetBSplineSurfaceForm(b->GetBSplineSurfaceForm());
-        f->*FPeek::srf() = nb;
-    }
-    for (SmEdge* e : g.edges)
-    {
-        SmCurve* c = e->*EdgePeek::curve();
-        // Keep circles/ellipses that the shared exporter can carry exactly; the
-        // healer then sees the same native kind as the imported Rust B-rep.
-        if (exact_curve(c))
-            continue;
-        SmBSplineCurve* nc = plain_curve(c);
-        if (nc != nullptr)
-            e->*EdgePeek::curve() = nc;
-    }
-}
 
 // Computes the cached vertex/face, vertex/edge, edge/face and edge/CCW-edge gaps, as
 // the fixture's `build` does for `init_gaps`, but over every vertex use (the walk
@@ -258,7 +188,7 @@ SmBrep* build_any(Rd& rd, const char* path, SmStatus& status)
     return brep;
 }
 
-// Builds, normalises and walks; nullptr with the status written to `o` on failure.
+// Builds and walks; nullptr with the status written to `o` on failure.
 SmBrep* prepare(Rd& rd, const char* path, Graph& g, std::vector<double>& o)
 {
     SmStatus status = SM_SUCCESS;
@@ -269,11 +199,6 @@ SmBrep* prepare(Rd& rd, const char* path, Graph& g, std::vector<double>& o)
         o.push_back(st(status));
         return nullptr;
     }
-    {
-        Graph g0;
-        walk(brep, g0, true);
-        normalise(g0);
-    }
     // the block's last value is `init_gaps`
     if (rd.at > 0 && rd.in[rd.at - 1] != 0.0)
         init_cached_gaps(brep);
@@ -281,75 +206,14 @@ SmBrep* prepare(Rd& rd, const char* path, Graph& g, std::vector<double>& o)
     return brep;
 }
 
-void put_vertex_lists(Graph& g, std::vector<double>& o)
-{
-    for (SmVertex* v : g.vertices)
-    {
-        std::vector<int64_t> l;
-        for (SmTopology* t : list_of(v->GetList()))
-            l.push_back(g.find(8, t));
-        put_list(o, l);
-    }
-}
-
-// The cached gap records of every edge use and vertex use (the export only has their
-// IsInit flags): per edge use `init gap eu0 eu1 t0 t1` (end/CCW-start) and
-// `init gap eu t u v` (edge/face), per vertex use `init gap vu t` (vertex/edge) and
-// `init gap vu u v` (vertex/face).
-void put_cached_gaps(Graph& g, std::vector<double>& o)
-{
-    for (SmEdgeuse* eu : g.edgeuses)
-    {
-        const SmEdgeEdgeGap& c = eu->*EuPeek::ccw_gap();
-        o.push_back(flg(c.IsInit()));
-        o.push_back(c.m_dGap3d);
-        o.push_back((double)g.find(6, c.GetEdgeuse(0)));
-        o.push_back((double)g.find(6, c.GetEdgeuse(1)));
-        o.push_back(c.GetEdgeT(0));
-        o.push_back(c.GetEdgeT(1));
-        const SmEdgeFaceGap& f = eu->*EuPeek::face_gap();
-        o.push_back(flg(f.IsInit()));
-        o.push_back(f.m_dGap3d);
-        o.push_back((double)g.find(6, f.GetEdgeuse(0)));
-        o.push_back(f.GetEdgeT(0));
-        SmPoint2d uv = f.GetFaceUV();
-        o.push_back(uv.x);
-        o.push_back(uv.y);
-    }
-    for (SmVertexuse* vu : g.vertexuses)
-    {
-        const SmVertexEdgeGap& e = vu->*VuPeek::edge_gap();
-        o.push_back(flg(e.IsInit()));
-        o.push_back(e.m_dGap3d);
-        o.push_back((double)g.find(8, e.GetVertexuse()));
-        o.push_back(e.GetEdgeT(0));
-        const SmVertexFaceGap& f = vu->*VuPeek::face_gap();
-        o.push_back(flg(f.IsInit()));
-        o.push_back(f.m_dGap3d);
-        o.push_back((double)g.find(8, f.GetVertexuse()));
-        SmPoint2d uv = f.GetFaceUV();
-        o.push_back(uv.x);
-        o.push_back(uv.y);
-    }
-}
-
-void run_export(Rd& rd, const char* path, std::vector<double>& o, bool lists)
+void run_export(Rd& rd, const char* path, std::vector<double>& o)
 {
     Graph g;
     SmBrep* brep = prepare(rd, path, g, o);
     if (brep == nullptr)
         return;
     o.push_back(0.0);
-    if (lists)
-    {
-        put_vertex_lists(g, o);
-        put_cached_gaps(g, o);
-        // the infinite region (SmBrep::m_pInfiniteRegion), which the shared graph export
-        // does not carry; Fix_InfiniteRegion walks the region list from it
-        o.push_back((double)g.find(0, brep->GetInfiniteRegion()));
-    }
-    else
-        export_graph(brep, g, o);
+    export_graph(brep, g, o);
     delete brep;
 }
 
@@ -1785,8 +1649,7 @@ SC_EXPORT int32_t sc_heal_heal_data_p2_eval(int32_t op, const char* path, const 
     std::vector<double> o;
     switch (op)
     {
-    case P2_EXPORT: run_export(rd, path, o, false); break;
-    case P2_VLISTS: run_export(rd, path, o, true); break;
+    case P2_EXPORT: run_export(rd, path, o); break;
     case P2_PROB: run_prob(rd, o); break;
     case P2_HEAL: run_heal(rd, path, o); break;
     default: return SC_ERR_ARG;

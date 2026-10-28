@@ -7,7 +7,8 @@
 //! `.smb` file, often the same file twice so that every edge has a coincident partner,
 //! or the wire network of `prog_test` `my_test_topology`), makes an
 //! `SmTopologyIntersector` over them, relates some vertex or edge pairs first, and runs
-//! one of the unit's three merges. The Rust side imports the same exports into the
+//! one of the unit's three merges. The Rust side builds the same B-reps with the Rust
+//! kernel (the p1 runner's `own_breps`; no C++ export reaches it) into the
 //! `boolean.topology_intersector_p1` runner's two-B-rep adapter (`Two`, extended here
 //! with [`IntersectorBrepP3`]) and runs the same merge on a [`TopologyIntersector`].
 //! Both sides produce one flat record: the pre-relation statuses, the merge's status
@@ -67,7 +68,7 @@ use solidcore_ffi::units::boolean_topology_intersector_p1 as ffi1;
 use solidcore_ffi::units::boolean_topology_intersector_p3::{self as ffi, Op};
 
 use super::boolean_topology_intersector_p1::{
-    brep_block, brep_h, build_failure, eid, fid, flag, harness, hd, path_of, put_h, BrepIn, Hin,
+    brep_block, brep_h, build_failure, own_breps, BrepPair, eid, fid, flag, harness, hd, path_of, put_h, BrepIn, Hin,
     Two, H, K_BREP, K_EDGE, K_EDGE_CURVE, K_FACE, K_FACE_SURFACE, K_NULL, K_TRIM_CURVE, K_VERTEX,
     K_VERTEXUSE,
     NULL_DEREF, TI_HANDLE,
@@ -325,7 +326,22 @@ fn apply_vertex_use_order(
     Ok(())
 }
 
-fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
+/// The B-reps a side resolves the merge on: the Rust build of the p1 runner's
+/// [`own_breps`] (the Rust `.smb` reader and constructors, renumbered into the
+/// fixture's traversal order, each vertex's uses in their native list order; no C++
+/// export reaches the Rust side). The C++ side resolves on the same Rust build, so both
+/// get the same numbers, and only when the Rust build fails on the import of its own
+/// exports with upstream's vertex use order.
+fn side_breps(
+    rust: bool,
+    i: &Inputs,
+) -> Result<BrepPair, Box<Result<Output, HarnessError>>> {
+    match own_breps(&i.brep_a, i.brep_b.as_ref()) {
+        Ok(Ok(x)) => return Ok(x),
+        Ok(Err(o)) if rust => return Err(Box::new(Ok(o))),
+        Err(e) if rust => return Err(Box::new(Err(e))),
+        _ => {}
+    }
     let [pa, pb] = paths(i).map_err(|e| Box::new(Err(e)))?;
     let bl = blocks(i).map_err(|e| Box::new(Err(e)))?;
     let ex = ffi::eval(Op::Export, [&pa, &pb], &bl)
@@ -333,16 +349,19 @@ fn prepare(i: &Inputs) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
     let Some((a, b)) = ffi1::split_exports(&ex) else {
         return Err(Box::new(Ok(build_failure(&ex))));
     };
-    let (brep_a, _) = import(&a).map_err(|e| Box::new(Err(e)))?;
-    let brep_b = match &b {
+    let (mut brep_a, _) = import(&a).map_err(|e| Box::new(Err(e)))?;
+    let mut brep_b = match &b {
         Some(b) => Some(import(b).map_err(|e| Box::new(Err(e)))?.0),
         None => None,
     };
-    let mut brep_a = brep_a;
-    let mut brep_b = brep_b;
     let uses = ffi::eval(Op::VertexUses, [&pa, &pb], &bl)
         .map_err(|e| Box::new(Err(harness(format!("c++ vertex uses: {e}")))))?;
     apply_vertex_use_order(&uses, &mut brep_a, brep_b.as_mut()).map_err(|e| Box::new(Err(e)))?;
+    Ok((brep_a, brep_b))
+}
+
+fn prepare(i: &Inputs, rust: bool) -> Result<Prepared, Box<Result<Output, HarnessError>>> {
+    let (brep_a, brep_b) = side_breps(rust, i)?;
     let count4 = |b: &Brep| {
         [
             b.vertices().len(),
@@ -464,7 +483,7 @@ fn encode(i: &Inputs, p: &Prepared) -> Result<Vec<f64>, HarnessError> {
 }
 
 fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    let p = match prepare(i) {
+    let p = match prepare(i, false) {
         Ok(p) => p,
         Err(r) => return *r,
     };
@@ -823,7 +842,7 @@ fn run_rust_merge(i: &Inputs, p: Prepared) -> Result<Vec<f64>, SolidError> {
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let p = match prepare(i) {
+    let p = match prepare(i, true) {
         Ok(p) => p,
         Err(r) => return *r,
     };

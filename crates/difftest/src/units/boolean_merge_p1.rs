@@ -1,9 +1,10 @@
 //! C++ parity for merge control, topology cleanup, face coincidence, vertex copies,
 //! region attributes and file-local region/translation helpers. Topology fixtures
-//! are constructed in C++ and imported as raw arena records before either helper
-//! runs, following the topology units. Deferred paths still run the native helper.
+//! are constructed by each side's own kernel (the Rust side's by the Rust `.smb` reader
+//! and constructors, renumbered into the fixture's traversal order; no C++ export
+//! reaches it); the C++ side's post-op graph is imported to compare it. Deferred paths still run the native helper.
 use super::topology_edgeuse_p1::{self as spec, BrepIn};
-use super::topology_vertexuse::{import, import_raw};
+use super::topology_vertexuse::import_raw;
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -23,7 +24,7 @@ use solidcore::topology::{
     LoopuseStart, RegionId, ShellId, VertexId, VertexuseId, VertexuseOwner,
 };
 use solidcore::SolidError;
-use solidcore_ffi::units::{boolean_merge_p1 as ffi, topology_vertexuse as fixture};
+use solidcore_ffi::units::boolean_merge_p1 as ffi;
 use std::collections::BTreeMap;
 
 /// The op of `find_brep_region_of_other_face` (`SmMerge::FindBrepRegionOfOtherFace`).
@@ -62,7 +63,10 @@ fn split_other_graph(record: &mut Vec<f64>) -> Result<Brep, HarnessError> {
     if end != record.len() {
         return Err(harness("face coincidence record has trailing values"));
     }
-    let (other, _) = import_raw(record.get(start..end).ok_or_else(short)?)?;
+    let (mut other, _) = import_raw(record.get(start..end).ok_or_else(short)?)?;
+    // the face loop lists and loop edge lists the export does not carry, derived from
+    // the exported uses as the Rust B-rep holds them (as `topology.brep_p5`)
+    other.refresh_cached_topology();
     record.truncate(len_at);
     Ok(other)
 }
@@ -162,6 +166,28 @@ fn control([a, b, c]: [u8; 3]) -> Vec<f64> {
     v.extend(flags(state.options));
     v.push(state.tag_id as f64);
     v
+}
+/// An operand's Rust B-rep, built by the Rust kernel ([`crate::own_builder::build_any`]:
+/// the Rust `.smb` reader or constructors, in the fixture's traversal order), with its
+/// geometry owned under arena identities (the B-rep cache solves of op 5's point
+/// classification, `BrepQuery::default`, find faces and edges by them, as upstream's by
+/// pointer); the output of a failed build otherwise.
+fn own_operand(k: &mut Kernel, src: &BrepIn) -> Result<Result<Brep, Output>, HarnessError> {
+    use crate::own_builder::{build_any, failed_output, Built, Conventions};
+    match build_any(k, src, false, false, &Conventions::TOPOLOGY_FIXTURE)? {
+        Built::Brep(b) => {
+            let mut b = *b;
+            crate::util::own_arena_geometry(&mut b);
+            // the new owners drop the face tolerances cached on the surfaces
+            let faces: Vec<_> = b.faces().ids().collect();
+            for f in faces {
+                b.sync_face_surface_tolerance(f)
+                    .map_err(|e| harness(e.to_string()))?;
+            }
+            Ok(Ok(b))
+        }
+        Built::Failed(e) => Ok(Err(failed_output(&e))),
+    }
 }
 fn block(i: &Inputs) -> Result<(String, Vec<f64>), HarnessError> {
     if i.op == 0 {
@@ -1104,7 +1130,11 @@ impl UnitDiff for Runner {
             .checked_add(2)
             .ok_or_else(|| harness("record count overflow"))?;
         let raw = v.get(end..).ok_or_else(|| harness("short graph"))?;
-        let (b, _) = import_raw(raw)?;
+        let (mut b, _) = import_raw(raw)?;
+        // the face loop lists and loop edge lists the export does not carry, derived
+        // from the exported uses as the Rust B-rep holds them (the Rust side builds its
+        // input itself, so its faces and loops have them; as `topology.brep_p5`)
+        b.refresh_cached_topology();
         let mut record = v
             .get(2..end)
             .ok_or_else(|| harness("short record"))?
@@ -1121,43 +1151,22 @@ impl UnitDiff for Runner {
         if i.op == 0 {
             return Ok(Output::new().values("record", control(i.args)));
         }
-        let (path, block) = block(&i)?;
-        let raw = crate::export_memo::export("topology_vertexuse", &[&path], &block, || {
-            fixture::eval(fixture::Op::Export, &path, &block)
-        })
-        .map_err(|e| harness(e.to_string()))?;
-        let (mut b, exact) = import(&raw)?;
-        // the B-rep cache solves of op 5's point classification (`BrepQuery::default`)
-        // find the faces and edges by their arena identities, as upstream's by pointer
-        crate::util::own_arena_geometry(&mut b);
-        // the new owners drop the face tolerances the import cached on the surfaces
-        let faces: Vec<_> = b.faces().ids().collect();
-        for f in faces {
-            b.sync_face_surface_tolerance(f)
-                .map_err(|e| harness(e.to_string()))?;
-        }
-        // Op 5 without mates classifies points against `b` (SmBrep::Point3DClassify;
-        // with mates every edge is mated, so the radial sectors decide): a face surface
-        // the export carries only as its B-spline part would be classified against other
-        // geometry than the C++ one (the harness limitation of `query.face_p1`).
-        let [_, mates, _] = i.args;
-        let mated = mates != 0;
-        if i.op == OP_FIND_REGION && !mated && exact.iter().any(|&e| !e) {
-            return Ok(Output::deferred(
-                "harness:analytic-geometry-export",
-                "analytic face surface in the B-rep export",
-            ));
-        }
-        let (other_path, other_block) = other_block(&i)?;
-        let other_raw =
-            crate::export_memo::export("topology_vertexuse", &[&other_path], &other_block, || {
-                fixture::eval(fixture::Op::Export, &other_path, &other_block)
-            })
-            .map_err(|e| harness(e.to_string()))?;
-        let (mut other, _) = import(&other_raw)?;
+        // both B-reps built by the Rust kernel as the shim's fixture `build` makes them
+        // (no C++ export reaches the Rust side)
+        let mut k = Kernel::default();
+        let primary = i.brep.as_ref().ok_or_else(|| harness("B-rep op without brep"))?;
+        let mut b = match own_operand(&mut k, primary)? {
+            Ok(b) => b,
+            Err(o) => return Ok(o),
+        };
+        let other_src = i.other.as_ref().unwrap_or(primary);
+        let mut other = match own_operand(&mut k, other_src)? {
+            Ok(b) => b,
+            Err(o) => return Ok(o),
+        };
         // the FFI's selection guard: the selectors are taken modulo these counts
-        let counts = |raw: &[f64]| fixture::counts(raw).ok_or_else(|| harness("fixture rejected"));
-        if !ffi::selection_valid(i.op, &counts(&raw)?, &counts(&other_raw)?) {
+        let counts = crate::own_builder::counts;
+        if !ffi::selection_valid(i.op, &counts(&b), &counts(&other)) {
             return Err(harness("fixture lacks selected entity"));
         }
         match run_rust(&i, &mut b, &mut other) {
