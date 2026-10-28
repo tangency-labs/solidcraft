@@ -733,6 +733,7 @@ pub struct EvalCache {
 struct CachedEval {
     error: Option<String>,
     warning: Option<String>,
+    import_report: Option<Arc<kernel::ImportReport>>,
     ms: f64,
     state: Arc<ModelState>,
     /// What the state costs, worked out once when it was stored (see
@@ -938,6 +939,10 @@ pub struct FeatureResult {
     pub name: String,
     pub error: Option<String>,
     pub warning: Option<String>,
+    /// An Import feature's warnings by kind and part, with what came in of the file's parts
+    /// (`warning` is the first of them as the kernel words them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_report: Option<Arc<kernel::ImportReport>>,
     pub ms: f64,
     pub skipped: bool,
     /// Not evaluated on the document's current inputs: a feature at or after a sketch shown live
@@ -1868,6 +1873,7 @@ impl Model {
                     name: f.name.clone(),
                     error: None,
                     warning: None,
+                    import_report: None,
                     ms: 0.0,
                     skipped: true,
                     stale: false,
@@ -1903,6 +1909,7 @@ impl Model {
                     name: f.name.clone(),
                     error: c.error,
                     warning: c.warning,
+                    import_report: c.import_report,
                     ms: c.ms,
                     skipped: false,
                     stale: false,
@@ -1936,6 +1943,7 @@ impl Model {
                 b.made = crate::lineage::Made::Before;
             }
             let mut warning = None;
+            let mut import_report = None;
             // Face references by name: move each face point onto its named face (on the body the
             // feature names, when it names one and the face is there).
             let renamed;
@@ -1959,7 +1967,7 @@ impl Model {
             let r = match frame_error.or(bad_param) {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
-                    eval_feature(doc, &vals, f, &mut next, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+                    eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report).map_err(|e| kernel::KernelError::Failed(e.to_string()))
                 }),
             };
             if r.is_ok() {
@@ -2011,7 +2019,14 @@ impl Model {
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
             if !self.no_cache {
-                let e = CachedEval { error: error.clone(), warning: warning.clone(), ms, bytes: state.added_bytes(&before), state: state.clone() };
+                let e = CachedEval {
+                    error: error.clone(),
+                    warning: warning.clone(),
+                    import_report: import_report.clone(),
+                    ms,
+                    bytes: state.added_bytes(&before),
+                    state: state.clone(),
+                };
                 if let Some(k) = &self.kept.0 {
                     k.put(key, &e);
                 }
@@ -2025,6 +2040,7 @@ impl Model {
                 name: f.name.clone(),
                 error,
                 warning,
+                import_report,
                 ms,
                 skipped: false,
                 stale: false,
@@ -6214,7 +6230,14 @@ fn chamfer_with(
     })
 }
 
-fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+fn eval_feature(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+    import_report: &mut Option<Arc<kernel::ImportReport>>,
+) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     match &f.kind {
@@ -7018,6 +7041,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 let shown: Vec<&str> = imp.warnings.iter().take(3).map(String::as_str).collect();
                 let more = if n > 3 { format!(" (+{} more)", n - 3) } else { String::new() };
                 *warning = Some(format!("{}{more}", shown.join("; ")));
+                *import_report = Some(Arc::new(imp.report.clone()));
             }
             Ok(())
         }

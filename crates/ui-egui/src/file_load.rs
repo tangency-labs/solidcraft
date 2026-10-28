@@ -927,6 +927,8 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     app.set_status(
                         if made.result.get("read_only").and_then(Value::as_bool) == Some(true) {
                             crate::i18n::tr("document.opened_read_only").to_string()
+                        } else if let Some(summary) = crate::timeline::import_status(app, &made.result) {
+                            summary
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
                             format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
