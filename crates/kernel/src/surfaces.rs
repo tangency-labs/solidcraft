@@ -1255,7 +1255,7 @@ mod imp {
         checked(&sewn, "stitch")?;
         let (record, kept) = sewn.to_native_ordered().map_err(|e| failed(format!("SMLib stitch: {e}")))?;
         let h = if same_numbering(r, &back) { sewn.history().ok().and_then(|raw| raw.history(&[order], &kept).ok()) } else { None };
-        Ok((Body::from_smlib_record(sewn, record)?, h))
+        Ok((Body::from_smlib_record(record)?, h))
     }
 
     pub(super) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {

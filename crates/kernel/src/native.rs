@@ -126,7 +126,7 @@ pub fn decode_native_body(bytes: &[u8]) -> Result<Body> {
 }
 
 /// An SMLib body as a kernel body: SMLib's export mapped by `solidcraft_smlib` (canonical order,
-/// radians, pcurves) is the body's record, and the SMLib body is kept with it.
+/// radians, pcurves) is the body's record ([`Body::from_smlib_record`]).
 pub fn body_from_smlib(brep: &solidcraft_smlib::Brep) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "body_from_smlib");
     body_from_smlib_ordered(brep).map(|(body, _)| body)
@@ -137,8 +137,7 @@ pub fn body_from_smlib(brep: &solidcraft_smlib::Brep) -> Result<Body> {
 pub(crate) fn body_from_smlib_ordered(brep: &solidcraft_smlib::Brep) -> Result<(Body, Option<solidcraft_smlib::history::Order>)> {
     let _span = solidcraft_profile::span("kernel", "body_from_smlib_ordered");
     let (record, order) = brep.to_native_ordered().map_err(|e| KernelError::Failed(e.to_string()))?;
-    let handle = brep.try_clone().map_err(|e| KernelError::Failed(format!("SMLib: {e}")))?;
-    Ok((Body::from_smlib_record(handle, record)?, Some(order)))
+    Ok((Body::from_smlib_record(record)?, Some(order)))
 }
 
 /// `body` in SMLib, with where each of SMLib's faces and edges is in the body's face and edge
