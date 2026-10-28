@@ -23,6 +23,7 @@ pub mod construct;
 pub mod display_quality;
 pub mod display_units;
 mod document;
+pub mod drawing;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -34,6 +35,7 @@ mod format_offsets;
 pub mod frame;
 mod history_names;
 pub mod hole_reference;
+pub mod ids;
 pub use format_offsets::whole_profile_selection_from_value;
 pub mod joints;
 mod lineage;
@@ -69,8 +71,8 @@ pub mod sheet;
 pub mod text_params;
 
 pub use assembly::{
-    IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, map_point_expr, mat_inverse,
-    mat_mul, rigid,
+    BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, map_point_expr,
+    mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
 pub use eval::{

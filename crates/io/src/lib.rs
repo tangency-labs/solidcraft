@@ -14,15 +14,17 @@ mod dxf;
 mod dxf_out;
 pub mod formats;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, THUMBNAIL_SIZE, is_design_container, read_design_file, read_design_geometry,
-    read_design_preview, read_design_thumbnail, read_design_thumbnail_file, write_design_container, write_design_container_with_cache,
-    write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_thumbnail,
+    DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
+    read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
+    write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
+    write_design_container_with_thumbnail, write_drawing_container,
 };
 mod legacy_dir;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+pub mod paper;
 pub mod safe_write;
 mod sketch2d;
 mod svg;
@@ -68,6 +70,14 @@ pub fn is_design_path(path: &str) -> bool {
 /// Is this a design container file (`.sc` or a legacy extension, not plain JSON), any case?
 pub fn is_design_container_path(path: &std::path::Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(is_design_ext)
+}
+/// Drawing file extension: a drawing is a file of its own beside the designs it draws. Short and
+/// plain, as the browsers' file pickers take only ASCII letters, digits, `+` and `.`, up to 16 long.
+pub const DRAWING_EXT: &str = "scdwg";
+
+/// Is this a drawing file name (`.scdwg`, any case)?
+pub fn is_drawing_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(DRAWING_EXT))
 }
 /// Largest design file we read.
 pub const MAX_DESIGN_BYTES: usize = 256 << 20;
@@ -667,7 +677,11 @@ pub fn read_design(bytes: &[u8]) -> Result<Document> {
         return design::read(bytes);
     }
     let s = std::str::from_utf8(bytes).map_err(|_| IoError::Invalid("design file is not UTF-8 JSON".into()))?;
-    Ok(Document::from_json(s)?)
+    // Only a file that isn't a design pays for asking whether it is a drawing.
+    Document::from_json(s).map_err(|e| match file_kind(bytes) {
+        Ok(FileKind::Drawing) => IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()),
+        _ => e.into(),
+    })
 }
 
 /// Design file bytes.

@@ -485,7 +485,7 @@ fn mirror_y(r: &Region2) -> Region2 {
             .iter()
             .map(|s| match *s {
                 Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center: f(center), radius, start: -start, sweep: -sweep },
-                other => sheet::map_controls(&other, f),
+                other => other.map_controls(f),
             })
             .collect();
         Loop2 { segs }.ccw()

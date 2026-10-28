@@ -847,3 +847,48 @@ fn a_box_from_points_holds_them_and_grows() {
     assert_eq!((both.min, both.max), (Vec3::new(0.0, 1.0, 4.0), Vec3::new(1.0, 2.0, 5.0)));
     assert!(b.intersection(&far).is_empty());
 }
+
+/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
+/// points moved, its length scales, and an arc stays an arc turning the same way.
+#[test]
+fn a_similarity_moves_each_kind_of_segment_exactly() {
+    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+    let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];
+    for (i, q) in p.iter_mut().take(6).enumerate() {
+        *q = Vec2::new(i as f64, (i * i) as f64 * 0.3);
+    }
+    let segments = [
+        Seg2::Line { a: Vec2::new(1.0, 2.0), b: Vec2::new(4.0, -1.0) },
+        Seg2::Arc { center: Vec2::new(2.0, 1.0), radius: 3.0, start: 0.4, sweep: -2.1 },
+        Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1.0, 2.0), p2: Vec2::new(3.0, 2.0), p3: Vec2::new(4.0, 0.0) },
+        Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w: std::f64::consts::FRAC_1_SQRT_2 },
+        Seg2::Bezier { n: 5, p },
+    ];
+    for seg in segments {
+        let moved = seg.similar(&m);
+        for i in 0..=8 {
+            let t = f64::from(i) / 8.0;
+            assert!((moved.point_at(t) - m.apply(seg.point_at(t))).len() < 1e-9, "{seg:?} at {t}");
+        }
+        assert!((moved.length() - seg.length() * m.scale()).abs() < 1e-9 * seg.length().max(1.0), "{seg:?}");
+        assert_eq!(std::mem::discriminant(&moved), std::mem::discriminant(&seg));
+    }
+    // An arc keeps its sweep: the turning direction survives a similarity.
+    let arc = Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start: 0.0, sweep: -1.0 };
+    assert!(matches!(arc.similar(&m), Seg2::Arc { sweep, .. } if sweep == -1.0));
+    // The identity changes nothing.
+    let identity = Similarity2::new(1.0, 0.0, Vec2::ZERO).unwrap();
+    for seg in segments {
+        assert_eq!(seg.similar(&identity), seg);
+    }
+    // A similarity scales by a finite number above 0, and turns and moves by finite ones.
+    for (scale, angle, shift) in [
+        (0.0, 0.0, Vec2::ZERO),
+        (-1.0, 0.0, Vec2::ZERO),
+        (f64::NAN, 0.0, Vec2::ZERO),
+        (1.0, f64::INFINITY, Vec2::ZERO),
+        (1.0, 0.0, Vec2::new(f64::NAN, 0.0)),
+    ] {
+        assert!(Similarity2::new(scale, angle, shift).is_none(), "{scale} {angle} {shift:?}");
+    }
+}
