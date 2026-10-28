@@ -64,6 +64,10 @@ const CHECKS: usize = 16;
 /// How close, against the geometry's size, a closed-form pcurve must lift onto its edge to be
 /// taken as exact (rounding, well inside any tolerance).
 const EXACT: f64 = 1e-9;
+/// An edge's tolerance over its largest distance from a face's surface: a pcurve is accepted
+/// within half its edge's tolerance ([`pcurves_within`]), as SMLib's zone tolerance is half the
+/// record's, so a tolerance that covers a gap goes past twice it.
+pub const SURFACE_GAP_MARGIN: f64 = 3.0;
 
 /// For each loop of a face on `surface`, the pcurve of each of its edge uses, in order, within
 /// `tolerance` mm (or the use's own edge tolerance where larger) of the edge when lifted onto

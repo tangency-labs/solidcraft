@@ -1,5 +1,5 @@
 //! Exact mass properties from SMLib: area, volume, centroid and inertia, integrated on the exact
-//! surfaces rather than a tessellation, and the exact box.
+//! surfaces rather than a tessellation; the exact box; how far an edge lies from a face's surface.
 
 use crate::{Brep, Result, error, ffi};
 
@@ -46,6 +46,17 @@ impl Brep {
     /// and face on its exact curve or surface, not grown by tolerances or control hulls.
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
         ffi::measure::bounds(&self.0).map_err(error)
+    }
+
+    /// How far edge `edge` (its curve over its interval) lies from the surface of face `face`,
+    /// over that surface's own domain and not beyond it, in mm: SMLib's own edge/face gap, the
+    /// one it sizes an edge's tolerance by. Indices are in the body's edge and face order (as
+    /// it was imported and is exported). An edge run past its face's patch measures how far it
+    /// goes; SMLib keeps such an edge whole when making its UV trim only when its zone tolerance
+    /// (half the flat arrays' `EDGE_TOLERANCE`) covers this.
+    pub fn edge_face_distance(&self, edge: usize, face: usize) -> Result<f64> {
+        let (Ok(e), Ok(f)) = (i64::try_from(edge), i64::try_from(face)) else { return Err(error(ffi::ERR_ARG)) };
+        ffi::measure::edge_face_distance(&self.0, e, f).map_err(error)
     }
 
     /// Total area of every face, each counted once, so sheets and open shells too.

@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use solidcraft_geom::brep::pcurve::{TrimFace, Trims};
+use solidcraft_geom::brep::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
 use solidcraft_geom::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
 
 /// [`Trims`] by SMLib.
@@ -21,8 +21,12 @@ impl Trims for SmlibTrims {
 
 fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     let (record, bare) = sheet(face)?;
-    let arrays = crate::import::arrays_with_bare_uses(&record, &bare).map_err(|e| e.to_string())?;
-    let body = crate::flat::Flat::from_arrays(&arrays).and_then(|f| f.import()).map_err(|e| e.to_string())?;
+    let mut arrays = crate::import::arrays_with_bare_uses(&record, &bare).map_err(|e| e.to_string())?;
+    let import = |a: &crate::import::Arrays| crate::flat::Flat::from_arrays(a).and_then(|f| f.import()).map_err(|e| e.to_string());
+    let mut body = import(&arrays)?;
+    if cover_gaps(&body, face, &bare, &mut arrays)? {
+        body = import(&arrays)?;
+    }
     let (out, order) = body.to_native_ordered().map_err(|e| e.to_string())?;
     let [made] = out.faces.as_slice() else { return Err(format!("SMLib made {} faces of one", out.faces.len())) };
     let made_uses: Vec<&OrientedEdge> = made
@@ -56,6 +60,40 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
         result.push(pcs);
     }
     Ok(result)
+}
+
+/// Each bare use's edge measured against the face's surface as SMLib measures it (over the
+/// surface's own domain: an edge run a few um past its patch measures how far), and its
+/// `EDGE_TOLERANCE` in `arrays` raised to cover that gap with [`SURFACE_GAP_MARGIN`]: SMLib keeps
+/// an edge whole when making its trim only when its zone tolerance (half that) covers the gap, and
+/// otherwise trims the edge back to the patch. Whether any was raised; an edge farther off than
+/// SMLib's tolerances reach is refused with how far.
+fn cover_gaps(body: &crate::Brep, face: &TrimFace<'_>, bare: &HashSet<(u32, u32, u32)>, arrays: &mut crate::import::Arrays) -> Result<bool, String> {
+    let mut edges: Vec<usize> = Vec::new();
+    for (li, l) in face.loops.iter().enumerate() {
+        for (p, u) in l.iter().enumerate() {
+            let (Ok(li), Ok(p)) = (u32::try_from(li), u32::try_from(p)) else { return Err("too many uses".into()) };
+            if bare.contains(&(0, li, p)) && !edges.contains(&(u.edge as usize)) {
+                edges.push(u.edge as usize);
+            }
+        }
+    }
+    let mut raised = false;
+    for e in edges {
+        let gap = body.edge_face_distance(e, 0).map_err(|e| e.to_string())?;
+        let need = SURFACE_GAP_MARGIN * gap;
+        let tolerances = arrays.reals.get_mut(&crate::flat::EDGE_TOLERANCE).ok_or("edge tolerances")?;
+        let given = tolerances.get_mut(e).ok_or("edge reference")?;
+        if need <= *given {
+            continue;
+        }
+        if !(need <= crate::flat::MAX_TOLERANCE) {
+            return Err(format!("an edge lies {gap} mm off the face's surface"));
+        }
+        *given = need;
+        raised = true;
+    }
+    Ok(raised)
 }
 
 /// A pcurve SMLib made on its edge's interval `theirs`, on ours. SMLib may set an edge's end to
