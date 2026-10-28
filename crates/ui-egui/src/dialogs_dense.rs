@@ -1178,7 +1178,7 @@ fn extrude_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     form_row(ui, "Extent Type", |ui| {
         combo(ui, "ex_ext", &["Distance", "To Object", "All"], &mut ext);
         *all = ext == 2;
-        set_to_object(&mut d.inputs, &mut d.active, ext == 1);
+        set_object_input(&mut d.inputs, &mut d.active, TO_OBJECT, ext == 1);
     });
     if ext == 1 {
         input_row(d, ui, &app.session, app.preferences.origin_plane_names, TO_OBJECT);
@@ -1253,7 +1253,7 @@ fn extrude_rows(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
         form_row(ui, "Start", |ui| {
             combo(ui, "ex_start", &["Profile Plane", "Offset", "From Object"], &mut st);
             if st != old {
-                set_object(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
+                set_object_input(&mut d.inputs, &mut d.active, FROM_OBJECT, st == 2);
                 if st == 1 && start.is_empty() {
                     *start = length_default(&app.session, "5");
                 }

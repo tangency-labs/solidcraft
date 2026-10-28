@@ -1596,7 +1596,7 @@ impl Dialog {
         if !object_target(s, &reference, sel) {
             return false;
         }
-        set_to_object(&mut self.inputs, &mut self.active, true);
+        set_object_input(&mut self.inputs, &mut self.active, TO_OBJECT, true);
         let Some(at) = self.inputs.iter().position(|i| i.label == TO_OBJECT) else { return false };
         if let Some(input) = self.inputs.get_mut(at) {
             input.items = vec![sel.clone()];
@@ -2664,12 +2664,12 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
 /// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
 /// makes it the active input.
 fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) {
-    if !matches!(d.kind, Kind::Extrude { .. }) {
+    if !d.inputs.iter().any(|i| i.under_choice) {
         return input_rows_range(d, ui, s, names, 0..d.inputs.len());
     }
-    // An extrude's To Object and From Object show under the choices that add them.
-    let first: Vec<usize> = d.inputs.iter().enumerate().filter(|(_, i)| i.label != TO_OBJECT && i.label != FROM_OBJECT).map(|(n, _)| n).collect();
-    for i in first {
+    // The inputs a form draws under the choices that add them are left out here.
+    let listed: Vec<usize> = d.inputs.iter().enumerate().filter(|(_, i)| !i.under_choice).map(|(n, _)| n).collect();
+    for i in listed {
         input_rows_range(d, ui, s, names, i..i + 1);
     }
 }
@@ -3782,8 +3782,19 @@ pub(crate) fn preset_to_object(d: &mut Dialog, on: bool) {
 }
 
 fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
+    add_object(inputs, active, SelInput::new(label, FACES | selection::VERTICES, false), on);
+}
+
+/// [`set_object`] for an input the form draws itself, under the choice that adds it
+/// ([`SelInput::under_choice`]): an extrude's To Object under Extent Type, its From Object under Start.
+pub(crate) fn set_object_input(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
+    add_object(inputs, active, SelInput::new(label, FACES | selection::VERTICES, false).under_choice(), on);
+}
+
+fn add_object(inputs: &mut Vec<SelInput>, active: &mut usize, input: SelInput, on: bool) {
+    let label = input.label;
     if on && !object_on(inputs, label) {
-        inputs.push(SelInput::new(label, FACES | selection::VERTICES, false));
+        inputs.push(input);
         *active = inputs.len() - 1;
     } else if !on && object_on(inputs, label) {
         inputs.retain(|i| i.label != label);
@@ -5809,7 +5820,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let frame = feature_frame(s, f.component);
             for (label, point) in [(TO_OBJECT, extent.to), (FROM_OBJECT, extent.from)] {
                 if let Some(point) = point {
-                    set_object(&mut d.inputs, &mut d.active, label, true);
+                    set_object_input(&mut d.inputs, &mut d.active, label, true);
                     // The face the point is on, as it was picked: a bare point's chip reads
                     // as sketch coordinates, (0.00, 0.00) mm with no sketch open.
                     let point = solidcraft_engine::doc::apply_point(&frame, point.0);
