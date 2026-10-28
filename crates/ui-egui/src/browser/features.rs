@@ -55,16 +55,16 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
 
 pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
     // Compact history: every feature of the component, sketches too, in history order with the
-    // marker, in place of the timeline.
+    // marker, in place of the timeline. Otherwise only what is built: features behind the marker
+    // leave the browser.
     let compact = app.preferences.history_in_browser;
+    let rolled_to = app.session.doc.marker;
+    let listed = |index: usize| compact || rolled_to.is_none_or(|marker| index < marker);
     let has_features = match app.tree.model.as_ref().filter(|m| m.matches(&app.session) && !compact) {
-        Some(model) => model.features.get(&component).is_some_and(|features| !features.is_empty()),
-        None => app
-            .session
-            .doc
-            .features
-            .iter()
-            .any(|feature| feature.component == component && (compact || !matches!(feature.kind, FeatureKind::Sketch { .. }))),
+        Some(model) => model.features.get(&component).is_some_and(|features| features.iter().any(|&index| listed(index))),
+        None => app.session.doc.features.iter().enumerate().any(|(index, feature)| {
+            listed(index) && feature.component == component && (compact || !matches!(feature.kind, FeatureKind::Sketch { .. }))
+        }),
     };
     if !has_features {
         return;
@@ -102,7 +102,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         if id.is_some_and(|id| lit.contains(&id) || from_view.contains(&Some(id))) { Mark::Here } else { Mark::None }
     };
     if !compact {
-        for index in indices {
+        for index in indices.into_iter().filter(|&index| listed(index)) {
             let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index));
         }
         return;
@@ -357,6 +357,25 @@ mod tests {
         assert_eq!(at["ok"], true, "{at}");
         assert_eq!(h.app.session.doc.to_json(), saved);
         assert_eq!(h.app.session.undo.len(), undo);
+    }
+
+    #[test]
+    fn browser_features_after_history_marker_are_not_listed() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"First"})).unwrap();
+        let first = h.app.session.doc.features[0].name.clone();
+        h.app.run("solid.box", json!({"length":20,"width":10,"height":10,"body_name":"Later"})).unwrap();
+        h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+
+        for cache in ["current", "missing", "stale"] {
+            assert_eq!(feature_rows(&mut h, cache), ["Features".to_owned(), first.clone()], "{cache}");
+        }
+
+        h.app.run("timeline.roll_to", json!({"position":0})).unwrap();
+        for cache in ["current", "missing", "stale"] {
+            assert!(feature_rows(&mut h, cache).is_empty(), "{cache}: an empty rolled-back Features folder is hidden");
+        }
     }
 
     #[test]
@@ -616,7 +635,7 @@ mod tests {
     }
 
     /// A feature's browser row has the timeline's actions: its sketch button and menu edit the
-    /// profile sketch, and the menu suppresses and rolls back; rolled-back rows stay listed.
+    /// profile sketch, and the menu suppresses and rolls back; rolled-back rows leave the browser.
     #[test]
     fn browser_feature_row_edits_its_sketch_suppresses_and_rolls_back() {
         let mut h = Harness::new();
@@ -663,7 +682,8 @@ mod tests {
         let pad_index = h.app.session.doc.feature_index(pad).unwrap();
         assert_eq!(h.app.session.doc.marker, Some(pad_index + 1), "the marker goes right after the feature");
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
-        assert!(labels.contains(&block_name), "a rolled-back feature stays listed: {labels:?}");
+        assert!(labels.contains(&pad_name), "the feature before the marker remains listed: {labels:?}");
+        assert!(!labels.contains(&block_name), "a rolled-back feature leaves the browser: {labels:?}");
     }
 
     fn settle_heavy(h: &mut Harness) {

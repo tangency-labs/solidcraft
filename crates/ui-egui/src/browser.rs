@@ -1111,7 +1111,7 @@ fn model_body_indices(app: &SolveApp, component: u64) -> Vec<usize> {
 }
 
 fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<usize> {
-    match app.tree.model.as_ref().filter(|model| model.matches(&app.session)) {
+    let indices = match app.tree.model.as_ref().filter(|model| model.matches(&app.session)) {
         Some(model) => (if sketches { &model.sketches } else { &model.planes }).get(&component).cloned().unwrap_or_default(),
         None => app
             .session
@@ -1131,7 +1131,8 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
                 (f.component == component && kind).then_some(i)
             })
             .collect(),
-    }
+    };
+    if sketches { indices.into_iter().filter(|&index| app.session.doc.marker.is_none_or(|marker| index < marker)).collect() } else { indices }
 }
 
 fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
