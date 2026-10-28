@@ -1961,6 +1961,14 @@ impl Session {
         }
         let mut expected = (*original.doc).clone();
         expected.marker = source.doc.marker;
+        // Rolling the marker solves the joints again and stores where that puts each occurrence.
+        if expected.occurrences.len() == source.doc.occurrences.len() {
+            for (e, s) in expected.occurrences.iter_mut().zip(&source.doc.occurrences) {
+                if e.id == s.id {
+                    e.transform = s.transform;
+                }
+            }
+        }
         if expected != *source.doc {
             return Err(EngineError::Other("the original editor model does not match its source design".into()));
         }
