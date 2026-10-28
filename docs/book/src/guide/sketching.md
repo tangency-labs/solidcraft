@@ -318,7 +318,10 @@ The solver is SolidCraft's own (damped Gauss–Newton with degree-of-freedom ana
 coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, concentric, collinear,
 midpoint, symmetry, fix, curvature (G2) and polygon. **Sketch Dimension** (D) adds linear,
 aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, circle-to-circle,
-radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points. Each is a parameter
+radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points.
+An ellipse is drawn with its major and minor axes as construction lines through its centre.
+Click the ellipse and pull the value across its major axis for the major half-axis, or out past an
+end of the major axis for the minor half-axis; click an axis line for the whole axis. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
 Press D, click what you want to measure and type the value: as soon as the click settles the
