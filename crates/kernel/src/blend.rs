@@ -225,7 +225,94 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
 pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_setback");
     body.require_brep("fillet")?;
+    setbacks_reach(body, edges, radius, setbacks)?;
     crate::blend_smlib::fillet_setback(body, edges, radius, setbacks).and_then(|b| closed(body, b))
+}
+
+/// Refuses a setback that does not reach past where its corner's rounds meet without one
+/// ([`setback_minimum`]), naming the least it must exceed, at a corner where every edge is one
+/// of `edges` (the others are SMLib's to refuse). SMLib fails there with its own status
+/// (smlib_blend_setback): its patch does not join contact lines that already cross.
+fn setbacks_reach(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<()> {
+    let faces = Faces::of(body)?;
+    let (picked, _) = crate::blend_smlib::picked_edges(body, edges)?;
+    let picked: BTreeSet<usize> = picked.into_iter().collect();
+    let reach = body.size() * 0.05 + 1e-3;
+    for (at, distance) in setbacks {
+        let nearest = (0..faces.rec.vertices.len())
+            .filter_map(|v| u32::try_from(v).ok())
+            .filter_map(|v| faces.point(v).map(|p| (p.dist(*at), v)))
+            .filter(|(d, _)| *d <= reach)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((_, v)) = nearest else { continue };
+        let all_rounded = (0..faces.rec.edges.len())
+            .filter(|e| faces.rec.edges.get(*e).is_some_and(|x| !x.uses.is_empty() && x.vertices.contains(&v)))
+            .all(|e| picked.contains(&e));
+        if !all_rounded {
+            continue;
+        }
+        let Some(least) = setback_minimum(&faces, v, radius) else { continue };
+        if *distance <= least * (1.0 + 1e-9) {
+            let p = faces.point(v).unwrap_or(*at);
+            let shown = format!("{:.4}", least).trim_end_matches('0').trim_end_matches('.').to_string();
+            let why = if (least - radius).abs() <= radius * 1e-9 {
+                format!("more than the radius ({shown} mm)")
+            } else {
+                format!("more than {shown} mm")
+            };
+            return Err(KernelError::Invalid(format!(
+                "the setback must be {why} at the corner ({:.3}, {:.3}, {:.3}): the rounds' contact lines meet {shown} mm from it along its edges, \
+                 and the corner's patch starts past that",
+                p.x, p.y, p.z
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// The least setback a corner of rounds of `radius` at `vertex` takes: on each face at the
+/// corner, the contact lines (rails) of the two rounded edges beside it cross, and a setback
+/// must reach past that crossing along both edges (smlib_blend_setback). A rail lies
+/// r tan(psi / 2) from its edge, psi the angle between the outward normals of the edge's two
+/// faces (r on faces square to each other); the rails of edges at angle alpha on a face, d1 and
+/// d2 from them, cross (d2 + d1 cos alpha) / sin alpha along the first edge from the vertex.
+/// Exact for planar faces and straight edges; `None` for a corner with any other (left to SMLib)
+/// or one it cannot read.
+fn setback_minimum(faces: &Faces, vertex: u32, radius: f64) -> Option<f64> {
+    let at: Vec<usize> = (0..faces.rec.edges.len())
+        .filter(|e| faces.rec.edges.get(*e).is_some_and(|x| !x.uses.is_empty() && x.vertices.contains(&vertex)))
+        .collect();
+    if at.len() < 3 {
+        return None;
+    }
+    // Each edge's direction away from the vertex and its rail's distance from it.
+    let mut away = Vec::with_capacity(at.len());
+    let mut rail = Vec::with_capacity(at.len());
+    for e in &at {
+        let [a, b] = faces.rec.edges.get(*e)?.vertices;
+        if a == b || !faces.straight(*e) {
+            return None;
+        }
+        let (pa, pb) = faces.ends(*e)?;
+        away.push(if a == vertex { (pb - pa).normalized()? } else { (pa - pb).normalized()? });
+        let [f, g]: [u32; 2] = faces.faces_of(*e).into_iter().collect::<Vec<_>>().try_into().ok()?;
+        let cos = faces.plane_normal(f as usize)?.dot(faces.plane_normal(g as usize)?).clamp(-1.0, 1.0);
+        rail.push(radius * (cos.acos() / 2.0).tan());
+    }
+    let mut least: f64 = 0.0;
+    let around: BTreeSet<u32> = at.iter().flat_map(|e| faces.faces_of(*e)).collect();
+    for f in around {
+        let beside: Vec<usize> = (0..at.len()).filter(|i| at.get(*i).is_some_and(|e| faces.faces_of(*e).contains(&f))).collect();
+        let [i, j] = beside[..] else { return None };
+        let cos = away.get(i)?.dot(*away.get(j)?).clamp(-1.0, 1.0);
+        let sin = (1.0 - cos * cos).sqrt();
+        if sin <= 1e-9 {
+            return None;
+        }
+        let (di, dj) = (*rail.get(i)?, *rail.get(j)?);
+        least = least.max((dj + di * cos) / sin).max((di + dj * cos) / sin);
+    }
+    (least.is_finite() && least > 0.0).then_some(least)
 }
 
 /// [`fillet`] whose corners where three or more rounded edges meet are G2 patches
@@ -298,6 +385,7 @@ pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(
         }
     }
     let set_back: Vec<(Vec3, f64)> = corners.iter().copied().zip(distance).collect();
+    setbacks_reach(body, edges, radius, &set_back)?;
     let open = crate::blend_smlib::fillet_setback_open(body, edges, radius, &set_back)?;
     let mut patches = Vec::with_capacity(open.holes.len());
     for hole in &open.holes {

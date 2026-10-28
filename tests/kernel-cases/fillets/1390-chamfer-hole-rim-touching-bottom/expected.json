@@ -7,5 +7,6 @@
  "what": "a 3 mm chamfer on the rim of a hole that is tangent to the bottom face runs off that face and must not add material below the part",
  "source": "invariants",
  "method": "cube 20 with a diameter 10 hole along -Y from the back face, its axis at z=5 so the hole wall touches the bottom face z=0 along one line. The hole rim on the back face has no face material between it and the bottom edge there, so a 3 mm setback cannot lie on the face: no chamfer of that size exists. The right answer is a clean refusal (a chamfer of a convex edge only ever removes material; building it grew the part by 1067 mm3 below the bottom face).",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "larger than the faces beside its edges allow"
 }

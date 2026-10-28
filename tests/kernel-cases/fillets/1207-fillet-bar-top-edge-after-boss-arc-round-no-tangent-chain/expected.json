@@ -4,7 +4,8 @@
  ],
  "what": "after the boss's partial base arc is rounded r2, the bar's top edge that runs into the round rounded r2 without its tangent chain",
  "source": "invariants",
- "method": "bar and boss as 1207-fillet-bar-top-edge-and-boss-arc-together; the base arc rounded r2 first (V0 + 28.9190), running out over the front face where its section is a curve on that face tangent to the bar's top edge; then that edge rounded r2 alone (tangent chain off): it ends where the section curve goes on tangentially, so a clean refusal or a valid body",
+ "method": "bar and boss as 1207-fillet-bar-top-edge-and-boss-arc-together; the base arc rounded r2 first (V0 + 28.9190), running out over the front face where its section is a curve on that face tangent to the bar's top edge; then that edge rounded r2 alone (tangent chain off): it ends where the section curve goes on tangentially, so a valid body or a refusal saying so (the edge continues tangentially)",
  "body_count": 1,
- "outcome": "solid_or_refused"
+ "outcome": "solid_or_refused",
+ "refusal": "continues tangentially"
 }
