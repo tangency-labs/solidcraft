@@ -35,6 +35,9 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("view.save", "New Named View", view_save)
         .icon("camera")
         .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
+    CommandSpec::new("view.plane_size", "Resize Plane", plane_size).icon("scale").params(
+        "plane: construction plane name; extent: [x0, y0, x1, y1] (mm, in the plane's own x and y about its origin) | null (back to a size that follows the zoom). Display only",
+    ),
     CommandSpec::new("view.rename", "Rename Named View", view_rename).icon("rename").params("view: name, name"),
     CommandSpec::new("view.delete", "Delete Named View", view_delete).icon("delete").params("view: name"),
     CommandSpec::new("view.list", "List Named Views", view_list).icon("list").noundo().doc_only(),
@@ -733,6 +736,41 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     d.named_views.retain(|x| x.name != name);
     d.named_views.push(v);
     Ok(json!({ "view": name }))
+}
+
+/// Most a plane's drawn rectangle reaches from its origin, mm.
+const MAX_PLANE_EXTENT: f64 = 1e7;
+
+/// The size a construction plane is drawn at: a rectangle of its own (dragged by its edges and
+/// corners in the view), or (`extent: null`) a square that follows the zoom.
+fn plane_size(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.plane_size";
+    let name = str_(p, "plane").ok_or_else(|| bad(cmd, "`plane` must name a construction plane"))?;
+    let id = crate::view::construction_planes(s)
+        .into_iter()
+        .find(|(_, n, _)| n == name)
+        .map(|(id, _, _)| id)
+        .ok_or_else(|| bad(cmd, format!("no construction plane `{name}`")))?;
+    let extent = match p.get("extent") {
+        None => return Err(bad(cmd, "`extent` must be [x0, y0, x1, y1] or null")),
+        Some(Value::Null) => None,
+        Some(v) => {
+            let e: [f64; 4] = serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`extent` must be [x0, y0, x1, y1] or null"))?;
+            if !e.iter().all(|x| x.is_finite() && x.abs() <= MAX_PLANE_EXTENT) || e[2] - e[0] < 1e-3 || e[3] - e[1] < 1e-3 {
+                return Err(bad(cmd, "`extent` must be finite, within 10 km of the plane's origin, with x1 > x0 and y1 > y0"));
+            }
+            Some(e)
+        }
+    };
+    if s.doc.plane_extents.get(&id).copied() == extent {
+        return Err(bad(cmd, "the plane already has that size"));
+    }
+    let d = s.doc_mut();
+    match extent {
+        Some(e) => d.plane_extents.insert(id, e),
+        None => d.plane_extents.remove(&id),
+    };
+    Ok(json!({ "plane": name, "extent": extent }))
 }
 
 fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {

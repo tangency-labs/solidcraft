@@ -1157,7 +1157,9 @@ fn construction_plane_row_opens_its_menu() {
     assert_eq!(menu["open"], true, "{menu}");
     assert_eq!(menu["target"], json!({"type": "plane", "id": id}), "{menu}");
     let labels: Vec<&str> = menu["items"].as_array().unwrap().iter().filter_map(|i| i["label"].as_str()).filter(|l| !l.is_empty()).collect();
-    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Delete", "Rename", "Show/Hide", "Find in Timeline"]);
+    assert_eq!(labels, ["Create Sketch", "Edit Feature", "Reset Size", "Delete", "Rename", "Show/Hide", "Find in Timeline"]);
+    let reset = menu["items"].as_array().unwrap().iter().find(|i| i["label"] == "Reset Size").unwrap();
+    assert_eq!(reset["enabled"], false, "a plane never resized has no size to reset: {reset}");
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Plane { name: "Cut".into() }], "the right-click picks the plane");
     context_menu::close(&mut h.app);
 

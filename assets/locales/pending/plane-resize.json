@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.view_plane_size": "Resize Plane",
+    "ui.resetPlaneSize": "Reset Size"
+  },
+  "ar": {
+    "cmd.view_plane_size": "تغيير حجم المستوى",
+    "ui.resetPlaneSize": "إعادة تعيين الحجم"
+  },
+  "he": {
+    "cmd.view_plane_size": "שינוי גודל המישור",
+    "ui.resetPlaneSize": "איפוס הגודל"
+  },
+  "ja": {
+    "cmd.view_plane_size": "平面のサイズ変更",
+    "ui.resetPlaneSize": "サイズをリセット"
+  },
+  "vi": {
+    "cmd.view_plane_size": "Đổi kích thước mặt phẳng",
+    "ui.resetPlaneSize": "Đặt lại kích thước"
+  },
+  "zh": {
+    "cmd.view_plane_size": "调整平面大小",
+    "ui.resetPlaneSize": "重置大小"
+  }
+}

@@ -2759,6 +2759,11 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Construction planes drawn at a size of their own (dragged by their edges and corners):
+    /// by feature id, the rectangle `[x0, y0, x1, y1]` in the plane's own coordinates, mm. A
+    /// plane not listed is drawn at a size that follows the zoom. Display only.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plane_extents: std::collections::BTreeMap<u64, [f64; 4]>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -2984,6 +2989,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            plane_extents: std::collections::BTreeMap::new(),
             visibility: Visibility::default(),
         }
     }

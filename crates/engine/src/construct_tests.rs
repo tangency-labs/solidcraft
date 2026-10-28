@@ -562,3 +562,37 @@ fn offset_plane_through_a_point_follows_the_point() {
     // A distance and a point at once is refused.
     assert!(s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 5, "through": {"vertex": [0, 0, 0]}})).is_err());
 }
+
+/// A construction plane takes a size of its own (`view.plane_size`), as one undo step,
+/// saved with the design; `extent: null` goes back to the size that follows the zoom.
+#[test]
+fn a_construction_plane_keeps_the_size_it_is_given() {
+    let mut s = part();
+    let made = run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":5,"name":"Lid"}));
+    let id = made["feature"].as_u64().unwrap_or_else(|| s.doc.find_feature("Lid").unwrap().id);
+    let undo = s.undo.len();
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":[-5,-2,45,32]}));
+    assert_eq!(s.doc.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
+    assert_eq!(s.undo.len(), undo + 1);
+    // Saved with the design.
+    let saved = s.doc.to_json();
+    let back = solidcraft_doc::Document::from_json(&saved).unwrap();
+    assert_eq!(back.plane_extents.get(&id), Some(&[-5.0, -2.0, 45.0, 32.0]));
+    // Nothing of the model changes.
+    assert!(near(plane(&s, "Lid").origin, Vec3::new(0.0, 0.0, 5.0)));
+    for bad in [
+        json!({"plane":"Lid","extent":[0,0,0,10]}),
+        json!({"plane":"Lid","extent":[0,0,10]}),
+        json!({"plane":"Nope","extent":[0,0,1,1]}),
+        json!({"plane":"Lid","extent":[0,0,1e9,1]}),
+        json!({"plane":"Lid"}),
+        json!({"plane":"Lid","extent":[-5,-2,45,32]}),
+    ] {
+        assert!(s.execute("view.plane_size", &bad).is_err(), "{bad}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.plane_extents.is_empty());
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "view.plane_size", json!({"plane":"Lid","extent":null}));
+    assert!(s.doc.plane_extents.is_empty());
+}
