@@ -1226,7 +1226,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                     boundary.push(b);
                 }
                 let extent = brep::form::extent(&label, &boundary).ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(brep::form::surface(&label, extent).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                Some(brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
             }
             None => None,
         };

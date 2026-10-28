@@ -50,11 +50,18 @@ pub fn angle(s: f64) -> f64 {
     q * FRAC_PI_2 + quarter_psi(s - q)
 }
 
-/// The quarters an angle interval needs: the first one and how many.
-fn quarters([a0, a1]: [f64; 2]) -> Option<(f64, usize)> {
+/// The quarters an angle interval needs: the first one and how many. An end within `reach` (an
+/// angle) of a quarter's end is on it: a face whose boundary lies within its tolerance of a
+/// quarter's end needs no part of the quarter past it.
+fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
     if !(a0.is_finite() && a1.is_finite() && a1 > a0 && a1 - a0 <= TAU * (1.0 + 1e-9)) {
         return None;
     }
+    let on_end = |a: f64| {
+        let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
+        if (a - end).abs() <= reach { end } else { a }
+    };
+    let (a0, a1) = (on_end(a0), on_end(a1));
     let q0 = quarter_of(a0);
     let q1 = (a1 / FRAC_PI_2 - SLACK).ceil();
     let n = (q1 - q0).max(1.0) as usize;
@@ -63,13 +70,14 @@ fn quarters([a0, a1]: [f64; 2]) -> Option<(f64, usize)> {
 
 /// A face's quarters along an angle direction and its domain there: a whole turn is exactly
 /// four quarters from the one it starts in (the form closes on itself, so it is periodic and the
-/// face's seam uses lie a period apart), anything less the quarters it needs.
-fn face_quarters(a: [f64; 2]) -> Option<((f64, usize), [f64; 2])> {
+/// face's seam uses lie a period apart), anything less the quarters it needs ([`quarters`], ends
+/// within `reach` of a quarter's end on it).
+fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
     if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
         let q0 = quarter_of(a[0]);
         return Some(((q0, 4), [q0, q0 + 4.0]));
     }
-    let grid = quarters(a)?;
+    let grid = quarters(a, reach)?;
     Some((grid, params(a, grid)))
 }
 
@@ -130,7 +138,7 @@ pub fn curve(c: &Curve, [t0, t1]: [f64; 2]) -> Option<(Curve, [f64; 2])> {
 
 fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64; 2])> {
     let (o, x, y, _) = axes(frame)?;
-    let grid = quarters(t)?;
+    let grid = quarters(t, 0.0)?;
     let (knots, pts) = arcs(grid.0, grid.1);
     let homogeneous = pts.iter().map(|([c, s], w)| hom(o + x * (rx * c) + y * (ry * s), *w)).collect();
     Some((Curve::RationalSpline { knots, homogeneous }, params(t, grid)))
@@ -139,8 +147,30 @@ fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64;
 /// The NURBS form of a cylinder, cone, sphere or torus face over `domain` (in the label's
 /// parameters: angles, and the height along the axis of a cylinder or cone) and the domain in the
 /// form's parameters; `None` for another kind, or a domain of more than one turn.
-pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]; 2])> {
-    let (grid, fu) = face_quarters(u)?;
+pub fn surface(s: &Surface, domain: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]; 2])> {
+    surface_within(s, domain, 0.0)
+}
+
+/// [`surface`] for a face whose boundary lies within `tolerance` (mm) of its surface: where the
+/// domain ends within `tolerance` of a quarter's end (the angle that far along the widest circle
+/// of the face in that direction), the form ends there too. A face's box is the extent of its
+/// boundary's points ([`extent`]), which may run past a quarter's end by as much as its edges lie
+/// off the surface; the form then covers no quarter for that alone (a torus face of half a tube
+/// would otherwise go round the whole tube).
+pub fn surface_within(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+    // The angle `tolerance` makes on a circle of `radius`.
+    let reach = |radius: f64| if tolerance > 0.0 && radius > 0.0 && radius.is_finite() { tolerance / radius } else { 0.0 };
+    let (reach_u, reach_v) = match s {
+        Surface::Cylinder { radius, .. } => (reach(radius.abs()), 0.0),
+        Surface::Cone { radius_at_origin, half_angle, .. } => {
+            let slope = half_angle.tan();
+            (reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), 0.0)
+        }
+        Surface::Sphere { radius, .. } => (reach(radius.abs()), reach(radius.abs())),
+        Surface::Torus { major_radius, minor_radius, .. } => (reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())),
+        _ => (0.0, 0.0),
+    };
+    let (grid, fu) = face_quarters(u, reach_u)?;
     let (u_knots, ring) = arcs(grid.0, grid.1);
     // The ring of arcs times a profile `(control, weight)` mapped to (radial, axial) about the
     // frame: a rational tensor product, its weights the products.
@@ -173,13 +203,13 @@ pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]
             Some((Surface::RationalSpline { u_knots, v_knots: vec![v[0], v[0], v[1], v[1]], homogeneous }, [fu, v]))
         }
         Surface::Sphere { frame, radius } => {
-            let vgrid = quarters(v)?;
+            let vgrid = quarters(v, reach_v)?;
             let (v_knots, meridian) = arcs(vgrid.0, vgrid.1);
             let homogeneous = net(frame, &meridian, &|[c, s]| (radius * c, radius * s))?;
             Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, params(v, vgrid)]))
         }
         Surface::Torus { frame, major_radius, minor_radius } => {
-            let (vgrid, fv) = face_quarters(v)?;
+            let (vgrid, fv) = face_quarters(v, reach_v)?;
             let (v_knots, tube) = arcs(vgrid.0, vgrid.1);
             let homogeneous = net(frame, &tube, &|[c, s]| (major_radius + minor_radius * c, minor_radius * s))?;
             Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, fv]))
@@ -189,7 +219,7 @@ pub fn surface(s: &Surface, [u, v]: [[f64; 2]; 2]) -> Option<(Surface, [[f64; 2]
             // zero (the profile): (a + ib)(c + is) for each point's radial (a, b) in the frame and
             // each arc control point (c, s), weights multiplied; then the matrix.
             let (angles, along) = if *forward { (v, u) } else { (u, v) };
-            let (ring_grid, fa) = face_quarters(angles)?;
+            let (ring_grid, fa) = face_quarters(angles, 0.0)?;
             let (a_knots, arcs_r) = arcs(ring_grid.0, ring_grid.1);
             let (p_knots, h) = profile_nurbs(profile, Some(along))?;
             let fp = match profile.as_ref() {

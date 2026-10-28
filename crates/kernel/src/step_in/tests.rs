@@ -394,6 +394,38 @@ fn shelled_three_quarter_tube_round_trips() {
     round_trip(&b);
 }
 
+/// A half tube (half a torus's tube, half way round, closed by a flat annulus and
+/// two flat ends) whose torus the file places 5 nm off the rest, well within the file's
+/// accuracy: the torus face's boundary then projects a hair past both ends of its half of the
+/// tube, and its NURBS form once took the quarter past each end too, going round the whole tube,
+/// which SMLib does not take for a torus: the part came in as a mesh of its faces.
+#[test]
+fn half_tube_a_hair_off_its_torus_imports_as_a_solid() {
+    use solidcraft_geom::Seg2;
+    use std::f64::consts::PI;
+    let (major, minor) = (10.75, 1.25);
+    let d = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::new(major, 0.0), radius: minor, start: 0.0, sweep: PI },
+            Seg2::Line { a: Vec2::new(major - minor, 0.0), b: Vec2::new(major + minor, 0.0) },
+        ],
+    };
+    let tube = revolve(&Plane::XZ, &[Region2 { outer: d, holes: vec![] }], Vec2::ZERO, Vec2::Y, PI).unwrap().pop().unwrap();
+    let text = step_export(&[&tube], "test").unwrap();
+    // The torus's placement moved to a point of its own, 5 nm along the axis, off the face's side.
+    let torus = text.lines().find_map(|l| l.split_once("=TOROIDAL_SURFACE('',#")).unwrap().1.split(',').next().unwrap().to_string();
+    let place = text.lines().find(|l| l.starts_with(&format!("#{torus}=AXIS2_PLACEMENT_3D('',#"))).unwrap();
+    let (_, axes) = place.split_once("('',#").unwrap().1.split_once(',').unwrap();
+    let mut low = text.replace(place, &format!("#{torus}=AXIS2_PLACEMENT_3D('',#900000,{axes}"));
+    let data_end = low.rfind("ENDSEC;").unwrap();
+    low.insert_str(data_end, "#900000=CARTESIAN_POINT('',(0.0,0.0,-5.E-6));\n");
+    let imp = step_import(&low).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert!(b.refused.is_none() && b.closed && !b.body.is_mesh() && !b.body.is_surface(), "{:?} {:?}", b.refused, imp.warnings);
+    assert!(rel(measure(&b.body).unwrap().volume, measure(&tube).unwrap().volume) < 1e-3);
+}
+
 #[test]
 fn several_bodies_and_names() {
     let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
