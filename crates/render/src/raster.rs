@@ -118,6 +118,11 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             let alpha = sm.alpha();
             let m = &sm.mesh;
             let body = sm.color.f();
+            // The hatch of its cut face: its own by part, else the cap's at 45 degrees.
+            let (tint, turned) = match scene.part_hatch {
+                Some(colours) => (colours.get(sm.hatch.colour()).map_or(cap_tint, |c| c.f()), sm.hatch.turned()),
+                None => (cap_tint, false),
+            };
             let pts: Vec<Option<[f64; 3]>> = m.positions.iter().map(|p| project(*p)).collect();
             // 1 / clip w per vertex, for perspective-correct interpolation of world positions (so
             // the section cuts along the plane, not a curve, in perspective views).
@@ -194,15 +199,16 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 };
                             }
                             if cut {
-                                // The cut: the body's colour tinted toward the cap colour, hatched
-                                // at 45 degrees (as the viewport draws it); a plain cap is the
-                                // body's own colour.
+                                // The cut: the body's colour tinted toward its hatch colour, hatched
+                                // at 45 or 135 degrees (as the viewport draws it); a plain cap is
+                                // the body's own colour.
                                 if scene.plain_cap {
                                     c.put(x, y, base, 1.0);
                                     continue;
                                 }
-                                let tinted: [f64; 3] = std::array::from_fn(|k| base[k] + (cap_tint[k] - base[k]) * 0.35);
-                                let k = if ((x + y) / SS) % 9 < 2 { 0.6 } else { 1.0 };
+                                let tinted: [f64; 3] = std::array::from_fn(|k| base[k] + (tint[k] - base[k]) * 0.35);
+                                let along = if turned { x as i64 - y as i64 } else { (x + y) as i64 };
+                                let k = if along.div_euclid(SS as i64).rem_euclid(9) < 2 { 0.6 } else { 1.0 };
                                 c.put(x, y, tinted.map(|v| v * k), 1.0);
                                 continue;
                             }
@@ -424,7 +430,14 @@ mod tests {
 
     /// A front panel over a back one, with a line between them, seen from the front.
     fn two_panels(front_opacity: f32) -> (Scene, Camera) {
-        let glass = SceneMesh { mesh: Arc::new(panel(-5.0)), color: Rgb(255, 0, 0), face_colors: Vec::new(), opacity: front_opacity, closed: true };
+        let glass = SceneMesh {
+            mesh: Arc::new(panel(-5.0)),
+            color: Rgb(255, 0, 0),
+            face_colors: Vec::new(),
+            opacity: front_opacity,
+            closed: true,
+            hatch: Default::default(),
+        };
         let scene = Scene {
             meshes: vec![SceneMesh::solid(Arc::new(panel(5.0)), Rgb(0, 255, 0)), glass],
             lines: vec![SceneLine {

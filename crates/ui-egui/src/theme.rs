@@ -758,6 +758,9 @@ pub struct Tokens {
     pub chip: Color32,
     /// Inside of bodies cut by a section.
     pub section_cap: Color32,
+    /// The section hatch's other colours by part, after `section_cap` (Preferences > Graphics >
+    /// Section hatch): of its family and lightness, so a cut stays calm.
+    pub section_hatch: [Color32; 2],
     /// Closed sketch profiles (translucent fill).
     pub profile_fill: Color32,
     /// Constraint glyph boxes.
@@ -902,6 +905,7 @@ impl Tokens {
             sketch_point: view.sketch_point,
             sketch_point_free: view.sketch_point_free,
             section_cap: view.section_cap,
+            section_hatch: view.section_hatch,
             profile_fill: view.profile_fill,
             glyph_bg: view.glyph_bg,
             glyph_edge: view.glyph_edge,

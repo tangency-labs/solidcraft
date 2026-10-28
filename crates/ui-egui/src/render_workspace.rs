@@ -1637,6 +1637,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
+            hatch: Default::default(),
         });
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
         Ok(())

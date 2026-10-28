@@ -5,5 +5,6 @@
  "what": "a sweep with an end scale of 500 (the engine allows 0.01 to 100): the option check (SweepControl::check) must refuse it",
  "source": "invariants",
  "method": "a scale outside 0.01..100 is a hostile value for the sweep options: the right behaviour is a clean refusal with no body made.",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "`scale` (the end scale) must be between 0.01 and 100"
 }

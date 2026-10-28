@@ -7,5 +7,6 @@
  "what": "a fillet on a sheet metal corner changes the body but not its sheet model, so the flat pattern would be a sharp rectangle: it must refuse",
  "source": "invariants",
  "method": "after Fillet R10 on a corner of a 100 x 60 sheet the body has a round, and a flat pattern written from the sheet model would be the sharp 100 x 60 rectangle, a different part from the design; the right behaviour is a clean refusal naming the feature",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "the flat pattern of `Body1` can't include Fillet1, which changed the body after its sheet metal features"
 }

@@ -6,5 +6,6 @@
  "what": "a second edge flange picked on the bend line of an existing flange made a doubled flange with a gap and two shells in one body",
  "source": "invariants",
  "method": "the base's edge at y = 5 (the setback R + T = 5 from the first flange) is the bend line of the existing flange, not a free edge; a flange there would stand on material the first bend already occupies. The right behaviour is a clean refusal that leaves the sheet unchanged",
- "outcome": "refused"
+ "outcome": "refused",
+ "refusal": "that edge is the bend line of a flange; pick a free edge of the sheet"
 }

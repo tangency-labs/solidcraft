@@ -41,7 +41,7 @@ pub struct PaletteIndex(pub u32);
 /// How many palette entries fit on one texel row: the shader reads `x = i & 2047`,
 /// `y = i >> 11`. A power of two keeps the lookup a shift and a mask.
 pub const PALETTE_WIDTH: u32 = 2048;
-/// Most palette entries a scene may carry (2048 × 512): the palette is an `R32Uint` texture
+/// Most palette entries a scene may carry (2048 × 512): the palette is an `Rg32Uint` texture
 /// (`downlevel_defaults`/WebGL2 have no storage buffers in the vertex stage).
 pub const MAX_PALETTE: usize = 1 << 20;
 
@@ -50,17 +50,22 @@ pub const MAX_PALETTE: usize = 1 << 20;
 /// The first [`Palette::stable_len`] entries are stable for a scene: cached block bytes keep
 /// referring to them, so appearance edits only change their values. Entries after that are
 /// interned per build for ephemeral geometry (grids, highlights, sketch, previews).
+///
+/// A stable entry also carries the section hatch of the body it colours
+/// (`solidcraft_render::hatch`): none, the cap's own hatch, unless the scene hatches by part.
 #[derive(Clone, Debug, Default)]
 pub struct Palette {
     entries: Vec<[u8; 4]>,
     lookup: std::collections::HashMap<[u8; 4], u32>,
     stable_len: usize,
+    /// Per entry, 1 + its body's hatch, or 0 for the cap's own (empty: 0 for every entry).
+    hatches: Vec<u8>,
 }
 
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new() }
+        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new(), hatches: Vec::new() }
     }
 
     /// Where the stable entries end and the per-build interned ones begin.
@@ -116,9 +121,35 @@ impl Palette {
         PaletteIndex(i)
     }
 
-    /// The palette as the shader's `R32Uint` texels (rgba bytes packed little-endian).
-    pub fn texels(&self) -> Vec<u32> {
-        self.entries.iter().map(|[r, g, b, a]| u32::from_le_bytes([*r, *g, *b, *a])).collect()
+    /// Give stable entry `i` (a body's colour) that body's section hatch; `false` when `i` is not
+    /// a stable entry.
+    pub fn set_hatch(&mut self, i: PaletteIndex, hatch: solidcraft_render::hatch::Hatch) -> bool {
+        let at = i.0 as usize;
+        if at >= self.stable_len {
+            return false;
+        }
+        if self.hatches.len() < self.stable_len {
+            self.hatches.resize(self.stable_len, 0);
+        }
+        match self.hatches.get_mut(at) {
+            Some(slot) => {
+                *slot = hatch.0.saturating_add(1);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The section hatch entry `i` was given ([`Palette::set_hatch`]), if any.
+    pub fn hatch(&self, i: PaletteIndex) -> Option<solidcraft_render::hatch::Hatch> {
+        self.hatches.get(i.0 as usize).and_then(|h| h.checked_sub(1)).map(solidcraft_render::hatch::Hatch)
+    }
+
+    /// Entry `i` as the shader's `Rg32Uint` texel: the rgba bytes packed little-endian, then
+    /// 1 + its hatch (0: the cap's own).
+    fn texel(&self, i: usize) -> [u32; 2] {
+        let colour = self.entries.get(i).map_or(0, |[r, g, b, a]| u32::from_le_bytes([*r, *g, *b, *a]));
+        [colour, u32::from(self.hatches.get(i).copied().unwrap_or(0))]
     }
 }
 
@@ -151,8 +182,8 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 }
 /// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
 /// occlusion radius), the 8 analysis colours, their flags, the depth direction and the two
-/// whole-body highlight colours (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 416;
+/// whole-body highlight colours, then the section hatch colours (`uniform_bytes`).
+const UNIFORM_SIZE: u64 = 416 + 16 * solidcraft_render::hatch::HATCH_COLOURS as u64;
 
 /// A body drawn from its display plan, evaluated on the GPU: the plan, and a palette index per
 /// face (the plan's face numbering; faces past the end take the last index).
@@ -914,6 +945,9 @@ pub struct Frame {
     pub hover_tint: [f32; 3],
     /// Whole-body selection highlight: a selected body's colour before lighting (sRGB 0..1).
     pub selection_tint: [f32; 3],
+    /// The section hatch colours by part (straight sRGB, 0..1; the first the cap's own): what a
+    /// cut body whose palette entries carry a hatch ([`Palette::set_hatch`]) is tinted toward.
+    pub hatch: [[f32; 3]; solidcraft_render::hatch::HATCH_COLOURS],
 }
 
 /// Heights of the model seen from a direction (an orthographic depth map): a point is reachable
@@ -1393,15 +1427,18 @@ fn joined<'a>(blocks: impl Iterator<Item = &'a Option<Batch>>, own: Option<Batch
     (!parts.is_empty()).then_some(Batch { parts, chunk })
 }
 
-/// A scene's palette on the GPU: an `R32Uint` texture, [`PALETTE_WIDTH`] entries to a row.
+/// A scene's palette on the GPU: an `Rg32Uint` texture (colour, hatch), [`PALETTE_WIDTH`]
+/// entries to a row.
 struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
     _texture: wgpu::Texture,
     bind: wgpu::BindGroup,
     rows: u32,
-    entries: Vec<[u8; 4]>,
 }
+
+/// Bytes of one palette texel.
+const PALETTE_TEXEL: u32 = 8;
 
 fn palette_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
@@ -1410,28 +1447,28 @@ fn palette_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R32Uint,
+        format: wgpu::TextureFormat::Rg32Uint,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     })
 }
 
-/// Rows `first..last` of `entries` as the texture's texels (zero past the end).
-fn palette_bytes(entries: &[[u8; 4]], first: u32, last: u32) -> Vec<u8> {
+/// Rows `first..last` of `palette` as the texture's texels (zero past the end).
+fn palette_bytes(palette: &Palette, first: u32, last: u32) -> Vec<u8> {
     let width = PALETTE_WIDTH as usize;
-    let mut out = Vec::with_capacity((last - first) as usize * width * 4);
+    let mut out = Vec::with_capacity((last - first) as usize * width * PALETTE_TEXEL as usize);
     for row in first..last {
         for col in 0..PALETTE_WIDTH {
-            let i = row as usize * width + col as usize;
-            let texel = entries.get(i).map_or(0, |[r, g, b, a]| u32::from_le_bytes([*r, *g, *b, *a]));
-            out.extend_from_slice(&texel.to_le_bytes());
+            for word in palette.texel(row as usize * width + col as usize) {
+                out.extend_from_slice(&word.to_le_bytes());
+            }
         }
     }
     out
 }
 
-fn palette_rows(entries: &[[u8; 4]]) -> u32 {
-    u32::try_from(entries.len().div_ceil(PALETTE_WIDTH as usize)).unwrap_or(1).max(1)
+fn palette_rows(palette: &Palette) -> u32 {
+    u32::try_from(palette.len().div_ceil(PALETTE_WIDTH as usize)).unwrap_or(1).max(1)
 }
 
 impl PaletteGpu {
@@ -1443,15 +1480,14 @@ impl PaletteGpu {
         palette: Arc<Palette>,
         written: &mut u64,
     ) -> PaletteGpu {
-        let entries = palette.entries().to_vec();
-        let rows = palette_rows(&entries);
+        let rows = palette_rows(&palette);
         let texture = palette_texture(device, rows);
-        let bytes = palette_bytes(&entries, 0, rows);
+        let bytes = palette_bytes(&palette, 0, rows);
         *written += bytes.len() as u64;
         queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             &bytes,
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * 4), rows_per_image: Some(rows) },
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * PALETTE_TEXEL), rows_per_image: Some(rows) },
             wgpu::Extent3d { width: PALETTE_WIDTH, height: rows, depth_or_array_layers: 1 },
         );
         let view = texture.create_view(&Default::default());
@@ -1463,7 +1499,7 @@ impl PaletteGpu {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
             ],
         });
-        PaletteGpu { palette, _texture: texture, bind, rows, entries }
+        PaletteGpu { palette, _texture: texture, bind, rows }
     }
 
     /// Bring the texture up to `palette`, writing only the rows whose entries changed (or the
@@ -1480,8 +1516,7 @@ impl PaletteGpu {
         if Arc::ptr_eq(&self.palette, &palette) {
             return;
         }
-        let entries = palette.entries().to_vec();
-        let rows = palette_rows(&entries);
+        let rows = palette_rows(&palette);
         if rows != self.rows {
             *self = PaletteGpu::new(device, queue, uniform, bgl, palette, written);
             return;
@@ -1489,7 +1524,7 @@ impl PaletteGpu {
         let width = PALETTE_WIDTH as usize;
         let same = |row: u32| {
             let base = row as usize * width;
-            (0..width).all(|c| self.entries.get(base + c).copied().unwrap_or_default() == entries.get(base + c).copied().unwrap_or_default())
+            (0..width).all(|c| self.palette.texel(base + c) == palette.texel(base + c))
         };
         let mut row = 0u32;
         while row < rows {
@@ -1501,7 +1536,7 @@ impl PaletteGpu {
             while row < rows && !same(row) {
                 row += 1;
             }
-            let bytes = palette_bytes(&entries, first, row);
+            let bytes = palette_bytes(&palette, first, row);
             *written += bytes.len() as u64;
             queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
@@ -1511,11 +1546,10 @@ impl PaletteGpu {
                     aspect: wgpu::TextureAspect::All,
                 },
                 &bytes,
-                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * 4), rows_per_image: Some(row - first) },
+                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * PALETTE_TEXEL), rows_per_image: Some(row - first) },
                 wgpu::Extent3d { width: PALETTE_WIDTH, height: row - first, depth_or_array_layers: 1 },
             );
         }
-        self.entries = entries;
         self.palette = palette;
     }
 }
@@ -2942,6 +2976,7 @@ fn frame_key(cb: &Frame) -> u64 {
     // picture cached under the previous theme's colours is not shown (#5802).
     cb.hover_tint.map(f32::to_bits).hash(&mut h);
     cb.selection_tint.map(f32::to_bits).hash(&mut h);
+    cb.hatch.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.outline.hash(&mut h);
     cb.ao_radius.to_bits().hash(&mut h);
     cb.ssaa.to_bits().hash(&mut h);
@@ -3656,6 +3691,9 @@ pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -
     v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, 0.0]);
     v.extend([cb.hover_tint[0], cb.hover_tint[1], cb.hover_tint[2], 0.0]);
     v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], 0.0]);
+    for [r, g, b] in cb.hatch {
+        v.extend([r, g, b, 1.0]);
+    }
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -3820,6 +3858,7 @@ mod tests {
             access: None,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
+            hatch: Default::default(),
             outline: false,
             eye: [0.0; 4],
             ao_radius: 0.0,
@@ -4106,6 +4145,7 @@ mod glass_tests {
             ssaa: 1.0,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
+            hatch: Default::default(),
         };
         let texture = |format, usage, sample_count| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -4273,6 +4313,7 @@ mod glass_tests {
             access: None,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
+            hatch: Default::default(),
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,

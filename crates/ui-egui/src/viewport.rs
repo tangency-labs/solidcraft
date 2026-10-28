@@ -451,6 +451,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.preview.effective_replaced().hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
     app.preferences.cosmetic_threads.hash(&mut h);
+    app.preferences.section_hatch.hash(&mut h);
     crate::theme::is_dark().hash(&mut h);
     crate::theme::vision().hash(&mut h);
     // Two themes may share a light/dark base while drawing different geometry colours.
@@ -1422,6 +1423,9 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
         let mut made = std::collections::HashMap::with_capacity(kept.len());
         let normal = [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()];
+        // The closed solid bodies the plane cuts and where it cuts them: their hatches by part.
+        let by_part = app.preferences.section_hatch == crate::prefs::SectionHatch::ByPart;
+        let mut cuts: Vec<(&str, Vec<(Vec3, Vec3)>)> = Vec::new();
         for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name)) {
             let mesh = b.mesh();
             let key = (std::sync::Arc::as_ptr(&mesh) as usize, normal);
@@ -1429,10 +1433,28 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
                 Some((_, index)) => index,
                 None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh, n)),
             };
-            for (a, c) in index.segments(&mesh, o) {
+            let segments = index.segments(&mesh, o);
+            for (a, c) in &segments {
                 sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
             }
             made.insert(key, (mesh, index));
+            let solid = b.is_closed() && !body_faded(app, b, &active_bodies) && s.doc.model_body_opacity(b) >= 0.999;
+            if by_part && solid && !segments.is_empty() {
+                cuts.push((b.name.as_str(), segments));
+            }
+        }
+        // Each cut body's hatch on all its palette entries (its colour, faces and placements).
+        let parts: Vec<solidcraft_engine::render::hatch::CutPart> = cuts
+            .iter()
+            .map(|(name, segments)| solidcraft_engine::render::hatch::CutPart { seed: solidcraft_engine::render::hatch::seed(name), segments })
+            .collect();
+        let hatches = solidcraft_engine::render::hatch::hatches(&parts, n);
+        let palette = std::sync::Arc::make_mut(&mut sc.palette);
+        for ((name, _), hatch) in cuts.iter().zip(hatches) {
+            let Some(slots) = arena.slots(name) else { continue };
+            for slot in (0..slots.face_capacity as usize).map(|f| slots.face(f)).chain([slots.body, slots.instance]) {
+                palette.set_hatch(slot, hatch);
+            }
         }
         if let Ok(mut k) = app.viewport.section_index.lock() {
             *k = made;
@@ -3935,6 +3957,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let c = t.body_selected;
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
+            // The section hatch colours by part: the cap's, then the theme's others.
+            hatch: std::array::from_fn(|k| {
+                let c = if k == 0 { t.section_cap } else { t.section_hatch.get(k - 1).copied().unwrap_or(t.section_cap) };
+                let [r, g, b, _] = c.to_normalized_gamma_f32();
+                [r, g, b]
+            }),
         });
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     }
@@ -5350,6 +5378,7 @@ pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> soli
         sketch_centerline: rgb(t.sketch_centerline),
         axes: t.axes().map(rgb),
         cap: rgb(t.section_cap),
+        hatch: t.section_hatch.map(rgb),
         isocurve: rgb(t.accent),
         analysis: t.analysis,
     }
@@ -7161,6 +7190,7 @@ mod tests {
                     ssaa: 1.0,
                     hover_tint: [0.0; 3],
                     selection_tint: [0.0; 3],
+                    hatch: Default::default(),
                 };
                 let t0 = std::time::Instant::now();
                 let mut encoder = device.create_command_encoder(&Default::default());

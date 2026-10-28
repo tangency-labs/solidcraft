@@ -306,7 +306,11 @@ fn groups(t: &Tokens) -> Vec<Group> {
             ],
             &[],
         ),
-        group("section", &[("section_cap", t.section_cap)], &[("body", t.body)]),
+        group(
+            "section",
+            &[("section_cap", t.section_cap), ("section_hatch[0]", t.section_hatch[0]), ("section_hatch[1]", t.section_hatch[1])],
+            &[("body", t.body)],
+        ),
         group("interference", &[("interference", t.interference)], &[("body", t.body)]),
         group(
             "continuity seams",

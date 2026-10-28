@@ -12,10 +12,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::Vec3;
-use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene};
+use solidcraft_render::hatch::Hatch;
+use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene, SceneMesh};
 use wgpu::util::DeviceExt;
 
-use crate::view::{AccessMap, Frame, GpuScene, GpuTarget, Renderer, analysis_colors, analysis_uniform};
+use crate::view::{AccessMap, Frame, GpuScene, GpuTarget, Palette, PaletteIndex, Renderer, analysis_colors, analysis_uniform};
 use crate::{GpuError, Result, popped};
 
 /// The colour format pictures are drawn in: sRGB bytes as they are, like the viewport's usual
@@ -401,6 +402,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         ssaa: 1.0,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
+        hatch: scene.part_hatch.map_or_else(Default::default, |c| c.map(|Rgb(r, g, b)| [r, g, b].map(|x| f32::from(x) / 255.0))),
     }
 }
 
@@ -408,16 +410,44 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
 /// normals; a face normal where a vertex has none), lines as wide lines (over everything when
 /// `on_top`), the grid under everything. A body whose appearance is see-through
 /// ([`solidcraft_render::SceneMesh::glass`]) goes into the scene's glass, drawn as the viewport
-/// draws glass: far sides first, then near sides, so what lies inside it shows through.
+/// draws glass: far sides first, then near sides, so what lies inside it shows through. When the
+/// scene hatches its cut by part ([`Scene::part_hatch`]), each body's colours are palette entries
+/// of its own, carrying its hatch.
 pub fn scene_geometry(scene: &Scene) -> GpuScene {
-    let mut sc = GpuScene::default();
-    for m in &scene.meshes {
-        let alpha = (m.alpha() * 255.0).round().clamp(0.0, 255.0) as u8;
-        let c4 = |c: Rgb| [c.0, c.1, c.2, alpha];
+    let by_part = scene.part_hatch.is_some() && scene.clip.is_some();
+    // Per body, its colours' stable entries (by part), and the stable palette they make.
+    let mut own: Vec<HashMap<[u8; 4], PaletteIndex>> = Vec::new();
+    let mut stable: Vec<[u8; 4]> = Vec::new();
+    let mut hatches: Vec<(PaletteIndex, Hatch)> = Vec::new();
+    let c4 = |m: &SceneMesh, c: Rgb| [c.0, c.1, c.2, (m.alpha() * 255.0).round().clamp(0.0, 255.0) as u8];
+    if by_part {
+        for m in &scene.meshes {
+            let mut map = HashMap::new();
+            for c in std::iter::once(m.color).chain(m.face_colors.iter().map(|(_, c)| *c)) {
+                map.entry(c4(m, c)).or_insert_with(|| {
+                    let i = PaletteIndex(u32::try_from(stable.len()).unwrap_or(0));
+                    stable.push(c4(m, c));
+                    hatches.push((i, m.hatch));
+                    i
+                });
+            }
+            own.push(map);
+        }
+    }
+    let mut palette = Palette::with_stable(stable);
+    for (i, h) in hatches {
+        palette.set_hatch(i, h);
+    }
+    let mut sc = GpuScene::with_palette(palette);
+    for (mi, m) in scene.meshes.iter().enumerate() {
         let faces: HashMap<u32, Rgb> = m.face_colors.iter().copied().collect();
         let mesh = &m.mesh;
         for (ti, t) in mesh.triangles.iter().enumerate() {
-            let col = sc.color(c4(mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color)));
+            let rgba = c4(m, mesh.tri_face.get(ti).and_then(|f| faces.get(f)).copied().unwrap_or(m.color));
+            let col = match own.get(mi).and_then(|o| o.get(&rgba)) {
+                Some(i) => *i,
+                None => sc.color(rgba),
+            };
             let [Some(a), Some(b), Some(c)] = t.map(|k| mesh.positions.get(k as usize).copied()) else { continue };
             let flat = (b - a).cross(c - a).normalized().unwrap_or(Vec3::Z);
             for (k, p) in t.iter().zip([a, b, c]) {
@@ -557,7 +587,6 @@ mod tests {
     use super::*;
     use crate::view::TRI_SIZE;
     use solidcraft_geom::Mesh;
-    use solidcraft_render::SceneMesh;
     use std::sync::Arc;
 
     /// One triangle facing the camera.
@@ -582,7 +611,14 @@ mod tests {
     /// headless picture of a translucent target shows the tool inside it.
     #[test]
     fn a_see_through_body_is_glass_at_its_own_alpha_and_a_solid_one_is_not() {
-        let mesh = |opacity: f32| SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: Vec::new(), opacity, closed: true };
+        let mesh = |opacity: f32| SceneMesh {
+            mesh: sheet(),
+            color: Rgb(200, 30, 30),
+            face_colors: Vec::new(),
+            opacity,
+            closed: true,
+            hatch: Default::default(),
+        };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
         let solid = geometry(1.0);
@@ -606,7 +642,14 @@ mod tests {
     /// painting one face does not make the body solid again.
     #[test]
     fn a_painted_face_keeps_its_bodys_opacity() {
-        let mesh = SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5, closed: true };
+        let mesh = SceneMesh {
+            mesh: sheet(),
+            color: Rgb(200, 30, 30),
+            face_colors: vec![(0, Rgb(0, 255, 0))],
+            opacity: 0.5,
+            closed: true,
+            hatch: Default::default(),
+        };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);
         assert_eq!(color(&sc, &sc.glass), Some([0, 255, 0, 128]), "the face's own colour at the body's alpha");

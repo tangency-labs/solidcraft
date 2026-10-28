@@ -502,3 +502,76 @@ fn a_cut_hides_the_edges_behind_it() {
         }
     }
 }
+
+/// The hatch a picture shows over the pixels `at`: the colour most of them have (the fill,
+/// rounded to 8 levels a channel), and whether the darker lines through it run at 135 degrees
+/// (down to the right on screen) rather than 45.
+fn hatch_seen(img: &[u8], w: u32, at: &[(i64, i64)]) -> ([u8; 3], bool) {
+    let px = |x: i64, y: i64| {
+        let i = (y * i64::from(w) + x) as usize * 4;
+        img.get(i..i + 3).map(|p| [p[0], p[1], p[2]])
+    };
+    let mut counts = std::collections::HashMap::new();
+    for (x, y) in at {
+        if let Some(p) = px(*x, *y) {
+            *counts.entry(p.map(|c| c / 8)).or_insert(0usize) += 1;
+        }
+    }
+    let fill = counts.into_iter().max_by_key(|(_, n)| *n).map_or([0; 3], |(c, _)| c);
+    let line = |x: i64, y: i64| {
+        px(x, y).is_some_and(|p| p.iter().map(|c| u32::from(*c)).sum::<u32>() * 8 < fill.iter().map(|c| u32::from(*c) * 8 + 4).sum::<u32>() * 7)
+    };
+    // Along a 45 degree line (x + y the same) the pixels agree; across it they alternate.
+    let agree = |dy: i64| at.iter().filter(|(x, y)| line(*x, *y) && line(x + 1, y + dy)).count();
+    (fill, agree(1) > agree(-1))
+}
+
+/// Section hatch by part: two blocks side by side, cut through both, touch along the cut, so they
+/// get different hatches (in angle or colour) and the picture shows them apart; the next frame
+/// and a plane moved a little keep each block's hatch. With one hatch for every body (the
+/// preference's old behaviour) both caps are the cap colour at 45 degrees.
+#[test]
+fn touching_caps_are_hatched_apart_and_keep_their_hatch() {
+    let left = ("solid.box", json!({"length": 20, "width": 30, "height": 20, "body_name": "left"}));
+    let right = ("solid.box", json!({"length": 20, "width": 30, "height": 20, "corner": [20, 0, 0], "operation": "new", "body_name": "right"}));
+    let cut = |y: f64| ("inspect.section", json!({"plane": {"origin": [0, y, 0], "normal": [0, -1, 0]}}));
+    let s = session(&[left.clone(), right.clone(), cut(15.0)]);
+    let moved = session(&[left, right, cut(15.5)]);
+    let mut cam = view::home_camera(&s).unwrap();
+    (cam.fov, cam.yaw, cam.pitch) = (0.0, -0.3, 0.2);
+    let hatches = |s: &Session| view::scene(s, &cam).unwrap().meshes.iter().map(|m| m.hatch).collect::<Vec<_>>();
+    let first = hatches(&s);
+    assert_eq!(first.len(), 2);
+    assert_ne!(first[0], first[1], "touching caps share a hatch");
+    assert_eq!(hatches(&s), first, "the next frame keeps them");
+    assert_eq!(hatches(&moved), first, "a plane moved a little keeps them");
+    let (w, h) = (360, 280);
+    // Each block's cap on screen, 4 px in: x 0..20 and 20..40, z 0..20 at y = 15.
+    let radius = view::scene(&s, &cam).unwrap().radius;
+    let cap_pixels = |x0: f64| -> Vec<(i64, i64)> {
+        let corner = |x: f64, z: f64| cam.to_screen(Vec3::new(x, 15.0, z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y));
+        let q: Vec<(f64, f64)> = [(x0, 0.0), (x0 + 20.0, 0.0), (x0 + 20.0, 20.0), (x0, 20.0)].iter().filter_map(|(x, z)| corner(*x, *z)).collect();
+        assert_eq!(q.len(), 4, "the cut is on screen");
+        let turn = (0..4).map(|i| q[i].0 * q[(i + 1) % 4].1 - q[(i + 1) % 4].0 * q[i].1).sum::<f64>().signum();
+        let inside = |x: f64, y: f64| {
+            (0..4).all(|i| {
+                let ((ax, ay), (bx, by)) = (q[i], q[(i + 1) % 4]);
+                ((bx - ax) * (y - ay) - (by - ay) * (x - ax)) / (bx - ax).hypot(by - ay) * turn >= 4.0
+            })
+        };
+        (0..i64::from(h)).flat_map(|y| (0..i64::from(w)).map(move |x| (x, y))).filter(|(x, y)| inside(*x as f64 + 0.5, *y as f64 + 0.5)).collect()
+    };
+    let (a, b) = (cap_pixels(0.0), cap_pixels(20.0));
+    assert!(a.len() > 1500 && b.len() > 1500, "the caps ({} and {} px)", a.len(), b.len());
+    for (mode, c) in capturers() {
+        let by_part = c.rgba(&Scene { grid: Vec::new(), ..view::scene(&s, &cam).unwrap() }, &cam, w, h).unwrap();
+        let (la, lb) = (hatch_seen(&by_part, w, &a), hatch_seen(&by_part, w, &b));
+        assert_ne!(la, lb, "{mode} depth: the touching caps look alike");
+        let expect = |hatch: solidcraft_engine::render::hatch::Hatch| hatch.turned();
+        assert_eq!((la.1, lb.1), (expect(first[0]), expect(first[1])), "{mode} depth: the caps' angles");
+        let one = c.rgba(&Scene { grid: Vec::new(), part_hatch: None, ..view::scene(&s, &cam).unwrap() }, &cam, w, h).unwrap();
+        let (oa, ob) = (hatch_seen(&one, w, &a), hatch_seen(&one, w, &b));
+        assert_eq!(oa, ob, "{mode} depth: one hatch for every body");
+        assert!(!oa.1, "{mode} depth: one hatch runs at 45 degrees");
+    }
+}
