@@ -17,7 +17,11 @@
 //! - macOS: the `.dmg` is verified and opened; the user drags the app to Applications. SolidCraft
 //!   is ad-hoc signed and not notarized, so replacing the bundle in place would install code the
 //!   system can't vouch for without the user seeing it.
-//! - Flatpak, Snap, `.deb`, `.rpm`, `.tar.gz`: never replaced; the window shows the command.
+//! - Linux `.tar.gz`: the new archive is unpacked over the installed folder (the one that contains
+//!   `bin/solidcraft`, or the program's own folder) and SolidCraft offers a restart. The previous
+//!   folder is kept beside it as `<name>.old` until the next start. A folder that can't be renamed
+//!   is left as it was.
+//! - Flatpak, Snap, `.deb`, `.rpm`: never replaced; the window shows the command.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -58,6 +62,8 @@ pub enum Method {
     Exe(PathBuf),
     /// Open the downloaded disk image.
     Dmg,
+    /// Replace this unpacked `.tar.gz` install (the folder that contains the program).
+    Tarball(PathBuf),
 }
 
 /// The in-place update for an installation, if it has one. `exe` is the running executable.
@@ -68,8 +74,32 @@ pub fn method(kind: &InstallKind, exe: Option<&Path>) -> Option<Method> {
         InstallKind::WindowsPortable => exe.map(|e| Method::PortableZip(e.to_path_buf())),
         InstallKind::WindowsExe => exe.map(|e| Method::Exe(e.to_path_buf())),
         InstallKind::MacApp(_) => Some(Method::Dmg),
+        InstallKind::LinuxTarball => exe.and_then(installable_tarball_prefix).map(Method::Tarball),
         _ => None,
     }
+}
+
+/// The folder an unpacked Linux install lives in: the parent of `bin/` when the program is
+/// `…/bin/solidcraft`, otherwise the program's own folder. `/` is not an install folder.
+pub fn tarball_prefix(exe: &Path) -> Option<PathBuf> {
+    let parent = exe.parent()?;
+    let prefix = if parent.file_name().is_some_and(|name| name == "bin") { parent.parent()?.to_path_buf() } else { parent.to_path_buf() };
+    prefix.parent().is_some().then_some(prefix)
+}
+
+/// A `.tar.gz` folder Update now may replace. A top-level directory (`/opt`, `/usr/local` is under
+/// `/usr` and is not this kind) or the user's home would mean renaming far more than the install.
+fn installable_tarball_prefix(exe: &Path) -> Option<PathBuf> {
+    let prefix = tarball_prefix(exe)?;
+    let parent = prefix.parent()?;
+    if parent.parent().is_none() {
+        return None;
+    }
+    let home = std::env::var_os("HOME").into_iter().chain(std::env::var_os("USERPROFILE"));
+    if home.into_iter().any(|dir| prefix == Path::new(&dir)) {
+        return None;
+    }
+    Some(prefix)
 }
 
 /// What to do once the package is verified and in place.
@@ -189,7 +219,7 @@ pub fn run(
     let part = match method {
         Method::AppImage(target) => sibling(target, ".update")?,
         Method::Exe(exe) => sibling(exe, ".update")?,
-        Method::Msi | Method::Dmg | Method::PortableZip(_) => {
+        Method::Msi | Method::Dmg | Method::PortableZip(_) | Method::Tarball(_) => {
             std::fs::create_dir_all(staging).map_err(|e| format!("{}: {e}", staging.display()))?;
             staging.join(&asset.name)
         }
@@ -278,7 +308,125 @@ pub fn apply(method: &Method, package: &Path) -> Result<Outcome, String> {
         }
         Method::Msi => Ok(Outcome::Installer(PathBuf::from("msiexec"), vec!["/i".into(), package.to_string_lossy().to_string(), "/passive".into()])),
         Method::Dmg => Ok(Outcome::Opened(package.to_path_buf())),
+        Method::Tarball(prefix) => apply_tarball(prefix, package),
     }
+}
+
+/// Unpack a verified release `.tar.gz` over `prefix`. The archive's top folder is stripped.
+/// The previous tree is renamed to `<name>.old` and removed at the next start, so a running
+/// program keeps its files until then. A failure puts the previous tree back.
+fn apply_tarball(prefix: &Path, package: &Path) -> Result<Outcome, String> {
+    let parent = prefix.parent().ok_or_else(|| format!("{} has no folder", prefix.display()))?;
+    let name = prefix
+        .file_name()
+        .and_then(|n| n.to_str())
+        .filter(|n| !n.is_empty() && *n != "." && *n != "..")
+        .ok_or_else(|| format!("{} has no name", prefix.display()))?;
+    let staging = parent.join(format!("{name}.update-new"));
+    let backup = parent.join(format!("{name}.old"));
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).map_err(|e| format!("clearing {}: {e}", staging.display()))?;
+    }
+    if let Err(error) = unpack_release_tarball(package, &staging) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    let relative = if staging.join("bin").join("solidcraft").is_file() {
+        PathBuf::from("bin").join("solidcraft")
+    } else if staging.join("solidcraft").is_file() {
+        PathBuf::from("solidcraft")
+    } else {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err("the archive has no solidcraft program".into());
+    };
+    for bin in ["bin/solidcraft", "bin/solidcraft-cli", "bin/solvecraft-cli", "solidcraft"] {
+        let path = staging.join(bin);
+        if path.is_file() {
+            let _ = make_executable(&path);
+        }
+    }
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&staging);
+            format!("removing the previous {}: {e}", backup.display())
+        })?;
+    }
+    if let Err(error) = std::fs::rename(prefix, &backup) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("moving {} aside: {error}", prefix.display()));
+    }
+    if let Err(error) = std::fs::rename(&staging, prefix) {
+        let restored = std::fs::rename(&backup, prefix);
+        let _ = std::fs::remove_dir_all(&staging);
+        if let Err(restore) = restored {
+            return Err(format!("putting the new {} in place: {error}; restoring the previous copy also failed: {restore}", prefix.display()));
+        }
+        return Err(format!("putting the new {} in place: {error}", prefix.display()));
+    }
+    let _ = std::fs::remove_file(package);
+    Ok(Outcome::Restart(prefix.join(relative)))
+}
+
+/// Extract a release `.tar.gz` into `dest`, dropping the single top folder the release wraps
+/// around `bin/` and `share/`. Absolute paths, `..` and links are refused.
+fn unpack_release_tarball(package: &Path, dest: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(package).map_err(|e| format!("{}: {e}", package.display()))?;
+    let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    let mut total = 0u64;
+    let entries = archive.entries().map_err(|e| format!("{}: {e}", package.display()))?;
+    for entry in entries {
+        let mut entry = entry.map_err(|e| format!("{}: {e}", package.display()))?;
+        let path = entry.path().map_err(|_| "unsafe path in archive".to_string())?.into_owned();
+        let mut components = path.components();
+        match components.next() {
+            Some(std::path::Component::Normal(_)) => {}
+            Some(_) => return Err(format!("unsafe path in archive: {}", path.display())),
+            None => continue,
+        }
+        let relative: PathBuf = components.collect();
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+        if relative.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+            return Err(format!("unsafe path in archive: {}", path.display()));
+        }
+        let target = dest.join(&relative);
+        match entry.header().entry_type() {
+            tar::EntryType::Directory => {
+                std::fs::create_dir_all(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+            }
+            tar::EntryType::Regular => {
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+                }
+                let claimed = entry.header().size().unwrap_or(0);
+                if claimed > MAX_UNZIPPED {
+                    return Err(format!("{} in the archive is too large", relative.display()));
+                }
+                #[cfg(unix)]
+                let mode = entry.header().mode().unwrap_or(0o644);
+                let mut out = std::fs::File::create(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+                let copied = std::io::copy(&mut (&mut entry).take(MAX_UNZIPPED + 1), &mut out).map_err(|e| format!("{}: {e}", target.display()))?;
+                out.flush().map_err(|e| format!("{}: {e}", target.display()))?;
+                if copied > MAX_UNZIPPED {
+                    let _ = std::fs::remove_file(&target);
+                    return Err(format!("{} in the archive is too large", relative.display()));
+                }
+                total = total.saturating_add(copied);
+                if total > MAX_PACKAGE {
+                    return Err("the unpacked archive is too large".into());
+                }
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode & 0o777));
+                }
+            }
+            _ => return Err(format!("refusing {} in the archive", path.display())),
+        }
+    }
+    Ok(())
 }
 
 /// `path` with `suffix` appended to its file name, in the same folder.
@@ -347,7 +495,8 @@ fn make_executable(_: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// At start: delete the executable a previous update moved aside (`solidcraft.exe.old`).
+/// At start: delete what a previous update moved aside (`solidcraft.exe.old`, or the previous
+/// `.tar.gz` folder kept as `<install>.old`).
 pub fn clean_up_after_update(exe: Option<&Path>) {
     for file in [exe.map(Path::to_path_buf), exe.and_then(|e| e.parent()).map(|d| d.join("solidcraft-cli.exe"))].into_iter().flatten() {
         if let Ok(old) = sibling(&file, ".old")
@@ -355,5 +504,15 @@ pub fn clean_up_after_update(exe: Option<&Path>) {
         {
             let _ = std::fs::remove_file(old);
         }
+    }
+    // Only the Linux archive's program is named `solidcraft` with no extension. An AppImage or
+    // `solidcraft.exe` keeps its own `.old` file, handled above, and its folders are left alone.
+    let Some(exe) = exe.filter(|path| path.file_name().is_some_and(|name| name == "solidcraft")) else { return };
+    let Some(prefix) = installable_tarball_prefix(exe) else { return };
+    let Some(name) = prefix.file_name().and_then(|n| n.to_str()) else { return };
+    let Some(backup) = prefix.parent().map(|parent| parent.join(format!("{name}.old"))) else { return };
+    // Only a folder this updater left behind: it holds the program, and nothing else is removed.
+    if backup.join("bin").join("solidcraft").is_file() || backup.join("solidcraft").is_file() {
+        let _ = std::fs::remove_dir_all(backup);
     }
 }

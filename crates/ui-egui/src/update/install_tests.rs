@@ -54,13 +54,20 @@ fn methods_per_installation() {
     assert_eq!(method(&InstallKind::WindowsPortable, Some(exe)), Some(Method::PortableZip(exe.into())));
     assert_eq!(method(&InstallKind::WindowsExe, Some(exe)), Some(Method::Exe(exe.into())));
     assert_eq!(method(&InstallKind::MacApp("/A/S.app".into()), Some(exe)), Some(Method::Dmg));
+    assert_eq!(
+        method(&InstallKind::LinuxTarball, Some(Path::new("/opt/solidcraft-0.1.0/bin/solidcraft"))),
+        Some(Method::Tarball("/opt/solidcraft-0.1.0".into()))
+    );
+    assert_eq!(tarball_prefix(Path::new("/opt/solidcraft")), Some(PathBuf::from("/opt")), "a program not inside bin/");
+    assert_eq!(tarball_prefix(Path::new("/solidcraft")), None, "the filesystem root is not an install folder");
+    assert_eq!(method(&InstallKind::LinuxTarball, Some(Path::new("/opt/bin/solidcraft"))), None, "a top-level folder is not replaced");
+    assert_eq!(method(&InstallKind::LinuxTarball, None), None, "no program path, so no folder to replace");
     for never in [
         InstallKind::Flatpak("id".into()),
         InstallKind::Snap { store: true },
         InstallKind::Snap { store: false },
         InstallKind::Deb,
         InstallKind::Rpm,
-        InstallKind::LinuxTarball,
         InstallKind::Other,
         InstallKind::Dev,
     ] {
@@ -217,6 +224,143 @@ fn windows_installer_is_followed_by_the_new_version() {
         )
     );
     assert!(out.iter().any(|a| a == "-Command"));
+}
+
+fn gzip_bytes(raw: &[u8]) -> Vec<u8> {
+    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoded.write_all(raw).unwrap();
+    encoded.finish().unwrap()
+}
+
+/// A ustar archive. `typeflag` is `b'0'` for a file. Used when the `tar` builder would refuse the name.
+fn raw_tar(entries: &[(&str, u8, &[u8])]) -> Vec<u8> {
+    let mut archive = Vec::new();
+    for (name, typeflag, data) in entries {
+        assert!(name.len() <= 100, "{name}");
+        let mut header = vec![0u8; 512];
+        header[..name.len()].copy_from_slice(name.as_bytes());
+        let octal = |value: u64, width: usize| {
+            let text = format!("{:0width$o}", value, width = width - 1);
+            let mut bytes = text.into_bytes();
+            bytes.push(0);
+            bytes
+        };
+        header[100..108].copy_from_slice(&octal(0o755, 8));
+        header[108..116].copy_from_slice(&octal(0, 8));
+        header[116..124].copy_from_slice(&octal(0, 8));
+        header[124..136].copy_from_slice(&octal(data.len() as u64, 12));
+        header[136..148].copy_from_slice(&octal(0, 12));
+        header[148..156].copy_from_slice(b"        ");
+        header[156] = *typeflag;
+        header[257..262].copy_from_slice(b"ustar");
+        header[263] = 0;
+        header[264..266].copy_from_slice(b"00");
+        let sum: u32 = header.iter().map(|b| u32::from(*b)).sum();
+        let checksum = format!("{sum:06o}\0 ");
+        header[148..156].copy_from_slice(checksum.as_bytes());
+        archive.extend_from_slice(&header);
+        archive.extend_from_slice(data);
+        archive.extend(std::iter::repeat(0u8).take((512 - (data.len() % 512)) % 512));
+    }
+    archive.extend(std::iter::repeat(0u8).take(1024));
+    archive
+}
+
+/// A gzip-compressed tar archive of `files` (`name` is the path inside the archive).
+fn gzip_tar(files: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut raw = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut raw);
+        for (name, bytes) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder.append_data(&mut header, *name, *bytes).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoded.write_all(&raw).unwrap();
+    encoded.finish().unwrap()
+}
+
+#[test]
+fn a_tarball_replaces_its_install_folder_only_when_it_verifies() {
+    let dir = scratch("tarball");
+    let prefix = dir.join("solidcraft-9.9.8");
+    let exe = prefix.join("bin").join("solidcraft");
+    std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+    std::fs::write(&exe, b"old version").unwrap();
+    std::fs::write(prefix.join("bin").join("solidcraft-cli"), b"old cli").unwrap();
+
+    let name = "solidcraft-9.9.9-linux-x86_64.tar.gz";
+    let payload = gzip_tar(&[
+        ("solidcraft-9.9.9-linux-x86_64/bin/solidcraft", b"new version"),
+        ("solidcraft-9.9.9-linux-x86_64/bin/solidcraft-cli", b"new cli"),
+        ("solidcraft-9.9.9-linux-x86_64/share/doc/README.md", b"notes"),
+    ]);
+    let release = release_with(&[(name, payload.len()), (SUMS, 100)]);
+    let method = Method::Tarball(prefix.clone());
+
+    let wrong = format!("{}  {name}\n", hex(b"something else"));
+    let bad = net(vec![(name.into(), payload.clone()), (SUMS.into(), wrong.into_bytes())]);
+    let err = run(&release, &InstallKind::LinuxTarball, &method, "x86_64", &bad, &dir.join("staging"), &Progress::default()).unwrap_err();
+    assert!(err.contains("doesn't match"), "{err}");
+    assert_eq!(std::fs::read(&exe).unwrap(), b"old version", "a bad checksum leaves the install");
+    assert!(!dir.join("solidcraft-9.9.8.old").exists());
+
+    let sums = format!("{}  {name}\n", hex(&payload));
+    let good = net(vec![(name.into(), payload), (SUMS.into(), sums.into_bytes())]);
+    let out = run(&release, &InstallKind::LinuxTarball, &method, "x86_64", &good, &dir.join("staging"), &Progress::default()).unwrap();
+    assert_eq!(out, Outcome::Restart(exe.clone()));
+    assert_eq!(std::fs::read(&exe).unwrap(), b"new version");
+    assert_eq!(std::fs::read(prefix.join("bin/solidcraft-cli")).unwrap(), b"new cli");
+    assert_eq!(std::fs::read(prefix.join("share/doc/README.md")).unwrap(), b"notes");
+    let backup = dir.join("solidcraft-9.9.8.old");
+    assert_eq!(std::fs::read(backup.join("bin/solidcraft")).unwrap(), b"old version", "the previous folder is kept until the next start");
+    clean_up_after_update(Some(&exe));
+    assert!(!backup.exists(), "the next start removes the previous folder");
+
+    // The tar builder refuses to write `..`, so this header is assembled directly.
+    let evil = gzip_bytes(&raw_tar(&[("solidcraft-9.9.9-linux-x86_64/../../escaped", b'0', b"bad")]));
+    let evil_path = dir.join("evil.tar.gz");
+    std::fs::write(&evil_path, &evil).unwrap();
+    let err = apply(&Method::Tarball(prefix.clone()), &evil_path).unwrap_err();
+    assert!(err.contains("unsafe"), "{err}");
+    assert!(!dir.join("escaped").exists());
+    assert!(!dir.join("solidcraft-9.9.8.update-new").exists());
+    assert_eq!(std::fs::read(&exe).unwrap(), b"new version");
+
+    let empty = gzip_tar(&[("solidcraft-9.9.9-linux-x86_64/README.md", b"only notes")]);
+    let empty_path = dir.join("empty.tar.gz");
+    std::fs::write(&empty_path, &empty).unwrap();
+    assert!(apply(&Method::Tarball(prefix.clone()), &empty_path).unwrap_err().contains("no solidcraft program"));
+    assert_eq!(std::fs::read(&exe).unwrap(), b"new version");
+    assert!(!dir.join("solidcraft-9.9.8.update-new").exists());
+
+    let mut raw = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut raw);
+        let mut header = tar::Header::new_gnu();
+        header.set_path("solidcraft-9.9.9-linux-x86_64/bin/solidcraft").unwrap();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_link_name("elsewhere").unwrap();
+        header.set_cksum();
+        builder.append(&header, std::io::empty()).unwrap();
+        builder.finish().unwrap();
+    }
+    let mut encoded = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoded.write_all(&raw).unwrap();
+    let link_path = dir.join("link.tar.gz");
+    std::fs::write(&link_path, encoded.finish().unwrap()).unwrap();
+    let err = apply(&Method::Tarball(prefix.clone()), &link_path).unwrap_err();
+    assert!(err.contains("refusing"), "{err}");
+    assert_eq!(std::fs::read(&exe).unwrap(), b"new version", "a symlink archive does not replace the program");
+    assert!(!dir.join("solidcraft-9.9.8.update-new").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
