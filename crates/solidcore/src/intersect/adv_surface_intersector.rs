@@ -70,6 +70,13 @@
 //!   (cyclic tree links, which recurse forever upstream) is
 //!   [`SolidError::InvalidInput`], as is nesting past the base solver's
 //!   [`MAX_SOLVE_DEPTH`](crate::geom::global_solver::MAX_SOLVE_DEPTH).
+//! - **Tangential contact points** (not upstream, WR-74, tangency-labs/solidcore#394,
+//!   opt-in `Kernel::fixes.ssi_tangent_contact_points`, off by default). The node
+//!   pairs `FindInteriorCurves` drops (normals within 5 degrees, no local
+//!   intersection, normals within 2 degrees at the solution) seed the SolidCraft
+//!   fork's search for isolated tangential contacts (`tangent_contacts`,
+//!   tangency-labs/smlib@c26edbc), run after the loop for a non-self intersection.
+//!   Its Newton iterations are bounded loops (8 + 25 steps), no recursion.
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::curve::conic::{Conic, ConicType};
@@ -99,6 +106,8 @@ use crate::surface::surface::p2::{
 };
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::p1::{BezierPatch, SurfaceCache};
+
+mod tangent_contacts;
 
 const OP_SING: &str =
     "intersect::adv_surface_intersector::AdvSurfaceIntersector::compute_singularity_point";
@@ -502,6 +511,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // curves): this loop only appends curves, so slot `i` stays curve `i`'s.
         let mut drop_caches = DropPointCaches::default();
 
+        // Opt-in (WR-74, #394): the patch UV domains of the node pairs that cannot
+        // start a crossing curve seed the tangential contact point search below.
+        let mut tangent_seeds: Vec<[Extent2d; 2]> = Vec::new();
+
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
             let uv_guess1 = Point2::new(sol.start.parameters[0], sol.start.parameters[1]);
@@ -522,6 +535,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 5.0 {
+                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
                     continue;
                 }
             }
@@ -543,6 +557,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
             // for nodes that do not intersect - skip to next node pair
             if !found_answer {
+                self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
                 continue;
             }
 
@@ -560,6 +575,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     angle_rad = PI - angle_rad;
                 }
                 if angle_rad * (180.0 / PI) < 2.0 {
+                    self.push_tangent_seed(k, &mut tangent_seeds, node1, node2)?;
                     continue;
                 }
             }
@@ -610,6 +626,36 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             self.base.start_point = None;
         }
 
+        // Opt-in (WR-74, #394): isolated tangential contact points
+        if k.fixes.ssi_tangent_contact_points && !self.base.doing_self_intersection {
+            tangent_contacts::find_tangent_contact_points(
+                k,
+                &self.base,
+                &tangent_seeds,
+                out,
+                &mut drop_caches,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Opt-in (WR-74, #394): records the patch UV domains of a node pair
+    /// `FindInteriorCurves` drops as a seed of the tangential contact point search
+    /// (nothing without `Kernel::fixes.ssi_tangent_contact_points`).
+    fn push_tangent_seed(
+        &self,
+        k: &Kernel,
+        seeds: &mut Vec<[Extent2d; 2]>,
+        node1: Option<NodeId>,
+        node2: Option<NodeId>,
+    ) -> Result<()> {
+        if k.fixes.ssi_tangent_contact_points {
+            seeds.push([
+                *self.patch(0, node1)?.aux.uv_domain(),
+                *self.patch(1, node2)?.aux.uv_domain(),
+            ]);
+        }
         Ok(())
     }
 
