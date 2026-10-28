@@ -37,6 +37,8 @@ struct NavStore {
     query: String,
     cursor: usize,
     hits: Vec<NavHit>,
+    /// The cursor moved this frame, so this frame's passes scroll the selected row into view.
+    scroll: bool,
 }
 
 /// The row to scroll to and outline after a result is chosen.
@@ -592,6 +594,7 @@ pub(crate) fn nav(ctx: &Context) -> (String, usize, Vec<NavHit>) {
 pub(crate) fn set_cursor(ctx: &Context, cursor: usize) {
     ctx.data_mut(|data| {
         let store = data.get_temp_mut_or_default::<NavStore>(Id::new(NAV));
+        store.scroll = store.cursor != cursor;
         store.cursor = cursor;
     });
 }
@@ -619,7 +622,10 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
     if with(ui, |state| state.hiding > 0).unwrap_or(true) {
         return;
     }
-    let cursor = ui.ctx().data(|data| data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default().cursor);
+    let (cursor, scroll) = ui.ctx().data(|data| {
+        let store = data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default();
+        (store.cursor, store.scroll)
+    });
     let selected = with(ui, |state| {
         let selected = state.nav.len() == cursor;
         state.nav.push(PaintedHit { page: state.page_index, label: label.to_string() });
@@ -631,7 +637,10 @@ pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
     }
     let t = Tokens::get();
     ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
-    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    // Only when Up/Down moved the cursor: following it every frame pins the list to the match.
+    if scroll {
+        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    }
     crate::scenario::publish_handle("prefs:search:current", rect.center());
 }
 
@@ -721,6 +730,39 @@ mod tests {
         h.frames(1);
         assert!(h.app.prefs_window.filter.is_empty());
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS, "Escape returns to the page from before the search");
+    }
+
+    /// The selected match is scrolled to when the arrows move it, not on every frame, so the
+    /// wheel can scroll the results away from it.
+    #[test]
+    fn preferences_search_results_scroll_freely() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+        h.frames(2);
+        h.app.prefs_window.filter = "view".into();
+        h.frames(3);
+        let first = crate::scenario::handle_at("prefs:search:current").expect("first match");
+        let wheel = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -400.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        // The wheel scrolls smoothly: give it time to come to rest before each check.
+        h.frame_with(vec![egui::Event::PointerMoved(first), wheel.clone()]);
+        h.frames(60);
+        let scrolled = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
+        assert!(scrolled.y < first.y - 100.0, "the wheel scrolls past the first match ({} -> {})", first.y, scrolled.y);
+        h.step(&serde_json::json!({"key": "ArrowDown"})).expect("next match");
+        h.frames(60);
+        let next = crate::scenario::handle_at("prefs:search:current").expect("next match");
+        let body = crate::scenario::rect_of("dialog:page_body").expect("page body");
+        assert!(body.contains(next), "Down brings the next match into view ({next:?} in {body:?})");
+        h.frame_with(vec![egui::Event::PointerMoved(next), wheel]);
+        h.frames(60);
+        let after = crate::scenario::handle_at("prefs:search:current").expect("match still drawn");
+        assert!(after.y < next.y - 100.0, "the wheel still scrolls after Down ({} -> {})", next.y, after.y);
     }
 
     #[test]
