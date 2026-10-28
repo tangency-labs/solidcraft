@@ -77,20 +77,17 @@ const MAX_SPLINE_POINTS: usize = 4096;
 const MAX_SPLINE_DEGREE: usize = 16;
 /// Samples along a curve when projecting a vertex onto it.
 const MAX_SAMPLES: usize = 4096;
-/// How far (mm) a vertex may lie from its curve before the edge is refused.
-const MAX_VERTEX_GAP: f64 = 1.0;
-/// How far (mm) an edge's curve may lie from a face's surface before the face is refused.
-const MAX_EDGE_GAP: f64 = 1.0;
+/// The largest tolerance (mm) an edge or vertex is given: SMLib takes none larger (smlib.h's
+/// EDGE_TOLERANCE and VERTEX_TOLERANCE, `solidcraft_smlib::flat::MAX_TOLERANCE`). Geometry that
+/// would need more is refused, with how far off it lies.
+const MAX_TOLERANCE: f64 = 1.0;
+/// A vertex's tolerance over its largest gap from its curves and surfaces.
+const VERTEX_GAP_MARGIN: f64 = 1.5;
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 const EDGE_GAP_SAMPLES: usize = 16;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
 /// record check measures it: with margin, as a vertex's.
 const EDGE_GAP_MARGIN: f64 = 1.5;
-/// An edge's tolerance over its largest distance from a face's surface, measured before its
-/// pcurve is made: a closed-form pcurve is accepted within half its edge's tolerance
-/// (`pcurve::pcurves_within`), so the tolerance goes past twice the distance.
-const EDGE_SURFACE_MARGIN: f64 = 3.0;
-
 /// A solid (or sheet) read from the file.
 #[derive(Clone, Debug)]
 pub struct Solid {
@@ -441,11 +438,11 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// A vertex `gap` mm from where its edge's curve puts it: refused if far off, else its
     /// tolerance covers the gap.
     fn raise_vertex(&mut self, v: u32, gap: f64, edge: u64) -> R<()> {
-        if !(gap <= MAX_VERTEX_GAP) {
+        if !(VERTEX_GAP_MARGIN * gap <= MAX_TOLERANCE) {
             return Err(format!("edge #{edge}: a vertex lies {gap} mm off its curve"));
         }
         if let Some(x) = self.vertices.get_mut(v as usize) {
-            x.tolerance = x.tolerance.max(1.5 * gap);
+            x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
         }
         Ok(())
     }
@@ -492,7 +489,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                     let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
                     gap = gap.max(s.dist(p));
                 }
-                self.cover_edge(e, gap, EDGE_SURFACE_MARGIN)?;
+                self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
             }
         }
         Ok(())
@@ -504,7 +501,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         if margin * gap <= x.tolerance {
             return Ok(());
         }
-        if !(gap <= MAX_EDGE_GAP) {
+        if !(margin * gap <= MAX_TOLERANCE) {
             return Err(format!("an edge lies {gap} mm off the face's surface"));
         }
         x.tolerance = margin * gap;
@@ -1002,10 +999,10 @@ impl<'b, 'a> Builder<'b, 'a> {
                 {
                     let p = v3(x.point);
                     let gap = surface.project(p, None, f64::INFINITY).and_then(|q| surface.point(q)).map_or(f64::INFINITY, |s| s.dist(p));
-                    if !(gap <= MAX_VERTEX_GAP) {
+                    if !(VERTEX_GAP_MARGIN * gap <= MAX_TOLERANCE) {
                         return Err(format!("face #{}: a vertex loop's vertex lies {gap} mm off its surface", face.step));
                     }
-                    x.tolerance = x.tolerance.max(1.5 * gap);
+                    x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
                 }
             }
         }
