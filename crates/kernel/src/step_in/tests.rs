@@ -898,10 +898,13 @@ fn repeated_items_are_shared_and_one_use_items_are_not() {
     assert!(boxes[1].bbox.min.dist(Vec3::new(90.0, 0.0, 0.0)) < 1e-6, "{:?}", boxes[1].bbox);
 }
 
+/// A face on a surface the reader does not know is left out and named; the rest of the solid
+/// comes in as a surface body of the faces that read, with no "open body" warning on top (as
+/// `a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read`).
 #[test]
 fn unsupported_face_is_left_out_and_reported() {
     let mut t = String::from(HEAD);
-    let cube = cube_entities().replace("#410=PLANE('',#409);", "#410=OFFSET_SURFACE('',#409,1.,.F.);");
+    let cube = cube_entities().replace("#410=PLANE('',#409);", "#410=CURVE_BOUNDED_SURFACE('',#409,(),.F.);");
     t += &cube;
     t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
     t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
@@ -910,8 +913,11 @@ fn unsupported_face_is_left_out_and_reported() {
     assert_eq!(imp.bodies.len(), 1);
     assert!(!imp.bodies[0].closed);
     assert_eq!(imp.bodies[0].body.face_count(), 5);
-    assert!(imp.warnings.iter().any(|w| w.contains("OFFSET_SURFACE")), "{:?}", imp.warnings);
-    assert!(imp.warnings.iter().any(|w| w.contains("open body")), "{:?}", imp.warnings);
+    assert!(imp.bodies[0].body.is_surface() && !imp.bodies[0].body.is_mesh());
+    let unsupported = "face #411: not supported yet: surface CURVE_BOUNDED_SURFACE";
+    assert!(imp.warnings.iter().any(|w| w.contains("'Cube': imported as surfaces: ") && w.contains(unsupported)), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("'Cube': left out: ") && w.contains(unsupported)), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("open body")), "{:?}", imp.warnings);
 }
 
 #[test]
