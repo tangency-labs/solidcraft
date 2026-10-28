@@ -1493,16 +1493,14 @@ mod tests {
         file["format_pending"] = serde_json::json!(["not-a-change-anyone-made"]);
         file["features"] = serde_json::json!([{"type": "emboss", "face": {"body": "Body", "at": [0, 0, 0], "a_newer_key": true}}]);
         let error = read(&file.to_string()).unwrap_err().to_string();
-        if PENDING.is_empty() {
-            assert!(error.contains("emboss face"), "a list beside a folded format means nothing: {error}");
-        } else {
-            assert_eq!(
-                error,
-                format!(
-                    "this design was saved by a newer SolidCraft (file format {FORMAT} with `not-a-change-anyone-made`, which this version doesn't know): update SolidCraft to open it"
-                )
-            );
-        }
+        // With changes pending, FORMAT is made of them; once they are folded it is the folded
+        // format, which is made of changes too. Either way an unknown change is a newer build's.
+        assert_eq!(
+            error,
+            format!(
+                "this design was saved by a newer SolidCraft (file format {FORMAT} with `not-a-change-anyone-made`, which this version doesn't know): update SolidCraft to open it"
+            )
+        );
     }
 
     /// Drawings follow the same rules from their own first format: folded formats follow on from 1
