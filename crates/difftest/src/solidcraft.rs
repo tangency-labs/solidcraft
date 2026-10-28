@@ -1454,6 +1454,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "revolve_splits_curves_on_axis" => &mut k.fixes.revolve_splits_curves_on_axis,
         "stitch_solid_nests_cavities" => &mut k.fixes.stitch_solid_nests_cavities,
         "sphere_small_circle_not_touching" => &mut k.fixes.sphere_small_circle_not_touching,
+        "ssi_low_angle_start_on_probation" => &mut k.fixes.ssi_low_angle_start_on_probation,
         "curve_tight_box_interval_knots" => &mut k.fixes.curve_tight_box_interval_knots,
         "fillet_tangent_point_one_sided_step" => &mut k.fixes.fillet_tangent_point_one_sided_step,
         "fillet_rails_meet_at_one_end_point" => &mut k.fixes.fillet_rails_meet_at_one_end_point,

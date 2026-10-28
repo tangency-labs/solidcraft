@@ -82,6 +82,14 @@
 //!   fork's search for isolated tangential contacts (`tangent_contacts`,
 //!   tangency-labs/smlib@c26edbc), run after the loop for a non-self intersection.
 //!   Its Newton iterations are bounded loops (8 + 25 steps), no recursion.
+//! - **Opt-in fix (WR-79 part 2, #396).** With
+//!   `Kernel::fixes.ssi_low_angle_start_on_probation` (off by default),
+//!   `FindInteriorCurves` traces a start point below the 5/2 degree normal-angle tests
+//!   on probation (the SolidCraft fork's tangency-labs/smlib@30d25bf): kept only as a
+//!   closed loop whose box diagonal exceeds twice the tolerance and that is not
+//!   tangent, coincident or touching; skipped below `2 tol / modelSize` radians;
+//!   rejected traces and their start points are remembered. Off, the port matches the
+//!   pinned C++.
 //! - **Singular start direction** (not upstream, WR-512, tangency-labs/solidcore#1522,
 //!   opt-in `Kernel::fixes.ssi_singular_start_inside_direction`, off by default). A
 //!   curve starting at a singularity takes its first direction from the first singular
@@ -114,7 +122,8 @@ use crate::intersect::surface_intersector::p1::{
     SurfaceIntersector, TsectId, TsectPnt,
 };
 use crate::kernel::Kernel;
-use crate::math::{min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::{
     compute_surface_point_type, drop_vectors, evaluate_geometric, LocalSurfaceType, TsectCurveType,
@@ -555,7 +564,11 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
     /// per intersecting leaf pair, and traces a curve from each candidate whose
     /// normals are at least 5 degrees apart, whose local intersection succeeds with
     /// normals at least 2 degrees apart and which is not on a curve found already.
-    /// The curves are appended to `out`.
+    /// The curves are appended to `out`. With
+    /// `Kernel::fixes.ssi_low_angle_start_on_probation` a candidate below either
+    /// angle (but at least `2 tol / modelSize` radians) is traced on probation and kept
+    /// only as a closed transversal loop larger than twice the tolerance (see the
+    /// module deviations).
     ///
     /// # Errors
     ///
@@ -581,6 +594,21 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         // Opt-in (WR-74, #394): the patch UV domains of the node pairs that cannot
         // start a crossing curve seed the tangential contact point search below.
         let mut tangent_seeds: Vec<[Extent2d; 2]> = Vec::new();
+        // Fix WR-79 part 2 (#396, opt-in): the 3D curves traced from low-angle start
+        // points and then rejected (and those start points), with their drop caches;
+        // later low-angle start points on them are not traced again.
+        let probation = k.fixes.ssi_low_angle_start_on_probation;
+        let mut rejected_curves: Vec<Curve> = Vec::new();
+        let mut rejected_caches = DropPointCaches::default();
+        // The smallest normal angle worth tracing from: on a transversal loop of radius
+        // r between surfaces of relative curvature radius R the normals differ by about
+        // r/R, so loops above the tolerance on surfaces curved at model scale stay above
+        // tol/modelSize, while tangent curves and tangent points fall below it.
+        let min_loop_angle_rad = if probation {
+            self.min_loop_angle_rad(k)?
+        } else {
+            0.0
+        };
 
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
@@ -593,7 +621,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             let bss1 = self.base.surface(SrfIndex::First);
             let bss2 = self.base.surface(SrfIndex::Second);
 
-            // Skip cases where surface normals are very close
+            // Skip cases where surface normals are very close (with the WR-79 fix:
+            // trace them on probation, keeping only a closed transversal loop larger
+            // than the tolerance)
+            let mut low_angle_start = false;
             {
                 let norm1 = surface_evaluate_normal(k, bss1, uv_guess1)?;
                 let norm2 = surface_evaluate_normal(k, bss2, uv_guess2)?;
@@ -607,7 +638,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     if k.fixes.ssi_tangent_curve_tracer {
                         self.tangent_curve_seeds.push([uv_guess1, uv_guess2]);
                     }
-                    continue;
+                    if !probation {
+                        continue;
+                    }
+                    low_angle_start = true;
                 }
             }
 
@@ -651,6 +685,13 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                     if k.fixes.ssi_tangent_curve_tracer {
                         self.tangent_curve_seeds.push([uv, uv2]);
                     }
+                    if !probation {
+                        continue;
+                    }
+                    low_angle_start = true;
+                }
+                // too small an angle for a loop above the tolerance
+                if low_angle_start && angle_rad < min_loop_angle_rad {
                     continue;
                 }
             }
@@ -663,6 +704,17 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 None,
                 &mut drop_caches,
             )? {
+                continue;
+            }
+            if low_angle_start
+                && self.base.is_point_on_curve_cached(
+                    k,
+                    surf_pnt,
+                    &rejected_curves,
+                    None,
+                    &mut rejected_caches,
+                )?
+            {
                 continue;
             }
 
@@ -696,9 +748,52 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 self.base.reverse_curve_direction()?;
             }
 
+            // a low-angle start point only yields output when it traced a closed
+            // loop that is not a single point within tolerance
+            let keep_curve = !low_angle_start || self.probation_loop_is_large()?;
+
             // turn m_vCurvePoints into an intersection curve
+            let num_curves = out.curves_3d.len();
             flush_curve(k, &mut self.base, out)?;
             self.base.start_point = None;
+
+            // drop a probationary curve that is not a transversal loop, and remember it
+            // and its start point so nearby start points are not traced again
+            let reject = low_angle_start
+                && (out.curves_3d.len() == num_curves
+                    || !keep_curve
+                    || matches!(
+                        out.curve_types.last(),
+                        Some(
+                            TsectCurveType::Tangent
+                                | TsectCurveType::Coincident
+                                | TsectCurveType::Touching
+                        )
+                    ));
+            if reject {
+                while out.curves_3d.len() > num_curves {
+                    if let Some(c) = out.curves_3d.pop() {
+                        rejected_curves.push(c);
+                    }
+                    if out.surface1_uv_curves.len() > num_curves {
+                        out.surface1_uv_curves.pop();
+                    }
+                    if out.surface2_uv_curves.len() > num_curves {
+                        out.surface2_uv_curves.pop();
+                    }
+                    if out.curve_types.len() > num_curves {
+                        out.curve_types.pop();
+                    }
+                    if out.deviations.len() > num_curves {
+                        out.deviations.pop();
+                    }
+                }
+                // the popped curves' slots may be taken by later curves
+                drop_caches.truncate(num_curves);
+                rejected_curves.push(Curve::from(BSplineCurve::create_degenerate_curve(
+                    3, surf_pnt,
+                )?));
+            }
         }
 
         // Opt-in (WR-74, #394): isolated tangential contact points
@@ -732,6 +827,56 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             ]);
         }
         Ok(())
+    }
+
+    /// The WR-79 fix's (#396 part 2) smallest normal angle worth tracing from:
+    /// `2 tol / modelSize`, with the model size the larger diagonal of the two
+    /// surfaces' boxes over their UV domains (`PI`, nothing, when that is not above the
+    /// tolerance).
+    fn min_loop_angle_rad(&self, k: &Kernel) -> Result<f64> {
+        let tol = self.base.this_approx_tol_3d;
+        let mut sizes = [0.0; 2];
+        for (size, (which, dom)) in sizes.iter_mut().zip(
+            [SrfIndex::First, SrfIndex::Second]
+                .into_iter()
+                .zip(&self.base.uv_domains),
+        ) {
+            let boxes = self.base.surface(which).calculate_bounding_box(
+                k,
+                dom,
+                [true, false, false],
+                true,
+            )?;
+            *size = boxes.normal_box.unwrap_or_default().size().length();
+        }
+        let model_size = max2(sizes[0], sizes[1]);
+        Ok(if model_size > tol {
+            2.0 * tol / model_size
+        } else {
+            PI
+        })
+    }
+
+    /// The WR-79 fix's (#396 part 2) test of a probationary trace: the curve just
+    /// traced is closed, has more than two points and the diagonal of their box exceeds
+    /// twice the tolerance.
+    fn probation_loop_is_large(&self) -> Result<bool> {
+        if !self.base.curve_is_closed {
+            return Ok(false);
+        }
+        let pnts = self.base.curve_points();
+        if pnts.len() <= 2 {
+            return Ok(false);
+        }
+        let mut loop_box: Option<Extent3d> = None;
+        for &id in pnts {
+            let p = Extent3d::from_point(self.base.point(id)?.crv_pos());
+            loop_box = Some(match loop_box {
+                None => p,
+                Some(b) => b.union(&p),
+            });
+        }
+        Ok(loop_box.is_some_and(|b| b.size().length() > 2.0 * self.base.this_approx_tol_3d))
     }
 
     // ---- Gauss maps --------------------------------------------------------------------------
