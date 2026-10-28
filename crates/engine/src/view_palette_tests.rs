@@ -93,6 +93,7 @@ const MARK: Palette = Palette {
     sketch_centerline: Rgb(43, 44, 45),
     axes: [Rgb(46, 47, 48), Rgb(49, 50, 51), Rgb(52, 53, 54)],
     cap: Rgb(55, 56, 57),
+    hatch: [Rgb(61, 62, 63), Rgb(64, 65, 66)],
     isocurve: Rgb(58, 59, 60),
     analysis: solidcraft_render::AnalysisColors {
         draft: [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]],

@@ -332,6 +332,19 @@ pub enum HistorySketches {
     UnderFeature,
 }
 
+/// How a section hatches the faces it cuts (Preferences: "Section hatch").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionHatch {
+    /// Each body in its own hatch (`solidcraft_render::hatch`): 45 or 135 degrees in one of the
+    /// theme's hatch colours, touching bodies never alike. Also what a value this version doesn't
+    /// know reads as (`lenient`).
+    #[default]
+    ByPart,
+    /// Every cut face in the cap colour at 45 degrees (how it was before by part).
+    One,
+}
+
 /// What an orbit turns around (Preferences: "Orbit around").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -586,6 +599,9 @@ preference_settings! {
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
+    /// A section hatches each cut body its own way (the default), or every one alike, in the cap
+    /// colour at 45 degrees, as before.
+    section_hatch: SectionHatch = SectionHatch::ByPart, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
     grid_follows_view: bool = false => check("Grid follows the view", "Side views show the grid on the upright plane facing them instead of the ground");

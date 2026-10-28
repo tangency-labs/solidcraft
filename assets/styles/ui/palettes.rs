@@ -187,6 +187,11 @@ impl Tokens {
             dimension_driven: Color32::from_rgb(120, 126, 138),
             sketch_point_free: Color32::from_rgb(30, 90, 200),
             section_cap: Color32::from_rgb(214, 128, 72),
+            // A steel and a sage that tint a body about as strongly as the cap does and to within
+            // a few points of its lightness, so the cut stays calm, while staying apart from the
+            // cap, each other and the body in every colour vision mode (dark keeps them, as the
+            // cap).
+            section_hatch: [Color32::from_rgb(84, 138, 168), Color32::from_rgb(108, 180, 126)],
             dialog_bg: Color32::from_rgb(250, 251, 252),
             dialog_border: Color32::from_rgb(213, 219, 227),
             chip: Color32::from_rgb(38, 120, 218),

@@ -315,7 +315,7 @@ theme_keys! {
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
-    many: [continuity, logo],
+    many: [continuity, logo, section_hatch],
     icons: [highlight, agent, marker_halo],
 }
 

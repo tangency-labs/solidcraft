@@ -1,0 +1,17 @@
+{
+  "en": {
+    "prefs.section_hatch": "Section hatch",
+    "prefs.section_hatch_by_part": "By part",
+    "prefs.section_hatch_one": "One style"
+  },
+  "ja": {
+    "prefs.section_hatch": "断面ハッチング",
+    "prefs.section_hatch_by_part": "部品ごと",
+    "prefs.section_hatch_one": "単一スタイル"
+  },
+  "zh": {
+    "prefs.section_hatch": "剖面线",
+    "prefs.section_hatch_by_part": "按零件",
+    "prefs.section_hatch_one": "单一样式"
+  }
+}

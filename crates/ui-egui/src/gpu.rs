@@ -365,6 +365,7 @@ fn offscreen(
         ssaa,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
+        hatch: Default::default(),
     });
     let texture = |format, usage| {
         device.create_texture(&wgpu::TextureDescriptor {

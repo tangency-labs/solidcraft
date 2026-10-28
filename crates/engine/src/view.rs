@@ -72,6 +72,8 @@ pub struct Palette {
     pub axes: [Rgb; 3],
     /// What the section cap is tinted toward.
     pub cap: Rgb,
+    /// The section hatch's other colours, after the cap's (`Scene::part_hatch`).
+    pub hatch: [Rgb; 2],
     /// Isocurve Analysis: the faces' isoparametric curves.
     pub isocurve: Rgb,
     /// The surface analysis colours.
@@ -97,6 +99,7 @@ impl Palette {
         sketch_centerline: colors::SKETCH_CENTERLINE,
         axes: [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z],
         cap: colors::SECTION_CAP,
+        hatch: solidcraft_render::SECTION_HATCH,
         isocurve: colors::ISOCURVE,
         analysis: AnalysisColors::DEFAULT,
     };
@@ -589,6 +592,7 @@ fn build_scene(
         clip: section.map(|(o, n)| (n, n.dot(o))),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,
+        part_hatch: Some([p.cap, p.hatch[0], p.hatch[1]]),
         analysis: s.analysis.map(|a| SceneAnalysis { mode: a.mode(), colors: p.analysis }),
         ..Default::default()
     };
@@ -655,6 +659,8 @@ fn build_scene(
         .flatten()
         .collect();
     let mut thread_budget = crate::cosmetic_threads::Budget::default();
+    // Where the section cuts each closed solid body, by its mesh in `sc.meshes`: their hatches.
+    let mut cuts: Vec<(usize, u64, Vec<(Vec3, Vec3)>)> = Vec::new();
     for body in st.bodies.iter().filter(|b| s.body_visible(&b.name)) {
         let selected = selected_occurrences.contains(&body.name) || s.selection.iter().any(|x| matches!(x, Sel::Body { name } if *name == body.name));
         let mesh = body.mesh();
@@ -676,7 +682,9 @@ fn build_scene(
         // A see-through appearance is drawn see-through, as the viewport draws it; a selected
         // body is drawn solid, so the selection colour reads.
         let opacity = if selected { 1.0 } else { s.doc.model_body_opacity(body) as f32 };
-        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed() });
+        let cut_solid = section.is_some() && body.is_closed() && opacity >= solidcraft_render::SEE_THROUGH;
+        sc.meshes.push(SceneMesh { mesh: Arc::clone(&mesh), color, face_colors, opacity, closed: body.is_closed(), hatch: Default::default() });
+        let at = sc.meshes.len() - 1;
         if cosmetic_threads
             && thread_budget.available()
             && s.doc.model_body_opacity(body) >= 0.999
@@ -694,8 +702,21 @@ fn build_scene(
         }
         // The outline of the body where the section cuts it.
         if let Some((o, n)) = section {
-            for (a, b) in section_segments(&mesh, o, n) {
-                sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+            let segments = section_segments(&mesh, o, n);
+            for (a, b) in &segments {
+                sc.lines.push(SceneLine { points: vec![*a, *b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
+            }
+            if cut_solid && !segments.is_empty() {
+                cuts.push((at, solidcraft_render::hatch::seed(&body.name), segments));
+            }
+        }
+    }
+    if let Some((_, n)) = section {
+        let parts: Vec<solidcraft_render::hatch::CutPart> =
+            cuts.iter().map(|(_, seed, segments)| solidcraft_render::hatch::CutPart { seed: *seed, segments }).collect();
+        for ((at, _, _), hatch) in cuts.iter().zip(solidcraft_render::hatch::hatches(&parts, n)) {
+            if let Some(m) = sc.meshes.get_mut(*at) {
+                m.hatch = hatch;
             }
         }
     }
