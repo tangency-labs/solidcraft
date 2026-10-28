@@ -18,7 +18,9 @@
 //! - **Layers:** nonempty groups share one PDF optional-content group for each
 //!   distinct paper object kind. Group order remains the original paint order,
 //!   and each kind's PDF layer uses ObjectKind::layer, as in DXF. Empty
-//!   groups do not invent layers. All present layers start visible.
+//!   groups do not invent layers. Consecutive painted groups of the same kind
+//!   share one marked-content run; empty groups do not interrupt it. All present
+//!   layers start visible.
 //!   Set [`PdfOptions::layers`] to false for the same vector marks without layers.
 //! - **Content size:** every append checks the cumulative byte limit before growing the
 //!   buffer, including inside a path/arc and the final graphics-state restore. Allocation
@@ -185,12 +187,19 @@ fn content_with_limit(groups: &[GridGroup], max_bytes: usize) -> Result<String> 
 fn content_with_limit_and_layers(groups: &[GridGroup], layers: Option<&[Layer]>, max_bytes: usize) -> Result<String> {
     let mut w = Content::new(max_bytes)?;
     w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
+    let mut active_kind = None;
     for group in groups.iter().filter(|group| !group.items.is_empty()) {
         if let Some(layers) = layers {
             let layer = layers.iter().find(|layer| layer.kind == group.kind).ok_or_else(|| IoError::Invalid("missing paper PDF layer".into()))?;
-            w.append("/OC /")?;
-            w.append(&layer.tag)?;
-            w.append(" BDC\n")?;
+            if active_kind != Some(group.kind) {
+                if active_kind.is_some() {
+                    w.append("EMC\n")?;
+                }
+                w.append("/OC /")?;
+                w.append(&layer.tag)?;
+                w.append(" BDC\n")?;
+                active_kind = Some(group.kind);
+            }
         }
         for item in &group.items {
             match item {
@@ -217,9 +226,9 @@ fn content_with_limit_and_layers(groups: &[GridGroup], layers: Option<&[Layer]>,
                 }
             }
         }
-        if layers.is_some() {
-            w.append("EMC\n")?;
-        }
+    }
+    if active_kind.is_some() {
+        w.append("EMC\n")?;
     }
     w.append("Q\n")?;
     Ok(w.out)

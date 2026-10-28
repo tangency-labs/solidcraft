@@ -657,3 +657,132 @@ fn flat_pdf_reproduces_the_original_p1_a3_sample_bytes() {
     assert_eq!(pdf(&sheet, &options), bytes);
     assert!(check_xref(&bytes).is_ok());
 }
+
+#[test]
+fn adjacent_pdf_groups_share_one_run_without_reordering_noncontiguous_layers() {
+    let groups = [
+        (1, ObjectKind::TitleBlock, 10.0),
+        (2, ObjectKind::TitleBlock, 20.0),
+        (3, ObjectKind::DrawingBorder, 30.0),
+        (4, ObjectKind::TitleBlock, 40.0),
+    ]
+    .into_iter()
+    .map(|(object, kind, y)| Group { object, kind, items: vec![stroke(vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }], false, 0.35, None)] })
+    .collect();
+    let sheet = Scene { size_mm: p(210.0, 297.0), groups };
+    let bytes = pdf(&sheet, &NONE);
+    assert_eq!(pdf(&sheet, &NONE), bytes);
+    assert!(check_xref(&bytes).is_ok());
+    let file = text(&bytes);
+    assert_eq!(file.matches("/Type /OCG\n").count(), 2);
+    for key in ["OCGs", "Order", "ON"] {
+        assert!(file.contains(&format!("/{key} [6 0 R 7 0 R]")));
+    }
+    assert!(file.contains("/Name (TITLE_BLOCK)") && file.contains("/Name (DRAWING_BORDER)"));
+    let stream = content(&bytes);
+    let markers: Vec<_> = stream.lines().filter(|line| line.ends_with(" BDC") || *line == "EMC").collect();
+    assert_eq!(markers, ["/OC /L0 BDC", "EMC", "/OC /L1 BDC", "EMC", "/OC /L0 BDC", "EMC"]);
+    let operators = ops(&stream);
+    let starts: Vec<_> = operators.iter().filter(|(op, _)| op == "m").map(|(_, n)| (n[0], n[1])).collect();
+    assert_eq!(starts, [(10.0, 10.0), (10.0, 20.0), (10.0, 30.0), (10.0, 40.0)]);
+    assert_eq!(operators.iter().filter(|(op, _)| op == "S").count(), 4);
+    if let Some(path) = std::env::var_os("SOLIDCRAFT_PDF_COALESCING_REVIEW_OUTPUT") {
+        let flat = pdf(&sheet, &PdfOptions { layers: false, ..NONE.clone() });
+        let written = std::fs::write(&path, &bytes);
+        assert!(written.is_ok(), "could not write the asserted coalescing fixture to {path:?}: {written:?}");
+        let flat_path = std::path::PathBuf::from(&path).with_extension("flat.pdf");
+        let written = std::fs::write(&flat_path, &flat);
+        assert!(written.is_ok(), "could not write the matching flat fixture to {flat_path:?}: {written:?}");
+    }
+}
+
+#[test]
+fn empty_pdf_groups_do_not_break_adjacent_painted_runs_or_invent_layers() {
+    for insert_empty in [false, true] {
+        let mut groups = vec![Group { object: 0, kind: ObjectKind::SheetBorder, items: vec![] }];
+        for (object, y) in [(1, 10.0), (2, 20.0)] {
+            if insert_empty {
+                groups.push(Group { object: 100 + object, kind: ObjectKind::DrawingBorder, items: vec![] });
+            }
+            groups.push(Group {
+                object,
+                kind: ObjectKind::TitleBlock,
+                items: vec![stroke(vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }], false, 0.35, None)],
+            });
+        }
+        groups.push(Group { object: 200, kind: ObjectKind::RevisionTable, items: vec![] });
+        let sheet = Scene { size_mm: p(210.0, 297.0), groups };
+        let bytes = pdf(&sheet, &NONE);
+        let file = text(&bytes);
+        assert_eq!(file.matches("/Type /OCG\n").count(), 1);
+        for absent in ["SHEET_BORDER", "DRAWING_BORDER", "REVISION_TABLE"] {
+            assert!(!file.contains(&format!("/Name ({absent})")));
+        }
+        let stream = content(&bytes);
+        let markers: Vec<_> = stream.lines().filter(|line| line.ends_with(" BDC") || *line == "EMC").collect();
+        assert_eq!(markers, ["/OC /L0 BDC", "EMC"]);
+        assert_eq!(ops(&stream).iter().filter(|(op, _)| op == "S").count(), 2);
+    }
+}
+
+#[test]
+fn a_merged_pdf_run_keeps_all_paint_and_shared_width_and_dash_state() {
+    let line = |y| vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }];
+    let dashed = Some(Dashes { lengths_mm: vec![4.0, 2.0], phase_mm: 0.0 });
+    let square = Loop2::polygon(&[p(10.0, 30.0), p(20.0, 30.0), p(20.0, 40.0), p(10.0, 40.0)]);
+    let items = [
+        stroke(line(10.0), false, 0.35, None),
+        stroke(line(20.0), false, 0.7, dashed.clone()),
+        Item::Fill { region: Region2 { outer: square, holes: vec![] } },
+        stroke(line(50.0), false, 0.7, dashed),
+        stroke(line(60.0), false, 0.7, None),
+    ];
+    let sheet = Scene {
+        size_mm: p(210.0, 297.0),
+        groups: items.into_iter().enumerate().map(|(i, item)| Group { object: i as u64, kind: ObjectKind::TitleBlock, items: vec![item] }).collect(),
+    };
+    let before = sheet.clone();
+    let prepared = sheet.prepare().unwrap();
+    let (bytes, report) = paper_pdf(&prepared, &NONE).unwrap();
+    let flat_options = PdfOptions { layers: false, ..NONE.clone() };
+    let (flat, flat_report) = paper_pdf(&prepared, &flat_options).unwrap();
+    assert_eq!(sheet, before);
+    assert_eq!(report, flat_report);
+    let stream = content(&bytes);
+    let markers: Vec<_> = stream.lines().filter(|line| line.ends_with(" BDC") || *line == "EMC").collect();
+    assert_eq!(markers, ["/OC /L0 BDC", "EMC"]);
+    let operators = ops(&stream);
+    let paints: Vec<_> = operators.iter().filter(|(op, _)| ["S", "h", "f*"].contains(&op.as_str())).map(|(op, _)| op.as_str()).collect();
+    assert_eq!(paints, ["S", "S", "h", "f*", "S", "S"]);
+    let styles: Vec<_> = operators.iter().filter(|(op, _)| op == "w" || op == "d").map(|(op, n)| (op.as_str(), n.as_slice())).collect();
+    assert_eq!(styles, [("w", &[0.35][..]), ("w", &[0.7][..]), ("d", &[4.0, 2.0, 0.0][..]), ("d", &[0.0][..])]);
+    let starts: Vec<_> = operators.iter().filter(|(op, _)| op == "m").map(|(_, n)| (n[0], n[1])).collect();
+    assert_eq!(starts, [(10.0, 10.0), (10.0, 20.0), (10.0, 30.0), (10.0, 50.0), (10.0, 60.0)]);
+    let stripped = stream.lines().filter(|line| !line.ends_with(" BDC") && *line != "EMC").map(|line| format!("{line}\n")).collect::<String>();
+    assert_eq!(stripped, content(&flat));
+    assert!(check_xref(&bytes).is_ok() && check_xref(&flat).is_ok());
+}
+
+#[test]
+fn merged_pdf_run_limits_charge_transitions_and_the_final_close() {
+    let groups = [(1, ObjectKind::TitleBlock, 10.0), (2, ObjectKind::TitleBlock, 20.0), (3, ObjectKind::DrawingBorder, 30.0)]
+        .into_iter()
+        .map(|(object, kind, y)| Group { object, kind, items: vec![stroke(vec![Seg2::Line { a: p(10.0, y), b: p(20.0, y) }], false, 0.35, None)] })
+        .collect();
+    let sheet = Scene { size_mm: p(210.0, 297.0), groups };
+    let prepared = sheet.prepare().unwrap();
+    let grid = prepared.on_grid(Grid::TEN_NANOMETRES).unwrap();
+    // Literal independent stream: adjacent objects retain two strokes within
+    // L0; only the change to L1 closes and reopens marked content.
+    let expected = concat!(
+        "q 2.834645669 0 0 2.834645669 0 0 cm 0 J 0 j 4 M\n",
+        "/OC /L0 BDC\n0.35 w\n10 10 m\n20 10 l\nS\n10 20 m\n20 20 l\nS\n",
+        "EMC\n/OC /L1 BDC\n10 30 m\n20 30 l\nS\nEMC\nQ\n",
+    );
+    assert_eq!(super::content_with_limit(&grid.groups, expected.len()).unwrap(), expected);
+    assert!(super::content_with_limit(&grid.groups, expected.len() - 1).is_err());
+    for tail in ["EMC\n/OC /L1 BDC\n", "/OC /L1 BDC\n", "EMC\nQ\n"] {
+        let prefix = expected.find(tail).unwrap();
+        assert!(super::content_with_limit(&grid.groups, prefix + tail.len() - 1).is_err());
+    }
+}
