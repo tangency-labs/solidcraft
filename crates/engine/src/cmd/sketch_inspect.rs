@@ -571,8 +571,9 @@ mod tests {
         assert_eq!(meridians, 5, "the meridians run from pole to pole");
     }
 
-    /// On a trimmed B-spline face (a spline profile's extruded side, with a hole through it) the
-    /// isocurves are the surface's own rows and columns and stay inside the face's loops.
+    /// On a trimmed B-spline face (a spline profile's extruded side, with a hole through it: an
+    /// inner loop) the isocurves are the surface's own rows and columns and stay inside the face's
+    /// loops.
     #[test]
     fn isocurves_of_a_trimmed_spline_face_stay_inside_it() {
         let mut s = Session::default();
@@ -581,8 +582,8 @@ mod tests {
         s.execute("sketch.line", &json!({"points": [[40, 0], [0, 0]]})).unwrap();
         s.execute("sketch.finish", &json!({})).unwrap();
         s.execute("solid.extrude", &json!({"distance": 30})).unwrap();
-        s.execute("solid.cylinder", &json!({"radius": 3, "height": 30, "base": [20, -10, 15], "axis": "Y", "operation": "cut"})).unwrap();
-        let r = s.execute("inspect.isocurve", &json!({"faces": [[20, 8, 5]], "count": 12})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius": 3, "height": 30, "base": [28, -10, 15], "axis": "Y", "operation": "cut"})).unwrap();
+        let r = s.execute("inspect.isocurve", &json!({"faces": [[28, 6.7, 5]], "count": 12})).unwrap();
         let face = &r["faces"][0];
         assert!(face["u_curves"].as_u64().unwrap() >= 12 && face["v_curves"].as_u64().unwrap() >= 12, "{face}");
         let st = s.model.state();
@@ -604,7 +605,7 @@ mod tests {
                     .fold(f64::INFINITY, f64::min);
                 assert!(d < 2.0 * tol, "on the spline face: {q:?} is {d} from it");
                 assert!((-1e-6..=30.0 + 1e-6).contains(&q[2]) && q[1] > -1e-6, "{q:?}");
-                assert!((q[0] - 20.0).hypot(q[2] - 15.0) > 3.0 - 1e-3, "not in the hole: {q:?}");
+                assert!((q[0] - 28.0).hypot(q[2] - 15.0) > 3.0 - 1e-3, "not in the hole: {q:?}");
             }
         }
     }
