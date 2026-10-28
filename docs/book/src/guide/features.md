@@ -48,6 +48,15 @@ start or end offsets or a From Object input, the target also sets the stored dis
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
 existing picks. With the setting off, picks only add profiles, as before.
 
+Extrude's **To Object** and **From Object** take a face or vertex, or a reference: a sketch
+point or sketch curve, an edge, an origin or construction plane, axis or point. A reference is
+found again on every recompute, so the extrusion follows it when it moves. A point ends the
+extrusion at the plane through it, parallel to the profile. A parallel plane, axis or curve ends
+it at its height, and a plane at an angle cuts the end along it. A curve running away from the
+profile is reached where it begins. One that starts at the profile's plane or crosses it is
+reached at its end on the side it was picked. An axis along the extrusion gives no end.
+**To Offset** goes that much further in every case.
+
 A positive extrude taper slopes the side walls outward, so the profile grows along the
 extrusion direction and the far end is larger; a negative taper slopes them inward, making
 the far end smaller. For example, a 10 × 10 mm square extruded 10 mm with `taper: "5 deg"`

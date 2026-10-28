@@ -660,3 +660,27 @@ fn reopened_to_object_shows_its_face_under_the_extent_type() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
     assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcraft_engine::geom::Vec3::new(5.0, 5.0, 15.0)));
 }
+
+/// Reopened, a To Object on a construction plane and a From Object on a sketch point show what
+/// was picked (#8527), and OK keeps them as references, so the extrude still follows them.
+#[test]
+fn reopened_to_object_reference_shows_what_was_picked() {
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":"25 mm","name":"Lid"})).unwrap();
+    let marks = h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.point", json!({"point":[3, 4],"id":"tip"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let mut h = make_in(h, json!({"to":{"plane":"Lid"},"from":{"sketch":marks,"point":"tip"}}));
+    open(&mut h);
+    let d = h.app.dialog.as_ref().unwrap();
+    let pick = |label: &str| d.inputs.iter().find(|i| i.label == label).and_then(|i| i.items.first()).cloned();
+    assert_eq!(pick("To Object"), Some(solidcraft_engine::Sel::Plane { name: "Lid".into() }));
+    assert_eq!(pick("From Object"), Some(solidcraft_engine::Sel::SketchPoint { id: format!("{marks}:tip") }));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    let e = extent(&h);
+    assert!(matches!(e.to_ref, Some(solidcraft_engine::doc::construct::GeoRef::Plane { .. })), "{e:?}");
+    assert!(matches!(e.from_ref, Some(solidcraft_engine::doc::construct::GeoRef::SketchPoint { .. })), "{e:?}");
+    let b = h.app.run("inspect.measure", json!({"bodies":["Main"]})).unwrap()["bodies"][0].clone();
+    assert_eq!((b["bbox"]["min"][2].as_f64(), b["bbox"]["max"][2].as_f64()), (Some(4.0), Some(25.0)), "{b}");
+}
