@@ -15,6 +15,12 @@ const FOLDER_INDENT: f32 = 14.0;
 const DROP_LEVEL_ANCHOR: f32 = 12.0;
 const DROP_BAR_INSET: f32 = 4.0;
 
+/// The label the left timeline's menu draws to unsuppress one feature. It
+/// reaches the UI as an English text and the catalog resolves it, so it needs
+/// a message of its own: `cmd.timeline_suppress` only covers the other half
+/// of the toggle (#8301).
+pub(crate) const UNSUPPRESS_FEATURE: &str = "Unsuppress Feature";
+
 /// What a drag in the timeline is moving.
 #[derive(Clone, Debug, PartialEq)]
 enum Drag {
@@ -1455,7 +1461,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Feature(id), rect.center());
             ui.close();
         }
-        if crate::context_menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
+        if crate::context_menu::button(ui, if *suppressed { UNSUPPRESS_FEATURE } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
             ui.close();
         }
@@ -1494,6 +1500,15 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
 mod tests {
     use super::*;
     use crate::scenario::{Harness, handle_at};
+
+    /// The menu's unsuppress entry reaches the UI as an English text and the
+    /// catalog resolves it. A label the catalog does not carry comes back
+    /// unchanged, so the menu stays English in every locale (#8301).
+    #[test]
+    fn the_unsuppress_menu_entry_is_translated() {
+        let ja = crate::i18n::Locale::for_language("ja");
+        assert_ne!(ja.label(UNSUPPRESS_FEATURE), UNSUPPRESS_FEATURE, "`{UNSUPPRESS_FEATURE}` has no Japanese translation, so it stays English");
+    }
 
     #[test]
     fn history_folder_delete_tooltip_uses_the_language() {

@@ -1,0 +1,42 @@
+{
+  "en": {
+    "timeline.suppress_features": "Suppress Features",
+    "timeline.unsuppress_feature": "Unsuppress Feature",
+    "timeline.unsuppress_features": "Unsuppress Features"
+  },
+  "ja": {
+    "timeline.suppress_features": "フィーチャーを抑制",
+    "timeline.unsuppress_feature": "フィーチャーの抑制を解除",
+    "timeline.unsuppress_features": "フィーチャーの抑制を解除"
+  },
+  "zh": {
+    "timeline.suppress_features": "抑制特征",
+    "timeline.unsuppress_feature": "取消抑制特征",
+    "timeline.unsuppress_features": "取消抑制特征"
+  },
+  "de": {
+    "timeline.suppress_features": "Funktionen unterdrücken",
+    "timeline.unsuppress_feature": "Unterdrückung der Funktion aufheben",
+    "timeline.unsuppress_features": "Unterdrückung der Funktionen aufheben"
+  },
+  "ko": {
+    "timeline.suppress_features": "피처 비활성화",
+    "timeline.unsuppress_feature": "피처 비활성화 해제",
+    "timeline.unsuppress_features": "피처 비활성화 해제"
+  },
+  "ar": {
+    "timeline.suppress_features": "تعطيل الميزات",
+    "timeline.unsuppress_feature": "إلغاء تعطيل الميزة",
+    "timeline.unsuppress_features": "إلغاء تعطيل الميزات"
+  },
+  "he": {
+    "timeline.suppress_features": "השבתת פיצ'רים",
+    "timeline.unsuppress_feature": "ביטול השבתת פיצ'ר",
+    "timeline.unsuppress_features": "ביטול השבתת פיצ'רים"
+  },
+  "vi": {
+    "timeline.suppress_features": "Bỏ kích hoạt các tính năng",
+    "timeline.unsuppress_feature": "Kích hoạt lại tính năng",
+    "timeline.unsuppress_features": "Kích hoạt lại các tính năng"
+  }
+}

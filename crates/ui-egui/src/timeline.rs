@@ -11,6 +11,13 @@ use solidcraft_engine::doc::{
 use crate::SolveApp;
 use crate::theme::Tokens;
 
+/// The labels the timeline's context menu draws for the suppress toggle. They
+/// reach the UI as English texts and the catalog resolves them, so every one
+/// of them needs a message; a label the catalog lacks stays English in every
+/// locale (#8301).
+pub(crate) const SUPPRESS_FEATURES: &str = "Suppress Features";
+pub(crate) const UNSUPPRESS_FEATURES: &str = "Unsuppress Features";
+
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
 pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport) {
@@ -653,7 +660,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                         app.dialog = Some(crate::dialogs::Dialog::rename(*id, name));
                         ui.close();
                     }
-                    if crate::context_menu::button(ui, if *suppressed { "Unsuppress Features" } else { "Suppress Features" }, "suppress").clicked() {
+                    if crate::context_menu::button(ui, if *suppressed { UNSUPPRESS_FEATURES } else { SUPPRESS_FEATURES }, "suppress").clicked() {
                         let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
                         ui.close();
                     }
@@ -786,6 +793,17 @@ mod tests {
     use solidcraft_engine::doc::{FeatureKind, PlaneRef};
 
     use crate::scenario::Harness;
+
+    /// The context menu's suppress entries reach the UI as English texts and
+    /// the catalog resolves them. A label the catalog does not carry comes
+    /// back unchanged, so the menu stays English in every locale (#8301).
+    #[test]
+    fn the_suppress_menu_entries_are_translated() {
+        let ja = crate::i18n::Locale::for_language("ja");
+        for label in [super::SUPPRESS_FEATURES, super::UNSUPPRESS_FEATURES] {
+            assert_ne!(ja.label(label), label, "`{label}` has no Japanese translation, so it stays English");
+        }
+    }
 
     #[test]
     fn history_status_translates_prefixes_and_both_diagnostics() {
