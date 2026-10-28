@@ -1,0 +1,137 @@
+{
+  "en": {
+    "Suppress Features": "Suppress Features",
+    "Unsuppress Features": "Unsuppress Features",
+    "Unsuppress Feature": "Unsuppress Feature"
+  },
+  "ar": {
+    "Suppress Features": "تعطيل الميزات",
+    "Unsuppress Features": "إلغاء تعطيل الميزات",
+    "Unsuppress Feature": "إلغاء تعطيل الميزة"
+  },
+  "cs": {
+    "Suppress Features": "Potlačit prvky",
+    "Unsuppress Features": "Zrušit potlačení prvků",
+    "Unsuppress Feature": "Zrušit potlačení prvku"
+  },
+  "da": {
+    "Suppress Features": "Undertryk features",
+    "Unsuppress Features": "Ophæv undertrykkelse af features",
+    "Unsuppress Feature": "Ophæv undertrykkelse af feature"
+  },
+  "de": {
+    "Suppress Features": "Merkmale unterdrücken",
+    "Unsuppress Features": "Unterdrückung der Merkmale aufheben",
+    "Unsuppress Feature": "Unterdrückung des Merkmals aufheben"
+  },
+  "es": {
+    "Suppress Features": "Suprimir operaciones",
+    "Unsuppress Features": "Reactivar operaciones",
+    "Unsuppress Feature": "Reactivar operación"
+  },
+  "fr": {
+    "Suppress Features": "Désactiver les fonctions",
+    "Unsuppress Features": "Réactiver les fonctions",
+    "Unsuppress Feature": "Réactiver la fonction"
+  },
+  "gl": {
+    "Suppress Features": "Suprimir as operacións",
+    "Unsuppress Features": "Deixar de suprimir as operacións",
+    "Unsuppress Feature": "Deixar de suprimir a operación"
+  },
+  "he": {
+    "Suppress Features": "השבתת פיצ'רים",
+    "Unsuppress Features": "ביטול השבתת פיצ'רים",
+    "Unsuppress Feature": "ביטול השבתת פיצ'ר"
+  },
+  "hu": {
+    "Suppress Features": "Elemek elnyomása",
+    "Unsuppress Features": "Elemek elnyomásának megszüntetése",
+    "Unsuppress Feature": "Elem elnyomásának megszüntetése"
+  },
+  "id": {
+    "Suppress Features": "Tekan Fitur",
+    "Unsuppress Features": "Lepas Tekan Fitur",
+    "Unsuppress Feature": "Lepas Tekan Fitur"
+  },
+  "it": {
+    "Suppress Features": "Sospendi lavorazioni",
+    "Unsuppress Features": "Riattiva lavorazioni",
+    "Unsuppress Feature": "Riattiva lavorazione"
+  },
+  "ja": {
+    "Suppress Features": "フィーチャーを抑制",
+    "Unsuppress Features": "フィーチャーの抑制を解除",
+    "Unsuppress Feature": "フィーチャーの抑制を解除"
+  },
+  "ko": {
+    "Suppress Features": "특성 비활성화",
+    "Unsuppress Features": "특성 비활성화 해제",
+    "Unsuppress Feature": "특성 비활성화 해제"
+  },
+  "ms": {
+    "Suppress Features": "Nyahaktifkan Ciri",
+    "Unsuppress Features": "Aktifkan Semula Ciri",
+    "Unsuppress Feature": "Aktifkan Semula Ciri"
+  },
+  "nb": {
+    "Suppress Features": "Undertrykk funksjoner",
+    "Unsuppress Features": "Opphev undertrykking av funksjoner",
+    "Unsuppress Feature": "Opphev undertrykking av funksjon"
+  },
+  "nl": {
+    "Suppress Features": "Kenmerken onderdrukken",
+    "Unsuppress Features": "Onderdrukking van kenmerken opheffen",
+    "Unsuppress Feature": "Onderdrukking van kenmerk opheffen"
+  },
+  "pl": {
+    "Suppress Features": "Wygaś funkcje",
+    "Unsuppress Features": "Cofnij wygaszenie funkcji",
+    "Unsuppress Feature": "Cofnij wygaszenie funkcji"
+  },
+  "pt-BR": {
+    "Suppress Features": "Suprimir recursos",
+    "Unsuppress Features": "Reativar recursos",
+    "Unsuppress Feature": "Reativar recurso"
+  },
+  "ro": {
+    "Suppress Features": "Suprimă operațiile",
+    "Unsuppress Features": "Anulează suprimarea operațiilor",
+    "Unsuppress Feature": "Anulează suprimarea operației"
+  },
+  "ru": {
+    "Suppress Features": "Подавить операции",
+    "Unsuppress Features": "Снять подавление с операций",
+    "Unsuppress Feature": "Снять подавление с операции"
+  },
+  "sv": {
+    "Suppress Features": "Undertryck funktioner",
+    "Unsuppress Features": "Häv undertryckning för funktioner",
+    "Unsuppress Feature": "Häv undertryckning för funktion"
+  },
+  "tr": {
+    "Suppress Features": "Özellikleri bastır",
+    "Unsuppress Features": "Özelliklerin bastırmasını kaldır",
+    "Unsuppress Feature": "Özelliğin bastırmasını kaldır"
+  },
+  "uk": {
+    "Suppress Features": "Придушити операції",
+    "Unsuppress Features": "Скасувати придушення операцій",
+    "Unsuppress Feature": "Скасувати придушення операції"
+  },
+  "vi": {
+    "Suppress Features": "Tạm nén các tính năng",
+    "Unsuppress Features": "Kích hoạt lại các tính năng",
+    "Unsuppress Feature": "Kích hoạt lại tính năng"
+  },
+  "zh-TW": {
+    "Suppress Features": "抑制特徵",
+    "Unsuppress Features": "取消抑制特徵",
+    "Unsuppress Feature": "取消抑制特徵"
+  },
+  "zh": {
+    "Suppress Features": "抑制特征",
+    "Unsuppress Features": "取消抑制特征",
+    "Unsuppress Feature": "取消抑制特征"
+  }
+}

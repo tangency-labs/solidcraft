@@ -1160,6 +1160,30 @@ mod tests {
         }
     }
 
+    /// The feature menu's Suppress and Unsuppress entries are in the user's language, in both
+    /// timelines (#8301).
+    #[test]
+    fn the_feature_menu_suppress_entries_use_the_language() {
+        let ja = crate::i18n::Locale::for_language("ja");
+        for left in [false, true] {
+            let mut h = two_boxes(left);
+            h.app.preferences.language = "ja".into();
+            let second = h.app.session.doc.find_feature("Second").map(|f| f.id).unwrap();
+            h.app.run("timeline.suppress", json!({ "feature": second })).unwrap();
+            h.frames(4);
+            let (suppress, unsuppress) = if left { ("Suppress Feature", "Unsuppress Feature") } else { ("Suppress Features", "Unsuppress Features") };
+            for (name, label) in [("First", suppress), ("Second", unsuppress)] {
+                let shown = ja.label(label);
+                assert_ne!(shown, label, "`{label}` has a Japanese entry");
+                h.step(&json!({"click": {"handle": format!("timeline:{name}")}, "button": "right"})).unwrap();
+                let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
+                let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_owned()).collect();
+                assert!(texts.iter().any(|t| t == shown), "left={left}: `{shown}` in {texts:?}");
+                h.step(&json!({"key": "Escape"})).unwrap();
+            }
+        }
+    }
+
     /// A feature with a warning mark offers Copy Warning Message, which copies what its tooltip
     /// says; a feature with nothing to report doesn't offer it. In both timelines.
     #[test]
