@@ -909,3 +909,45 @@ fn analytic_partials_are_the_derivatives_of_the_order_below() {
         }
     }
 }
+
+#[test]
+fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_face() {
+    // A torus face round 280° of its tube: on the quarter grid it needs all four quarters, a form
+    // that closes on itself; on arcs of its own it starts where the face does and stops past
+    // where it ends.
+    let torus = Surface::Torus { frame: a_frame(), major_radius: 5., minor_radius: 1.5, tube_start: 0. };
+    let label = [[0.3, 1.2], [-2.9, 2.0]];
+    let tube = |s: &Surface| match s {
+        Surface::RationalSpline { v_knots, .. } => (v_knots.first().copied().unwrap(), v_knots.last().copied().unwrap()),
+        _ => panic!("not a NURBS: {s:?}"),
+    };
+    let (grid, _) = form::surface(&torus, label).unwrap();
+    assert_eq!(tube(&grid), (-2.0, 2.0), "the grid's form is the whole tube");
+    let tol = 1e-3;
+    let (own, domain) = form::surface_on_own_arcs(&torus, label, tol).unwrap();
+    let (v0, v1) = tube(&own);
+    assert_eq!((v0, v1), (0.0, 4.0));
+    let (label_at, own_at) = (eval::SurfaceEval::new(&torus).unwrap(), eval::SurfaceEval::new(&own).unwrap());
+    let u = domain[0][0];
+    assert!(own_at.point([u, v0]).unwrap().dist(own_at.point([u, v1]).unwrap()) > 0.1, "the form does not close");
+    // Every point of the form is on the torus: (√(x² + y²) − R)² + z² = r² in its frame.
+    for i in 0..=8 {
+        for j in 0..=12 {
+            let uv = [domain[0][0] + (domain[0][1] - domain[0][0]) * i as f64 / 8., v0 + (v1 - v0) * j as f64 / 12.];
+            let p = own_at.point(uv).unwrap() - crate::Vec3::new(1., 2., 3.);
+            let off = ((p.x.hypot(p.y) - 5.).powi(2) + p.z.powi(2)).sqrt() - 1.5;
+            assert!(off.abs() < 1e-12, "{uv:?}: {off}");
+        }
+    }
+    // Its domain is the face's: the corners land where the label's do, the form past them by the
+    // angle the tolerance makes.
+    for (a, b) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+        let (p, q) = (label_at.point([label[0][a], label[1][b]]).unwrap(), own_at.point([domain[0][a], domain[1][b]]).unwrap());
+        assert!(p.dist(q) < 1e-9, "corner {a}{b}: {p:?} vs {q:?}");
+    }
+    assert!(domain[1][0] > v0 && domain[1][1] < v1, "{domain:?}");
+    // A whole turn stays on the grid (periodic), and a plane has no form.
+    let (whole, _) = form::surface_on_own_arcs(&torus, [[0.3, 1.2], [-FRAC_PI_2, -FRAC_PI_2 + TAU]], tol).unwrap();
+    assert_eq!(tube(&whole), (-1.0, 3.0));
+    assert!(form::surface_on_own_arcs(&Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }, label, tol).is_none());
+}

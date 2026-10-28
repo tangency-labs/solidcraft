@@ -426,7 +426,7 @@ impl Refusal {
 }
 
 impl SurfaceKind {
-    fn of(surface: &solidcraft_geom::brep::Surface) -> SurfaceKind {
+    pub(crate) fn of(surface: &solidcraft_geom::brep::Surface) -> SurfaceKind {
         use solidcraft_geom::brep::Surface as S;
         match surface {
             S::Plane { .. } | S::PlaneThrough { .. } => SurfaceKind::Plane,

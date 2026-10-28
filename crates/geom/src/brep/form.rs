@@ -91,6 +91,61 @@ fn params([a0, a1]: [f64; 2], (q0, n): (f64, usize)) -> [f64; 2] {
     [param(a0).clamp(q0, end), param(a1).clamp(q0, end)]
 }
 
+/// Equal arcs from angle `a0` to `a1` (less than a turn), as few as keep each within a quarter:
+/// their knot vector (0 at `a0`, one more at each arc's end) and control points (as
+/// [`arcs`]). A form on them is not on the quarter grid: for a face whose angle range needs the
+/// four quarters of a turn (or five) without being a turn, which on the grid would be a form that
+/// closes on itself (or overlaps itself) around a face that does not.
+fn arcs_between(a0: f64, a1: f64) -> Option<(Vec<f64>, Vec<([f64; 2], f64)>)> {
+    let span = a1 - a0;
+    if !(a0.is_finite() && span > 0.0 && span < TAU) {
+        return None;
+    }
+    let n = ((span / FRAC_PI_2) - 1e-9).ceil().max(1.0) as usize;
+    let phi = span / n as f64;
+    let w = (0.5 * phi).cos();
+    let at = |a: f64| [a.cos(), a.sin()];
+    let mut pts = Vec::with_capacity(2 * n + 1);
+    let mut knots = vec![0.0; 3];
+    for k in 0..n {
+        let start = a0 + phi * k as f64;
+        if k == 0 {
+            pts.push((at(start), 1.0));
+        }
+        let mid = at(start + 0.5 * phi);
+        pts.push(([mid[0] / w, mid[1] / w], w));
+        pts.push((at(start + phi), 1.0));
+        let end = (k + 1) as f64;
+        knots.extend(if k + 1 < n { vec![end; 2] } else { vec![end; 3] });
+    }
+    Some((knots, pts))
+}
+
+/// The arcs of a face's angle range `a` and its domain on them: the quarter grid's
+/// ([`face_quarters`]), or with `own` and a range short of a turn, arcs of its own from its start
+/// ([`arcs_between`], the domain all of them).
+fn face_arcs(a: [f64; 2], reach: f64, own: bool) -> Option<((Vec<f64>, Vec<([f64; 2], f64)>), [f64; 2])> {
+    if own && a[1] - a[0] < TAU * (1.0 - 1e-9) {
+        // Past each end by `reach` (while that stays short of a turn): the face's boundary, which
+        // lies off the surface by as much, then stays on the form.
+        let pad = reach.max(0.0).min(0.25 * (TAU * (1.0 - 1e-9) - (a[1] - a[0])));
+        let (a0, a1) = (a[0] - pad, a[1] + pad);
+        let made = arcs_between(a0, a1)?;
+        let n = made.0.last().copied()?;
+        let phi = (a1 - a0) / n;
+        // The form parameter at angle `t`: its arc, plus the arc's own parameter there (as
+        // `quarter_u`, for an arc of `phi`).
+        let at = |t: f64| {
+            let k = ((t - a0) / phi).floor().clamp(0.0, n - 1.0);
+            let psi = (t - a0 - k * phi).clamp(0.0, phi);
+            k + 0.5 * (1.0 + (0.5 * psi - 0.25 * phi).tan() / (0.25 * phi).tan())
+        };
+        return Some((made, [at(a[0]), at(a[1])]));
+    }
+    let (grid, d) = face_quarters(a, reach)?;
+    Some((arcs(grid.0, grid.1), d))
+}
+
 /// Quarter arcs from quarter `q0`, `n` of them: their knot vector (in form parameter) and their
 /// control points (as `(cos, sin)` factors on the unit circle's plane) with weights.
 fn arcs(q0: f64, n: usize) -> (Vec<f64>, Vec<([f64; 2], f64)>) {
@@ -238,10 +293,29 @@ pub fn tube_turned(s: &Surface, angle: f64) -> Option<Surface> {
 /// boundary's points ([`extent`]), which may run past a quarter's end by as much as its edges lie
 /// off the surface; the form then covers no quarter for that alone (a torus face of half a tube
 /// would otherwise go round the whole tube).
-pub fn surface_within(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+pub fn surface_within(s: &Surface, domain: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+    surface_on(s, domain, tolerance, false)
+}
+
+/// The NURBS form of a cylinder, cone, sphere or torus face over `domain` (as [`surface`]) whose
+/// angles run on arcs of the face's own from where it starts, not on its frame's quarter grid,
+/// wherever its range is short of a turn: the same surface, exactly, but a form that never
+/// closes on itself around a face that does not (a torus face round 250° of its tube needs all
+/// four quarters of the grid, a form SMLib does not take for a torus); each angle runs past the
+/// face's ends by the angle `tolerance` (mm) makes, so a boundary that far off stays on the
+/// form. Its circles' forms then no
+/// longer share its parameter, so its pcurves are not lines: Repair Part rebuilds a refused face
+/// on it and has SMLib make them.
+pub fn surface_on_own_arcs(s: &Surface, domain: [[f64; 2]; 2], tolerance: f64) -> Option<(Surface, [[f64; 2]; 2])> {
+    match s {
+        Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. } => surface_on(s, domain, tolerance, true),
+        _ => None,
+    }
+}
+
+fn surface_on(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64, own: bool) -> Option<(Surface, [[f64; 2]; 2])> {
     let (reach_u, reach_v) = reaches(s, v, tolerance);
-    let (grid, fu) = face_quarters(u, reach_u)?;
-    let (u_knots, ring) = arcs(grid.0, grid.1);
+    let ((u_knots, ring), fu) = face_arcs(u, reach_u, own)?;
     // The ring of arcs times a profile `(control, weight)` mapped to (radial, axial) about the
     // frame: a rational tensor product, its weights the products.
     let net = |f: &Frame, profile: &[([f64; 2], f64)], at: &dyn Fn([f64; 2]) -> (f64, f64)| -> Option<Vec<Vec<[f64; 4]>>> {
@@ -279,8 +353,7 @@ pub fn surface_within(s: &Surface, [u, v]: [[f64; 2]; 2], tolerance: f64) -> Opt
             Some((Surface::RationalSpline { u_knots, v_knots, homogeneous }, [fu, params(v, vgrid)]))
         }
         Surface::Torus { frame, major_radius, minor_radius, tube_start } => {
-            let (vgrid, fv) = face_quarters(v, reach_v)?;
-            let (v_knots, tube) = arcs(vgrid.0, vgrid.1);
+            let ((v_knots, tube), fv) = face_arcs(v, reach_v, own)?;
             // The tube's arcs turned on by its start (a rotation of the control points, exact).
             let (ts, tc) = tube_start.sin_cos();
             let homogeneous = net(frame, &tube, &|[c, s]| (major_radius + minor_radius * (c * tc - s * ts), minor_radius * (s * tc + c * ts)))?;

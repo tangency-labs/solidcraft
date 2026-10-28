@@ -113,6 +113,7 @@ mod prism_measure;
 pub mod profile;
 pub mod provenance;
 mod record;
+mod repair;
 #[cfg(test)]
 mod seam_faces_tests;
 mod sew;
@@ -206,6 +207,7 @@ pub use polybool::faceted_boolean;
 pub use polyhedron::{HalfSpace, convex_polyhedron, draft, offset_faces, shell};
 pub use prism::{PLANAR_FIT_TOL, extrude_planar_regions, planar_regions_boolean};
 pub use prism_measure::certified_prism_equivalent;
+pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
