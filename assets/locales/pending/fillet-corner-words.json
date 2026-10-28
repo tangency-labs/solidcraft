@@ -8,7 +8,7 @@
     "ui.fillet_fit_needs_constant": "Radius fit needs Constant radius.",
     "ui.fillet_setback": "Setback",
     "ui.fillet_setback_hint": "{factor} × radius",
-    "ui.fillet_setback_tip": "How far along each edge from the corner the patch starts. Empty: {factor} × the radius.",
+    "ui.fillet_setback_tip": "Where the smooth corner patch starts: how far along each edge from the corner. The default is {factor} × the radius. It must be more than the least setback, where the rounds meet without one: the radius where the faces are square to each other.",
     "ui.fillet_smooth_radius": "Smooth radius change",
     "ui.fillet_type_curvature": "Curvature continuous",
     "ui.fillet_type_tip": "The section across the edge. Curvature continuous: a curvature-continuous (G2) section between planar faces, so reflections run from the faces into the round without a kink."
@@ -22,7 +22,7 @@
     "ui.fillet_fit_needs_constant": "ملاءمة نصف القطر تتطلب نصف قطر ثابتًا.",
     "ui.fillet_setback": "مسافة الإرجاع",
     "ui.fillet_setback_hint": "{factor} × نصف القطر",
-    "ui.fillet_setback_tip": "المسافة على طول كل حافة من الزاوية التي تبدأ عندها الرقعة. فارغ: {factor} ضعف نصف القطر.",
+    "ui.fillet_setback_tip": "حيث تبدأ رقعة الزاوية الناعمة: المسافة على طول كل حافة من الزاوية. الافتراضي {factor} ضعف نصف القطر. يجب أن تكون أكبر من أقل مسافة إرجاع، حيث تلتقي الاستدارات بدونها: نصف القطر حيث تكون الأوجه متعامدة.",
     "ui.fillet_smooth_radius": "تغيّر ناعم لنصف القطر",
     "ui.fillet_type_curvature": "متصل الانحناء",
     "ui.fillet_type_tip": "المقطع عبر الحافة. متصل الانحناء: مقطع متصل الانحناء (G2) بين وجوه مستوية، فتمر الانعكاسات من الوجوه إلى التقويس دون انكسار."
@@ -36,7 +36,7 @@
     "ui.fillet_fit_needs_constant": "Radiusanpassung braucht einen konstanten Radius.",
     "ui.fillet_setback": "Rücksprung",
     "ui.fillet_setback_hint": "{factor} × Radius",
-    "ui.fillet_setback_tip": "Wie weit von der Ecke entlang jeder Kante das Flächenstück beginnt. Leer: {factor} × der Radius.",
+    "ui.fillet_setback_tip": "Wo das glatte Eckflächenstück beginnt: wie weit von der Ecke entlang jeder Kante. Standard ist {factor} × der Radius. Er muss größer sein als der kleinste Rücksprung, wo sich die Rundungen ohne ihn treffen: der Radius, wo die Flächen rechtwinklig zueinander stehen.",
     "ui.fillet_smooth_radius": "Radius glatt ändern",
     "ui.fillet_type_curvature": "Krümmungsstetig",
     "ui.fillet_type_tip": "Der Querschnitt über die Kante. Krümmungsstetig: ein krümmungsstetiger Querschnitt (G2) zwischen ebenen Flächen, sodass Spiegelungen ohne Knick von den Flächen in die Rundung laufen."
@@ -50,7 +50,7 @@
     "ui.fillet_fit_needs_constant": "התאמת רדיוס דורשת רדיוס קבוע.",
     "ui.fillet_setback": "נסיגה",
     "ui.fillet_setback_hint": "{factor} × רדיוס",
-    "ui.fillet_setback_tip": "המרחק לאורך כל קצה מהפינה שבו הטלאי מתחיל. ריק: פי {factor} מהרדיוס.",
+    "ui.fillet_setback_tip": "היכן מתחיל טלאי הפינה החלק: המרחק לאורך כל קצה מהפינה. ברירת המחדל היא פי {factor} מהרדיוס. עליה להיות גדולה מהנסיגה המזערית, שבה העיגולים נפגשים בלעדיה: הרדיוס כשהפאות ניצבות זו לזו.",
     "ui.fillet_smooth_radius": "שינוי רדיוס חלק",
     "ui.fillet_type_curvature": "רציף בעקמומיות",
     "ui.fillet_type_tip": "החתך לרוחב הקצה. רציף בעקמומיות: חתך רציף בעקמומיות (G2) בין פאות מישוריות, כך שההשתקפויות עוברות מהפאות אל העיגול בלי שבר."
@@ -64,7 +64,7 @@
     "ui.fillet_fit_needs_constant": "半径フィットには一定の半径が必要です。",
     "ui.fillet_setback": "セットバック",
     "ui.fillet_setback_hint": "{factor} × 半径",
-    "ui.fillet_setback_tip": "パッチが始まる、コーナーから各エッジに沿った距離。空欄のときは半径の {factor} 倍。",
+    "ui.fillet_setback_tip": "なめらかなコーナーパッチが始まる位置: コーナーから各エッジに沿った距離。既定値は半径の {factor} 倍。最小セットバック (セットバックなしでラウンド同士が交わる位置。面どうしが直角なら半径) より大きくする必要があります。",
     "ui.fillet_smooth_radius": "半径をなめらかに変化",
     "ui.fillet_type_curvature": "曲率連続",
     "ui.fillet_type_tip": "エッジを横切る断面。曲率連続: 平面の間の曲率連続 (G2) 断面で、映り込みが面からフィレットへ折れずにつながります。"
@@ -78,7 +78,7 @@
     "ui.fillet_fit_needs_constant": "반지름 맞춤에는 일정한 반지름이 필요합니다.",
     "ui.fillet_setback": "셋백",
     "ui.fillet_setback_hint": "{factor} × 반지름",
-    "ui.fillet_setback_tip": "패치가 시작되는, 코너에서 각 모서리를 따른 거리. 비워 두면 반지름의 {factor}배.",
+    "ui.fillet_setback_tip": "부드러운 코너 패치가 시작되는 위치: 코너에서 각 모서리를 따른 거리. 기본값은 반지름의 {factor}배. 최소 셋백(셋백 없이 라운드가 만나는 곳, 면이 서로 직각이면 반지름)보다 커야 합니다.",
     "ui.fillet_smooth_radius": "반지름 부드럽게 변화",
     "ui.fillet_type_curvature": "곡률 연속",
     "ui.fillet_type_tip": "모서리를 가로지르는 단면. 곡률 연속: 평면 사이의 곡률 연속(G2) 단면으로, 반사가 면에서 라운드로 꺾임 없이 이어집니다."
@@ -92,7 +92,7 @@
     "ui.fillet_fit_needs_constant": "半径拟合需要恒定半径。",
     "ui.fillet_setback": "后退距离",
     "ui.fillet_setback_hint": "{factor} × 半径",
-    "ui.fillet_setback_tip": "曲面片从角点沿每条边开始的距离。留空：半径的 {factor} 倍。",
+    "ui.fillet_setback_tip": "平滑角点曲面片开始的位置：从角点沿每条边的距离。默认值为半径的 {factor} 倍。必须大于最小后退距离（不后退时圆角相交之处；面相互垂直时即半径）。",
     "ui.fillet_smooth_radius": "半径平滑变化",
     "ui.fillet_type_curvature": "曲率连续",
     "ui.fillet_type_tip": "横跨边的截面。曲率连续：平面之间的曲率连续 (G2) 截面，反射从面平滑过渡到圆角，没有折痕。"

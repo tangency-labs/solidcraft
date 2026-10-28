@@ -3,42 +3,42 @@
     "ui.continuity_smooth_curvature_change": "Smooth curvature change",
     "ui.continuity_smooth_curvature_change_tip": "Smooth curvature change (G4): even the way the curvature changes runs on smoothly across the seam.",
     "ui.fillet_corner_tangent_tip": "Tangent (G1): a rolling-ball corner, a piece of the rolling ball's sphere tangent to each round.",
-    "ui.fillet_corner_curvature_tip": "Curvature (G2): a smooth patch. The corner is set back along each edge by the Setback (empty: {factor} × the radius) and filled with a patch, so reflections run through it without a kink."
+    "ui.fillet_corner_curvature_tip": "Curvature (G2): a smooth patch. The corner is set back along each edge by the Setback ({factor} × the radius unless you type one) and filled with a patch, so reflections run through it without a kink."
   },
   "ar": {
     "ui.continuity_smooth_curvature_change": "تغيّر انحناء سلس",
     "ui.continuity_smooth_curvature_change_tip": "تغيّر انحناء سلس (G4): حتى طريقة تغيّر الانحناء تستمر بسلاسة عبر خط الالتقاء.",
     "ui.fillet_corner_tangent_tip": "مماس (G1): زاوية بالكرة المتدحرجة، جزء من سطح الكرة المتدحرجة مماسّ لكل تقويس.",
-    "ui.fillet_corner_curvature_tip": "الانحناء (G2): رقعة ناعمة. تُرجَع الزاوية على طول كل حافة بمقدار الإرجاع (فارغ: {factor} ضعف نصف القطر) وتُملأ برقعة، فتمر الانعكاسات عبرها دون انكسار."
+    "ui.fillet_corner_curvature_tip": "الانحناء (G2): رقعة ناعمة. تُرجَع الزاوية على طول كل حافة بمقدار الإرجاع ({factor} ضعف نصف القطر ما لم تكتب قيمة) وتُملأ برقعة، فتمر الانعكاسات عبرها دون انكسار."
   },
   "de": {
     "ui.continuity_smooth_curvature_change": "Glatte Krümmungsänderung",
     "ui.continuity_smooth_curvature_change_tip": "Glatte Krümmungsänderung (G4): Selbst die Art, wie sich die Krümmung ändert, läuft an der Naht glatt weiter.",
     "ui.fillet_corner_tangent_tip": "Tangential (G1): eine Kugelecke, ein Stück der Kugel des rollenden Balls, tangential zu jeder Rundung.",
-    "ui.fillet_corner_curvature_tip": "Krümmung (G2): ein glattes Flächenstück. Die Ecke wird entlang jeder Kante um den Rücksprung zurückgesetzt (leer: {factor} × der Radius) und mit einem Flächenstück gefüllt, sodass Spiegelungen ohne Knick hindurchlaufen."
+    "ui.fillet_corner_curvature_tip": "Krümmung (G2): ein glattes Flächenstück. Die Ecke wird entlang jeder Kante um den Rücksprung zurückgesetzt ({factor} × der Radius, sofern Sie keinen eingeben) und mit einem Flächenstück gefüllt, sodass Spiegelungen ohne Knick hindurchlaufen."
   },
   "he": {
     "ui.continuity_smooth_curvature_change": "שינוי עקמומיות חלק",
     "ui.continuity_smooth_curvature_change_tip": "שינוי עקמומיות חלק (G4): גם האופן שבו העקמומיות משתנה ממשיך בצורה חלקה לאורך התפר.",
     "ui.fillet_corner_tangent_tip": "משיק (G1): פינת כדור מתגלגל, חלק מספירת הכדור המתגלגל, משיק לכל עיגול.",
-    "ui.fillet_corner_curvature_tip": "עקמומיות (G2): טלאי חלק. הפינה נסוגה לאורך כל קצה במרחק הנסיגה (ריק: פי {factor} מהרדיוס) ומתמלאת בטלאי, כך שההשתקפויות עוברות בה בלי שבר."
+    "ui.fillet_corner_curvature_tip": "עקמומיות (G2): טלאי חלק. הפינה נסוגה לאורך כל קצה במרחק הנסיגה (פי {factor} מהרדיוס אלא אם תקלידו ערך) ומתמלאת בטלאי, כך שההשתקפויות עוברות בה בלי שבר."
   },
   "ja": {
     "ui.continuity_smooth_curvature_change": "なめらかな曲率変化",
     "ui.continuity_smooth_curvature_change_tip": "なめらかな曲率変化 (G4): 境目で曲率の変わり方そのものもなめらかに続きます。",
     "ui.fillet_corner_tangent_tip": "接線 (G1): 転がるボールのコーナー。転がるボールの球面の一部で、各フィレットに接します。",
-    "ui.fillet_corner_curvature_tip": "曲率 (G2): なめらかなパッチ。コーナーを各エッジに沿ってセットバック分 (空欄のときは半径の {factor} 倍) 後退させてパッチで埋め、映り込みが折れずに通ります。"
+    "ui.fillet_corner_curvature_tip": "曲率 (G2): なめらかなパッチ。コーナーを各エッジに沿ってセットバック分 (入力しなければ半径の {factor} 倍) 後退させてパッチで埋め、映り込みが折れずに通ります。"
   },
   "ko": {
     "ui.continuity_smooth_curvature_change": "부드러운 곡률 변화",
     "ui.continuity_smooth_curvature_change_tip": "부드러운 곡률 변화(G4): 이음매에서 곡률이 변하는 방식까지 부드럽게 이어집니다.",
     "ui.fillet_corner_tangent_tip": "접선(G1): 굴러가는 볼 코너. 굴러가는 볼의 구면 일부로, 각 라운드에 접합니다.",
-    "ui.fillet_corner_curvature_tip": "곡률(G2): 부드러운 패치. 코너를 각 모서리를 따라 셋백만큼(비워 두면 반지름의 {factor}배) 물려 패치로 채우므로, 반사가 꺾임 없이 지나갑니다."
+    "ui.fillet_corner_curvature_tip": "곡률(G2): 부드러운 패치. 코너를 각 모서리를 따라 셋백만큼(입력하지 않으면 반지름의 {factor}배) 물려 패치로 채우므로, 반사가 꺾임 없이 지나갑니다."
   },
   "zh": {
     "ui.continuity_smooth_curvature_change": "平滑曲率变化",
     "ui.continuity_smooth_curvature_change_tip": "平滑曲率变化 (G4)：连曲率的变化方式在接缝处也平滑延续。",
     "ui.fillet_corner_tangent_tip": "相切 (G1)：滚球角，滚球球面的一部分，与每个圆角相切。",
-    "ui.fillet_corner_curvature_tip": "曲率 (G2)：平滑曲面片。角点沿每条边后退一个后退距离（留空：半径的 {factor} 倍），并用曲面片填充，反射穿过时没有折痕。"
+    "ui.fillet_corner_curvature_tip": "曲率 (G2)：平滑曲面片。角点沿每条边后退一个后退距离（未输入时为半径的 {factor} 倍），并用曲面片填充，反射穿过时没有折痕。"
   }
 }

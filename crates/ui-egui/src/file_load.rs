@@ -979,6 +979,39 @@ pub(crate) fn phase(app: &SolveApp) -> Option<&'static str> {
     })
 }
 
+/// The three steps the card lists for an open or an import (`cad`: a STEP or IGES file), the one
+/// under way and how far it is. A STEP file is read, its parts checked and repaired one by one
+/// (the kernel's `converting`), then the model is built and shown; a design is read, its
+/// features rebuilt, then shown. `work` is the kernel's last report, which stays at its end
+/// once the step is over; `features` is (built, total).
+fn load_steps(
+    cad: bool,
+    phase: u8,
+    work: Option<(&'static str, usize, usize)>,
+    features: (usize, usize),
+) -> ([&'static str; 3], usize, Option<String>) {
+    let (done, total) = features;
+    let labels = if cad {
+        ["file_load.step_read", "file_load.step_repair", "file_load.step_build"]
+    } else {
+        ["file_load.step_read", "file_load.step_rebuild", "file_load.step_show"]
+    };
+    let count = |key: &str, done: usize, total: usize| {
+        Some(crate::i18n::format(key, &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())]))
+    };
+    let percent = |d: usize, t: usize| Some(crate::i18n::format("file_load.step_percent", &[("percent", &(d * 100 / t.max(1)).to_string())]));
+    let (current, detail) = match (phase, work) {
+        (1.., _) => (2, None),
+        (_, Some(("reading", d, t))) if cad => (0, percent(d, t)),
+        (_, Some((_, d, t))) if cad && d < t => (1, count("file_load.step_part", d, t)),
+        (_, Some(_)) if cad => (2, None),
+        _ if total == 0 => (0, None),
+        _ if cad => (1, None),
+        _ => (1, count("file_load.step_feature", done, total)),
+    };
+    (labels, current, detail)
+}
+
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(r) = &app.file_load.running else { return };
     let cancelled = r.cancelled();
@@ -1061,29 +1094,40 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 };
                 ui_kit::text(ui, &note, ui_kit::Text::Note("preview"));
             }
-            let status = if cancelled && export {
-                crate::i18n::tr_label("dxf.cancel_wait").to_string()
-            } else if cancelled {
-                crate::i18n::tr("file_load.stopping").to_string()
+            // An open or an import goes through three steps the card lists; the other operations
+            // (and a cancelled one) say what they are doing in a line.
+            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::Recover { .. });
+            if stepped {
+                let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
+                    && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
+                let (labels, current, detail) = load_steps(cad, phase, r.progress.work(), (done, total));
+                let labels = labels.map(crate::i18n::tr);
+                ui_kit::steps(ui, "file_load", &labels, current, detail.as_deref());
             } else {
-                match (phase, work) {
-                    (_, work) if r.request.kind == Kind::ExportDxf => crate::dialogs_view_dxf::progress_text(work),
-                    (_, Some(("reading", d, t))) => {
-                        crate::i18n::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
+                let status = if cancelled && export {
+                    crate::i18n::tr_label("dxf.cancel_wait").to_string()
+                } else if cancelled {
+                    crate::i18n::tr("file_load.stopping").to_string()
+                } else {
+                    match (phase, work) {
+                        (_, work) if r.request.kind == Kind::ExportDxf => crate::dialogs_view_dxf::progress_text(work),
+                        (_, Some(("reading", d, t))) => {
+                            crate::i18n::format("file_load.reading_percent", &[("percent", &(d * 100 / t.max(1)).to_string())])
+                        }
+                        (_, Some((_, d, t))) => {
+                            crate::i18n::format("file_load.converting", &[("done", &(d + 1).to_string()), ("total", &t.to_string())])
+                        }
+                        (1, _) => crate::i18n::tr("file_load.preparing_view").to_string(),
+                        (2, _) => crate::i18n::tr("file_load.preparing_thumbnail").to_string(),
+                        _ if total > 0 => crate::i18n::format(
+                            "file_load.rebuilding",
+                            &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())],
+                        ),
+                        _ => crate::i18n::tr("file_load.reading").to_string(),
                     }
-                    (_, Some((_, d, t))) => crate::i18n::format("file_load.converting", &[("done", &(d + 1).to_string()), ("total", &t.to_string())]),
-                    (1, _) => crate::i18n::tr("file_load.preparing_view").to_string(),
-                    (2, _) => crate::i18n::tr("file_load.preparing_thumbnail").to_string(),
-                    _ if total > 0 => {
-                        crate::i18n::format("file_load.rebuilding", &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())])
-                    }
-                    _ => crate::i18n::tr("file_load.reading").to_string(),
-                }
-            };
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui_kit::text(ui, &status, ui_kit::Text::Report("status", false));
-            });
+                };
+                ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);
+            }
             // Always there, so the card keeps its height as the phases change.
             let fraction = if cancelled {
                 0.0
@@ -1119,6 +1163,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A STEP file goes through its three steps in order as the kernel reports them, and stays
+    /// on the last once the parts are done; a design's steps follow its features.
+    #[test]
+    fn the_card_follows_an_import_through_its_three_steps() {
+        let step = |phase, work, features| {
+            let (_, current, detail) = load_steps(true, phase, work, features);
+            (current, detail)
+        };
+        assert_eq!(step(0, None, (0, 0)), (0, None));
+        assert_eq!(step(0, Some(("reading", 40, 80)), (0, 0)), (0, Some("50%".into())));
+        assert_eq!(step(0, Some(("converting", 11, 140)), (0, 1)), (1, Some("Part 12 of 140".into())));
+        assert_eq!(step(0, Some(("converting", 140, 140)), (0, 1)), (2, None));
+        assert_eq!(step(1, Some(("converting", 140, 140)), (1, 1)), (2, None));
+        let (labels, current, detail) = load_steps(false, 0, None, (2, 5));
+        assert_eq!((labels[1], current, detail.as_deref()), ("file_load.step_rebuild", 1, Some("Feature 3 of 5")));
+    }
 
     fn completed_open(app: &mut SolveApp, request: Request, session: Session) {
         let (tx, rx) = std::sync::mpsc::channel();

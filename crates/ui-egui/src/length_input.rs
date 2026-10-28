@@ -80,6 +80,17 @@ pub(crate) fn model(doc: &Document, mm: f64) -> String {
     format!("{} {unit}", mm / scale)
 }
 
+/// A computed length shown in an editable field or a message, in the design's unit, to a
+/// millionth of it with trailing zeros dropped ("3 mm", not "3.000000 mm" or 2.9999999999999996):
+/// for a value the field shows but sends only once the user edits it.
+pub(crate) fn shown(doc: &Document, mm: f64) -> String {
+    let unit = unit(doc);
+    let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
+    let text = format!("{:.6}", mm / scale);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{} {unit}", if text == "-0" || text.is_empty() { "0" } else { text })
+}
+
 /// The editable length expressions in a dialog. Counts, angles, ratios, selectors and standard
 /// part designations never go through length conversion. Keep this list shared by submission
 /// and feature refill, so a bare stored millimetre cannot become inches just by pressing OK.
@@ -92,9 +103,9 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
     match kind {
         D::Extrude { distance, distance2, to_offset, start, wall, wall2, .. } => vec![distance, distance2, to_offset, start, wall, wall2],
         D::Fillet { radius, distance2, setback, .. } => {
-            // An empty setback stands for the command's default and stays empty.
+            // A setback not typed (or emptied) stands for the command's default and stays so.
             let mut lengths = vec![radius, distance2];
-            if !setback.trim().is_empty() {
+            if let Some(setback) = setback.as_mut().filter(|s| !s.trim().is_empty()) {
                 lengths.push(setback);
             }
             lengths

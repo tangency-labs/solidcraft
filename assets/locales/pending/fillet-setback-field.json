@@ -1,0 +1,23 @@
+{
+  "en": {
+    "ui.fillet_setback_least": "More than {least}"
+  },
+  "ar": {
+    "ui.fillet_setback_least": "أكثر من {least}"
+  },
+  "de": {
+    "ui.fillet_setback_least": "Mehr als {least}"
+  },
+  "he": {
+    "ui.fillet_setback_least": "יותר מ-{least}"
+  },
+  "ja": {
+    "ui.fillet_setback_least": "{least} より大きく"
+  },
+  "ko": {
+    "ui.fillet_setback_least": "{least}보다 크게"
+  },
+  "zh": {
+    "ui.fillet_setback_least": "须大于 {least}"
+  }
+}

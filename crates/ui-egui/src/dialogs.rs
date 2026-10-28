@@ -188,9 +188,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 distance2: String,
                 angle: String,
                 flip: bool,
-                /// A smooth-patch corner's setback along each edge, as typed; empty for the
-                /// command's own default (1.5 × the radius).
-                setback: String,
+                /// A smooth-patch corner's setback along each edge, as typed; `None` until the
+                /// user types one: the field then shows the command's own default (1.5 × the
+                /// radius) as a length that follows the radius, and the command gets none.
+                setback: Option<String>,
             },
             Mirror,
             /// Rectangular pattern of bodies: along one direction, optionally a second.
@@ -1710,6 +1711,34 @@ pub(crate) fn fillet_corners(s: &Session, items: &[Sel]) -> Vec<Vec3> {
     corners
 }
 
+/// The least setback the smooth-patch `corners` of a Fillet dialog's edges take with rounds of
+/// `radius`: the largest the kernel names at any of them ([`kernel::fillet_least_setback`]; a
+/// setback must be more than this). `None` where the kernel names none (a corner whose least
+/// SMLib decides). Kept per design revision, radius and corners: the kernel reads the bodies'
+/// faces, and the form asks every frame.
+pub(crate) fn fillet_least_setback(ctx: &egui::Context, s: &Session, items: &[Sel], corners: &[Vec3], radius: f64) -> Option<f64> {
+    let mut bodies: Vec<String> = fillet_edge_ids(s, items).into_iter().map(|(b, _)| b).collect();
+    bodies.dedup();
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    (&s.document_id, s.revision, radius.to_bits(), &bodies).hash(&mut key);
+    corners.iter().for_each(|c| [c.x, c.y, c.z].map(f64::to_bits).hash(&mut key));
+    let key = key.finish();
+    let id = egui::Id::new("fillet_least_setback");
+    if let Some((k, least)) = ctx.data(|d| d.get_temp::<(u64, Option<f64>)>(id))
+        && k == key
+    {
+        return least;
+    }
+    let st = crate::open_meshing::session_world(s);
+    let least = bodies
+        .iter()
+        .filter_map(|b| st.body(b))
+        .flat_map(|b| corners.iter().filter_map(|c| solidcraft_engine::doc::kernel::fillet_least_setback(&b.body, *c, radius).ok().flatten()))
+        .reduce(f64::max);
+    ctx.data_mut(|d| d.insert_temp(id, (key, least)));
+    least
+}
+
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else
 /// the last sketch's while no feature builds from it yet. A used profile (a cube's sketch on its
 /// bottom face) is only taken when it is picked.
@@ -2566,14 +2595,17 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick"));
             return;
         }
-        // A fillet's refusal reads in plain words; the kernel's own text stays in the hover
-        // text, Copy Details and the issue report.
-        let plain = if matches!(d.kind, Kind::Fillet { chamfer: false, .. }) { fillet_plain_error(&error) } else { None };
+        // A fillet's refusal reads in plain words, or not at all where its Setback field already
+        // says what is wrong; the kernel's own text stays in the hover text, Copy Details and the
+        // issue report.
+        let setback_in_field = d.extra.get("setbacks").is_none();
+        let plain = if matches!(d.kind, Kind::Fillet { chamfer: false, .. }) { fillet_plain_error(&error, setback_in_field) } else { None };
         ui.vertical(|ui| {
             match &plain {
-                Some(plain) => {
+                Some(FilletRefusal::Plain(plain)) => {
                     crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).on_hover_text(shown_error(&error));
                 }
+                Some(FilletRefusal::InField) => {}
                 None => {
                     crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
                 }
@@ -2586,6 +2618,10 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                         ui.ctx().copy_text(error.clone());
                     }
                 }
+                // A value the field flags is the user's to change, not a failure to report.
+                if matches!(plain, Some(FilletRefusal::InField)) {
+                    return;
+                }
                 let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
                 crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
                 if response.clicked() {
@@ -2596,11 +2632,25 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     }
 }
 
+/// How the Fillet dialog shows a kernel refusal ([`fillet_plain_error`]).
+#[derive(Debug, PartialEq)]
+pub(crate) enum FilletRefusal {
+    /// In these plain words.
+    Plain(&'static str),
+    /// Not again: the Setback field already flags the value and names the least it takes.
+    InField,
+}
+
 /// A fillet's refusal by the kernel in plain words, for the dialog: what happened and what may
-/// help, without SMLib's status codes, its check's test list or the command's parameter names.
-/// `None` for a refusal that is no kernel failure (an expression, a pick), shown as it is.
-pub(crate) fn fillet_plain_error(error: &str) -> Option<&'static str> {
+/// help, without SMLib's status codes, its check's test list or the command's parameter names;
+/// a setback short of the least is left to the Setback field (`setback_in_field`: the setback
+/// came from it, so it is flagged there). `None` for a refusal that is no kernel failure (an
+/// expression, a pick), shown as it is.
+pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<FilletRefusal> {
     // The kernel's refusals as the timeline records them (`KernelError`, `blend_smlib`).
+    if setback_in_field && error.contains("the setback must be more than") {
+        return Some(FilletRefusal::InField);
+    }
     let too_large = error.contains("larger than the faces beside its edges allow");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
@@ -2609,11 +2659,11 @@ pub(crate) fn fillet_plain_error(error: &str) -> Option<&'static str> {
         || error.contains("kernel internal error")
         || error.contains("the rounds would leave openings");
     if too_large {
-        Some(tr("ui.fillet_error_too_large"))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large")))
     } else if corner && kernel {
-        Some(tr("ui.fillet_error_corner"))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_corner")))
     } else if kernel {
-        Some(tr("ui.fillet_error_failed"))
+        Some(FilletRefusal::Plain(tr("ui.fillet_error_failed")))
     } else {
         None
     }
@@ -3502,16 +3552,7 @@ pub(crate) const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", 
 
 /// A new Fillet or Chamfer dialog's values.
 fn fillet_kind(size: &str, chamfer: bool) -> Kind {
-    Kind::Fillet {
-        radius: size.into(),
-        chamfer,
-        chain: true,
-        ctype: 0,
-        distance2: size.into(),
-        angle: "45 deg".into(),
-        flip: false,
-        setback: String::new(),
-    }
+    Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false, setback: None }
 }
 
 /// A length field's first text: `number` in the design's units, with the unit written out so the
@@ -4107,15 +4148,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         }
                     }
                 }
-                // A smooth patch's setback, typed once, goes to each of the dialog's corners; left
-                // empty, the command sets them back by its default (1.5 × the radius).
+                // A smooth patch's setback, typed once, goes to each of the dialog's corners; not
+                // typed (or emptied), the command sets them back by its default (1.5 × the radius).
                 if d.extra.get("corner").and_then(Value::as_str) == Some("g2")
                     && dense::fillet_option_applies(&d.extra, "corner")
-                    && !setback.trim().is_empty()
+                    && let Some(setback) = setback.as_deref().map(str::trim).filter(|s| !s.is_empty())
                 {
                     let corners = fillet_corners(s, sels(d, 0));
                     if !corners.is_empty() {
-                        p["setbacks"] = Value::Array(corners.into_iter().map(|v| json!({"vertex": pt3(v), "distance": setback.trim()})).collect());
+                        p["setbacks"] = Value::Array(corners.into_iter().map(|v| json!({"vertex": pt3(v), "distance": setback})).collect());
                     }
                 }
                 ("solid.fillet", p)
@@ -5438,7 +5479,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 let at_corners =
                     corners.len() == setbacks.len() && setbacks.iter().all(|c| corners.iter().any(|v| v.dist(c.vertex.0) < VERTEX_TOLERANCE));
                 match &mut d.kind {
-                    Kind::Fillet { setback, .. } if !corner.is_rolling() && uniform && at_corners => *setback = first.distance.to_string(),
+                    Kind::Fillet { setback, .. } if !corner.is_rolling() && uniform && at_corners => *setback = Some(first.distance.to_string()),
                     _ => {
                         let saved = setbacks.iter().map(|c| json!({"vertex": pt3(c.vertex.0), "distance": c.distance.to_string()}));
                         d.extra.insert("setbacks".into(), Value::Array(saved.collect()));
