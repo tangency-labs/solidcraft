@@ -1,0 +1,55 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      20,
+      10
+     ],
+     [
+      20,
+      20
+     ],
+     [
+      0,
+      20
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      10,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.blend_curve",
+   "params": {
+    "a": "l4.end",
+    "b": "l1.start",
+    "continuity": "g4"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10
+   }
+  }
+ ]
+}
