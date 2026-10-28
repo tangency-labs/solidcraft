@@ -191,10 +191,14 @@ pub fn iso_curves(body: &Body, face: usize, at: Vec3, along_u: bool) -> Result<V
     Ok(out)
 }
 
-/// The isoparametric curves of face `face` of `body` for Isocurve Analysis: `count` each way
-/// (1…[`MAX_ISO_COUNT`]), the held parameter evenly spaced across the face's extent in (u, v)
-/// with the extent's sides left out (`k / (count + 1)` of the way, k = 1…count), each cut to the
-/// face ([`FaceTrims::clip`]) and its points at chord tolerance `chord`. Along u first, then v.
+/// The isoparametric curves of face `face` of `body` for Isocurve Analysis, the held parameter
+/// on a ladder of the face's surface ([`iso_ladder`]) rather than on the face's own extent, so
+/// faces on one surface (a face split by a boss, the pieces of a split cylinder) show the same
+/// lines, straight across where they meet. `count` (1…[`MAX_ISO_COUNT`]) sets the density: a
+/// bounded parameter's range in `count + 1` steps, a linear one in steps of the body's size over
+/// `count + 1`, rounded to 1, 2 or 5 times a power of ten. The rungs strictly inside the face's
+/// extent are cut to the face ([`FaceTrims::clip`]), their points at chord tolerance `chord`.
+/// Along u first, then v.
 pub fn iso_grid(body: &Body, face: usize, count: usize, chord: f64) -> Result<Vec<IsoLine>> {
     if !(1..=MAX_ISO_COUNT).contains(&count) {
         return Err(KernelError::Invalid(format!("iso curves: 1…{MAX_ISO_COUNT} each way")));
@@ -203,6 +207,8 @@ pub fn iso_grid(body: &Body, face: usize, count: usize, chord: f64) -> Result<Ve
         return Err(KernelError::Invalid("iso curves: the chord tolerance must be positive".into()));
     }
     let trims = FaceTrims::new(body, face)?;
+    let spacing = round_spacing(body.size() / (count + 1) as f64)
+        .ok_or_else(|| KernelError::Invalid("iso curves: the body has no size to space them by".into()))?;
     let [[u0, u1], [v0, v1]] = trims.extent();
     let mut out = Vec::new();
     for along_u in [true, false] {
@@ -210,8 +216,19 @@ pub fn iso_grid(body: &Body, face: usize, count: usize, chord: f64) -> Result<Ve
         if !(hi > lo) {
             continue;
         }
-        for k in 1..=count {
-            let fixed = lo + (hi - lo) * k as f64 / (count + 1) as f64;
+        let Some((start, step)) = iso_ladder(trims.surface, &trims.eval, !along_u, count, spacing) else { continue };
+        // Rungs on the extent's sides are its boundary, not curves across it.
+        let eps = step * 1e-6;
+        let first = ((lo + eps - start) / step).ceil();
+        let last = ((hi - eps - start) / step).floor();
+        if !(first.is_finite() && last.is_finite()) {
+            continue;
+        }
+        // The ladder is spaced so that a face holds at most about `count + 1` rungs; the cap
+        // only guards a surface whose parameters run far faster than the body's size.
+        let rungs = (last - first + 1.0).clamp(0.0, (4 * MAX_ISO_COUNT) as f64) as usize;
+        for k in 0..rungs {
+            let fixed = start + (first + k as f64) * step;
             for (curve, interval) in trims.clip(along_u, fixed)? {
                 let segs = curve_path(&curve, interval)?;
                 let mut points: Vec<Vec3> = segs.first().map(crate::PathSeg::start).into_iter().collect();
@@ -223,6 +240,74 @@ pub fn iso_grid(body: &Body, face: usize, count: usize, chord: f64) -> Result<Ve
         }
     }
     Ok(out)
+}
+
+/// Where the iso lines of a surface fall in one of its parameters (`held_u`: u, else v):
+/// `start + k * step` for whole k, fixed by the surface alone. A bounded parameter (an angle, a
+/// B-spline's knot range) is its range in `count + 1` steps from its start. A linear one (a
+/// plane's, a cylinder's or cone's along its axis) has rungs `spacing` apart in the world,
+/// counted from the world origin along the parameter's gradient, so another record of the same
+/// plane or axis (its own origin, its own face) gets the same lines. None for a parameter that is
+/// neither.
+fn iso_ladder(surface: &brep::Surface, eval: &SurfaceEval, held_u: bool, count: usize, spacing: f64) -> Option<(f64, f64)> {
+    use solidcraft_geom::brep::Surface;
+    let d = if held_u { 0 } else { 1 };
+    if let Some((a, b)) = eval.domain().range.get(d).copied().flatten().filter(|(a, b)| b > a) {
+        return Some((a, (b - a) / (count + 1) as f64));
+    }
+    let v = |q: [f64; 3]| Vec3::new(q[0], q[1], q[2]);
+    // The parameter as (P - origin) · g, P a point of the surface.
+    let (origin, g) = match surface {
+        Surface::Plane { origin, u_axis, v_axis } => (v(*origin), plane_gradient(v(*u_axis), v(*v_axis), held_u)?),
+        Surface::PlaneThrough { origin, u_point, v_point } => {
+            let o = v(*origin);
+            (o, plane_gradient(v(*u_point) - o, v(*v_point) - o, held_u)?)
+        }
+        // Along the axis: P = origin + z * v + (radial part, at right angles to z).
+        Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } if !held_u => {
+            let z = v(frame.x_axis).cross(v(frame.y_axis));
+            let zz = z.dot(z);
+            if !(zz > 1e-300) {
+                return None;
+            }
+            (v(frame.origin), z * (1.0 / zz))
+        }
+        _ => return None,
+    };
+    let len = g.len();
+    if !(len.is_finite() && len > 0.0) {
+        return None;
+    }
+    // The parameter of the world plane P · g/|g| = k * spacing is k * spacing * |g| - origin · g.
+    Some((-origin.dot(g), spacing * len))
+}
+
+/// The gradient of a plane's u (`held_u`) or v in the world: the dual of its axes in their plane.
+fn plane_gradient(du: Vec3, dv: Vec3, held_u: bool) -> Option<Vec3> {
+    let n = du.cross(dv);
+    let nn = n.dot(n);
+    if !(nn > 1e-300) {
+        return None;
+    }
+    Some(if held_u { dv.cross(n) } else { n.cross(du) } * (1.0 / nn))
+}
+
+/// `x` rounded down to 1, 2 or 5 times a power of ten (None unless it is positive and finite).
+fn round_spacing(x: f64) -> Option<f64> {
+    if !(x.is_finite() && x > 0.0) {
+        return None;
+    }
+    let p = 10f64.powf(x.log10().floor());
+    let m = x / p;
+    Some(
+        p * if m >= 5.0 {
+            5.0
+        } else if m >= 2.0 {
+            2.0
+        } else {
+            1.0
+        },
+    )
 }
 
 /// A pcurve's parameters and points at [`ISO_SAMPLES`] per knot span, in its direction.
