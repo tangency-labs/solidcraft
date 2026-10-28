@@ -456,7 +456,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             let list = app.session.execute("contact.list", &json!({})).unwrap_or(Value::Null);
             form_row(ui, "Contact", |ui| {
                 let mut on = list.get("enabled").and_then(Value::as_bool).unwrap_or(false);
-                if crate::ui_kit::checkbox(ui, "Enabled", &mut on).changed() {
+                if crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Enabled"), &mut on).changed() {
                     let _ = app.run("contact.enable_sets", json!({ "enabled": on }));
                 }
             });
