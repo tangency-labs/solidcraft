@@ -21,7 +21,8 @@ document remains the reference implementation today.
 # Headless: an in-process design session, no window (screenshots are drawn on the GPU).
 solidcraft-cli mcp
 
-# Headless, starting from a design file or a command script.
+# Headless, starting from a design file or a command script (a script's relative file paths
+# are beside it, see scripts.md).
 solidcraft-cli mcp --in part.sc
 
 # Bridged to the running app, so you can watch the agent model. The app's control channel is

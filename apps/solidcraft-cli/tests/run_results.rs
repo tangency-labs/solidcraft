@@ -667,3 +667,33 @@ fn render_setup_overrides_obey_shared_validation_before_host_initialization() {
         assert!(!out.exists());
     }
 }
+
+/// A relative file path inside a script is beside the script, wherever the CLI is started
+/// (#8195): the STEP file it inserts is read from there and the file it exports is written
+/// there. A path on the command line (`--out`) stays relative to the working folder.
+#[test]
+fn script_file_paths_resolve_beside_the_script_and_command_line_paths_in_the_working_folder() {
+    let dir = Scratch::new();
+    let (scripts, elsewhere) = (dir.0.join("scripts"), dir.0.join("elsewhere"));
+    std::fs::create_dir(&scripts).unwrap();
+    std::fs::create_dir(&elsewhere).unwrap();
+    std::fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance/cylinder.step"), scripts.join("cap.step")).unwrap();
+    let script = scripts.join("r.json");
+    std::fs::write(
+        &script,
+        json!({"commands": [{"command": "file.insert_step", "params": {"path": "cap.step", "name": "cap"}},
+            {"command": "file.export", "params": {"path": "cap-out.stl"}}]})
+        .to_string(),
+    )
+    .unwrap();
+    let results = json_output(cli().current_dir(&elsewhere).arg("run").arg(&script).args(["--results", "--out", "cli-out.stl"]).output().unwrap());
+    assert_eq!(results[0]["bodies"].as_array().map(Vec::len), Some(1), "{results}");
+    assert!(scripts.join("cap-out.stl").is_file());
+    assert!(!elsewhere.join("cap-out.stl").exists());
+    assert!(elsewhere.join("cli-out.stl").is_file());
+    assert!(!scripts.join("cli-out.stl").exists());
+    // A script named by a relative path, without --results (the session `eval` and `snapshot`
+    // open too).
+    let eval = json_output(cli().current_dir(&dir.0).args(["eval", "scripts/r.json"]).output().unwrap());
+    assert_eq!(eval["body_count"], json!(1), "{eval}");
+}

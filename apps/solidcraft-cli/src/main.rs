@@ -56,7 +56,7 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (a relative file path inside a script file, read or written (file.insert_step, file.export, doc.open, a sketch.text font file, ...),\n       is beside the script; with eval, snapshot, render and mcp --in too. --in, --out, --save and --json-out are relative to the working folder)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n";
 /// `script`'s lines in the usage.
@@ -245,6 +245,21 @@ pub fn read_json(path: &str) -> Result<Value, String> {
     serde_json::from_str(&s).map_err(|e| format!("{path}: {e}"))
 }
 
+/// A script read from the file `path`, with the relative file paths its commands read and write
+/// resolved against the script's folder (#8195), so a script and its files are kept together
+/// and run from anywhere. Paths given on the command line stay relative to the working folder.
+fn beside_script(path: &str, script: Value) -> Value {
+    match std::path::Path::new(path).parent().filter(|d| !d.as_os_str().is_empty()) {
+        Some(dir) => solidcraft_engine::script_paths::relative_to(&script, dir),
+        None => script,
+    }
+}
+
+/// [`read_json`] of a script file, its file paths resolved as [`beside_script`] says.
+fn read_script(path: &str) -> Result<Value, String> {
+    read_json(path).map(|v| beside_script(path, v))
+}
+
 /// A session from a design file, a STEP/3MF/STL file, a command script, or an oracle recipe.
 pub fn load(path: &str) -> Result<Session, String> {
     load_checked(path, solidcraft_engine::schema::ParamCheck::Off)
@@ -271,6 +286,7 @@ fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Res
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
     } else {
         let script = if v.get("features").is_some() && v.get("commands").is_none() { recipe::to_script(&v)? } else { v };
+        let script = beside_script(path, script);
         // Warn level: each step's `param_warnings` as it completes, even when a later step fails
         // (stderr, so stdout stays the caller's).
         let mut warn = |step: usize, r: &Value| {
@@ -356,7 +372,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
             None => Session::default(),
         };
         let needs = if want_results { "--results needs a script" } else { "--timings needs a script" };
-        let v = read_json(path.ok_or(needs)?)?;
+        let v = read_script(path.ok_or(needs)?)?;
         let out = if timings {
             let (r, mut t) = s.run_script_timed(&v, profile).map_err(|e| e.to_string())?;
             if want_results && let Some(o) = t.as_object_mut() {
@@ -398,7 +414,7 @@ fn open(base: Option<&str>, path: Option<&String>) -> Result<Session, String> {
     match (base, path) {
         (Some(b), Some(p)) => {
             let mut s = load(b)?;
-            s.run_script(&read_json(p)?).map_err(|e| e.to_string())?;
+            s.run_script(&read_script(p)?).map_err(|e| e.to_string())?;
             Ok(s)
         }
         (Some(b), None) => load(b),

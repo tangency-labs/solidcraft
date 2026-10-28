@@ -27,6 +27,7 @@ pub mod recovery;
 pub mod render_jobs;
 pub mod sample;
 pub mod schema;
+pub mod script_paths;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod slicer_files;
 mod slicer_icon;
