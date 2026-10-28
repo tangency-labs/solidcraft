@@ -82,8 +82,7 @@ fn bare_axis_id_still_resolves_in_the_profile_sketch() {
     let mut s = colliding_sketches();
     let err = s
         .execute("solid.revolve", &json!({"sketch": "ProfileSketch", "profiles": [0], "axis": "l1"}))
-        .err()
-        .expect("the profile sketch's own l1 crosses the profile");
+        .expect_err("the profile sketch's own l1 crosses the profile");
     assert!(err.to_string().contains("crosses"), "{err}");
 }
 
