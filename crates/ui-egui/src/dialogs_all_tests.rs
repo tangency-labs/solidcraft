@@ -1026,7 +1026,7 @@ fn reopened_rectangular_pattern_shows_each_to_object_under_its_distance_type() {
     assert!(y("Distance Type 2") < y("Extent 2"));
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
-    let saved = h.app.session.doc.to_json();
+    let saved = h.app.session.doc.to_json().replace([' ', '\n'], "");
     assert!(saved.contains("\"extent2\":true") && saved.contains("\"to_offset1\""), "{saved}");
 }
 

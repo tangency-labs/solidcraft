@@ -1090,7 +1090,8 @@ fn rectangular_extent_spans_first_to_last_copy() {
     }
     assert!(!hole_at(&s, 100.0, 60.0) && !hole_at(&s, 60.0, 105.0));
     let saved = s.doc.to_json();
-    assert!(saved.contains("\"extent1\":true") && !saved.contains("extent2"), "{saved}");
+    let compact = saved.replace([' ', '\n'], "");
+    assert!(compact.contains("\"extent1\":true") && !compact.contains("extent2"), "{saved}");
     let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
     assert!(hole_at(&reopened, 90.0, 90.0));
     // Centred, the extent is still the whole span: two copies on each side, 7.5 mm apart.
