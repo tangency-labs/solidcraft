@@ -3958,11 +3958,11 @@ mod prism_local_tests;
 mod loft_rails_tests;
 
 #[cfg(test)]
-#[path = "revolve_convention_tests.rs"]
-mod revolve_convention_tests;
-#[cfg(test)]
 #[path = "revolve_axis_sketch_tests.rs"]
 mod revolve_axis_sketch_tests;
+#[cfg(test)]
+#[path = "revolve_convention_tests.rs"]
+mod revolve_convention_tests;
 
 #[cfg(test)]
 #[path = "single_hole_tests.rs"]
