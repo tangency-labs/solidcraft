@@ -248,9 +248,24 @@ pub fn read_solids_with(ex: &Exchange, trims: &dyn Trims) -> Solids {
 }
 
 fn read_solids_in(ex: &Exchange, trims: Option<&dyn Trims>) -> Solids {
-    let mut items: Vec<u64> = ex.entities.iter().filter(|(_, e)| SOLID_ITEMS.contains(&e.name())).map(|(id, _)| *id).collect();
-    items.sort_unstable();
-    let index = Index::new(ex);
+    let mut solids: Vec<u64> = ex.entities.iter().filter(|(_, e)| SOLID_ITEMS.contains(&e.name())).map(|(id, _)| *id).collect();
+    solids.sort_unstable();
+    let mut index = Index::new(ex);
+    // A surface model's closed shells read on their own sit where the model does.
+    let mut items = Vec::with_capacity(solids.len());
+    for solid in solids {
+        for piece in self::items(ex, solid) {
+            if piece != solid {
+                if let Some(c) = index.context.get(&solid).copied() {
+                    index.context.insert(piece, c);
+                }
+                if let Some(p) = index.product.get(&solid).cloned() {
+                    index.product.insert(piece, p);
+                }
+            }
+            items.push(piece);
+        }
+    }
     let mut out = Solids::default();
     let mut budget = MAX_FILE_FACES;
     let mut readers: HashMap<u64, (Reader<'_>, units::Context)> = HashMap::new();
@@ -334,7 +349,7 @@ fn read_with<'a>(
     let mut b = Builder::new(ex, reader, tolerance(&context), budget, trims);
     // The file's faces, edges, vertices and their geometry read into the builder.
     let topology = solidcraft_profile::span("import", "step.topology");
-    let (ids, kind) = item_shells(e)?;
+    let (ids, kind) = item_shells(ex, item)?;
     let mut shells = Vec::with_capacity(ids.len());
     let mut skipped = false;
     for s in ids {
@@ -362,7 +377,7 @@ pub struct FaceRead {
 /// as [`read_solid_with`] reads it, with its own edges and vertices (so its tolerances cover its
 /// own gaps only); a face that cannot be read on its own says why and the others are still read.
 pub fn read_faces_with(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims) -> R<Vec<FaceRead>> {
-    let (shells, _) = item_shells(entity(ex, item)?)?;
+    let (shells, _) = item_shells(ex, item)?;
     let mut reader = Reader::new(ex, context.units);
     let mut budget = MAX_FILE_FACES;
     let mut out = Vec::new();
@@ -384,8 +399,31 @@ pub fn read_faces_with(ex: &Exchange, item: u64, context: units::Context, trims:
     Ok(out)
 }
 
+/// A surface model's shells the file calls closed and the others, in its order.
+fn model_shells(ex: &Exchange, shells: &[u64]) -> (Vec<u64>, Vec<u64>) {
+    shells.iter().partition(|s| ex.get(**s).is_some_and(|e| matches!(e.name(), "CLOSED_SHELL" | "ORIENTED_CLOSED_SHELL")))
+}
+
+/// The items a solid item is read as, each one body: the item itself, but for a surface model
+/// with both closed and open shells (a part with a sheet beside it) each closed shell on its own
+/// (a solid), then the model (its open shells, a sheet).
+pub fn items(ex: &Exchange, item: u64) -> Vec<u64> {
+    let shells = match ex.get(item) {
+        Some(e) if e.name() == "SHELL_BASED_SURFACE_MODEL" => {
+            e.params().get(1).and_then(Param::as_list).unwrap_or(&[]).iter().filter_map(Param::as_ref_id).collect()
+        }
+        _ => Vec::new(),
+    };
+    let (closed, open) = model_shells(ex, &shells);
+    if closed.is_empty() || open.is_empty() {
+        return vec![item];
+    }
+    closed.into_iter().chain([item]).collect()
+}
+
 /// The shells of a solid item (the outer shell first, then its voids), and what kind it is.
-fn item_shells(e: &Entity) -> R<(Vec<u64>, Kind)> {
+fn item_shells(ex: &Exchange, item: u64) -> R<(Vec<u64>, Kind)> {
+    let e = entity(ex, item)?;
     let p = e.params();
     match e.name() {
         "MANIFOLD_SOLID_BREP" => Ok((vec![rid(p.get(1), "outer shell")?], Kind::Solid)),
@@ -403,8 +441,12 @@ fn item_shells(e: &Entity) -> R<(Vec<u64>, Kind)> {
             if ids.is_empty() || ids.len() > brep::MAX_SHELLS {
                 return Err(format!("a surface model with {} shells", ids.len()));
             }
-            Ok((ids, Kind::Model))
+            // Its closed shells, where it has open ones too, are items of their own ([`items`]).
+            let (closed, open) = model_shells(ex, &ids);
+            Ok((if closed.is_empty() || open.is_empty() { ids } else { open }, Kind::Model))
         }
+        // A closed shell of a surface model that has open shells too ([`items`]).
+        "CLOSED_SHELL" | "ORIENTED_CLOSED_SHELL" => Ok((vec![item], Kind::Model)),
         n => Err(unsupported(n)),
     }
 }

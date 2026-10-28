@@ -570,6 +570,46 @@ fn product(pd: u64, name: &str) -> String {
     )
 }
 
+/// A surface model of a closed shell and an open one beside it (Poppy Humanoid's thighs: the
+/// part, and a sheet of two faces on it) comes in as two bodies: the closed shell a solid of its
+/// own, the open one a surface body, each in the model's colour. It once came in as one body,
+/// open for its sheet's edges.
+#[test]
+fn a_surface_models_closed_shell_beside_a_sheet_is_a_solid_of_its_own() {
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    // A unit square sheet at z = 5.
+    let corners = [(0, 0), (1, 0), (1, 1), (0, 1)];
+    for (i, (x, y)) in corners.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,5.));\n#{}=VERTEX_POINT('',#{});\n", 800 + i, 810 + i, 800 + i);
+    }
+    let mut oes = Vec::new();
+    for i in 0..4 {
+        let (a, b) = (corners[i], corners[(i + 1) % 4]);
+        t += &format!("#{}=DIRECTION('',({}.,{}.,0.));\n#{}=VECTOR('',#{},1.);\n", 820 + 2 * i, b.0 - a.0, b.1 - a.1, 821 + 2 * i, 820 + 2 * i);
+        t += &format!("#{}=LINE('',#{},#{});\n", 830 + i, 800 + i, 821 + 2 * i);
+        t += &format!("#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 840 + i, 810 + i, 810 + (i + 1) % 4, 830 + i);
+        t += &format!("#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n", 850 + i, 840 + i);
+        oes.push(format!("#{}", 850 + i));
+    }
+    t += &format!("#860=EDGE_LOOP('',({}));\n#861=FACE_OUTER_BOUND('',#860,.T.);\n", oes.join(","));
+    t += "#862=CARTESIAN_POINT('',(0.,0.,5.));\n#863=DIRECTION('',(0.,0.,1.));\n#864=AXIS2_PLACEMENT_3D('',#862,#863,$);\n#865=PLANE('',#864);\n";
+    t += "#866=ADVANCED_FACE('',(#861),#865,.T.);\n#130=OPEN_SHELL('',(#866));\n#110=SHELL_BASED_SURFACE_MODEL('Thigh',(#100,#130));\n";
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#110),#20);\n";
+    t += "#70=STYLED_ITEM('',(#71),#110);\n#71=PRESENTATION_STYLE_ASSIGNMENT((#72));\n#72=SURFACE_STYLE_USAGE(.BOTH.,#73);\n#73=SURFACE_SIDE_STYLE('',(#74));\n#74=SURFACE_STYLE_FILL_AREA(#75);\n#75=FILL_AREA_STYLE('',(#76));\n#76=FILL_AREA_STYLE_COLOUR('',#77);\n#77=COLOUR_RGB('',1.,0.5,0.);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap();
+    assert_eq!(imp.bodies.len(), 2, "{:?}", imp.warnings);
+    let (solid, sheet) = (&imp.bodies[0], &imp.bodies[1]);
+    assert!(solid.closed && solid.refused.is_none() && !solid.body.is_surface(), "{:?}", imp.warnings);
+    assert_eq!((solid.source_item, solid.file_faces), (100, 6));
+    assert!(rel(measure(&solid.body).unwrap().volume, 1.0) < 1e-9);
+    assert!(!sheet.closed && sheet.body.is_surface() && sheet.body.face_count() == 1);
+    assert_eq!((sheet.source_item, sheet.name.as_str()), (110, "Thigh"));
+    assert!(imp.bodies.iter().all(|b| b.color == Some([1.0, 0.5, 0.0])));
+}
+
 #[test]
 fn hand_written_part_in_inches_with_colour() {
     let mut t = String::from(HEAD);
