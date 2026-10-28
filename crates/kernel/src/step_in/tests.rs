@@ -497,17 +497,18 @@ fn cube_entities() -> String {
     for (i, (x, y, z)) in pts.iter().enumerate() {
         s += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,{z}.));\n#{}=VERTEX_POINT('',#{});\n", 200 + i, 210 + i, 200 + i);
     }
-    // 12 edges, each on the line through its two vertices (trimmed by them).
+    // 12 edges, each on the line through its two vertices (trimmed by them). Their directions
+    // and vectors are #340 to #363, clear of the ids the assembly fixtures add (#600 on).
     let edges = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
     for (k, (a, b)) in edges.iter().enumerate() {
         let (p, q) = (pts[*a], pts[*b]);
         let d = (q.0 - p.0, q.1 - p.1, q.2 - p.2);
-        s += &format!("#{}=DIRECTION('',({}.,{}.,{}.));\n#{}=VECTOR('',#{},1.);\n", 600 + 2 * k, d.0, d.1, d.2, 601 + 2 * k, 600 + 2 * k);
+        s += &format!("#{}=DIRECTION('',({}.,{}.,{}.));\n#{}=VECTOR('',#{},1.);\n", 340 + 2 * k, d.0, d.1, d.2, 341 + 2 * k, 340 + 2 * k);
         s += &format!(
             "#{}=LINE('',#{},#{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
             300 + k,
             200 + a,
-            601 + 2 * k,
+            341 + 2 * k,
             320 + k,
             210 + a,
             210 + b,
