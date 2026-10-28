@@ -60,3 +60,49 @@ pub(crate) fn progress(ui: &mut egui::Ui, key: &str, fraction: f32) -> egui::Res
     crate::scenario::publish_rect(&format!("dialog:progress:{key}"), bar);
     response
 }
+
+/// Steps of a running operation, one row each: a tick for the ones done, a spinner for the one
+/// under way and a ring for the ones to come, each the height of the text and centred on it.
+/// `detail` (how far the current step is) goes at the end of its row. Pair it with `progress`
+/// for the current step. Tokens: `font_label, control_height, form_ink/dim/primary, space_2/8`.
+pub(crate) fn steps(ui: &mut egui::Ui, key: &str, labels: &[&str], current: usize, detail: Option<&str>) {
+    let t = Tokens::get();
+    let mark = t.font_label;
+    for (i, label) in labels.iter().enumerate() {
+        let (row, response) =
+            ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), super::row_height()), egui::Sense::hover());
+        let slot = egui::Rect::from_center_size(egui::pos2(row.left() + mark / 2.0, row.center().y), vec2(mark, mark));
+        let painter = ui.painter();
+        let (font, ink) = match i.cmp(&current) {
+            std::cmp::Ordering::Less => {
+                super::checks::paint_check_glyph(painter, slot, false, t.form_ink);
+                (egui::FontId::proportional(t.font_label), t.form_ink)
+            }
+            std::cmp::Ordering::Equal => {
+                egui::Spinner::new().size(mark).color(t.form_primary).paint_at(ui, slot);
+                (crate::fonts::semibold(t.font_label), t.form_ink)
+            }
+            std::cmp::Ordering::Greater => {
+                painter.circle_stroke(slot.center(), mark / 2.0 - t.space_2, egui::Stroke::new(1.0, t.form_dim));
+                (egui::FontId::proportional(t.font_label), t.form_dim)
+            }
+        };
+        let mut text = egui::Rect::from_min_max(egui::pos2(slot.right() + t.space_8, row.top()), row.max);
+        if let Some(detail) = detail.filter(|_| i == current) {
+            let galley = ui.painter().layout_no_wrap(detail.to_string(), egui::FontId::proportional(t.font_label), t.form_dim);
+            let at = egui::pos2(row.right() - galley.size().x, row.center().y - galley.size().y / 2.0);
+            if at.x > text.left() + t.space_8 {
+                ui.painter().galley(at, galley, t.form_dim);
+                text.max.x = at.x - t.space_8;
+            }
+        }
+        super::text::paint_text(ui, text, label, font, ink, false);
+        let state = match i.cmp(&current) {
+            std::cmp::Ordering::Less => "done",
+            std::cmp::Ordering::Equal => "current",
+            std::cmp::Ordering::Greater => "next",
+        };
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), *label));
+        crate::scenario::publish_rect(&format!("dialog:step:{key}:{i}:{state}"), row);
+    }
+}
