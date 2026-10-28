@@ -1040,7 +1040,7 @@ fn a_modelled_threads_flank_joins_are_not_drawn() {
             .get(f as usize)
             .is_some_and(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
     };
-    let tolerances = solidcraft_kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: 0.5, curvature_per_mm: 1.0 };
+    let tolerances = solidcraft_kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: 0.5, curvature_per_mm: 1.0, ..Default::default() };
     let report = solidcraft_kernel::seam_diagnostics(body, &[], 33, tolerances).unwrap();
     let mut flank_joins = 0;
     let mut worst: f64 = 0.0;

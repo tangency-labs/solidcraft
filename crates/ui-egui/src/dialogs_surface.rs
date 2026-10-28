@@ -9,6 +9,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::{AxisRef, Direction, FaceAt, FeatureKind, Mat, PlaneRef, Position, ProfileSel, RuledCorners, RuledMode};
 use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::kernel::{Construction, Continuity};
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, OP_LABELS, OPS, combo, form_row, op_index};
@@ -58,21 +59,21 @@ crate::dialog_descriptor::dialog_descriptors! {
             Loft {
                 rail_fit: usize,
             },
-            /// `continuity`: an index into [`BLEND_CONTINUITY`] for each end, [from, to]; `bulge`: how
+            /// `continuity`: an index into [`BLEND_ORDERS`] for each end, [from, to]; `bulge`: how
             /// full each end leaves (0 is the plain bridge); `stitch`: sew the blend onto both bodies.
             Blend {
                 continuity: [usize; 2],
                 bulge: [f64; 2],
                 stitch: bool,
             },
-            /// `continuity`: an index into [`PATCH_CONTINUITY`] (for a loop of sketch curves, how much of
+            /// `continuity`: an index into [`BOUNDARY_ORDERS`] (for a loop of sketch curves, how much of
             /// the sketch's plane each side repeats; for picked edges, how the surface meets the faces
             /// beside them); `join`: sew the surface into the body of its edges.
             Boundary {
                 continuity: usize,
                 join: bool,
             },
-            /// `continuity`: an index into [`PATCH_CONTINUITY`] (how a patch on edges meets the faces
+            /// `continuity`: an index into [`PATCH_ORDERS`] (how a patch on edges meets the faces
             /// beside its loop).
             Patch {
                 continuity: usize,
@@ -137,29 +138,51 @@ impl Surf {
     }
 }
 
-/// How a patch on edges meets the faces beside its loop (labels, and the `continuity` parameter).
-/// Labels are plain words; the order's code (G0, G1, G2) is in each one's hover text.
-const PATCH_CONTINUITY: [(&str, &str); 3] = [("ui.continuity_position", "g0"), ("ui.continuity_tangent", "g1"), ("ui.continuity_curvature", "g2")];
+/// A dialog's continuity choices: the orders a construction builds, from the kernel's table
+/// ([`Construction::offered`]), so an order a construction learns shows up here by itself. The
+/// dialog keeps an index into them; labels are plain words, each order's code (G0 …) is in the
+/// hover text.
+#[derive(Clone, Copy, Debug)]
+struct Orders(Construction);
 
-/// How much of the surface at its edges each end of a blend repeats (labels, and the
-/// `continuity` words).
-const BLEND_CONTINUITY: [(&str, &str); 4] =
-    [("ui.continuity_position", "g0"), ("ui.continuity_tangent", "g1"), ("ui.continuity_curvature", "g2"), ("ui.continuity_curvature_change", "g3")];
+/// How a patch on edges meets the faces beside its loop.
+const PATCH_ORDERS: Orders = Orders(Construction::Patch);
+/// How much of the surface at its edges each end of a blend repeats.
+const BLEND_ORDERS: Orders = Orders(Construction::Bridge);
+/// A boundary's one row serves its loop patch (a bridge) and its curve network alike: the orders
+/// a network builds, the fewer of the two.
+const BOUNDARY_ORDERS: Orders = Orders(Construction::Network);
 
-/// Each continuity's hover text, in the order of [`BLEND_CONTINUITY`]: where its code (G0 … G3)
-/// is shown.
-const CONTINUITY_TIPS: [&str; 4] =
-    ["ui.continuity_position_tip", "ui.continuity_tangent_tip", "ui.continuity_curvature_tip", "ui.continuity_curvature_change_tip"];
+impl Orders {
+    fn all(self) -> Vec<Continuity> {
+        self.0.offered()
+    }
 
-/// A Continuity row's segments over `orders` (the segments draw their text as given).
-fn continuity_segments(ui: &mut egui::Ui, selected: &mut usize, orders: &[(&str, &str)]) -> egui::Response {
-    let labels: Vec<&str> = orders.iter().map(|(label, _)| crate::i18n::tr(label)).collect();
-    ui.scope(|ui| ui_kit::segmented(ui, selected, &labels, Default::default())).response
-}
+    /// The message ids of the labels, in order.
+    fn labels(self) -> Vec<&'static str> {
+        self.all().into_iter().map(Continuity::label_id).collect()
+    }
 
-/// The hover text of a list of `orders` continuities: a line for each.
-fn continuity_tip(orders: usize) -> String {
-    CONTINUITY_TIPS.iter().take(orders).map(|tip| crate::i18n::tr(tip)).collect::<Vec<_>>().join("\n")
+    /// The hover text: a line for each order.
+    fn tip(self) -> String {
+        self.all().into_iter().map(|g| crate::i18n::tr(g.tip_id())).collect::<Vec<_>>().join("\n")
+    }
+
+    /// The command word of the choice at `index`.
+    fn word(self, index: usize) -> Option<&'static str> {
+        self.all().get(index).map(|g| g.as_str())
+    }
+
+    /// The index of `g` among the choices (`None`: not offered).
+    fn index(self, g: Continuity) -> Option<usize> {
+        self.all().iter().position(|o| *o == g)
+    }
+
+    /// A Continuity row's segments (the segments draw their text as given).
+    fn segments(self, ui: &mut egui::Ui, selected: &mut usize) -> egui::Response {
+        let labels: Vec<&str> = self.labels().into_iter().map(crate::i18n::tr).collect();
+        ui.scope(|ui| ui_kit::segmented(ui, selected, &labels, Default::default())).response
+    }
 }
 
 /// What a boundary surface becomes: a body of its own, or part of the body of its edges.
@@ -292,27 +315,23 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             ui_kit::options(ui, "untrim_options", &mut [("Restore outer boundary", outer), ("In place (surfaces)", in_place)]);
         }
         Surf::Patch { continuity } => {
-            form_row(ui, "Continuity", |ui| continuity_segments(ui, continuity, &PATCH_CONTINUITY))
-                .on_hover_text(continuity_tip(PATCH_CONTINUITY.len()));
+            form_row(ui, "Continuity", |ui| PATCH_ORDERS.segments(ui, continuity)).on_hover_text(PATCH_ORDERS.tip());
         }
         Surf::Blend { continuity, bulge, stitch } => {
             let [from, to] = continuity;
             let [from_bulge, to_bulge] = bulge;
-            form_row(ui, "Start continuity", |ui| ui_kit::dropdown(ui, "bl_cont0", from, &BLEND_CONTINUITY.map(|(label, _)| label)))
-                .on_hover_text(continuity_tip(BLEND_CONTINUITY.len()));
+            form_row(ui, "Start continuity", |ui| ui_kit::dropdown(ui, "bl_cont0", from, &BLEND_ORDERS.labels())).on_hover_text(BLEND_ORDERS.tip());
             form_row(ui, "Start bulge", |ui| {
                 ui_kit::scalar_field(ui, from_bulge, -0.9..=3.0);
             });
-            form_row(ui, "End continuity", |ui| ui_kit::dropdown(ui, "bl_cont1", to, &BLEND_CONTINUITY.map(|(label, _)| label)))
-                .on_hover_text(continuity_tip(BLEND_CONTINUITY.len()));
+            form_row(ui, "End continuity", |ui| ui_kit::dropdown(ui, "bl_cont1", to, &BLEND_ORDERS.labels())).on_hover_text(BLEND_ORDERS.tip());
             form_row(ui, "End bulge", |ui| {
                 ui_kit::scalar_field(ui, to_bulge, -0.9..=3.0);
             });
             ui_kit::options(ui, "blend_options", &mut [("Stitch to both bodies", stitch)]);
         }
         Surf::Boundary { continuity, join } => {
-            form_row(ui, "Continuity", |ui| continuity_segments(ui, continuity, &PATCH_CONTINUITY))
-                .on_hover_text(continuity_tip(PATCH_CONTINUITY.len()));
+            form_row(ui, "Continuity", |ui| BOUNDARY_ORDERS.segments(ui, continuity)).on_hover_text(BOUNDARY_ORDERS.tip());
             form_row(ui, "Operation", |ui| {
                 let mut op = usize::from(*join);
                 combo(ui, "bo_op", &BOUNDARY_OPS, &mut op);
@@ -565,7 +584,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 let (body, edges) = body_and_edges(items(inputs, i))?;
                 Ok(json!({"body": body, "edges": edges}))
             };
-            let word = |i: usize| BLEND_CONTINUITY.get(i).map_or("g1", |(_, w)| *w);
+            let word = |i: usize| BLEND_ORDERS.word(i).unwrap_or("g1");
             let mut p = json!({
                 "from": side(0)?,
                 "to": side(1)?,
@@ -579,7 +598,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
         }
         Surf::Boundary { continuity, join } => {
             need(0, "the curves (sketch curves or edges)")?;
-            let word = PATCH_CONTINUITY.get(*continuity).map_or("g0", |(_, w)| *w);
+            let word = BOUNDARY_ORDERS.word(*continuity).unwrap_or("g0");
             let across = items(inputs, 1);
             let picks = items(inputs, 0);
             let sketch_ids: Vec<String> = picks.curve_ids();
@@ -628,7 +647,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 let edges: Vec<Value> = items(inputs, 0).edge_points().into_iter().map(pt).collect();
                 let body = items(inputs, 0).iter().find_map(|x| if let Sel::Edge { body, .. } = x { Some(body.clone()) } else { None });
                 let mut p = json!({"edges": edges, "body": body});
-                if let Some((_, word)) = PATCH_CONTINUITY.get(*continuity).filter(|_| *continuity > 0) {
+                if let Some(word) = PATCH_ORDERS.word(*continuity).filter(|_| *continuity > 0) {
                     p["continuity"] = json!(word);
                 }
                 let points: Vec<Value> = items(inputs, 1)
@@ -866,7 +885,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             )
         }
         FeatureKind::SurfaceBlend { from, to, continuity, bulge, align, seam, stitch } => {
-            let index = |c: &solidcraft_engine::doc::kernel::Continuity| BLEND_CONTINUITY.iter().position(|(_, w)| *w == c.as_str()).unwrap_or(1);
+            let index = |c: &Continuity| BLEND_ORDERS.index(*c).unwrap_or(1);
             let k = Surf::Blend { continuity: continuity.each_ref().map(index), bulge: *bulge, stitch: *stitch };
             // What the dialog does not show is kept as it was: the leave directions and the seams.
             let mut extra = Map::new();
@@ -882,8 +901,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             return Some((Kind::Surface(k), ins, extra));
         }
         FeatureKind::SurfaceBoundary { sketch, curves, orders, crown, samples, .. } => {
-            let first = orders.first().copied().unwrap_or(solidcraft_engine::doc::kernel::Continuity::G1);
-            let index = PATCH_CONTINUITY.iter().position(|(_, w)| *w == first.as_str());
+            let first = orders.first().copied().unwrap_or(Continuity::G1);
+            let index = BOUNDARY_ORDERS.index(first);
             // What the dialog does not show is kept as it was: a crown, the stations, and orders
             // that differ from side to side or that the list does not offer (G3).
             let mut extra = Map::new();
@@ -924,8 +943,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                     })
                     .collect()
             };
-            let g = u.iter().chain(v).find(|c| c.body.is_some()).map_or(solidcraft_engine::doc::kernel::Continuity::G0, |c| c.continuity);
-            let index = PATCH_CONTINUITY.iter().position(|(_, w)| *w == g.as_str()).unwrap_or(0);
+            let g = u.iter().chain(v).find(|c| c.body.is_some()).map_or(Continuity::G0, |c| c.continuity);
+            let index = BOUNDARY_ORDERS.index(g).unwrap_or(0);
             (Surf::Boundary { continuity: index, join: *operation == solidcraft_engine::doc::Operation::Join }, vec![sels(u), sels(v)])
         }
         FeatureKind::SurfaceLoft { sections, rails, rail_fit, .. } => {
@@ -957,7 +976,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                     sels.extend((0..ss.profiles.len()).map(|index| Sel::Profile { sketch: sk.0, index }));
                 }
             }
-            let index = PATCH_CONTINUITY.iter().position(|(_, w)| *w == continuity.all.as_str()).unwrap_or(0);
+            let index = PATCH_ORDERS.index(continuity.all).unwrap_or(0);
             // What the dialog does not show is kept as it was: the crown, edges with a
             // continuity of their own, and points that are not on a face any more.
             let through: Vec<Sel> = points.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect();
@@ -1102,4 +1121,41 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
         inp.items = items;
     }
     Some((Kind::Surface(k), ins, Map::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Whether `text` names a continuity by its code (G0 … G4).
+    fn coded(text: &str) -> bool {
+        Continuity::ALL.iter().any(|g| text.contains(g.code()))
+    }
+
+    /// The Patch, Blend and Boundary rows offer what their construction builds, from G0; their
+    /// labels are words in every complete catalogue (and the RTL ones), never a code, and each
+    /// hover line names its order's code for those who know it.
+    #[test]
+    fn continuity_rows_are_words_and_keep_the_codes_for_the_hover_text() {
+        for orders in [PATCH_ORDERS, BLEND_ORDERS, BOUNDARY_ORDERS] {
+            let all = orders.all();
+            assert_eq!(all, orders.0.offered());
+            assert_eq!(all.first(), Some(&Continuity::G0), "{orders:?}");
+            for (i, g) in all.iter().enumerate() {
+                assert_eq!(orders.word(i), Some(g.as_str()));
+                assert_eq!(orders.index(*g), Some(i));
+            }
+            assert_eq!(orders.word(all.len()), None);
+        }
+        assert_eq!(BLEND_ORDERS.all().last(), Some(&Continuity::G3), "a blend builds up to G3 today");
+        for lang in ["en", "ar", "he", "ja", "zh", "de", "ko"] {
+            let locale = crate::i18n::Locale::for_language(lang);
+            for g in Continuity::ALL {
+                let (label, tip) = (locale.text(g.label_id()), locale.text(g.tip_id()));
+                assert!(label != g.label_id() && tip != g.tip_id(), "{lang}: {g:?} has no text");
+                assert!(!coded(&label), "{lang}: the {g:?} label names a code: {label}");
+                assert!(tip.contains(g.code()), "{lang}: the {g:?} hover text names its code: {tip}");
+            }
+        }
+    }
 }

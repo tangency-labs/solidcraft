@@ -1,0 +1,30 @@
+{
+  "en": {
+    "ui.continuity_smooth_curvature_change": "Smooth curvature change",
+    "ui.continuity_smooth_curvature_change_tip": "Smooth curvature change (G4): even the way the curvature changes runs on smoothly across the seam."
+  },
+  "ar": {
+    "ui.continuity_smooth_curvature_change": "تغيّر انحناء سلس",
+    "ui.continuity_smooth_curvature_change_tip": "تغيّر انحناء سلس (G4): حتى طريقة تغيّر الانحناء تستمر بسلاسة عبر خط الالتقاء."
+  },
+  "de": {
+    "ui.continuity_smooth_curvature_change": "Glatte Krümmungsänderung",
+    "ui.continuity_smooth_curvature_change_tip": "Glatte Krümmungsänderung (G4): Selbst die Art, wie sich die Krümmung ändert, läuft an der Naht glatt weiter."
+  },
+  "he": {
+    "ui.continuity_smooth_curvature_change": "שינוי עקמומיות חלק",
+    "ui.continuity_smooth_curvature_change_tip": "שינוי עקמומיות חלק (G4): גם האופן שבו העקמומיות משתנה ממשיך בצורה חלקה לאורך התפר."
+  },
+  "ja": {
+    "ui.continuity_smooth_curvature_change": "なめらかな曲率変化",
+    "ui.continuity_smooth_curvature_change_tip": "なめらかな曲率変化 (G4): 境目で曲率の変わり方そのものもなめらかに続きます。"
+  },
+  "ko": {
+    "ui.continuity_smooth_curvature_change": "부드러운 곡률 변화",
+    "ui.continuity_smooth_curvature_change_tip": "부드러운 곡률 변화(G4): 이음매에서 곡률이 변하는 방식까지 부드럽게 이어집니다."
+  },
+  "zh": {
+    "ui.continuity_smooth_curvature_change": "平滑曲率变化",
+    "ui.continuity_smooth_curvature_change_tip": "平滑曲率变化 (G4)：连曲率的变化方式在接缝处也平滑延续。"
+  }
+}

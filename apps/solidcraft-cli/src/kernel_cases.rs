@@ -126,7 +126,8 @@ const SEAM_ANGLE_DEG: f64 = 1.0;
 /// with how many seams and stations clear there were. An error where the seams can't be measured.
 fn curvature_jumps(body: &solidcraft_engine::kernel::Body, near: [f64; 3], within: f64, clear: f64) -> Result<Value, String> {
     use solidcraft_engine::geom::Vec3;
-    let tol = solidcraft_engine::kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: SEAM_ANGLE_DEG, curvature_per_mm: 0.0 };
+    let tol =
+        solidcraft_engine::kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: SEAM_ANGLE_DEG, curvature_per_mm: 0.0, ..Default::default() };
     let report = solidcraft_engine::kernel::seam_diagnostics(body, &[], SEAM_SAMPLES, tol).map_err(|e| e.to_string())?;
     let at = Vec3::new(near[0], near[1], near[2]);
     let seams: Vec<_> = report

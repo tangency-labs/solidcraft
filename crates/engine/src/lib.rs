@@ -503,6 +503,9 @@ pub struct ContinuitySeam {
     pub points: Vec<Vec3>,
     /// The seam's worst verdict along its length.
     pub verdict: kernel::SeamVerdict,
+    /// The highest continuity order it meets along its whole length (`None`: the faces do not
+    /// meet).
+    pub order: Option<kernel::Continuity>,
 }
 
 /// A face Isocurve Analysis shows: the body, the picked point on the face (its face is found

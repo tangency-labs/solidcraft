@@ -1,12 +1,18 @@
 //! Continuity diagnostics across the seams between a body's faces: do the two faces that meet
-//! at an edge share a curve (G0), a tangent plane (G1) and a curvature (G2)?
+//! at an edge share a curve (G0), a tangent plane (G1), a curvature (G2), the way that curvature
+//! changes across the seam (G3) and the way that change changes (G4)?
 //!
 //! The stations are taken on the edge itself — the curve both faces are supposed to share — so
 //! the numbers describe the B-rep and not a tessellation: each station is projected onto each
 //! face's own surface, and the two projections are compared. The gap is the distance between
 //! them (G0); the normal angle is the angle between the faces' outward normals there (G1); the
 //! curvature jump is the difference of their normal curvatures in the normal section square to
-//! the edge, from the second fundamental form of each surface (G2). A rolling-ball fillet is
+//! the edge, from the second fundamental form of each surface (G2); the curvature-change jump and
+//! its rate's jump compare the first and second arc-length derivatives of those normal sections'
+//! curvatures across the edge (G3, G4). All three come from each surface's exact partial
+//! derivatives ([`solidcraft_geom::brep::normal_section`]), never from samples. Each seam's
+//! [`SeamReport::order`] is the highest order whose test, and every lower one, its worst station
+//! passes. A rolling-ball fillet is
 //! tangent to the faces it joins but is not curvature continuous: where it meets a plane its
 //! seam reads 0° and 1 / radius, which no chord tolerance would reveal.
 //!
@@ -15,9 +21,11 @@
 
 use serde::Serialize;
 use solidcraft_geom::Vec3;
+use solidcraft_geom::brep::normal_section::{SectionJet, normal_section};
 use solidcraft_geom::brep::{self as b, eval::CurveEval, eval::SurfaceEval};
 
 use crate::body::Body;
+use crate::continuity_order::Continuity;
 use crate::{KernelError, Result};
 
 /// Bodies with more edges than this are refused rather than sampled for minutes.
@@ -54,7 +62,36 @@ pub struct ContinuityTolerances {
     pub angle_deg: f64,
     /// Largest curvature jump that still counts as curvature continuous (G2), 1/mm.
     pub curvature_per_mm: f64,
+    /// Largest jump of the curvature's change across the seam that still counts as G3, 1/mm².
+    pub curvature_change_per_mm2: f64,
+    /// Largest jump of that change's rate that still counts as G4, 1/mm³.
+    pub curvature_change_rate_per_mm3: f64,
 }
+
+impl Default for ContinuityTolerances {
+    /// A micron of gap, a degree of normal angle, a curvature jump of 1/100 mm, and a change of
+    /// curvature (and its rate) a tenth as large again per millimetre.
+    fn default() -> Self {
+        ContinuityTolerances {
+            gap_mm: 1e-3,
+            angle_deg: 1.0,
+            curvature_per_mm: 1e-2,
+            curvature_change_per_mm2: 1e-3,
+            curvature_change_rate_per_mm3: 1e-4,
+        }
+    }
+}
+
+impl ContinuityTolerances {
+    /// The tolerance of each metric, in [`Metrics`] order (G0 … G4).
+    fn by_order(&self) -> Metrics {
+        [self.gap_mm, self.angle_deg, self.curvature_per_mm, self.curvature_change_per_mm2, self.curvature_change_rate_per_mm3]
+    }
+}
+
+/// One value per order a seam is tested for, G0 … G4: the gap, the normal angle, and the jumps of
+/// the curvature, of its change, and of that change's rate.
+type Metrics = [f64; 5];
 
 /// The worst value of one metric along an edge, with where it was found.
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -67,8 +104,9 @@ pub struct SeamWorst {
 }
 
 /// Which test a seam fails, from the best continuity to the worst: [`SeamVerdict::Smooth`] is
-/// within every tolerance (G2 or better), then a tangent seam whose curvature jumps (G1), then
-/// a visible crease (G0 only), and finally faces that do not meet at all.
+/// curvature continuous (G2 or better: [`SeamReport::order`] says how much better), then a
+/// tangent seam whose curvature jumps (G1), then a visible crease (G0 only), and finally faces
+/// that do not meet at all.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SeamVerdict {
@@ -76,6 +114,18 @@ pub enum SeamVerdict {
     CurvatureJump,
     Sharp,
     Gap,
+}
+
+impl SeamVerdict {
+    /// The verdict of a seam whose highest order met is `order` (`None`: not even G0).
+    pub fn of(order: Option<Continuity>) -> SeamVerdict {
+        match order {
+            None => SeamVerdict::Gap,
+            Some(Continuity::G0) => SeamVerdict::Sharp,
+            Some(Continuity::G1) => SeamVerdict::CurvatureJump,
+            Some(_) => SeamVerdict::Smooth,
+        }
+    }
 }
 
 /// One edge's diagnostics: the worst of each metric along it, and where.
@@ -90,7 +140,14 @@ pub struct SeamReport {
     pub gap_mm: SeamWorst,
     pub normal_angle_deg: SeamWorst,
     pub curvature_jump_per_mm: SeamWorst,
-    /// What the tolerances make of the seam.
+    /// The worst jump of the curvature's arc-length derivative across the seam (G3), 1/mm².
+    pub curvature_change_jump_per_mm2: SeamWorst,
+    /// The worst jump of its second derivative (G4), 1/mm³.
+    pub curvature_change_rate_jump_per_mm3: SeamWorst,
+    /// The highest order every station meets within the tolerances (`None`: the faces do not
+    /// meet).
+    pub order: Option<Continuity>,
+    /// What the tolerances make of the seam ([`SeamVerdict::of`] its order).
     pub verdict: SeamVerdict,
     /// The stations in order: what a viewport shades.
     pub points: Vec<Vec3>,
@@ -98,7 +155,7 @@ pub struct SeamReport {
     pub stations: Vec<SeamStation>,
 }
 
-/// One station of a seam: how far along the edge, and the three metrics there.
+/// One station of a seam: how far along the edge, and the five metrics there.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct SeamStation {
     /// 0 at the edge's start, 1 at its end.
@@ -106,6 +163,28 @@ pub struct SeamStation {
     pub gap_mm: f64,
     pub normal_angle_deg: f64,
     pub curvature_jump_per_mm: f64,
+    pub curvature_change_jump_per_mm2: f64,
+    pub curvature_change_rate_jump_per_mm3: f64,
+}
+
+impl SeamStation {
+    fn new(edge_fraction: f64, m: Metrics) -> SeamStation {
+        let [gap_mm, normal_angle_deg, curvature_jump_per_mm, curvature_change_jump_per_mm2, curvature_change_rate_jump_per_mm3] = m;
+        SeamStation {
+            edge_fraction,
+            gap_mm,
+            normal_angle_deg,
+            curvature_jump_per_mm,
+            curvature_change_jump_per_mm2,
+            curvature_change_rate_jump_per_mm3,
+        }
+    }
+}
+
+/// The highest order whose metric, and every lower one, is within its tolerance.
+fn highest_met(worst: Metrics, tolerances: Metrics) -> Option<Continuity> {
+    let met = worst.iter().zip(tolerances).take_while(|(w, t)| **w <= *t).count();
+    met.checked_sub(1).and_then(Continuity::from_order)
 }
 
 /// The seam diagnostics of one body.
@@ -160,7 +239,8 @@ pub fn seam_diagnostics(body: &Body, edges: &[usize], samples: usize, tolerances
     if !(MIN_SAMPLES..=MAX_SAMPLES).contains(&samples) {
         return Err(KernelError::Invalid(format!("`samples` must be {MIN_SAMPLES}…{MAX_SAMPLES}")));
     }
-    for (name, value) in [("gap", tolerances.gap_mm), ("angle", tolerances.angle_deg), ("curvature", tolerances.curvature_per_mm)] {
+    let names = ["gap", "angle", "curvature", "curvature change", "curvature change rate"];
+    for (name, value) in names.into_iter().zip(tolerances.by_order()) {
         // A range test also throws out NaN (both comparisons are false).
         if !(0.0..1e9).contains(&value) {
             return Err(KernelError::Invalid(format!("the {name} tolerance must be a finite number, 0 or more")));
@@ -289,7 +369,7 @@ fn measure(body: &Body, edges: &[usize], samples: usize, tolerances: ContinuityT
     Ok(ContinuityReport { seams, skipped, unmeasured })
 }
 
-/// One edge's worst gap, normal angle and curvature jump.
+/// One edge's worst gap, normal angle and jumps of curvature, its change and that change's rate.
 fn seam(
     index: usize,
     curve: &CurveEval,
@@ -301,52 +381,22 @@ fn seam(
 ) -> Option<SeamReport> {
     // The station fractions: 0 at the edge's start, 1 at its end.
     let steps = samples.checked_sub(1)?;
-    let fraction = |k: usize| k as f64 / steps as f64;
-    let mut gap = None;
-    let mut angle = None;
-    let mut jump = None;
+    let mut worst: [Option<SeamWorst>; 5] = [None; 5];
     let mut points = Vec::with_capacity(samples);
     let mut stations = Vec::with_capacity(samples);
     for k in 0..samples {
-        let f = fraction(k);
+        let f = k as f64 / steps as f64;
         let Some((at, tangent)) = curve.derivs(t0 + (t1 - t0) * f) else { continue };
-        if !at.is_finite() {
-            continue;
-        }
-        // Both projections and both curvatures, or the station says nothing.
-        let (Some((qa, na, uv_a)), Some((qb, nb, uv_b))) = (on_a.project(at), on_b.project(at)) else { continue };
-        let Some(tangent) = tangent.normalized() else { continue };
-        // The normal sections square to the seam: one direction per face, in its tangent plane.
-        let (Some(ka), Some(kb)) = (on_a.normal_curvature(uv_a, na, across(na, tangent)), on_b.normal_curvature(uv_b, nb, across(nb, tangent)))
-        else {
-            continue;
-        };
-        // The faces' outward normals agree on a smooth seam; where they are opposed (a knife
-        // edge) the curvatures are compared in one frame, since bending away from one face is
-        // bending towards the other.
-        let signed = if na.dot(nb) < 0.0 { ka + kb } else { ka - kb };
-        let station = SeamStation {
-            edge_fraction: f,
-            gap_mm: qa.dist(qb),
-            normal_angle_deg: na.dot(nb).clamp(-1.0, 1.0).acos().to_degrees(),
-            curvature_jump_per_mm: signed.abs(),
-        };
+        let Some(metrics) = station(at, tangent, &mut on_a, &mut on_b) else { continue };
         points.push(at);
-        stations.push(station);
-        keep(&mut gap, station.gap_mm, at, f);
-        keep(&mut angle, station.normal_angle_deg, at, f);
-        keep(&mut jump, station.curvature_jump_per_mm, at, f);
+        stations.push(SeamStation::new(f, metrics));
+        for (w, value) in worst.iter_mut().zip(metrics) {
+            keep(w, value, at, f);
+        }
     }
-    let (gap, angle, jump) = (gap?, angle?, jump?);
-    let verdict = if gap.value > tolerances.gap_mm {
-        SeamVerdict::Gap
-    } else if angle.value > tolerances.angle_deg {
-        SeamVerdict::Sharp
-    } else if jump.value > tolerances.curvature_per_mm {
-        SeamVerdict::CurvatureJump
-    } else {
-        SeamVerdict::Smooth
-    };
+    let [gap, angle, jump, change, rate] = worst;
+    let [gap, angle, jump, change, rate] = [gap?, angle?, jump?, change?, rate?];
+    let order = highest_met([gap.value, angle.value, jump.value, change.value, rate.value], tolerances.by_order());
     let length = points.windows(2).map(|w| w.first().zip(w.get(1)).map_or(0.0, |(a, b)| a.dist(*b))).sum();
     Some(SeamReport {
         edge: index,
@@ -355,10 +405,36 @@ fn seam(
         gap_mm: gap,
         normal_angle_deg: angle,
         curvature_jump_per_mm: jump,
-        verdict,
+        curvature_change_jump_per_mm2: change,
+        curvature_change_rate_jump_per_mm3: rate,
+        order,
+        verdict: SeamVerdict::of(order),
         points,
         stations,
     })
+}
+
+/// The five metrics at the seam point `at` (edge tangent `tangent`): both projections and both
+/// faces' normal sections square to the seam, or the station says nothing.
+fn station(at: Vec3, tangent: Vec3, on_a: &mut FaceSurface, on_b: &mut FaceSurface) -> Option<Metrics> {
+    if !at.is_finite() {
+        return None;
+    }
+    let ((qa, na, uv_a), (qb, nb, uv_b)) = (on_a.project(at)?, on_b.project(at)?);
+    let tangent = tangent.normalized()?;
+    let ja = on_a.section(uv_a, na, across(na, tangent))?;
+    let jb = on_b.section(uv_b, nb, across(nb, tangent))?;
+    // The faces' outward normals agree on a smooth seam; where they are opposed (a knife edge)
+    // the sections are compared in one frame: face b's normal and its across direction both turn
+    // round, so its k-th derivative of curvature reads (−1)^(k+1) times as much in face a's.
+    let opposed = na.dot(nb) < 0.0;
+    let jump = |k: usize, a: f64, b: f64| {
+        let flip = if opposed && k % 2 == 0 { -1.0 } else { 1.0 };
+        (a - flip * b).abs()
+    };
+    let [ka, ca, ra] = ja.values();
+    let [kb, cb, rb] = jb.values();
+    Some([qa.dist(qb), na.dot(nb).clamp(-1.0, 1.0).acos().to_degrees(), jump(0, ka, kb), jump(1, ca, cb), jump(2, ra, rb)])
 }
 
 /// The direction in which a face's curvature is read at a seam: across the edge, square to it,
@@ -402,40 +478,12 @@ impl FaceSurface {
         Some((q, normal, uv))
     }
 
-    /// The normal curvature of the face at `uv` along `direction` (a unit vector of its tangent
-    /// plane), from the second fundamental form. A surface point `r(u, v)` with unit normal `n`
-    /// crossed that way has curvature `κ = n · r''` of the curve whose tangent there is
-    /// `direction`: a plane reads 0 and a cylinder of radius `R`, across its axis, −1 / R
-    /// (bending towards its axis). `None` at a degenerate parameter point (a cone's apex), where
-    /// the surface has no curvature.
-    fn normal_curvature(&self, uv: [f64; 2], normal: Vec3, direction: Vec3) -> Option<f64> {
-        let (_, ru, rv) = self.surface.derivs(uv[0], uv[1])?;
-        let (ruu, ruv, rvv) = self.surface.second(uv[0], uv[1])?;
-        let (ru_len, rv_len) = (ru.len(), rv.len());
-        if !(ru_len > 0.0 && rv_len > 0.0) {
-            return None;
-        }
-        // Solve the direction in the unit basis (r_u / |r_u|, r_v / |r_v|): the curve then runs
-        // its parameters at du/ds = α / |r_u| and dv/ds = β / |r_v|, and
-        // `r'' = r_uu (du/ds)² + 2 r_uv (du/ds)(dv/ds) + r_vv (dv/ds)²`.
-        let cos = (ru.dot(rv) / (ru_len * rv_len)).clamp(-1.0, 1.0);
-        let sin2 = 1.0 - cos * cos;
-        if !(sin2 > 1e-12) {
-            return None;
-        }
-        let (cu, cv) = (direction.dot(ru) / ru_len, direction.dot(rv) / rv_len);
-        let (du, dv) = ((cu - cv * cos) / sin2 / ru_len, (cv - cu * cos) / sin2 / rv_len);
-        if !(du.is_finite() && dv.is_finite()) {
-            return None;
-        }
-        // `direction` is a unit vector: divide by the speed the parameters imply (they only miss
-        // it by rounding), so κ does not depend on how the surface is parameterized.
-        let speed = (ru * du + rv * dv).len();
-        if !(speed > 1e-6) {
-            return None;
-        }
-        let second = normal.dot(ruu * (du * du) + ruv * (2.0 * du * dv) + rvv * (dv * dv));
-        (second / (speed * speed)).is_finite().then_some(second / (speed * speed))
+    /// The face's normal section at `uv` along `direction` (a unit vector of its tangent plane):
+    /// its curvature `κ = n · r″` and κ's first two arc-length derivatives, from the surface's
+    /// exact partials. A plane reads 0 and a cylinder of radius `R`, across its axis, −1 / R
+    /// (bending towards its axis). `None` at a degenerate parameter point (a cone's apex).
+    fn section(&self, uv: [f64; 2], normal: Vec3, direction: Vec3) -> Option<SectionJet> {
+        normal_section(&self.surface.partials(uv[0], uv[1])?, normal, direction)
     }
 }
 
@@ -443,10 +491,10 @@ impl FaceSurface {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use solidcraft_geom::Plane;
+    use solidcraft_geom::{Plane, Seg2};
 
     fn tolerances() -> ContinuityTolerances {
-        ContinuityTolerances { gap_mm: 1e-3, angle_deg: 1.0, curvature_per_mm: 0.01 }
+        ContinuityTolerances::default()
     }
 
     fn box_body() -> Body {
@@ -468,6 +516,7 @@ mod tests {
             assert!((seam.normal_angle_deg.value - 90.0).abs() < 1e-9, "angle {}", seam.normal_angle_deg.value);
             assert!(seam.curvature_jump_per_mm.value < 1e-9, "jump {}", seam.curvature_jump_per_mm.value);
             assert_eq!(seam.verdict, SeamVerdict::Sharp);
+            assert_eq!(seam.order, Some(Continuity::G0));
             assert_eq!(seam.samples, 33);
             assert!((seam.length - 10.0).abs() < 1e-9);
         }
@@ -488,6 +537,9 @@ mod tests {
             assert!(seam.curvature_jump_per_mm.value.is_finite());
             assert!((seam.curvature_jump_per_mm.value - 0.25).abs() < 1e-6, "1 / radius, got {}", seam.curvature_jump_per_mm.value);
             assert_eq!(seam.verdict, SeamVerdict::CurvatureJump);
+            // A plane tangent to a cylinder: G1, not G2. Neither section's curvature changes.
+            assert_eq!(seam.order, Some(Continuity::G1));
+            assert!(seam.curvature_change_jump_per_mm2.value < 1e-9 && seam.curvature_change_rate_jump_per_mm3.value < 1e-9);
         }
         assert_eq!(r.seams.iter().filter(|s| s.verdict == SeamVerdict::Sharp).count(), 13);
     }
@@ -517,6 +569,89 @@ mod tests {
         }
     }
 
+    /// A 3 mm tall prism over a profile that runs along a line from (-20, 0) to the origin, on
+    /// into `transition` (starting at the origin, leaving along +x), and back straight to
+    /// (-20, 20): its one tangent wall seam is the line meeting the transition.
+    fn line_into(transition: Seg2) -> Body {
+        use solidcraft_geom::{Loop2, Region2, Vec2};
+        let end = match transition {
+            Seg2::Cubic { p3, .. } => p3,
+            Seg2::Bezier { n, p } => p[usize::from(n)],
+            _ => Vec2::new(0.0, 0.0),
+        };
+        let outer = Loop2 {
+            segs: vec![
+                Seg2::Line { a: Vec2::new(-20.0, 0.0), b: Vec2::new(0.0, 0.0) },
+                transition,
+                Seg2::Line { a: end, b: Vec2::new(-20.0, 20.0) },
+                Seg2::Line { a: Vec2::new(-20.0, 20.0), b: Vec2::new(-20.0, 0.0) },
+            ],
+        };
+        crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0.0, 3.0).unwrap().remove(0)
+    }
+
+    /// The one seam of `body` where the faces are tangent.
+    fn tangent_seam(body: &Body) -> SeamReport {
+        let r = report(body);
+        let mut tangent: Vec<SeamReport> = r.seams.into_iter().filter(|s| s.normal_angle_deg.value < 0.01).collect();
+        assert_eq!(tangent.len(), 1, "{tangent:?}");
+        tangent.remove(0)
+    }
+
+    /// A plane into a cubic whose first three control points lie on the plane's line: the cubic
+    /// starts with zero curvature (G2), but its curvature changes there. For control points
+    /// (0,0), (L,0), (2L,0), (3L,H): B′ = (3L, 0), B″ = 0 and B‴ = (0, 6H) at the start, so
+    /// dκ/dt = (x′y‴ − y′x‴) / |B′|³ = 2H / (3L²) and, at ds/dt = 3L, dκ/ds = 2H / (9L³): with
+    /// L = H = 10, 2 / 900 per mm².
+    #[test]
+    fn a_plane_into_a_g2_transition_is_curvature_continuous_but_not_g3() {
+        use solidcraft_geom::Vec2;
+        let v = Vec2::new;
+        let body = line_into(Seg2::Cubic { p0: v(0.0, 0.0), p1: v(10.0, 0.0), p2: v(20.0, 0.0), p3: v(30.0, 10.0) });
+        let seam = tangent_seam(&body);
+        assert!(seam.curvature_jump_per_mm.value < 1e-9, "{}", seam.curvature_jump_per_mm.value);
+        let change = seam.curvature_change_jump_per_mm2.value;
+        assert!((change - 2.0 / 900.0).abs() < 1e-9, "dκ/ds 2/900, got {change}");
+        assert_eq!(seam.order, Some(Continuity::G2));
+        assert_eq!(seam.verdict, SeamVerdict::Smooth, "G2 is still smooth to the older verdict");
+    }
+
+    /// A plane into a quartic whose first four control points are evenly spaced on the plane's
+    /// line: curvature and its change both start at zero (G3), but the change's rate does not.
+    /// For (0,0), (L,0), (2L,0), (3L,0), (4L,H): B′ = (4L, 0), B″ = B‴ = 0 and B⁗ = (0, 24H),
+    /// so d²κ/dt² = (x′y⁗ − y′x⁗) / |B′|³ = 3H / (2L²) and, at ds/dt = 4L, d²κ/ds² = 3H / (32L⁴):
+    /// with L = 5, H = 10, 3 / 2000 per mm³.
+    #[test]
+    fn a_plane_into_a_g3_transition_holds_the_change_of_curvature_but_not_g4() {
+        use solidcraft_geom::Vec2;
+        let mut p = [Vec2::new(0.0, 0.0); solidcraft_geom::MAX_BEZIER_CTRL];
+        for (k, q) in [(5.0, 0.0), (10.0, 0.0), (15.0, 0.0), (20.0, 10.0)].into_iter().enumerate() {
+            p[k + 1] = Vec2::new(q.0, q.1);
+        }
+        let body = line_into(Seg2::Bezier { n: 4, p });
+        let seam = tangent_seam(&body);
+        assert!(seam.curvature_jump_per_mm.value < 1e-9 && seam.curvature_change_jump_per_mm2.value < 1e-9, "{seam:?}");
+        let rate = seam.curvature_change_rate_jump_per_mm3.value;
+        assert!((rate - 3.0 / 2000.0).abs() < 1e-9, "d²κ/ds² 3/2000, got {rate}");
+        assert_eq!(seam.order, Some(Continuity::G3));
+        // Within a looser rate tolerance the same seam reads G4.
+        let loose = ContinuityTolerances { curvature_change_rate_per_mm3: 1e-2, ..tolerances() };
+        let r = seam_diagnostics(&body, &[seam.edge], 33, loose).unwrap();
+        assert_eq!(r.seams[0].order, Some(Continuity::G4));
+    }
+
+    #[test]
+    fn the_highest_order_met_needs_every_order_below_it() {
+        let tol = [1.0; 5];
+        assert_eq!(highest_met([0.0; 5], tol), Some(Continuity::G4));
+        assert_eq!(highest_met([0.0, 0.0, 2.0, 0.0, 0.0], tol), Some(Continuity::G1), "a G2 failure caps the order");
+        assert_eq!(highest_met([2.0, 0.0, 0.0, 0.0, 0.0], tol), None, "faces that do not meet have no order");
+        assert_eq!(highest_met([0.0, 0.0, 0.0, f64::NAN, 0.0], tol), Some(Continuity::G2), "NaN never passes");
+        for (order, verdict) in [(None, SeamVerdict::Gap), (Some(Continuity::G0), SeamVerdict::Sharp), (Some(Continuity::G3), SeamVerdict::Smooth)] {
+            assert_eq!(SeamVerdict::of(order), verdict);
+        }
+    }
+
     #[test]
     fn picks_refuse_what_is_not_there() {
         let body = box_body();
@@ -531,6 +666,7 @@ mod tests {
         assert!(seam_diagnostics(&body, &[], 2, tolerances()).is_err());
         assert!(seam_diagnostics(&body, &[], 258, tolerances()).is_err());
         assert!(seam_diagnostics(&body, &[], 33, ContinuityTolerances { gap_mm: f64::NAN, ..tolerances() }).is_err());
+        assert!(seam_diagnostics(&body, &[], 33, ContinuityTolerances { curvature_change_rate_per_mm3: -1.0, ..tolerances() }).is_err());
         assert!(seam_diagnostics(&body, &[999], 33, tolerances()).is_err());
     }
 }
