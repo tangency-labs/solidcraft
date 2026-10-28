@@ -22,6 +22,11 @@ items. Hashes select candidates; a bijective entity comparison verifies them. Di
 remain separate. Definitions link only when their names, product identity and appearances
 agree; uninterpreted product properties keep distinct definitions separate. Other exact matches
 share geometry storage and display buffers while retaining their identities and styles.
+Set `share_parts: false` on `doc.open` or `file.insert_step` to keep separately authored
+STEP definitions independent while preserving the file's existing instances. The window's
+**Share repeated STEP parts** preference supplies this option when it is not given explicitly;
+turning it off also lists each instance separately in the browser. Existing designs keep their
+saved definitions. Geometry storage and display buffers remain shared with either choice.
 New imports can embed a versioned shared STEP source with explicit original-entity mappings,
 so save/reopen preserves the source without depending on the optional native cache. Import
 features can select source body indices instead of rebuilding the rest of the assembly.

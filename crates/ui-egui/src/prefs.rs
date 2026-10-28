@@ -1430,6 +1430,8 @@ preference_settings! {
     /// again after each edit. Off by default: folders start open, placements as "Components start
     /// open" says, and a pick in the 3D view opens the Browser down to its body (#3005), as before.
     browser_rows_start_closed: bool = false, PAGE_LAYOUT;
+    /// Link identical parts on new STEP imports and group their instances in the browser.
+    share_imported_parts: bool = true, PAGE_LAYOUT;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's center)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.

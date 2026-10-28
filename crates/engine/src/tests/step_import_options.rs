@@ -152,7 +152,7 @@ fn opening_a_y_up_step_file_can_stand_it_up() {
     let design = std::path::Path::new(&path).with_file_name("kept.solidcraft");
     run(&mut s, "file.save_as", json!({"path": design.to_string_lossy()}));
     let before = s.doc.clone();
-    for p in [json!({"up": "y"}), json!({"names": "product"})] {
+    for p in [json!({"up": "y"}), json!({"names": "product"}), json!({"share_parts":false})] {
         let mut params = p.clone();
         params["path"] = json!(design.to_string_lossy());
         assert!(s.execute("doc.open", &params).is_err(), "{params}");
@@ -162,7 +162,7 @@ fn opening_a_y_up_step_file_can_stand_it_up() {
 
 /// A value that is not one of the choices is refused, and the design stays as it was.
 #[test]
-fn wrong_up_and_names_are_refused() {
+fn wrong_import_options_are_refused() {
     let path = frame_file("refused");
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
@@ -175,17 +175,19 @@ fn wrong_up_and_names_are_refused() {
         json!({"names": "label"}),
         json!({"names": 7}),
         json!({"up": "y", "names": "nope"}),
+        json!({"share_parts": "false"}),
+        json!({"share_parts": 0}),
     ] {
         let mut params = p.clone();
         params["path"] = json!(path);
         for command in ["file.insert_step", "doc.open"] {
             let e = s.execute(command, &params).unwrap_err().to_string();
-            assert!(e.contains("`up`") || e.contains("`names`"), "{command} {params}: {e}");
+            assert!(e.contains("`up`") || e.contains("`names`") || e.contains("`share_parts`"), "{command} {params}: {e}");
             assert!(std::sync::Arc::ptr_eq(&s.doc, &before), "{command} {params} changed the design");
         }
     }
     // Null means not given.
-    run(&mut s, "file.insert_step", json!({"path": path, "up": null, "names": null}));
+    run(&mut s, "file.insert_step", json!({"path": path, "up": null, "names": null, "share_parts":null}));
     assert_eq!(kinds(&s), ["BoxFeature", "BaseFeature"]);
 }
 
