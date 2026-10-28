@@ -824,7 +824,8 @@ fn pyramid_past_a_near_pole(pole_tolerance: f64) -> solidcraft_geom::brep::Brep 
     };
     let points: Vec<Vec<[f64; 3]>> = (0..5).map(|u| vec![corner(u, 1.0, 0.0), corner(u, top, 1.0)]).collect();
     let surface = Surface::Spline { u_knots: vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0], v_knots: vec![0.0, 0.0, 1.0, 1.0], points };
-    let edge = |curve: Curve, interval: [f64; 2], vertices: [u32; 2]| b::Edge { nurbs: None, curve, interval, vertices, tolerance: 1e-6, uses: Vec::new() };
+    let edge =
+        |curve: Curve, interval: [f64; 2], vertices: [u32; 2]| b::Edge { nurbs: None, curve, interval, vertices, tolerance: 1e-6, uses: Vec::new() };
     let edges = vec![
         edge(Curve::Line { start: corner(0, 1.0, 0.0), end: corner(0, top, 1.0) }, [0.0, 1.0], [1, 0]),
         edge(Curve::Polyline { points: vec![corner(0, 1.0, 0.0), corner(1, 1.0, 0.0), corner(2, 1.0, 0.0)] }, [0.0, 2.0], [1, 2]),
