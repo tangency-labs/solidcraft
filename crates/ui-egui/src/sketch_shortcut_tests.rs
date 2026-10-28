@@ -202,6 +202,33 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     assert!(h.app.tree.occurrence_move.is_none(), "M must not open component Move while editing its sketch");
 }
 
+/// With Keep model keys out of sketches on, sketches and the model have their own keys: with M
+/// bound to Move/Copy Sketch Entities too, M is Move outside a sketch and Move/Copy Sketch
+/// Entities in one; F (Fillet) does nothing in a sketch; Measure's key works in both; and a key
+/// only clashes with commands that work in the same place.
+#[test]
+fn sketch_and_model_keys_are_kept_apart() {
+    use crate::keymap::{Scope, bind, command_for, scope};
+    let mut h = Harness::new();
+    h.app.preferences.sketch_keys_only = true;
+    assert_eq!(scope("sketch.move"), Scope::Sketch);
+    assert_eq!(scope("solid.fillet"), Scope::Model);
+    bind(&mut h.app, "sketch.move", "M", false).unwrap();
+    assert_eq!(command_for(&h.app, "M"), Some("solid.move"));
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.settle();
+    assert_eq!(command_for(&h.app, "M"), Some("sketch.move"));
+    assert_eq!(command_for(&h.app, "F"), None, "no model tool from a key pressed in a sketch");
+    press(&mut h, "F");
+    assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_some(), "F left the sketch alone");
+    assert_eq!(command_for(&h.app, "I"), Some("inspect.measure"), "Measure's key works in a sketch too");
+    // A sketch command may take a model command's key, but not another sketch command's.
+    bind(&mut h.app, "sketch.fillet", "F", false).unwrap();
+    assert_eq!(command_for(&h.app, "F"), Some("sketch.fillet"));
+    let e = bind(&mut h.app, "sketch.fillet", "L", false).unwrap_err();
+    assert!(e.contains("already used"), "{e}");
+}
+
 /// #2459: by default a tool's shortcut pressed again starts the tool again, in the mode the key
 /// is bound to; the preference is off.
 #[test]
@@ -296,6 +323,21 @@ fn the_extrude_key_in_a_sketch_finishes_the_sketch() {
     press(&mut h, "E");
     assert!(h.app.session.active_sketch.is_none());
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Extrude { .. })));
+}
+
+/// With Keep model keys out of sketches on, E in a sketch does nothing: the sketch stays open and
+/// no Extrude opens. Off (the default), the test above holds.
+#[test]
+fn with_model_keys_kept_out_the_extrude_key_in_a_sketch_does_nothing() {
+    let mut h = Harness::new();
+    h.app.preferences.sketch_keys_only = true;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let sketch = h.app.session.active_sketch;
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+    press(&mut h, "E");
+    assert_eq!(h.app.session.active_sketch, sketch, "E left the sketch open");
+    assert!(h.app.dialog.is_none(), "no dialog opened: {:?}", h.app.dialog.as_ref().map(|d| &d.kind));
+    assert!(h.app.tool.is_none());
 }
 
 #[test]

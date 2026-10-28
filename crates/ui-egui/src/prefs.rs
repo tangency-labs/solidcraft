@@ -1020,6 +1020,10 @@ preference_settings! {
     /// A sketch tool's shortcut pressed again before the first point steps to the tool's next
     /// creation mode (#2459). Off (the default): the key starts the tool again, as it always has.
     shortcut_cycles_modes: bool = false, PAGE_SKETCH;
+    /// While a sketch is open, only sketch keys and keys that work everywhere run; a model
+    /// command's key (E, F) does nothing. Off (the default): a model key pressed in a sketch
+    /// runs its command, and one that builds a feature finishes the sketch first (#2815).
+    sketch_keys_only: bool = false, PAGE_SHORTCUTS;
     /// Where the view goes when a sketch ends (#7038). Keep (the default) leaves it as it is.
     sketch_exit_view: SketchExitView = SketchExitView::default(), PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.

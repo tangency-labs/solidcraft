@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.sketch_keys_only": "Keep model keys out of sketches",
+    "ui.sketch_keys_only_tip": "While editing a sketch, only sketch keys and keys that work everywhere run; a model key such as E or F does nothing, so a stray key can't close a heavy sketch."
+  },
+  "ar": {
+    "ui.sketch_keys_only": "إبقاء مفاتيح النموذج خارج الرسومات",
+    "ui.sketch_keys_only_tip": "أثناء تحرير رسم، تعمل مفاتيح الرسم والمفاتيح التي تعمل في كل مكان فقط؛ ولا يفعل مفتاح نموذج مثل E أو F شيئًا، فلا يمكن لمفتاح مضغوط بالخطأ أن يغلق رسمًا ثقيلًا."
+  },
+  "he": {
+    "ui.sketch_keys_only": "להשאיר את מקשי המודל מחוץ לסקיצות",
+    "ui.sketch_keys_only_tip": "בזמן עריכת סקיצה פועלים רק מקשי סקיצה ומקשים שפועלים בכל מקום; מקש של המודל כמו E או F לא עושה דבר, כך שמקש שנלחץ בטעות לא יסגור סקיצה כבדה."
+  },
+  "ja": {
+    "ui.sketch_keys_only": "スケッチ中はモデルのキーを使わない",
+    "ui.sketch_keys_only_tip": "スケッチの編集中は、スケッチのキーとどこでも使えるキーだけが働きます。E や F などのモデルのキーは何もしないので、うっかり押したキーで重いスケッチが閉じることはありません。"
+  },
+  "vi": {
+    "ui.sketch_keys_only": "Không dùng phím mô hình trong bản phác thảo",
+    "ui.sketch_keys_only_tip": "Khi đang chỉnh sửa bản phác thảo, chỉ các phím phác thảo và các phím dùng được ở mọi nơi mới hoạt động; phím mô hình như E hoặc F không làm gì, nên một phím bấm nhầm không thể đóng một bản phác thảo nặng."
+  },
+  "zh": {
+    "ui.sketch_keys_only": "草图中不使用模型快捷键",
+    "ui.sketch_keys_only_tip": "编辑草图时，只有草图快捷键和在任何地方都可用的快捷键会生效；E 或 F 等模型快捷键不起作用，因此误按的按键不会关闭复杂的草图。"
+  }
+}

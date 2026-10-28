@@ -320,13 +320,13 @@ pub fn commands_for(app: &SolveApp, key: &str) -> Vec<&'static str> {
 /// Where a command's shortcut works: in a sketch (the SKETCH tab's tools), in the model (the
 /// other tabs), or everywhere (commands on no tab: undo, views, files).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Scope {
+pub(crate) enum Scope {
     Sketch,
     Model,
     Everywhere,
 }
 
-fn scope(id: &str) -> Scope {
+pub(crate) fn scope(id: &str) -> Scope {
     match solidcraft_engine::find_command(id).map(|c| c.tab) {
         Some("SKETCH") => Scope::Sketch,
         Some("") | None => Scope::Everywhere,
@@ -341,13 +341,27 @@ fn clash(a: &str, b: &str) -> bool {
     x == y || x == Scope::Everywhere || y == Scope::Everywhere
 }
 
+/// Whether a command's key runs in a sketch and in the model alike when the two keep their keys
+/// apart: one of no tab, and inspecting, views and files wherever their buttons sit (Measure's I).
+fn runs_everywhere(id: &str) -> bool {
+    scope(id) == Scope::Everywhere || ["inspect.", "view.", "file."].iter().any(|p| id.starts_with(p))
+}
+
 /// The enabled command a key press runs, if any: one of the mode the view is in (a sketch tool
-/// while a sketch is open, a model command otherwise) before any other.
+/// while a sketch is open, a model command otherwise) before any other. With Preferences ›
+/// Shortcuts › Keep model keys out of sketches on, only one of that mode or one that works
+/// everywhere: a model command's key pressed in a sketch (E, F) runs nothing, nor a sketch
+/// tool's in the model.
 pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
     let here = if app.session.active_sketch.is_some() { Scope::Sketch } else { Scope::Model };
     let enabled: Vec<&'static str> =
         commands_for(app, key).into_iter().filter(|id| solidcraft_engine::find_command(id).is_some_and(|c| c.info(&app.session).enabled)).collect();
-    enabled.iter().find(|id| scope(id) == here).or(enabled.first()).copied()
+    let mine = enabled.iter().find(|id| scope(id) == here);
+    if app.preferences.sketch_keys_only {
+        mine.or_else(|| enabled.iter().find(|id| runs_everywhere(id))).copied()
+    } else {
+        mine.or(enabled.first()).copied()
+    }
 }
 
 /// Run a shortcut key: its enabled command; outside a sketch, a sketch tool's key opens Create
@@ -530,6 +544,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             }
             ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
+            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only).on_hover_text(app.tr("ui.sketch_keys_only_tip"));
         }
         if !filtering && !app.keymap.read_only {
             ui_kit::text(ui, app.tr("ui.shortcut_capture_hint"), ui_kit::Text::Note("shortcut_capture_help"));

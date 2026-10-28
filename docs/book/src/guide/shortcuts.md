@@ -54,6 +54,15 @@ from then on. The choice is kept across designs and restarts. With **Pressing a 
 again switches its mode** on (Preferences › Sketch), pressing the key again before the first
 click steps to the family's next variant.
 
+One key can be bound to a sketch tool and to a model command at once: in a sketch the key runs
+the sketch tool, outside one the model command. Outside a sketch, a sketch tool's key opens
+Create Sketch and starts the tool in the new sketch. By default a model command's key pressed
+in a sketch still runs it, and one that builds a feature (E, Extrude) finishes the sketch first.
+With **Keep model keys out of sketches** on (File › Keyboard Shortcuts), a sketch and the model
+keep their keys apart: while editing a sketch only sketch keys and keys that work everywhere
+(Measure, the views, the file commands) run, and a model key such as E or F does nothing, so a
+stray key can't close a heavy sketch.
+
 Keys handled by the window itself:
 
 | Key | Action |
