@@ -655,6 +655,15 @@ pub struct DrawResult {
     pub param_warnings: Vec<String>,
 }
 
+/// What a straight slot returns, including its construction centre and middle point.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SlotResult {
+    #[serde(flatten)]
+    pub drawn: DrawResult,
+    pub centre_line: Option<String>,
+    pub middle: Option<String>,
+}
+
 /// What `sketch.point` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PointResult {

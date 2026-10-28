@@ -220,14 +220,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_TO_CENTER_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("p0, p1: arc centres, width", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: arc centres, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", crate::checked!("sketch.slot.overall", slot_overall))
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .at("SKETCH", "CREATE")
@@ -2071,6 +2071,17 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     polygon(s, p, cmd, center, rv, start, n, true)
 }
 
+/// The centre point of arc `a` (`None`: not an arc).
+fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
+    match sk.curves.get(a).map(|c| &c.kind) {
+        Some(CurveKind::Arc { c, .. }) => Some(*c),
+        _ => None,
+    }
+}
+
+/// A straight slot: two lines and two equal arc caps, tangent where they meet, plus its middle
+/// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
+/// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
     let (out, info) = slot_parts(s, p, cmd, c0, c1, w)?;
     draw_reply(out, info)
@@ -2081,6 +2092,7 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
+    let mut extra = (None, None);
     let (out, info) = draw(s, p, cmd, |sk, _| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
@@ -2094,6 +2106,14 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
             cons.push(add_c(sk, ConstraintKind::Tangent { a: l, b: a })?);
         }
         cons.push(add_c(sk, ConstraintKind::Equal { a: a0, b: a1 })?);
+        let (k0, k1) = arc_centre(sk, a0).zip(arc_centre(sk, a1)).ok_or_else(|| bad(cmd, "the slot caps lost their centres"))?;
+        let axis = sk.add_line_pts(k0, k1, None)?;
+        if let Some(c) = sk.curves.get_mut(axis) {
+            c.construction = true;
+        }
+        let mid = sk.add_point((c0 + c1) * 0.5, None)?;
+        cons.push(add_c(sk, ConstraintKind::Midpoint { p: mid, l: axis })?);
+        extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
     Ok((out, info))
