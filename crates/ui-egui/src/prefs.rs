@@ -4602,6 +4602,39 @@ mod tests {
             .collect()
     }
 
+    /// The Interface page's tab colour strip names each tab as the ribbon does, in every language.
+    #[test]
+    fn tab_accent_strip_names_the_tabs_as_the_ribbon_does() {
+        use crate::workspace::tab_name;
+        fn texts(shape: &egui::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => out.push(text.galley.job.text.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+                _ => {}
+            }
+        }
+        let h = crate::scenario::Harness::new();
+        for (lang, want) in [
+            ("en", ["Model", "Surface", "Mesh", "Form", "Sheet Metal", "Render"]),
+            ("de", ["Modell", "Fläche", "Mesh", "Form", "Blech", "Rendern"]),
+            ("fr", ["Modèle", "Surface", "Maillage", "Forme", "Tôlerie", "Rendu"]),
+        ] {
+            let _scope = crate::i18n::scope(lang);
+            let got = ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"].map(tab_name);
+            assert_eq!(got, want, "{lang}");
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 200.0));
+            let mut out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+                crate::ui_kit::scope(ui, crate::ui_kit::tab_accent_strip);
+            });
+            out.textures_delta.clear();
+            let mut painted = Vec::new();
+            out.shapes.iter().for_each(|shape| texts(&shape.shape, &mut painted));
+            for name in want {
+                assert!(painted.iter().any(|p| p == name), "{lang}: the strip paints {painted:?}, not {name}");
+            }
+        }
+    }
+
     /// Origin plane names (#6491): Top, Front and Right are names shown in the browser, the
     /// dialogs' chips and the plane choices; the planes' ids, the commands and the design keep XY,
     /// XZ and YZ. Saved, refused when unknown, and taken back by Cancel and Restore Defaults.

@@ -13,6 +13,25 @@ pub fn tab_label(tab: &str) -> &str {
     tab.strip_prefix("RENDER ").unwrap_or(tab)
 }
 
+/// A tab's registry name in normal word casing: "SHEET METAL" → "Sheet Metal".
+pub fn word_cased(name: &str) -> String {
+    name.split_whitespace()
+        .map(|word| {
+            let lower = word.to_lowercase();
+            let mut chars = lower.chars();
+            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A ribbon tab's name as the ribbon shows it, in the current language: "SHEET METAL" reads
+/// "Sheet Metal", or "Blech" in German. A partial catalog may translate only the word-cased name.
+pub fn tab_name(tab: &str) -> String {
+    let cased = word_cased(crate::i18n::tr_label(tab_label(tab)));
+    crate::i18n::tr_label(&cased).to_string()
+}
+
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
 
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.

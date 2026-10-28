@@ -1,0 +1,38 @@
+{
+  "en": {
+    "ui.heading_form": "FORM"
+  },
+  "ar": {
+    "ui.heading_form": "تشكيل"
+  },
+  "de": {
+    "ui.heading_form": "FORM"
+  },
+  "es": {
+    "ui.heading_form": "FORMA"
+  },
+  "fr": {
+    "ui.heading_form": "FORME"
+  },
+  "he": {
+    "ui.heading_form": "צורה"
+  },
+  "it": {
+    "ui.heading_form": "FORMA"
+  },
+  "ja": {
+    "ui.heading_form": "フォーム"
+  },
+  "ko": {
+    "ui.heading_form": "폼"
+  },
+  "vi": {
+    "ui.heading_form": "TẠO HÌNH"
+  },
+  "zh": {
+    "ui.heading_form": "造型"
+  },
+  "zh-TW": {
+    "ui.heading_form": "造型"
+  }
+}

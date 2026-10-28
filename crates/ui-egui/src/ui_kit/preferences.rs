@@ -564,16 +564,16 @@ pub(crate) fn tab_accent_strip(ui: &mut Ui) {
     }
     let t = Tokens::get();
     super::text(ui, crate::i18n::tr("prefs.tab_accent_note"), super::Text::Hint("tab_accent"));
-    let names =
-        [("MODEL", "Model"), ("SURFACE", "Surface"), ("MESH", "Mesh"), ("FORM", "Form"), ("SHEET METAL", "Sheet Metal"), ("RENDER", "Render")];
+    // Named as the ribbon names its tabs, so each reads as its tab does in every language.
+    let names = ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"];
     let (r, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24 + t.space_8), Sense::hover());
     let width = r.width() / names.len() as f32;
-    for (i, (name, display_label)) in names.iter().enumerate() {
+    for (i, name) in names.iter().enumerate() {
         let rect = Rect::from_min_size(r.min + vec2(i as f32 * width, 0.0), vec2((width - t.space_6).max(0.0), t.space_6));
         let accent = crate::theme::TabAccent::for_tab(&t, name);
         ui.painter().rect_filled(rect, t.radius_sm, accent.color);
         let label = Rect::from_min_size(pos2(rect.left(), rect.bottom() + t.space_4), vec2(rect.width(), t.space_16));
-        centred_text(ui.painter(), label, crate::i18n::tr_label(display_label), FontId::proportional(t.font_small), t.form_dim);
+        centred_text(ui.painter(), label, &crate::workspace::tab_name(name), FontId::proportional(t.font_small), t.form_dim);
     }
 }
 
