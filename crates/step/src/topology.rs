@@ -1168,10 +1168,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         // its domain.
         let natural = surface.natural();
         // At a pole (where the surface collapses to a point across a direction, to within the
-        // tolerance, as the pcurves closed the loop there) a loop may jump in that direction: the
-        // seam's two uses meet there a period apart.
+        // tolerance of the vertex the two uses meet at) a loop may jump in that direction: the
+        // seam's two uses meet there a period apart, and a side collapsed to within the vertex's
+        // tolerance (a corner patch with one side shrunk to a few µm) is run along between them,
+        // its boundary iso line. As the record check (`brep::geometry`) takes it.
         let poles = SurfaceEval::new(&surface).ok();
-        let at_pole = |uv: [f64; 2]| poles.as_ref().is_some_and(|e| e.pole_within(uv, tol).iter().any(|p| *p));
+        let at_pole = |uv: [f64; 2], reach: f64| poles.as_ref().is_some_and(|e| e.pole_within(uv, reach).iter().any(|p| *p));
         for (l, pc) in edge_loops.iter().zip(&pcs) {
             let mut ends = Vec::with_capacity(l.len());
             for (&(_, forward), c) in l.iter().zip(pc) {
@@ -1181,7 +1183,11 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             for k in 0..ends.len() {
                 let (Some((start, _)), Some((_, end))) = (ends.get(k), ends.get(if k == 0 { ends.len() - 1 } else { k - 1 })) else { continue };
-                if at_pole(*start) || at_pole(*end) {
+                // The vertex use k starts at, where the one before it ends.
+                let &(e, forward) = l.get(k).ok_or("edge use")?;
+                let v = self.edges.get(e as usize).ok_or("edge reference")?.vertices[if forward { 0 } else { 1 }];
+                let reach = self.vertices.get(v as usize).ok_or("vertex reference")?.tolerance.max(tol);
+                if at_pole(*start, reach) || at_pole(*end, reach) {
                     continue;
                 }
                 for d in 0..2 {
@@ -1191,7 +1197,21 @@ impl<'b, 'a> Builder<'b, 'a> {
                         continue;
                     }
                     if !((start[d] - end[d]).abs() <= 0.5 * (b - a)) {
-                        return Err(unsupported("a loop across a closed spline surface's seam without a seam edge"));
+                        // Whether the surface closes across `d` there: its two boundaries meet.
+                        let ends_at = |x: f64| {
+                            let mut q = *start;
+                            q[d] = x;
+                            poles.as_ref().and_then(|s| s.point(q))
+                        };
+                        let closed = matches!((ends_at(*a), ends_at(*b)), (Some(p), Some(q)) if p.dist(q) <= reach);
+                        return Err(unsupported(if closed {
+                            "a loop across a closed spline surface's seam without a seam edge".to_string()
+                        } else {
+                            format!(
+                                "a loop that jumps across its spline surface's {} range where the surface neither closes nor collapses to a point",
+                                if d == 0 { "u" } else { "v" }
+                            )
+                        }));
                     }
                 }
             }

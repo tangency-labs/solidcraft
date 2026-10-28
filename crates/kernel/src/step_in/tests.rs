@@ -2096,3 +2096,70 @@ fn an_edge_over_a_spheres_pole_is_split_there() {
     let m = measure(&imp.bodies[0].body).unwrap();
     assert!(rel(m.area, excess * r * r) < 1e-3, "{} vs {}", m.area, excess * r * r);
 }
+
+/// A planar bicubic patch whose v = 0 side is shrunk to `side` mm (a corner of a round written as
+/// a four-sided patch, Poppy Humanoid's connectors write them), bounded by three edges, its
+/// boundary iso curves counter-clockwise in (u, v): up the u = 1 side, back across v = 1, down
+/// the u = 0 side. The two side edges end `side` apart at one vertex, the end of the u = 0 side,
+/// whose tolerance covers that gap; the face tolerance (the file's 1e-6 mm) does not.
+fn patch_with_a_side_shrunk(side: f64) -> String {
+    let f = |x: f64| format!("{x:.17E}");
+    // (i, j), i along u: the v = 0 row runs over `side`, the v = 1 row over 30 mm.
+    let p = |i: usize, j: usize| {
+        let v = j as f64 / 3.0;
+        [(1.0 - v) * side * i as f64 / 3.0 + v * 10.0 * i as f64, 30.0 * v, 0.0]
+    };
+    let pt = |id: usize, q: [f64; 3]| format!("#{id}=CARTESIAN_POINT('',({},{},{}));\n", f(q[0]), f(q[1]), f(q[2]));
+    let mut t = String::from(HEAD);
+    let mut rows = Vec::new();
+    for i in 0..4 {
+        rows.push(format!("({})", (0..4).map(|j| format!("#{}", 100 + i * 4 + j)).collect::<Vec<_>>().join(",")));
+        for j in 0..4 {
+            t += &pt(100 + i * 4 + j, p(i, j));
+        }
+    }
+    t += &format!(
+        "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(4,4),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
+        rows.join(",")
+    );
+    // A at (0, 0), C at (1, 1), B at (0, 1).
+    for (k, q) in [p(0, 0), p(3, 3), p(0, 3)].into_iter().enumerate() {
+        t += &pt(200 + k, q);
+        t += &format!("#{}=VERTEX_POINT('',#{});\n", 210 + k, 200 + k);
+    }
+    let sides: [[(usize, usize); 4]; 3] = [[(3, 0), (3, 1), (3, 2), (3, 3)], [(3, 3), (2, 3), (1, 3), (0, 3)], [(0, 3), (0, 2), (0, 1), (0, 0)]];
+    for (k, side) in sides.iter().enumerate() {
+        for (m, &(i, j)) in side.iter().enumerate() {
+            t += &pt(300 + k * 4 + m, p(i, j));
+        }
+        let pts: Vec<String> = (0..4).map(|m| format!("#{}", 300 + k * 4 + m)).collect();
+        t += &format!("#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.);\n", 400 + k, pts.join(","));
+        t += &format!(
+            "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            500 + k,
+            210 + k,
+            210 + (k + 1) % 3,
+            400 + k,
+            510 + k,
+            500 + k
+        );
+    }
+    t += "#520=EDGE_LOOP('',(#510,#511,#512));\n#521=FACE_OUTER_BOUND('',#520,.T.);\n#522=ADVANCED_FACE('',(#521),#10,.T.);\n";
+    t += "#530=OPEN_SHELL('',(#522));\n#531=SHELL_BASED_SURFACE_MODEL('Corner',(#530));\n#532=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#531),#540);\n";
+    t += &context(540, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn a_patch_side_shrunk_within_its_vertexs_tolerance_is_a_pole_of_the_loop() {
+    // 4 µm: four times the face's tolerance, within the vertex's (1.5 × its 4 µm gap). The loop
+    // runs along the shrunk side between the side edges' ends, a pole for it, and the face reads
+    // with the patch's area: a trapezoid 30 mm high, 30 mm and `side` wide.
+    let side = 4e-3 * 1e-3;
+    let imp = step_import(&patch_with_a_side_shrunk(side)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    let area = 0.5 * (30.0 + side) * 30.0;
+    assert!(rel(m.area, area) < 1e-6, "{} vs {area}", m.area);
+}
