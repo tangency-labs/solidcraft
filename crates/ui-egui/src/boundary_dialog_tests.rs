@@ -70,7 +70,7 @@ fn edges_and_curves_make_a_network_and_come_back_in_an_edit() {
     let d = h.app.dialog.as_mut().unwrap();
     d.inputs[0].items = vec![rim.clone(), Sel::SketchCurve { id: top.clone(), sketch: None }];
     let Kind::Surface(Surf::Boundary { continuity, join }) = &mut d.kind else { panic!("{:?}", d.kind) };
-    *continuity = 2;
+    *continuity = Continuity::G2;
     *join = true;
     ok(&mut h);
     let name = h.app.session.doc.features.last().unwrap().name.clone();
@@ -91,7 +91,7 @@ fn edges_and_curves_make_a_network_and_come_back_in_an_edit() {
     h.step(&json!({"call":"ui.editFeature","params":{"feature":name}})).unwrap();
     h.frames(8);
     let d = h.app.dialog.as_ref().unwrap();
-    assert!(matches!(d.kind, Kind::Surface(Surf::Boundary { continuity: 2, join: true })), "{:?}", d.kind);
+    assert!(matches!(d.kind, Kind::Surface(Surf::Boundary { continuity: Continuity::G2, join: true })), "{:?}", d.kind);
     assert_eq!(d.inputs[0].items.len(), 2, "{:?}", d.inputs[0].items);
     ok(&mut h);
     let (u2, v2, op2) = network(&h);
@@ -112,7 +112,7 @@ fn curves_that_meet_are_one_chain() {
     h.app.run("sketch.line", json!({"points":[[10,0],[10,8]],"ids":["d"]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     let sketch = h.app.session.doc.find_feature("Net").unwrap().id;
-    let k = Surf::Boundary { continuity: 0, join: false };
+    let k = Surf::Boundary { continuity: Continuity::G0, join: false };
     let (_, mut inputs) = crate::dialogs_surface::start(&h.app, "surface.boundary").unwrap();
     inputs[0].items = ["a2", "b", "a1"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     inputs[1].items = ["c", "d"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();

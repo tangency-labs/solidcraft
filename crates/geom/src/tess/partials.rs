@@ -134,7 +134,7 @@ fn nurbs_partials(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], 
             let l = total - k;
             let mut x = xyz(a[k][l]);
             for (i, j) in (0..=k).flat_map(|i| (0..=l).map(move |j| (i, j))).filter(|ij| *ij != (0, 0)) {
-                x = x - d[k - i][l - j] * (binomial(k, i) * binomial(l, j) * a[i][j][3]);
+                x -= d[k - i][l - j] * (binomial(k, i) * binomial(l, j) * a[i][j][3]);
             }
             d[k][l] = x * (1.0 / w);
         }
@@ -169,7 +169,7 @@ impl EvalCurve {
         for k in 0..=order {
             let mut x = xyz(*a.get(k)?);
             for i in 1..=k {
-                x = x - *d.get(k - i)? * (binomial(k, i) * a.get(i)?[3]);
+                x -= *d.get(k - i)? * (binomial(k, i) * a.get(i)?[3]);
             }
             d.push(x * (1.0 / w));
         }

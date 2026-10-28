@@ -82,7 +82,7 @@ fn nonlinear(d: &Partials, du: &Series<f64>, dv: &Series<f64>) -> Series<Vec3> {
         let term = times(&pu[i], &pv[j]);
         let weight = 1.0 / (factorial(i) * factorial(j));
         for (o, t) in out.iter_mut().zip(term) {
-            *o = *o + d[i][j] * (t * weight);
+            *o += d[i][j] * (t * weight);
         }
     }
     out
