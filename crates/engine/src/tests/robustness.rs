@@ -272,21 +272,31 @@ fn shell_after_a_drilled_hole() {
 
 /// Rounding a box's edges one at a time: an edge running into an earlier round (of the same
 /// radius or another) takes off about what each round alone would (the corner where they meet
-/// is small).
+/// is small). The upright runs on tangentially into the first round's end arc, and that into
+/// the top right edge: its tangent chain, which the default (`tangent_chain`) rounds too, taking
+/// off about what a round of that edge (38 long, past the first round) would as well.
 #[test]
 fn fillet_into_an_earlier_round() {
     let box_ = json!({"command": "solid.box", "params": {"length": 60, "width": 40, "height": 15}});
+    let lost = |r: f64, len: f64| (1.0 - PI / 4.0) * r * r * len;
     for r2 in [2.0, 3.0] {
         let s = script(json!([
             box_,
-            {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2}},
-            {"command": "solid.fillet", "params": {"edges": [[60, 0, 7]], "radius": r2}}
+            {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2, "tangent_chain": false}},
+            {"command": "solid.fillet", "params": {"edges": [[60, 0, 7]], "radius": r2, "tangent_chain": false}}
         ]));
-        let lost = |r: f64, len: f64| (1.0 - PI / 4.0) * r * r * len;
         let want = 36000.0 - lost(2.0, 60.0) - lost(r2, 15.0);
         let v = total_volume(&s);
         assert!((v - want).abs() < 2.0, "r2 {r2}: {v} vs {want}");
     }
+    let s = script(json!([
+        box_,
+        {"command": "solid.fillet", "params": {"edges": [[30, 0, 15]], "radius": 2}},
+        {"command": "solid.fillet", "params": {"edges": [[60, 0, 7]], "radius": 2}}
+    ]));
+    let want = 36000.0 - lost(2.0, 60.0) - lost(2.0, 15.0) - lost(2.0, 38.0);
+    let v = total_volume(&s);
+    assert!((v - want).abs() < 2.0, "the upright's tangent chain: {v} vs {want}");
 }
 
 /// Clean seeds (seed 16: a partial face contact, fused), and the original seed 5 edge contact,

@@ -409,7 +409,14 @@ fn ribs_flush_with_a_window_change_nothing_away_from_them() {
     s.run_script(&Value::Array(lid.to_vec())).unwrap();
     let measure = |s: &Session| s.model.state().body("Lid").map(|b| solidcraft_kernel::measure(&b.body).unwrap()).unwrap();
     let (v0, a0) = (measure(&s).volume, measure(&s).area);
-    assert!((v0 - 6703.5222).abs() < 1e-3, "{v0}");
+    // The plate with its rounded corners, the skirt, less the window, the slot and the notch
+    // through the skirt: (76.8 × 89.3 - (4 - π) × 9) × 2.4 + (71.5 × 84 - 68.5 × 81) × 3
+    // - 68 × 61 × 2.4 - 44 × 10 × 2.4 - 22 × 1.5 × 3.
+    let lid = (76.8 * 89.3 - (4.0 - std::f64::consts::PI) * 9.0) * 2.4 + (71.5 * 84.0 - 68.5 * 81.0) * 3.0
+        - 68.0 * 61.0 * 2.4
+        - 44.0 * 10.0 * 2.4
+        - 22.0 * 1.5 * 3.0;
+    assert!((v0 - lid).abs() < 1e-3, "{v0} vs {lid}");
     for (i, rib) in ribs.iter().enumerate() {
         let reply = s.execute(rib["command"].as_str().unwrap(), &rib["params"]).unwrap();
         let id = reply["feature"].as_u64().unwrap();
@@ -418,13 +425,15 @@ fn ribs_flush_with_a_window_change_nothing_away_from_them() {
         assert!(!result.warning.as_deref().unwrap_or_default().contains("tool displacement"), "{:?}", result.warning);
         let m = measure(&s);
         let n = (i + 1) as f64;
+        // The measure's accuracy: SMLib's mass properties come within 2e-7 of a closed form.
+        let (dv, da) = (2e-7 * m.volume, 2e-7 * m.area);
         // 1.6 x 6 x 11.7 less the 1.35 x 6 x 3 inside the skirt.
-        assert!((m.volume - (v0 + n * 88.02)).abs() < 1e-6, "rib {}: {}", i + 1, m.volume - v0);
+        assert!((m.volume - (v0 + n * 88.02)).abs() < dv, "rib {}: {}", i + 1, m.volume - v0);
         // Top 9.6, outer side 6 x 8.7 above the skirt, inner side 6 x 11.7 (flush with the
         // window's side), ends 2 x (1.6 x 11.7 - 1.35 x 3); the skirt top 8.1, its inner side
         // 18 and 1.5 of the plate go under the rib.
         let area = 9.6 + 52.2 + 70.2 + 29.34 - 8.1 - 18.0 - 1.5;
-        assert!((m.area - (a0 + n * area)).abs() < 1e-6, "rib {}: area {} (no slit adds any)", i + 1, m.area - a0);
+        assert!((m.area - (a0 + n * area)).abs() < da, "rib {}: area {} (no slit adds any)", i + 1, m.area - a0);
     }
     let bounds = s.model.state().body("Lid").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap().bounds();
     assert!((bounds.max.z - 14.1).abs() < 1e-9, "{}", bounds.max.z);
