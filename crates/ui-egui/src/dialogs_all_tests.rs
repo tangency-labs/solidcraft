@@ -934,3 +934,23 @@ fn extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile()
         assert!(((volume - before) - area * 5.0).abs() < 5e-3 * area * 5.0, "x = {x}: {volume} - {before} vs {}", area * 5.0);
     }
 }
+
+/// Every selection field of every command's dialog is labelled with a message the catalogs carry,
+/// so it reads in the user's language ("First edge", "Second point" read English everywhere when
+/// they were missing).
+#[test]
+fn every_selection_field_label_is_translated() {
+    let h = fixture();
+    let _japanese = crate::i18n::scope("ja");
+    let mut missing = std::collections::BTreeSet::new();
+    for spec in solidcraft_engine::command_specs() {
+        let Some(d) = Dialog::for_command(&h.app, spec.id) else { continue };
+        for input in &d.inputs {
+            let label = input.label.trim();
+            if label.chars().any(|c| c.is_ascii_alphabetic()) && crate::i18n::tr_label(label) == label {
+                missing.insert(format!("{}: {label}", spec.id));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "selection fields without a message: {missing:#?}");
+}
