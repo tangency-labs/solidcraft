@@ -135,6 +135,8 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
         },
         Kind::Sheet(_) => (at, crate::dialogs_sheet::arrow(app, d).or(normal)),
         Kind::Plastic(_) => (at, normal),
+        // A direction that runs To Object has no value to drag (#8523).
+        Kind::PatternRect { .. } if crate::dialogs::pattern_runs_to_object(d, 0) => (at, None),
         Kind::PatternRect { .. } => (at, d.inputs.get(1).and_then(|i| i.items.first()).and_then(|x| crate::dialogs::axis_of(app, x)).map(|a| a.1)),
         // A sketch move's X Distance grows along the sketch's own x axis, so its drag arrow
         // lies in the sketch plane. Scale has no arrow: a factor is not a length, and the
@@ -155,6 +157,7 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
 /// is square to the first unless one is picked.
 fn pattern_dir2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     match &d.kind {
+        Kind::PatternRect { .. } if crate::dialogs::pattern_runs_to_object(d, 1) => None,
         Kind::PatternRect { .. } => match d.inputs.get(2).and_then(|i| i.items.first()) {
             Some(x) => crate::dialogs::axis_of(app, x).map(|a| a.1),
             None => d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2])),

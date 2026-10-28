@@ -2229,6 +2229,17 @@ pub enum PatternKind {
         reversed: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reversed2: bool,
+        /// Extent (#8523): `spacing1` is the distance from the first copy to the last.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extent1: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extent2: bool,
+        /// To Object (#8523): the last copy's centre reaches the face or point here, along the
+        /// direction from the centre of what is copied; `spacing1` is not used.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to1: Option<FacePick>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to2: Option<FacePick>,
     },
     Circular {
         origin: Position,

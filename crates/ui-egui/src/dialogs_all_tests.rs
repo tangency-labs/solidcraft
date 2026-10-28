@@ -946,6 +946,48 @@ fn solid_pattern_quantity_arrows_step_the_count_the_command_receives() {
     }
 }
 
+/// Each direction of a rectangular pattern has its own Distance Type (#8523): Spacing by default,
+/// Extent, or To Object, which adds a pick input for that direction and sends its point.
+#[test]
+fn rectangular_pattern_distance_type_per_direction() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.rectangular");
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+    h.app.dialog = Some(d);
+    h.settle();
+    let sent = |h: &Harness| {
+        let cmds = crate::dialogs::preview_commands(&h.app, h.app.dialog.as_ref().unwrap());
+        cmds.map(|cmds| cmds.into_iter().find(|(id, _)| id == "solid.pattern.rectangular").map(|(_, p)| p).unwrap_or_default())
+    };
+    let p = sent(&h).unwrap();
+    assert!(p.get("type1").is_none() && p.get("type2").is_none() && p.get("to1").is_none(), "Spacing is the default: {p}");
+    let set = |h: &mut Harness, key: &str, value: &str| {
+        h.app.dialog.as_mut().unwrap().extra.insert(key.into(), json!(value));
+        h.frames(2);
+    };
+    set(&mut h, "type1", "extent");
+    let p = sent(&h).unwrap();
+    assert_eq!((&p["type1"], p.get("type2")), (&json!("extent"), None), "{p}");
+    assert_eq!(h.app.dialog.as_mut().unwrap().primary().map(|(label, ..)| label), Some("Extent"));
+    // To Object on the second direction: its own input, active, and a pick is needed.
+    set(&mut h, "type2", "to_object");
+    let d = h.app.dialog.as_ref().unwrap();
+    let labels: Vec<&str> = d.inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels.last(), Some(&"To Object 2"), "{labels:?}");
+    assert!(!labels.contains(&"To Object"), "{labels:?}");
+    assert_eq!(d.active, d.inputs.len() - 1);
+    assert_eq!(sent(&h).unwrap_err(), "select the face or point Direction 2 runs to");
+    let last = h.app.dialog.as_ref().unwrap().inputs.len() - 1;
+    h.app.dialog.as_mut().unwrap().inputs[last].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(0.0, 40.0, 0.0) }];
+    let p = sent(&h).unwrap();
+    assert_eq!((&p["type2"], &p["to2"], &p["type1"]), (&json!("to_object"), &json!([0.0, 40.0, 0.0]), &json!("extent")), "{p}");
+    // Back to Spacing: the input goes, and with it the point.
+    set(&mut h, "type2", "spacing");
+    assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|i| i.label != "To Object 2"));
+    assert!(sent(&h).unwrap().get("to2").is_none());
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();

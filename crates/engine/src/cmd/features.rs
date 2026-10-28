@@ -87,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
         .at("SOLID", "CREATE")
         .icon("pattern_rect")
-        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip)"),
+        .params("features: [names] | bodies: [names] | components: [names]; dir1: [x,y,z]; count1; spacing1; dir2?, count2?, spacing2?; type1?, type2?: spacing|extent|to_object (default spacing: between neighbours; extent: spacing<k> is the distance from the first copy to the last; to_object: the copy furthest along the direction reaches to<k>, measured from the middle of what is copied, and follows it; no spacing<k> needed); to1?, to2?: [x,y,z] (a point on the face, vertex or point to go to; implies to_object; not with components); alignment?, alignment2?: left|center|right (default right; counts include the original); reversed?, reversed2?: bool (Flip; To Object takes its side from the object)"),
     CommandSpec::new("solid.pattern.circular", "Circular Pattern", pattern_circ)
         .at("SOLID", "CREATE")
         .icon("pattern_circ")
@@ -2063,16 +2063,22 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
     let (features, bodies) = pattern_sources(s, p, cmd)?;
     let dir1 = p.get("dir1").and_then(vec3).ok_or_else(|| bad(cmd, "`dir1` must be [x, y, z]"))?;
     let count1 = req_expr(cmd, p, "count1")?;
-    let spacing1 = req_expr(cmd, p, "spacing1")?;
     check_count(s, &count1, cmd, "count1")?;
+    let (extent1, to1) = distance_type(p, cmd, "1")?;
+    // To Object needs no spacing: a stored one is kept for switching back.
+    let spacing1 = if to1.is_some() { expr(p, "spacing1").unwrap_or_else(|| "0".into()) } else { req_expr(cmd, p, "spacing1")? };
     check_expr(s, &spacing1, Kind::Length, cmd, "spacing1")?;
     let dir2 = p.get("dir2").and_then(vec3);
     let (count2, spacing2) = (expr(p, "count2"), expr(p, "spacing2"));
+    let (extent2, to2) = distance_type(p, cmd, "2")?;
     if let Some(c) = &count2 {
         check_count(s, c, cmd, "count2")?;
     }
     if let Some(c) = &spacing2 {
         check_expr(s, c, Kind::Length, cmd, "spacing2")?;
+    }
+    if (to1.is_some() || to2.is_some()) && !string_list(cmd, p, "components")?.is_empty() {
+        return Err(bad(cmd, "not supported yet: To Object in a pattern of components"));
     }
     let pattern = solidcraft_doc::PatternKind::Rectangular {
         dir1: Dir(dir1),
@@ -2080,13 +2086,32 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
         spacing1,
         dir2: dir2.map(Dir),
         count2,
-        spacing2,
+        spacing2: spacing2.or_else(|| to2.map(|_| "0".into())),
         alignment: super::alignment_param(p, "alignment", cmd)?,
         alignment2: super::alignment_param(p, "alignment2", cmd)?,
         reversed: super::reversed_param(p, "reversed", cmd)?,
         reversed2: super::reversed_param(p, "reversed2", cmd)?,
+        extent1,
+        extent2,
+        to1,
+        to2,
     };
     finish_pattern(s, p, features, pattern, bodies)
+}
+
+/// A rectangular pattern direction's distance type (#8523), from `type<k>`: `spacing` (the
+/// default), `extent` (`spacing<k>` runs from the first copy to the last) or `to_object` (the
+/// last copy reaches the face or point at `to<k>`; a `to<k>` alone means To Object too).
+fn distance_type(p: &Value, cmd: &str, k: &str) -> Result<(bool, Option<FacePick>)> {
+    let to = p.get(format!("to{k}").as_str());
+    let to_point = || to.and_then(vec3).map(FacePick).ok_or_else(|| bad(cmd, format!("`to{k}` must be a point [x, y, z] on the face, vertex or point the pattern runs to")));
+    match str_(p, &format!("type{k}")).map(str::to_ascii_lowercase).as_deref() {
+        None if to.is_some() => Ok((false, Some(to_point()?))),
+        None | Some("spacing") => Ok((false, None)),
+        Some("extent") => Ok((true, None)),
+        Some("to_object" | "to object" | "object") => Ok((false, Some(to_point()?))),
+        Some(t) => Err(bad(cmd, format!("unknown `type{k}` `{t}` (spacing, extent or to_object)"))),
+    }
 }
 
 fn pattern_circ(s: &mut Session, p: &Value) -> Result<Value> {

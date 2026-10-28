@@ -129,6 +129,27 @@ fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
 }
 
+/// A rectangular pattern direction's Distance Type (#8523) and its value: the Spacing between
+/// neighbours, the Extent from the first copy to the last, or To Object (a pick instead of a
+/// value, the input added below the others).
+fn pattern_distance_rows(
+    ui: &mut egui::Ui,
+    extra: &mut serde_json::Map<String, Value>,
+    inputs: &mut Vec<SelInput>,
+    active: &mut usize,
+    index: usize,
+    value: &mut String,
+) -> bool {
+    let [label, id, key, object, spacing, extent] = PATTERN_DISTANCE[index.min(1)];
+    let ty = form_row(ui, label, |ui| extra_choice(ui, extra, id, key, &PATTERN_DISTANCE_TYPES));
+    set_object(inputs, active, object, ty == 2);
+    match ty {
+        0 => expr_row(ui, spacing, value),
+        1 => expr_row(ui, extent, value),
+        _ => false,
+    }
+}
+
 fn fillet_type(extra: &serde_json::Map<String, Value>) -> usize {
     let value = extra.get("type").and_then(Value::as_str).unwrap_or("constant");
     if value == "g2" { 3 } else { FILLET_TYPES.iter().position(|(_, key)| *key == value).unwrap_or(0) }
@@ -399,9 +420,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         }
         Kind::PatternRect { count, spacing, count2, spacing2 } => {
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
-            enter |= expr_row(ui, "Spacing", spacing);
+            enter |= pattern_distance_rows(ui, &mut d.extra, &mut d.inputs, &mut d.active, 0, spacing);
             enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
-            enter |= expr_row(ui, "Spacing 2", spacing2);
+            enter |= pattern_distance_rows(ui, &mut d.extra, &mut d.inputs, &mut d.active, 1, spacing2);
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
                 feature_pattern_alignment_row(ui, &mut d.extra, 1);

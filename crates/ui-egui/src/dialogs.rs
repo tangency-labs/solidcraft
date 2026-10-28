@@ -1331,6 +1331,7 @@ impl Dialog {
     pub fn primary(&mut self) -> Option<(&'static str, ValueKind, &mut String)> {
         let move_field = crate::dialogs_move::value_field(self);
         let through_point = offset_through_point(self).is_some();
+        let pattern_type = self.extra.get("type1").and_then(Value::as_str).map(str::to_owned);
         Some(match &mut self.kind {
             Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
@@ -1368,7 +1369,12 @@ impl Dialog {
                     _ => ("X", ValueKind::Length, x),
                 },
             },
-            Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
+            // Direction 1's value follows its distance type (#8523); To Object has none.
+            Kind::PatternRect { spacing, .. } => match pattern_type.as_deref() {
+                Some("to_object") => return None,
+                Some("extent") => ("Extent", ValueKind::Length, spacing),
+                _ => ("Spacing", ValueKind::Length, spacing),
+            },
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Section { offset, .. } => ("Distance", ValueKind::Length, offset),
             Kind::OffsetPlane { .. } if through_point => return None,
@@ -3780,6 +3786,27 @@ pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(
     result.map(|_| ())
 }
 
+/// A rectangular pattern's directions (#8523): the Distance Type row, its dialog id and command
+/// key, the To Object input it adds, and the value's label for Spacing and for Extent.
+const PATTERN_DISTANCE: [[&str; 6]; 2] = [
+    ["Distance Type", "pat_dist1", "type1", TO_OBJECT, "Spacing", "Extent"],
+    ["Distance Type 2", "pat_dist2", "type2", "To Object 2", "Spacing 2", "Extent 2"],
+];
+const PATTERN_DISTANCE_TYPES: [(&str, &str); 3] = [("Spacing", "spacing"), ("Extent", "extent"), ("To Object", "to_object")];
+
+/// Whether a rectangular pattern direction (`index` 0 or 1) runs To Object.
+pub(crate) fn pattern_runs_to_object(d: &Dialog, index: usize) -> bool {
+    let [_, _, key, ..] = PATTERN_DISTANCE[index.min(1)];
+    d.extra.get(key).and_then(Value::as_str) == Some("to_object")
+}
+
+/// A rectangular pattern direction's To Object (`index` 0 or 1): whether it is chosen, and the
+/// point picked for it.
+fn pattern_to_object(d: &Dialog, index: usize) -> (bool, Option<Value>) {
+    let [_, _, _, object, ..] = PATTERN_DISTANCE[index.min(1)];
+    (pattern_runs_to_object(d, index), object_point(&d.inputs, object))
+}
+
 /// The pick input an extent of To Object adds (a face, vertex or point to go to).
 const TO_OBJECT: &str = "To Object";
 const FROM_OBJECT: &str = "From Object";
@@ -4722,15 +4749,29 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             let mut p = json!({"dir1": pt(d1), "count1": count, "spacing1": spacing});
             pattern_objects(s, sels(d, 0), &mut p);
+            match pattern_to_object(d, 0) {
+                (true, Some(to)) => p["to1"] = to,
+                (true, None) => return Err("select the face or point the pattern runs to".into()),
+                _ => {}
+            }
             let kept2 = d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d2 = match sels(d, 2).first() {
                 Some(x) => Some(axis_of(app, x).ok_or("the second direction must be an axis, a sketch line or a straight edge")?.1),
                 None => kept2,
             };
-            if let Some(d2) = d2 {
-                p["dir2"] = pt(d2);
-                p["count2"] = json!(count2);
-                p["spacing2"] = json!(spacing2);
+            match d2 {
+                Some(d2) => {
+                    p["dir2"] = pt(d2);
+                    p["count2"] = json!(count2);
+                    p["spacing2"] = json!(spacing2);
+                    match pattern_to_object(d, 1) {
+                        (true, Some(to)) => p["to2"] = to,
+                        (true, None) => return Err("select the face or point Direction 2 runs to".into()),
+                        _ => {}
+                    }
+                }
+                // No second direction: its distance type has nothing to measure.
+                None => p["type2"] = json!("spacing"),
             }
             ("solid.pattern.rectangular", p)
         }
@@ -6401,12 +6442,39 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 copied.iter().map(|name| Sel::Body { name: name.to_string() }).collect()
             };
             let mut d = match pattern {
-                PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
+                PatternKind::Rectangular {
+                    dir1,
+                    count1,
+                    spacing1,
+                    dir2,
+                    count2,
+                    spacing2,
+                    alignment,
+                    alignment2,
+                    reversed,
+                    reversed2,
+                    extent1,
+                    extent2,
+                    to1,
+                    to2,
+                } => {
                     let mut d = start("solid.pattern.rectangular")?;
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("alignment2".into(), json!(alignment2));
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.extra.insert("reversed2".into(), json!(reversed2));
+                    // Each direction's distance type (#8523); To Object shows its pick.
+                    let active = d.active;
+                    for (index, (extent, to)) in [(*extent1, *to1), (*extent2, *to2)].into_iter().enumerate() {
+                        let [_, _, key, object, ..] = PATTERN_DISTANCE[index];
+                        if to.is_some() {
+                            d.extra.insert(key.into(), json!("to_object"));
+                            with_object(&mut d, s, object, to.map(|p| p.0));
+                        } else if extent {
+                            d.extra.insert(key.into(), json!("extent"));
+                        }
+                    }
+                    d.active = active;
                     d.kind = Kind::PatternRect {
                         count: count1.to_string(),
                         spacing: spacing1.to_string(),

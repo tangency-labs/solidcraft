@@ -1882,6 +1882,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         // over every body.
         FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => reads.all = true,
         FeatureKind::Revolve { to: Some(_), .. } => reads.all = true,
+        FeatureKind::Pattern { pattern: crate::PatternKind::Rectangular { to1, to2, .. }, .. } if to1.is_some() || to2.is_some() => reads.all = true,
         // A mirror of placed bodies follows the placements it was picked at and its own component's
         // frame, not every occurrence: moving an unrelated one leaves it (and its cache) alone.
         FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() => return mirror_placements_digest(doc, f, placements, bodies),
@@ -2400,7 +2401,7 @@ impl Model {
                 Ok(()) => {
                     // Copies are named after their sources through the instance transforms.
                     let mats = match &f.kind {
-                        FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, &vals, &state, f.component, pattern).unwrap_or_default(),
+                        FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, &vals, &state, f.component, pattern, Some(f)).unwrap_or_default(),
                         FeatureKind::Mirror { plane, .. } => {
                             doc.resolve_plane_in(&vals, plane, 0, Some(&state)).map(|pl| vec![mirror_matrix(&pl)]).unwrap_or_default()
                         }
@@ -6476,10 +6477,20 @@ fn mirror_copy_frame(doc: &Document, path: &[u64]) -> Option<(u64, Mat, Mat)> {
 /// The placements (column-major matrices) of a pattern's copies, the original excluded.
 pub fn pattern_matrices(doc: &Document, st: &ModelState, p: &crate::PatternKind) -> Result<Vec<[[f64; 4]; 4]>> {
     let (vals, _) = doc.param_values();
-    pattern_transforms(doc, &vals, st, 0, p)
+    pattern_transforms(doc, &vals, st, 0, p, None)
 }
 
-fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, p: &crate::PatternKind) -> Result<Vec<Mat>> {
+/// The placements of a pattern's copies. `feature` is the pattern feature itself: a rectangular
+/// pattern's To Object distances are measured from the middle of what it copies (#8523), which
+/// a pattern of components (none) can't give yet.
+fn pattern_transforms(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    component: u64,
+    p: &crate::PatternKind,
+    feature: Option<&Feature>,
+) -> Result<Vec<Mat>> {
     let count = |e: &str| -> Result<usize> {
         let n = expr::eval_count(e, vals)?;
         if !(1.0..=MAX_INSTANCES as f64).contains(&n) {
@@ -6489,18 +6500,50 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
     };
     let mut out = Vec::new();
     match p {
-        crate::PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
-            let (n1, s1) = (count(count1)?, val(vals, spacing1, Kind::Length)?);
+        crate::PatternKind::Rectangular {
+            dir1,
+            count1,
+            spacing1,
+            dir2,
+            count2,
+            spacing2,
+            alignment,
+            alignment2,
+            reversed,
+            reversed2,
+            extent1,
+            extent2,
+            to1,
+            to2,
+        } => {
+            let n1 = count(count1)?;
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
-            let (n2, s2, d2) = match (dir2, count2, spacing2) {
-                (Some(d), Some(c), Some(sp)) => {
-                    (count(c)?, val(vals, sp, Kind::Length)?, d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?)
+            let second = match (dir2, count2) {
+                (Some(d), Some(c)) if spacing2.is_some() || to2.is_some() => {
+                    Some((count(c)?, d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?))
                 }
-                _ => (1, 0.0, Vec3::Y),
+                _ => None,
             };
+            let n2 = second.map_or(1, |(n, _)| n);
             if n1 * n2 > MAX_INSTANCES {
                 return Err(DocError::Invalid("too many pattern instances".into()));
             }
+            // The To Object faces' names follow `face_points`: `to1`, then `to2`.
+            let names = feature.map(|f| f.face_names.as_slice()).unwrap_or_default();
+            let to_name = |k: usize| names.get(k).map(String::as_str);
+            let reach = |to: Vec3, name: Option<&str>, d: Vec3| -> Result<f64> {
+                let f = feature.ok_or_else(|| DocError::Invalid("not supported yet: To Object in a pattern of components".into()))?;
+                pattern_reach(doc, st, f, component, to, name, d)
+            };
+            let s1 = match to1 {
+                Some(p) => step_to(reach(p.0, to_name(0), d1)?, n1, *alignment, *reversed),
+                None => step_of(val(vals, spacing1, Kind::Length)?, n1, *extent1),
+            };
+            let (s2, d2) = match (second, to2, spacing2) {
+                (Some((n2, d2)), Some(p), _) => (step_to(reach(p.0, to_name(usize::from(to1.is_some())), d2)?, n2, *alignment2, *reversed2), d2),
+                (Some((n2, d2)), None, Some(sp)) => (step_of(val(vals, sp, Kind::Length)?, n2, *extent2), d2),
+                _ => (0.0, Vec3::Y),
+            };
             for i in 0..n1 {
                 for j in 0..n2 {
                     if i == 0 && j == 0 {
@@ -6566,6 +6609,86 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
         }
     }
     Ok(out)
+}
+
+/// A rectangular pattern direction's spacing from its value: the spacing itself, or with
+/// `extent` the distance from the first copy to the last (#8523).
+fn step_of(value: f64, n: usize, extent: bool) -> f64 {
+    match (extent, n) {
+        (false, _) => value,
+        (true, 0 | 1) => 0.0,
+        (true, n) => value / (n - 1) as f64,
+    }
+}
+
+/// The spacing that brings the copy furthest out along a direction `reach` mm from the original
+/// (To Object, #8523): the last copy, or with Center the last one on the far side. The object
+/// says which way, so Flip changes nothing here.
+fn step_to(reach: f64, n: usize, alignment: solidcraft_sketch::PatternAlignment, reversed: bool) -> f64 {
+    // Center alternates sides, odd slots going forward: the last odd slot.
+    let far = match alignment {
+        solidcraft_sketch::PatternAlignment::Center if n > 2 && (n - 1).is_multiple_of(2) => n - 2,
+        _ => n.saturating_sub(1),
+    };
+    if far == 0 { 0.0 } else { reach / alignment.multiplier(far, reversed) }
+}
+
+/// How far, along unit direction `d`, the To Object pick `to` lies from the middle of what
+/// pattern `f` copies (#8523). A planar face square to `d` counts as a whole; a curved or slanted
+/// face where the line from the middle meets it; else the picked point.
+fn pattern_reach(doc: &Document, st: &ModelState, f: &Feature, component: u64, to: Vec3, name: Option<&str>, d: Vec3) -> Result<f64> {
+    let FeatureKind::Pattern { features, bodies, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a pattern".into()));
+    };
+    let tst = state_in_frame(doc, st, component);
+    let centre = seed_centre(doc, &tst, features, bodies).ok_or_else(|| DocError::Invalid("To Object: what the pattern copies has no geometry to measure from".into()))?;
+    let plane = Plane::from_normal(centre, d).ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
+    let face = object_face(&tst, name, to, Some(d));
+    let reach = height_at(&tst, face, &plane, centre, to);
+    if !reach.is_finite() || reach.abs() < 1e-9 {
+        return Err(DocError::Invalid("the To object is where the pattern starts: pick one further along the direction".into()));
+    }
+    Ok(reach)
+}
+
+/// The middle of the box around what a pattern copies (#8523): its bodies, or the faces its
+/// features made (for a pattern or mirror among them, its own sources' faces and their copies).
+fn seed_centre(doc: &Document, st: &ModelState, features: &[FeatureId], bodies: &[crate::BodyName]) -> Option<Vec3> {
+    let mut b = solidcraft_geom::Aabb3::EMPTY;
+    for n in bodies {
+        if let Some(mb) = st.body(n) {
+            b = b.union(&mb.mesh_bounds());
+        }
+    }
+    let mut ids: Vec<u64> = Vec::new();
+    let mut todo: Vec<FeatureId> = features.to_vec();
+    while let Some(id) = todo.pop() {
+        if ids.contains(&id.0) || ids.len() > MAX_INSTANCES {
+            continue;
+        }
+        ids.push(id.0);
+        if let Some(FeatureKind::Pattern { features, .. } | FeatureKind::Mirror { features, .. }) = doc.feature(id.0).map(|x| &x.kind) {
+            todo.extend(features.iter().copied());
+        }
+    }
+    if !ids.is_empty() {
+        for mb in &st.bodies {
+            let names = crate::naming::face_names(mb);
+            let made: Vec<bool> = names.iter().map(|n| crate::persistent_name::made_by(n).is_some_and(|id| ids.contains(&id))).collect();
+            if !made.contains(&true) {
+                continue;
+            }
+            let m = mb.mesh();
+            for (t, fi) in m.triangles.iter().zip(&m.tri_face) {
+                if made.get(*fi as usize).copied().unwrap_or(false)
+                    && let Some(pts) = m.tri(t)
+                {
+                    pts.into_iter().for_each(|p| b.add(p));
+                }
+            }
+        }
+    }
+    (!b.is_empty()).then(|| b.center())
 }
 
 fn seg_len(s: &kernel::PathSeg) -> f64 {
@@ -6659,7 +6782,7 @@ fn source_label(doc: &Document, id: FeatureId) -> String {
 fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, src: &Feature) -> Result<Option<(Vec<FeatureId>, Vec<Mat>)>> {
     match &src.kind {
         FeatureKind::Pattern { features, pattern, bodies } if bodies.is_empty() => {
-            Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern)?)))
+            Ok(Some((features.clone(), pattern_transforms(doc, vals, st, src.component, pattern, Some(src))?)))
         }
         FeatureKind::Mirror { features, plane, bodies, .. } if bodies.is_empty() => {
             let pl = doc.resolve_plane_in(vals, plane, 0, Some(st))?;
@@ -7929,7 +8052,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::Pattern { features, pattern, bodies } => {
-            let mats = pattern_transforms(doc, vals, st, f.component, pattern)?;
+            let mats = pattern_transforms(doc, vals, st, f.component, pattern, Some(f))?;
             if bodies.is_empty() {
                 return replay(doc, vals, f, st, features, &mats, warning);
             }
