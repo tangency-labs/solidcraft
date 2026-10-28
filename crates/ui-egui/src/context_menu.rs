@@ -1115,6 +1115,16 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.insert_point", "Add Spline Point").with(json!({"curve": curve, "at": [at.x, at.y]})));
     }
+    // #8224: any spline of the sketch's own runs the other way.
+    if let [curve] = curves.as_slice()
+        && ss
+            .sketch
+            .curve_index(curve)
+            .and_then(|i| ss.sketch.curves.get(i))
+            .is_some_and(|c| matches!(c.kind, CurveKind::Spline { .. }) && c.link.is_none())
+    {
+        v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
+    }
     v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
     // The clipboard beside Delete, as in every menu.
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
@@ -2477,7 +2487,8 @@ mod tests {
     }
 
     /// #6533: a right-click on a fit point spline offers Add Spline Point at the clicked spot, and
-    /// the item puts a fit point there. A control point spline is not offered it.
+    /// the item puts a fit point there. A control point spline is not offered it. Every spline is
+    /// offered Reverse Spline Direction (#8224), which runs it the other way.
     #[test]
     fn spline_context_menu_adds_a_fit_point_where_it_was_clicked() {
         let mut h = crate::scenario::Harness::new();
@@ -2510,6 +2521,18 @@ mod tests {
         h.step(&json!({"click":{"world":[c.x,c.y,0]},"button":"right"})).unwrap();
         assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: control.clone(), sketch: None }]);
         assert!(items(&h.app, &Target::Viewport).iter().all(|item| item.id != "sketch.spline.insert_point"));
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|item| item.id == "sketch.spline.reverse").expect("a control point spline offers Reverse Spline Direction");
+        assert_eq!((item.label.as_str(), item.params.clone()), ("Reverse Spline Direction", Some(json!({"curve": control}))));
+        let points = |h: &crate::scenario::Harness, id: &str| {
+            let state = h.app.session.world_state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            sk.curves[sk.curve_index(id).unwrap()].kind.point_ids()
+        };
+        let mut reversed = points(&h, &control);
+        reversed.reverse();
+        h.step(&json!({"click":{"handle":"menu:sketch.spline.reverse"}})).unwrap();
+        assert_eq!(points(&h, &control), reversed);
         close(&mut h.app);
 
         let at = spot(&h, &fit, 1);

@@ -1,0 +1,83 @@
+{
+  "en": {
+    "cmd.sketch_spline_reverse": "Reverse Spline Direction"
+  },
+  "ar": {
+    "cmd.sketch_spline_reverse": "عكس اتجاه المنحنى الشريحي"
+  },
+  "cs": {
+    "cmd.sketch_spline_reverse": "Obrátit směr splajnu"
+  },
+  "da": {
+    "cmd.sketch_spline_reverse": "Vend splinens retning"
+  },
+  "de": {
+    "cmd.sketch_spline_reverse": "Splinerichtung umkehren"
+  },
+  "es": {
+    "cmd.sketch_spline_reverse": "Invertir dirección del spline"
+  },
+  "fr": {
+    "cmd.sketch_spline_reverse": "Inverser le sens de la spline"
+  },
+  "gl": {
+    "cmd.sketch_spline_reverse": "Inverter a dirección do spline"
+  },
+  "he": {
+    "cmd.sketch_spline_reverse": "היפוך כיוון הספליין"
+  },
+  "hu": {
+    "cmd.sketch_spline_reverse": "Spline irányának megfordítása"
+  },
+  "id": {
+    "cmd.sketch_spline_reverse": "Balik Arah Spline"
+  },
+  "it": {
+    "cmd.sketch_spline_reverse": "Inverti direzione della spline"
+  },
+  "ja": {
+    "cmd.sketch_spline_reverse": "スプラインの方向を反転"
+  },
+  "ko": {
+    "cmd.sketch_spline_reverse": "스플라인 방향 반전"
+  },
+  "ms": {
+    "cmd.sketch_spline_reverse": "Songsangkan Arah Splin"
+  },
+  "nb": {
+    "cmd.sketch_spline_reverse": "Reverser splineretning"
+  },
+  "nl": {
+    "cmd.sketch_spline_reverse": "Splinerichting omkeren"
+  },
+  "pl": {
+    "cmd.sketch_spline_reverse": "Odwróć kierunek splajnu"
+  },
+  "pt-BR": {
+    "cmd.sketch_spline_reverse": "Inverter direção do spline"
+  },
+  "ro": {
+    "cmd.sketch_spline_reverse": "Inversează direcția spline-ului"
+  },
+  "ru": {
+    "cmd.sketch_spline_reverse": "Обратить направление сплайна"
+  },
+  "sv": {
+    "cmd.sketch_spline_reverse": "Vänd splinens riktning"
+  },
+  "tr": {
+    "cmd.sketch_spline_reverse": "Spline yönünü ters çevir"
+  },
+  "uk": {
+    "cmd.sketch_spline_reverse": "Обернути напрямок сплайна"
+  },
+  "vi": {
+    "cmd.sketch_spline_reverse": "Đảo ngược hướng đường cong Spline"
+  },
+  "zh-TW": {
+    "cmd.sketch_spline_reverse": "反向雲形線方向"
+  },
+  "zh": {
+    "cmd.sketch_spline_reverse": "反向样条曲线方向"
+  }
+}

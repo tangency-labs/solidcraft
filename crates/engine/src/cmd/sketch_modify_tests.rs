@@ -1142,6 +1142,67 @@ fn a_point_added_to_a_spline_keeps_its_constraints_and_undoes() {
     assert_eq!(sketch(&s), unchanged, "refusals change nothing");
 }
 
+/// Reverse Spline Direction (#8224): a fit, a control point and a closed spline each run the
+/// other way along the same path, their ends swapped. Their points, the constraints on them and
+/// a line joined to an end stay, and undo restores the spline. A line and the source and output
+/// of an offset are refused.
+#[test]
+fn a_reversed_spline_runs_the_other_way_along_the_same_path() {
+    use solidcraft_geom::Seg2;
+    let mut s = new_sketch();
+    let fit =
+        ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 8], [25, 2], [30, 6]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [format!("{fit}.end"), [40, 6]], "connect": false}));
+    let cv = ids(&run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 20], [10, 30], [25, 18], [30, 26]], "connect": false}))["curves"])
+        [0]
+    .clone();
+    let closed = ids(&run(
+        &mut s,
+        "sketch.spline.fit_point",
+        json!({"points": [[0, 40], [10, 48], [20, 40], [10, 34]], "periodic": true, "connect": false}),
+    )["curves"])[0]
+        .clone();
+    let off = |segs: &[Seg2], q: Vec2| segs.iter().map(|seg| seg.point_at(seg.closest_param(q)).dist(q)).fold(f64::INFINITY, f64::min);
+    let unit = |v: Vec2| v.normalized().unwrap_or_default();
+    for id in [&fit, &cv, &closed] {
+        let before = sketch(&s);
+        let ci = before.curve_index(id).unwrap();
+        let path = before.exact_segs(ci).unwrap();
+        let r = run(&mut s, "sketch.spline.reverse", json!({"curve": id}));
+        assert_eq!(r["curve"], json!(id), "{r}");
+        let after = sketch(&s);
+        let mut reversed = before.curves[ci].kind.point_ids();
+        reversed.reverse();
+        assert_eq!(after.curves[ci].kind.point_ids(), reversed, "{id}");
+        assert_eq!((&after.points, &after.constraints), (&before.points, &before.constraints), "{id}: points and constraints stay");
+        let segs = after.exact_segs(ci).unwrap();
+        for (a, b) in [(&path, &segs), (&segs, &path)] {
+            for seg in a {
+                for k in 0..=8 {
+                    let q = seg.point_at(k as f64 / 8.0);
+                    assert!(off(b, q) < 1e-7, "{id}: {q:?} is off the other path by {}", off(b, q));
+                }
+            }
+        }
+        // It starts where it ended, heading back the way it came.
+        let (first, last) = (segs.first().unwrap(), path.last().unwrap());
+        assert!(first.point_at(0.0).dist(last.point_at(1.0)) < 1e-9, "{id}");
+        assert!(unit(first.derivative(0.0)).dist(unit(last.derivative(1.0)) * -1.0) < 1e-7, "{id}");
+    }
+    let before = sketch(&s);
+    run(&mut s, "sketch.spline.reverse", json!({"curve": fit}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s), before, "undo restores the spline");
+
+    let line = before.curves.iter().find(|c| matches!(c.kind, CurveKind::Line { .. })).unwrap().id.clone();
+    let made = ids(&run(&mut s, "sketch.offset", json!({"curves": [cv], "distance": 2, "side": [10, 40]}))["curves"]);
+    let unchanged = sketch(&s);
+    for id in [&line, &cv, &made[0]] {
+        assert!(s.execute("sketch.spline.reverse", &json!({"curve": id})).is_err(), "{id} is refused");
+    }
+    assert_eq!(sketch(&s), unchanged, "refusals change nothing");
+}
+
 #[test]
 fn text_makes_profiles_that_extrude_and_edit() {
     let mut s = new_sketch();
