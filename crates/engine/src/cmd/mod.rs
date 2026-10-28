@@ -31,6 +31,8 @@ mod component_clone_assembly;
 mod construct;
 mod delete;
 mod diagnostics;
+mod drawing;
+mod drawing_sketch;
 mod edit;
 mod face;
 mod features;
@@ -82,6 +84,7 @@ mod sketch_import;
 mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
+mod sketch_store;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -101,6 +104,18 @@ pub type Run = fn(&mut Session, &Value) -> Result<Value>;
 pub type LiveRun = fn(&mut Session, &Value) -> Result<(Value, Option<crate::LiveEdit>)>;
 pub type Enabled = fn(&Session) -> std::result::Result<(), String>;
 pub type SchemaFn = fn() -> schemars::Schema;
+
+/// The part of the design a command works on (#3890): the model (most commands), the open
+/// drawing, or either (files, undo, selection, diagnostics, choosing a drawing).
+/// [`CommandSpec::allowed`] checks it before the command's own `enabled`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Model,
+    Drawing,
+    /// A shared sketch tool: model or the explicitly active sheet sketch.
+    Sketch,
+    Any,
+}
 
 pub struct CommandSpec {
     pub id: &'static str,
@@ -130,6 +145,8 @@ pub struct CommandSpec {
     pub contract: Option<&'static dyn crate::schema::Contract>,
     /// The JSON Schema of a successful result; `None` until described.
     pub output: Option<SchemaFn>,
+    /// The part of the design it works on: the model unless it says otherwise.
+    pub part: Part,
 }
 
 impl CommandSpec {
@@ -150,6 +167,7 @@ impl CommandSpec {
             planned: None,
             contract: None,
             output: None,
+            part: Part::Model,
         }
     }
     /// Not built yet; `issue` tracks building it.
@@ -202,14 +220,44 @@ impl CommandSpec {
         self.undoable = false;
         self
     }
-    /// Run inside another command: when it is enabled, its `run` (the caller's command owns the
+    /// Works with a drawing open or with none.
+    pub const fn any_part(mut self) -> Self {
+        self.part = Part::Any;
+        self
+    }
+    /// Works on the open drawing.
+    pub const fn in_drawing(mut self) -> Self {
+        self.part = Part::Drawing;
+        self
+    }
+    /// Uses the shared sketch tool on its active model or explicit sheet receiver.
+    pub const fn in_sketch_part(mut self) -> Self {
+        self.part = Part::Sketch;
+        self
+    }
+    /// Whether the command can run in `s` now: on the part open, and enabled. The one check
+    /// running a command, running it inside another and listing it make.
+    pub fn allowed(&self, s: &Session) -> std::result::Result<(), String> {
+        if s.active_sheet_sketch.is_some() && matches!(self.id, "drawing.create" | "drawing.open" | "drawing.close" | "drawing.delete") {
+            return Err("finish or cancel the sheet sketch before switching drawings".into());
+        }
+        match (self.part, s.open_drawing.is_some()) {
+            (Part::Model, true) => Err("a drawing is open: close it to change the model (drawing.close)".into()),
+            (Part::Drawing, false) => Err("open a drawing first (drawing.open, or drawing.create)".into()),
+            (Part::Sketch, true) if !s.active_sheet_sketch.as_ref().is_some_and(|entry| Some(entry.drawing) == s.open_drawing) => {
+                Err("a drawing is open: enter a sheet sketch first (drawing.sketch.create or drawing.sketch.edit)".into())
+            }
+            _ => (self.enabled)(s),
+        }
+    }
+    /// Run inside another command: when it is allowed, its `run` (the caller's command owns the
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
-        (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
+        self.allowed(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
         (self.run)(s, p)
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
-        let e = (self.enabled)(s);
+        let e = self.allowed(s);
         CommandInfo {
             id: self.id,
             label: self.label,
@@ -245,7 +293,11 @@ pub fn always(_: &Session) -> std::result::Result<(), String> {
 }
 
 pub fn in_sketch(s: &Session) -> std::result::Result<(), String> {
-    if s.active_sketch.is_some() { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
+    let active = match s.open_drawing {
+        Some(drawing) => s.active_sheet_sketch.as_ref().is_some_and(|entry| entry.drawing == drawing),
+        None => s.active_sketch.is_some(),
+    };
+    if active { Ok(()) } else { Err("no sketch is being edited (Create Sketch or Edit Sketch first)".into()) }
 }
 
 /// The mirror of [`in_sketch`], for a command that acts on bodies and has nothing to offer the
@@ -303,6 +355,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
+    v.extend(drawing::COMMANDS.iter());
+    v.extend(drawing_sketch::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v

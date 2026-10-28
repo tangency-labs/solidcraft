@@ -6,7 +6,8 @@ use serde_json::{Value, json};
 use solidcraft_geom::Vec3;
 use solidcraft_sketch::WireSpace;
 
-use super::sketch::{edit, target_sketch};
+use super::sketch::edit;
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, req_vec3, vec3};
 use crate::{Result, Session};
@@ -45,7 +46,7 @@ fn needs_3d(sk: &solidcraft_sketch::Sketch, cmd: &str) -> Result<()> {
 /// World command inputs belong to the target sketch's owner, which may differ from the
 /// active component when a script supplies an explicit sketch.
 fn inverse_owner_frame(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::Mat> {
-    let id = target_sketch(s, p, cmd)?;
+    let id = sketch_store::target(s, p, cmd)?;
     let owner = s.doc.feature(id).map(|f| f.component).ok_or_else(|| bad(cmd, "target sketch is missing"))?;
     if owner != 0 && owner != s.active_component {
         if s.doc.occurrences.len() > 100_000 {

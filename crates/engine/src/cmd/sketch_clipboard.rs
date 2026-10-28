@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use solidcraft_geom::{Aabb2, Vec2};
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
-use super::sketch::{edit, target_sketch};
+use super::sketch::edit;
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, string_list, vec2};
 use crate::{Result, Sel, Session};
@@ -91,12 +92,12 @@ fn text_of(sk: &Sketch, ci: usize) -> Option<&str> {
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.copy";
-    let id = target_sketch(s, p, cmd)?;
+    let id = sketch_store::target(s, p, cmd)?;
     let ids = chosen(s, p);
     if ids.is_empty() {
         return Err(bad(cmd, "select the sketch curves or points to copy"));
     }
-    let sk = s.doc.sketch(id)?;
+    let sk = sketch_store::read(&s.doc, id)?;
     let (mut cs, mut ps, mut texts): (Vec<usize>, Vec<usize>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
     for e in &ids {
         if let Some(c) = sk.curve_index(e) {
@@ -244,7 +245,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "params must be an object"));
     }
     let Some(clip) = s.sketch_clipboard.clone() else { return Err(bad(cmd, "nothing copied (sketch.copy first)")) };
-    let target = target_sketch(s, p, cmd)?;
+    let target = sketch_store::target(s, p, cmd)?;
     let positioned = p.get("at").is_some() || p.get("translate").is_some();
     let t = if let Some(v) = p.get("at") {
         vec2(v).ok_or_else(|| bad(cmd, "`at` must be [x, y]"))? - clip.center

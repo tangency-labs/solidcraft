@@ -2,9 +2,11 @@
 //! `document.metadata.set` and `document.metadata.remove` change it, each in one undo step. The
 //! keys SolidCraft reads, and the checks a change gets, are `solidcraft_doc::metadata`'s; keys
 //! other tools wrote are kept as they are. The UI's Design Properties dialog, scripts and MCP
-//! agents all go through these commands.
+//! agents all go through these commands. A drawing's properties are read and changed by the
+//! same rules ([`reading`], [`setting`], [`removing`]), through `drawing.properties`.
 
 use serde_json::{Map, Value, json};
+use solidcraft_doc::Metadata;
 use solidcraft_doc::metadata::{BOM_TYPE, MAX_KEYS, WELL_KNOWN};
 
 use super::CommandSpec;
@@ -27,14 +29,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("key, or keys: [keys] (any key, also one another tool wrote) → metadata, removed: [keys that were there]"),
 ];
 
-fn read(s: &mut Session, _: &Value) -> Result<Value> {
-    let m = &s.doc.metadata;
+/// What reading `m` answers: the object as saved, and SolidCraft's properties, each its text or
+/// null.
+pub(super) fn reading(m: &Metadata) -> Value {
     let properties: Map<String, Value> = WELL_KNOWN.iter().map(|k| (k.to_string(), m.text(k).map_or(Value::Null, |t| json!(t)))).collect();
-    Ok(json!({"metadata": m, "properties": properties}))
+    json!({"metadata": m, "properties": properties})
 }
 
-fn set(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "document.metadata.set";
+/// `m` with a call's `key` and `value`, or its `values`, set (all or nothing), and the keys that
+/// changed.
+pub(super) fn setting(cmd: &str, m: &Metadata, p: &Value) -> Result<(Metadata, Vec<String>)> {
     let entries: Vec<(&str, &Value)> = match (p.get("values"), p.get("key")) {
         (Some(Value::Object(values)), None) if values.len() <= MAX_KEYS => values.iter().map(|(k, v)| (k.as_str(), v)).collect(),
         (Some(Value::Object(_)), None) => return Err(bad(cmd, format!("`values` can hold at most {MAX_KEYS} keys"))),
@@ -45,7 +49,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => return Err(bad(cmd, "give `key` and `value`, or `values`: {key: value, …}")),
     };
-    let mut next = s.doc.metadata.clone();
+    let mut next = m.clone();
     let mut changed = Vec::new();
     for (key, value) in entries {
         if key == BOM_TYPE {
@@ -55,6 +59,37 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
             changed.push(key.to_string());
         }
     }
+    Ok((next, changed))
+}
+
+/// `m` with a call's `key`, or its `keys`, removed, and the keys that were there.
+pub(super) fn removing(cmd: &str, m: &Metadata, p: &Value) -> Result<(Metadata, Vec<String>)> {
+    let keys: Vec<&str> = match (p.get("keys"), p.get("key")) {
+        (Some(Value::Array(keys)), None) if keys.len() <= MAX_KEYS => {
+            keys.iter().map(Value::as_str).collect::<Option<_>>().ok_or_else(|| bad(cmd, "`keys` must be a list of keys"))?
+        }
+        (None, Some(_)) => vec![str_(p, "key").ok_or_else(|| bad(cmd, "`key` must be text"))?],
+        _ => return Err(bad(cmd, format!("give `key`, or `keys`: a list of at most {MAX_KEYS} keys"))),
+    };
+    let mut removed: Vec<String> = Vec::new();
+    for k in keys {
+        if m.get(k).is_some() && !removed.iter().any(|r| r == k) {
+            removed.push(k.to_string());
+        }
+    }
+    let mut next = m.clone();
+    for k in &removed {
+        next.remove(k);
+    }
+    Ok((next, removed))
+}
+
+fn read(s: &mut Session, _: &Value) -> Result<Value> {
+    Ok(reading(&s.doc.metadata))
+}
+
+fn set(s: &mut Session, p: &Value) -> Result<Value> {
+    let (next, changed) = setting("document.metadata.set", &s.doc.metadata, p)?;
     // Only a real change touches the design (an undo step, unsaved changes).
     if next != s.doc.metadata {
         s.doc_mut().metadata = next;
@@ -63,25 +98,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "document.metadata.remove";
-    let keys: Vec<&str> = match (p.get("keys"), p.get("key")) {
-        (Some(Value::Array(keys)), None) if keys.len() <= MAX_KEYS => {
-            keys.iter().map(Value::as_str).collect::<Option<_>>().ok_or_else(|| bad(cmd, "`keys` must be a list of keys"))?
-        }
-        (None, Some(_)) => vec![str_(p, "key").ok_or_else(|| bad(cmd, "`key` must be text"))?],
-        _ => return Err(bad(cmd, format!("give `key`, or `keys`: a list of at most {MAX_KEYS} keys"))),
-    };
-    let mut removed: Vec<&str> = Vec::new();
-    for k in keys {
-        if s.doc.metadata.get(k).is_some() && !removed.contains(&k) {
-            removed.push(k);
-        }
-    }
+    let (next, removed) = removing("document.metadata.remove", &s.doc.metadata, p)?;
     if !removed.is_empty() {
-        let m = &mut s.doc_mut().metadata;
-        for k in &removed {
-            m.remove(k);
-        }
+        s.doc_mut().metadata = next;
     }
     Ok(json!({"metadata": s.doc.metadata, "removed": removed}))
 }

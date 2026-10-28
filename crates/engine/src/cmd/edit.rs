@@ -1,22 +1,24 @@
 //! Undo/redo, the timeline, deletion and selection.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
-use solidcraft_doc::{Feature, FeatureKind};
+use solidcraft_doc::drawing::{self, Drawing};
+use solidcraft_doc::{Document, Feature, FeatureKind};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, string_list};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
-    CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
-    CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
+    CommandSpec::new("edit.undo", "Undo", undo).any_part().icon("undo").key("Ctrl+Z").noundo().doc_only(),
+    CommandSpec::new("edit.redo", "Redo", redo).any_part().icon("redo").key("Ctrl+Y").noundo().doc_only(),
+    CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).any_part().icon("checkpoint")
         .noundo()
         .doc_only()
         .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint)"),
-    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint).icon("restore")
+    CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint).any_part().icon("restore")
         .noundo()
         .doc_only()
         .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included"),
@@ -68,14 +70,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         "feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
-    CommandSpec::new("select.set", "Select", select_set).icon("select")
+    CommandSpec::new("select.set", "Select", select_set).any_part().icon("select")
         .noundo()
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
-    CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
+    CommandSpec::new("select.clear", "Clear Selection", select_clear).any_part().icon("select").noundo(),
 ];
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let Some(prev) = s.undo.pop() else { return Err(EngineError::Other("nothing to undo".into())) };
+    let prev = latest(&mut s.undo, s.open_drawing).ok_or_else(|| nothing(s, "undo"))?;
     let now = go_to(s, prev);
     let label = now.label.clone();
     s.redo.push(now);
@@ -83,26 +85,78 @@ fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
-    let Some(next) = s.redo.pop() else { return Err(EngineError::Other("nothing to redo".into())) };
+    let next = latest(&mut s.redo, s.open_drawing).ok_or_else(|| nothing(s, "redo"))?;
     let now = go_to(s, next);
     let label = now.label.clone();
     s.undo.push(now);
     Ok(json!({"redone": label}))
 }
 
-/// Put the session at `snap`; returns where it was, under the same label.
+/// Takes the latest of `steps` on `part` (the open drawing, else the model): undo and redo go
+/// through one part's steps, and leave the others' where they are.
+fn latest(steps: &mut Vec<Snapshot>, part: Option<u64>) -> Option<Snapshot> {
+    let at = steps.iter().rposition(|step| step.part == part)?;
+    Some(steps.remove(at))
+}
+
+fn nothing(s: &Session, what: &str) -> EngineError {
+    match s.open_drawing {
+        Some(_) => EngineError::Other(format!("nothing to {what} in this drawing (close it to {what} in the model)")),
+        None => EngineError::Other(format!("nothing to {what}")),
+    }
+}
+
+/// Put the session at `snap`; returns where it was, under the same label. A drawing's step puts
+/// back only that drawing. The model's step puts back the design as it was, but keeps each
+/// drawing the design had as it is now: each part's steps are undone in that part only. Neither
+/// opens or closes a drawing: a drawing's steps are taken while it is open, and the model's while
+/// none is.
 fn go_to(s: &mut Session, snap: Snapshot) -> Snapshot {
-    let was = Snapshot { label: snap.label, doc: s.doc.clone(), active_sketch: s.active_sketch, pending_moves: s.pending_moves.clone() };
-    let same = std::sync::Arc::ptr_eq(&s.doc, &snap.doc);
+    let was = Snapshot { part: snap.part, ..Snapshot::of(s, &snap.label) };
+    let snap = match snap.part {
+        Some(id) => Snapshot { doc: drawing_from(&s.doc, &snap.doc, id), active_sheet_sketch: snap.active_sheet_sketch.clone(), ..was.clone() },
+        None => Snapshot { doc: drawings_from(snap.doc, &s.doc), ..snap },
+    };
+    let same = Arc::ptr_eq(&s.doc, &snap.doc);
+    let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
     s.doc = snap.doc;
     s.active_sketch = snap.active_sketch;
+    s.active_sheet_sketch = snap.active_sheet_sketch;
+    s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
     s.selection.clear();
-    // A new document is evaluated by `execute`.
-    if same {
+    // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
+    if same && moved {
         s.refresh();
     }
     was
+}
+
+/// `doc` with its drawing `id` as `step` has it.
+fn drawing_from(doc: &Arc<Document>, step: &Document, id: u64) -> Arc<Document> {
+    let mut doc = doc.clone();
+    if let Some(then) = step.drawing(id)
+        && !doc.drawing(id).is_some_and(|now| Arc::ptr_eq(then, now))
+    {
+        Arc::make_mut(&mut doc).put_drawing(then.clone());
+    }
+    doc
+}
+
+/// The model's step `step` with each of its drawings as `now` has it.
+fn drawings_from(mut step: Arc<Document>, now: &Document) -> Arc<Document> {
+    let current = |d: &Arc<Drawing>| now.drawing(d.id).filter(|n| !Arc::ptr_eq(d, n));
+    if step.drawings.iter().any(|d| current(d).is_some()) {
+        let mut drawings = step.drawings.clone();
+        for d in &mut drawings {
+            if let Some(n) = current(d) {
+                *d = n.clone();
+            }
+        }
+        drawing::sort(&mut drawings);
+        Arc::make_mut(&mut step).drawings = drawings;
+    }
+    step
 }
 
 fn checkpoint(s: &mut Session, _p: &Value) -> Result<Value> {

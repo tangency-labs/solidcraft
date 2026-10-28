@@ -656,6 +656,8 @@ fn v2_to_v3(v: &mut Value) -> Result<()> {
 pub fn read(s: &str) -> Result<Document> {
     let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
     let (version, applied) = DESIGN.take_version(&mut v)?;
+    // Each drawing is a record of its own family, read by its own rules, numbers and all.
+    let drawings = take_drawings(&mut v)?;
     DESIGN.check_numbers(&v, "metadata")?;
     crate::config::validate_rules_json(&v)?;
     crate::config::validate_styles_json(&v)?;
@@ -768,9 +770,20 @@ pub fn read(s: &str) -> Result<Document> {
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
+}
+
+/// Take a plain JSON design's drawings out of its JSON and read each, before the design's own
+/// rules see anything: a drawing this build can't read refuses the design, never dropped.
+fn take_drawings(v: &mut Value) -> Result<Vec<crate::drawing::Drawing>> {
+    let Some(list) = v.as_object_mut().and_then(|o| o.remove("drawings")) else { return Ok(Vec::new()) };
+    let Value::Array(list) = list else { return Err(DocError::Invalid("damaged design: `drawings` is not a list".into())) };
+    crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+    let read = |(i, d): (usize, Value)| crate::drawing::Drawing::from_value(d).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)));
+    list.into_iter().enumerate().map(read).collect()
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {

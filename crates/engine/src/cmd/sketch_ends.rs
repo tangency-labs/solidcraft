@@ -4,7 +4,8 @@
 use serde_json::{Value, json};
 use solidcraft_sketch::{ConstraintKind, EndReport, EndTouch, Sketch, loose_ends};
 
-use super::sketch::{add_c, edit, target_sketch};
+use super::sketch::{add_c, edit};
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, string_list};
 use crate::{EngineError, Result, Session};
@@ -53,7 +54,7 @@ fn report_json(sk: &Sketch, r: &EndReport) -> Value {
 }
 
 fn loose_ends_cmd(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = target_sketch(s, p, "sketch.loose_ends")?;
+    let id = sketch_store::target(s, p, "sketch.loose_ends")?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
     Ok(report_json(&ss.sketch, &ss.ends))

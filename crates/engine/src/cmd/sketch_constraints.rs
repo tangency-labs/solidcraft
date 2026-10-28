@@ -6,6 +6,7 @@ use solidcraft_geom::Vec2;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, constraint_result, dof_now, edit, listed, redundancy, residual_of};
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list, vec2};
 use crate::{EngineError, Result, Session};
@@ -396,8 +397,8 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     if !driven {
         // Making it driving must not over-constrain: compare with the sketch without it.
-        let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
-        let mut sk = s.doc.sketch(id)?.clone();
+        let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
+        let mut sk = sketch_store::read(&s.doc, id)?.clone();
         if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == cid) {
             c.driven = true;
         }
@@ -457,12 +458,7 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
 }
 
 fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = match p.get("sketch") {
-        Some(Value::Number(n)) => n.as_u64(),
-        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-        _ => s.active_sketch,
-    }
-    .ok_or_else(|| bad("sketch.glyphs", "no such sketch"))?;
+    let id = sketch_store::target(s, p, "sketch.glyphs")?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let failing = &ss.report.failing;
@@ -496,7 +492,7 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
     let at = req_vec2(cmd, p, "at")?;
     let from = p.get("from").and_then(vec2);
     let r = num(p, "radius").filter(|r| *r > 0.0).unwrap_or(1.0);
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch is not evaluated".into()))?;
     let sk = &ss.sketch;

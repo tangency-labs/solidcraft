@@ -79,12 +79,7 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let mut combs: Vec<(String, Vec<(Vec3, f64, Vec3)>)> = Vec::new();
     let curves = string_list(p, "curves");
     if !curves.is_empty() {
-        let id = match p.get("sketch") {
-            Some(Value::Number(n)) => n.as_u64(),
-            Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-            _ => s.active_sketch,
-        }
-        .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+        let id = super::sketch_store::target(s, p, cmd)?;
         let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
         for c in curves.iter().take(1000) {
             let ci = ss.sketch.curve_index(c).ok_or_else(|| bad(cmd, format!("unknown curve `{c}`")))?;
@@ -230,12 +225,7 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
     let mut items: Vec<(String, Option<(f64, Vec3)>)> = Vec::new();
     let curves = string_list(p, "curves");
     if !curves.is_empty() {
-        let id = match p.get("sketch") {
-            Some(Value::Number(n)) => n.as_u64(),
-            Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-            _ => s.active_sketch,
-        }
-        .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+        let id = super::sketch_store::target(s, p, cmd)?;
         let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
         for c in curves.iter().take(1000) {
             let ci = ss.sketch.curve_index(c).ok_or_else(|| bad(cmd, format!("unknown curve `{c}`")))?;

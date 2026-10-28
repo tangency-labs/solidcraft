@@ -174,7 +174,9 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
         label: String::new(),
         doc: d.clone(),
         active_sketch: None,
+        active_sheet_sketch: None,
         pending_moves: Default::default(),
+        part: None,
     };
     let docs: Vec<_> = (0..6).map(doc).collect();
     // The turn began at depth 3 with docs[3]; the history then lost its oldest step.
@@ -185,6 +187,11 @@ fn merging_finds_the_turns_start_when_the_history_was_trimmed() {
     // A start that is no longer in the history: nothing is merged.
     let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
     assert_eq!(merge_undo(&mut undo, &doc(9), 3, "Agent"), 0);
+    assert_eq!(undo.len(), 5);
+    // A drawing's step among the model's: each part keeps its own steps.
+    let mut undo: Vec<_> = docs[1..6].iter().map(snap).collect();
+    undo[3].part = Some(7);
+    assert_eq!(merge_undo(&mut undo, &docs[3], 3, "Agent"), 0);
     assert_eq!(undo.len(), 5);
 }
 

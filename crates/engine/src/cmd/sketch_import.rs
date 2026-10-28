@@ -9,6 +9,7 @@ use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{edit, ids_of};
+use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
 use crate::{EngineError, Result, Session};
 
@@ -129,12 +130,13 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         Ok((ids_of(sk, &cs), texts))
     })?;
     // Text becomes sketch text.
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
     for t in texts {
         if let Geom2::Text { text, at, height, angle } = t {
+            // Not `sketch_store::update`: a text that can't be linked is skipped, not refused.
             let mut doc = (*s.doc).clone();
-            let mut sk = doc.sketch(id)?.clone();
+            let mut sk = sketch_store::read(&doc, id)?.clone();
             if super::sketch_project::add_link(
                 s,
                 &doc,
@@ -145,7 +147,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             )
             .is_ok()
             {
-                *doc.sketch_mut(id)? = sk;
+                sketch_store::write(&mut doc, id, sk)?;
                 *s.doc_mut() = doc;
                 n_text += 1;
             }
@@ -164,12 +166,7 @@ fn insert_svg(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.export_dxf";
-    let id = match p.get("sketch") {
-        Some(Value::Number(n)) => n.as_u64(),
-        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-        _ => s.active_sketch,
-    }
-    .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+    let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let sk = &ss.sketch;

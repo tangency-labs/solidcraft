@@ -8,7 +8,6 @@ use std::sync::Arc;
 mod drawing;
 mod native_cache;
 mod thumbnail;
-pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use native_cache::read_design_geometry;
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
@@ -74,12 +73,6 @@ struct PackageWriter {
 }
 
 impl PackageWriter {
-    fn new() -> PackageWriter {
-        PackageWriter { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0 }
-    }
-    fn finish(self) -> Result<Vec<u8>> {
-        Ok(self.zip.finish().map_err(invalid)?.into_inner())
-    }
     fn part(&mut self, name: &str, bytes: &[u8], compressed: bool) -> Result<()> {
         if bytes.len() > if name.ends_with(".step") { MAX_STEP_PART } else { MAX_PART } {
             return Err(invalid("part too large"));
@@ -228,7 +221,7 @@ fn write_container(
     thumbnail: Option<&[u8]>,
     budget: usize,
 ) -> Result<Vec<u8>> {
-    let mut writer = PackageWriter::new();
+    let mut writer = PackageWriter { zip: zip::ZipWriter::new(Cursor::new(Vec::new())), names: BTreeSet::new(), expanded: 0, resolved: 0 };
     let mut features = Vec::with_capacity(doc.features.len());
     for feature in &doc.features {
         let replacements = match &feature.kind {
@@ -273,10 +266,16 @@ fn write_container(
         value.as_object_mut().ok_or_else(|| invalid("canvas metadata"))?.insert("image_blob".into(), blob);
         canvases.push(value);
     }
-    let metadata = replace(doc, fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases))])).map_err(invalid)?;
+    let replacements = fields([("features", Value::Array(features)), ("canvases", Value::Array(canvases)), ("drawings", Value::Null)]);
+    let mut metadata = replace(doc, replacements).map_err(invalid)?;
+    // The drawings have entries of their own: `document.json` is the same with them or without.
+    if let Some(o) = metadata.as_object_mut() {
+        o.remove("drawings");
+    }
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
+    drawing::write(&mut writer, doc)?;
     // The model cache is optional: one that does not fit the container is left out, never a
     // failed save.
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata).ok()).filter(|(manifest, data)| {
@@ -302,7 +301,7 @@ fn write_container(
     if let Some(png) = thumbnail {
         thumbnail::write(&mut writer, png, &metadata)?;
     }
-    let bytes = writer.finish()?;
+    let bytes = writer.zip.finish().map_err(invalid)?.into_inner();
     if bytes.len() > MAX_DESIGN_BYTES {
         return Err(invalid(format!("the design would be {} MB, over the {} MB a design file may hold", bytes.len() >> 20, MAX_DESIGN_BYTES >> 20)));
     }
@@ -436,8 +435,9 @@ impl<R: Read + Seek> PackageReader<R> {
         }
         self.document.as_ref().filter(|d| d.len() <= limit).cloned().ok_or_else(|| invalid("metadata budget"))
     }
-    fn has_part(&self, name: &str) -> bool {
-        self.zip.index_for_name(name).is_some()
+    /// Every entry's name (each was checked when the container was opened).
+    fn names(&self) -> Result<Vec<String>> {
+        self.zip.file_names().map(|name| name.map(|n| n.into_owned()).map_err(invalid)).collect()
     }
     fn part(&mut self, name: &str) -> Result<Vec<u8>> {
         self.limited_part(name, if name.ends_with(".step") { MAX_STEP_PART } else { MAX_PART })
@@ -623,33 +623,6 @@ pub(super) fn read(bytes: &[u8]) -> Result<Document> {
 /// keeps one seekable file handle instead of buffering the complete archive. JSON continues
 /// through the normal migrations.
 pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
-    let mut source = open_regular_file(path)?;
-    if is_container_source(&mut source)? {
-        let mut reader = DesignContainerReader::new(source)?;
-        // A design with its model opens without a picture first: the model is the session.
-        let model = reader.geometry();
-        if let Some(notify) = notify
-            && model.is_none()
-            && let Ok(preview) = read_preview(&mut reader.reader)
-        {
-            notify(preview);
-        }
-        Ok((reader.read_document()?, model))
-    } else {
-        let mut bytes = Vec::new();
-        source.take(MAX_DESIGN_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(invalid)?;
-        Ok((crate::read_design(&bytes)?, None))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-type FileSource = std::fs::File;
-#[cfg(target_arch = "wasm32")]
-type FileSource = Cursor<Vec<u8>>;
-
-/// A file to read: inside the folders this process may use, a regular file, and at most
-/// [`MAX_DESIGN_BYTES`], read from its start.
-fn open_regular_file(path: &str) -> Result<FileSource> {
     #[cfg(not(target_arch = "wasm32"))]
     let mut source = {
         crate::vfs::check(path).map_err(invalid)?;
@@ -673,24 +646,33 @@ fn open_regular_file(path: &str) -> Result<FileSource> {
         return Err(invalid("file too large"));
     }
     source.seek(SeekFrom::Start(0)).map_err(invalid)?;
-    Ok(source)
-}
-
-/// Whether a source starts as a container does, leaving it at its start.
-fn is_container_source(source: &mut FileSource) -> Result<bool> {
     let mut prefix = [0u8; 4];
-    let size = source.seek(SeekFrom::End(0)).map_err(invalid)?;
-    source.seek(SeekFrom::Start(0)).map_err(invalid)?;
     if size >= 4 {
         source.read_exact(&mut prefix).map_err(invalid)?;
     }
     source.seek(SeekFrom::Start(0)).map_err(invalid)?;
-    Ok(is_design_container(&prefix))
+    if is_design_container(&prefix) {
+        let mut reader = DesignContainerReader::new(source)?;
+        // A design with its model opens without a picture first: the model is the session.
+        let model = reader.geometry();
+        if let Some(notify) = notify
+            && model.is_none()
+            && let Ok(preview) = read_preview(&mut reader.reader)
+        {
+            notify(preview);
+        }
+        Ok((reader.read_document()?, model))
+    } else {
+        let mut bytes = Vec::new();
+        source.take(MAX_DESIGN_BYTES as u64 + 1).read_to_end(&mut bytes).map_err(invalid)?;
+        Ok((crate::read_design(&bytes)?, None))
+    }
 }
 
 fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Document> {
-    if drawing::container_kind(reader)? == FileKind::Drawing {
-        return Err(IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()));
+    let version: Value = serde_json::from_slice(&reader.part("container.json")?).map_err(invalid)?;
+    if !matches!(version.get("format").and_then(Value::as_str), Some(VERSION | LEGACY_VERSION)) {
+        return Err(invalid("unsupported container version"));
     }
     let bytes = reader.document(MAX_DESIGN_BYTES)?;
     let metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
@@ -698,6 +680,9 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
+    if !doc.drawings.is_empty() {
+        return Err(invalid("ambiguous drawings in document.json and in their own entries"));
+    }
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -730,6 +715,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         }
         canvas.data = solidcraft_doc::canvas::base64_encode(bytes);
     }
+    doc.drawings = drawing::read(reader)?;
     Ok(doc)
 }
 

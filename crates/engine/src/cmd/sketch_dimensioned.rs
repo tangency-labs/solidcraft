@@ -9,6 +9,7 @@ use crate::{
 
 pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.draw.dimensioned";
+    let on_sheet = s.open_drawing.is_some();
     let create = str_(p, "command").ok_or_else(|| bad(cmd, "`command` must name a supported sketch creator"))?;
     let roles: &[&str] = match create {
         "sketch.line" => &["length", "angle"],
@@ -23,6 +24,10 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let mut params = p.get("params").filter(|v| v.is_object()).cloned().ok_or_else(|| bad(cmd, "`params` must be an object"))?;
     let dimensions = p.get("dimensions").and_then(Value::as_object).ok_or_else(|| bad(cmd, "`dimensions` must be an object"))?;
+    if on_sheet {
+        // Never let a compound tool select another sheet or a model sketch.
+        super::super::sketch_store::sheet_target(s, &params, cmd)?;
+    }
     if dimensions.len() > roles.len() || dimensions.keys().any(|key| !roles.contains(&key.as_str())) {
         return Err(bad(cmd, "unsupported dimension role for this creator"));
     }
@@ -106,7 +111,10 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         };
         // A typed size the sketch already has (a rectangle drawn onto another's side, the same
         // height) is placed as a driven (reference) dimension rather than refused.
-        let mut dimension = json!({"entities": entities, "type": ty, "value": value, "if_redundant": "driven"});
+        let mut dimension = json!({"entities": entities, "type": ty, "value": value});
+        if !on_sheet {
+            dimension["if_redundant"] = json!("driven");
+        }
         if let Some(sketch) = params.get("sketch") {
             dimension["sketch"] = sketch.clone();
         }

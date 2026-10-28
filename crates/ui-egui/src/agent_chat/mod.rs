@@ -1270,7 +1270,8 @@ fn end_turn(app: &mut SolveApp) {
 }
 
 /// Merge the undo steps made since `start_doc` (at depth `start_undo`) into one, labelled `label`;
-/// how many steps it took in (0: none were made, or the history no longer reaches that far).
+/// how many steps it took in (0: none were made, the history no longer reaches that far, or they
+/// changed several parts of the design, whose steps are each undone in their own part).
 fn merge_undo(
     undo: &mut Vec<solidcraft_engine::Snapshot>,
     start_doc: &Arc<solidcraft_engine::doc::Document>,
@@ -1282,6 +1283,10 @@ fn merge_undo(
     let Some(first) = (0..undo.len().min(start_undo + 1)).rev().find(|&i| undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc))) else {
         return 0;
     };
+    let part = undo.get(first).map(|s| s.part);
+    if undo.iter().skip(first).any(|s| Some(s.part) != part) {
+        return 0;
+    }
     let steps = undo.len() - first;
     undo.truncate(first + 1);
     if let Some(s) = undo.get_mut(first) {

@@ -146,7 +146,7 @@ fn sketch_of<'a>(
     if let Some(id) = sketch {
         return st.sketch(id);
     }
-    if let Some(ss) = s.active_sketch.and_then(|id| st.sketch(id)).filter(|ss| has(&ss.sketch)) {
+    if let Some(ss) = super::sketch_store::active(s).and_then(|id| st.sketch(id)).filter(|ss| has(&ss.sketch)) {
         return Some(ss);
     }
     st.sketches.iter().rev().map(|ss| &**ss).find(|ss| has(&ss.sketch))

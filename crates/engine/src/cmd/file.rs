@@ -15,8 +15,8 @@ use crate::params::{bad, bool_, num, str_, string_list};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("file.new", "New Design", new_doc).icon("new").key("Ctrl+N").noundo().params("name?"),
-    CommandSpec::new("doc.open", "Open", open)
+    CommandSpec::new("file.new", "New Design", new_doc).any_part().icon("new").key("Ctrl+N").noundo().params("name?"),
+    CommandSpec::new("doc.open", "Open", open).any_part()
         .icon("open")
         .key("Ctrl+O")
         .noundo()
@@ -29,22 +29,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .3mf, .stl, .obj, .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept)"),
-    CommandSpec::new("file.save", "Save", save)
+    CommandSpec::new("file.save", "Save", save).any_part()
         .icon("save")
         .key("Ctrl+S")
         .noundo()
         .params("path? (default: current file); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
-    CommandSpec::new("file.save_as", "Save As", save_as)
+    CommandSpec::new("file.save_as", "Save As", save_as).any_part()
         .icon("save")
         .noundo()
         .params("path; format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false)"),
-    CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
+    CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).any_part().icon("restore")
         .noundo()
         .params("dir? (default: the recovery folder) → designs autosaved by apps that crashed or closed with unsaved changes"),
-    CommandSpec::new("doc.recover", "Recover Design", recover).icon("restore")
+    CommandSpec::new("doc.recover", "Recover Design", recover).any_part().icon("restore")
         .noundo()
         .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
-    CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", recovery_discard).icon("delete").noundo().params("id, or all: true; dir?"),
+    CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", recovery_discard).any_part().icon("delete").noundo().params("id, or all: true; dir?"),
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()

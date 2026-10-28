@@ -9,6 +9,7 @@ use solidcraft_doc::{Document, FeatureKind};
 use solidcraft_geom::{Plane, Vec3};
 use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
 
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, str_, vec3};
 use crate::{EngineError, Result, Session};
@@ -196,7 +197,7 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         Some(anchor) => solidcraft_doc::project::refresh_face_anchor_links(&doc, &vals, &st, &plane, sk, anchor),
         None => solidcraft_doc::project::refresh_links(&doc, &vals, &st, &plane, sk),
     };
-    if let Ok(stored) = doc.sketch(id)
+    if let Ok(stored) = sketch_store::read(&doc, id)
         && sk.positions_in(stored).is_some()
     {
         let mut solved = sk.clone();
@@ -254,19 +255,18 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind) -> Result<Va
     if refs.is_empty() {
         return Err(bad(cmd, "`refs` is empty"));
     }
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    refresh(s, &doc, id, &mut sk);
-    let mut out = Vec::new();
-    for src in sources {
-        let what = src.describe();
-        let l = add_link(s, &doc, id, &mut sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-        out.push(link_json(&sk, &l));
-    }
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
+    let out = sketch_store::update(s, id, |s, doc, sk| {
+        refresh(s, doc, id, sk);
+        let mut out = Vec::new();
+        for src in sources {
+            let what = src.describe();
+            let l = add_link(s, doc, id, sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+            out.push(link_json(sk, &l));
+        }
+        Ok(out)
+    })?;
     Ok(json!({"links": out}))
 }
 
@@ -284,18 +284,16 @@ fn include_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Add one link from `src` to the active sketch and report it.
 fn one_link(s: &mut Session, cmd: &str, kind: LinkKind, src: LinkSource) -> Result<Value> {
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    refresh(s, &doc, id, &mut sk);
-    let what = src.describe();
-    let l = add_link(s, &doc, id, &mut sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-    let mut out = link_json(&sk, &l);
-    let wires: Vec<String> = sk.link_wires(&l).iter().filter_map(|w| sk.wires.get(*w).map(|w| w.id.clone())).collect();
-    out["wires"] = json!(wires);
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
-    Ok(out)
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    sketch_store::update(s, id, |s, doc, sk| {
+        refresh(s, doc, id, sk);
+        let what = src.describe();
+        let l = add_link(s, doc, id, sk, kind, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
+        let mut out = link_json(sk, &l);
+        let wires: Vec<String> = sk.link_wires(&l).iter().filter_map(|w| sk.wires.get(*w).map(|w| w.id.clone())).collect();
+        out["wires"] = json!(wires);
+        Ok(out)
+    })
 }
 
 fn project_to_surface(s: &mut Session, p: &Value) -> Result<Value> {
@@ -338,7 +336,7 @@ fn spun_profile(s: &mut Session, p: &Value) -> Result<Value> {
         "Y" => (Vec3::ZERO, Vec3::Y),
         "Z" => (Vec3::ZERO, Vec3::Z),
         _ => {
-            let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+            let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
             let st = s.model.state();
             let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch is not evaluated".into()))?;
             let ci = ss.sketch.curve_index(axis).ok_or_else(|| bad(cmd, format!("unknown curve `{axis}`")))?;
@@ -371,48 +369,47 @@ fn fit_section(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    let l = add_link(s, &doc, id, &mut sk, LinkKind::Intersect, LinkSource::Body { body }).map_err(|e| bad(cmd, e.to_string()))?;
-    let curves: Vec<String> = sk.link_curves(&l).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
-    sk.break_link(&l)?;
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let curves = sketch_store::update(s, id, |s, doc, sk| {
+        let l = add_link(s, doc, id, sk, LinkKind::Intersect, LinkSource::Body { body }).map_err(|e| bad(cmd, e.to_string()))?;
+        let curves: Vec<String> = sk.link_curves(&l).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
+        sk.break_link(&l)?;
+        Ok(curves)
+    })?;
     Ok(json!({"curves": curves}))
 }
 
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.break_link";
-    let id = s.active_sketch.ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
-    let mut doc = (*s.doc).clone();
-    let sk = doc.sketch_mut(id)?;
-    let mut links: Vec<String> = Vec::new();
-    if let Some(l) = str_(p, "link") {
-        if sk.link(l).is_none() {
-            return Err(bad(cmd, format!("no link `{l}`")));
+    let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
+    let links = sketch_store::update(s, id, |_, _, sk| {
+        let mut links: Vec<String> = Vec::new();
+        if let Some(l) = str_(p, "link") {
+            if sk.link(l).is_none() {
+                return Err(bad(cmd, format!("no link `{l}`")));
+            }
+            links.push(l.to_string());
         }
-        links.push(l.to_string());
-    }
-    for e in crate::params::string_list(p, "entities") {
-        let l = sk
-            .curves
-            .iter()
-            .find(|c| c.id == e)
-            .and_then(|c| c.link.clone())
-            .or_else(|| sk.points.iter().find(|q| q.id == e).and_then(|q| q.link.clone()))
-            .ok_or_else(|| bad(cmd, format!("`{e}` is not linked geometry")))?;
-        if !links.contains(&l) {
-            links.push(l);
+        for e in crate::params::string_list(p, "entities") {
+            let l = sk
+                .curves
+                .iter()
+                .find(|c| c.id == e)
+                .and_then(|c| c.link.clone())
+                .or_else(|| sk.points.iter().find(|q| q.id == e).and_then(|q| q.link.clone()))
+                .ok_or_else(|| bad(cmd, format!("`{e}` is not linked geometry")))?;
+            if !links.contains(&l) {
+                links.push(l);
+            }
         }
-    }
-    if links.is_empty() {
-        return Err(bad(cmd, "give `link` or `entities`"));
-    }
-    for l in &links {
-        sk.break_link(l)?;
-    }
-    *s.doc_mut() = doc;
+        if links.is_empty() {
+            return Err(bad(cmd, "give `link` or `entities`"));
+        }
+        for l in &links {
+            sk.break_link(l)?;
+        }
+        Ok(links)
+    })?;
     Ok(json!({"broken": links}))
 }
 
@@ -427,10 +424,25 @@ fn auto_project(s: &mut Session, p: &Value) -> Result<Value> {
 /// makes a point held at the line's midpoint (and `"vertex:x,y,z"` is the vertex form). Everything
 /// else is left as it is. The links are added to the active sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
-    let Some(id) = s.active_sketch else { return Ok(p.clone()) };
+    // A sheet may be open while the model retains its own active sketch. Never
+    // project into that model or reinterpret its new local ids as sheet points.
+    let sheet = s.open_drawing.is_some();
+    let target = if sheet { None } else { sketch_store::active(s) };
+    if !sheet && target.is_none() {
+        return Ok(p.clone());
+    }
     let mut out = p.clone();
     let mut doc: Option<(Document, Sketch)> = None;
     let fix = |v: &mut Value, s: &Session, doc: &mut Option<(Document, Sketch)>| -> Result<()> {
+        // These spellings denote automatic projection/snap operations, not an
+        // authored 2D point. Reject even malformed values with an `at` fallback.
+        if sheet
+            && (v.get("vertex").is_some()
+                || v.get("on_edge").is_some()
+                || v.as_str().is_some_and(|text| ["vertex:", "mid:", "on:", "x:"].iter().any(|prefix| text.starts_with(prefix))))
+        {
+            return Err(bad(cmd, "not supported yet: automatic snap or projection in a sheet sketch; use a 2D point or exact local point id"));
+        }
         let (vertex, edge) = (v.get("vertex").and_then(vec3), v.get("on_edge").and_then(vec3));
         // String forms from interactive snapping: "vertex:x,y,z" and "mid:<line>".
         let vertex = vertex.or_else(|| {
@@ -454,9 +466,10 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         if vertex.is_none() && edge.is_none() && mid.is_none() && on.is_none() {
             return Ok(());
         }
+        let id = target.ok_or_else(|| bad(cmd, "no model sketch is being edited"))?;
         if doc.is_none() {
             let d = (*s.doc).clone();
-            let mut sk = d.sketch(id)?.clone();
+            let mut sk = sketch_store::read(&d, id)?.clone();
             refresh(s, &d, id, &mut sk);
             *doc = Some((d, sk));
         }
@@ -511,7 +524,8 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
     }
     if let Some((mut d, sk)) = doc {
-        *d.sketch_mut(id)? = sk;
+        let id = target.ok_or_else(|| bad(cmd, "no model sketch is being edited"))?;
+        sketch_store::write(&mut d, id, sk)?;
         *s.doc_mut() = d;
     }
     Ok(out)
@@ -535,7 +549,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
     let plane = sketch_plane(&doc, id, &state)?;
     let names = state.body(body).map(solidcraft_doc::naming::face_names).unwrap_or_default();
 
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     let mut links = Vec::with_capacity(indices.len());
     for &index in indices {
         let resolved = solidcraft_doc::project::resolve_face_indices(&state, &plane, LinkKind::Project, body, &[index])?;
@@ -545,7 +559,7 @@ pub(super) fn project_internal_faces(s: &mut Session, id: u64, body: &str, indic
         }
         links.push(link);
     }
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     Ok(links)
 }
@@ -568,13 +582,13 @@ pub(super) fn auto_project_face(s: &mut Session, id: u64, _at: Vec3) -> Result<O
     let state = solidcraft_doc::state_in_face_anchor_frame(&doc, &raw, &anchor, author)?;
     let plane = doc.resolve_face_anchor(&anchor, author, &raw)?;
     let resolved = solidcraft_doc::project::resolve_anchored_face(&doc, &state, &plane, LinkKind::Project, &anchor)?;
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     let link = sk.add_link_with_wires(LinkKind::Project, resolved.source, &resolved.geom, &resolved.wires)?;
     if let Some(link) = sk.links.iter_mut().find(|entry| entry.id == link) {
         link.face_name = Some(anchor.target.name.clone());
         link.auto_face = true;
     }
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     Ok(Some(link))
 }

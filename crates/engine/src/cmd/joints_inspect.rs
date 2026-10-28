@@ -189,6 +189,7 @@ fn face_ref(doc: &Document, name: &str) -> Value {
             .filter(|(k, _)| k.strip_prefix('s').is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
             .map_or(curve, |(_, c)| c);
         let found = f.kind.input_sketches().into_iter().find_map(|id| {
+            // design-only: a joint names a curve of one of the design's sketches.
             let sk = doc.sketch(id).ok()?;
             let c = sk.curves.iter().find(|c| c.id == curve)?;
             let curve_type = serde_json::to_value(&c.kind).ok().and_then(|k| k.get("type").cloned()).unwrap_or(Value::Null);

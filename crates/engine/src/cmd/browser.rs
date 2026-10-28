@@ -682,6 +682,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         && super::sketch::face::anchor(&plane)
             .is_none_or(|next| next.target != anchor.target || next.component != anchor.component || next.path != anchor.path)
     {
+        // design-only: Redefine Sketch Plane edits the design's sketch feature.
         let sketch = trial.doc_mut().sketch_mut(id)?;
         if let Some(mut visible) = visible_geometry {
             let constraints: std::collections::BTreeMap<_, _> =

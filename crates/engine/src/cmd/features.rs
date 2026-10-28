@@ -262,7 +262,7 @@ pub(super) fn feature_sketch(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
             _ => Err(bad(cmd, format!("`{key}` is not a sketch"))),
         };
     }
-    if let Some(a) = s.active_sketch {
+    if let Some(a) = super::sketch_store::active(s) {
         return Ok(a);
     }
     let limit = s.doc.marker.unwrap_or(usize::MAX);
