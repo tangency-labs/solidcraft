@@ -8,37 +8,31 @@
 //! `my_test_tsurf_cyl_creation_fast`; lines spanning a periodic direction make the
 //! no-area loops of faces without seam edge: cylinder circles, sphere caps and bands,
 //! torus bands and diagonals), or the natural face of an analytic surface
-//! (`CreateFaceInRegionFromSurface`, as `my_test_closed_sphere_properties`). There is no
-//! Rust B-rep builder, so the Rust side imports the graph the shim exports (unit
-//! `topology.face_p2`'s layout and importer).
+//! (`CreateFaceInRegionFromSurface`, as `my_test_closed_sphere_properties`). The Rust
+//! side makes the same B-rep with the Rust kernel ([`own_brep`]: the Rust reader, the
+//! shared face builder and this runner's curves and natural-face builders, in the
+//! shim's call order and traversal order), so no C++ state reaches its geometry or
+//! topology.
 //!
 //! **Face props.** `ClassifyLoops` reads the face props of its only caller,
-//! `SmFaceProps::SetProps_Stage3`. With `props` `1` the shim builds them as that caller
-//! does (`SetProps_Stage2`, `ReSet(SM_PROPSTAGE_3)`, the loop props) and exports the
-//! values `ClassifyLoops` reads (stage, closed flags, poles, the loops' seam crossing
-//! and winding counts, the seam classifications' end point classes and vertices, the
-//! seam done-touch lists, and for the loop bisector and `GetLoopCrossings` the zone
-//! tolerance, no-vertex poles, pole points and missing seam direction); both sides then run `ClassifyLoops` on those same props (the
-//! Rust side imports them; the seam classifications' non-vertex point classifications
-//! carry no object, which `ClassifyLoops` never reads). The target loops are exported
-//! too. With `props` `0` the props are fresh and `ClassifyLoops` computes them itself
-//! (`SetProps_Stage2`; the Rust side runs the port of unit `heal.face_props`).
+//! `SmFaceProps::SetProps_Stage3`. With `props` `1` each side builds them as that caller
+//! does (`SetProps_Stage2`, `ReSet(SM_PROPSTAGE_3)`, the loop props; the Rust side with
+//! the port of unit `heal.face_props`, [`stage3_props`]) on its own B-rep, and runs
+//! `ClassifyLoops` on them. With `props` `0` the props are fresh and `ClassifyLoops`
+//! computes them itself (`SetProps_Stage2`). The case (face, props, target loops and
+//! the rejection guards) is resolved by each side from its own B-rep (the Rust side's
+//! [`setup`], the shim's `setup` in its call order); no C++ state reaches the Rust side.
 //!
 //! **Deferred.** Fresh props of a closed surface need `SmFace::HasSeamProblem`
 //! (`topology.face_p4`), which reaches its unported callees.
 //!
-//! **Exact geometry.** The shim exports an analytic face surface (`SmCylinder`,
-//! `SmSphere`, `SmTorus`, `SmCone`, ...) and an ellipse or circle edge curve with its
-//! exact database record when that record is lossless (`sc_analytic_export.h`,
-//! `sc_exact_curve_export.h`), and the importer rebuilds them with the ported readers.
-//! Before, it imported their B-spline parts only: the loop bisector then ran on
-//! approximated geometry and flipped a loop classification in three cylinder cases (two
-//! at scale `1e-3`, and `gen0360` on macOS), now the named regressions `cyl_*` in
-//! `cases.json`. Geometry still imported as a B-spline part (unit `topology.face_p2`'s
-//! `Exact`) stays compared, since the loop classification is integer-valued. The export marks the gap caches the shim's props
-//! build filled but carries no values; the import refills them
-//! (`topology_vertexuse::refill_gaps`), since the bisector's `CurveOnClassify` reads the
-//! edge/face gaps (plan/findings/query.face_p4--gen0360-macos-exact-records.md).
+//! **Native geometry.** The analytic face surfaces and ellipse edge curves are the Rust
+//! kernel's own (`CreateCanonical`, `SwapUV`, the reader); before, the importer rebuilt
+//! them from the shim's exact records, and before that imported their B-spline parts
+//! only (the loop bisector then flipped a loop classification in three cylinder cases,
+//! now the named regressions `cyl_*` in `cases.json`). The gap caches are the Rust
+//! B-rep's own: those the build's `init_gaps` walk fills, and those the props build and
+//! `ClassifyLoops` compute (plan/findings/query.face_p4--gen0360-macos-exact-records.md).
 //!
 //! **Rejected** (both sides report `rejected`): the inputs the FFI wrapper documents,
 //! where `ClassifyLoops` would read outside its arrays.
@@ -58,19 +52,20 @@ use solidcore::heal::face_props::{
     ClassifyLoopsOut, FaceProps, HealNotYetFaceType, LoopObject, LoopProps, Looptree, PropStage,
     Tri,
 };
-use solidcore::intersect::curve_class::p1::{CrvDirOnFaceType, CurveClassification, TouchData};
-use solidcore::intersect::point_class::PointClassType;
+use solidcore::intersect::curve_class::p1::{CrvDirOnFaceType, CurveClassification};
 use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::kernel::Kernel;
 use solidcore::math::Point3;
-use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use solidcore::geom::extent2d::Extent2d;
+use solidcore::geom::vector2d::Point2;
 use solidcore::query::face::p4 as qf4;
+use solidcore::surface::surface::Surface;
+use solidcore::topology::Brep;
 use solidcore::topology::{EdgeId, EdgeuseId, FaceId, LoopId, VertexId};
 use solidcore_ffi::units::query_face_p4::{self as ffi, Op};
 
 use super::topology_edgeuse_p1::{domain, flag, gen_surface, push_surface, SrfIn, FILES};
-use super::topology_face_p2::import;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -436,12 +431,6 @@ impl Rd<'_> {
     }
 }
 
-fn loop_id(i: i64) -> Result<LoopId, HarnessError> {
-    u32::try_from(i)
-        .map(LoopId::from_index)
-        .map_err(|_| harness("bad loop index"))
-}
-
 fn index_of(l: Option<LoopId>) -> i64 {
     l.map_or(-1, |l| i64::from(l.index()))
 }
@@ -575,162 +564,546 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         .int("scratch_size", scratch))
 }
 
-/// The imported seam classification: `n` intervals whose end point classifications
-/// carry the exported class (and vertex).
-fn classification(
+// ---- the Rust B-rep ---------------------------------------------------------------------
+
+/// The shim's `read_any_surface`: a B-spline (or plane) over its natural domain, or a
+/// real analytic surface made by its `CreateCanonical` at the default placement,
+/// `SwapUV`'d when `swap`, over its natural domain with an unbounded direction (above
+/// `1e5` wide) clamped to `[0, scale*c]`. The error is the build's (the shim's NULL
+/// surface, then `SM_ERR`).
+fn any_surface(
     k: &Kernel,
-    rd: &mut Rd<'_>,
-) -> Result<Option<CurveClassification<H>>, HarnessError> {
-    if rd.int()? == 0 {
-        return Ok(None);
+    s: &AnySrf,
+) -> Result<Result<(Surface, Extent2d), SolidError>, HarnessError> {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::surface::cone::Cone;
+    use solidcore::surface::sphere::Sphere;
+    use solidcore::surface::torus::{Torus, TorusOptions};
+    const OP: &str = "difftest::query_face_p4::read_any_surface";
+    if let AnySrf::Bspline { surface } = s {
+        let s = super::topology_edgeuse_p1::surface_of(surface)?;
+        return Ok(s.natural_uv_domain_with_nurb(k).map(|d| (s, d)));
     }
-    let n = rd.count()?;
-    let mut cc = CurveClassification::new(k);
-    cc.set_size(k, n).map_err(|e| harness(e.to_string()))?;
-    for i in 0..n {
-        let iv = cc.at_mut(i).map_err(|e| harness(e.to_string()))?;
-        for end in 0..2 {
-            let class = rd.int()?;
-            let vertex = rd.int()?;
-            let class = i32::try_from(class)
-                .ok()
-                .and_then(PointClassType::from_code)
-                .ok_or_else(|| harness("bad point class"))?;
-            let object = u32::try_from(vertex)
-                .ok()
-                .map(|v| H::Topo(EntityRef::Vertex(VertexId::from_index(v))));
-            let pc = if end == 0 { &mut iv.start } else { &mut iv.end };
-            pc.set_class_object(class, object);
+    let origin = Axis2Placement::default();
+    let (made, scale, c, swap) = match s {
+        AnySrf::Bspline { .. } => return Err(harness("unreachable surface kind")),
+        AnySrf::Cylinder { scale, a, c, swap } => (
+            Cone::create_canonical_cylinder(k, &origin, scale * a).map(Surface::from),
+            *scale,
+            *c,
+            *swap,
+        ),
+        AnySrf::Sphere { scale, a, swap } => (
+            Sphere::create_canonical(k, &origin, scale * a).map(Surface::from),
+            *scale,
+            0.0,
+            *swap,
+        ),
+        AnySrf::Torus { scale, a, b, swap } => (
+            Torus::create_canonical(
+                k,
+                &origin,
+                scale * a,
+                scale * b,
+                TorusOptions::default(),
+                None,
+            )
+            .map(Surface::from),
+            *scale,
+            0.0,
+            *swap,
+        ),
+        AnySrf::Cone {
+            scale,
+            a,
+            b,
+            c,
+            swap,
+        } => (
+            Cone::create_canonical_with_semi_angle(k, &origin, scale * a, *b, None, false, false)
+                .map(Surface::from),
+            *scale,
+            *c,
+            *swap,
+        ),
+    };
+    // a failed CreateCanonical or SwapUV: the shim's NULL surface
+    let Ok(mut surface) = made else {
+        return Ok(Err(SolidError::sm_err(OP)));
+    };
+    if swap && surface.swap_uv(k).is_err() {
+        return Ok(Err(SolidError::sm_err(OP)));
+    }
+    let dom = match surface.natural_uv_domain_with_nurb(k) {
+        Ok(d) => d,
+        Err(e) => return Ok(Err(e)),
+    };
+    let (mut lo, mut hi) = (dom.min(), dom.max());
+    if hi.x - lo.x > 1e5 {
+        lo.x = 0.0;
+        hi.x = scale * c;
+    }
+    if hi.y - lo.y > 1e5 {
+        lo.y = 0.0;
+        hi.y = scale * c;
+    }
+    Ok(Ok((surface, Extent2d::from_points(lo, hi))))
+}
+
+/// The point at fractions `(a, b)` of `dom` (the shim's `at_frac`).
+fn at_frac(dom: &Extent2d, a: f64, b: f64) -> Point2 {
+    Point2::new(
+        dom.min().x + a * (dom.max().x - dom.min().x),
+        dom.min().y + b * (dom.max().y - dom.min().y),
+    )
+}
+
+/// One `MakeFaceWithCurves` face of a [`BrepIn::Curves`] source (the shim's
+/// `make_face_with_curves`): the surface, its UV line and circle trims and the vertex
+/// loop points, on the infinite region.
+fn curves_face(
+    k: &mut Kernel,
+    b: &mut Brep,
+    surface: &AnySrf,
+    loops: &[Vec<CurveIn>],
+    points: &[[f64; 2]],
+) -> Result<Result<(), SolidError>, HarnessError> {
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
+    use solidcore::topology::brep::p2::ArenaNotifyState;
+    use solidcore::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+    use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+    let (srf, dom) = match any_surface(k, surface)? {
+        Ok(x) => x,
+        Err(e) => return Ok(Err(e)),
+    };
+    let mut uv = Vec::new();
+    let mut orientations = Vec::new();
+    for c in loops.iter().flatten() {
+        let (curve, rev) = match c {
+            CurveIn::Line { a, b, c, d, rev } => {
+                let p = at_frac(&dom, *a, *b);
+                let q = at_frac(&dom, *c, *d);
+                (
+                    BSplineCurve::create_line_segment(
+                        2,
+                        Point3::new(p.x, p.y, 0.0),
+                        Point3::new(q.x, q.y, 0.0),
+                    ),
+                    *rev,
+                )
+            }
+            CurveIn::Circle { a, b, r, rev } => {
+                let ctr = at_frac(&dom, *a, *b);
+                let side = (dom.max().x - dom.min().x).min(dom.max().y - dom.min().y);
+                let mut frame = Axis2Placement::default();
+                // SetCanonical's status is ignored, as there
+                let _ = frame.set_canonical(
+                    Point3::new(ctr.x, ctr.y, 0.0),
+                    Point3::new(0.0, 0.0, 1.0),
+                    Point3::new(1.0, 0.0, 0.0),
+                );
+                (
+                    BSplineCurve::create_circle_segment(
+                        2,
+                        &frame,
+                        r * side,
+                        0.0,
+                        360.0,
+                        NurbCircleParam::Quadratic,
+                    ),
+                    *rev,
+                )
+            }
+        };
+        match curve {
+            Ok(c) => {
+                uv.push(Curve::from(c));
+                orientations.push(if rev {
+                    OrientType::Opposite
+                } else {
+                    OrientType::Same
+                });
+            }
+            Err(e) => return Ok(Err(e)),
         }
     }
-    Ok(Some(cc))
-}
-
-fn touches(rd: &mut Rd<'_>) -> Result<Vec<TouchData<H>>, HarnessError> {
-    let n = rd.count()?;
-    let mut v = Vec::new();
-    for _ in 0..n {
-        let conn = rd.int()?;
-        let dir = rd.int()?;
-        let loop_index = rd.int()?;
-        let connected_to = match conn {
-            -1 => None,
-            c if c >= 0 => Some(H::Topo(EntityRef::Loop(loop_id(c)?))),
-            _ => return Err(harness("touch connected to a non-loop (guard missed it)")),
-        };
-        v.push(TouchData {
-            connected_to,
-            loop_dir: i32::try_from(dir)
-                .ok()
-                .and_then(CrvDirOnFaceType::from_code)
-                .ok_or_else(|| harness("bad touch direction"))?,
-            loop_index: u64::try_from(loop_index).map_err(|_| harness("bad loop index"))?,
-            param: 0.0,
-            pt_classify_index: 0,
-            pt_classify: None,
-        });
+    let mut loop_points = Vec::new();
+    for [a, bb] in points {
+        match srf.evaluate_point(k, at_frac(&dom, *a, *bb)) {
+            Ok(p) => loop_points.push(p),
+            Err(e) => return Ok(Err(e)),
+        }
     }
-    Ok(v)
+    let input = FaceCurvesInput {
+        loops: loops.iter().map(Vec::len).collect(),
+        curves_3d: None,
+        uv_curves: Some(uv),
+        orientations,
+        loop_points,
+    };
+    let mut state = ArenaNotifyState::new(b);
+    let this_face = |face| arena_identity(CacheObject::Face(face));
+    let mut env = state.env(None);
+    let region = b.infinite_region();
+    Ok(make_face_with_curves(
+        k,
+        b,
+        region,
+        input,
+        srf,
+        &dom,
+        OrientType::Same,
+        None,
+        &this_face,
+        &mut env,
+    )
+    .map(|_| ()))
 }
 
-fn tri(code: i64) -> Result<Tri, HarnessError> {
-    Ok(match code {
-        0 => Tri::False,
-        1 => Tri::True,
-        2 => Tri::Unsure,
-        _ => return Err(harness("bad SmBoolean")),
-    })
+/// The natural face of a [`BrepIn::Natural`] source (`CreateFaceInRegionFromSurface`
+/// on the infinite region).
+fn natural_face(
+    k: &mut Kernel,
+    b: &mut Brep,
+    surface: &AnySrf,
+) -> Result<Result<(), SolidError>, HarnessError> {
+    use solidcore::topology::brep::p2::ArenaNotifyState;
+    use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+    use solidcore::topology::topology_traverser::Marks;
+    let (srf, dom) = match any_surface(k, surface)? {
+        Ok(x) => x,
+        Err(e) => return Ok(Err(e)),
+    };
+    let mut state = ArenaNotifyState::new(b);
+    let mut env = state.env(None);
+    let mut marks = Marks::default();
+    let this_face = |face| arena_identity(CacheObject::Face(face));
+    let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
+        env: &mut env,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    let region = b.infinite_region();
+    Ok(solidcore::topology::brep::p8::create_face_in_region_from_surface(
+        k,
+        b,
+        region,
+        Some(srf),
+        &dom,
+        &mut fenv,
+    )
+    .map(|_| ()))
+}
+
+/// The Rust B-rep of a B-rep source of this unit's shim `build` (shared with unit
+/// `query.face_p3`), made by the Rust kernel in the shim's traversal order (unit
+/// `topology.face_p2`'s conventions: the same `walk` and `init_gaps` walk): an `.smb`
+/// file read by the Rust reader, a face from a surface by [`crate::own_builder`], and
+/// the curves and natural faces here. No C++ state reaches it. A failed build is
+/// `build_failed: <status>`, as the C++ side reports the shim's NULL build.
+pub(super) fn own_brep(
+    brep: &BrepIn,
+    validate_only: bool,
+    init_gaps: bool,
+) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
+    use super::topology_face_p2::{own_output, CONVENTIONS};
+    let mut k = Kernel::default();
+    let built = match brep {
+        BrepIn::File { .. } | BrepIn::Face { .. } => {
+            return Ok(super::topology_face_p2::own_brep(
+                &mut k,
+                brep,
+                &brep_path(brep)?,
+                validate_only,
+                init_gaps,
+            )?
+            .map_err(|o| failed_as_build(&o)))
+        }
+        BrepIn::Curves {
+            copies,
+            surface,
+            loops,
+            points,
+        } => {
+            let mut bad = None;
+            let raw = crate::own_builder::in_new_brep(&mut k, |k, b| {
+                solidcore::topology::brep::p2::set_tolerance(k, b, 1e-7, false, true)?;
+                let mut first = Ok(());
+                for _ in 0..*copies {
+                    let r = match curves_face(k, b, surface, loops, points) {
+                        Ok(r) => r,
+                        Err(h) => {
+                            bad = Some(h);
+                            return Err(SolidError::invalid_input("difftest", "bad source"));
+                        }
+                    };
+                    if first.is_ok() {
+                        first = r;
+                    }
+                }
+                first
+            })?;
+            if let Some(h) = bad {
+                return Err(h);
+            }
+            crate::own_builder::finish(&mut k, raw, validate_only, init_gaps, &CONVENTIONS)?
+        }
+        BrepIn::Natural { surface } => {
+            let mut bad = None;
+            let raw = crate::own_builder::in_new_brep(&mut k, |k, b| {
+                solidcore::topology::brep::p2::set_tolerance(k, b, 1e-7, false, true)?;
+                match natural_face(k, b, surface) {
+                    Ok(r) => r,
+                    Err(h) => {
+                        bad = Some(h);
+                        Err(SolidError::invalid_input("difftest", "bad source"))
+                    }
+                }
+            })?;
+            if let Some(h) = bad {
+                return Err(h);
+            }
+            crate::own_builder::finish(&mut k, raw, validate_only, init_gaps, &CONVENTIONS)?
+        }
+    };
+    Ok(own_output(built).map_err(|o| failed_as_build(&o)))
+}
+
+/// A failed build's output in this unit's form (`build_failed: <status>`; an unported
+/// deferral unchanged).
+fn failed_as_build(o: &Output) -> Output {
+    match o.error.as_deref().and_then(|n| n.strip_prefix("brep_build_status_")) {
+        Some(status) => Output::err(format!("build_failed: {status}")),
+        None => o.clone(),
+    }
+}
+
+// ---- the case, resolved on the Rust B-rep (the shim's `setup`) ---------------------------
+
+/// The deferral or failure output of a Rust error the shim's case setup cannot ignore:
+/// an unported callee defers the case, anything else is a Rust error.
+pub(super) fn setup_error(e: &SolidError) -> Output {
+    Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
+}
+
+/// Whether the shim ignores a status of the case setup's props calls (it discards
+/// `SetProps_Stage2`'s status, and `SmLoopProps::SetProps` always succeeds upstream):
+/// an upstream status. An unported callee or any other Rust error (an invalid input
+/// included: it can be a limitation of the runner's handles) is not ignored.
+fn ignored_status(e: &SolidError) -> bool {
+    matches!(e, SolidError::Upstream { .. })
+}
+
+/// The face props `SetProps_Stage3` has built when it calls `ClassifyLoops`, and its
+/// closed loops: the shim's `new SmFaceProps(face, face_index)`, `SetProps_Stage2(face,
+/// face_index, SM_HO_ALL)` (on `b` in place, its status ignored) and `stage3_prefix`
+/// (`SmFaceProps.cpp`, `SetProps_Stage3`, from `ReSet(SM_PROPSTAGE_3)` to the closed
+/// loop count, as the library's `build_loop_props` ports it). `Err(output)` for an
+/// error the shim has no counterpart for (an unported callee defers the case).
+pub(super) fn stage3_props<O: LoopObject>(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    face_index: u64,
+) -> Result<(FaceProps<O>, Vec<LoopId>), Box<Output>> {
+    use solidcore::heal::face_props::{ContainmentType, LoopuseType};
+    use solidcore::heal::face_props::HealerOpType;
+    let mut props: FaceProps<O> = FaceProps::for_face(face, face_index);
+    if let Err(e) = props.set_props_stage2_mut(k, b, face, face_index, HealerOpType::All) {
+        if !ignored_status(&e) {
+            return Err(Box::new(setup_error(&e)));
+        }
+    }
+    // stage3_prefix
+    props.reset(PropStage::Stage3);
+    props.prop_stage = PropStage::Stage3A;
+    let Some(m_face) = props.face else {
+        return Err(Box::new(Output::err("rust_error: props without face")));
+    };
+    let loops = match solidcore::topology::face::p2::loops(b, m_face, false, None) {
+        Ok(l) => l,
+        Err(e) => return Err(Box::new(setup_error(&e))),
+    };
+    let mut loop_props = vec![LoopProps::new(); loops.len()];
+    let mut closed_loops = Vec::new();
+    for (lp, &l) in loop_props.iter_mut().zip(&loops) {
+        if let Err(e) = lp.set_props(k, b, l, &props) {
+            if !ignored_status(&e) {
+                return Err(Box::new(setup_error(&e)));
+            }
+        }
+        if lp.loopuse_type == LoopuseType::Vertexuse {
+            if (lp.seam_crossing_cnt_u > 0 || lp.seam_crossing_cnt_v > 0)
+                && lp.vertex_loop_on_pole.is_true()
+            {
+                closed_loops.push(l);
+            }
+        } else if lp.closed_3d.is_true() || lp.closed_ptrs.is_true() {
+            closed_loops.push(l);
+        } else {
+            lp.containment = ContainmentType::WireLoop;
+        }
+    }
+    props.loop_props = loop_props;
+    props.closed_loop_cnt = closed_loops.len() as u64;
+    Ok((props, closed_loops))
+}
+
+/// The shim's `fresh_props_closed`: whether fresh props of the selected face would be on
+/// a closed surface (`SetProps_Stage2` on a separate Rust build of the same source, its
+/// status ignored; a failed build counts as closed, as the shim's).
+fn fresh_props_closed(k: &Kernel, i: &Inputs) -> Result<Result<bool, Output>, HarnessError> {
+    use solidcore::heal::face_props::HealerOpType;
+    let Ok((mut b, _)) = own_brep(&i.brep, i.validate_only, i.init_gaps)? else {
+        return Ok(Ok(true));
+    };
+    let n = b.faces().len();
+    if n == 0 {
+        return Ok(Ok(true));
+    }
+    let fi = i.face as usize % n;
+    let face = FaceId::from_index(u32::try_from(fi).map_err(|_| harness("bad face"))?);
+    let mut props: FaceProps<H> = FaceProps::for_face(face, fi as u64);
+    if let Err(e) = props.set_props_stage2_mut(k, &mut b, face, fi as u64, HealerOpType::All) {
+        if !ignored_status(&e) {
+            return Ok(Err(setup_error(&e)));
+        }
+    }
+    Ok(Ok(props.closed_u != Tri::False || props.closed_v != Tri::False))
+}
+
+/// The shim's `staged_guard`: the inputs `ClassifyLoops` would read outside its arrays
+/// with (a touch list of odd length, a touch connected to something other than a loop, a
+/// touch loop index outside the target loops, an empty seam classification of a loop
+/// crossing that seam, more target loops than loop props on a closed surface).
+fn staged_guard(p: &FaceProps<H>, n_target: usize) -> bool {
+    let n_target = n_target as u64;
+    for l in [
+        &p.done_touch_list_u,
+        &p.done_touch_list_v,
+        &p.raw_touch_list_u,
+        &p.raw_touch_list_v,
+    ] {
+        if l.len() % 2 != 0 {
+            return true;
+        }
+        for t in l {
+            if t.connected_to.is_some_and(|c| c.as_loop().is_none()) {
+                return true;
+            }
+            if t.loop_index >= n_target {
+                return true;
+            }
+        }
+    }
+    let closed = p.closed_u != Tri::False || p.closed_v != Tri::False;
+    if closed && n_target > p.loop_props.len() as u64 {
+        return true;
+    }
+    let empty = |c: &Option<CurveClassification<H>>| c.as_ref().is_none_or(|c| c.size() == 0);
+    for lp in &p.loop_props {
+        if p.closed_u != Tri::False && lp.seam_crossing_cnt_u > 0 && empty(&p.crv_class_u) {
+            return true;
+        }
+        if p.closed_v != Tri::False && lp.seam_crossing_cnt_v > 0 && empty(&p.crv_class_v) {
+            return true;
+        }
+    }
+    false
+}
+
+/// A resolved case: the face, its props and the target loops, or the case's output.
+type CaseOf = Result<(FaceId, FaceProps<H>, Vec<LoopId>), Output>;
+
+/// The case on `b` as the shim's `setup` resolves it (`face_sel props_mode
+/// loops_mode`): the face, its props and the target loops; `Err(rejected)` where the
+/// shim rejects it, `Err(output)` for an error of the Rust setup.
+fn setup(
+    k: &Kernel,
+    b: &mut Brep,
+    i: &Inputs,
+) -> Result<CaseOf, HarnessError> {
+    use solidcore::topology::face::p2::loops as face_loops;
+    let rejected = || Ok(Err(Output::err("rejected")));
+    let n_faces = b.faces().len();
+    if n_faces == 0 {
+        return rejected();
+    }
+    let face_index = i.face as usize % n_faces;
+    let face_of = |x: usize| u32::try_from(x).map(FaceId::from_index).map_err(|_| harness("bad face"));
+    let face = face_of(face_index)?;
+    let (props, base) = if i.props == 1 {
+        match stage3_props::<H>(k, b, face, face_index as u64) {
+            Ok(x) => x,
+            Err(o) => return Ok(Err(*o)),
+        }
+    } else {
+        match fresh_props_closed(k, i)? {
+            Ok(true) => return rejected(),
+            Ok(false) => {}
+            Err(o) => return Ok(Err(o)),
+        }
+        let base = match face_loops(b, face, false, None) {
+            Ok(l) => l,
+            Err(e) => return Ok(Err(setup_error(&e))),
+        };
+        (FaceProps::for_face(face, face_index as u64), base)
+    };
+    // loops_mode: 0 empty (ClassifyLoops gets them), 1 base, 2 base reversed, 3 base
+    // without its last loop, 4 base with its first loop replaced by a loop of the next
+    // face (prepended to an empty base)
+    let mut loops = Vec::new();
+    match i.loops {
+        1 | 3 | 4 => {
+            let mut first = 0;
+            if i.loops == 4 {
+                let other = face_of((face_index + 1) % n_faces)?;
+                let ol = match face_loops(b, other, false, None) {
+                    Ok(l) => l,
+                    Err(e) => return Ok(Err(setup_error(&e))),
+                };
+                match ol.first() {
+                    Some(&l) if other != face => loops.push(l),
+                    _ => return rejected(),
+                }
+                first = usize::from(!base.is_empty());
+            }
+            let n = base.len() - usize::from(i.loops == 3 && !base.is_empty());
+            loops.extend(base.iter().take(n).skip(first));
+        }
+        2 => loops.extend(base.iter().rev()),
+        _ => {}
+    }
+    if i.props == 1 {
+        let mut n_target = loops.len();
+        if n_target == 0 {
+            n_target = match face_loops(b, face, false, None) {
+                Ok(l) => l.len(),
+                Err(e) => return Ok(Err(setup_error(&e))),
+            };
+        }
+        if staged_guard(&props, n_target) {
+            return rejected();
+        }
+    }
+    Ok(Ok((face, props, loops)))
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
-    let o = run_ffi(Op::Export, i)?;
-    if o.first() != Some(&0.0) {
-        return Ok(Output::err(format!(
-            "build_failed: {}",
-            o.get(1).copied().unwrap_or(-9.0)
-        )));
-    }
-    let (graph, block) = ffi::split_export(&o).ok_or_else(|| harness("bad export"))?;
-    let mut rd = Rd { v: block, at: 0 };
-    if rd.num()? != 0.0 {
-        return Ok(Output::err("rejected"));
-    }
-    let (mut b, _exact) = import(graph)?;
-    // ClassifyLoops reads the cached gaps the export only marks as set (the bisector's
-    // CurveOnClassify with bHasBigGaps): recompute their values, as the refilling
-    // importers do
-    super::topology_vertexuse::refill_gaps(&mut b);
-    let face_index = rd.int()?;
-    let face = FaceId::from_index(u32::try_from(face_index).map_err(|_| harness("bad face"))?);
-
-    // the props: imported (props 1) or fresh (props 0)
-    let stage = rd.int()?;
-    let props_face_index = rd.int()?;
-    let closed_u = tri(rd.int()?)?;
-    let closed_v = tri(rd.int()?)?;
-    let poles = rd.int()?;
-    let not_yet = rd.int()?;
-    let n_lp = rd.count()?;
-    let mut loop_props = Vec::new();
-    for _ in 0..n_lp {
-        let mut lp = LoopProps::new();
-        lp.seam_crossing_cnt_u = rd.int()? as u64;
-        lp.seam_winding_cnt_u = rd.int()? as u64;
-        lp.seam_crossing_cnt_v = rd.int()? as u64;
-        lp.seam_winding_cnt_v = rd.int()? as u64;
-        loop_props.push(lp);
-    }
-    let crv_class_u = classification(&k, &mut rd)?;
-    let crv_class_v = classification(&k, &mut rd)?;
-    let done_u = touches(&mut rd)?;
-    let done_v = touches(&mut rd)?;
-    let zone_tol = rd.num()?;
-    let no_vertex_poles = rd.int()?;
-    let bad_missing_seam = rd.int()?;
-    let n_pp = rd.count()?;
-    let mut pole_points = Vec::new();
-    for _ in 0..n_pp {
-        pole_points.push(Point3::new(rd.num()?, rd.num()?, rd.num()?));
-    }
-    let raw_u = touches(&mut rd)?;
-    let raw_v = touches(&mut rd)?;
-    let bad_crossed_seam = rd.int()?;
-    let n_loops = rd.count()?;
-    let mut loops = rd
-        .ints(n_loops)?
-        .into_iter()
-        .map(loop_id)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut props: FaceProps<H> = FaceProps::for_face(face, props_face_index as u64);
-    if i.props == 1 {
-        props.prop_stage = PropStage::from_code(stage).ok_or_else(|| harness("bad stage"))?;
-        props.closed_u = closed_u;
-        props.closed_v = closed_v;
-        props.poles = poles as u64;
-        props.not_yet_face_type =
-            HealNotYetFaceType::from_code(not_yet).ok_or_else(|| harness("bad not-yet type"))?;
-        props.loop_props = loop_props;
-        props.crv_class_u = crv_class_u;
-        props.crv_class_v = crv_class_v;
-        props.done_touch_list_u = done_u;
-        props.done_touch_list_v = done_v;
-        props.zone_tol_3d = zone_tol;
-        props.no_vertex_poles =
-            u64::try_from(no_vertex_poles).map_err(|_| harness("bad no-vertex poles"))?;
-        props.bad_missing_seam_dir = u64::try_from(bad_missing_seam)
-            .ok()
-            .and_then(SurfParamType::from_code)
-            .ok_or_else(|| harness("bad SmSurfParamType"))?;
-        props.pole_points = pole_points;
-        props.raw_touch_list_u = raw_u;
-        props.raw_touch_list_v = raw_v;
-        props.bad_crossed_seam_dir = u64::try_from(bad_crossed_seam)
-            .ok()
-            .and_then(SurfParamType::from_code)
-            .ok_or_else(|| harness("bad SmSurfParamType"))?;
-    }
+    // the B-rep: the Rust kernel's own build of the source (no C++ state)
+    let (mut b, _) = match own_brep(&i.brep, i.validate_only, i.init_gaps)? {
+        Ok(x) => x,
+        Err(o) => return Ok(o),
+    };
+    // the case (rejection, face, props, target loops), resolved from that B-rep as the
+    // shim's `setup` resolves it
+    let (face, mut props, mut loops) = match setup(&k, &mut b, i)? {
+        Ok(x) => x,
+        Err(o) => return Ok(o),
+    };
 
     let mut out = initial_out();
     let mut scratch: CurveClassification<H> = CurveClassification::new(&k);

@@ -989,6 +989,7 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     prefix_lists: true,
     vertex_edge_gaps: true,
     vertex_lists_last: false,
+    skip_edge_list: false,
     face_owner: &face_owner,
     edge_owner: &edge_owner,
 };

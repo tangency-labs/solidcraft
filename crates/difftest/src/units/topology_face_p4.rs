@@ -2,12 +2,11 @@
 //! Rust: `solidcore::topology::face::p4`.
 //!
 //! Every op runs on a B-rep of unit `topology.vertexuse` (upstream `.smb` files, faces of
-//! B-spline surfaces, real `SmPlane`s or the analytic surfaces the export sends exactly):
-//! the C++ side builds a real `SmBrep`, gives its faces and edges the plain B-spline
-//! copies of the analytic geometry the export does not send exactly (what the Rust
-//! import rebuilds, keeping the owners) and runs the `SmFace` member on the selected
-//! face; the
-//! Rust side imports the graph that unit's shim exports and runs the port. Both sides
+//! B-spline surfaces, real `SmPlane`s or analytic surfaces): the C++ side builds a real
+//! `SmBrep` and runs the `SmFace` member on the selected face of its native geometry; the
+//! Rust side builds the same B-rep itself ([`super::topology_face_p1::own_brep`]: the
+//! Rust kernel's builders, or the Rust `.smb` reader, renumbered into the shim's
+//! traversal order) and runs the port. No C++ state reaches the Rust side. Both sides
 //! produce one flat record (`out`, laid out as in the ffi module): traversal indices,
 //! flags, statuses, line/face solutions and seam classification point classes.
 //!
@@ -15,7 +14,8 @@
 //! count (`-1` stays "no target array"), a `Connected` target modulo its kind's count.
 //! `Sector` picks the `edge`-th edge of the face (modulo its edge count) and the vertex
 //! at the end it starts from (`at_start`), so the curve leaves a face vertex; the
-//! selectors are resolved on the Rust import, whose traversal order is the export's.
+//! selectors are resolved by each side on its own B-rep (both in the shim's traversal
+//! order).
 //!
 //! **Not compared.** Attribute filters (`pOptAttributeId`): both sides pass none. The
 //! solutions' objects of `Line` (the surface pointer upstream, a handle here).
@@ -297,17 +297,29 @@ fn export_of(brep: &BrepIn) -> Result<Rc<Vec<f64>>, HarnessError> {
 /// before the op.
 type Resolved = Result<(Inputs, Rc<Vec<f64>>), Output>;
 
-/// The edges of a face in the import (`GetEdges`), for the `Sector` selectors.
-fn face_edges(ex: &[f64], f: FaceId) -> Result<Vec<EdgeId>, HarnessError> {
-    let (b, _) = shared::import(ex)?;
-    fp4::edges(&b, f, None, false, None).map_err(|e| harness(format!("rust import: {e}")))
+/// The edges of a face (`GetEdges`), for the `Sector` selectors.
+fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>, HarnessError> {
+    fp4::edges(b, f, None, false, None).map_err(|e| harness(format!("face edges: {e}")))
 }
 
+/// The C++ side's resolution: the selectors resolved on the import of the shim's export
+/// (the C++ B-rep's own traversal order).
 fn resolve(i: &Inputs) -> Result<Resolved, HarnessError> {
     let ex = export_of(&i.brep)?;
     let Some(c) = fixture::counts(&ex) else {
         return Ok(Err(Output::new().values("out", ex.to_vec())));
     };
+    let (b, _) = shared::import(&ex)?;
+    Ok(resolve_with(i, c, &b)?.map(|r| (r, ex)))
+}
+
+/// The inputs with the selectors resolved on a B-rep `b` with entity counts `c`, or the
+/// output of a case that ends before the op.
+fn resolve_with(
+    i: &Inputs,
+    c: [usize; 10],
+    b: &Brep,
+) -> Result<Result<Inputs, Output>, HarnessError> {
     let [_, _, _, n_f, _, n_l, ..] = c;
     if n_f == 0 {
         return Ok(Err(Output::err("no_face")));
@@ -343,7 +355,7 @@ fn resolve(i: &Inputs) -> Result<Resolved, HarnessError> {
             ..
         } => {
             let f = FaceId::from_index(r.face as u32);
-            let edges = face_edges(&ex, f)?;
+            let edges = face_edges(b, f)?;
             if edges.is_empty() {
                 return Ok(Err(Output::err("no_face_edge")));
             }
@@ -351,14 +363,21 @@ fn resolve(i: &Inputs) -> Result<Resolved, HarnessError> {
                 .get(shared::sel((*edge).max(0), edges.len()) as usize)
                 .copied()
                 .ok_or_else(|| harness("edge selector"))?;
-            let (b, _) = shared::import(&ex)?;
-            let [v0, v1] = b.edge(e).map_err(|e| harness(e.to_string()))?.vertices;
+            // the vertices of the edge's first and second edge uses (the end vertices as
+            // the export's import records them), on either side's own B-rep
+            let uses = &b.edge(e).map_err(|e| harness(e.to_string()))?.edgeuses;
+            let vertex_of = |eu: Option<&EdgeuseId>| -> Option<VertexId> {
+                let vu = b.edgeuse(*eu?).ok()?.vertexuse?;
+                b.vertexuse(vu).ok()?.vertex
+            };
+            let v0 = vertex_of(uses.first()).unwrap_or(VertexId::from_index(0));
+            let v1 = vertex_of(uses.get(1)).unwrap_or(v0);
             *edge = i64::from(e.index());
             *vertex = i64::from(if *at_start { v0 } else { v1 }.index());
         }
         _ => {}
     }
-    Ok(Ok((r, ex)))
+    Ok(Ok(r))
 }
 
 fn input_of(i: &Inputs) -> Result<(Op, String, Vec<f64>), HarnessError> {
@@ -707,9 +726,8 @@ fn sector_null_deref(b: &Brep, f: FaceId, v: VertexId, e: EdgeId) -> Result<bool
 }
 
 #[allow(clippy::too_many_lines)]
-fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
+fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
     let k = Kernel::default();
-    let (mut b, _) = shared::import(ex)?;
     let f = FaceId::from_index(i.face as u32);
     let mut o = vec![0.0];
     let loops_of = |l: i64| (l >= 0).then(|| vec![LoopId::from_index(l as u32)]);
@@ -750,7 +768,11 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
                 o.push(NULL_DEREF);
                 return Ok(o);
             };
-            let handle = SurfaceHandle(surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
+            let handle = SurfaceHandle(
+                surface
+                    .natural_uv_domain_with_nurb(&k)
+                    .map_err(|e| HarnessError::new(e.to_string()))?,
+            );
             let uv_domain = face.uv_domain;
             let tol = tol.unwrap_or(face.tolerance);
             let interval = ivl.map(|[t0, t1]| Extent1d::from_min_max(t0, t1));
@@ -879,11 +901,15 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let (r, ex) = match resolve(i)? {
+    let (b, c) = match super::topology_face_p1::own_brep(&i.brep, false, false)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
-    match rust_record(&r, &ex) {
+    let r = match resolve_with(i, c, &b)? {
+        Ok(r) => r,
+        Err(o) => return Ok(o),
+    };
+    match rust_record(&r, b) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(h)) => Err(h),

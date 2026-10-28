@@ -6,21 +6,20 @@
 //! builders (an upstream `.smb` file, `CreateFaceFromSurface` over a B-spline or `SmPlane`,
 //! `MakeFaceWithCurves` with line and circle UV trims and vertex loops over a B-spline or a
 //! real `SmCylinder` / `SmSphere` / `SmTorus` / `SmCone`, or an analytic surface's natural
-//! face). There is no Rust B-rep builder: the Rust side imports the graph the shim exports
-//! (unit `topology.face_p2`'s layout and importer, with unit `query.face_p4`'s exact
-//! records of analytic face surfaces and ellipse edge curves). Faces whose surface, and
-//! edges whose curve, the importer still cannot reproduce exactly (no lossless record:
-//! an `SmBSplineSurface` subclass other than `SmPlane`, an `SmBSplineCurve` subclass
-//! other than `SmLine`) are not compared: both sides report `inexact_geometry` when the
-//! operation evaluates them.
+//! face). The Rust side makes the same B-rep with the Rust kernel (unit `query.face_p4`'s
+//! `own_brep`, in the shim's traversal order) and resolves the case on it as the shim
+//! does (the face, `SetProps_Stage3`'s props and closed loops for the bisector, the sector
+//! line's edge uses, parameters and ends: [`resolve`], in the shim's call order), so no
+//! C++ state reaches its geometry, topology or case. Every face is compared: the native geometry needs
+//! no `inexact_geometry` skip.
 //!
 //! **Operations.**
 //! - `tight`: `SmFace::CalculateTightBoundingBox` of a face: status and box.
 //! - `internal`: `SmFace::CalculateAnInternalPoint`, the only caller of the file-static
 //!   `sm_FaceClassifyUVLine`: status and point.
 //! - `bisector`: `sms_FindAndClassifyLoopBisector` on the face props and closed loops
-//!   `SetProps_Stage3` builds (exported to the Rust side: closed flags, poles and pole
-//!   points, missing seam direction, zone tolerance), with chosen loops marked as
+//!   `SetProps_Stage3` builds (each side builds its own, as unit `query.face_p4`'s
+//!   props mode 1), with chosen loops marked as
 //!   classified: status, seam flags, closure, whether a curve was built, the UV trim
 //!   line's ends and the classification's intervals (bounds and start / mid / end point
 //!   classes and vertices).
@@ -38,22 +37,22 @@ use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
 use solidcore::error::{EntityRef, SolidError};
 use solidcore::geom::extent1d::Extent1d;
-use solidcore::heal::face_props::{FaceProps, LoopObject, Tri};
+use solidcore::heal::face_props::{FaceProps, LoopObject};
 use solidcore::intersect::curve_class::p1::CurveClassification;
 use solidcore::intersect::point_class::{ClassObject, ClassObjectKind, PointClassification};
 use solidcore::kernel::Kernel;
 use solidcore::math::{Point2, Point3};
-use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::face::p3 as qf3;
 use solidcore::query::face::p4::ZEROED_CLASSIFY_LOOP_IO;
-use solidcore::topology::{edgeuse::p1 as eu1, Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId};
+use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId};
 use solidcore_ffi::units::query_face_p3::{self as ffi, Kind};
-use solidcore_ffi::units::query_face_p4::split_export;
 
-use super::query_face_p4::{brep_input, brep_path, gen_scale, gen_seam_face, rect, AnySrf, BrepIn, CurveIn};
+use super::query_face_p4::{
+    brep_input, brep_path, gen_scale, gen_seam_face, own_brep, rect, setup_error, stage3_props,
+    AnySrf, BrepIn, CurveIn,
+};
 use super::topology_edgeuse_p1::{domain, gen_surface, FILES};
-use super::topology_face_p2::{import, Exact};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -231,76 +230,14 @@ impl Rd<'_> {
     fn pt(&mut self) -> Result<Point3, HarnessError> {
         Ok(Point3::new(self.num()?, self.num()?, self.num()?))
     }
-
-    fn index(&mut self) -> Result<u32, HarnessError> {
-        u32::try_from(self.int()?).map_err(|_| harness("bad index in shim output"))
-    }
-}
-
-fn orient(code: i64) -> Result<OrientType, HarnessError> {
-    match code {
-        0 => Ok(OrientType::Unknown),
-        1 => Ok(OrientType::Same),
-        2 => Ok(OrientType::Opposite),
-        _ => Err(harness("bad orientation")),
-    }
-}
-
-fn tri(code: i64) -> Result<Tri, HarnessError> {
-    Ok(match code {
-        0 => Tri::False,
-        1 => Tri::True,
-        2 => Tri::Unsure,
-        _ => return Err(harness("bad SmBoolean")),
-    })
-}
-
-fn surf_param(code: i64) -> Result<SurfParamType, HarnessError> {
-    u64::try_from(code)
-        .ok()
-        .and_then(SurfParamType::from_code)
-        .ok_or_else(|| harness("bad SmSurfParamType"))
-}
-
-// ---- exactness ------------------------------------------------------------------------------
-
-fn face_inexact(exact: &Exact, f: FaceId) -> bool {
-    !exact.faces.get(f.index() as usize).copied().unwrap_or(true)
-}
-
-fn edge_inexact(exact: &Exact, e: EdgeId) -> bool {
-    !exact.edges.get(e.index() as usize).copied().unwrap_or(true)
-}
-
-/// Whether the face's surface or the curve of an edge of the face was not imported
-/// exactly.
-fn face_or_edges_inexact(b: &Brep, exact: &Exact, f: FaceId) -> bool {
-    if face_inexact(exact, f) {
-        return true;
-    }
-    let Ok(face) = b.face(f) else {
-        return false;
-    };
-    let Some(fu) = face.faceuse else {
-        return false;
-    };
-    let Ok(lus) = eu1::faceuse_loopuses(b, fu, false, None) else {
-        return false;
-    };
-    lus.into_iter().any(|lu| {
-        eu1::loopuse_edgeuses(b, lu).is_ok_and(|eus| {
-            eus.into_iter()
-                .any(|eu| eu1::edge(b, eu).ok().flatten().is_some_and(|e| edge_inexact(exact, e)))
-        })
-    })
 }
 
 // ---- the resolved cases -------------------------------------------------------------------
 
-/// What the export of a case gives the Rust side.
+/// The case the shim resolves from its B-rep, resolved by the Rust side from its own.
 enum Resolved {
     Face(FaceId),
-    Bisector(BisectorCase),
+    Bisector(Box<BisectorCase>),
     Sector(SectorCase),
 }
 
@@ -310,12 +247,7 @@ struct BisectorCase {
     loops: Vec<LoopId>,
     mask: u32,
     containment: i64,
-    closed_u: Tri,
-    closed_v: Tri,
-    poles: u64,
-    pole_points: Vec<Point3>,
-    missing_seam: SurfParamType,
-    zone_tol: f64,
+    props: FaceProps<H>,
 }
 
 struct SectorCase {
@@ -335,106 +267,261 @@ struct SectorCase {
     uv_ok: bool,
 }
 
-/// The export of `i`: the imported B-rep and the resolved case; `Err(output)` for a
-/// failed build, a rejected case or inexact geometry (the same output on both sides).
-fn export(i: &Inputs) -> Result<Result<(Brep, Resolved), Output>, HarnessError> {
-    let o = run_ffi(i, true)?;
-    if o.first() != Some(&0.0) {
-        return Ok(Err(Output::err(format!(
-            "build_failed: {}",
-            o.get(1).copied().unwrap_or(-9.0)
-        ))));
+/// The drop's solution object (`DropPoint` with no solution array: never stored).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DropObj;
+
+impl solidcore::geom::solution_array::SolutionObject for DropObj {
+    fn kind(&self) -> solidcore::geom::solution_array::ObjectKind {
+        solidcore::geom::solution_array::ObjectKind::Surface
     }
-    let (graph, block) = split_export(&o).ok_or_else(|| harness("bad export"))?;
-    let mut rd = Rd { v: block, at: 0 };
-    if rd.num()? != 0.0 {
-        return Ok(Err(Output::err("rejected")));
+}
+
+/// The shim's `face_frac`: the point at fractions `(a, b)` of the face's UV domain.
+fn face_frac(b: &Brep, f: FaceId, a: f64, c: f64) -> solidcore::Result<Point2> {
+    let d = solidcore::topology::face::p2::uv_domain(b, f)?;
+    Ok(Point2::new(
+        d.min().x + a * (d.max().x - d.min().x),
+        d.min().y + c * (d.max().y - d.min().y),
+    ))
+}
+
+/// The case of `i` on the Rust B-rep `b` (the Rust kernel's own build of the source,
+/// unit `query.face_p4`'s [`own_brep`]), resolved as the shim's `run` resolves it on
+/// its B-rep (face selection, `bisector_setup`, `sector_setup`, in their order); no C++
+/// state reaches it. `Err(output)` for a rejected case (`rejected`, as the shim's) or
+/// an error of the Rust setup (an unported callee defers the case).
+fn resolve(k: &Kernel, b: &mut Brep, i: &Inputs) -> Result<Result<Resolved, Output>, HarnessError> {
+    let rejected = || Ok(Err(Output::err("rejected")));
+    let n_faces = b.faces().len();
+    if n_faces == 0 {
+        return rejected();
     }
-    let (mut b, exact) = import(graph)?;
-    // the cached gaps the export only marks as set get their values (unit
-    // `query.face_p4`'s runner does the same)
-    super::topology_vertexuse::refill_gaps(&mut b);
-    let face = FaceId::from_index(rd.index()?);
-    let resolved = match &i.op {
-        OpIn::Tight | OpIn::Internal => {
-            if face_or_edges_inexact(&b, &exact, face) {
-                return Ok(Err(Output::err("inexact_geometry")));
-            }
-            Resolved::Face(face)
+    let face_index = i.face as usize % n_faces;
+    let face = FaceId::from_index(u32::try_from(face_index).map_err(|_| harness("bad face"))?);
+    match &i.op {
+        OpIn::Tight | OpIn::Internal => Ok(Ok(Resolved::Face(face))),
+        OpIn::Bisector { target, mask, containment } => {
+            Ok(bisector_setup(k, b, face, face_index, *target, *mask, *containment).map_err(|o| *o))
         }
-        OpIn::Bisector { .. } => {
-            let target = rd.count()?;
-            let n = rd.count()?;
-            let loops = (0..n)
-                .map(|_| rd.index().map(LoopId::from_index))
-                .collect::<Result<Vec<_>, _>>()?;
-            let mask = u32::try_from(rd.int()?).map_err(|_| harness("bad mask"))?;
-            let containment = rd.int()?;
-            let closed_u = tri(rd.int()?)?;
-            let closed_v = tri(rd.int()?)?;
-            let poles = u64::try_from(rd.int()?).map_err(|_| harness("bad poles"))?;
-            let n_pp = rd.count()?;
-            let pole_points = (0..n_pp).map(|_| rd.pt()).collect::<Result<Vec<_>, _>>()?;
-            let missing_seam = surf_param(rd.int()?)?;
-            let zone_tol = rd.num()?;
-            if face_or_edges_inexact(&b, &exact, face) {
-                return Ok(Err(Output::err("inexact_geometry")));
-            }
-            Resolved::Bisector(BisectorCase {
-                face,
-                target,
-                loops,
-                mask,
-                containment,
-                closed_u,
-                closed_v,
-                poles,
-                pole_points,
-                missing_seam,
-                zone_tol,
-            })
-        }
-        OpIn::Sector { .. } => {
-            let eu1 = EdgeuseId::from_index(rd.index()?);
-            let eu2 = EdgeuseId::from_index(rd.index()?);
-            let p = [rd.num()?, rd.num()?];
-            let tol = [rd.num()?, rd.num()?];
-            let o = [orient(rd.int()?)?, orient(rd.int()?)?];
-            let dim = u64::try_from(rd.int()?).map_err(|_| harness("bad dim"))?;
-            let start = rd.pt()?;
-            let end = rd.pt()?;
-            let curve_orient = orient(rd.int()?)?;
-            let curve_tol = rd.num()?;
-            let singular = rd.num()? != 0.0;
-            let sing_uv = Point2::new(rd.num()?, rd.num()?);
-            let uv_ok = rd.num()? != 0.0;
-            let edge_of = |eu| eu1::edge(&b, eu).ok().flatten();
-            if face_or_edges_inexact(&b, &exact, face)
-                || edge_of(eu1).is_some_and(|e| edge_inexact(&exact, e))
-                || edge_of(eu2).is_some_and(|e| edge_inexact(&exact, e))
-                || eu1::face(&b, eu2).ok().flatten().is_some_and(|f| face_or_edges_inexact(&b, &exact, f))
-            {
-                return Ok(Err(Output::err("inexact_geometry")));
-            }
-            Resolved::Sector(SectorCase {
-                face,
-                eu1,
-                eu2,
-                p,
-                tol,
-                o,
-                dim,
-                start,
-                end,
-                curve_orient,
-                curve_tol,
-                singular,
-                sing_uv,
-                uv_ok,
-            })
-        }
+        OpIn::Sector { .. } => sector_setup(k, b, face, &i.op),
+    }
+}
+
+/// The shim's `bisector_setup`: `SetProps_Stage3`'s props and closed loops (unit
+/// `query.face_p4`'s props mode 1), the target index (modulo the closed loop count),
+/// the mask and containment; rejected without closed loops or surface, or with a pole
+/// and fewer than four pole points.
+fn bisector_setup(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    face_index: usize,
+    target: u32,
+    mask: u8,
+    containment: u8,
+) -> Result<Resolved, Box<Output>> {
+    let (props, loops) = stage3_props::<H>(k, b, face, face_index as u64)?;
+    let surface = match solidcore::topology::face::p2::surface(b, face) {
+        Ok(s) => s.is_some(),
+        Err(e) => return Err(Box::new(setup_error(&e))),
     };
-    Ok(Ok((b, resolved)))
+    if loops.is_empty() || !surface {
+        return Err(Box::new(Output::err("rejected")));
+    }
+    let target = target as usize % loops.len();
+    // the pole points are read at their four slots
+    if props.poles != 0 && props.pole_points.len() < 4 {
+        return Err(Box::new(Output::err("rejected")));
+    }
+    Ok(Resolved::Bisector(Box::new(BisectorCase {
+        face,
+        target,
+        loops,
+        mask: u32::from(mask),
+        containment: i64::from(containment),
+        props,
+    })))
+}
+
+/// The shim's `sector_setup`: the edge uses, parameters, tolerances and orientations
+/// where the line crosses an edge's interior (mode 0) or the start vertex of an edge use
+/// (with its clockwise neighbour, mode 1, or radial, mode 2), and the line (3D from the
+/// crossing, its reverse, or the UV line), in the shim's call order.
+#[allow(clippy::too_many_lines)] // one shim routine
+fn sector_setup(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    op: &OpIn,
+) -> Result<Result<Resolved, Output>, HarnessError> {
+    use solidcore::topology::{edge, edgeuse::p1 as eu_mod, face::p2 as face_p2, loopuse};
+    let OpIn::Sector {
+        loop_sel,
+        eu: eu_sel,
+        mode,
+        frac,
+        curve: curve_kind,
+        ta,
+        tb,
+        curve_tol,
+        edge_tol,
+        singular,
+        sa,
+        sb,
+        uv_ok,
+    } = op
+    else {
+        return Err(harness("not a sector case"));
+    };
+    let rejected = || Ok(Err(Output::err("rejected")));
+    let fail = |e: &SolidError| Ok(Err(setup_error(e)));
+    macro_rules! r {
+        ($e:expr) => {
+            match $e {
+                Ok(x) => x,
+                Err(e) => return fail(&e),
+            }
+        };
+    }
+    let has_surface = r!(face_p2::surface(b, face)).is_some();
+    let loops = r!(face_p2::loops(b, face, false, None));
+    if !has_surface || loops.is_empty() {
+        return rejected();
+    }
+    let Some(&l) = loops.get(*loop_sel as usize % loops.len()) else {
+        return rejected();
+    };
+    if r!(loopuse::loop_loopuse(b, l)).is_none() {
+        return rejected();
+    }
+    let eus = r!(loopuse::loop_edgeuses(b, l));
+    let Some(&eu) = eus.get(*eu_sel as usize % eus.len().max(1)) else {
+        return rejected();
+    };
+    let Some(e) = r!(eu_mod::edge(b, eu)) else {
+        return rejected();
+    };
+    if r!(edge::curve(b, e)).is_none() {
+        return rejected();
+    }
+    let ivl = r!(edge::interval(b, e));
+    let (eu1, eu2, p1, p2, o1, o2);
+    if *mode == 0 {
+        // crossing an edge's interior: both edge uses the same
+        eu1 = eu;
+        eu2 = eu;
+        p1 = ivl.evaluate(*frac);
+        p2 = p1;
+        o1 = OrientType::Same;
+        o2 = OrientType::Opposite;
+    } else {
+        // at the start vertex of eu: eu (SAME) and its clockwise neighbour (OPPOSITE), or
+        // eu's radial edge use (mode 2)
+        eu1 = eu;
+        p1 = if r!(eu_mod::orientation(b, eu)) == OrientType::Same {
+            ivl.min()
+        } else {
+            ivl.max()
+        };
+        o1 = OrientType::Same;
+        let other = if *mode == 1 {
+            r!(eu_mod::cw_edgeuse(b, eu))
+        } else {
+            r!(eu_mod::radial(b, eu))
+        };
+        let Some(other) = other else {
+            return rejected();
+        };
+        let Some(e2) = r!(eu_mod::edge(b, other)) else {
+            return rejected();
+        };
+        if r!(edge::curve(b, e2)).is_none() {
+            return rejected();
+        }
+        eu2 = other;
+        let ivl2 = r!(edge::interval(b, e2));
+        p2 = if r!(eu_mod::orientation(b, other)) == OrientType::Same {
+            ivl2.max()
+        } else {
+            ivl2.min()
+        };
+        o2 = OrientType::Opposite;
+    }
+    let cross = {
+        let Some(c) = r!(edge::curve(b, e)) else {
+            return rejected();
+        };
+        r!(c.evaluate_point(k, p1))
+    };
+    // SmTol::GetZoneTol3d of an edge: its GetTolerance
+    let tol1 = if *edge_tol < 0.0 { r!(edge::tolerance(b, e)) } else { *edge_tol };
+    let tol2 = if *edge_tol < 0.0 {
+        match r!(eu_mod::edge(b, eu2)) {
+            Some(e2) => r!(edge::tolerance(b, e2)),
+            None => return rejected(),
+        }
+    } else {
+        *edge_tol
+    };
+    // the curve: a line from the crossing to the face point at fractions (ta, tb) (kind 0),
+    // the reverse line classified at its max end (kind 1), or the UV line between their
+    // parameters (kind 2)
+    let tuv = r!(face_frac(b, face, *ta, *tb));
+    let (dim, start, end, curve_orient);
+    {
+        let Some(srf) = r!(face_p2::surface(b, face)) else {
+            return rejected();
+        };
+        if *curve_kind == 2 {
+            let dom = r!(srf.natural_uv_domain_with_nurb(k));
+            let opts = solidcore::surface::surface::p5::DropPointOptions::default();
+            let dropped = match srf.drop_point::<DropObj>(k, cross, &dom, &opts) {
+                Ok(d) => d,
+                Err(e) if Output::unported(&e).is_some() => return fail(&e),
+                // a failed DropPoint status rejects the case, as the shim's
+                Err(_) => return rejected(),
+            };
+            if !dropped.success {
+                return rejected();
+            }
+            let cuv = dropped.result_uv;
+            dim = 2;
+            start = Point3::new(cuv.x, cuv.y, 0.0);
+            end = Point3::new(tuv.x, tuv.y, 0.0);
+            curve_orient = OrientType::Same;
+        } else {
+            let target = match srf.evaluate_point(k, tuv) {
+                Ok(p) => p,
+                Err(e) if Output::unported(&e).is_some() => return fail(&e),
+                Err(_) => return rejected(),
+            };
+            dim = 3;
+            start = if *curve_kind == 1 { target } else { cross };
+            end = if *curve_kind == 1 { cross } else { target };
+            curve_orient = if *curve_kind == 1 { OrientType::Opposite } else { OrientType::Same };
+        }
+    }
+    if start.distance(end) < 1e-9 {
+        return rejected();
+    }
+    let sing_uv = r!(face_frac(b, face, *sa, *sb));
+    Ok(Ok(Resolved::Sector(SectorCase {
+        face,
+        eu1,
+        eu2,
+        p: [p1, p2],
+        tol: [tol1, tol2],
+        o: [o1, o2],
+        dim,
+        start,
+        end,
+        curve_orient,
+        curve_tol: *curve_tol,
+        singular: *singular,
+        sing_uv,
+        uv_ok: *uv_ok,
+    })))
 }
 
 // ---- C++ side -----------------------------------------------------------------------------
@@ -444,10 +531,6 @@ fn status_err(status: f64) -> Output {
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    // the same rejections as the Rust side (failed build, rejected, inexact geometry)
-    if let Err(out) = export(i)? {
-        return Ok(out);
-    }
     let o = run_ffi(i, false)?;
     let mut rd = Rd { v: &o, at: 0 };
     if rd.num()? != 0.0 {
@@ -553,6 +636,9 @@ enum H {
     Curve(bool),
     EdgeCurve(EdgeId),
     Trim(EdgeuseId),
+    /// A temporary curve (the seam curves of `SmFace::HasSeamProblem`, which the props'
+    /// `SetProps_Stage2` runs on a closed surface).
+    Temp(usize),
 }
 
 impl ClassObject for H {
@@ -560,8 +646,14 @@ impl ClassObject for H {
         match self {
             Self::Topo(e) => e.class_kind(),
             Self::Surface(_) => ClassObjectKind::Surface,
-            Self::Curve(_) | Self::EdgeCurve(_) | Self::Trim(_) => ClassObjectKind::Curve,
+            Self::Curve(_) | Self::EdgeCurve(_) | Self::Trim(_) | Self::Temp(_) => {
+                ClassObjectKind::Curve
+            }
         }
+    }
+
+    fn temporary(index: usize, kind: ClassObjectKind) -> Option<Self> {
+        (kind == ClassObjectKind::Curve).then_some(Self::Temp(index))
     }
 }
 
@@ -643,13 +735,22 @@ fn point_class_pair(pc: &PointClassification<H>) -> [i64; 2] {
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
-    let (mut b, resolved) = match export(i)? {
+    // the B-rep: the Rust kernel's own build of the source (no C++ state)
+    let (mut b, _) = match own_brep(&i.brep, i.validate_only, i.init_gaps)? {
+        Ok(x) => x,
+        Err(out) => return Ok(out),
+    };
+    // the case, resolved from that B-rep as the shim resolves it
+    let resolved = match resolve(&k, &mut b, i)? {
         Ok(x) => x,
         Err(out) => return Ok(out),
     };
     Ok(match resolved {
         Resolved::Face(f) => match &i.op {
             OpIn::Internal => {
+                // the shim's `drop_trim_cache(f)` before `CalculateAnInternalPoint`
+                // (`harness/cpp/shim/query_face_p3.cpp`)
+                super::query_face_p1::drop_trim_cache(&b, f)?;
                 match solidcore::topology::face::p2::calculate_an_internal_point(&k, &mut b, f) {
                     Ok(p) => Output::new().values("point", p.to_array()),
                     Err(e) => rust_err(&e),
@@ -700,13 +801,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 fn rust_bisector(k: &Kernel, b: &Brep, c: &BisectorCase) -> Result<Output, HarnessError> {
-    let mut props: FaceProps<H> = FaceProps::for_face(c.face, 0);
-    props.closed_u = c.closed_u;
-    props.closed_v = c.closed_v;
-    props.poles = c.poles;
-    props.pole_points.clone_from(&c.pole_points);
-    props.bad_missing_seam_dir = c.missing_seam;
-    props.zone_tol_3d = c.zone_tol;
+    let props = &c.props;
     let containment = solidcore::heal::face_props::ContainmentType::from_code(c.containment)
         .ok_or_else(|| harness("bad containment"))?;
     let mut ios = vec![ZEROED_CLASSIFY_LOOP_IO; c.loops.len()];
@@ -728,7 +823,7 @@ fn rust_bisector(k: &Kernel, b: &Brep, c: &BisectorCase) -> Result<Output, Harne
         &c.loops,
         &ios,
         &marked,
-        &props,
+        props,
         &mut objects,
         &mut cc,
     );

@@ -3,12 +3,12 @@
 //!
 //! Every op runs on a B-rep of unit `topology.vertexuse` (upstream `.smb` files, faces of
 //! B-spline surfaces or real `SmPlane`s, wire edges, the `my_test_topology` network): the
-//! C++ side builds a real `SmBrep`, preserves exactly exported analytic surfaces and
-//! gives other surfaces and edge curves the plain B-spline copies the Rust import
-//! rebuilds (keeping the owners), then runs the
-//! `SmFace` member on the selected face; the Rust side imports the graph that unit's shim
-//! exports (with each edge curve owned by its edge, as upstream) and runs the port. Face
-//! and loop selectors are taken modulo their counts. Both sides produce one flat record
+//! C++ side builds a real `SmBrep` and runs the `SmFace` member on the selected face of its
+//! native geometry; the Rust side builds the same B-rep itself ([`own_brep`]: the Rust
+//! kernel's builders, or the Rust `.smb` reader, renumbered into the shim's traversal
+//! order), gives each edge curve its edge as owner (as upstream) and runs the port. No
+//! C++ state reaches the Rust side: each side resolves the face and loop selectors
+//! (modulo their counts) on its own B-rep. Both sides produce one flat record
 //! (`out`, laid out as in the ffi module): statuses, domains, gaps, curve samples and
 //! the orientation / UV trim curve state after the mutating ops.
 //!
@@ -41,9 +41,8 @@
 //! naming UB-137 and the trap: the harness then skips the Rust side and compares
 //! nothing. Seam calls the trap runs to completion compare as usual.
 //!
-//! **Not compared.** Edge curves and UV trim curves are still imported as plain
-//! B-splines (except lines), so conic curve paths (`SwapUV`'s conic mirrors) are not
-//! compared with the C++. Exactly exported analytic surface branches are retained.
+//! Both sides hold the B-rep's native geometry (analytic surfaces, conic edge curves),
+//! so the conic and analytic branches (`SwapUV`'s conic mirrors) are compared.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -57,9 +56,7 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::object::ObjectRef;
 use solidcore::heal::face_props::{FaceProps, LoopObject, Tri};
 use solidcore::intersect::curve_class::p1::CurveClassification;
-use solidcore::intersect::point_class::{
-    ClassObject, ClassObjectKind,
-};
+use solidcore::intersect::point_class::{ClassObject, ClassObjectKind};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -317,9 +314,15 @@ fn resolve(i: &Inputs) -> Result<Resolved, HarnessError> {
     let Some(c) = fixture::counts(&ex) else {
         return Ok(Err(Output::new().values("out", ex.to_vec())));
     };
+    Ok(resolve_with(i, c).map(|r| (r, ex)).map_err(|o| *o))
+}
+
+/// The inputs with the selectors resolved against entity counts `c`, or the output of
+/// a case without a face (or loop).
+fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
     let [_, _, _, n_f, _, n_l, ..] = c;
     if n_f == 0 {
-        return Ok(Err(Output::err("no_face")));
+        return Err(Box::new(Output::err("no_face")));
     }
     let mut r = i.clone();
     r.face = shared::sel(i.face.max(0), n_f);
@@ -333,13 +336,13 @@ fn resolve(i: &Inputs) -> Result<Resolved, HarnessError> {
         }
         OpIn::LoopRoundTrip { loop_ } => {
             if n_l == 0 {
-                return Ok(Err(Output::err("no_loop")));
+                return Err(Box::new(Output::err("no_loop")));
             }
             *loop_ = shared::sel((*loop_).max(0), n_l);
         }
         _ => {}
     }
-    Ok(Ok((r, ex)))
+    Ok(r)
 }
 
 fn input_of(i: &Inputs) -> Result<(Op, String, Vec<f64>), HarnessError> {
@@ -638,13 +641,9 @@ fn seam_problem(
     ),
     Fail,
 > {
-    let check = fp4::has_seam_problem_in_brep_mut::<H>(
-        k,
-        b,
-        f,
-        fp4::HasSeamProblemOptions::default(),
-    )
-    .map_err(|e| fail(&e))?;
+    let check =
+        fp4::has_seam_problem_in_brep_mut::<H>(k, b, f, fp4::HasSeamProblemOptions::default())
+            .map_err(|e| fail(&e))?;
     o.push(flag(check.has_problem));
     o.extend([
         f64::from(check.problem.crossed as u8),
@@ -684,9 +683,8 @@ fn reaches_brep(b: &Brep, f: FaceId) -> Result<bool, SolidError> {
 }
 
 #[allow(clippy::too_many_lines)] // one record per op
-fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
+fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
     let mut k = Kernel::default();
-    let (mut b, _) = shared::import(ex)?;
     // upstream edge curves are owned by their edges
     let edges: Vec<EdgeId> = b.edges().ids().collect();
     for e in edges {
@@ -849,7 +847,11 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
             let face = b.face(f).map_err(e)?;
             put_domain(&mut o, &face.uv_domain);
             match face.surface.as_ref() {
-                Some(s) => put_domain(&mut o, &s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?),
+                Some(s) => put_domain(
+                    &mut o,
+                    &s.natural_uv_domain_with_nurb(&k)
+                        .map_err(|e| HarnessError::new(e.to_string()))?,
+                ),
                 None => o.push(-1.0),
             }
         }
@@ -921,12 +923,98 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
     Ok(o)
 }
 
+/// The Rust B-rep of a `topology.vertexuse` B-rep block, built by the Rust kernel as
+/// that unit's shim (`sc_topology_fixture.h`) builds it: a shim-built source by
+/// [`crate::own_builder`], an `.smb` file by the Rust reader, both renumbered into the
+/// shim's traversal order under its conventions, or the build's error. No C++ state
+/// reaches it.
+///
+/// # Errors
+///
+/// A harness error for a source the shim would not accept either.
+pub(super) fn own_built(
+    src: &BrepIn,
+    validate_only: bool,
+    init_gaps: bool,
+) -> Result<crate::own_builder::Built, HarnessError> {
+    use crate::own_builder::{build_as, read_as, renumber_with, Built, Conventions};
+    let mut k = Kernel::default();
+    let conv = &Conventions::TOPOLOGY_FIXTURE;
+    let BrepIn::File { rebuild, .. } = src else {
+        return build_as(&mut k, src, validate_only, init_gaps, conv)?
+            .ok_or_else(|| harness("own builder: no build for a shim-built source"));
+    };
+    let path = shared::path_of(src)?;
+    if init_gaps {
+        // the gap walk may leave size estimates a copy does not carry: read afresh
+        return read_as(&mut k, &path, *rebuild, validate_only, init_gaps, conv);
+    }
+    let key = (path, *rebuild, validate_only);
+    // a copy of the same file's earlier Rust read (the reader is deterministic): the
+    // renumbering of a B-rep already in traversal order is a plain copy
+    let hit = OWN_READS.with(|c| {
+        c.borrow()
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, b)| renumber_with(b, conv))
+    });
+    if let Some(b) = hit {
+        return Ok(Built::Brep(Box::new(b?)));
+    }
+    let built = read_as(&mut k, &key.0, key.1, validate_only, false, conv)?;
+    if let Built::Brep(b) = &built {
+        let copy = renumber_with(b, conv)?;
+        OWN_READS.with(|c| {
+            let mut c = c.borrow_mut();
+            if c.len() >= 4 {
+                c.remove(0);
+            }
+            c.push((key, copy));
+        });
+    }
+    Ok(built)
+}
+
+/// A file source's key (path, rebuild, `validate_only`) and its Rust read.
+type OwnRead = ((String, bool, bool), Brep);
+
+thread_local! {
+    /// The last few Rust `.smb` reads, by key.
+    static OWN_READS: RefCell<Vec<OwnRead>> = const { RefCell::new(Vec::new()) };
+}
+
+/// [`own_built`] with its entity counts; a failed build is the record the shim gives
+/// one (`-1 status`), or the deferral of an unported callee.
+///
+/// # Errors
+///
+/// As [`own_built`].
+pub(super) fn own_brep(
+    src: &BrepIn,
+    validate_only: bool,
+    init_gaps: bool,
+) -> Result<crate::own_builder::RustBrep<(Brep, [usize; 10])>, HarnessError> {
+    use crate::own_builder::{build_status, counts, Built};
+    match own_built(src, validate_only, init_gaps)? {
+        Built::Brep(b) => {
+            let c = counts(&b);
+            Ok(Ok((*b, c)))
+        }
+        Built::Failed(e) => Ok(Err(Output::unported(&e)
+            .unwrap_or_else(|| Output::new().values("out", vec![-1.0, build_status(&e)])))),
+    }
+}
+
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let (r, ex) = match resolve(i)? {
+    let (b, c) = match own_brep(&i.brep, false, false)? {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
-    match rust_record(&r, &ex) {
+    let r = match resolve_with(i, c) {
+        Ok(r) => r,
+        Err(o) => return Ok(*o),
+    };
+    match rust_record(&r, b) {
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(h)) => Err(h),

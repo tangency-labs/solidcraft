@@ -7,9 +7,8 @@
 // validates every input. The input is a face selector (index into the traversal-order
 // face list), the op's fixed-size arguments, then the B-rep block of unit
 // topology.vertexuse (built by the shared sc_topology_fixture.h), whose graph that unit's
-// Export op exports for the Rust import. As the topology.face_p1 shim, the faces and
-// edges get the plain B-spline copies of analytic geometry (what the Rust import
-// rebuilds), keeping the owners, before the op.
+// Export op exports for the C++ side's selector resolution. The op runs on the B-rep's
+// own native geometry; the Rust side builds and reads the same B-rep natively.
 //
 // Output: `0` (or `-1 status` when the B-rep build failed), then the op record. A slot of
 // `-2` marks a call the shim skips because upstream would dereference null.
@@ -36,63 +35,6 @@ enum : int32_t
 };
 
 const double FP4_NULL_DEREF = -2.0;
-
-struct Fp4EdgePeek : SmEdge
-{
-    static SmCurve* SmEdge::*curve() { return &Fp4EdgePeek::m_pCurve; }
-};
-
-// The Rust import rebuilds NURBs as plain B-splines (and lines, planes) and the analytic
-// surfaces the export sends exactly (sc_analytic_export.h) as their own kind: give every
-// other face and edge of the C++ B-rep the same geometry (as heal_gap.cpp's normalise).
-// The analytic originals are leaked (they may still be referenced elsewhere).
-void fp4_normalise(Graph& g)
-{
-    for (SmFace* f : g.faces)
-    {
-        SmSurface* s = f->*FPeek::srf();
-        if (s == nullptr || !s->IsKindOf(SmBSplineSurface_TYPE) || s->GetType() == SmBSplineSurface_TYPE ||
-            s->GetType() == SmPlane_TYPE)
-            continue;
-        // exported exactly: the Rust side runs the same analytic surface
-        std::vector<double> head;
-        if (sc_analytic_export::put_exact_head(head, s, the_context()))
-            continue;
-        SmBSplineSurface* b = (SmBSplineSurface*)s;
-        gw_SURFACE* nurb = b->GetGwNurbPointer();
-        if (nurb == nullptr)
-            continue;
-        SmBSplineSurface* nb = new (the_context()) SmBSplineSurface(sm_AllocateAndCopyNurbSurface(nurb), FALSE, NULL);
-        nb->GetOutOfBoundsEnabled() = b->GetOutOfBoundsEnabled();
-        nb->SetBSplineSurfaceForm(b->GetBSplineSurfaceForm());
-        bool owned = s->GetOwner() == f;
-        f->*FPeek::srf() = nb;
-        if (owned)
-        {
-            s->SetOwner(NULL);
-            nb->SetOwner(f);
-        }
-    }
-    for (SmEdge* e : g.edges)
-    {
-        SmCurve* c = e->*Fp4EdgePeek::curve();
-        if (c == nullptr || !c->IsKindOf(SmBSplineCurve_TYPE) || c->GetType() == SmBSplineCurve_TYPE ||
-            c->GetType() == SmLine_TYPE)
-            continue;
-        SmBSplineCurve* b = (SmBSplineCurve*)c;
-        gw_CURVE* nurb = b->GetGwNurbPointer();
-        if (nurb == nullptr)
-            continue;
-        SmBSplineCurve* nc = new (the_context()) SmBSplineCurve(sm_AllocateAndCopyNurbCurve(nurb), b->GetDim(), FALSE);
-        bool owned = c->GetOwner() == e;
-        e->*Fp4EdgePeek::curve() = nc;
-        if (owned)
-        {
-            c->SetOwner(NULL);
-            nc->SetOwner(e);
-        }
-    }
-}
 
 // The number of op arguments after the face selector.
 int64_t fp4_nargs(int32_t op)
@@ -150,7 +92,6 @@ void fp4_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     o.push_back(0.0);
     Graph g;
     walk(built.brep, g);
-    fp4_normalise(g);
     if (fi < 0 || fi >= (int64_t)g.faces.size())
     {
         o.push_back((double)SC_ERR_ARG);

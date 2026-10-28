@@ -5,26 +5,21 @@
 //! `SmBrep` per call: read from an upstream `.smb` test file (optionally rebuilding its
 //! UV trim curves), a wire edge from a B-spline curve (`CreateWireEdgeFromCurve`), a face
 //! from a B-spline surface or a real `SmPlane` (`CreateFaceFromSurface`), or the wire
-//! network of `prog_test` `my_test_topology`. The Rust side imports the graph the shim
-//! exports in traversal order (raw members, including each face's face use, UV domain,
-//! rectangular-trim flag, tolerance and surface owner, and each vertex use's cached
-//! vertex/face gap) into a [`Brep`] and runs the ported functions on
-//! it; results are compared as traversal indices, flags, statuses, values and curve
-//! blocks (the shim's `put_curve` layout). Selectors are taken modulo the entity count
-//! (`-1` selecting null where allowed).
+//! network of `prog_test` `my_test_topology`. The Rust side makes the same B-rep with
+//! the Rust kernel ([`own_brep`]: an `.smb` file read by the Rust reader, any other kind
+//! built by [`crate::own_builder`], in the shim's call order) and renumbers it into the
+//! shim's traversal order ([`CONVENTIONS`]), so no C++ state reaches it, and runs the
+//! ported functions on it; results are compared as traversal indices, flags, statuses,
+//! values and curve blocks (the shim's `put_curve` layout). Selectors are taken modulo
+//! the entity count (`-1` selecting null where allowed). The C++ side resolves its
+//! selectors and reports a failed build from its own export.
 //!
-//! **Exact geometry.** Plain B-spline surfaces, `SmPlane`s, B-spline curves and
-//! `SmLine`s retain their regular blocks. Eligible revolution, cone/cylinder, sphere,
-//! torus and extrusion surfaces additionally carry an exact database head
-//! (`2 ...`, `harness/cpp/shim/sc_analytic_export.h`); eligible 3D edge ellipses and
-//! circles carry an exact curve head (`-3 ...`, `sc_exact_curve_export.h`). The importer
-//! reconstructs the concrete analytic kind and checks its B-spline part. The shared
-//! exporters require existing NURBs and lossless native database round trips; surface
-//! generator/polar state must also survive. Unsupported subclasses and representations
-//! rejected by those checks still arrive as their B-spline part only. Ops evaluating
-//! such a face surface (`Points`, `FixUv`, `BestUv`, `Connected`) or, for `BestUv`, such
-//! an edge curve still report `inexact_geometry` on both sides. UV trim curves and
-//! operation-result curve blocks retain the regular layout.
+//! **Export importer.** [`import`] still decodes the shim's export (used by the C++
+//! side here and by unit `query.face_p2`): plain B-spline surfaces, `SmPlane`s,
+//! B-spline curves and `SmLine`s as regular blocks, eligible analytic surfaces and
+//! ellipse/circle edge curves from their exact records (`sc_analytic_export.h`,
+//! `sc_exact_curve_export.h`), other subclasses as their B-spline part ([`Exact`]).
+//! Since the Rust B-rep is native, no operation is skipped as `inexact_geometry` here.
 //!
 //! **`GetPointsInFace` with more than one point** draws its V dither from
 //! `srand(time(NULL))` / `rand()` upstream and from `kernel.rng` in the port
@@ -1387,29 +1382,87 @@ fn project_points(body: &[f64], count: u64, face: &Face, dom: Option<[f64; 4]>) 
     out
 }
 
-/// Whether the op evaluates geometry that was not imported exactly ([`Exact`]): a
-/// face's surface (`Points`, and the edge use ops through the edge use's face) or,
-/// for `BestUv`, the edge's curve. Such cases are not compared (both sides report
-/// `inexact_geometry`).
-fn inexact(op: &OpIn, b: &Brep, exact: &Exact) -> bool {
-    use solidcore::topology::edgeuse::p1 as eu1;
-    let face_inexact = |f: Option<FaceId>| {
-        f.is_some_and(|f| !exact.faces.get(f.index() as usize).copied().unwrap_or(true))
+// ---- the Rust B-rep ---------------------------------------------------------------------
+
+/// The shim's build conventions (its own `build` and `walk`): the vertex use lists
+/// followed after the loops' loop uses, `GetVertexEdgeGap` in the `init_gaps` walk; a
+/// face's surface owned under the identity [`import`] gives it (`(SmFace_TYPE, 1 +
+/// index)`), an edge's curve under the `sc_topology_fixture.h` identity. Shared with the
+/// runners whose shims build and walk B-reps the same way (`query.face_p3`,
+/// `query.face_p4`, `surface.trim_srf_cache`).
+pub(crate) const CONVENTIONS: crate::own_builder::Conventions<'static> =
+    crate::own_builder::Conventions {
+        prefix_lists: false,
+        vertex_edge_gaps: true,
+        vertex_lists_last: true,
+        skip_edge_list: false,
+        face_owner: &face_owner,
+        edge_owner: &edge_owner,
     };
-    let eu_face = |e: i64| eu1::face(b, EdgeuseId::from_index(e as u32)).ok().flatten();
-    let edge_inexact = |e: i64| {
-        eu1::edge(b, EdgeuseId::from_index(e as u32))
-            .ok()
-            .flatten()
-            .is_some_and(|e| !exact.edges.get(e.index() as usize).copied().unwrap_or(true))
-    };
-    match op {
-        OpIn::Points { f, .. } => face_inexact(Some(FaceId::from_index(*f as u32))),
-        OpIn::FixUv { eu, .. } => face_inexact(eu_face(*eu)),
-        OpIn::BestUv { eu, .. } => face_inexact(eu_face(*eu)) || edge_inexact(*eu),
-        OpIn::Connected { eu1: a, eu2: c, .. } => face_inexact(eu_face(*a)) || face_inexact(eu_face(*c)),
-        _ => false,
+
+fn face_owner(f: FaceId) -> ObjectRef {
+    ObjectRef {
+        type_code: fp2::TYPE,
+        key: ObjectKey(1 + u64::from(f.index())),
     }
+}
+
+fn edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
+    use crate::own_builder::fixture_key;
+    (
+        fixture_key(solidcore::topology::edge::TYPE, e.index()),
+        fixture_key(16999, 0),
+    )
+}
+
+/// A Rust B-rep with its entity counts, or the output of its failed build.
+pub(crate) type OwnBrep = crate::own_builder::RustBrep<(Brep, [usize; 10])>;
+
+/// A built (or failed) source as the runners consume it.
+#[allow(clippy::result_large_err)] // the failed build's output is the case's result
+pub(crate) fn own_output(built: crate::own_builder::Built) -> OwnBrep {
+    use crate::own_builder::{counts, failed_output, Built};
+    match built {
+        Built::Brep(b) => {
+            let c = counts(&b);
+            Ok((*b, c))
+        }
+        Built::Failed(e) => Err(failed_output(&e)),
+    }
+}
+
+/// The Rust B-rep of a shim B-rep source, made by the Rust kernel as the shim's `build`
+/// makes it, in its traversal order ([`CONVENTIONS`]): an `.smb` file (`path`) read by
+/// the Rust reader, any other kind built by [`crate::own_builder`]. `src` is any
+/// `kind`-tagged source whose JSON has a [`BrepIn`]'s shape. No C++ state reaches it.
+///
+/// # Errors
+///
+/// A harness error for a source the builders do not know or a file that cannot be
+/// opened.
+pub(crate) fn own_brep<T: Serialize>(
+    k: &mut Kernel,
+    src: &T,
+    path: &str,
+    validate_only: bool,
+    init_gaps: bool,
+) -> Result<OwnBrep, HarnessError> {
+    let v = serde_json::to_value(src).map_err(|e| harness(format!("B-rep source: {e}")))?;
+    if v.get("kind").and_then(Value::as_str) == Some("file") {
+        let rebuild = v.get("rebuild").and_then(Value::as_bool).unwrap_or(false);
+        let built = crate::own_builder::read_as(
+            k,
+            path,
+            rebuild,
+            validate_only,
+            init_gaps,
+            &CONVENTIONS,
+        )?;
+        return Ok(own_output(built));
+    }
+    let built = crate::own_builder::build_as(k, &v, validate_only, init_gaps, &CONVENTIONS)?
+        .ok_or_else(|| harness("own builder: no file path"))?;
+    Ok(own_output(built))
 }
 
 // ---- C++ side ---------------------------------------------------------------------------
@@ -1433,10 +1486,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(op) => op,
         Err(name) => return Ok(Output::err(name)),
     };
-    let (b, exact) = import(&ex)?;
-    if inexact(&op, &b, &exact) {
-        return Ok(Output::err("inexact_geometry"));
-    }
+    let (b, _) = import(&ex)?;
     let (code, args) = op_args(&op)?;
     let mut input = brep_block(i)?;
     input.extend(args);
@@ -1613,18 +1663,16 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             Err(Fail::Harness(h)) => Err(h),
         };
     }
-    let ex = export(i)?;
-    let Some(c) = ffi::counts(&ex) else {
-        return Ok(build_failure(&ex));
+    let brep = i.brep.as_ref().ok_or_else(|| harness("B-rep op without B-rep"))?;
+    let mut k = Kernel::default();
+    let (mut b, c) = match own_brep(&mut k, brep, &path_of(i)?, i.validate_only, i.init_gaps)? {
+        Ok(x) => x,
+        Err(o) => return Ok(o),
     };
-    let (mut b, exact) = import(&ex)?;
     let op = match resolve(&i.op, &counts_of(c)) {
         Ok(op) => op,
         Err(name) => return Ok(Output::err(name)),
     };
-    if inexact(&op, &b, &exact) {
-        return Ok(Output::err("inexact_geometry"));
-    }
     match run_rust_op(&mut b, &op) {
         Ok(body) => {
             let body = match &op {
@@ -1711,10 +1759,15 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             Err(e) => o.extend([status_of(e)?, 0.0]),
             }
         }
-        OpIn::Internal { f } => match fp2::calculate_an_internal_point(&k, b, fid(*f)) {
+        OpIn::Internal { f } => {
+            // the shim's `DeleteObjectsCache(SM_OC_TRIMSRF, srf)` before
+            // `CalculateAnInternalPoint` (`harness/cpp/shim/topology_face_p2.cpp`, OP_INTERNAL)
+            super::query_face_p1::drop_trim_cache(b, fid(*f))?;
+            match fp2::calculate_an_internal_point(&k, b, fid(*f)) {
             Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
-            Err(e) => o.extend([status_of(e)?, 0.0, 0.0, 0.0]),
-        },
+                Err(e) => o.extend([status_of(e)?, 0.0, 0.0, 0.0]),
+            }
+        }
         OpIn::FromFace {
             f,
             orient: or,

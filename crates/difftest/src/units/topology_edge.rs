@@ -3,32 +3,25 @@
 //!
 //! As the `topology.vertexuse` runner, the C++ side builds a real `SmBrep` per call:
 //! read from an upstream `.smb` test file (optionally rebuilding its UV trim curves), a
-//! wire edge from a B-spline curve (`CreateWireEdgeFromCurve`), a face from a B-spline
-//! surface or a real `SmPlane` (`CreateFaceFromSurface`), or the wire network of
-//! `prog_test` `my_test_topology`. There is no Rust B-rep reader or builder yet (units
-//! `topology.brep_*`), so the Rust side imports the graph the shim exports in traversal
-//! order (raw members, including the cached edge/face and vertex/edge gap lengths and
-//! whether each edge owns its curve) into a [`Brep`] and runs the ported functions on
-//! it. Queries are compared as traversal indices, flags, statuses and values; edits
-//! (tolerances, orientations, list changes, notifications, curve changes) by the
-//! mutable graph state afterwards (the shim's `put_state`) and the curves they touch.
-//! `init_gaps` has the C++ side compute the cached gaps before the op (their values are
-//! exported, so the gap queries compare real gap lengths).
+//! wire edge from a B-spline curve (`CreateWireEdgeFromCurve`), a real `SmLine` or
+//! `SmEllipse`/`SmCircle`, a face from a B-spline surface or a real `SmPlane`
+//! (`CreateFaceFromSurface`), or the wire network of `prog_test` `my_test_topology`.
+//! The Rust side builds the same B-rep with the Rust kernel alone ([`own_brep`]: the
+//! Rust `.smb` reader, [`crate::own_builder`] and this shim's line and ellipse wires),
+//! renumbered into the shim's traversal order, with the shim's `init_gaps` walk run by
+//! the Rust kernel; no C++ state reaches the Rust side. The C++ side resolves its
+//! selectors on the graph the shim exports (raw members, cached gaps and curve
+//! ownership) and runs the op on its native B-rep. Queries are compared as traversal
+//! indices, flags, statuses and values; edits (tolerances, orientations, list changes,
+//! notifications, curve changes) by the mutable graph state afterwards (the shim's
+//! `put_state`) and the curves they touch.
 //!
-//! **Inexact geometry.** The export carries plain B-spline curves and `SmLine`s exactly.
-//! Lossless ellipse/circle edge records retain their concrete kind, stored NURB,
-//! STEP domain, polar tables and explicit out-of-bounds flag. Other curve kinds
-//! arrive as their B-spline part only. Planes and losslessly exported analytic surfaces
+//! **Export exactness.** The export carries plain B-spline curves, `SmLine`s and
+//! ellipse/circle records exactly, and planes and the analytic surfaces
 //! (`SmSurfOfRevolution`, `SmCone`/`SmCylinder`, `SmSphere`, `SmTorus`,
-//! `SmSurfOfExtrusion`) retain their concrete kinds; other `SmBSplineSurface` subclasses
-//! arrive as their B-spline parts. Analytic records use the shared exact transport
-//! helpers, including the native round-trip/non-mutation checks and a bitwise check of the
-//! imported base.
-//! Operations that evaluate such an edge curve (`EndTangent`, `Trimmed`, `Reverse`, `Ode`,
-//! `RadialCurve`) or the surface of a face of the edge (`Seam`, `Topological`,
-//! `Tangent`, `Radial`, `RadialCurve`, `Blend`) are not compared: the C++ runner
-//! reports `inexact_geometry`, and the Rust runner defers on this harness import
-//! limitation. Neither runner evaluates the skipped operation.
+//! `SmSurfOfExtrusion`) with their concrete kinds; other kinds arrive as their B-spline
+//! parts. Since both sides now evaluate native geometry, no operation is gated on that
+//! any more; the tests keep the export's exactness checks.
 //!
 //! Selectors are taken modulo the entity count (`-1` selecting null where allowed); the
 //! sector of `AddPair` and the edge use of `ResetPrimary` are taken from the edge's own
@@ -89,11 +82,14 @@ const KIND_TYPES: [i64; 9] = [16016, 16005, 16001, 16010, 12060, 11001, 16013, 1
 /// "Upstream would dereference null" in an output slot.
 const NULL_DEREF: f64 = -2.0;
 
-/// The Rust B-rep of an export, with whether each face's surface and each edge's curve
-/// was imported exactly.
+/// The B-rep of an export, with whether each face's surface and each edge's curve
+/// was imported exactly (the C++ side resolves its selectors on it; only the tests
+/// read the exactness flags).
 struct Imported {
     b: Brep,
+    #[cfg_attr(not(test), allow(dead_code))]
     exact_faces: Vec<bool>,
+    #[cfg_attr(not(test), allow(dead_code))]
     exact_curves: Vec<bool>,
 }
 
@@ -1510,9 +1506,11 @@ fn op_args(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
     })
 }
 
-/// Whether the op evaluates geometry that was not imported exactly (see the module
-/// docs). The C++ side refuses these inputs with `inexact_geometry`; the Rust side
-/// reports a harness deferral instead of an empty parity pass.
+/// Whether the op evaluates geometry the export carries only inexactly (see the module
+/// docs). No side gates on it any more: the Rust side builds its own B-rep, so both
+/// sides evaluate native geometry. The tests keep checking the export, which the C++
+/// side's selector resolution reads.
+#[cfg(test)]
 fn inexact(op: &OpIn, im: &Imported) -> bool {
     let curve_inexact = |e: i64| !im.exact_curves.get(e as usize).copied().unwrap_or(true);
     let faces_inexact = |e: i64| {
@@ -1564,9 +1562,6 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let Some(op) = resolve(&i.op, c, &im.b) else {
         return Ok(Output::err("no_edge"));
     };
-    if inexact(&op, &im) {
-        return Ok(Output::err("inexact_geometry"));
-    }
     let (code, args) = op_args(&op)?;
     let mut input = brep_block(i)?;
     input.extend(args);
@@ -1782,25 +1777,177 @@ fn rust_curve(c: &CrvIn) -> Result<SmCurve, HarnessError> {
 }
 
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let ex = export(i)?;
-    let Some(c) = ffi::counts(&ex) else {
-        return Ok(build_failure(&ex));
+    let (mut b, c) = match own_brep(i)? {
+        Ok(x) => x,
+        Err(o) => return Ok(o),
     };
-    let mut im = import(&ex)?;
-    let Some(op) = resolve(&i.op, c, &im.b) else {
+    let Some(op) = resolve(&i.op, c, &b) else {
         return Ok(Output::err("no_edge"));
     };
-    if inexact(&op, &im) {
-        return Ok(Output::deferred(
-            "topology.edge",
-            "difftest: exact analytic geometry import for edge evaluation",
-        ));
-    }
-    match run_rust_op(&mut im.b, &op) {
+    match run_rust_op(&mut b, &op) {
         Ok(o) => Ok(o),
         Err(Fail::Solid(e)) => rust_err(&e),
         Err(Fail::Harness(h)) => Err(h),
     }
+}
+
+// ---- Rust-side B-rep ----------------------------------------------------------------------
+
+/// The shim's build conventions: its `walk` follows the vertex use lists after the
+/// loops' loop uses, its `init_gaps` walk calls `GetVertexEdgeGap` where a vertex use
+/// has one, and owned geometry carries the identities this runner's import gave it (a
+/// face `(SmFace_TYPE, 1 + index)`, an edge [`key_of`]), the B-rep's naming left
+/// `Unknown`.
+const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder::Conventions {
+    vertex_edge_gaps: true,
+    vertex_lists_last: true,
+    face_owner: &face_owner,
+    edge_owner: &edge_owner,
+    ..crate::own_builder::Conventions::EDGEUSE_GRAPH
+};
+
+fn face_owner(f: FaceId) -> ObjectRef {
+    ObjectRef {
+        type_code: solidcore::topology::face::p2::TYPE,
+        key: ObjectKey(1 + u64::from(f.index())),
+    }
+}
+
+fn edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
+    // the B-rep part only feeds the owner-change notification, which the copy drops
+    (
+        key_of(EntityRef::Edge(e)),
+        ObjectRef {
+            type_code: 16011,
+            key: ObjectKey(1),
+        },
+    )
+}
+
+/// The Rust B-rep of the case and its entity counts, or the output of a failed build,
+/// made by the Rust kernel alone as the shim's `build` makes it: an `.smb` file by the
+/// Rust reader, the wire, face and network sources by [`crate::own_builder`], the
+/// `SmLine` and ellipse wires by [`line_wire`] and [`ellipse_wire`]; then renumbered
+/// into the shim's traversal order ([`CONVENTIONS`]). No C++ state reaches the Rust
+/// side.
+fn own_brep(i: &Inputs) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
+    use crate::own_builder::{build_as, counts, failed_output, finish, in_new_brep, read_as, Built};
+    let mut k = Kernel::default();
+    let (vo, ig) = (i.validate_only, i.init_gaps);
+    let built = match &i.brep {
+        BrepIn::File { rebuild, .. } => {
+            read_as(&mut k, &path_of(&i.brep)?, *rebuild, vo, ig, &CONVENTIONS)?
+        }
+        BrepIn::Line { .. } | BrepIn::Ellipse { .. } => {
+            let raw = in_new_brep(&mut k, |k, b| match &i.brep {
+                BrepIn::Line {
+                    p,
+                    v,
+                    a,
+                    b: c,
+                    scale,
+                    inside_out,
+                    f0,
+                    f1,
+                } => line_wire(k, b, (*p, *v), [*a, *c], *scale, *inside_out, [*f0, *f1]),
+                _ => ellipse_wire(k, b, &i.brep),
+            })?;
+            finish(&mut k, raw, vo, ig, &CONVENTIONS)?
+        }
+        src => build_as(&mut k, src, vo, ig, &CONVENTIONS)?
+            .ok_or_else(|| harness("own builder: unexpected file source"))?,
+    };
+    Ok(match built {
+        Built::Brep(b) => {
+            let c = counts(&b);
+            Ok((*b, c))
+        }
+        Built::Failed(e) => Err(failed_output(&e)),
+    })
+}
+
+/// Kind 4: `CreateWireEdgeFromCurve` on a real `SmLine(p, v, [a, b], scale, 3, ctx,
+/// NULL, inside_out)` over the fractions `f` of its natural interval.
+fn line_wire(
+    k: &mut Kernel,
+    b: &mut Brep,
+    (p, v): ([f64; 3], [f64; 3]),
+    [a, c]: [f64; 2],
+    scale: f64,
+    inside_out: bool,
+    [f0, f1]: [f64; 2],
+) -> Result<(), SolidError> {
+    use solidcore::curve::line::BoundedLineOptions;
+    let l = Line::bounded(
+        Vec3::from_array(p),
+        Vec3::from_array(v),
+        &Extent1d::from_min_max(a, c),
+        &BoundedLineOptions {
+            scale,
+            dim: 3,
+            nurb: None,
+            inside_out,
+        },
+    );
+    let nat = l.natural_interval();
+    solidcore::topology::brep::p5::create_wire_edge_from_curve(
+        k,
+        b,
+        SmCurve::from(l),
+        Extent1d::from_min_max(nat.evaluate(f0), nat.evaluate(f1)),
+    )
+    .map(|_| ())
+}
+
+/// Kind 5: a real `SmCircle` / `SmEllipse` over `angles`, its NURB reparameterised to
+/// `natural` (`SM_ERR` without a NURB), out-of-bounds evaluation set, then
+/// `CreateWireEdgeFromCurve` over the fractions of its natural interval and, on success,
+/// the edge's `SetTolerance(tolerance, FALSE, FALSE)` and `SetOrientation`.
+fn ellipse_wire(k: &mut Kernel, b: &mut Brep, src: &BrepIn) -> Result<(), SolidError> {
+    use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
+    let BrepIn::Ellipse {
+        circle,
+        center,
+        x,
+        y,
+        angles: [a, c],
+        radii: [rx, ry],
+        inside_out,
+        natural: [n0, n1],
+        fractions: [f0, f1],
+        oob,
+        tolerance,
+        orientation,
+    } = src
+    else {
+        return Err(SolidError::invalid_input("topology_edge::ellipse_wire", "source"));
+    };
+    let (center, x, y) = (Vec3::from_array(*center), Vec3::from_array(*x), Vec3::from_array(*y));
+    let domain = Extent1d::from_min_max(*a, *c);
+    let opts = EllipseOptions {
+        inside_out: *inside_out,
+        ..EllipseOptions::default()
+    };
+    let mut curve = if *circle {
+        Ellipse::new_circle(k, center, x, y, domain, *rx, &opts)?
+    } else {
+        Ellipse::new(k, center, x, y, domain, *rx, *ry, &opts)?
+    };
+    if curve.base().gw_nurb().is_none() {
+        return Err(SolidError::sm_err("topology_edge::ellipse_wire"));
+    }
+    curve.edit_parameterization(k, &Extent1d::from_min_max(*n0, *n1), true, None)?;
+    curve.set_out_of_bounds_enabled(*oob);
+    let curve = SmCurve::from(curve);
+    let natural = curve.natural_interval();
+    let e = solidcore::topology::brep::p5::create_wire_edge_from_curve(
+        k,
+        b,
+        curve,
+        Extent1d::from_min_max(natural.evaluate(*f0), natural.evaluate(*f1)),
+    )?;
+    ed::set_tolerance(b, e, *tolerance, false, false)?;
+    ed::set_orientation(b, e, orient_of_code(*orientation))
 }
 
 fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
