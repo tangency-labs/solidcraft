@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn newly_catalogued_command_labels_translate() {
         let cases = [
-            ("cs", "Příruba", "Zebra analýza", "Studie pohybu"),
+            ("cs", "Obruba", "Zebra analýza", "Pohybová studie"),
             ("da", "Flange", "Zebraanalyse", "Bevægelsesanalyse"),
             ("nb", "Flens", "Zebraanalyse", "Bevegelsesanalyse"),
             ("zh", "法兰", "斑马纹分析", "运动研究"),
