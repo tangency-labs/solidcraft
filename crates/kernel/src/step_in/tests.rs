@@ -2163,3 +2163,61 @@ fn a_patch_side_shrunk_within_its_vertexs_tolerance_is_a_pole_of_the_loop() {
     let area = 0.5 * (30.0 + side) * 30.0;
     assert!(rel(m.area, area) < 1e-6, "{} vs {area}", m.area);
 }
+
+/// A solid no B-rep can be made of is still shown: a cup whose wall, a cylinder face, has one
+/// bound (the rim it shares with its bottom) and no far one is refused, as Poppy Humanoid's
+/// stock head is. Each face is read and meshed on its own instead: the bottom shows, as a mesh
+/// body that says why the solid was refused; the wall, which cannot be read on its own either,
+/// is left out and named. Modelling operations refuse the mesh body.
+#[test]
+fn a_refused_solid_is_shown_as_a_mesh_of_the_faces_that_read() {
+    let text = format!(
+        "{HEAD}
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=DIRECTION('',(0.,0.,-1.));
+#5=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#6=AXIS2_PLACEMENT_3D('',#1,#4,#3);
+#7=CARTESIAN_POINT('',(5.,0.,0.));
+#8=VERTEX_POINT('',#7);
+#9=CIRCLE('',#5,5.);
+#10=EDGE_CURVE('',#8,#8,#9,.T.);
+#11=ORIENTED_EDGE('',*,*,#10,.F.);
+#12=EDGE_LOOP('',(#11));
+#13=FACE_OUTER_BOUND('',#12,.T.);
+#14=PLANE('',#6);
+#15=ADVANCED_FACE('Bottom',(#13),#14,.T.);
+#16=ORIENTED_EDGE('',*,*,#10,.T.);
+#17=EDGE_LOOP('',(#16));
+#18=FACE_OUTER_BOUND('',#17,.T.);
+#19=CYLINDRICAL_SURFACE('',#5,5.);
+#20=ADVANCED_FACE('Wall',(#18),#19,.T.);
+#21=CLOSED_SHELL('',(#15,#20));
+#22=MANIFOLD_SOLID_BREP('Cup',#21);
+#23=SHAPE_REPRESENTATION('',(#22),$);
+{TAIL}"
+    );
+    let imp = step_import(&text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let cup = &imp.bodies[0];
+    assert!(cup.body.is_mesh(), "{:?}", imp.warnings);
+    let why = cup.shown_as_mesh.as_deref().unwrap_or_default();
+    assert!(why.contains("face #20: a face around an open surface of revolution with one bound"), "{why}");
+    assert_eq!(cup.file_faces, 2);
+    // The report keeps the refusal and names the face left out.
+    assert!(imp.warnings.iter().any(|w| w.contains("'Cup': shown as a mesh: ") && w.contains(why)), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("'Cup': not shown: face #20: ")), "{:?}", imp.warnings);
+    // The bottom, a 5 mm disk facing down.
+    let m = measure(&cup.body).unwrap();
+    assert!(rel(m.area, std::f64::consts::PI * 25.0) < 1e-2, "area {}", m.area);
+    let (positions, triangles) = cup.body.triangle_mesh().unwrap();
+    assert!(positions.iter().all(|p| p.z.abs() < 1e-9 && p.x.hypot(p.y) <= 5.0 + 1e-6), "the bottom only");
+    let down = triangles
+        .iter()
+        .map(|t| (positions[t[1] as usize] - positions[t[0] as usize]).cross(positions[t[2] as usize] - positions[t[0] as usize]).z)
+        .sum::<f64>();
+    assert!(down < 0.0, "the bottom faces out of the cup: {down}");
+    let refused = fillet(&cup.body, &[Vec3::new(5.0, 0.0, 0.0)], 1.0).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(refused.contains("needs a solid body"), "{refused}");
+}

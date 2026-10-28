@@ -310,39 +310,106 @@ fn read_with<'a>(
     trims: Option<&dyn Trims>,
 ) -> R<Solid> {
     let e = entity(ex, item)?;
-    let p = e.params();
-    let name = p.first().and_then(Param::as_str).unwrap_or("").to_string();
+    let name = e.params().first().and_then(Param::as_str).unwrap_or("").to_string();
     let mut b = Builder::new(ex, reader, tolerance(&context), budget, trims);
     // The file's faces, edges, vertices and their geometry read into the builder.
     let topology = solidcraft_profile::span("import", "step.topology");
-    let (shells, kind) = match e.name() {
-        "MANIFOLD_SOLID_BREP" => (vec![b.shell(rid(p.get(1), "outer shell")?)?], Kind::Solid),
+    let (ids, kind) = item_shells(e)?;
+    let mut shells = Vec::with_capacity(ids.len());
+    for s in ids {
+        shells.push(b.shell(s)?);
+    }
+    drop(topology);
+    b.finish(item, name, shells, kind)
+}
+
+/// A face of a solid read on its own ([`read_faces_with`]).
+#[derive(Clone, Debug)]
+pub struct FaceRead {
+    /// The face's entity in the file (the ADVANCED_FACE or FACE_SURFACE, or the ORIENTED_FACE
+    /// the shell lists when it could not be read).
+    pub face: u64,
+    /// The face as a one-face surface body, facing as its shell uses it; else why it could not
+    /// be read (naming the face).
+    pub record: R<Brep>,
+}
+
+/// Each face of a solid item read on its own, as a one-face surface body: what can still be
+/// shown of a solid that cannot be read whole, or whose body the kernel refuses. A face is read
+/// as [`read_solid_with`] reads it, with its own edges and vertices (so its tolerances cover its
+/// own gaps only); a face that cannot be read on its own says why and the others are still read.
+pub fn read_faces_with(ex: &Exchange, item: u64, context: units::Context, trims: &dyn Trims) -> R<Vec<FaceRead>> {
+    let (shells, _) = item_shells(entity(ex, item)?)?;
+    let mut reader = Reader::new(ex, context.units);
+    let mut budget = MAX_FILE_FACES;
+    let mut out = Vec::new();
+    for s in shells {
+        let (faces, flip) = shell_faces(ex, s)?;
+        for f in faces {
+            if out.len() >= MAX_FACES {
+                return Err(format!("more than {MAX_FACES} faces"));
+            }
+            let mut b = Builder::new(ex, &mut reader, tolerance(&context), &mut budget, Some(trims));
+            let read = b.face(f, 0).and_then(|(face, forward)| b.finish(item, String::new(), vec![vec![(face, forward != flip)]], Kind::Model));
+            let named = |m: String| if m.starts_with(&format!("face #{f}")) { m } else { format!("face #{f}: {m}") };
+            out.push(match read {
+                Ok(s) => FaceRead { face: s.face_origin.first().copied().unwrap_or(f), record: Ok(s.brep) },
+                Err(m) => FaceRead { face: f, record: Err(named(m)) },
+            });
+        }
+    }
+    Ok(out)
+}
+
+/// The shells of a solid item (the outer shell first, then its voids), and what kind it is.
+fn item_shells(e: &Entity) -> R<(Vec<u64>, Kind)> {
+    let p = e.params();
+    match e.name() {
+        "MANIFOLD_SOLID_BREP" => Ok((vec![rid(p.get(1), "outer shell")?], Kind::Solid)),
         "BREP_WITH_VOIDS" => {
-            let mut shells = vec![b.shell(rid(p.get(1), "outer shell")?)?];
+            let mut shells = vec![rid(p.get(1), "outer shell")?];
             let voids = refs(p.get(2), "voids")?;
             if voids.len() >= brep::MAX_SHELLS {
                 return Err(format!("{} voids", voids.len()));
             }
-            for v in voids {
-                shells.push(b.shell(v)?);
-            }
-            (shells, Kind::Voids)
+            shells.extend(voids);
+            Ok((shells, Kind::Voids))
         }
         "SHELL_BASED_SURFACE_MODEL" => {
             let ids = refs(p.get(1), "surface model shells")?;
             if ids.is_empty() || ids.len() > brep::MAX_SHELLS {
                 return Err(format!("a surface model with {} shells", ids.len()));
             }
-            let mut shells = Vec::with_capacity(ids.len());
-            for s in ids {
-                shells.push(b.shell(s)?);
-            }
-            (shells, Kind::Model)
+            Ok((ids, Kind::Model))
         }
-        n => return Err(unsupported(n)),
+        n => Err(unsupported(n)),
+    }
+}
+
+/// The faces a shell lists, and whether the shell turns them over (an oriented shell used
+/// against its faces).
+fn shell_faces(ex: &Exchange, id: u64) -> R<(Vec<u64>, bool)> {
+    let e = entity(ex, id)?;
+    let p = e.params();
+    let (faces, flip) = match e.name() {
+        "CLOSED_SHELL" | "OPEN_SHELL" => (refs(p.get(1), "shell faces")?, false),
+        "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => {
+            let inner = rid(p.get(2), "oriented shell element")?;
+            let inner_e = entity(ex, inner)?;
+            if !matches!(inner_e.name(), "CLOSED_SHELL" | "OPEN_SHELL") {
+                return Err(format!("#{inner}: {}", unsupported(format!("shell {}", inner_e.name()))));
+            }
+            (refs(inner_e.params().get(1), "shell faces")?, !flag(p.get(3), "oriented shell orientation")?)
+        }
+        n => return Err(format!("#{id}: {}", unsupported(format!("shell {n}")))),
     };
-    drop(topology);
-    b.finish(item, name, shells, kind)
+    if faces.is_empty() {
+        return Err(format!("shell #{id} has no faces"));
+    }
+    if faces.len() > MAX_FACES {
+        return Err(format!("shell #{id} with {} faces", faces.len()));
+    }
+    Ok((faces, flip))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -772,26 +839,7 @@ impl<'b, 'a> Builder<'b, 'a> {
     }
 
     fn shell(&mut self, id: u64) -> R<Vec<(u32, bool)>> {
-        let e = entity(self.ex, id)?;
-        let p = e.params();
-        let (faces, flip) = match e.name() {
-            "CLOSED_SHELL" | "OPEN_SHELL" => (refs(p.get(1), "shell faces")?, false),
-            "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => {
-                let inner = rid(p.get(2), "oriented shell element")?;
-                let inner_e = entity(self.ex, inner)?;
-                if !matches!(inner_e.name(), "CLOSED_SHELL" | "OPEN_SHELL") {
-                    return Err(format!("#{inner}: {}", unsupported(format!("shell {}", inner_e.name()))));
-                }
-                (refs(inner_e.params().get(1), "shell faces")?, !flag(p.get(3), "oriented shell orientation")?)
-            }
-            n => return Err(format!("#{id}: {}", unsupported(format!("shell {n}")))),
-        };
-        if faces.is_empty() {
-            return Err(format!("shell #{id} has no faces"));
-        }
-        if faces.len() > MAX_FACES {
-            return Err(format!("shell #{id} with {} faces", faces.len()));
-        }
+        let (faces, flip) = shell_faces(self.ex, id)?;
         let mut out = Vec::with_capacity(faces.len());
         for f in faces {
             let (face, forward) = self.face(f, 0)?;
