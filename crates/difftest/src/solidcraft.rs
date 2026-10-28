@@ -1526,6 +1526,7 @@ pub fn checks(e: &Expect, m: &Measured) -> Vec<Check> {
 }
 
 /// A run's verdict and its checks.
+/// A completed run without expectations is `UNCHECKED`, not a checked pass.
 pub fn verdict(e: &Expect, run: &Run) -> (&'static str, Vec<Check>) {
     match run {
         Run::Deferred(_) => ("DEFERRED", Vec::new()),
@@ -1534,7 +1535,7 @@ pub fn verdict(e: &Expect, run: &Run) -> (&'static str, Vec<Check>) {
             let c = checks(e, m);
             let v = if c.iter().any(|c| c.status == "fail") {
                 "FAIL"
-            } else if c.iter().any(|c| c.status == "unchecked") {
+            } else if c.is_empty() || c.iter().any(|c| c.status == "unchecked") {
                 "UNCHECKED"
             } else {
                 "PASS"
@@ -2011,6 +2012,33 @@ mod tests {
         });
         assert_eq!(verdict(&e, &d).0, "DEFERRED");
         assert_eq!(verdict(&e, &Run::Error("x".into())).0, "ERROR");
+    }
+
+    #[test]
+    fn scoring_without_expectations_is_unchecked() {
+        let e: Expect = serde_json::from_value(json!({})).unwrap();
+        let run = Run::Done(Measured {
+            volume: 1.0,
+            lumps: 1,
+            topology: [6, 12, 8],
+            cylinder_faces: 0,
+        });
+        let (v, c) = verdict(&e, &run);
+        assert!(c.is_empty());
+        assert_eq!(v, "UNCHECKED");
+
+        let report = run_entry(&run, v, &c);
+        assert_eq!(report["verdict"], "UNCHECKED");
+        assert_eq!(report["checks"], json!([]));
+        assert_eq!(report["measured"]["volume"], 1.0);
+
+        // Missing expectations must not hide a failed or deferred operation.
+        assert_eq!(verdict(&e, &Run::Error("x".into())).0, "ERROR");
+        let deferred = Run::Deferred(Deferral {
+            blocked_by: "u".into(),
+            symbol: "s".into(),
+        });
+        assert_eq!(verdict(&e, &deferred).0, "DEFERRED");
     }
 
     #[test]

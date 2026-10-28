@@ -795,7 +795,8 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
 * **Expectations** (`expect`): `lumps` (bounded regions; `0` = nothing left), `volume`
   (`value`, absolute `tol`, the `formula` it came from), `cylinder_faces_max`,
   `sheet_corner` (signed end distances and flat-pattern invariants).
-* **Verdicts**: `PASS`, `FAIL`, `UNCHECKED` (no check failed but one cannot be measured
+* **Verdicts**: `PASS`, `FAIL`, `UNCHECKED` (no expectations were supplied, or no check
+  failed but one cannot be measured
   yet: `cylinder_faces_max` until solidcore has a cylinder surface kind), `ERROR` (a step
   returned an error other than `Unported`), `DEFERRED`. A step that reaches unported code
   defers the case on the unit in its `SolidError::Unported`; `fillet` has no Rust
