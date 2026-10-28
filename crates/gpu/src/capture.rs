@@ -424,8 +424,10 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
                 let n = mesh.normals.get(*k as usize).copied().filter(|n| n.is_finite() && n.len() > 0.5).unwrap_or(flat);
                 if m.glass() {
                     sc.glass_tri(p.to_f32(), n.to_f32(), col);
-                } else {
+                } else if m.closed {
                     sc.tri(p.to_f32(), n.to_f32(), col);
+                } else {
+                    sc.open_tri(p.to_f32(), n.to_f32(), col);
                 }
             }
         }
@@ -580,7 +582,7 @@ mod tests {
     /// headless picture of a translucent target shows the tool inside it.
     #[test]
     fn a_see_through_body_is_glass_at_its_own_alpha_and_a_solid_one_is_not() {
-        let mesh = |opacity: f32| SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: Vec::new(), opacity };
+        let mesh = |opacity: f32| SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: Vec::new(), opacity, closed: true };
         let geometry = |opacity: f32| scene_geometry(&Scene { meshes: vec![mesh(opacity)], ..Default::default() });
 
         let solid = geometry(1.0);
@@ -604,7 +606,7 @@ mod tests {
     /// painting one face does not make the body solid again.
     #[test]
     fn a_painted_face_keeps_its_bodys_opacity() {
-        let mesh = SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5 };
+        let mesh = SceneMesh { mesh: sheet(), color: Rgb(200, 30, 30), face_colors: vec![(0, Rgb(0, 255, 0))], opacity: 0.5, closed: true };
         let sc = scene_geometry(&Scene { meshes: vec![mesh], ..Default::default() });
         assert_eq!(sc.tris.len(), 0);
         assert_eq!(color(&sc, &sc.glass), Some([0, 255, 0, 128]), "the face's own colour at the body's alpha");
