@@ -24,7 +24,7 @@ use crate::viewport::{Proj, projected_polygon};
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = crate::open_meshing::session_world(&app.session);
     let item = anchor_item(app, d);
-    let Some(first) = &item else { return section_plane(d) };
+    let Some(first) = &item else { return section_plane(app, d) };
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -254,16 +254,15 @@ pub(crate) fn blend_grow_dir(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     Some(if edge_concave(m, index, p).unwrap_or(false) { n } else { -n })
 }
 
-/// A Section Analysis dialog reopened from its section's own geometry (Show viewport section
-/// status): the plane it keeps as numbers when nothing is picked, so its arrow stands there as on
-/// a picked plane (#11423).
-fn section_plane(d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
-    if !matches!(d.kind, Kind::Section { .. }) {
-        return None;
+/// A Section Analysis dialog editing a section on a fixed plane (numbers, not a pick): no plane
+/// is picked, so its arrow stands on that plane as on a picked one (#11423, #3977).
+fn section_plane(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
+    use solidcraft_engine::doc::section_analysis::SectionPlane;
+    let Kind::Section { edit: Some(edit), .. } = &d.kind else { return None };
+    match &app.session.doc.section_analyses.get(edit.id)?.plane {
+        SectionPlane::Fixed { origin, normal } => Some((*origin, Some(normal.normalized()?))),
+        _ => None,
     }
-    let plane = d.extra.get("plane")?;
-    let point = |key: &str| serde_json::from_value::<[f64; 3]>(plane.get(key)?.clone()).ok().map(|[x, y, z]| Vec3::new(x, y, z));
-    Some((point("origin")?, Some(point("normal")?.normalized()?)))
 }
 
 /// The pick the dialog's arrow sits on: the first, or for a fillet or chamfer reopened from a
