@@ -82,8 +82,6 @@ thread_local! {
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
     static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
-    /// Isocurve analysis polylines (as segments) while the tool is active.
-    static ISO: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// Center of Mass has just started: measure everything on the next frame.
     static DEFERRED: Cell<bool> = const { Cell::new(false) };
     /// A Trim drag: the pieces its path would remove (sketch polylines), and where the path's
@@ -219,24 +217,6 @@ fn continuity_legend(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
 }
 
-/// Isocurve analysis lines.
-fn iso_lines(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.isocurve") {
-        ISO.with(|i| i.borrow_mut().clear());
-        return;
-    }
-    let tk = crate::theme::Tokens::get();
-    ISO.with(|i| {
-        for c in i.borrow().iter() {
-            for [a, b] in c {
-                if let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) {
-                    painter.line_segment([p, q], Stroke::new(1.2, tk.accent));
-                }
-            }
-        }
-    });
-}
-
 /// Analysis markers: a target with its label.
 fn marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if !app.tool.as_ref().is_some_and(|t| matches!(t.cmd, "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.continuity")) {
@@ -320,6 +300,13 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         .collect();
         app.set_status(format!("Continuity: {} (click the button again to turn it off)", counts.join(", ")), false);
         return true;
+    }
+    if id == "inspect.isocurve" && !app.session.isocurves.is_empty() {
+        // With curves shown, the button turns the analysis off; otherwise the tool picks faces.
+        if app.run(id, json!({"clear": true})).is_ok() {
+            app.set_status("Analysis off", false);
+        }
+        return false;
     }
     if id == "inspect.center_of_mass" {
         // The whole model at once; the tool stays for picking single bodies.
@@ -838,14 +825,10 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
         }
         Mode::ModelRef if cmd == "inspect.isocurve" => {
             let face = hits.iter().find_map(|h| if let Hit::Face { point, .. } = h { Some(*point) } else { None });
-            if let Some(at) = face
-                && let Ok(v) = app.run(cmd, json!({"faces": [[at.x, at.y, at.z]]}))
-            {
-                for c in v["curves"].as_array().into_iter().flatten() {
-                    let pts: Vec<Vec3> = c.as_array().into_iter().flatten().filter_map(v3).collect();
-                    let teeth: Vec<[Vec3; 2]> = pts.windows(2).map(|w| [w[0], w[1]]).collect();
-                    ISO.with(|i| i.borrow_mut().push(teeth));
-                }
+            // The face's curves join those shown (the viewport draws them, `Session::isocurves`); a
+            // failure says why on the status line.
+            if let Some(at) = face {
+                let _ = app.run(cmd, json!({"faces": [[at.x, at.y, at.z]], "add": true}));
             }
         }
         Mode::ModelRef if cmd == "inspect.continuity" => {
@@ -1525,7 +1508,6 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         analysis(app, "inspect.center_of_mass", json!({}));
     }
     marks(app, painter, proj);
-    iso_lines(app, painter, proj);
     continuity_legend(app, painter, proj);
 }
 

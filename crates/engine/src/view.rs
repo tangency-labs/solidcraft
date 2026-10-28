@@ -23,6 +23,8 @@ pub mod colors {
     /// Fixed (locked) geometry.
     pub const SKETCH_LOCKED: Rgb = Rgb(0, 140, 60);
     pub const SKETCH_CENTERLINE: Rgb = Rgb(200, 110, 60);
+    /// Isocurve Analysis curves: the light theme's accent.
+    pub const ISOCURVE: Rgb = Rgb(38, 120, 218);
     /// Linked (projected) reference geometry.
     pub const SKETCH_PROJECTED: Rgb = Rgb(150, 60, 190);
     /// Linked geometry whose reference was lost.
@@ -70,6 +72,8 @@ pub struct Palette {
     pub axes: [Rgb; 3],
     /// What the section cap is tinted toward.
     pub cap: Rgb,
+    /// Isocurve Analysis: the faces' isoparametric curves.
+    pub isocurve: Rgb,
     /// The surface analysis colours.
     pub analysis: AnalysisColors,
 }
@@ -93,6 +97,7 @@ impl Palette {
         sketch_centerline: colors::SKETCH_CENTERLINE,
         axes: [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z],
         cap: colors::SECTION_CAP,
+        isocurve: colors::ISOCURVE,
         analysis: AnalysisColors::DEFAULT,
     };
 }
@@ -693,6 +698,10 @@ fn build_scene(
                 sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
             }
         }
+    }
+    // Isocurve Analysis: the isoparametric curves of each face it shows, on the faces.
+    for line in s.isocurve_lines().iter().flat_map(|lines| lines.iter()) {
+        sc.lines.push(SceneLine { points: line.points.clone(), color: p.isocurve, alpha: 1.0, width: 1.4, on_top: false });
     }
     for ss in &st.sketches {
         let active = s.active_sketch == Some(ss.feature);
