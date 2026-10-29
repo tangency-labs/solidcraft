@@ -1234,3 +1234,44 @@ fn parabola_and_hyperbola_edges_bound_faces() {
         }
     }
 }
+
+/// A dome whose rim is two arcs (a quarter and three quarters), the loop starting at the arcs'
+/// shared vertex a quarter turn from the seam: the face's box, unwrapped from there, has the
+/// seam inside it, but its form (and so its pcurves, seam to seam) must start at the seam.
+#[test]
+fn a_dome_with_a_split_rim_keeps_its_whole_turn_on_a_form_that_starts_at_the_seam() {
+    let mut w = W::default();
+    let (ve, vb, vn) = (w.vertex([5.0, 0.0, 0.0]), w.vertex([0.0, 5.0, 0.0]), w.vertex([0.0, 0.0, 5.0]));
+    let meridian = w.circle([0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0], 5.0);
+    let seam = w.add(format!("EDGE_CURVE('',#{ve},#{vn},#{meridian},.T.)"));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+    let quarter = w.add(format!("EDGE_CURVE('',#{ve},#{vb},#{k},.T.)"));
+    let rest = w.add(format!("EDGE_CURVE('',#{vb},#{ve},#{k},.T.)"));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},5.)"));
+    let (o0, o1, o2, o3) = (w.oe(rest, true), w.oe(seam, true), w.oe(seam, false), w.oe(quarter, true));
+    let bx = w.bound(&[o0, o1, o2, o3], true, true);
+    let dome = w.face(&[bx], sphere, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (x0, x1) = (w.oe(quarter, false), w.oe(rest, false));
+    let bx = w.bound(&[x1, x0], true, true);
+    let disk = w.face(&[bx], plane, false);
+    let shell = closed_shell(&mut w, &[dome, disk]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('dome',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    let face = s.brep.faces.iter().find(|f| f.nurbs.is_some()).expect("the dome's form");
+    let Some(BSurface::RationalSpline { u_knots, .. }) = &face.nurbs else { panic!("{:?}", face.nurbs) };
+    let (k0, k1) = (u_knots[0], u_knots[u_knots.len() - 1]);
+    assert!((k1 - k0 - 4.0).abs() < 1e-9, "{u_knots:?}");
+    assert!(face.domain[0][0] <= k0 + 1e-9 && face.domain[0][1] >= k1 - 1e-9, "{:?} on {u_knots:?}", face.domain);
+    // Every pcurve lies within the form's knots.
+    for l in &face.loops {
+        let Loop::Edges { edges } = l else { continue };
+        for e in edges {
+            let [a, z] = e.pcurve.interval().expect("a pcurve interval");
+            for q in [e.pcurve.eval(a), e.pcurve.eval(z)].into_iter().flatten() {
+                assert!(q[0] >= k0 - 1e-9 && q[0] <= k1 + 1e-9, "{q:?} outside {u_knots:?}");
+            }
+        }
+    }
+}
