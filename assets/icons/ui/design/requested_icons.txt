@@ -147,6 +147,7 @@ iso_curve	false
 joint	false
 joint_origin	false
 library	false
+lighten	false
 line	false
 line_mid	false
 lip	false

@@ -402,6 +402,49 @@ pub struct PlaneAtAngleParams {
     pub common: PlaneCommon,
 }
 
+/// Cut pockets from sketch profiles, leaving a wall between profiles that meet.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct LightenParams {
+    /// The sketch to cut from, by id or name. Default: the active sketch, else the last one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which profiles to cut. Default: every drawn profile. Profiles that share an edge stay
+    /// separate, so the wall between them is kept.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// How thick a wall to leave between profiles that meet, and inside the part outline when
+    /// `trim` is on.
+    pub thickness: LengthExpr,
+    /// Radius of the round cutter. Corners it cannot reach are rounded. Straight walls stay.
+    /// Default: 0, which leaves corners sharp.
+    #[serde(default)]
+    pub tool_radius: Option<LengthExpr>,
+    /// How deep a blind pocket goes, along the material. Required unless `through_all` or `to`
+    /// is set. Ignored when `to` is set, and when `through_all` is set without `to`.
+    #[serde(default)]
+    pub depth: Option<LengthExpr>,
+    /// Cut through the target bodies. `to` wins when both are set.
+    #[serde(default)]
+    pub through_all: Option<bool>,
+    /// A point on the face or body the pocket stops at, in millimetres. The pocket ends at that
+    /// point's height along the sketch normal.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
+    pub to: Option<Point3>,
+    /// Keep each pocket inside the part's outline on the sketch plane, a full wall thickness in
+    /// from that outline. Default: true.
+    #[serde(default)]
+    pub trim: Option<bool>,
+    /// The bodies to cut. Default: the bodies taking part, or every solid in the feature's component.
+    #[serde(default)]
+    pub targets: Option<StringList>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// What a feature command returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct FeatureResult {

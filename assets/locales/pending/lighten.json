@@ -1,0 +1,22 @@
+{
+  "en": {
+    "cmd.solid.lighten": "Lighten",
+    "help.solid.lighten": "Cuts pockets from sketch profiles, leaving a wall between profiles that meet and inside the part outline. Use it to take weight out of a solid while keeping walls a round tool can machine."
+  },
+  "de": {
+    "cmd.solid.lighten": "Ausleichtern",
+    "help.solid.lighten": "Schneidet Taschen aus Skizzenprofilen und lässt eine Wand zwischen aneinanderliegenden Profilen und innerhalb der Teilkontur. Zum Ausleichtern eines Körpers, wobei Wände bleiben, die ein rundes Werkzeug fräsen kann."
+  },
+  "ja": {
+    "cmd.solid.lighten": "軽量化",
+    "help.solid.lighten": "スケッチの輪郭からポケットを削り、接する輪郭の間と部品外形の内側に壁を残します。丸い工具で加工できる壁を残してソリッドを軽くするときに使います。"
+  },
+  "ko": {
+    "cmd.solid.lighten": "경량화",
+    "help.solid.lighten": "스케치 프로파일로 포켓을 잘라, 맞닿은 프로파일 사이와 부품 외곽 안쪽에 벽을 남깁니다. 둥근 공구로 가공할 수 있는 벽을 남기고 솔리드를 가볍게 할 때 씁니다."
+  },
+  "zh": {
+    "cmd.solid.lighten": "减重",
+    "help.solid.lighten": "按草图轮廓切除凹槽，在相接轮廓之间以及零件外形内侧留下壁厚。用于在保留圆刀可加工壁厚的同时减轻实体。"
+  }
+}
