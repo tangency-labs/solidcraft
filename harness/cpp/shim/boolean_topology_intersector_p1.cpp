@@ -8,8 +8,9 @@
 // sm_FindFirstLowestDimensionSol, sm_IntersectShellVertices, sm_IntersectWireLaminaEdges,
 // sm_SetEdgeClass, sm_CheckInteriorEdge, sReasonType, sm_TestAndSplitTwoEdges and
 // sm_TestAndImprintFace are VERBATIM copies of upstream (commit c9c5979, lines 1272-1572,
-// 2676-2829 and 6564-6861) inside namespace sc_ti_p1 (SM_DEBUG_CODE and CBI_CACHE are not
-// defined in the reference build).
+// 2676-2829 and 6564-6861; byte-identical in v1.0.1 3fd5b95, lines 1272-1572, 2676-2829 and
+// 6578-6875) inside namespace sc_ti_p1 (SM_DEBUG_CODE and CBI_CACHE are not defined in the
+// reference build).
 //
 // One entry point, sc_boolean_topology_intersector_p1_eval(op, path, in, n_in, out, cap,
 // out_len). Layouts are documented in
@@ -819,62 +820,6 @@ struct TiMgr
     friend type ti_get(TiMgr);
 };
 template struct TiRob<TiMgr, &SmTopologyIntersector::m_pProtoTopoMgr>;
-
-// UB-175: ~SmProtoTopologyManager deletes the listed proto edges before the listed proto
-// vertices; each ~SmProtoEdge unlists itself once from its start vertex and once from a
-// different end vertex, then each ~SmProtoVertex calls RemoveProtoVertex on every edge it
-// still lists. An edge whose ends coincide is listed twice there (AddProtoEdge, DD1) and a
-// combined vertex keeps entries of edges that no longer end at it: those entries are freed
-// edges. Replays the unlisting on copies and returns whether any listed vertex keeps a
-// listed edge; with `unlink`, removes those entries first so the destructor stays defined
-// (the script's own manager: its teardown is ours, lesson 23). Scope: only the edge-phase
-// unlisting is modelled; a proto vertex freed before the manager's destructor would be a
-// different use-after-free and is not flagged (no such path in source for these ops; the
-// pre-ready valgrind sample of the op-47 family covers it).
-static bool mgr_teardown_stale(SmProtoTopologyManager* mgr, bool unlink)
-{
-    SmTArray<SmProtoVertex*>& pvs = mgr->GetProtoVertices();
-    SmTArray<SmProtoEdge*>& pes = mgr->GetProtoEdges();
-    std::map<SmProtoVertex*, std::vector<SmProtoEdge*>> lists;
-    for (ULONG i = 0; i < pvs.GetSize(); i++)
-    {
-        if (pvs[i] == nullptr || lists.count(pvs[i]))
-            continue;
-        std::vector<SmProtoEdge*>& l = lists[pvs[i]];
-        SmTArray<SmProtoEdge*>& src = pvs[i]->GetProtoEdges();
-        for (ULONG j = 0; j < src.GetSize(); j++)
-            l.push_back(src[j]);
-    }
-    auto unlist = [&](SmProtoVertex* v, SmProtoEdge* e) {
-        auto it = lists.find(v);
-        if (it == lists.end())
-            return;
-        auto f = std::find(it->second.begin(), it->second.end(), e);
-        if (f != it->second.end())
-            it->second.erase(f);
-    };
-    std::vector<SmProtoEdge*> freed;
-    for (ULONG i = 0; i < pes.GetSize(); i++)
-    {
-        SmProtoEdge* e = pes[i];
-        if (e == nullptr || std::find(freed.begin(), freed.end(), e) != freed.end())
-            continue;
-        freed.push_back(e);
-        unlist(e->GetStartProtoVertex(), e);
-        if (e->GetEndProtoVertex() != e->GetStartProtoVertex())
-            unlist(e->GetEndProtoVertex(), e);
-    }
-    bool stale = false;
-    for (auto& kv : lists)
-        for (SmProtoEdge* e : kv.second)
-            if (std::find(freed.begin(), freed.end(), e) != freed.end())
-            {
-                stale = true;
-                if (unlink)
-                    kv.first->RemoveProtoEdge(e);
-            }
-    return stale;
-}
 
 enum TiOp : int32_t
 {
@@ -1751,11 +1696,7 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
         }
     }
     delete ti; // the destructor frees the table (and its curves), maps and subset
-    if (mgr)
-    {
-        mgr_teardown_stale(mgr, true);
-        delete mgr;
-    }
+    delete mgr;
 }
 
 // UB-166: the B-spline surface constructor's sm_FixupKnotVector can raise a v knot

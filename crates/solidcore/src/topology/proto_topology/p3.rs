@@ -30,11 +30,10 @@
 //!   deleting a proto edge on its own (the difftest's script ops) stays upstream's.
 //!   Without it, the stale id names a deleted slot and the later passes fail with
 //!   `InvalidInput`.
-//! - **Deleted vertex in `GlueCoincidentBrepVertices`** (SolidCraft fix,
-//!   tangency-labs/smlib da8d05e, UB-241). For two coincident vertices joined by
-//!   several common edges, upstream goes on to the next edge after squeezing or
-//!   gluing away the second vertex, and uses it after the free. The loop stops once
-//!   that vertex is recorded as deleted, in both B-reps' halves.
+//! - **UB-241 in `GlueCoincidentBrepVertices`** (SolidCraft fix, tangency-labs/smlib
+//!   da8d05e): use-after-free in `GlueCoincidentBrepVertices` on the `GlueVertices`
+//!   path; the port stops before that call. The delete branch is defined and runs as
+//!   upstream.
 //! - **B-rep access.** Topology objects are the caller's handles `O`, as in
 //!   [`p1`](super::p1). What these functions read from vertices and edges, and the
 //!   store new curves go to, is [`ProtoBrep`] (of `topology.proto_topology_p2`, which
@@ -1155,13 +1154,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         }
                     } else {
                         for &edge in edges {
-                            // SolidCraft change (tangency-labs/smlib da8d05e): squeezing
-                            // or gluing for an earlier common edge deleted v2; every
-                            // later step would use it (and the edges it ended) after the
-                            // free, so stop.
-                            if deleted_v.get(jj).copied().flatten() == Some(v2) {
-                                break;
-                            }
+                            // UB-241 (SolidCraft fix, tangency-labs/smlib da8d05e): stop
+                            // before the GlueVertices path; the delete branch runs as
+                            // upstream.
+                            let v2_deleted = deleted_v.get(jj).copied().flatten() == Some(v2);
                             let curve_handle =
                                 brep.edge_curve(edge).ok_or(dangling("edge is unknown"))?;
                             let ivl = brep
@@ -1171,6 +1167,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                 .approximate_length(k, &ivl, 5, false)?
                                 .0;
                             if len < xs {
+                                if v2_deleted && brep.edge_other_vertex(edge, Some(v1))? != Some(v1)
+                                {
+                                    break;
+                                }
                                 // If any to-be-deleted topology is mated, remove the
                                 // relationship when done.
                                 let edge_mate = mates
@@ -1230,6 +1230,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                     Err(e) => ret = Err(e),
                                 }
                             } else {
+                                // UB-241: stop before GlueVertices
+                                if v2_deleted {
+                                    break;
+                                }
                                 // coincident Vertices connected by a long Edge: Glue.
                                 if v1 != v2 {
                                     ignore_soft(brep.glue_vertices(
@@ -1847,24 +1851,35 @@ mod tests {
 
     /// Vertices 0 and 1 of B-rep 1 coincide and are joined by the long edges 0 and 1
     /// (both on curve 0); vertices 2 and 3 of B-rep 2 are far apart. Records every
-    /// `GlueVertices` call and refuses one of a vertex already glued away.
+    /// `GlueVertices` call and refuses one of a vertex already glued away; records
+    /// every `SqueezeEdge` and `DeleteEdge` (after a squeeze, `edge_other_vertex` answers
+    /// vertex 0).
     struct Pool {
         curves: Vec<Curve>,
         glued: Vec<(H, H)>,
+        squeezed: Vec<H>,
+        deleted: Vec<H>,
     }
 
     impl Pool {
         fn new() -> Self {
+            Self::with_length(10.0)
+        }
+
+        /// As [`Pool::new`] with edges `length` long.
+        fn with_length(length: f64) -> Self {
             let line = Line::create_line_segment(
                 3,
                 Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(10.0, 0.0, 0.0),
+                Vec3::new(length, 0.0, 0.0),
                 None,
             )
             .unwrap();
             Self {
                 curves: vec![Curve::from(line)],
                 glued: Vec::new(),
+                squeezed: Vec::new(),
+                deleted: Vec::new(),
             }
         }
     }
@@ -1905,7 +1920,11 @@ mod tests {
             Ok(Some(vtx(0)))
         }
         fn edge_other_vertex(&self, _edge: H, _vertex: Option<H>) -> Result<Option<H>> {
-            Ok(Some(vtx(1)))
+            Ok(Some(if self.squeezed.is_empty() {
+                vtx(1)
+            } else {
+                vtx(0)
+            }))
         }
         fn vertex_point(&self, vertex: H) -> Result<Point3> {
             Ok(match vertex.0 {
@@ -1983,10 +2002,11 @@ mod tests {
             &mut self,
             _k: &mut Kernel,
             _brep: H,
-            _edge: H,
+            edge: H,
             _survivor: H,
         ) -> Result<()> {
-            Err(SolidError::invalid_input("test", "unused"))
+            self.squeezed.push(edge);
+            Ok(())
         }
         fn brep_point_3d_classify(
             &mut self,
@@ -2019,7 +2039,8 @@ mod tests {
     }
 
     impl BrepGlue<H> for Pool {
-        fn delete_edge(&mut self, _k: &mut Kernel, _brep: H, _edge: H) -> Result<()> {
+        fn delete_edge(&mut self, _k: &mut Kernel, _brep: H, edge: H) -> Result<()> {
+            self.deleted.push(edge);
             Ok(())
         }
         fn glue_vertices(
@@ -2076,6 +2097,37 @@ mod tests {
             .unwrap();
         assert_eq!(pool.glued, vec![(vtx(0), vtx(1))]);
         // the second definition, whose B-rep 1 vertex is gone, is deleted
+        assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
+    }
+
+    #[test]
+    fn glue_deletes_a_second_short_common_edge_after_the_squeeze() {
+        // the delete branch runs as upstream after a squeeze;
+        // boolean.api_brep crossing_creases_union_d1e-05
+        let mut k = Kernel::default();
+        let mut pool = Pool::with_length(1e-6);
+        let b = H(100, ClassObjectKind::Other);
+        let e = Brep::new();
+        let mut m = ProtoTopologyManager::new(&k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap();
+        let p = Point3::new(0.0, 0.0, 0.0);
+        let pv = m.new_proto_vertex(p, 1e-5).unwrap();
+        m.add_proto_vertex(pv);
+        let r = H(50, ClassObjectKind::Region);
+        for (v1, v2) in [(vtx(0), vtx(2)), (vtx(1), vtx(3))] {
+            let mut vd =
+                VertexDefinition::new(&k, &pool, &region_pc(r), &region_pc(r), p, 1e-5, 1e-6, None)
+                    .unwrap();
+            vd.set_final_vertex(1, Some(v1));
+            vd.set_final_vertex(2, Some(v2));
+            let id = m.insert_vertex_definition(vd).unwrap();
+            m.add_vertex_definition(pv, id).unwrap();
+        }
+
+        m.glue_coincident_brep_vertices(&mut k, &mut pool, &mut NoMates)
+            .unwrap();
+        assert_eq!(pool.squeezed, vec![edg(0)]);
+        assert_eq!(pool.deleted, vec![edg(1)]);
+        assert!(pool.glued.is_empty());
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
     }
 

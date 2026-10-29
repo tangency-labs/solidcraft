@@ -4313,15 +4313,12 @@ fn run_part2_op(
                 o.push(NULL_DEREF);
                 return Ok(());
             }
-            // (where upstream reads a freed proto edge, UB-175, the shim's verbatim copy
-            // unlinks the stale entries and answers -2; the port goes on with its defined
-            // teardown and records the condition on the kernel. After a failed imprint,
-            // UB-242, both stop and the shim answers -2.)
+            // (after a failed imprint, UB-242, both stop and the shim answers -2. The
+            // v1.0.1 manager teardown is defined, so a run the port records UB-175 for,
+            // a v1.0.0 defect, is compared like any other.)
             k.upstream_ub_passed.clear();
             let r = ti.intersect_insert_relate(k, two, TI_HANDLE);
-            if k.upstream_ub_passed.contains(&"UB-242")
-                || k.upstream_ub_passed.contains(&"UB-175")
-            {
+            if k.upstream_ub_passed.contains(&"UB-242") {
                 o.push(NULL_DEREF);
                 return Ok(());
             }

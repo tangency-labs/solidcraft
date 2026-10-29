@@ -112,12 +112,12 @@ SmExtent2d domain(const SmSurface& s, const double* f) {
     double u=n.GetUMin(),v=n.GetVMin(),du=n.GetUMax()-u,dv=n.GetVMax()-v;
     return SmExtent2d(u+du*f[0],v+dv*f[1],u+du*f[2],v+dv*f[3]);
 }
-// UB-154 (plan/upstream-issues.md): the file-static sm_GetEllipseTrimIntervals
-// (SmCone.cpp:5282) ignores the statuses of the smgu_LinePlaneIntersect calls on the
-// trimmed cone's two seam lines and then compares and uses the uninitialised dParam[0..1]
-// (:5399-5405, :5463-5477). It is reached only from inside IntersectWithCone and
-// IntersectWithPlane, with an ellipse they compute, so the shim replays the same calls in
-// the same order up to that point (seam_lines_defined: the head of
+// UB-154 (plan/upstream-issues/; SmCone.cpp line numbers here are v1.0.1's, 3fd5b95): the
+// file-static sm_GetEllipseTrimIntervals (SmCone.cpp:5315) ignores the statuses of the
+// smgu_LinePlaneIntersect calls on the trimmed cone's two seam lines and then compares and
+// uses the uninitialised dParam[0..1] (:5434-5439, :5505-5521). It is reached only from
+// inside IntersectWithCone and IntersectWithPlane, with an ellipse they compute, so the shim
+// replays the same calls in the same order up to that point (seam_lines_defined: the head of
 // sm_GetEllipseTrimIntervals; the *_ellipse_seams_undefined functions: the paths of the two
 // callers that reach it). Status-checked steps that make upstream return before the call
 // return false here too.
@@ -149,8 +149,8 @@ bool seam_lines_defined(const SmCone& crCone, const SmExtent2d& crUVDomain,
                                    dParam[1]) == SM_SUCCESS;
 }
 
-// SmCone::IntersectWithCone (SmCone.cpp:2604) up to its elliptical branch for two
-// cylinders of the same radius whose axes intersect (:3010-3137): four
+// SmCone::IntersectWithCone (SmCone.cpp:2605) up to its elliptical branch for two
+// cylinders of the same radius whose axes intersect (:3011-3138): four
 // sm_AddEllipseIntervalsTrimmedToTwoCones calls, each trimming one ellipse to this cone
 // and then to the other one. True when one of those eight trims reads dParam.
 bool cone_ellipse_seams_undefined(const SmCone& crThis, const SmExtent2d& crUVDomain,
@@ -232,9 +232,9 @@ bool cone_ellipse_seams_undefined(const SmCone& crThis, const SmExtent2d& crUVDo
     return trims_undefined();
 }
 
-// SmCone::IntersectWithPlane (SmCone.cpp:3219) up to its elliptical branch (:3664-3834),
+// SmCone::IntersectWithPlane (SmCone.cpp:3220) up to its elliptical branch (:3665-3835),
 // which trims the ellipse to the cone's natural domain. True when that trim reads dParam.
-// No known input reaches it: the generator lines tested at :3716 and :3735 are as long
+// No known input reaches it: the generator lines tested at :3717 and :3736 are as long
 // as the seams and one of them is the least steep to the plane, so (up to rounding) they
 // fail first and return. Kept so the guard follows every path into
 // sm_GetEllipseTrimIntervals.

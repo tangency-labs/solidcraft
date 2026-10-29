@@ -221,8 +221,9 @@ bool set_rels_maps_ok(SmProtoTopologyManager* mgr, int64_t ctor_kind)
     return true;
 }
 
-// ImprintIntersections (SmTopologyIntersector.cpp:2302-2413, upstream commit c9c5979)
-// VERBATIM, apart from the SM_DEBUG_CODE blocks and the members reached through accessors,
+// ImprintIntersections (SmTopologyIntersector.cpp:2302-2413, upstream commit c9c5979;
+// byte-identical in v1.0.1 3fd5b95 at the same lines) VERBATIM, apart from the SM_DEBUG_CODE
+// blocks and the members reached through accessors,
 // plus one addition: `edited` answers whether a failing imprint may have edited a B-rep,
 // as the port's ImprintOutcome::failure_edited does. A vertex definition's imprint and the
 // glue edit first; an edge definition's imprint edits nothing when it stops before its
@@ -312,16 +313,17 @@ SmStatus ii_verbatim(SmTopologyIntersector* ti, bool& edited)
   return eRetStat;
 }
 
-// IntersectInsertRelate (SmTopologyIntersector.cpp:1092-1270, upstream commit c9c5979)
-// VERBATIM, apart from the
+// IntersectInsertRelate (SmTopologyIntersector.cpp:1092-1270, upstream commit c9c5979;
+// byte-identical in v1.0.1 3fd5b95 at the same lines) VERBATIM, apart from the
 // SM_VALIDATE_TOPOLOGY, SM_DEBUG_CODE and SM_USE_TBB blocks (not defined in the reference
-// build) and the members reached through accessors, plus one addition: before the delete,
-// whether ~SmProtoTopologyManager would read a freed proto edge (UB-175); if so the stale
-// entries are unlinked first, so the run stays defined, and `ub` is set (the port answers
-// InvalidInput there). A second addition stops after a failed ImprintIntersections (UB-242)
-// whose failure may have edited a B-rep (ii_verbatim above), where upstream goes on with
-// half-imprinted B-reps: `ub` is set there too. The real IntersectInsertRelate is no longer exercised by this
-// difftest, so re-diff this copy against upstream whenever the pinned commit moves.
+// build) and the members reached through accessors, plus one addition: it stops after a
+// failed ImprintIntersections (UB-242) whose failure may have edited a B-rep (ii_verbatim
+// above), where upstream goes on with half-imprinted B-reps, and sets `ub` (the port
+// answers InvalidInput there). v1.0.1's ~SmProtoTopologyManager cuts the proto vertex /
+// proto edge links before deleting them, so the teardown is defined (UB-175 is a v1.0.0
+// defect) and the copy deletes the manager as upstream does. The real
+// IntersectInsertRelate is no longer exercised by this difftest, so re-diff this copy
+// against upstream whenever the pinned commit moves.
 SmStatus iir_verbatim(SmTopologyIntersector* ti, bool& ub)
 {
   SmProtoTopologyManager*& m_pProtoTopoMgr = ti->*ti_get(TiMgr());
@@ -357,7 +359,7 @@ SmStatus iir_verbatim(SmTopologyIntersector* ti, bool& ub)
   // B-reps; stop here as the port does, deleting the manager as below, and answer -2)
   if (eStat != SM_SUCCESS && bEdited)
     {
-      if(m_pProtoTopoMgr) { mgr_teardown_stale(m_pProtoTopoMgr, true); delete m_pProtoTopoMgr ; m_pProtoTopoMgr = NULL; }
+      if(m_pProtoTopoMgr) { delete m_pProtoTopoMgr ; m_pProtoTopoMgr = NULL; }
       ub = true;
       return eStat;
     }
@@ -366,7 +368,7 @@ SmStatus iir_verbatim(SmTopologyIntersector* ti, bool& ub)
   eStat = ti->SetRelationships();
 
   // all done - clean up and exit
-  if(m_pProtoTopoMgr) { ub = mgr_teardown_stale(m_pProtoTopoMgr, true); delete m_pProtoTopoMgr ; m_pProtoTopoMgr = NULL; }
+  if(m_pProtoTopoMgr) { delete m_pProtoTopoMgr ; m_pProtoTopoMgr = NULL; }
   return eStat;
 }
 } // namespace

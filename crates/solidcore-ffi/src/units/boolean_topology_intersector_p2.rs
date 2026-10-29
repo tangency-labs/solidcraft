@@ -45,9 +45,9 @@
 //! are not vertices where upstream dereferences them, edges of a vertex without
 //! curve, faces without surface, 46 without the maps reaching `Relate`'s insert, 52's
 //! edges without curve, vertices or (the B-rep vertex's) primary edge use) and
-//! answers `-2`; it also answers `-2` for a 47 whose manager teardown would read a
-//! freed proto edge (UB-175: the shim runs a verbatim copy of
-//! `IntersectInsertRelate` that unlinks the stale entries first).
+//! answers `-2`; it also answers `-2` for a 47 whose failed imprint may have edited a
+//! B-rep (UB-242: the shim runs a verbatim copy of `IntersectInsertRelate` that stops
+//! there).
 //!
 //! 49 checks the index against both classifications only: upstream bounds its
 //! `index + 1` writes by the B-rep classification's size, so with a shorter other

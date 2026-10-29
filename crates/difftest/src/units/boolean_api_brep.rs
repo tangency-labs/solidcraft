@@ -375,10 +375,10 @@ fn to_output(o: &[f64]) -> Result<Output, HarnessError> {
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    if ub_175(i)? {
+    if ub_242(i)? {
         return Ok(Output::rejected(
-            "UB-175: ~SmProtoTopologyManager frees a proto edge that a proto vertex \
-             still lists, then ~SmProtoVertex reads it; not run",
+            "UB-242: IntersectInsertRelate ignores a failed imprint that edited a B-rep \
+             and goes on with the half-edited B-reps; not run",
         ));
     }
     match ffi::run(&to_call(i)) {
@@ -402,17 +402,18 @@ fn measured_output(o: &[f64]) -> Result<Output, HarnessError> {
     Ok(to_output(head)?.values("measures", measures.to_vec()))
 }
 
-/// Whether the Boolean reaches UB-175 (`plan/upstream-issues.md`): the teardown of
-/// `IntersectInsertRelate`'s proto topology manager reads a proto edge it already
-/// freed, so the input is undefined in C++ (AGENTS.md section 4, step 5.6) and [`cpp`]
-/// rejects it. Decided from the inputs and the Rust side only: the port replays the
-/// teardown, goes on with its defined result and records `"UB-175"` on the kernel
-/// ([`Kernel::upstream_ub_passed`]).
-fn ub_175(i: &Inputs) -> Result<bool, HarnessError> {
+/// Whether the Boolean reaches UB-242 (`plan/upstream-issues/`): an imprint in
+/// `IntersectInsertRelate` fails after it may have edited a B-rep, and upstream goes on
+/// with the half-edited B-reps, so the input is undefined in C++ (AGENTS.md section 4,
+/// step 5.6) and [`cpp`] rejects it. Decided from the inputs and the Rust side only: the
+/// port stops there (tangency-labs/smlib af8db37) and records `"UB-242"` on the kernel
+/// ([`Kernel::upstream_ub_passed`]). (Until the v1.0.1 pin this guard was UB-175's, the
+/// proto topology manager teardown, which v1.0.1 defines.)
+fn ub_242(i: &Inputs) -> Result<bool, HarnessError> {
     let mut k = Kernel::default();
     match rust_call_with(&mut k, i, &|_| {}) {
         Ok(_) | Err(Stop::Deferred(_) | Stop::Torus(_)) => {
-            Ok(k.upstream_ub_passed.contains(&"UB-175"))
+            Ok(k.upstream_ub_passed.contains(&"UB-242"))
         }
         Err(Stop::Harness(e)) => Err(e),
     }
