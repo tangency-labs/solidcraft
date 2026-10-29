@@ -771,7 +771,7 @@ pub fn create_oriented_trim_boundary(
                     // get trim curve's start UV point
                     let mut pnt = uv_curve.evaluate_point(k, ivl.min())?;
                     if wrap {
-                        shift = shift + seam_wrap(pnt + shift - last_pnt, periods);
+                        shift = shift + seam_wrap(k, b, f, last_pnt, pnt, shift, periods)?;
                         pnt += shift;
                     }
 
@@ -826,7 +826,7 @@ pub fn create_oriented_trim_boundary(
                     let ivl = bsc.reverse_parameterization(k, &ivl)?;
                     let mut pnt = bsc.evaluate_point(k, ivl.min())?;
                     if wrap {
-                        shift = shift + seam_wrap(pnt + shift - last_pnt, periods);
+                        shift = shift + seam_wrap(k, b, f, last_pnt, pnt, shift, periods)?;
                         pnt += shift;
                     }
                     let diff = pnt - last_pnt;
@@ -892,10 +892,56 @@ fn seam_periods(k: &Kernel, b: &Brep, f: FaceId) -> Result<[Option<f64>; 2]> {
     Ok(periods)
 }
 
+/// The further shift that takes a curve starting at `start` (not yet shifted) onto
+/// `last_end`, the shifted end of the curve before it, given the `shift` of the curves so
+/// far: where the gap is whole periods in a closed direction up to [`SEAM_WRAP_RESIDUAL`]
+/// (WR-491), a seam crossing. A gap along a singular side of the surface (a sphere's
+/// pole, a cone's apex) is a surface singularity instead, whatever its length: no shift
+/// (#1437).
+fn seam_wrap(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    last_end: Point3,
+    start: Point3,
+    shift: Vec3,
+    periods: [Option<f64>; 2],
+) -> Result<Vec3> {
+    let wrap = seam_wrap_of_gap(start + shift - last_end, periods);
+    if (wrap.x == 0.0 && wrap.y == 0.0) || gap_is_singular(k, b, f, last_end - shift, start)? {
+        return Ok(Vec3::new(0.0, 0.0, 0.0));
+    }
+    Ok(wrap)
+}
+
+/// Whether the UV line from `end` to `start` maps to one point on face `f`'s surface
+/// within twice the face tolerance (the closedness test of [`seam_periods`]): sampled at
+/// its quarter points, as on a sphere's pole or a cone's apex. Across a seam the line runs
+/// round the whole surface instead (#1437, WR-491).
+fn gap_is_singular(k: &Kernel, b: &Brep, f: FaceId, end: Point3, start: Point3) -> Result<bool> {
+    let surface = b
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| null("face without surface"))?;
+    let tolerance = 2.0 * fp2::tolerance(b, f)?;
+    let at = |t: f64| {
+        let p = end + (start - end) * t;
+        surface.evaluate_point(k, Point2::new(p.x, p.y))
+    };
+    let anchor = at(0.0)?;
+    for t in [0.25, 0.5, 0.75, 1.0] {
+        if (at(t)? - anchor).length() > tolerance {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// The shift that takes a curve starting at `gap` from the end of the one before it onto
 /// that end, where `gap` is whole periods in a closed direction up to
-/// [`SEAM_WRAP_RESIDUAL`] (WR-491): a seam crossing, not a surface singularity.
-fn seam_wrap(gap: Vec3, periods: [Option<f64>; 2]) -> Vec3 {
+/// [`SEAM_WRAP_RESIDUAL`] (WR-491).
+fn seam_wrap_of_gap(gap: Vec3, periods: [Option<f64>; 2]) -> Vec3 {
     let mut shift = Vec3::new(0.0, 0.0, 0.0);
     for (d, period, s) in [
         (gap.x, periods[0], &mut shift.x),

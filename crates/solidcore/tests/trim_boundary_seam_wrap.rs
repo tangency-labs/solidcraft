@@ -19,7 +19,9 @@
 use solidcore::curve::curve::Curve;
 use solidcore::curve::line::Line;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::mass::integrator::properties::{brep_area, brep_volume, PropertyAttributes};
+use solidcore::mass::integrator::properties::{
+    brep_area, brep_properties, brep_volume, MassPropertyBehavior, PropertyAttributes,
+};
 use solidcore::math::{Point3, PI};
 use solidcore::primitive::api_primitives::create_cone;
 use solidcore::topology::trimming_tools::clear_uv_trim_curves;
@@ -129,4 +131,154 @@ fn wr491_seam_wrap_fix_keeps_a_sound_body() {
     let (lateral, caps, volume) = exact();
     assert!((on.0 - lateral - caps).abs() < 1e-6 * (lateral + caps));
     assert!((on.1 - volume).abs() < 1e-6 * volume);
+}
+
+// ---- #1437: pole gaps are not seam crossings ------------------------------------------
+
+use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::primitive::api_primitives::{
+    create_box, create_cylinder, create_partial_sphere, create_sphere, create_torus,
+};
+
+/// Area and volume of `make`'s body at accuracy `acc` with the fix on or off.
+fn measure_body(
+    make: fn(&mut Kernel) -> Brep,
+    acc: f64,
+    fixed: bool,
+) -> (solidcore::Result<f64>, solidcore::Result<f64>) {
+    let mut k = Kernel::default();
+    k.fixes.trim_boundary_seam_wrap = fixed;
+    let mut b = make(&mut k);
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    (
+        brep_area(&k, &mut b, acc),
+        brep_volume(&k, &mut b, acc, &attrs),
+    )
+}
+
+/// A named body maker with its exact area and volume.
+type Body = (&'static str, fn(&mut Kernel) -> Brep, f64, f64);
+
+/// Every body of #1437's matrix, with its exact area and volume.
+fn bodies() -> [Body; 5] {
+    const R: f64 = 7.0;
+    [
+        // one face whose loop has a gap line at each pole
+        (
+            "sphere",
+            |k| create_sphere(k, Point3::new(0.0, 0.0, 0.0), R).unwrap(),
+            4.0 * PI * R * R,
+            4.0 / 3.0 * PI * R * R * R,
+        ),
+        // the upper hemisphere: one gap line, at the north pole
+        (
+            "hemisphere",
+            |k| {
+                let s = create_sphere(k, Point3::new(0.0, 0.0, 0.0), R).unwrap();
+                let bx = create_box(k, Point3::new(-10.0, -10.0, -20.0), 20.0, 20.0, 20.0).unwrap();
+                boolean_difference(k, s, bx).unwrap()
+            },
+            3.0 * PI * R * R,
+            2.0 / 3.0 * PI * R * R * R,
+        ),
+        // a quarter sector: the lune meets both poles, no seam inside
+        (
+            "sector",
+            |k| create_partial_sphere(k, Point3::new(0.0, 0.0, 0.0), R, 0.0, 90.0).unwrap(),
+            PI * R * R + PI * R * R,
+            PI * R * R * R / 3.0,
+        ),
+        // closed in both directions, no singularity
+        (
+            "torus",
+            |k| create_torus(k, Point3::new(0.0, 0.0, 0.0), 10.0, 3.0).unwrap(),
+            4.0 * PI * PI * 10.0 * 3.0,
+            2.0 * PI * PI * 10.0 * 9.0,
+        ),
+        // a seam edge, no singularity
+        (
+            "cylinder",
+            |k| create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 5.0, 12.0).unwrap(),
+            2.0 * PI * 5.0 * 12.0 + 2.0 * PI * 25.0,
+            PI * 25.0 * 12.0,
+        ),
+    ]
+}
+
+/// #1437: with the fix on, every body measures what it does with the fix off (bit for
+/// bit: none has a seam gap to wrap) and its exact area and volume. Before the fix, the
+/// sphere's two pole gaps were taken for seam crossings and it measured 0.
+#[test]
+fn i1437_pole_gaps_are_not_seam_crossings() {
+    for (name, make, area, volume) in bodies() {
+        let (off, on) = (
+            measure_body(make, 1e-6, false),
+            measure_body(make, 1e-6, true),
+        );
+        let (a_off, v_off) = (off.0.unwrap(), off.1.unwrap());
+        let (a_on, v_on) = (on.0.unwrap(), on.1.unwrap());
+        assert_eq!(
+            a_off.to_bits(),
+            a_on.to_bits(),
+            "{name}: area {a_off} vs {a_on}"
+        );
+        assert_eq!(
+            v_off.to_bits(),
+            v_on.to_bits(),
+            "{name}: volume {v_off} vs {v_on}"
+        );
+        assert!(
+            (a_on - area).abs() < 1e-5 * area,
+            "{name}: area {a_on} vs {area}"
+        );
+        assert!(
+            (v_on - volume).abs() < 1e-5 * volume,
+            "{name}: volume {v_on} vs {volume}"
+        );
+    }
+}
+
+/// #1437's reproduction at 1e-8: the sphere's area, volume and inertia with the fix on
+/// (the flag-off volume is #1431's `SM_ERR 1001`, so this compares with the exact values).
+#[test]
+fn i1437_sphere_properties_with_the_fix() {
+    const R: f64 = 7.0;
+    let mut k = Kernel::default();
+    k.fixes.trim_boundary_seam_wrap = true;
+    k.fixes.precise_properties_body_length_scale = true;
+    let mut b = create_sphere(&mut k, Point3::new(1.0, -2.0, 3.0), R).unwrap();
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let p = brep_properties(
+        &k,
+        &mut b,
+        1e-8,
+        Point3::new(1.0, -2.0, 3.0),
+        MassPropertyBehavior::default(),
+        &attrs,
+    )
+    .unwrap();
+    let (area, volume) = (4.0 * PI * R * R, 4.0 / 3.0 * PI * R * R * R);
+    assert!((p.area - area).abs() < 1e-7 * area, "area {}", p.area);
+    assert!(
+        (p.volume - volume).abs() < 1e-7 * volume,
+        "volume {}",
+        p.volume
+    );
+    // about the centre, the second volume moments (x², y², z²) are each V r² / 5
+    let second = volume * R * R / 5.0;
+    for c in [p.moments[5].x, p.moments[5].y, p.moments[5].z] {
+        assert!(
+            (c - second).abs() < 1e-6 * second,
+            "moments {:?}",
+            p.moments
+        );
+    }
 }
