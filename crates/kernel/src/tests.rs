@@ -1603,9 +1603,9 @@ fn overlapping_holes_and_mirror_joins() {
     let both = boolean(&half, &other, BoolOp::Union).unwrap().unwrap();
     let v = measure(&half).unwrap().volume;
     let mb = measure(&both).unwrap();
-    // Both volumes are SMLib's integrals, each good to its relative accuracy (1e-4,
-    // measure::ACCURACY); a lost round or wall would be off by percent.
-    assert!(rel(mb.volume, 2.0 * v) < 1e-4, "{} vs {}", mb.volume, 2.0 * v);
+    // Both volumes are SMLib's integrals, each good to its relative accuracy (1e-8,
+    // measure::ACCURACY): they agree to the two together.
+    assert!(rel(mb.volume, 2.0 * v) < 2e-8, "{} vs {}", mb.volume, 2.0 * v);
     // One body: the shared face is gone and the faces either side of it merged.
     assert_eq!(mb.merged.faces, 10, "{:?}", mb.merged);
     // Two equal cylinders on one axis, overlapping: one longer cylinder.
