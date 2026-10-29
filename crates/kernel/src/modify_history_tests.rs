@@ -280,7 +280,10 @@ fn draft_tilts_faces() {
     let side = Vec3::new(40.0, 15.0, 10.0);
     let r = crate::draft(&b, &[side], &Plane::XY, Vec3::Z, 5f64.to_radians()).unwrap();
     let h = verified(&r, &b, Reach { made: 0.0, moved: 2.0 });
-    assert_eq!(changes(h), [0, 6, 0, 0, 0]);
+    // The side tilts about its bottom edge (on the neutral plane z = 0); the top and the two
+    // faces beside it lose a wedge along their moved edges. The bottom and the opposite side
+    // are untouched.
+    assert_eq!(changes(h), [2, 4, 0, 0, 0]);
     assert_eq!(with(h, &[face(face_at(&b, side))]).len(), 1);
     // Walls of a body that is not convex.
     let l = ell();
