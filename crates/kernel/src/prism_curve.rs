@@ -578,14 +578,35 @@ mod tests {
         }
         out
     }
-    fn trap() -> Vec<f64> {
-        let mut p = vec![1.];
-        for k in 0..=16 {
-            p = multiply(&p, &[-(k as f64) / 16., 1.]);
+    /// The power basis `p` (in t) over the span t = a + h s, in s.
+    fn shifted(p: &[f64], a: f64, h: f64) -> Vec<f64> {
+        let mut out = vec![0.];
+        for c in p.iter().rev() {
+            out = multiply(&out, &[a, h]);
+            out[0] += c;
         }
-        let mid = (0..=16).map(|k| 1. / 32. - k as f64 / 16.).product::<f64>();
-        p.iter_mut().for_each(|v| *v /= mid);
-        p
+        out
+    }
+    /// A spline of `degree` over spans [k/16, (k+1)/16] (k = 0..16), joined C0 (each interior
+    /// knot `degree` times), whose homogeneous `x`, `y`, `w` are the power bases `f(k)` gives
+    /// in the span's own parameter s ∈ [0, 1]: a curve that bends only between the knots.
+    fn spans(degree: usize, f: impl Fn(usize) -> [Vec<f64>; 3]) -> Curve {
+        let mut knots = vec![0.; degree + 1];
+        let mut homogeneous: Vec<[f64; 4]> = Vec::new();
+        for k in 0..16 {
+            let [x, y, w] = f(k);
+            let (x, y, w) = (bernstein(&x, degree), bernstein(&y, degree), bernstein(&w, degree));
+            let controls = x.iter().zip(y).zip(w).map(|((x, y), w)| [*x, y, 0., w]);
+            homogeneous.extend(controls.skip(usize::from(k > 0)));
+            knots.extend(std::iter::repeat_n((k + 1) as f64 / 16., degree));
+        }
+        knots.push(1.);
+        Curve::RationalSpline { knots, homogeneous }
+    }
+    /// The bump s (1 - s) / (1/4) in the span's own parameter: 0 at both its ends (every old
+    /// sample location k/16 is a knot), 1 half way along the first span (t = 1/32).
+    fn bump(k: usize) -> Vec<f64> {
+        if k == 0 { vec![0., 4., -4.] } else { vec![0.] }
     }
     fn bezier_knots(degree: usize) -> Vec<f64> {
         std::iter::repeat_n(0., degree + 1).chain(std::iter::repeat_n(1., degree + 1)).collect()
@@ -615,27 +636,37 @@ mod tests {
         Curve::RationalSpline { knots: bezier_knots(2), homogeneous: vec![[10., 0., 0., 1.], [10. * w, 10. * w, 0., w], [0., 10., 0., 1.]] }
     }
 
+    /// Sampling must not certify a spline cap that merely passes through the sample points.
+    /// Once that took a single polynomial of degree 17 with a root at each of the 17 old sample
+    /// locations k/16, more than a B-rep record holds (MAX_SPLINE_DEGREE 16); here the aliasing is
+    /// in the knots instead: a C0 quadratic spline with a knot at every k/16, on the line (or
+    /// the circle) at each of them, and bowing off it between (by 1 mm, 1/32 along).
     #[test]
     fn sample_aliasing_does_not_certify_spline_caps() {
-        let e = curve(&[0., 10.], &trap(), &[1.], 17);
+        let e = spans(2, |k| {
+            let h = 1. / 16.;
+            [shifted(&[0., 10.], k as f64 * h, h), bump(k), vec![1.]]
+        });
         for k in 0..=16 {
-            assert!(at(&e, k as f64 / 16.).y.abs() < 1e-4, "old sample locations must see a line");
+            assert!(at(&e, k as f64 / 16.).y.abs() < 1e-12, "old sample locations must see a line");
         }
-        assert!((at(&e, 1. / 32.).y - 1.).abs() < 1e-6);
+        assert!((at(&e, 1. / 32.).y - 1.).abs() < 1e-12);
         assert!(segment(&run(&e, true), &Plane::XY, 1e-3, &mut 2_000_000).is_none());
-        let q = trap();
-        let mut perturb = q.iter().map(|v| v * 0.1).collect::<Vec<_>>();
-        perturb[0] += 1.;
+        // The quarter circle of radius 10, its homogeneous coordinates scaled by 1 + bump / 10 but
+        // its weight not: radius 10 at every k/16, 11 at 1/32.
         let w = std::f64::consts::FRAC_1_SQRT_2;
-        let x = multiply(&[10., 20. * (w - 1.), 10. * (1. - 2. * w)], &perturb);
-        let y = multiply(&[0., 20. * w, 10. * (1. - 2. * w)], &perturb);
-        let circle = curve(&x, &y, &[1., 2. * (w - 1.), 2. * (1. - w)], 19);
+        let (x, y, wt) = ([10., 20. * (w - 1.), 10. * (1. - 2. * w)], [0., 20. * w, 10. * (1. - 2. * w)], [1., 2. * (w - 1.), 2. * (1. - w)]);
+        let circle = spans(4, |k| {
+            let (a, h) = (k as f64 / 16., 1. / 16.);
+            let scale: Vec<f64> = bump(k).iter().enumerate().map(|(i, v)| v / 10. + if i == 0 { 1. } else { 0. }).collect();
+            [multiply(&shifted(&x, a, h), &scale), multiply(&shifted(&y, a, h), &scale), shifted(&wt, a, h)]
+        });
         for k in 0..=16 {
             let p = at(&circle, k as f64 / 16.);
-            assert!((p.x.hypot(p.y) - 10.).abs() < 1e-3, "old sample locations must see a circle");
+            assert!((p.x.hypot(p.y) - 10.).abs() < 1e-9, "old sample locations must see a circle");
         }
         let p = at(&circle, 1. / 32.);
-        assert!((p.x.hypot(p.y) - 11.).abs() < 1e-5);
+        assert!((p.x.hypot(p.y) - 11.).abs() < 1e-9);
         assert!(segment(&run(&circle, true), &Plane::XY, 1e-3, &mut 2_000_000).is_none());
     }
 
