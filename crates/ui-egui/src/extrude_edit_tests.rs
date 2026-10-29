@@ -503,3 +503,30 @@ fn two_sides_with_all_shows_distance_2_and_reverse_swaps_the_sides() {
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(extent(&h), e);
 }
+
+/// #2402: the taper handle is a gauge of its own beside the distance arrow, not a second arrow
+/// along it, so its grip stays well clear of the arrow at any distance; dragging the grip away
+/// from the arrow still sets an outward taper, geared down so that 30 points is about 9°.
+#[test]
+fn the_taper_grip_stands_clear_of_the_distance_arrow_and_sets_the_taper() {
+    for distance in ["2 mm", "10 mm", "200 mm"] {
+        let mut h = make(json!({"distance":distance}));
+        open(&mut h);
+        let d = h.app.dialog.as_ref().unwrap();
+        let (base, _) = crate::canvas::anchor(&h.app, d).unwrap();
+        let foot = h.at(&json!({"world":[base.x, base.y, base.z]})).unwrap();
+        let foot = egui::pos2(foot[0] as f32, foot[1] as f32);
+        let tip = crate::scenario::handle_at("arrow").unwrap();
+        let grip = crate::scenario::handle_at("taper").unwrap();
+        let v = tip - foot;
+        let along = ((grip - foot).dot(v) / v.length_sq()).clamp(0.0, 1.0);
+        let gap = grip.distance(foot + v * along);
+        assert!(gap > 60.0, "{distance}: the taper grip is {gap} points from the distance arrow");
+        let out = egui::vec2((grip.x - tip.x).signum() * 30.0, 0.0);
+        h.step(&json!({"drag":[[grip.x, grip.y], [grip.x + out.x, grip.y]], "steps":8})).unwrap();
+        h.frames(2);
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { taper, .. }, .. }) = &h.app.dialog else { panic!("extrude") };
+        let deg: f64 = taper.trim_end_matches(" deg").parse().unwrap();
+        assert!((5.0..13.0).contains(&deg), "{distance}: dragging the grip 30 points outwards gave {taper}");
+    }
+}
