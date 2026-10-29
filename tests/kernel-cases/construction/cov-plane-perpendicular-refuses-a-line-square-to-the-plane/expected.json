@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a perpendicular plane through the plane's normal",
+ "source": "analytic",
+ "method": "the Z axis is square to XY: every plane holding it is perpendicular, so none is the answer: refused",
+ "outcome": "refused",
+ "refusal": "the line is square to the plane"
+}
