@@ -838,8 +838,12 @@ mod tests {
         assert!(o.contains("o Body1") && o.contains("\nf "));
     }
 
-    /// OBJ shares a face's vertices (a cube: 8 positions, 6 normals, not 36 of each) and keeps
-    /// the body name as written, spaces included.
+    /// OBJ shares the vertices faces meet at and keeps the body name as written, spaces included.
+    /// The 10 × 20 × 30 box meshes as the planner's grids, no side longer than a fifth of its
+    /// extent (the 37.4 mm diagonal): its edges in 2, 3 and 5 pieces, so its faces are grids of
+    /// 2 × 3, 2 × 5 and 3 × 5 cells, 2 · (6 + 10 + 15) · 2 = 124 triangles. Welded, their
+    /// corners are the 3 · 4 · 6 = 72 nodes of the box's lattice less the 1 · 2 · 4 inside it: 64
+    /// positions (unwelded, 372), and one normal per face.
     #[test]
     fn obj_export_is_welded_and_keeps_names() {
         let (_, m) = model();
@@ -850,10 +854,10 @@ mod tests {
         let o = String::from_utf8(export(&st, &[], Format::Obj, "t").unwrap()).unwrap();
         let count = |p: &str| o.lines().filter(|l| l.starts_with(p)).count();
         assert!(o.contains("\no Red Block\n"), "{o}");
-        assert_eq!((count("v "), count("vn "), count("f ")), (8, 6, 12), "{o}");
+        assert_eq!((count("v "), count("vn "), count("f ")), (64, 6, 124), "{o}");
         let ids: Vec<usize> =
             o.lines().filter(|l| l.starts_with("f ")).flat_map(|l| l.split([' ', '/']).skip(1)).filter_map(|x| x.parse().ok()).collect();
-        assert!(ids.iter().all(|i| (1..=8).contains(i) || (1..=6).contains(i)));
+        assert!(ids.iter().all(|i| (1..=64).contains(i)));
     }
 
     /// The design properties land in each format's own metadata (#1015): STEP and IGES headers,
