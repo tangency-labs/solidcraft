@@ -79,18 +79,16 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
         index.entry(h).or_insert(u32::try_from(i).ok()?);
         handles.push(h);
     }
-    // How often the loops run along each side: a side run both ways (a slit, where a face's
-    // boundary goes out along a line its two sides share and back) bounds the face on neither.
-    let mut runs: HashMap<(FixedVertexHandle, FixedVertexHandle), usize> = HashMap::new();
+    // A side the loops run along both ways (a slit, where a face's boundary goes out along a
+    // line its two sides share and back) bounds the face on neither.
+    let mut sides: Vec<(FixedVertexHandle, FixedVertexHandle)> = Vec::new();
     for r in loops {
         let n = r.len();
         for k in 0..n {
-            let (a, b) = (*handles.get(r.start + k)?, *handles.get(r.start + (k + 1) % n)?);
-            if a != b {
-                *runs.entry(if a.index() < b.index() { (a, b) } else { (b, a) }).or_insert(0) += 1;
-            }
+            sides.push((*handles.get(r.start + k)?, *handles.get(r.start + (k + 1) % n)?));
         }
     }
+    let slits = slits(&sides);
     for r in loops {
         let n = r.len();
         for k in 0..n {
@@ -114,7 +112,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
     }
     if let Some((sag, budget)) = &fill.refine {
         let constraints = cdt.num_constraints();
-        let added = refine_sag(&mut cdt, sag, *budget, &from);
+        let added = refine_sag(&mut cdt, sag, *budget, &from, &slits);
         if fill.shape {
             let params = RefinementParameters::<f64>::new()
                 .keep_constraint_edges()
@@ -127,7 +125,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
             // Shaping flips sides and adds points of its own; the triangles it leaves may
             // sag again (a long strip round a cylinder), so the sag is checked once more.
             if shaped > 0 {
-                refine_sag(&mut cdt, sag, budget.saturating_sub(added + shaped), &from);
+                refine_sag(&mut cdt, sag, budget.saturating_sub(added + shaped), &from, &slits);
             }
         }
         // A split constraint would put a point on the boundary the neighbour does not have.
@@ -137,9 +135,7 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
     }
     let mut uv: Vec<[f64; 2]> = boundary.to_vec();
     let mut tris = Vec::new();
-    let slits: std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)> =
-        runs.into_iter().filter(|(_, n)| n % 2 == 0).map(|(e, _)| e).collect();
-    let region = region_without(&cdt, &slits);
+    let region = region(&cdt, &slits);
     for face in cdt.inner_faces() {
         if !region.get(face.index()).copied().unwrap_or(false) {
             continue;
@@ -199,6 +195,8 @@ pub(crate) fn band(points: &[[f64; 2]], n: usize, loops: &[std::ops::Range<usize
             sides.push((add(&mut cdt, a)?, add(&mut cdt, b)?));
         }
     }
+    // The band runs along both sides of a slit (see `triangulate`): its sides bound it on neither.
+    let slits = slits(&sides);
     for &(a, b) in stairs {
         sides.push((add(&mut cdt, a)?, add(&mut cdt, b)?));
     }
@@ -211,7 +209,7 @@ pub(crate) fn band(points: &[[f64; 2]], n: usize, loops: &[std::ops::Range<usize
         }
         cdt.add_constraint(a, b);
     }
-    let region = region(&cdt);
+    let region = region(&cdt, &slits);
     let mut tris = Vec::new();
     for face in cdt.inner_faces() {
         if !region.get(face.index()).copied().unwrap_or(false) {
@@ -230,7 +228,14 @@ pub(crate) fn band(points: &[[f64; 2]], n: usize, loops: &[std::ops::Range<usize
 /// the tolerance from the triangle or whose corner normals turn more than the facet angle, and
 /// under the middle of every non-constraint side that sags more than the tolerance or is
 /// longer than [`LONG`] times `h`, until none does or `budget` points were added. Returns the points added.
-fn refine_sag(cdt: &mut Cdt, sag: &Sag, budget: usize, from: &dyn Fn(Point2<f64>) -> [f64; 2]) -> usize {
+/// `slits`: constraint sides the loops run along both ways, inside the region on both sides.
+fn refine_sag(
+    cdt: &mut Cdt,
+    sag: &Sag,
+    budget: usize,
+    from: &dyn Fn(Point2<f64>) -> [f64; 2],
+    slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>,
+) -> usize {
     let mut added = 0;
     let mut cache: HashMap<FixedVertexHandle, Option<(Vec3, Option<Vec3>)>> = HashMap::new();
     // The widest turn between two corner normals.
@@ -246,7 +251,7 @@ fn refine_sag(cdt: &mut Cdt, sag: &Sag, budget: usize, from: &dyn Fn(Point2<f64>
                 (sag.eval)(q[0], q[1])
             })
         };
-        let region = region(cdt);
+        let region = region(cdt, slits);
         for face in cdt.inner_faces() {
             if !region.get(face.index()).copied().unwrap_or(false) {
                 continue;
@@ -318,15 +323,23 @@ fn refine_sag(cdt: &mut Cdt, sag: &Sag, budget: usize, from: &dyn Fn(Point2<f64>
     added
 }
 
-/// Per face (by index): inside the region the constraint loops bound. A flood fill from the
-/// outer face that flips parity each time it crosses a constraint edge (holes are out), linear
-/// in the number of triangles.
-fn region(cdt: &Cdt) -> Vec<bool> {
-    region_without(cdt, &std::collections::HashSet::new())
+/// The sides a boundary runs along an even number of times (a slit: out along a line and back),
+/// each as its vertices in index order: the region lies on both sides of them.
+fn slits(sides: &[(FixedVertexHandle, FixedVertexHandle)]) -> std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)> {
+    let mut runs: HashMap<(FixedVertexHandle, FixedVertexHandle), usize> = HashMap::new();
+    for &(a, b) in sides {
+        if a != b {
+            *runs.entry(if a.index() < b.index() { (a, b) } else { (b, a) }).or_insert(0) += 1;
+        }
+    }
+    runs.into_iter().filter(|(_, n)| n % 2 == 0).map(|(e, _)| e).collect()
 }
 
-/// [`region`], the constraint sides in `slits` (run along both ways) crossed without counting.
-fn region_without(cdt: &Cdt, slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>) -> Vec<bool> {
+/// Per face (by index): inside the region the constraint loops bound. A flood fill from the
+/// outer face that flips parity each time it crosses a constraint edge (holes are out), but for
+/// the sides in `slits` (run along both ways, the region on both sides), linear in the number of
+/// triangles.
+fn region(cdt: &Cdt, slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>) -> Vec<bool> {
     use spade::handles::{FixedFaceHandle, InnerTag};
     let counts = |e: spade::handles::DirectedEdgeHandle<'_, _, _, _, _>| {
         let [a, b] = e.vertices().map(|v| v.fix());

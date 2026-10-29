@@ -669,6 +669,39 @@ fn loops_touching_at_a_shared_vertex_bound_the_face() {
     assert!(closed_boundary(&ranges, &fixed, &uvs, &triangles), "the triangles follow both holes through their shared vertex");
 }
 
+/// A face meeting itself along a line (a hole's wall tangent inside the wall round it, cut from
+/// the boss side's top rim down to the hole's bottom): its loop runs up the slit and back down
+/// it, with the face on both sides. The iso-line grid's band beside the slit is the face on
+/// either side of it, and the triangles follow the slit both ways and cover the whole square.
+#[test]
+fn a_slit_in_a_trimmed_face_has_the_face_on_both_sides() {
+    // The square [0, 8] × [0, 4], its loop starting at the slit's tip (3, 1) up to the top, round
+    // the square and back down the slit.
+    let mut uvs: Vec<[f64; 2]> = (1..=4).map(|k| [3.0, k as f64]).collect();
+    uvs.extend((0..3).rev().map(|k| [k as f64, 4.0]));
+    uvs.extend((0..4).rev().map(|k| [0.0, k as f64]));
+    uvs.extend((1..=8).map(|k| [k as f64, 0.0]));
+    uvs.extend((1..=4).map(|k| [8.0, k as f64]));
+    uvs.extend((3..8).rev().map(|k| [k as f64, 4.0]));
+    uvs.extend((2..4).rev().map(|k| [3.0, k as f64]));
+    let fixed: Vec<Vec3> = uvs.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
+    let ranges = [std::ops::Range { start: 0, end: uvs.len() }];
+    let traces = motorcycle::traces(&uvs, &ranges, [1.0, 1.0], 0.0);
+    let lines = |n: usize, top: f64| (0..=n).map(|k| top * k as f64 / n as f64).collect::<Vec<f64>>();
+    let Some((extra, triangles)) = cutgrid::cut_grid(&uvs, &ranges, &lines(16, 8.0), &lines(8, 4.0), &traces, [1.0, 1.0]) else { panic!("meshes") };
+    assert!(closed_boundary(&ranges, &fixed, &uvs, &triangles), "the triangles follow the slit both ways");
+    let mut all = uvs.clone();
+    all.extend(extra);
+    let area: f64 = triangles
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|i| all[i as usize]);
+            0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+        })
+        .sum();
+    assert!((area - 32.0).abs() < 1e-12, "area {area}");
+}
+
 /// A face whose loop is a thin lune meshes: a half disc of radius 2.5 less a circle through the
 /// same ends 0.03 mm inside it at the middle, its inner side split at 11.25°. Each edge is
 /// sampled to the 0.1 mm chord on its own: the outer arc's chords (every 22.5°) sag 0.048 mm,
