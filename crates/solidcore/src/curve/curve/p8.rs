@@ -25,8 +25,9 @@
 //!   itself then names stand-ins for the four curves (`operand_handles`) reporting
 //!   their natural intervals, so `IdenticalSolutions` merges within 1/10000th of
 //!   them and `sm_RefineCCSolutions` resolves each curve, as upstream.
-//! - **Caches.** The caches are built for the call with [`make_curve_cache`] (see
-//!   unit `curve.curve_p5`), or kept across calls in slots the caller lends
+//! - **Caches.** The caches are built for the call with
+//!   [`make_curve_cache`](crate::curve::curve::p5::make_curve_cache) (see unit
+//!   `curve.curve_p5`), or kept across calls in slots the caller lends
 //!   (`global_curve_intersect_cached`, as upstream keeps them on the curves; the
 //!   composite curve offsetter uses it for its offset pairs, and
 //!   `global_curve_intersect_unnamed_cached` serves callers that name no handles,
@@ -34,6 +35,8 @@
 //!   identity, [`core::ptr::eq`]) shares one cache and so one tree, which makes the
 //!   intersection a self intersection, as upstream's shared object cache. A cache that cannot be built is
 //!   `SM_ERR_NULL_POINTER` (upstream `NER`).
+//!   Callers holding topology may supply each curve owner's zone tolerance to the
+//!   lazy build without changing intersection tolerance or copying geometry.
 //! - **Leaf pair solve.** Upstream calls `LocalSolve` on the intersection test
 //!   solver directly, which appends to the solution array the solver still points
 //!   at; the port lends the array to the solver for that call.
@@ -57,7 +60,7 @@
 use crate::curve::curve::p1::refine_cc_solutions;
 use crate::curve::curve::p2::{at, CciGlobalSolver, Curve};
 use crate::curve::curve::p4::{analytic_curve_intersect, point_or_undef, AnalyticOperand};
-use crate::curve::curve::p5::make_curve_cache;
+use crate::curve::curve::p5::make_curve_cache_with_zone_tol;
 use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -285,13 +288,24 @@ fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
     cache.tree().ok_or(SolidError::null_pointer(OP_GCI))
 }
 
-/// `GetOrCreateObjectCache` for a curve (`NER` on failure).
+/// `GetOrCreateObjectCache` for a curve (`NER` on failure). `zone_tol_3d` is the zone
+/// tolerance the caller resolved for the curve's owner: an edge curve's cache
+/// tessellates at half that tolerance ([`make_curve_cache_with_zone_tol`]), as
+/// upstream's `SmTol::GetApproxTol3d(&m_crCurve)` reads it from the curve's edge
+/// (`SmCurveCache.cpp:1496`). `None` preserves the curve's recorded owner tolerance,
+/// falling back to the system tolerance when the curve has none.
 fn build_cache<O: SolutionObject>(
     k: &Kernel,
     curve: &Curve,
     handle: Option<O>,
+    zone_tol_3d: Option<f64>,
 ) -> Result<CurveCache<O>> {
-    match make_curve_cache::<O>(k, curve, handle) {
+    match make_curve_cache_with_zone_tol::<O>(
+        k,
+        curve,
+        handle,
+        zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()),
+    ) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported() => Err(e),
         Err(_) => Err(SolidError::null_pointer(OP_GCI)),
@@ -375,6 +389,7 @@ impl Curve {
             opts,
             &mut None,
             &mut None,
+            [None, None],
         )
     }
 
@@ -403,8 +418,65 @@ impl Curve {
         cache1: &mut Option<CurveCache<O>>,
         cache2: &mut Option<CurveCache<O>>,
     ) -> Result<SolutionArray<O>> {
+        self.global_curve_intersect_cached_with_zone_tols(
+            k,
+            interval,
+            other,
+            other_interval,
+            dist_tol,
+            opts,
+            cache1,
+            cache2,
+            [None, None],
+        )
+    }
+
+    /// [`Curve::global_curve_intersect_cached`] with the zone tolerances the caller
+    /// resolved for the curves' owners. Upstream builds each curve's cache on the curve
+    /// object itself, so an edge curve tessellates at half the edge's tolerance
+    /// (`SmTol::GetApproxTol3d(&m_crCurve)`, `SmCurveCache.cpp:1496`); a caller whose
+    /// handle geometry is not that owned object supplies the tolerance here. A slot is
+    /// used exactly as in [`Curve::global_curve_intersect_cached`]: nothing is built
+    /// before the body reaches it, and a `None` tolerance builds as that method does.
+    /// A populated slot must also match its supplied owner tolerance. These hints
+    /// govern the two intersection-tree slots only; nested coincidence and drop
+    /// routines retain their existing curve-owner context.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::global_curve_intersect`].
+    pub(crate) fn global_curve_intersect_cached_with_zone_tols<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        opts: &CurveIntersectOptions<O>,
+        cache1: &mut Option<CurveCache<O>>,
+        cache2: &mut Option<CurveCache<O>>,
+        zone_tols: [Option<f64>; 2],
+    ) -> Result<SolutionArray<O>> {
         if opts.handles == [None, None] && opts.analytic_handles == [None, None] {
-            return self.global_curve_intersect(k, interval, other, other_interval, dist_tol, opts);
+            let own = operand_handles(self, other);
+            let inner = CurveIntersectOptions {
+                skip_global_coincidence_check: opts.skip_global_coincidence_check,
+                handles: [Some(own[0]), Some(own[1])],
+                analytic_handles: [Some(own[2]), Some(own[3])],
+            };
+            return Ok(self
+                .global_curve_intersect_cached_with_zone_tols(
+                    k,
+                    interval,
+                    other,
+                    other_interval,
+                    dist_tol,
+                    &inner,
+                    &mut None,
+                    &mut None,
+                    zone_tols,
+                )?
+                .without_objects());
         }
         self.global_curve_intersect_body(
             k,
@@ -415,6 +487,7 @@ impl Curve {
             opts,
             cache1,
             cache2,
+            zone_tols,
         )
     }
 
@@ -456,12 +529,16 @@ impl Curve {
                 &inner,
                 cache1,
                 cache2,
+                [None, None],
             )?
             .without_objects())
     }
 
     /// The body of [`Curve::global_curve_intersect`] for a caller giving handles, with
-    /// the cache slots of [`Curve::global_curve_intersect_cached`].
+    /// the cache slots of [`Curve::global_curve_intersect_cached`]. `zone_tols` are the
+    /// zone tolerances the caller resolved for the curves' owners, used only where a
+    /// slot's cache is built ([`build_cache`]); `None` preserves the corresponding
+    /// curve's recorded owner tolerance.
     fn global_curve_intersect_body<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -472,6 +549,7 @@ impl Curve {
         opts: &CurveIntersectOptions<O>,
         cache1_slot: &mut Option<CurveCache<O>>,
         cache2_slot: &mut Option<CurveCache<O>>,
+        zone_tols: [Option<f64>; 2],
     ) -> Result<SolutionArray<O>> {
         let [h_this, h_other] = opts.handles;
         let same_curve = core::ptr::eq(self, other);
@@ -518,12 +596,13 @@ impl Curve {
         }
 
         // get target curves' caches (kept in the caller's slots, see
-        // `global_curve_intersect_cached`)
+        // `global_curve_intersect_cached`), each at its owner's zone tolerance when the
+        // caller resolved one
         if cache1_slot.is_none() {
-            *cache1_slot = Some(build_cache(k, self, h_this)?);
+            *cache1_slot = Some(build_cache(k, self, h_this, zone_tols[0])?);
         }
         if !same_curve && cache2_slot.is_none() {
-            *cache2_slot = Some(build_cache(k, other, h_other)?);
+            *cache2_slot = Some(build_cache(k, other, h_other, zone_tols[1])?);
         }
         let cache1 = cache1_slot
             .as_mut()

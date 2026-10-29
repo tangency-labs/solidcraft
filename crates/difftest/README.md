@@ -252,6 +252,12 @@ HEAP blend.fillet_executive_p3 pads=1,3,8 checked=1 padded=1 address_dependent=1
 `padded=0` the line says so (`C++ runs in-process here: reruns unpadded, no address
 check`), because then nothing was tested for address dependence.
 
+Padding settings and counters are per calling thread; clearing padding leaves later
+children unpadded. A particular allocation is not guaranteed to keep its address
+between unpadded forks, or to change under a pad: parent allocations and allocator
+policy can move it. Check native output sensitivity rather than pinning raw heap
+addresses in a regression.
+
 It is a flag, not a gate: each case's outcome is judged against that run's first C++
 result, the summary line and exit status follow those outcomes, and no report is
 written. The reruns do shift the parent's heap and any in-process C++ state before the

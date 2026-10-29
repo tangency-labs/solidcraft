@@ -1,0 +1,343 @@
+{
+ "cases": [
+  {
+   "name": "hermite_target_crossing",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2264 (CreateWireEdgeFromCurve over an SmHermiteCurve) with source/SMLib/src/SmCurveClass.cpp:15478 (edge zone tolerance) and 15853 (GlobalCurveIntersect on the edge's curve)",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 1e-06,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_crossing_tiny",
+   "upstream_ref": "same as hermite_target_crossing at scale 1e-6 (edge and source zones 1e-13)",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "scale": 1e-06,
+    "zone": 1e-13,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 1e-13,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_crossing_large",
+   "upstream_ref": "same as hermite_target_crossing at scale 1e6 (edge and source zones 0.1)",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "scale": 1000000.0,
+    "zone": 0.1,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 0.1,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_scale1e8_tight_edge",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1496-1650 (the decomposition's dCurveDistance test against half the curve's edge tolerance): scale 1e8 with a 1e-10 edge zone",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "scale": 100000000.0,
+    "zone": 10.0,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 1e-10,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_scale1e8_coarse_edge",
+   "upstream_ref": "the same geometry and source zone as hermite_target_scale1e8_tight_edge with a 1e-2 edge zone",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "scale": 100000000.0,
+    "zone": 10.0,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 0.01,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_three_crossings",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15853 (GlobalCurveIntersect keeps every crossing of the cubic): y(t) = 0.5 + 2*f(t), f = -(t-0.2)(t-0.5)(t-0.8)",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.2, 0.66, 0.048],
+      "b": [0.8, 0.34, -0.048],
+      "zone": 1e-06,
+      "hermite": [[0.2, 0.66, 0.048], [1.0, -1.32, -0.396], [0.8, 0.34, -0.048], [1.0, -1.32, -0.396]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_tangential_midpoint",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15853 with a zero y derivative at the crossing (y(t) = 0.5 + 0.1(2t-1)^3); the cubic is curved only in y and z",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.4, -0.4],
+      "b": [0.7, 0.6, 0.4],
+      "zone": 1e-06,
+      "hermite": [[0.3, 0.4, -0.4], [0.4, 0.6, 0.9], [0.7, 0.6, 0.4], [0.4, 0.6, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_crossing_outside_source",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15517/15853: the bent cubic crosses the source's supporting line at x = 1.125, beyond the source interval [0.2, 0.8]",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.25, 0.65, -0.6],
+      "b": [0.75, 0.35, 0.6],
+      "zone": 1e-06,
+      "hermite": [[0.25, 0.65, -0.6], [2.5, 0.0, 2.5], [0.75, 0.35, 0.6], [-2.5, 0.0, 2.5]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_near_coincidence_wide_edge",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15478 (XSectTol3d from the live edge zone): the cubic comes within 5e-3 of the source line, inside the 1e-2 edge zone",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.52, -0.4],
+      "b": [0.7, 0.52, 0.4],
+      "zone": 0.01,
+      "hermite": [[0.3, 0.52, -0.4], [0.4, -0.06, 0.9], [0.7, 0.52, 0.4], [0.4, 0.06, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_near_coincidence_tight_edge",
+   "upstream_ref": "the same near-coincidence geometry with a 1e-10 edge zone: the 1e-6 intersection tolerance must reject it",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.52, -0.4],
+      "b": [0.7, 0.52, 0.4],
+      "zone": 1e-10,
+      "hermite": [[0.3, 0.52, -0.4], [0.4, -0.06, 0.9], [0.7, 0.52, 0.4], [0.4, 0.06, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_near_coincidence_wide_source",
+   "upstream_ref": "the same near-coincidence geometry with a 1e-2 source zone and a 1e-10 edge zone: the source zone alone reaches the solution",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 0.01,
+    "edges": [
+     {
+      "a": [0.3, 0.52, -0.4],
+      "b": [0.7, 0.52, 0.4],
+      "zone": 1e-10,
+      "hermite": [[0.3, 0.52, -0.4], [0.4, -0.06, 0.9], [0.7, 0.52, 0.4], [0.4, 0.06, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_near_coincidence_tight_source",
+   "upstream_ref": "the same near-coincidence geometry with a 1e-13 source zone and a 1e-2 edge zone: the edge zone alone reaches the solution",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-13,
+    "edges": [
+     {
+      "a": [0.3, 0.52, -0.4],
+      "b": [0.7, 0.52, 0.4],
+      "zone": 0.01,
+      "hermite": [[0.3, 0.52, -0.4], [0.4, -0.06, 0.9], [0.7, 0.52, 0.4], [0.4, 0.06, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_interval_start_half",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15476 (sEdgeIvl = pEdge->GetInterval()): the crossing at t = 0.5 is outside [0, 0.4]",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "interval": [0.0, 0.4],
+      "zone": 1e-06,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_interval_end_half",
+   "upstream_ref": "the same cubic over [0.5, 1]: the crossing is the edge interval's start",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "interval": [0.5, 1.0],
+      "zone": 1e-06,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_three_crossings_scale1e7_tight",
+   "upstream_ref": "source/SMLib/src/SmCurveCache.cpp:1496-1650 with source/SMLib/src/SmCurveClass.cpp:15853: three crossings at scale 1e7 and a 1e-10 edge zone, whose half-tolerance tessellation is far below the sampled Bezier-to-curve distance",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "scale": 10000000.0,
+    "zone": 1.0,
+    "edges": [
+     {
+      "a": [0.2, 0.66, 0.048],
+      "b": [0.8, 0.34, -0.048],
+      "zone": 1e-10,
+      "hermite": [[0.2, 0.66, 0.048], [1.0, -1.32, -0.396], [0.8, 0.34, -0.048], [1.0, -1.32, -0.396]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_uv_space_off",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15497 (bUVSpaceOkay == FALSE keeps the 3D source) with bHasBigGaps on a nonlinear target",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "uv": false,
+    "big": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 1e-06,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_native_defaults",
+   "upstream_ref": "source/SMLib/inc/SmCurveClass.h:783 (IntersectEdges default flags) on a nonlinear target",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "defaults": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 1e-06,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_two_edges",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:15514 (the per-edge loop): one crossing cubic, then a three-crossing cubic in the same classification",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.3, 0.6, -0.4],
+      "b": [0.7, 0.4, 0.4],
+      "zone": 1e-06,
+      "hermite": [[0.3, 0.6, -0.4], [0.4, 0.0, 0.9], [0.7, 0.4, 0.4], [0.4, 0.0, 0.9]]
+     },
+     {
+      "a": [0.2, 0.66, 0.048],
+      "b": [0.8, 0.34, -0.048],
+      "zone": 1e-06,
+      "hermite": [[0.2, 0.66, 0.048], [1.0, -1.32, -0.396], [0.8, 0.34, -0.048], [1.0, -1.32, -0.396]]
+     }
+    ]
+   }
+  },
+  {
+   "name": "hermite_target_closed_disjoint",
+   "upstream_ref": "source/SMLib/src/SmBrep.cpp:2264-2293: CreateWireEdgeFromCurve glues coincident endpoints; a nonconstant closed Hermite is a valid disjoint target, not an invalid line",
+   "inputs": {
+    "op": 0,
+    "dim3": true,
+    "zone": 1e-06,
+    "edges": [
+     {
+      "a": [0.5, 2.0, 0.0],
+      "b": [0.5, 2.0, 0.0],
+      "zone": 1e-06,
+      "hermite": [[0.5, 2.0, 0.0], [1.0, 0.0, 1.0], [0.5, 2.0, 0.0], [1.0, 0.0, -1.0]]
+     }
+    ]
+   }
+  }
+ ]
+}

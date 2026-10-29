@@ -2,13 +2,19 @@
 //! both cache traversal branches and explicit dependency deferrals. No absolute floors.
 //! The `IntersectEdges` target edges are real wire edges of a Rust B-rep, made as the
 //! shim makes them (`CreateWireEdgeFromCurve`, `SetTolerance(zone, FALSE)`), so the
-//! classification reaches their curves and vertices through `topology_entity`.
+//! classification reaches their curves and vertices through `topology_entity`. An
+//! edge's curve is the line `a`-`b`, the source curve (`same`) or a real
+//! `SmHermiteCurve(p1, d1, p2, d2, 3)`: a nonlinear target whose curve cache
+//! (`SmTol::GetApproxTol3d(&m_crCurve)`, half the edge's tolerance) spans differently
+//! from the classification curve's. The `zone_tol_3d` of each target is the tolerance
+//! its wire edge holds after `SetTolerance` (`SmEdge::GetTolerance`), not the recipe.
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use solidcore::curve::curve::Curve;
+use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
@@ -68,7 +74,15 @@ struct EdgeIn {
     same: bool,
     #[serde(default = "zone")]
     zone: f64,
+    /// `SmHermiteCurve(p1, d1, p2, d2, 3)` over `[0, 1]` instead of the line `a`-`b`.
+    /// Omitted when absent, so an existing case's serialized inputs are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hermite: Option<[[f64; 3]; 4]>,
 }
+/// The flat edge record: `kind a[3] b[3] lo hi same_source edge_zone p1[3] d1[3]
+/// p2[3] d2[3]` (23 scalars). `kind` is 0 for the line and 1 for the Hermite curve;
+/// the four Hermite vectors are zero for a line.
+const EDGE_RECORD: usize = 23;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)] // Independent native flags.
 struct Input {
@@ -127,11 +141,16 @@ impl Input {
         out.extend(self.source.iter().flatten());
         out.extend(self.vertices.iter().flatten());
         for e in &self.edges {
+            out.push(f64::from(e.hermite.is_some()));
             out.extend(e.a);
             out.extend(e.b);
             out.extend(e.interval);
             out.extend([f64::from(e.same), e.zone]);
+            let hermite = e.hermite.unwrap_or([[0.; 3]; 4]);
+            out.extend(hermite.iter().flatten().copied());
         }
+        let n = 22 + 3 * self.vertices.len() + EDGE_RECORD * self.edges.len();
+        debug_assert_eq!(out.len(), n);
         out
     }
 }
@@ -230,6 +249,19 @@ fn v(a: [f64; 3]) -> Vec3 {
 }
 fn line(a: Vec3, b: Vec3, dim: u64) -> Curve {
     Curve::from(Line::from_points(a, b, dim))
+}
+
+/// The target edge's curve as the shim builds it: `SmLine(a, b, 3)`, the source curve
+/// itself for a shared edge, or `SmHermiteCurve(p1, d1, p2, d2, 3)`.
+fn edge_curve(e: &EdgeIn, source: &Curve, scale: f64) -> Curve {
+    match e.hermite {
+        Some(h) => {
+            let [p1, d1, p2, d2] = h.map(|x| v(x) * scale);
+            Curve::from(HermiteCurve::new(p1, d1, p2, d2, 3))
+        }
+        None if e.same => source.clone(),
+        None => line(v(e.a) * scale, v(e.b) * scale, 3),
+    }
 }
 
 fn surface(i: &Input) -> ScResult<Surface> {
@@ -513,14 +545,10 @@ fn rust(i: &Input) -> ScResult<Output> {
     }
     let mut edges = Vec::new();
     for (j, e) in i.edges.iter().enumerate() {
-        pool.edges.push(line(v(e.a) * i.scale, v(e.b) * i.scale, 3));
-        pool.edge_zones.push(e.zone);
-        // the shim's wire edge: the source line itself for a shared curve
-        let curve = if e.same {
-            pool.source.clone()
-        } else {
-            line(v(e.a) * i.scale, v(e.b) * i.scale, 3)
-        };
+        // The curve the classification reads through `H::EdgeCurve(j)` (a line, the
+        // source curve or a Hermite curve) and the edge's own curve.
+        let curve = edge_curve(e, &pool.source, i.scale);
+        pool.edges.push(curve.clone());
         let wire = solidcore::topology::brep::p5::create_wire_edge_from_curve(
             &mut k,
             &mut pool.wires,
@@ -528,13 +556,18 @@ fn rust(i: &Input) -> ScResult<Output> {
             Extent1d::from_min_max(e.interval[0], e.interval[1]),
         )?;
         solidcore::topology::edge::set_tolerance(&mut pool.wires, wire, e.zone, false, true)?;
+        // The tolerance the edge holds now (`SmEdge::GetTolerance`): what the shim's
+        // `SmTol::GetZoneTol3d(pEdge)` and `SmTol::GetApproxTol3d(pEdge->GetCurve())`
+        // see, which `SetTolerance` need not preserve exactly.
+        let live_zone = solidcore::topology::edge::tolerance(&pool.wires, wire)?;
+        pool.edge_zones.push(live_zone);
         pool.wire_edges.push(wire);
         edges.push(BoundaryEdge {
             edge: H::Edge(j),
             curve: if e.same { H::Source } else { H::EdgeCurve(j) },
             interval: Extent1d::from_min_max(e.interval[0], e.interval[1]),
             face_gap: None,
-            zone_tol_3d: e.zone,
+            zone_tol_3d: live_zone,
         });
     }
     let interval = Extent1d::from_min_max(i.interval[0], i.interval[1]);

@@ -12,6 +12,7 @@
 #include <SmEdgeuse.h>
 #include <SmFace.h>
 #include <SmFaceuse.h>
+#include <SmHermiteCurve.h>
 #include <SmLine.h>
 #include <SmLoop.h>
 #include <SmLoopuse.h>
@@ -125,7 +126,7 @@ SC_EXPORT int32_t sc_intersect_curve_class_p9_run(const double* in,int64_t n,dou
     for(int64_t j=0;j<n;j++) if(!std::isfinite(in[j])) return SC_ERR_ARG;
     auto integer=[](double x,int max){ return x>=0 && x<=max && x==std::floor(x); };
     for(int j=0;j<10;j++) if(!integer(in[j],j==2?6:j==1?2:1)) return SC_ERR_ARG;
-    if(!integer(in[12],8)||!integer(in[13],8)||n!=22+3*(int)in[12]+10*(int)in[13]) return SC_ERR_ARG;
+    if(!integer(in[12],8)||!integer(in[13],8)||n!=22+3*(int)in[12]+23*(int)in[13]) return SC_ERR_ARG;
     if(in[10]<=0 || in[11]<0 || in[14]>in[15]) return SC_ERR_ARG;
     if((in[0]==1 && (in[8]!=0 || in[13]!=0)) ||
        (in[9]!=0 && in[12]!=0) || (in[0]==0 && (in[12]!=0 || in[9]!=0))) return SC_ERR_ARG;
@@ -136,11 +137,14 @@ SC_EXPORT int32_t sc_intersect_curve_class_p9_run(const double* in,int64_t n,dou
     for(int j=22;j<22+3*(int)in[12];j++) if(!std::isfinite(in[j]*in[10])) return SC_ERR_ARG;
     int shared=0;
     for(int j=0;j<(int)in[13];j++) {
-        const double* p=in+22+3*(int)in[12]+10*j;
-        if(!integer(p[8],1) || p[6]>p[7] || p[9]<0) return SC_ERR_ARG;
-        for(int k=0;k<6;k++) if(!std::isfinite(p[k]*in[10])) return SC_ERR_ARG;
-        if(p[8]) { ++shared; if(in[8]!=1) return SC_ERR_ARG; }
-        else if(p[0]==p[3] && p[1]==p[4] && p[2]==p[5]) return SC_ERR_ARG;
+        // kind start[3] end[3] lo hi same edge_zone p1[3] d1[3] p2[3] d2[3]
+        const double* p=in+22+3*(int)in[12]+23*j;
+        if(!integer(p[0],1) || !integer(p[9],1) || p[7]>p[8] || p[10]<0) return SC_ERR_ARG;
+        for(int k=1;k<7;k++) if(!std::isfinite(p[k]*in[10])) return SC_ERR_ARG;
+        for(int k=11;k<23;k++) if(!std::isfinite(p[k]*in[10])) return SC_ERR_ARG;
+        // A Hermite edge carries its own curve, never the source curve.
+        if(p[9]) { ++shared; if(p[0]!=0 || in[8]!=1) return SC_ERR_ARG; }
+        else if(p[0]==0 && p[1]==p[4] && p[2]==p[5] && p[3]==p[6]) return SC_ERR_ARG;
     }
     if(shared>1) return SC_ERR_ARG;
     SC_TRY
@@ -203,12 +207,17 @@ SC_EXPORT int32_t sc_intersect_curve_class_p9_run(const double* in,int64_t n,dou
     std::unique_ptr<SmCurve> owned(new (&ctx) SmLine(a,b,2+(int)in[8],&ctx)); SmCurve* source=owned.get();
     SmTArray<SmEdge*> targets;
     for(int j=0;j<ne;j++) {
-        const double* p=in+22+3*nv+10*j; SmCurve* c=nullptr;
-        if(p[8]) c=owned.release(); else c=new (&ctx) SmLine(SmPoint3d(scale*p[0],scale*p[1],scale*p[2]),
-            SmPoint3d(scale*p[3],scale*p[4],scale*p[5]),3,&ctx);
-        SmEdge* e=nullptr; auto st=brep->CreateWireEdgeFromCurve(c,SmExtent1d(p[6],p[7]),e);
+        const double* p=in+22+3*nv+23*j; SmCurve* c=nullptr;
+        if(p[9]) c=owned.release();
+        else if(p[0]==1) c=new (ctx) SmHermiteCurve(SmVector3d(scale*p[11],scale*p[12],scale*p[13]),
+            SmVector3d(scale*p[14],scale*p[15],scale*p[16]),
+            SmVector3d(scale*p[17],scale*p[18],scale*p[19]),
+            SmVector3d(scale*p[20],scale*p[21],scale*p[22]),3);
+        else c=new (&ctx) SmLine(SmPoint3d(scale*p[1],scale*p[2],scale*p[3]),
+            SmPoint3d(scale*p[4],scale*p[5],scale*p[6]),3,&ctx);
+        SmEdge* e=nullptr; auto st=brep->CreateWireEdgeFromCurve(c,SmExtent1d(p[7],p[8]),e);
         if(st!=SM_SUCCESS || !e) return SC_ERR_ARG;
-        e->SetTolerance(p[9],FALSE); targets.Add(e); edges.push_back(e);
+        e->SetTolerance(p[10],FALSE); targets.Add(e); edges.push_back(e);
     }
     SmCurveClassification cc; cc.SetCurve(source,FALSE); cc.SetSurface1(s);
     SmTol::SetZoneTol3d(&cc,SmZoneTol3d(zone)); cc.SetDoingCrossHatch(in[4]);

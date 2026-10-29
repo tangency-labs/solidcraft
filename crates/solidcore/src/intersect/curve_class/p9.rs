@@ -17,7 +17,11 @@
 //! clearing is represented by a private copy for a lifted 2D source. Concrete
 //! curve-on-surface dispatch is preserved; [`CurveClassification::intersect_edges`]
 //! inserts through a read-only adapter (its mutable edits defer) and
-//! [`CurveClassification::intersect_edges_mut`] through a mutable one. Ignored native evaluation
+//! [`CurveClassification::intersect_edges_mut`] through a mutable one. Each target
+//! edge's curve cache is built at that edge's live zone tolerance, as upstream's
+//! `SmTol::GetApproxTol3d(&m_crCurve)` reads it from the curve's owning edge; the
+//! classification curve's cache has no owner in reach through the caller's geometry and
+//! still builds on the system tolerance. Ignored native evaluation
 //! and drop statuses preserve initialized outputs; unported errors propagate. The
 //! native checked-drop guess aliases its output and is reset to zero before solving;
 //! the Rust call explicitly uses that zero guess. A 3D trim-boundary source returns
@@ -385,7 +389,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 solutions.push(sol);
             }
         } else {
-            let found = working.global_curve_intersect_cached(
+            // `GlobalCurveIntersect` caches the edge's own curve object, whose cache is
+            // built at `SmTol::GetApproxTol3d(&m_crCurve)`: half the edge's tolerance
+            // (`SmCurveCache.cpp:1496`, through the curve's owner). The caller's handle
+            // geometry is not that owned object, so the live edge tolerance is supplied
+            // to the lazy build; a cache is still built only where the solve needs it.
+            let found = working.global_curve_intersect_cached_with_zone_tols(
                 k,
                 &self.interval(),
                 target,
@@ -400,6 +409,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 },
                 source_cache,
                 &mut None,
+                [None, Some(edge_zone)],
             )?;
             solutions.extend(
                 found
