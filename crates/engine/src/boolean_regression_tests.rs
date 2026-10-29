@@ -87,7 +87,8 @@ fn volume(s: &Session, body: &str) -> f64 {
 /// Dividing one of the cut's intersection edges met a point that projects onto neither surface,
 /// and the fallback unwrapped that same failed projection: a kernel panic, recorded as a crash.
 /// Nothing panics now; the box loses the eighth of the ball inside it, or the cut is refused
-/// and the box is left whole.
+/// and the box is left whole. The side face is picked by its point (the report's face index
+/// was truck's order): `p3` is its corner (15, -5, 0) and `l4` the box's upright edge there.
 #[test]
 fn revolve_cut_round_a_box_corner_does_not_panic() {
     use std::sync::Arc;
@@ -98,7 +99,7 @@ fn revolve_cut_round_a_box_corner_does_not_panic() {
         ("sketch.rectangle.two_point", json!({"p0": [-5.4, 7.0], "p1": [15.0, -5.0]})),
         ("sketch.finish", json!({})),
         ("solid.extrude", json!({"direction": "positive", "distance": "10 mm", "operation": "new", "profiles": [0], "sketch": 1})),
-        ("sketch.create", json!({"plane": {"body": "Body1", "face": [12.721266146083186, -5.0, 7.034827173055135], "index": 1, "path": []}})),
+        ("sketch.create", json!({"plane": {"face": [12.721266146083186, -5.0, 7.034827173055135]}})),
         ("sketch.circle.center", json!({"center": "p3", "radius": 4.664761515876241})),
         ("sketch.options", json!({"slice": true})),
         ("sketch.finish", json!({})),

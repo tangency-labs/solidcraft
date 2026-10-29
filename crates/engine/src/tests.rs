@@ -2772,17 +2772,20 @@ fn press_pull_on_curved_faces() {
     let v1 = volume(&mut s);
     assert!(rel(v1 - v0, PI * (25.0 - 16.0) * 20.0) < 1e-3, "{v0} {v1}");
     // A shell's inner wall behind a fillet (`F3:inner:F2:blend:…`) only names the fillet: it is
-    // offset like any curved face, not taken for the shell's fillet. (The offset itself is
-    // refused: the wall is tangent to its neighbours.)
+    // offset like any curved face, not taken for the shell's fillet. Pulled 0.5 into the cavity
+    // (radius 3 to 2.5), the wall alone moves, stepping in from its tangent neighbours: the
+    // quarter ring between the radii, 18 high, is added.
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20}));
     run(&mut s, "solid.fillet", json!({"edges": [[40, 40, 10]], "radius": 5}));
     run(&mut s, "solid.shell", json!({"faces": [[20, 20, 20]], "thickness": 2}));
     let on = Vec3::new(35.0, 35.0, 10.0) + Vec3::new(1.0, 1.0, 0.0).normalized().unwrap() * 3.0;
-    let err =
-        s.execute("solid.press_pull", &json!({"face": [on.x, on.y, on.z], "distance": 0.5})).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
-    assert!(!err.contains("not a fillet's or a chamfer's"), "{err}");
-    assert!(err.contains("offset"), "{err}");
+    let v0 = volume(&mut s);
+    let out = run(&mut s, "solid.press_pull", json!({"face": [on.x, on.y, on.z], "distance": 0.5}));
+    assert!(out["name"].as_str().is_some_and(|n| n.starts_with("OffsetFace")) && out.get("edited").is_none(), "{out}");
+    let ring = PI / 4.0 * (3.0 * 3.0 - 2.5 * 2.5) * 18.0;
+    // Each volume to the measure's 2e-7.
+    assert!((volume(&mut s) - v0 - ring).abs() < 4e-7 * v0, "{} vs {ring}", volume(&mut s) - v0);
 }
 
 /// A cut in one component leaves other components' bodies alone unless they are named as
@@ -3212,7 +3215,12 @@ fn shell_tangent_chain_that_opens_every_face_explains_how_to_keep_walls() {
         assert_eq!(s.doc.to_json(), before, "a refused shell must preserve the design");
     }
     run(&mut s, "solid.shell", json!({"faces": [[20,0,30]], "thickness": 2, "tangent_chain": false}));
-    assert!((volume(&mut s) - 15_305.28).abs() < 0.1);
+    // The rounded box (its 37 x 27 x 57 core grown by the 1.5 ball) less the cavity, which the
+    // 2 mm walls leave sharp, open through the front: 36 x 56 x 28. To the measure's 2e-7.
+    let (a, b, c, r) = (37.0, 27.0, 57.0, 1.5);
+    let rounded = a * b * c + 2.0 * r * (a * b + b * c + a * c) + PI * r * r * (a + b + c) + 4.0 / 3.0 * PI * r * r * r;
+    let want = rounded - 36.0 * 56.0 * 28.0;
+    assert!((volume(&mut s) - want).abs() < 2e-7 * rounded, "{} vs {want}", volume(&mut s));
     assert_eq!(s.model.state().bodies.len(), 1);
 }
 
