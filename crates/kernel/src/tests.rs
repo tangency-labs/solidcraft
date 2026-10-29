@@ -466,7 +466,9 @@ fn tapered_extrudes() {
 }
 
 /// A slot (two lines and two half-circles, tangent) tapered inward: every edge moves in by
-/// d = z · tan 8°, so A(d) = A₀ − P·d + π·d² (#546). An arc meeting a line at a corner is refused.
+/// d = z · tan 8°, so A(d) = A₀ − P·d + π·d² (#546). A quarter disc, its arc meeting the lines at
+/// corners, tapered outward: each wall continues as itself, so the section at d is the disc of
+/// radius r + d over x ≥ −d, y ≥ −d.
 #[test]
 fn tapered_extrude_of_lines_and_arcs() {
     let (r, l, h, a) = (5.0, 20.0, 12.0, 8f64.to_radians());
@@ -492,8 +494,34 @@ fn tapered_extrude_of_lines_and_arcs() {
             Seg2::Line { a: Vec2::new(0.0, r), b: Vec2::ZERO },
         ],
     };
-    let e = extrude_tapered(&Plane::XY, &Region2 { outer: quarter, holes: vec![] }, h, 1.0, a, crate::DraftCorner::default()).unwrap_err();
-    assert!(e.to_string().contains("arc meets another edge at a corner"), "{e}");
+    let b = extrude_tapered(&Plane::XY, &Region2 { outer: quarter, holes: vec![] }, h, 1.0, a, crate::DraftCorner::default()).unwrap();
+    // The section's area: under the circle of radius R = r + d down to y = −d from x = −d to
+    // x₁, where the circle meets y = −d, then the whole circle's width out to x = R;
+    // F(x) = ∫ √(R² − x²) dx.
+    let section = |d: f64| {
+        let big = r + d;
+        let f = |x: f64| 0.5 * (x * (big * big - x * x).max(0.0).sqrt() + big * big * (x / big).clamp(-1.0, 1.0).asin());
+        let x1 = (big * big - d * d).sqrt();
+        f(x1) - f(-d) + d * (x1 + d) + 2.0 * (f(big) - f(x1))
+    };
+    // Gauss–Legendre on 8 nodes over each of 16 pieces of the height: the area is smooth in d.
+    let (nodes, weights) = (
+        [0.183_434_642_495_649_8, 0.525_532_409_916_329, 0.796_666_477_413_626_7, 0.960_289_856_497_536_3],
+        [0.362_683_783_378_362, 0.313_706_645_877_887_3, 0.222_381_034_453_374_5, 0.101_228_536_290_376_3],
+    );
+    let pieces = 16;
+    let v: f64 = (0..pieces)
+        .map(|k| {
+            let (z0, dz) = (k as f64 * h / pieces as f64, h / pieces as f64);
+            let mid = z0 + 0.5 * dz;
+            nodes.iter().zip(weights).map(|(x, w)| w * (section((mid - 0.5 * dz * x) * t) + section((mid + 0.5 * dz * x) * t))).sum::<f64>()
+                * 0.5
+                * dz
+        })
+        .sum();
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 1e-6, "quarter disc: {} vs {v}", m.volume);
+    assert_eq!(m.merged.faces, 5, "quarter disc: bottom, top, two flat walls and the cone");
 }
 
 /// A circle with a lobe on each side (four arcs of three circles, meeting at corners: the outline of
