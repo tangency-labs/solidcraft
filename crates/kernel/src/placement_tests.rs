@@ -73,3 +73,25 @@ fn periodic_step_seam_survives_identity_rotation_and_translation() {
     assert_topology(body, &rigid, [[0., 1., 0., 0.], [-1., 0., 0., 0.], [0., 0., 1., 0.], [10., 10., 30., 1.]]);
     assert_eq!(crate::step_export(&[body], "source snapshot").unwrap(), unchanged);
 }
+
+/// A body mirrored in SMLib reads back from its record as the same valid solid: a plate with a
+/// through hole (the hole's cylinder comes out inside out) and a box with two rounds meeting at a
+/// corner (their intersection edge has a tolerance of its own, wider than the body's). Read back
+/// from the record, the hole's cylinder swept the wrong way about its axis 30 mm off its NURBS,
+/// and the rounds' shared edge lost its tolerance to the body's.
+#[test]
+fn mirrored_bodies_read_back_from_their_records_valid() {
+    let plate = crate::box_solid(Vec3::ZERO, Vec3::new(30., 40., 20.)).unwrap();
+    let hole = crate::cylinder(Vec3::new(20., 20., -5.), Vec3::Z, 5.0, 30.0).unwrap();
+    let holed = crate::boolean(&plate, &hole, crate::BoolOp::Cut).unwrap().unwrap();
+    let rounded = crate::fillet(&plate, &[Vec3::new(15., 0., 20.), Vec3::new(0., 0., 10.)], 3.0).unwrap();
+    // The mirror in x = 30.
+    let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [60., 0., 0., 1.]];
+    for (what, body) in [("holed plate", holed), ("rounded box", rounded)] {
+        let mirrored = transform_matrix(&body, mirror).unwrap();
+        let read_back = Body::from_record(mirrored.record().clone()).unwrap();
+        assert!(matches!(crate::validity(&read_back).smlib, Some(crate::SmlibCheck::Valid)), "{what}: {:?}", crate::validity(&read_back).smlib);
+        let (want, got) = (crate::measure(&body).unwrap().volume, crate::measure(&read_back).unwrap().volume);
+        assert!((got - want).abs() < 1e-6 * want, "{what}: volume {got}, expected {want}");
+    }
+}
