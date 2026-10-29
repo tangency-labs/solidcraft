@@ -181,19 +181,7 @@ impl Keymap {
     /// One key is saved as a string, as before a command could have several, so older versions
     /// still read it.
     pub fn prefs(&self) -> Value {
-        Value::Object(
-            self.custom
-                .iter()
-                .map(|(id, keys)| {
-                    let v = match keys.as_slice() {
-                        [] => json!(""),
-                        [key] => json!(key),
-                        _ => json!(keys),
-                    };
-                    (id.clone(), v)
-                })
-                .collect(),
-        )
+        Value::Object(self.custom.iter().map(|(id, keys)| (id.clone(), keys_value(keys))).collect())
     }
     pub fn load(&mut self, v: &Value) {
         self.custom = v.as_object().map(|o| o.iter().take(2000).filter_map(|(k, v)| Some((k.clone(), saved_keys(v)?))).collect()).unwrap_or_default();
@@ -207,8 +195,17 @@ impl Keymap {
     }
 }
 
+/// A command's keys as they are saved: `""` (none), one key, or a list of them.
+pub(crate) fn keys_value(keys: &[String]) -> Value {
+    match keys {
+        [] => json!(""),
+        [key] => json!(key),
+        _ => json!(keys),
+    }
+}
+
 /// A command's saved keys: `""` (none), one key, or a list of them.
-fn saved_keys(v: &Value) -> Option<Vec<String>> {
+pub(crate) fn saved_keys(v: &Value) -> Option<Vec<String>> {
     match v {
         Value::String(key) if key.is_empty() => Some(Vec::new()),
         Value::String(key) => Some(vec![key.clone()]),

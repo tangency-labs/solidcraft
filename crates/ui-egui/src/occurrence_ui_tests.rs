@@ -35,6 +35,29 @@ fn fixture() -> (Harness, u64, u64, u64) {
 }
 
 #[test]
+fn folder_visibility_shortcut_targets_only_the_clicked_placement() {
+    let (mut h, component, first, second) = fixture();
+    let group = h.app.run("browser.group", json!({"component":component,"folder":"bodies","items":["Body1"],"name":"Group"})).unwrap()["group"]
+        .as_u64()
+        .unwrap();
+    h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+    h.app.tree.collapsed.insert(super::occurrence_key(&[first]));
+    h.settle();
+    let first_body = h.app.session.occurrence_bodies(&[first], false).unwrap()[0].clone();
+    let second_body = h.app.session.occurrence_bodies(&[second], false).unwrap()[0].clone();
+    for (label, key) in [("Bodies", format!("o:{second}/bodies")), ("Group (1)", format!("o:{second}/g{group}"))] {
+        h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
+        h.step(&json!({"key":"V"})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_folders, vec![key]);
+        assert!(h.app.session.body_visible(&first_body));
+        assert!(!h.app.session.body_visible(&second_body));
+        h.step(&json!({"key":"V"})).unwrap();
+        assert!(h.app.session.body_visible(&second_body));
+        h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
+    }
+}
+
+#[test]
 fn browser_reuses_unchanged_rows_and_refreshes_live_state_and_replaced_documents() {
     let (mut h, _, first, second) = fixture();
     let second_body = h.app.session.occurrence_bodies(&[second], false).unwrap().pop().unwrap();

@@ -67,6 +67,7 @@ mod parts;
 mod point_cloud;
 mod script;
 mod section;
+pub mod settings;
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
 #[cfg(test)]
@@ -338,6 +339,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(section::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
+    v.extend(settings::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());

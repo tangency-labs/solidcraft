@@ -104,7 +104,7 @@ impl DimensionDraft {
     }
     fn params(&self, expr: &str) -> serde_json::Value {
         // The first dimension of a sketch scales it rather than distorting it (#1365).
-        let mut params = json!({"entities": self.entities, "value": expr, "scale_sketch": true});
+        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": true});
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -149,7 +149,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
     let (param, expr, draft) = dimension_draft(app, entities, Some(at))?;
     if draft.driven {
         PLACEMENT.with(|preview| *preview.borrow_mut() = None);
-        app.run("sketch.dimension", json!({"entities": draft.entities, "text_at": [at.x, at.y], "driven": true}))?;
+        app.run("sketch.dimension", json!({"entities": entities_value(&draft.entities), "text_at": [at.x, at.y], "driven": true}))?;
         app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
         return Ok(());
     }
@@ -237,6 +237,18 @@ fn reevaluate(app: &SolveApp, draft: &mut DimensionDraft, expr: &str) {
     }
 }
 
+/// The entities a dimension measures, as the command takes them: a sketch entity by its id, a
+/// model edge or vertex by its reference (#7912), read back from the pick's text as the
+/// constraint tools do (#6348).
+fn entities_value(entities: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(
+        entities
+            .iter()
+            .map(|entity| serde_json::from_str(entity).ok().filter(serde_json::Value::is_object).unwrap_or_else(|| json!(entity)))
+            .collect(),
+    )
+}
+
 fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> Result<(String, String, DimensionDraft), String> {
     let sketch = app.session.active_sketch.ok_or("Edit a sketch to add a dimension")?;
     if entities.is_empty() || entities.len() > 2 || at.is_some_and(|at| !at.x.is_finite() || !at.y.is_finite()) {
@@ -251,7 +263,7 @@ fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> R
 /// has no parameter), the parameter's expression, and the scratch session it was added in.
 fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, driven: bool) -> Result<(String, String, DimensionDraft), String> {
     let mut scratch = app.session.scratch();
-    let mut params = json!({"entities": entities, "driven": driven});
+    let mut params = json!({"entities": entities_value(entities), "driven": driven});
     if let Some(at) = at {
         params["text_at"] = json!([at.x, at.y]);
     }

@@ -725,19 +725,23 @@ pub fn sync_context(app: &mut crate::SolveApp) {
 
 pub fn select_command_tab(app: &mut crate::SolveApp, id: &str) {
     sync_context(app);
-    let Some(c) = solidcraft_engine::find_command(id) else { return };
+    if let Some(tab) = command_tab(app, id) {
+        app.ui.tab = tab.into();
+    }
+}
+
+/// The tab to switch to so the ribbon shows command `id`, or `None` to stay: the current tab
+/// already lists it, or its home tab can't be shown.
+pub fn command_tab(app: &crate::SolveApp, id: &str) -> Option<&'static str> {
+    let c = solidcraft_engine::find_command(id)?;
     // Keep the tab a toolbar click came from when it already lists this shared command.
     if crate::toolbar_custom::panel_lists(&app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
-        return;
+        return None;
     }
-    if let Some((tab, _)) = destination(c) {
-        if render_tab(tab) && !crate::render_workspace::active(app) {
-            return;
-        } // The Render workspace owns its entry/exit lifecycle.
-        if visible_tabs(app).contains(&tab) {
-            app.ui.tab = tab.into();
-        }
-    }
+    let (tab, _) = destination(c)?;
+    // The Render workspace owns its entry/exit lifecycle.
+    let render_closed = render_tab(tab) && !crate::render_workspace::active(app);
+    (!render_closed && visible_tabs(app).contains(&tab)).then_some(tab)
 }
 
 /// Defaults from the previous ribbon, used only to carry removals into the new layout.

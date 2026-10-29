@@ -251,6 +251,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
                 | "browser.expand_all"
                 | "browser.collapse_all"
         )
+        && !id.starts_with("settings.")
         && app.session.active_sketch.is_none()
         && app.session.world_state().bodies.len() == 1
         && app.session.undo.len() <= 2

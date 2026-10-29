@@ -1765,8 +1765,12 @@ pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
 /// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
 /// visibility (bodies, faces' and edges' bodies, sketches, construction and origin planes and
 /// axes, components' bodies, canvases, joints' glyphs). When some are shown and some hidden, all are hidden.
+/// A clicked folder takes precedence, and toggles its own visibility without changing its items.
 pub fn toggle_visibility(app: &mut SolveApp) {
     use solidcraft_engine::doc::FeatureKind;
+    if crate::browser::toggle_picked_folder(app) {
+        return;
+    }
     let paths: Vec<Vec<u64>> =
         app.session.selection.iter().filter_map(|s| if let Sel::Occurrence { path } = s { Some(path.clone()) } else { None }).collect();
     if !paths.is_empty() {

@@ -29,6 +29,42 @@ fn angular_drag_keeps_the_horizontal_construction_line() {
     }
 }
 
+/// A line held at its midpoint, with an angle to a horizontal line from that point (#8944):
+/// dragging one of its ends off that angle slides the end along the line as far as it can go,
+/// and the horizontal line keeps its length. That line's far end is free only along it, which
+/// can't bring the cursor closer, yet the cursor correction moved it a whole step at a time on
+/// rounding: the line shrank, for the first target to nothing.
+#[test]
+fn a_midpoint_line_dragged_off_its_angle_leaves_the_horizontal_line_alone() {
+    for live in [false, true] {
+        for (end, to, reached) in
+            [("l1.end", [14.0, 3.0], [11.617647, 6.970588]), ("l1.end", [5.0, 12.0], [8.970588, 5.382353]), ("l1.start", [-3.0, -12.0], [-7.5, -4.5])]
+        {
+            let mut s = solidcraft_engine::Session::default();
+            for (id, params) in [
+                ("sketch.create", json!({"plane":"XY"})),
+                ("sketch.line", json!({"points":[[-10,-6],[10,6]],"infer":false})),
+                ("sketch.constraint.midpoint", json!({"line":"l1","point":"origin"})),
+                ("sketch.line", json!({"points":["origin",[15,0]],"infer":false})),
+                ("sketch.constraint.horizontal_vertical", json!({"line":"l2"})),
+                ("sketch.dimension", json!({"entities":["l1","l2"],"type":"angle"})),
+            ] {
+                s.execute(id, &params).unwrap();
+            }
+            let from = four_bar::point(&s, end).unwrap();
+            s.execute("sketch.drag", &json!({"entity":end,"from":[from.x,from.y],"to":to,"live":live})).unwrap();
+            if live {
+                s.execute("sketch.drag_end", &json!({})).unwrap();
+            }
+            let point = |id| four_bar::point(&s, id).unwrap();
+            let at = point(end);
+            assert!(at.dist(Vec2::new(reached[0], reached[1])) < 1e-4, "{end} to {to:?} (live {live}) went to {at:?}");
+            let far = point("l2.end");
+            assert!(far.dist(Vec2::new(15.0, 0.0)) < 1e-6, "{end} to {to:?} (live {live}) moved l2's end to {far:?}");
+        }
+    }
+}
+
 fn drag(s: &mut solidcraft_engine::Session, target: Vec2) {
     let from = four_bar::point(s, "crank.end").unwrap();
     s.execute("sketch.drag", &json!({"entity":"crank.end","from":[from.x,from.y],"to":[target.x,target.y],"live":true})).unwrap();

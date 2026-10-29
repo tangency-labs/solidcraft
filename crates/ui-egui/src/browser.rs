@@ -71,11 +71,12 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
 mod model_tests;
 
 use std::collections::BTreeSet;
+use std::sync::{Arc, Weak};
 
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::doc::FeatureKind;
+use solidcraft_engine::doc::{Document, FeatureKind};
 
 use crate::context_menu::{Item, Target};
 use crate::theme::Tokens;
@@ -120,6 +121,8 @@ pub struct TreeState {
     pub redefine_draft: Option<crate::sketch_attachment_ui::Draft>,
     /// Components picked in the tree (they have no viewport selection).
     pub picked_components: Vec<u64>,
+    /// The last folder label clicked, for V; independent of the geometry selection.
+    picked_folder: Option<FolderPick>,
     /// Canvases picked in the tree.
     pub picked_canvases: Vec<u64>,
     /// Joints picked in the tree (a hidden one shows highlighted while it is picked).
@@ -165,7 +168,23 @@ pub struct TreeState {
     cache: Option<cache::Cache>,
 }
 
+struct FolderPick {
+    key: String,
+    session: u64,
+    doc: Weak<Document>,
+}
+
+impl FolderPick {
+    fn current(&self, app: &SolveApp) -> bool {
+        self.session == app.session.uid && std::ptr::eq(self.doc.as_ptr(), Arc::as_ptr(&app.session.doc))
+    }
+}
+
 impl TreeState {
+    pub(crate) fn clear_folder_pick(&mut self) {
+        self.picked_folder = None;
+    }
+
     fn remember(&mut self, key: &str) {
         if let Some(slot) = self.order.get_mut(self.order_len) {
             if slot != key {
@@ -404,6 +423,27 @@ pub fn origin_items(app: &SolveApp) -> Vec<Item> {
 /// items keep their own state, and hiding or showing them never changes it.
 pub fn toggle_folder(app: &mut SolveApp, key: &str) {
     let _ = app.run("browser.visibility", json!({ "tree_folders": [key], "visible": app.session.folder_hidden(key) }));
+}
+
+/// A folder shortcut target lasts until another click, Escape, or a change of design/model.
+/// Visibility changes keep the document snapshot, so V can toggle the same folder again.
+pub(crate) fn update_folder_pick(app: &mut SolveApp, ctx: &egui::Context) {
+    if ctx.input(|i| i.pointer.any_pressed() || i.key_pressed(egui::Key::Escape))
+        || app.tree.picked_folder.as_ref().is_some_and(|pick| !pick.current(app))
+    {
+        app.tree.clear_folder_pick();
+    }
+}
+
+fn pick_folder(app: &mut SolveApp, key: &str) {
+    app.tree.picked_folder = Some(FolderPick { key: key.into(), session: app.session.uid, doc: Arc::downgrade(&app.session.doc) });
+}
+
+pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
+    let Some(pick) = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app)) else { return false };
+    let key = pick.key.clone();
+    toggle_folder(app, &key);
+    true
 }
 
 /// Selected browser items of the folder of a body or sketch, when more than one (for Group
@@ -2438,6 +2478,7 @@ fn folder_rows_at(
             // still folds it. With no such command, the label folds, as it always has.
             let names: Vec<String> = data.entries().flat_map(|e| e.bodies.clone()).collect();
             if !offer_bodies(app, &names, Take::Toggle) {
+                pick_folder(app, key);
                 toggle(app, key, default_open);
             }
         }
@@ -2504,6 +2545,7 @@ fn folder_rows_at(
         } else if r.clicked {
             let names: Vec<String> = items.iter().flat_map(|e| e.bodies.clone()).collect();
             if !offer_bodies(app, &names, Take::Toggle) {
+                pick_folder(app, gkey);
                 toggle(app, gkey, true);
             }
         }

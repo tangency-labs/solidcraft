@@ -3,6 +3,105 @@ use crate::scenario::{Harness, handle_at, rect_of};
 use crate::shell::{LayoutMode, SHELL_GAP};
 
 #[test]
+fn clicked_browser_folders_toggle_visibility_with_v() {
+    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.app.ui.layout = mode;
+        for (name, x) in [("One", 0), ("Two", 20)] {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+        }
+        let group =
+            h.app.run("browser.group", json!({"component":0,"folder":"bodies","items":["One"],"name":"Group"})).unwrap()["group"].as_u64().unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":5})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":20})).unwrap();
+        h.app.run("browser.visibility", json!({"items":["Two"],"visible":false})).unwrap();
+        h.settle();
+        for (label, key) in [
+            ("Bodies", "c0/bodies".into()),
+            ("Sketches", "c0/sketches".into()),
+            ("Construction", "c0/construction".into()),
+            ("Group (1)", format!("c0/g{group}")),
+        ] {
+            h.app.run("select.set", json!({"items":[Sel::Body {name:"One".into()}]})).unwrap();
+            let before = h.app.session.visibility.clone();
+            let mut hidden = before.clone();
+            hidden.hidden_folders.push(key.clone());
+            h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
+            h.step(&json!({"key":"V"})).unwrap();
+            assert_eq!(h.app.session.visibility, hidden, "{mode:?}: V hides {label}, leaving individual items alone");
+            h.step(&json!({"key":"V"})).unwrap();
+            assert_eq!(h.app.session.visibility, before, "V shows the same folder again");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(h.app.session.visibility, hidden);
+            h.app.run("edit.redo", json!({})).unwrap();
+            assert_eq!(h.app.session.visibility, before);
+            // Restore expansion so the later group row is still reachable.
+            h.step(&json!({"click":{"handle":format!("row:{label}")}})).unwrap();
+        }
+    }
+}
+
+#[test]
+fn folder_visibility_target_clears_when_the_user_moves_on() {
+    for action in ["body click", "selection command", "empty click", "escape", "design tab", "model edit", "tool"] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.set", json!({"items":[Sel::Body {name:"One".into()}]})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"handle":"row:Sketches"}})).unwrap();
+        match action {
+            "body click" => h.step(&json!({"click":{"handle":"row:One"}})).unwrap(),
+            "selection command" => {
+                // Explicitly picking the same body must also leave the folder target.
+                h.app.run("select.set", json!({"items":[Sel::Body {name:"One".into()}]})).unwrap();
+            }
+            "empty click" => h.step(&json!({"click":[950,650]})).unwrap(),
+            "escape" => h.step(&json!({"key":"Escape"})).unwrap(),
+            "design tab" => {
+                crate::documents::new_tab(&mut h.app);
+                h.settle();
+                crate::documents::switch(&mut h.app, 0);
+                h.settle();
+            }
+            "model edit" => {
+                h.app.run("sketch.create", json!({"plane":"XZ"})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+            }
+            "tool" => {
+                h.app.start("file.save_mesh");
+                h.settle();
+            }
+            _ => panic!("unknown test action: {action}"),
+        }
+        h.step(&json!({"key":"V"})).unwrap();
+        assert!(h.app.session.visibility.hidden_folders.is_empty(), "{action}: V must no longer target Sketches");
+        if matches!(action, "body click" | "selection command") {
+            assert!(!h.app.session.body_visible("One"), "{action}: normal selection shortcuts still work");
+        }
+    }
+}
+
+#[test]
+fn folder_visibility_shortcut_does_not_take_dialog_body_picks_or_chevrons() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"chevron":"Bodies"}})).unwrap();
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(!h.app.session.folder_hidden("c0/bodies"), "the fold arrow does not pick a visibility target");
+    h.app.start("file.save_mesh");
+    h.settle();
+    h.step(&json!({"click":{"handle":"row:Bodies"}})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Body { name: "One".into() }]);
+    h.step(&json!({"key":"V"})).unwrap();
+    assert!(!h.app.session.folder_hidden("c0/bodies"), "a body input consumes the folder click");
+}
+
+#[test]
 fn save_mesh_add_all_and_add_visible_bodies_fill_the_bodies_input() {
     let mut h = Harness::new();
     for (name, x) in [("One", 0), ("Two", 20), ("Three", 40)] {

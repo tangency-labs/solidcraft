@@ -301,6 +301,35 @@ or turn on **Frame rate details**, for the performance overlay:
 While the readout is on, the view redraws every frame. With vertical sync the frame rate tops
 out at the display's refresh rate; the interface time and the GPU counts still show the work.
 
+### Settings profiles
+
+General › **Settings profiles** keeps the input and interface settings together under a name,
+for example "Laptop" and "Large monitor", and switches them at once. A profile holds:
+
+- the Interface, Navigation and Sketch pages: theme, interface scale and font, layout, mouse
+  mode and the other navigation options, the radial menu and mouse gestures with every studio's
+  command lists, and the sketch modifier keys;
+- the interface language;
+- the keyboard shortcuts, the toolbar and the S box favourites;
+- the imported theme it uses, so it travels with an exported profile.
+
+Settings that belong to the computer stay out: the 3D mouse (calibration, driver, speeds and
+buttons), graphics, units and decimals, the AI page, recent files and window positions.
+
+- **Active profile** lists the profiles; choosing one applies it. While its settings differ from
+  what was saved, a note says so.
+- **Save** keeps the current settings under the typed name, replacing a profile of that name,
+  and makes it the active one.
+- **Rename** and **Delete** act on the active profile.
+- **Export…** saves the active profile as one `solidcraft-profile/1` file; **Import…** adds one
+  without switching to it (a name already taken gets a number).
+
+Switching, like any other change in Preferences, is taken back by Cancel. A setting a profile
+holds but this computer refuses (an interface font that isn't installed) keeps its current value,
+and the message says how many did. Import ignores unknown keys, leaves out values this version
+can't read, and refuses files over 4 MiB. Scripts and agents reach the same actions with the
+`settings.profile.*` commands (`save`, `apply`, `rename`, `delete`, `list`, `export`, `import`).
+
 Navigation › **Smooth wheel zoom** is on by default. Turn it off to apply each wheel or
 trackpad event immediately, with no smoothing tail. It is independent of **Animate view
 changes**, which controls axis views, Look At, Home and Fit. Re-enabling smoothing during
