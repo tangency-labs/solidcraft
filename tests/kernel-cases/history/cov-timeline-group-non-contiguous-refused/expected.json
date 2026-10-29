@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.group of two features with others between them",
+ "source": "invariants",
+ "method": "a folder holds one contiguous run of features: Block and Notch have Round and the sketch between them",
+ "outcome": "refused",
+ "refusal": "timeline folder `Split` must contain one contiguous run of features"
+}

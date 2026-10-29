@@ -1,0 +1,33 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block",
+    "name": "Block"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     20,
+     15,
+     10
+    ],
+    "diameter": 10,
+    "name": "Hole"
+   }
+  },
+  {
+   "command": "timeline.suppress",
+   "params": {
+    "feature": "Hole",
+    "suppressed": true
+   }
+  }
+ ]
+}

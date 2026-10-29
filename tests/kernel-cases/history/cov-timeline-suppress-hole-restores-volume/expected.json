@@ -1,0 +1,30 @@
+{
+ "sources": [],
+ "what": "timeline.suppress on a through hole: the block is whole again",
+ "method": "40x30x10 block, the hole suppressed: V = 12000; 6 faces",
+ "body_count": 1,
+ "volume_mm3": 12000.0,
+ "faces": 6,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   10
+  ]
+ },
+ "results": [
+  {
+   "step": 3,
+   "json": {
+    "feature": 2,
+    "suppressed": true
+   }
+  }
+ ],
+ "source": "analytic"
+}

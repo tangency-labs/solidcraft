@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "timeline.edit of a round's radius from 2 to 4",
+ "method": "R4 along 40 mm: V = 12000 - (1-pi/4) 16 40; faces 7",
+ "body_count": 1,
+ "volume_mm3": 11862.654824574367,
+ "faces": 7,
+ "source": "analytic"
+}

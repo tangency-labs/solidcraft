@@ -1,0 +1,20 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Block",
+    "name": "Block"
+   }
+  },
+  {
+   "command": "timeline.ungroup",
+   "params": {
+    "group": 99
+   }
+  }
+ ]
+}

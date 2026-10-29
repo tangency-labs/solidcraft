@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.reorder_many of a sketch to behind the cut that uses it",
+ "source": "invariants",
+ "method": "the cut comes before its sketch: it breaks, so the move is refused",
+ "outcome": "refused",
+ "refusal": "moving the selected features there breaks Notch"
+}
