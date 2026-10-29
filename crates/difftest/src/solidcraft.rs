@@ -115,6 +115,7 @@ pub struct Refusal {
     /// The `id` of the step that fails.
     pub step: String,
     /// Text the step's error contains (the failing call and its status).
+    /// Empty or whitespace-only text never matches a refusal.
     pub error: String,
 }
 
@@ -1453,10 +1454,9 @@ pub fn run_rust(case: &Case) -> Run {
             Ok(()) => {}
             // Name the failing step (1-based) and the body it writes.
             Err(Run::Error(msg)) => {
-                let refused = case
-                    .refused_by
-                    .as_ref()
-                    .filter(|r| r.step == step.id() && msg.contains(&r.error));
+                let refused = case.refused_by.as_ref().filter(|r| {
+                    !r.error.trim().is_empty() && r.step == step.id() && msg.contains(&r.error)
+                });
                 let msg = format!("step {} (`{}`): {msg}", n + 1, step.id());
                 return match refused {
                     Some(r) => Run::Deferred(Deferral {
@@ -1930,6 +1930,15 @@ mod tests {
             .expect("the #422 case")
             .case;
         assert!(matches!(run_rust(&refused), Run::Deferred(_)));
+        let mut no_refusal = refused.clone();
+        no_refusal.refused_by = None;
+        let error = run_rust(&no_refusal);
+        assert!(matches!(error, Run::Error(_)));
+        for blank in ["", " ", "\t\r\n"] {
+            let mut blank_error = refused.clone();
+            blank_error.refused_by.as_mut().unwrap().error = blank.into();
+            assert_eq!(run_rust(&blank_error), error, "blank matcher {blank:?}");
+        }
         let mut other_step = refused.clone();
         if let Some(r) = other_step.refused_by.as_mut() {
             r.step = "block".into();
