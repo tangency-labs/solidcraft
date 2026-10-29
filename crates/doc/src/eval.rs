@@ -2401,7 +2401,9 @@ impl Model {
                 Ok(()) => {
                     // Copies are named after their sources through the instance transforms.
                     let mats = match &f.kind {
-                        FeatureKind::Pattern { pattern, .. } => pattern_transforms(doc, &vals, &state, f.component, pattern, Some(f)).unwrap_or_default(),
+                        FeatureKind::Pattern { pattern, .. } => {
+                            pattern_transforms(doc, &vals, &state, f.component, pattern, Some(f)).unwrap_or_default()
+                        }
                         FeatureKind::Mirror { plane, .. } => {
                             doc.resolve_plane_in(&vals, plane, 0, Some(&state)).map(|pl| vec![mirror_matrix(&pl)]).unwrap_or_default()
                         }
@@ -6535,17 +6537,18 @@ fn pattern_transforms(
             // The To Object faces' names follow `face_points`: `to1`, then `to2`.
             let names = feature.map(|f| f.face_names.as_slice()).unwrap_or_default();
             let to_name = |k: usize| names.get(k).map(String::as_str);
-            let reach = |to: Vec3, name: Option<&str>, g: &Option<crate::construct::GeoRef>, d: Vec3, offset: &Option<crate::Expr>| -> Result<f64> {
-                let f = feature.ok_or_else(|| DocError::Invalid("not supported yet: To Object in a pattern of components".into()))?;
-                let off = offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
-                let h = pattern_reach(doc, vals, st, f, component, to, name, g.as_ref(), d)?;
-                // Past the object by the offset, the way the copies go.
-                let reach = h + if h >= 0.0 { off } else { -off };
-                if reach.abs() < 1e-9 {
-                    return Err(DocError::Invalid("the To object with its offset is where the pattern starts".into()));
-                }
-                Ok(reach)
-            };
+            let reach =
+                |to: Vec3, name: Option<&str>, g: &Option<Box<crate::construct::GeoRef>>, d: Vec3, offset: &Option<crate::Expr>| -> Result<f64> {
+                    let f = feature.ok_or_else(|| DocError::Invalid("not supported yet: To Object in a pattern of components".into()))?;
+                    let off = offset.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?.unwrap_or(0.0);
+                    let h = pattern_reach(doc, vals, st, f, component, to, name, g.as_deref(), d)?;
+                    // Past the object by the offset, the way the copies go.
+                    let reach = h + if h >= 0.0 { off } else { -off };
+                    if reach.abs() < 1e-9 {
+                        return Err(DocError::Invalid("the To object with its offset is where the pattern starts".into()));
+                    }
+                    Ok(reach)
+                };
             let s1 = match to1 {
                 Some(p) => step_to(reach(p.0, to_name(0), to1_ref, d1, to_offset1)?, n1, *alignment, *reversed),
                 None => step_of(val(vals, spacing1, Kind::Length)?, n1, *extent1),
@@ -6667,7 +6670,8 @@ fn pattern_reach(
         return Err(DocError::Invalid("not a pattern".into()));
     };
     let tst = state_in_frame(doc, st, component);
-    let centre = seed_centre(doc, &tst, features, bodies).ok_or_else(|| DocError::Invalid("To Object: what the pattern copies has no geometry to measure from".into()))?;
+    let centre = seed_centre(doc, &tst, features, bodies)
+        .ok_or_else(|| DocError::Invalid("To Object: what the pattern copies has no geometry to measure from".into()))?;
     let plane = Plane::from_normal(centre, d).ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
     // A plane at an angle: where the line from the middle along `d` meets it.
     let (reach, _) = object_end(doc, vals, &tst, &plane, centre, to, name, g)?;

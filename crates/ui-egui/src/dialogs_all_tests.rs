@@ -1022,7 +1022,10 @@ fn reopened_rectangular_pattern_shows_each_to_object_under_its_distance_type() {
     assert!(matches!(&d.kind, Kind::PatternRect { to_offset, spacing2, .. } if to_offset == "-2 mm" && spacing2 == "30"), "{:?}", d.kind);
     let y = |name: &str| h.widget(name).unwrap_or_else(|| panic!("{name}"))[1];
     let to_row = crate::scenario::handle_at("dialog:clear:To Object").unwrap().y as f64;
-    assert!(y("Distance Type") < to_row && to_row < y("To Offset") && y("To Offset") < y("Quantity 2"), "To Object's row is under Direction 1's Distance Type");
+    assert!(
+        y("Distance Type") < to_row && to_row < y("To Offset") && y("To Offset") < y("Quantity 2"),
+        "To Object's row is under Direction 1's Distance Type"
+    );
     assert!(y("Distance Type 2") < y("Extent 2"));
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);

@@ -1095,15 +1095,23 @@ fn rectangular_extent_spans_first_to_last_copy() {
     let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
     assert!(hole_at(&reopened, 90.0, 90.0));
     // Centred, the extent is still the whole span: two copies on each side, 7.5 mm apart.
-    run(&mut s, "timeline.redefine", json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
-        "features":["Hole"],"dir1":[1,0,0],"count1":5,"spacing1":30,"type1":"extent","alignment":"center"}}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":5,"spacing1":30,"type1":"extent","alignment":"center"}}),
+    );
     for x in [45.0, 52.5, 60.0, 67.5, 75.0] {
         assert!(hole_at(&s, x, 60.0), "hole at x = {x}");
     }
     assert!(!hole_at(&s, 82.5, 60.0));
     // Back to Spacing: the same value now spaces neighbours.
-    run(&mut s, "timeline.redefine", json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
-        "features":["Hole"],"dir1":[1,0,0],"count1":2,"spacing1":30}}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":2,"spacing1":30}}),
+    );
     assert!(hole_at(&s, 90.0, 60.0));
     assert!(!s.doc.to_json().contains("extent1"));
 }
@@ -1129,7 +1137,11 @@ fn rectangular_to_object_reaches_the_face_and_follows_it() {
     }
     assert!(!hole_at(&s, 65.0, 60.0) && !hole_at(&s, 60.0, 70.0));
     // The block moves 20 mm closer: the copies close up to it.
-    run(&mut s, "timeline.redefine", json!({"feature":"Stop","command":"solid.box","params":{"length":10,"width":10,"height":5,"corner":[80,130,0],"body_name":"Stop"}}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Stop","command":"solid.box","params":{"length":10,"width":10,"height":5,"corner":[80,130,0],"body_name":"Stop"}}),
+    );
     let err = s.model.results.iter().find_map(|r| r.error.clone());
     assert!(err.is_none(), "{err:?}");
     for x in [60.0, 65.0, 70.0, 75.0, 80.0] {
@@ -1197,8 +1209,12 @@ fn rectangular_to_object_face_along_the_direction_and_offset() {
         assert!(hole_at(&s, x, 60.0), "hole at x = {x}");
     }
     // 10 mm short of it: 30 mm in two steps.
-    run(&mut s, "timeline.redefine", json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
-        "features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[115,135,5],"to_offset1":"-10 mm"}}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":3,"type1":"to_object","to1":[115,135,5],"to_offset1":"-10 mm"}}),
+    );
     for x in [60.0, 75.0, 90.0] {
         assert!(hole_at(&s, x, 60.0), "hole at x = {x} with the offset");
     }
@@ -1246,8 +1262,11 @@ fn rectangular_to_a_later_construction_plane_is_refused() {
     run(&mut s, "solid.pattern.rectangular", json!({"features":["Hole"],"dir1":[1,0,0],"count1":2,"spacing1":20,"name":"Pattern"}));
     run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 100, "name": "Late"}));
     let err = s
-        .execute("timeline.redefine", &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
-            "features":["Hole"],"dir1":[1,0,0],"count1":2,"to1":{"plane":"Late"}}}))
+        .execute(
+            "timeline.redefine",
+            &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+            "features":["Hole"],"dir1":[1,0,0],"count1":2,"to1":{"plane":"Late"}}}),
+        )
         .unwrap_err()
         .to_string();
     assert!(err.contains("must come earlier in the timeline"), "{err}");

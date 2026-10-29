@@ -6500,7 +6500,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                             set_object_input(&mut d.inputs, &mut d.active, object, true);
                             // A reference reopens as what was picked (the sketch point, the plane…).
                             let point = solidcraft_engine::doc::apply_point(&frame, to.0);
-                            let sel = reference.as_ref().and_then(|g| extent_ref_sel(s, g));
+                            let sel = reference.as_deref().and_then(|g| extent_ref_sel(s, g));
                             if let Some(input) = d.inputs.iter_mut().find(|i| i.label == object) {
                                 input.items = vec![sel.or_else(|| shown_face_sel(s, point)).unwrap_or(Sel::Vertex { body: String::new(), point })];
                             }
