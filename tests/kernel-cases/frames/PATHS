@@ -1,9 +1,6 @@
 # Source files whose change must rerun the frames area (frame members, inserted profiles).
-apps/solidcraft-cli/src/kernel_cases.rs
 crates/doc/src/eval_frame.rs
 crates/doc/src/frame.rs
 crates/engine/src/cmd/frame.rs
 crates/engine/src/cmd/sketch.rs
-crates/kernel/src/**
-crates/smlib/**
 tests/kernel-cases/frames/**

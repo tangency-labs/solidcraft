@@ -1,7 +1,6 @@
 # Source files whose change must rerun the construction area: one git pathspec glob a line.
 # The construct.* commands (the plane at an angle and offset plane live in features.rs).
 crates/engine/src/cmd/construct.rs
-crates/engine/src/cmd/features.rs
 # How a construction reference resolves, and the planes the document resolves.
 crates/doc/src/construct.rs
 crates/doc/src/document.rs

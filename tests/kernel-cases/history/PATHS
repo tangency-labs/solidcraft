@@ -11,7 +11,5 @@ crates/doc/src/config_rules.rs
 crates/doc/src/params.rs
 crates/doc/src/expr.rs
 # Rebuilding the timeline, and the results it keeps between rebuilds.
-crates/doc/src/eval.rs
-crates/doc/src/model_cache.rs
 # The cases themselves.
 tests/kernel-cases/history/**
