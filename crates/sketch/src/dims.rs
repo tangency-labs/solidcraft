@@ -28,8 +28,8 @@ pub enum DimFrame {
     ArcLength { center: Vec2, radius: f64, start: f64, sweep: f64 },
     /// An ellipse's minor half-axis: `len` from `center` along the unit `dir` or against it,
     /// drawn as a linear dimension to the minor axis end on the text's side, as the distance
-    /// to that end is when the ellipse has its axes. The text is stored as for the linear
-    /// frame along `dir`.
+    /// to that end is when the ellipse has its axes. The text is stored from `center`, as a
+    /// radius's is, so a radius placed before it was drawn this way keeps its text.
     HalfAxis { center: Vec2, dir: Vec2, len: f64 },
 }
 
@@ -129,12 +129,11 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             };
             DimFrame::Linear { p0, p1, dir: u }
         }
-        Radius { c, .. } if matches!(sk.curves.get(c)?.kind, CurveKind::Ellipse { .. }) => {
-            let CurveKind::Ellipse { c: centre, m, r } = sk.curves.get(c)?.kind else { return None };
-            let center = sk.point(centre)?;
-            DimFrame::HalfAxis { center, dir: unit(sk.point(m)? - center, Vec2::X).perp(), len: r }
-        }
         Radius { c, .. } | Diameter { c, .. } => {
+            if let (Radius { .. }, CurveKind::Ellipse { c: centre, m, r }) = (k, &sk.curves.get(c)?.kind) {
+                let center = sk.point(*centre)?;
+                return Some(DimFrame::HalfAxis { center, dir: unit(sk.point(*m)? - center, Vec2::X).perp(), len: *r });
+            }
             let (radius, arc) = match sk.curves.get(c)?.kind {
                 CurveKind::Ellipse { r, .. } => (r, None),
                 CurveKind::Arc { .. } => match sk.segs(c).first()? {
@@ -181,20 +180,16 @@ pub fn encode_text(f: &DimFrame, at: Vec2) -> Vec2 {
         }
         DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } => at - center,
         DimFrame::Angular { vertex, .. } => at - vertex,
-        DimFrame::HalfAxis { center, dir, len } => encode_text(&DimFrame::Linear { p0: center, p1: center + dir * len, dir }, at),
+        DimFrame::HalfAxis { center, .. } => at - center,
     }
 }
 
 /// The linear frame a [`DimFrame::HalfAxis`] is drawn as for the stored text `t`: to the end
 /// on the text's side, with `t` re-expressed for that frame.
 fn half_axis_side(center: Vec2, dir: Vec2, len: f64, t: Vec2) -> (DimFrame, Vec2) {
-    let along = DimFrame::Linear { p0: center, p1: center + dir * len, dir };
-    let at = center + dir * (len * 0.5 + t.x) + dir.perp() * t.y;
-    if (at - center).dot(dir) >= 0.0 {
-        return (along, t);
-    }
-    let against = DimFrame::Linear { p0: center, p1: center - dir * len, dir: -dir };
-    (against, encode_text(&against, at))
+    let dir = if t.dot(dir) < 0.0 { -dir } else { dir };
+    let linear = DimFrame::Linear { p0: center, p1: center + dir * len, dir };
+    (linear, encode_text(&linear, center + t))
 }
 
 /// Per point: the centre of the connected geometry it belongs to (points joined by curves),
@@ -235,7 +230,9 @@ pub fn default_text(f: &DimFrame, away: Vec2, px: f64) -> Option<Vec2> {
 /// frame-relative, as in [`encode_text`].
 pub fn default_text_offset(f: &DimFrame, px: f64) -> Vec2 {
     match *f {
-        DimFrame::Linear { .. } | DimFrame::HalfAxis { .. } => Vec2::new(0.0, 22.0 * px),
+        DimFrame::Linear { .. } => Vec2::new(0.0, 22.0 * px),
+        // Where a linear dimension to the minor axis end puts it.
+        DimFrame::HalfAxis { dir, len, .. } => dir * (len * 0.5) + dir.perp() * (22.0 * px),
         DimFrame::Radial { radius, .. } => Vec2::new(1.0, 1.0) * ((radius + 18.0 * px) * std::f64::consts::FRAC_1_SQRT_2),
         DimFrame::Angular { d0, sweep, .. } => Vec2::from_angle(d0.angle() + sweep * 0.5) * (48.0 * px),
         DimFrame::ArcLength { radius, start, sweep, .. } => Vec2::from_angle(start + sweep * 0.5) * (radius + 20.0 * px),
@@ -504,6 +501,12 @@ mod tests {
         let f =
             dim_frame(&sk, &ConstraintKind::Radius { c: e, value: 8.0 }).unwrap_or(DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::ZERO, dir: Vec2::X });
         assert!(matches!(f, DimFrame::HalfAxis { .. }), "{f:?}");
+        // Its text is stored from the centre, as it was while it was drawn as a radius, so a
+        // design saved then keeps the text where it was placed.
+        let at = Vec2::new(3.0, 17.0);
+        let radial = DimFrame::Radial { center: Vec2::ZERO, radius: 8.0, diameter: false, arc: None };
+        assert!(close(encode_text(&f, at), encode_text(&radial, at)));
+        assert!(close(dim_layout(&f, Some(encode_text(&radial, at)), 0.1, Vec2::ZERO).text, at));
         let minor = Vec2::new(-1.0, 1.0) * (8.0 * std::f64::consts::FRAC_1_SQRT_2);
         for end in [minor, minor * -1.0] {
             let to_end = DimFrame::Linear { p0: Vec2::ZERO, p1: end, dir: end * (1.0 / 8.0) };

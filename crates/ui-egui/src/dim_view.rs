@@ -831,7 +831,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             let row = (f64::from(size.y) + 2.0) * px;
             let base = text.unwrap_or_else(|| default_text_offset(&frame, px));
             text = Some(match frame {
-                DimFrame::Linear { .. } | DimFrame::HalfAxis { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
+                DimFrame::Linear { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
                 _ => base + base.normalized().unwrap_or(Vec2::X) * row,
             });
             lay = dim_layout_reaching(&frame, text, px, half, reach);
@@ -1437,6 +1437,32 @@ mod tests {
         }
         h.step(&json!({"key":"Escape"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
+        cancel();
+    }
+
+    /// With the minor axis line deleted, D past the major end gives the minor half-axis, and
+    /// the view paints it as a length, without R.
+    #[test]
+    fn an_ellipse_s_minor_half_axis_without_its_axis_is_painted_without_r() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let r = h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8})).unwrap();
+        let minor = r["created"]["curves"][2].as_str().unwrap().to_string();
+        h.app.run("sketch.delete", json!({"entities":[minor]})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":["e1"],"text_at":[30,3]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.frames(4);
+        let mut texts = Vec::new();
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let Shape::Text(t) = shape {
+                    texts.push(t.galley.text().to_string());
+                }
+            });
+        }
+        assert!(texts.iter().any(|t| t == "8.00 mm"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t.starts_with("R8")), "{texts:?}");
         cancel();
     }
 
