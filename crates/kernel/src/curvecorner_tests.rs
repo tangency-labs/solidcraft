@@ -251,18 +251,25 @@ fn the_arc_rounded_after_the_back_edge_matches_both_together() {
     one_then_the_other(BACK, arc_top());
 }
 
-/// The edge at `first` rounded (2), then the one at `then` as a fillet of its own, against both
-/// rounded together; each with its tangent chain, as the Fillet feature rounds by default (tangent
-/// propagation).
+/// The edge at `first` rounded (2), then the one at `then` as a fillet of its own, each with its
+/// tangent chain as the Fillet feature rounds by default (tangent propagation), against the same
+/// edges of the part rounded together: the picks' chains, and every edge of the part that the
+/// second round's chain carried on into across the first round (the left front upright, after
+/// the front edge's round: the left top edge runs on round that round's end arc and down the
+/// upright, a sphere octant at the corner where the three rounds meet).
 fn one_then_the_other(first: Vec3, then: Vec3) {
     let body = arc_part();
     let chained = |b: &Body, pts: &[Vec3]| crate::tangent_chain(b, pts).unwrap();
-    let step = crate::fillet(&body, &chained(&body, &[first]), 2.0).unwrap();
-    let after = crate::fillet(&step, &chained(&step, &[then]), 2.0).unwrap();
+    let step = crate::fillet(&body, &chained(&body, &[first]), 2.0).unwrap_or_else(|e| panic!("{first:?}: {e}"));
+    let second = chained(&step, &[then]);
+    let after = crate::fillet(&step, &second, 2.0).unwrap_or_else(|e| panic!("{first:?} then {then:?}: {e}"));
     let v = volume(&after);
-    let together = volume(&crate::fillet(&body, &chained(&body, &[first, then]), 2.0).unwrap());
+    // The part's own edges among the second chain's (points on an edge of the part).
+    let mut picks = vec![first, then];
+    picks.extend(second.iter().skip(1).filter(|p| crate::tangent_chain(&body, &[**p]).is_ok()));
+    let together = volume(&crate::fillet(&body, &chained(&body, &picks), 2.0).unwrap());
     // Within the display meshes' accuracy (two different B-reps, meshed apart).
-    assert!((v - together).abs() < 5e-3, "{first:?} then {then:?}: {v} vs together {together}");
+    assert!((v - together).abs() < 5e-3, "{first:?} then {then:?}: {v} vs together {together} ({picks:?})");
 }
 
 /// Edges rounded together come out the same in any order: a round made first doesn't carry the
