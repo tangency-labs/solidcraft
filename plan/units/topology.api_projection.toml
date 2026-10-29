@@ -1,0 +1,12 @@
+id = "topology.api_projection"
+upstream = ["source/SM_API/src/SmApiBrep.cpp", "source/SM_API/src/SmApiCurves.cpp", "source/SMLib/src/SmCrvOnSurf.cpp"]
+rust_module = "topology::api_projection"
+depends_on = ["topology.api_files", "blend.hcr", "topology.brep_p1", "intersect.surface_drop_lib_p1", "surface.surface_p11", "nurbs.b_spline_curve_p1"]
+soft_depends_on = []
+est_lines = 330
+layer = 59
+tests = ["tests/SM_API_test/src/TestSmBrep.cpp:TestSmProjectBrepOntoPlane", "tests/SM_API_test/src/TestSmBrep.cpp:TestSmCreateSilhouetteCurves", "tests/SM_API_test/src/TestSmBrep.cpp:TestSmProjectCurve", "tests/SM_API_test/src/TestSmCurves.cpp:TestSmProjectCurveToSurface", "tests/SM_API_test/src/TestSmCurves.cpp:TestSmLiftUVCurve"]
+status = "green"
+claimed_by = ""
+claimed_at = "2026-10-29"
+notes = "NOT IN callgraph/units.json: SmApiProjectBrepOntoPlane (SmApiBrep.cpp:775), SmApiCreateSilhouetteCurves (SmApiBrep.cpp:985), SmApiProjectCurve(SmBrep*, ..) (SmApiBrep.cpp:1070) and SmApiProjectCurve(const SmBSplineCurve*, const SmSurface*, ..) (SmApiCurves.cpp:1108) (SM_API gap table S3), with the unowned SmCurve::CreatePlaneProjection dispatch and SmCrvOnSurf::CreatePlaneProjection kept beside them (private in topology::api_projection). Rust: topology::api_projection::{project_brep_onto_plane, create_silhouette_curves, project_curve_onto_brep, project_curve_onto_surface}; the output slots are topology::api_files::add_curve_output_slots (SmApiAddCurveOutputSlots), compared here through its two callers. Difftest topology.api_projection: 32 fixture cases (SM_API_test TestSmProjectBrepOntoPlane, TestSmCreateSilhouetteCurves, TestSmProjectCurve, TestSmProjectCurveToSurface, TestSmLiftUVCurve: null and zero-length inputs, non-unit normals, appends to arrays holding entries, a projection missing the body) plus generated cases. Status set when the difftest gate has run."
