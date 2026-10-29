@@ -428,3 +428,7 @@ mesh_convert
     Tolerance = mesh_convert.tolerance (Length)
   expressions: mesh_convert.tolerance
 mesh_import
+repair
+  inputs:
+    Gap = repair.gap (Length)
+  expressions: repair.gap
