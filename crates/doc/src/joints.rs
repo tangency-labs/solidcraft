@@ -1910,7 +1910,7 @@ impl Document {
 pub mod cam;
 
 #[path = "joints_edge.rs"]
-mod edge;
+pub(crate) mod edge;
 pub use edge::edge_snap;
 
 #[path = "joints_reach.rs"]

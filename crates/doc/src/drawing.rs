@@ -20,6 +20,7 @@
 //!   (first or third angle) every projected view follows.
 //! - **Dimensions** on its views, each measuring named corners or edges of the view's model
 //!   ([`dimension`]).
+//! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
 //!
 //! The rules, which every later kind of record (views, annotations, tables) keeps too:
 //! - Every object has an id of [`crate::ids`]: random, so objects added side by side never take
@@ -35,8 +36,8 @@
 //! - A later change to the record is one file in `src/drawing/format/pending/` (its README).
 //!
 //! [`Drawing::from_json`] reads a drawing in this order: at most [`MAX_DRAWING_BYTES`] of text,
-//! the family's format check, every number in range, the upgrade, the typed record with its views
-//! and dimensions by id, then [`Drawing::validate`]; [`Drawing::from_value`] the same from the
+//! the family's format check, every number in range, the upgrade, the typed record with its views,
+//! dimensions and balloons by id, then [`Drawing::validate`]; [`Drawing::from_value`] the same from the
 //! format check on.
 
 use std::collections::BTreeSet;
@@ -52,9 +53,11 @@ use crate::format::DRAWING;
 use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 
+pub mod balloon;
 pub mod dimension;
 pub mod view;
 
+use balloon::Balloon;
 use dimension::Dimension;
 use view::View;
 
@@ -112,6 +115,9 @@ pub struct Drawing {
     /// By id ([`Drawing::add_dimensions`]), each behind its own `Arc`, as the views are.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dimensions: Vec<Arc<Dimension>>,
+    /// By id ([`Drawing::add_balloons`]), as the dimensions are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub balloons: Vec<Arc<Balloon>>,
 }
 
 /// A design the drawing draws: the design the drawing is in. Views and sheets name it by its id,
@@ -193,12 +199,14 @@ pub struct OnSheet {
     pub views: Vec<u64>,
     /// The dimensions in its views.
     pub dimensions: Vec<u64>,
+    /// The balloons in its views.
+    pub balloons: Vec<u64>,
 }
 
 impl OnSheet {
     /// Nothing is on the sheet.
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty() && self.dimensions.is_empty()
+        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty()
     }
 }
 
@@ -236,6 +244,7 @@ impl Drawing {
             sheets: vec![Arc::new(first)],
             views: Vec::new(),
             dimensions: Vec::new(),
+            balloons: Vec::new(),
         };
         drawing.validate()?;
         Ok(drawing)
@@ -258,9 +267,10 @@ impl Drawing {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied.as_deref())?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
-        let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
+        let (views, dimensions, balloons) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions), std::mem::take(&mut d.balloons));
         d.add_views(views);
         d.add_dimensions(dimensions);
+        d.add_balloons(balloons);
         d.validate().map_err(damaged)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
     }
@@ -294,13 +304,14 @@ impl Drawing {
         }
     }
 
-    /// What is on sheet `id`: its views and the dimensions in them. Each later kind of record on a
+    /// What is on sheet `id`: its views and the dimensions and balloons in them. Each later kind of record on a
     /// sheet adds its own here, and goes with the sheet ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
         let views: Vec<u64> = self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect();
         // The views are listed by id, so the sheet's are too.
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
-        OnSheet { views, dimensions }
+        let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
+        OnSheet { views, dimensions, balloons }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -311,6 +322,7 @@ impl Drawing {
         self.sheets.retain(|s| s.id != id);
         self.views.retain(|v| v.sheet != id);
         self.dimensions.retain(|d| on.dimensions.binary_search(&d.id).is_err());
+        self.balloons.retain(|b| on.balloons.binary_search(&b.id).is_err());
         on
     }
 
@@ -322,6 +334,7 @@ impl Drawing {
             .chain(self.sheets.iter().map(|s| s.id))
             .chain(self.views.iter().map(|v| v.id))
             .chain(self.dimensions.iter().map(|d| d.id))
+            .chain(self.balloons.iter().map(|b| b.id))
     }
 
     /// The record's rules (the module's notes): what reading a drawing checks, and what every edit
@@ -347,7 +360,8 @@ impl Drawing {
             self.check_sheet(sheet).map_err(|e| DocError::Invalid(format!("sheet {}: {e}", ids::encode(sheet.id))))?;
         }
         self.check_views()?;
-        self.check_dimensions()
+        self.check_dimensions()?;
+        self.check_balloons()
     }
 
     /// A sheet's own rules, and that the source it documents is one of the drawing's.

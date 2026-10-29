@@ -59,7 +59,7 @@ fn face_of(b: &ModelBody, i: usize, name: Option<&str>, pick: Vec3) -> Result<(u
 }
 
 /// Edge `i`'s middle (along its polyline) and the direction it runs there.
-fn middle(e: &[Vec3]) -> Option<(Vec3, Vec3)> {
+pub(crate) fn middle(e: &[Vec3]) -> Option<(Vec3, Vec3)> {
     let total: f64 = e.windows(2).map(|w| w[0].dist(w[1])).sum();
     let mut acc = 0.0;
     for w in e.windows(2) {

@@ -6,6 +6,7 @@ use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_render::VisualStyle;
 
 use crate::drawing_view::{TangentEdges, ViewDirection, ViewOverrides};
+use balloon::Balloon;
 use dimension::{DimensionKind, ModelEdge, ModelPoint, TextPlace};
 use view::{ViewKind, ViewPlace};
 
@@ -25,7 +26,7 @@ fn own_border() -> DrawingBorderProfile {
 /// lines too, and the right view's top view placed apart; on the second, an iso view at 1:1,
 /// tangent edges shown, with a 5 mm reference margin. On the front view, a dimension of each kind:
 /// between two corners, a placed copy's edge length along a direction, and an angle with its text
-/// given.
+/// given; and a balloon on the placed copy's top edge.
 fn plate() -> Drawing {
     let mut id_source = IdSource::seeded(SEED);
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
@@ -80,6 +81,8 @@ fn plate() -> Drawing {
         let id = d.allocate_id(&mut id_source).unwrap();
         d.add_dimensions([Arc::new(Dimension { id, view: front, kind, offset_mm: -10.0, text, decimals: 1, override_text })]);
     }
+    let id = d.allocate_id(&mut id_source).unwrap();
+    d.add_balloons([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0] })]);
     d.validate().unwrap();
     d
 }
@@ -446,19 +449,19 @@ fn a_sheet_goes_with_everything_on_it() {
     let d = plate();
     let (assembly, bolt) = (d.sheets[0].id, d.sheets[1].id);
     let on = d.on_sheet(assembly);
-    assert_eq!((on.views.len(), on.dimensions.len()), (3, 3), "{on:?}");
+    assert_eq!((on.views.len(), on.dimensions.len(), on.balloons.len()), (3, 3, 1), "{on:?}");
     assert_eq!(on.dimensions, d.dimensions.iter().map(|x| x.id).collect::<Vec<_>>());
     let bolt_on = d.on_sheet(bolt);
-    assert_eq!((bolt_on.views.len(), bolt_on.dimensions.len()), (1, 0), "{bolt_on:?}");
+    assert_eq!((bolt_on.views.len(), bolt_on.dimensions.len(), bolt_on.balloons.len()), (1, 0, 0), "{bolt_on:?}");
     assert!(d.on_sheet(d.id).is_empty() && !on.is_empty(), "not a sheet: nothing on it");
     let mut without = d.clone();
     assert_eq!(without.remove_sheet(bolt), bolt_on);
     without.validate().unwrap();
-    assert_eq!((without.sheets.len(), without.views.len(), without.dimensions.len()), (1, 3, 3));
+    assert_eq!((without.sheets.len(), without.views.len(), without.dimensions.len(), without.balloons.len()), (1, 3, 3, 1));
     let mut without = d.clone();
     assert_eq!(without.remove_sheet(assembly), on);
     without.validate().unwrap();
-    assert_eq!((without.sheets.len(), without.views.len(), without.dimensions.len()), (1, 1, 0));
+    assert_eq!((without.sheets.len(), without.views.len(), without.dimensions.len(), without.balloons.len()), (1, 1, 0, 0));
     // The top view, placed apart, moved to the bolt's sheet: its parent is on the assembly's.
     let mut moved = d.clone();
     let top = moved.views.iter().position(|v| v.sheet == assembly && matches!((v.kind, v.place), (ViewKind::Projected { .. }, ViewPlace::At(_))));

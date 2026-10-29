@@ -214,8 +214,8 @@ impl Drawing {
     }
 }
 
-/// An edge reference's rules.
-fn check_edge(edge: &ModelEdge) -> Result<()> {
+/// An edge reference's rules (a balloon's edge keeps them too).
+pub(super) fn check_edge(edge: &ModelEdge) -> Result<()> {
     check_body(&edge.body, edge.origin_feature, &edge.path)?;
     check_reference_name(&edge.name)
 }
@@ -274,7 +274,7 @@ pub struct Resolved {
     pub points: Vec<Vec3>,
 }
 
-/// Where a dimension stands with the model.
+/// Where a dimension, or a balloon's edge, stands with the model.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Status {
     /// Measured.
@@ -363,7 +363,7 @@ impl Document {
             Units::Fixed { unit } => unit.as_str(),
             Units::FollowModel => self.units.as_str(),
         };
-        let mut lookup = Lookup { doc: self, model, state: model.state(), named: BTreeMap::new() };
+        let mut lookup = Lookup::new(self, model);
         wanted
             .iter()
             .map(|id| {
@@ -376,7 +376,8 @@ impl Document {
 }
 
 /// One call's lookups: the model's bodies, and the edge names of each body named, worked out once.
-struct Lookup<'a> {
+/// Balloons find their edges through it too ([`super::balloon`]).
+pub(super) struct Lookup<'a> {
     doc: &'a Document,
     model: &'a Model,
     state: Arc<ModelState>,
@@ -394,15 +395,19 @@ struct Found {
 /// The edges a name finds on a body: their indices and polylines in the design's frame, whether
 /// they are the one edge it names, whether exact history found it, and the body's index and the
 /// frame it is placed in.
-struct Edges {
-    pieces: Vec<(usize, Vec<Vec3>)>,
-    whole: bool,
-    exact: bool,
+pub(super) struct Edges {
+    pub(super) pieces: Vec<(usize, Vec<Vec3>)>,
+    pub(super) whole: bool,
+    pub(super) exact: bool,
     body: usize,
     frame: Mat,
 }
 
-impl Lookup<'_> {
+impl<'a> Lookup<'a> {
+    pub(super) fn new(doc: &'a Document, model: &'a Model) -> Lookup<'a> {
+        Lookup { doc, model, state: model.state(), named: BTreeMap::new() }
+    }
+
     fn resolve(&mut self, d: &Dimension, basis: &Plane, units: &str) -> Resolved {
         let (status, found) = match self.measure(d, basis) {
             Ok(found) => (if d.override_text.is_some() { Status::Overridden } else { Status::Ok }, Some(found)),
@@ -493,7 +498,7 @@ impl Lookup<'_> {
     }
 
     /// The edges `edge` names: the one edge, or the pieces of it.
-    fn edges(&mut self, edge: &ModelEdge) -> std::result::Result<Edges, Status> {
+    pub(super) fn edges(&mut self, edge: &ModelEdge) -> std::result::Result<Edges, Status> {
         let (i, frame) = self.body(&edge.body, edge.origin_feature, &edge.path)?;
         let names = self.names(i)?;
         let (indices, whole) = match names.matching(&edge.name) {
@@ -676,7 +681,7 @@ fn at(pick: &EdgePick) -> String {
 }
 
 /// The pieces a name found, as candidates.
-fn edge_candidates(body: &str, found: &Edges) -> Vec<Candidate> {
+pub(super) fn edge_candidates(body: &str, found: &Edges) -> Vec<Candidate> {
     found.pieces.iter().take(MAX_CANDIDATES).map(|(index, _)| Candidate::Edge { body: body.to_string(), index: *index }).collect()
 }
 
