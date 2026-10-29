@@ -87,11 +87,12 @@ pub fn edge_circle(b: &Body, edge: usize) -> Option<EdgeCircle> {
     let [t0, t1] = e.interval;
     let (start, end) = (c.point(t0)?, c.point(t1)?);
     if let Curve::Circle { frame, radius } = &e.curve {
-        // The record's parameter is the angle about the frame's z: the edge runs counter-clockwise
-        // about it from its start to its end.
+        // The edge runs counter-clockwise about the frame's z from its start to its end, over the
+        // angles of its interval on the circle itself (a NURBS form is parameterised otherwise).
         let axis = Vec3::from(frame.x_axis).cross(Vec3::from(frame.y_axis)).unit()?;
         let closed = e.vertices[0] == e.vertices[1];
-        let angle = if closed { std::f64::consts::TAU } else { (t1 - t0).min(std::f64::consts::TAU) };
+        let [a0, a1] = e.curve_interval()?;
+        let angle = if closed { std::f64::consts::TAU } else { (a1 - a0).min(std::f64::consts::TAU) };
         return Some(EdgeCircle { center: Vec3::from(frame.origin), axis, radius: *radius, start, end, angle });
     }
     let tol = (b.size() * 1e-7).max(1e-9) * 100.0;

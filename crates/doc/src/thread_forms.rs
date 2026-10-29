@@ -400,7 +400,7 @@ impl ThreadForm {
                     }
                     None => {
                         let d = num(body).ok_or_else(bad)?;
-                        let p = self.coarse(d).ok_or_else(|| format!("no coarse pitch for M{} (give it: M{}x1)", show(d), show(d)))?;
+                        let p = self.coarse(d).ok_or_else(|| no_coarse_pitch(d).unwrap_or_else(bad))?;
                         (d, p, p * n)
                     }
                 }
@@ -661,6 +661,18 @@ fn inches(s: &str) -> Option<f64> {
         return Some(*d);
     }
     num(s)
+}
+
+/// The refusal for a plain `M<d>` with no ISO coarse pitch: the two coarsest fine pitches to
+/// give that suit the diameter. `None` for a diameter no metric thread has.
+pub fn no_coarse_pitch(d: f64) -> Option<String> {
+    const PITCHES: [f64; 9] = [2.0, 1.5, 1.25, 1.0, 0.75, 0.5, 0.35, 0.25, 0.2];
+    if !(d.is_finite() && d > 0.2 && d <= 1e4) {
+        return None;
+    }
+    let first = PITCHES.iter().position(|p| *p <= 0.12 * d).unwrap_or(PITCHES.len() - 1);
+    let pitches: Vec<String> = PITCHES.iter().skip(first).take(2).filter(|p| **p < d).map(|p| format!("M{}x{}", show(d), show(*p))).collect();
+    (!pitches.is_empty()).then(|| format!("M{} has no coarse ISO pitch: give one, e.g. {}", show(d), pitches.join(" or ")))
 }
 
 fn show(v: f64) -> String {

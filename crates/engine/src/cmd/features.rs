@@ -2343,16 +2343,8 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
 
 /// The pitches to try for a plain `M<d>` that has no ISO coarse pitch, `None` for anything else.
 fn fine_only_hint(t: &str) -> Option<String> {
-    const PITCHES: [f64; 9] = [2.0, 1.5, 1.25, 1.0, 0.75, 0.5, 0.35, 0.25, 0.2];
     let diameter = t.trim().strip_prefix(['M', 'm']).and_then(|d| d.trim().parse::<f64>().ok());
-    if let Some(d) = diameter.filter(|d| d.is_finite() && *d > 0.2 && *d <= 1e4) {
-        let first = PITCHES.iter().position(|p| *p <= 0.12 * d).unwrap_or(PITCHES.len() - 1);
-        let pitches: Vec<String> = PITCHES.iter().skip(first).take(2).filter(|p| **p < d).map(|p| format!("M{d}x{p}")).collect();
-        if !pitches.is_empty() {
-            return Some(format!("M{d} has no coarse ISO pitch: give one, e.g. {}", pitches.join(" or ")));
-        }
-    }
-    None
+    diameter.and_then(solidcraft_doc::thread_forms::no_coarse_pitch)
 }
 
 /// Largest nominal diameter automatic thread sizing knows (the last ISO coarse size).

@@ -122,6 +122,10 @@ pub struct Exchange {
     pub schemas: Vec<String>,
     /// FILE_NAME originating system.
     pub originating_system: String,
+    /// FILE_NAME preprocessor version.
+    pub preprocessor: String,
+    /// FILE_DESCRIPTION text, its lines joined by a space.
+    pub description: String,
     pub entities: HashMap<u64, Entity>,
     /// Ids defined more than once (the first definition is kept).
     pub duplicates: Vec<u64>,
@@ -441,7 +445,13 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
                                 ex.schemas = v.iter().filter_map(|p| p.as_str().map(str::to_string)).collect();
                             }
                         }
+                        "FILE_DESCRIPTION" => {
+                            if let Some(Param::List(v)) = params.first() {
+                                ex.description = v.iter().filter_map(|p| p.as_str()).collect::<Vec<_>>().join(" ");
+                            }
+                        }
                         "FILE_NAME" => {
+                            ex.preprocessor = params.get(4).and_then(Param::as_str).unwrap_or("").to_string();
                             ex.originating_system = params.get(5).and_then(Param::as_str).unwrap_or("").to_string();
                         }
                         _ => {}

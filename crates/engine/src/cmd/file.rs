@@ -130,7 +130,7 @@ fn exporter_up(import: &solidcraft_kernel::StepImport) -> Option<(&'static str, 
     if import.system.trim().starts_with("SolidCraft") {
         return Some(("z", "SolidCraft"));
     }
-    let named = import.system.to_ascii_lowercase().contains("solidworks");
+    let named = [&import.system, &import.preprocessor, &import.description].iter().any(|h| h.to_ascii_lowercase().contains("solidworks"));
     named.then_some(("y", "SolidWorks"))
 }
 

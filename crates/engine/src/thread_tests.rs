@@ -270,7 +270,8 @@ fn a_thread_without_a_coarse_pitch_suggests_explicit_pitches() {
     }
     for designation in ["MNaN", "Minf", "M-28", "M0", "M1e9", "M1e999", "M28x", "M28xNaN"] {
         let e = s.execute("solid.thread", &json!({"face": [14, 0, 5], "designation": designation})).unwrap_err().to_string();
-        assert!(e.contains("unknown thread"), "{designation}: {e}");
+        // Each thread form names itself in its refusal: `unknown metric thread`.
+        assert!(e.contains("unknown metric thread"), "{designation}: {e}");
         assert_eq!(s.doc.to_json(), saved);
     }
     run(&mut s, "solid.thread", json!({"face": [14, 0, 5], "designation": "M28x2"}));
