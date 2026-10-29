@@ -6177,7 +6177,9 @@ fn mirror_matrix(pl: &Plane) -> Mat {
     ]
 }
 
-const MAX_INSTANCES: usize = 1000;
+/// The most copies one pattern makes (the original included), and so one mirror or pattern step
+/// of nested ones; perforated plates and perfboard grids need a few thousand.
+const MAX_INSTANCES: usize = 10_000;
 
 /// Where a mirrored body was picked and where its copy goes: the component the copy joins and
 /// that component's world frame, and the frame the body's own geometry is in where it was picked
@@ -6402,6 +6404,11 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
         .filter(|b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
         .all(|b| {
             tools.iter().all(|t| {
+                // Plates and their cutters are mostly stacked prisms, decided in 2D at a small
+                // part of the intersection's cost; this runs for every copy of a pattern.
+                if let Some(shares) = kernel::prisms_share_material(&b.body, &t.body) {
+                    return !shares;
+                }
                 // A diagnostic must neither reject an otherwise valid cut nor add its own
                 // retries to the feature's report. An inconclusive probe is not a miss.
                 let (intersection, _) = kernel::capture_boolean_diagnostics(|| kernel::boolean(&b.body, &t.body, BoolOp::Intersect));

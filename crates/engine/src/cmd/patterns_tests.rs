@@ -970,3 +970,35 @@ fn pattern_of_features_picked_in_any_order_copies_them_in_timeline_order() {
         assert!(rel(volume(&mut s), expected) < 1e-9, "{picked:?}");
     }
 }
+
+#[test]
+fn a_perforated_plate_pattern_past_a_thousand_copies_cuts_every_hole_exactly() {
+    // A 40 x 30 grid on a 2.54 pitch: more copies than patterns used to allow, and a plate that
+    // grows well past the faces the exact stacked cut used to read.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":110,"width":85,"height":1.6,"corner":[0,0,0],"body_name":"Board"}));
+    run(&mut s, "solid.hole", json!({"position":[5,5,1.6],"diameter":1,"depth":1.6,"name":"Hole"}));
+    // Measured volumes facet round holes, so each copy should remove what the first one did.
+    let hole = 110.0 * 85.0 * 1.6 - volume(&mut s);
+    assert!(rel(hole, PI * 0.25 * 1.6) < 1e-2, "{hole}");
+    let reply = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features":["Hole"],"dir1":[1,0,0],"count1":40,"spacing1":2.54,
+            "dir2":[0,1,0],"count2":30,"spacing2":2.54,"name":"Grid"}),
+    );
+    let id = reply["feature"].as_u64().unwrap();
+    let result = s.model.result(id).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{result:?}");
+    let expected = 110.0 * 85.0 * 1.6 - 1200.0 * hole;
+    assert!(rel(volume(&mut s), expected) < 1e-6, "{} vs {expected}", volume(&mut s));
+    let st = s.world_state();
+    let board = &st.body("Board").unwrap().body;
+    assert!(!board.contains(solidcraft_geom::Vec3::new(5. + 39. * 2.54, 5. + 29. * 2.54, 0.8)));
+    assert!(board.contains(solidcraft_geom::Vec3::new(5. + 1.27, 5. + 1.27, 0.8)));
+    // The cap still holds.
+    let over = json!({"feature":"Grid","command":"solid.pattern.rectangular","params":{
+        "features":["Hole"],"dir1":[1,0,0],"count1":101,"spacing1":1,"dir2":[0,1,0],"count2":100,"spacing2":0.8}});
+    let refused = s.execute("timeline.redefine", &over).is_err() || s.model.result(id).is_some_and(|r| r.error.is_some());
+    assert!(refused, "10_100 copies must be refused");
+}

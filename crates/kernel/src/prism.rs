@@ -24,6 +24,9 @@ mod spline_tests;
 const MAX_PLANAR_SEGMENTS: usize = 8192;
 const MAX_PLANAR_EVENTS: usize = 131_072;
 const MAX_PLANAR_PAIRS: usize = 16_000_000;
+/// The most faces a cut's two operands may have between them to be cut slab by slab
+/// ([`stack_indexed`]); the face budget the planar source lineage allows a body.
+const MAX_STACK_CUT_FACES: usize = 16_384;
 
 /// Free-form boundary segments (conics, Béziers) take part in planar booleans as lines and
 /// arcs within this distance (mm); loops that come out whole get their exact segments back.
@@ -2376,7 +2379,7 @@ fn stack_tagged(b: &Body, d: Vec3, plane: &Plane, tol: f64, index: &LazyIndex) -
     if let Some(p) = prism_tagged(b, d, plane, tol, index) {
         return Some(vec![p]);
     }
-    if b.face_count() > 2048 {
+    if b.face_count() > MAX_STACK_CUT_FACES {
         return None;
     }
     let mut events = Vec::new();
@@ -2459,7 +2462,10 @@ fn stack_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2], comm
     if !matches!(op, BoolOp::Union | BoolOp::Cut) {
         return None;
     }
-    if op == BoolOp::Cut && a.face_count().saturating_add(b.face_count()) > 2048 {
+    // The slab sections bound the 2D work below; this only keeps reading huge bodies as
+    // prisms in check. A grooved or perforated plate cut one tool at a time (a pattern) grows
+    // by a few hundred faces a cut, and every cut after this many went to the mesh boolean.
+    if op == BoolOp::Cut && a.face_count().saturating_add(b.face_count()) > MAX_STACK_CUT_FACES {
         return None;
     }
     fn section(ps: &[Prism], lo: f64, hi: f64, tol: f64) -> Section {
@@ -2498,23 +2504,30 @@ fn stack_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2], comm
         let (lo, hi) = (*w.first()?, *w.get(1)?);
         let (x, y) = (section(&pa, lo, hi, tol), section(&pb, lo, hi, tol));
         let before = area(&x.regions);
-        if op == BoolOp::Cut {
-            let count = edges(&x.regions).saturating_add(edges(&y.regions));
-            work = work.saturating_add(count.saturating_mul(count));
-            if work > 32_000_000 {
-                return None;
-            }
-        }
         let s = match (x.regions.is_empty(), y.regions.is_empty(), op) {
             (true, _, BoolOp::Cut | BoolOp::Intersect) | (_, true, BoolOp::Intersect) => Section::default(),
             (true, _, BoolOp::Union) => y,
             (_, true, _) => x,
-            _ => boolean2d_tagged(&x, &y, op, tol)?,
+            _ => {
+                // Only slabs the tool reaches run a 2D boolean: a slab it misses keeps its
+                // section as it is and costs nothing, however detailed (a plate grooved on
+                // both faces, cut on one).
+                if op == BoolOp::Cut {
+                    let count = edges(&x.regions).saturating_add(edges(&y.regions));
+                    work = work.saturating_add(count.saturating_mul(count));
+                    if work > 32_000_000 {
+                        return None;
+                    }
+                }
+                boolean2d_tagged(&x, &y, op, tol)?
+            }
         };
         changed |= !same_area(area(&s.regions), before, tol);
         if op == BoolOp::Cut {
             output_edges = output_edges.saturating_add(edges(&s.regions));
-            if output_edges > 8192 {
+            // Each edge of a slab's section becomes a wall face of the result, so this keeps
+            // the result within the face budget its operands are held to.
+            if output_edges > MAX_STACK_CUT_FACES {
                 return None;
             }
         }
@@ -2579,6 +2592,54 @@ pub(crate) fn prism_union_between_caps(a: &Body, b: &Body, op: BoolOp) -> Option
     }
     let index = [&LazyIndex::new(a, 0), &LazyIndex::new(b, 1)];
     crate::guard("prism boolean", || Ok(stack_indexed(a, b, op, index, false))).ok().flatten()
+}
+
+/// Whether `a` and `b` share material (an intersection of some volume, not just a touch),
+/// decided in 2D slab by slab when both are stacked prisms along a common direction, as
+/// [`stack_indexed`] reads them: they share material where some slab's sections overlap over
+/// an area. No body is built, so it is far cheaper than the intersection itself: a pattern
+/// asks it for every copy (#3042). `None` when they are not such prisms or the 2D work is out
+/// of budget; the caller then asks the B-rep boolean.
+pub fn prisms_share_material(a: &Body, b: &Body) -> Option<bool> {
+    let index = [&LazyIndex::new(a, 0), &LazyIndex::new(b, 1)];
+    crate::guard("prism contact", || Ok(share_material_indexed(a, b, index))).ok().flatten()
+}
+
+fn share_material_indexed(a: &Body, b: &Body, [ia, ib]: [&LazyIndex; 2]) -> Option<bool> {
+    if a.face_count().saturating_add(b.face_count()) > MAX_STACK_CUT_FACES {
+        return None;
+    }
+    let tol = (a.size().max(b.size()) * 1e-7).max(1e-9) * 10.0;
+    let (pa, pb) = directions(a, b)?.into_iter().find_map(|d| {
+        let plane = Plane::from_normal(Vec3::ZERO, d)?;
+        Some((stack_tagged(a, d, &plane, tol, ia)?, stack_tagged(b, d, &plane, tol, ib)?))
+    })?;
+    let section = |ps: &[Prism], lo: f64, hi: f64| ps.iter().find(|p| p.lo <= lo + tol && p.hi >= hi - tol).map(|p| p.section.clone());
+    let mut levels: Vec<f64> = pa.iter().chain(&pb).flat_map(|p| [p.lo, p.hi]).collect();
+    levels.sort_by(f64::total_cmp);
+    levels.dedup_by(|x, y| (*x - *y).abs() < tol);
+    let edges = |s: &Section| s.regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.segs.len()).sum::<usize>();
+    let mut work = 0usize;
+    for w in levels.windows(2) {
+        let (lo, hi) = (*w.first()?, *w.get(1)?);
+        let (Some(x), Some(y)) = (section(&pa, lo, hi), section(&pb, lo, hi)) else { continue };
+        if x.regions.is_empty() || y.regions.is_empty() {
+            continue;
+        }
+        let count = edges(&x).saturating_add(edges(&y));
+        work = work.saturating_add(count.saturating_mul(count));
+        if work > 32_000_000 {
+            return None;
+        }
+        let common = boolean2d_tagged(&x, &y, BoolOp::Intersect, tol)?;
+        let area: f64 = common.regions.iter().map(|r| r.outer.signed_area().abs() - r.holes.iter().map(|h| h.signed_area().abs()).sum::<f64>()).sum();
+        // A touch along a wall leaves at most a sliver of rounding: more than a square ten
+        // tolerances wide is material.
+        if area > 100.0 * tol * tol {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 #[cfg(test)]
@@ -3484,6 +3545,31 @@ mod planar_tests {
         assert!(hits.iter().all(|(u, _)| (line.point_at(*u).x.abs() - half).abs() < 1e-12), "{hits:?}");
     }
 
+    #[test]
+    fn prisms_share_material_matches_the_intersection_and_declines_non_prisms() {
+        let plate = crate::box_solid(Vec3::ZERO, Vec3::new(40., 30., 10.)).unwrap();
+        let pin = |x: f64, y: f64, r: f64| crate::cylinder(Vec3::new(x, y, -5.), Vec3::Z, r, 20.).unwrap();
+        assert_eq!(prisms_share_material(&plate, &pin(10., 15., 2.)), Some(true));
+        assert_eq!(prisms_share_material(&plate, &pin(60., 15., 2.)), Some(false));
+        // Touching a wall or a cap is contact, not material.
+        let beside = crate::box_solid(Vec3::new(40., 0., 0.), Vec3::new(50., 30., 10.)).unwrap();
+        assert_eq!(prisms_share_material(&plate, &beside), Some(false));
+        let above = crate::box_solid(Vec3::new(0., 0., 10.), Vec3::new(40., 30., 20.)).unwrap();
+        assert_eq!(prisms_share_material(&plate, &above), Some(false));
+        // A copy landing in a hole already cut removes nothing; a wider one does.
+        let drilled = crate::boolean(&plate, &pin(10., 15., 2.5), BoolOp::Cut).unwrap().unwrap();
+        assert_eq!(prisms_share_material(&drilled, &pin(10., 15., 2.)), Some(false));
+        assert_eq!(prisms_share_material(&drilled, &pin(10., 15., 3.)), Some(true));
+        // Pins across the plate's edge and corner agree with the intersection itself.
+        for (x, y) in [(39., 15.), (41., 15.), (42.5, 15.), (40., 30.), (41.5, 31.5), (20., -1.), (20., -2.5)] {
+            let tool = pin(x, y, 2.);
+            let common = crate::boolean(&plate, &tool, BoolOp::Intersect).unwrap();
+            let shares = common.and_then(|c| c.volume_at(1e-6)).is_some_and(|v| v > 1e-6);
+            assert_eq!(prisms_share_material(&plate, &tool), Some(shares), "pin at ({x}, {y})");
+        }
+        // Not stacked prisms: the caller asks the B-rep boolean instead.
+        assert_eq!(prisms_share_material(&plate, &crate::sphere(Vec3::new(10., 15., 10.), 3.).unwrap()), None);
+    }
     #[test]
     fn planar_region_api_rejects_hostile_values_and_budgets() {
         let plate = rectangle(Vec2::ZERO, Vec2::new(10.0, 10.0));

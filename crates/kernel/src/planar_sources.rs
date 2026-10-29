@@ -18,16 +18,42 @@ pub(super) fn actual_plane(face: &mt::Face) -> Option<Plane> {
     Plane::new(from_p3(p.origin()), u, v)
 }
 
-/// How far apart the normals' x components of two planes `same_support` accepts can be, with
-/// room to spare: their unit normals are within about 1e-12 of each other.
-const NORMAL_WINDOW: f64 = 1e-9;
+/// A plane's signed distance from the world origin along its normal.
+fn offset(plane: &Plane) -> f64 {
+    plane.normal().dot(plane.origin)
+}
 
-/// The entries of `sorted` (ordered by their plane's normal x) whose normal x is within
-/// [`NORMAL_WINDOW`] of `nx`: the only ones `same_support` can accept for a plane with that normal.
-fn normal_window<T>(sorted: &[T], plane: impl Fn(&T) -> &Plane, nx: f64) -> &[T] {
-    let first = sorted.partition_point(|t| plane(t).normal().x < nx - NORMAL_WINDOW);
-    let last = sorted.partition_point(|t| plane(t).normal().x <= nx + NORMAL_WINDOW);
-    sorted.get(first..last.max(first)).unwrap_or_default()
+/// How far apart the [`offset`]s of two planes `same_support` accepts can be, in units of
+/// `EPSILON * (1 + |a.origin| + |b.origin|)`. Their origins' gap along `a`'s normal is within
+/// 4096 of those units, and their unit normals within about 4096 * EPSILON of each other, which
+/// moves the offset by at most that times `|b.origin|`; the rest is room for rounding.
+const OFFSET_SLACK: f64 = 16384.;
+
+/// Planes sorted by [`offset`], so a face looks only at the window that `same_support` can accept.
+/// Sorting by normal alone put every face of an axis-aligned part (all normals along X, Y or Z)
+/// into a few windows, so a cut with thousands of coplanar tool faces compared each result face
+/// with all of them.
+struct SupportIndex<T> {
+    sorted: Vec<T>,
+    /// The longest plane origin in `sorted`, for the window's width.
+    reach: f64,
+}
+
+impl<T> SupportIndex<T> {
+    fn new(mut items: Vec<T>, plane: impl Fn(&T) -> &Plane) -> Self {
+        items.sort_by(|a, b| offset(plane(a)).total_cmp(&offset(plane(b))));
+        let reach = items.iter().map(|t| plane(t).origin.len()).fold(0., f64::max);
+        SupportIndex { sorted: items, reach }
+    }
+
+    /// The entries whose plane `same_support` can accept for `actual` (and possibly a few more).
+    fn window(&self, plane: impl Fn(&T) -> &Plane, actual: &Plane) -> &[T] {
+        let d = offset(actual);
+        let tolerance = OFFSET_SLACK * f64::EPSILON * (1. + actual.origin.len() + self.reach);
+        let first = self.sorted.partition_point(|t| offset(plane(t)) < d - tolerance);
+        let last = self.sorted.partition_point(|t| offset(plane(t)) <= d + tolerance);
+        self.sorted.get(first..last.max(first)).unwrap_or_default()
+    }
 }
 
 pub(super) fn same_support(a: &Plane, b: &Plane) -> bool {
@@ -180,7 +206,6 @@ impl Body {
                 let opposing = Plane::new(plane.origin, plane.x, -plane.y).ok_or_else(|| KernelError::Invalid("invalid opposing plane".into()))?;
                 competing.extend([plane, opposing]);
             }
-            competing.sort_by(|a, b| a.normal().x.total_cmp(&b.normal().x));
             let mut candidates = Vec::new();
             let mut unknown_supports = Vec::new();
             let faces = inputs.iter().flat_map(|input| {
@@ -216,10 +241,11 @@ impl Body {
                     candidates.push((inner, source, true, cost));
                 }
             }
-            // Planes that match must have (nearly) the same unit normal (`same_support`), so the
-            // lists are sorted by the normal's x and each face looks only at its window of them.
-            unknown_supports.sort_by(|a, b| a.normal().x.total_cmp(&b.normal().x));
-            candidates.sort_by(|a, b| a.0.normal().x.total_cmp(&b.0.normal().x));
+            // Planes that match lie (nearly) on one support (`same_support`), so the lists are
+            // indexed by offset and each face looks only at its window of them.
+            let unknown_supports = SupportIndex::new(unknown_supports, |p| p);
+            let competing = SupportIndex::new(competing, |p| p);
+            let candidates = SupportIndex::new(candidates, |c| &c.0);
             let mut work = 2_000_000usize;
             let mut metadata = 2_000_000usize;
             let mut identity_bytes = 16_000_000usize;
@@ -228,15 +254,14 @@ impl Body {
                 let mut found = None;
                 if let Some(actual) = actual_plane(face) {
                     let mut blocked = false;
-                    let nx = actual.normal().x;
-                    for plane in normal_window(&unknown_supports, |p| p, nx) {
+                    for plane in unknown_supports.window(|p| p, &actual) {
                         work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("unknown planar source comparison budget exceeded".into()))?;
                         if same_support(plane, &actual) {
                             blocked = true;
                             break;
                         }
                     }
-                    for plane in normal_window(&competing, |p| p, nx) {
+                    for plane in competing.window(|p| p, &actual) {
                         work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("planar tool comparison budget exceeded".into()))?;
                         if same_support(plane, &actual) {
                             blocked = true;
@@ -261,7 +286,7 @@ impl Body {
                         continue;
                     }
                     let mut chosen: Option<(Plane, &FaceSource, bool, usize)> = None;
-                    for (plane, source, inner, cost) in normal_window(&candidates, |c| &c.0, nx) {
+                    for (plane, source, inner, cost) in candidates.window(|c| &c.0, &actual) {
                         work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("planar source comparison budget exceeded".into()))?;
                         if same_support(plane, &actual) {
                             if let Some((previous_plane, previous_source, previous_inner, _)) = chosen {
@@ -335,6 +360,44 @@ impl Body {
 mod tests {
     use super::*;
     use crate::{box_solid, fillet, shell, transform_matrix};
+
+    #[test]
+    fn support_index_window_holds_every_plane_same_support_accepts() {
+        // Axis-aligned planes on a 2.54 grid both ways, as a grooved and perforated plate has,
+        // some with origins far out in their plane, plus near copies that `same_support` still
+        // accepts: nudged along the normal, tilted by a few ulps, or both.
+        let axes = [(Vec3::X, Vec3::Y), (Vec3::Y, Vec3::Z), (Vec3::Z, Vec3::X)];
+        let mut planes = Vec::new();
+        for k in 0..120 {
+            let t = k as f64 * 2.54 - 150.;
+            for (x, y) in axes {
+                let n = x.cross(y);
+                let along = x * (if k % 3 == 0 { 1.0e3 } else { k as f64 });
+                let origin = n * t + along;
+                for (x, y) in [(x, y), (x, -y)] {
+                    planes.push(Plane::new(origin, x, y).unwrap());
+                    let nudge = n * (1024. * f64::EPSILON * (1. + origin.len()));
+                    planes.push(Plane::new(origin + nudge, x, y).unwrap());
+                    planes.push(Plane::new(origin - nudge, x + n * (1000. * f64::EPSILON), y).unwrap());
+                }
+            }
+        }
+        let index = SupportIndex::new(planes.clone(), |p| p);
+        let mut accepted = 0;
+        for actual in &planes {
+            let window = index.window(|p| p, actual);
+            for plane in &planes {
+                if same_support(plane, actual) {
+                    accepted += 1;
+                    assert!(window.contains(plane), "{plane:?} accepted for {actual:?} but outside its window");
+                }
+            }
+            // Only a plane's own near copies share its offset (plus the odd other axis's plane
+            // at the same offset), not the hundreds that share its normal.
+            assert!(window.len() <= 12, "window of {} for {actual:?}", window.len());
+        }
+        assert!(accepted > planes.len(), "the near copies should match each other");
+    }
 
     #[test]
     fn rounded_shell_planar_roles_are_exact_distinct_and_transformable() {
