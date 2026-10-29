@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.reorder of a cut to before its own sketch",
+ "source": "invariants",
+ "method": "the cut cannot find its sketch there: the move breaks a feature that worked and is refused",
+ "outcome": "refused",
+ "refusal": "moving Notch there breaks Notch"
+}

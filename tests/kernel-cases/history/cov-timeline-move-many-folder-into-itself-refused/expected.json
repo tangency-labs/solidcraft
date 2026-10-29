@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "timeline.move_many of a folder into itself",
+ "source": "invariants",
+ "method": "a folder cannot hold itself",
+ "outcome": "refused",
+ "refusal": "a folder cannot be moved into itself or one of its descendants"
+}

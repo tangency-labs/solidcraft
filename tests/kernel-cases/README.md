@@ -43,6 +43,7 @@ One directory per area, one per case: `tests/kernel-cases/<area>/<id>/`.
 | `surfaces` (every `surface.*` tool: offset, ruled, untrim, unstitch, reverse normal, boundary, blend, match, fair, and a normal and an edge case of each of the others) | surfaces rig |
 | `construction` (construction planes, axes and points: `construct.*`) | tool coverage rig |
 | `inspect` (the inspect commands that return numbers) | tool coverage rig |
+| `history` (the timeline's suppress, reorder, delete, roll back, edit and folders; configuration rows, columns and rules; parameters that drive geometry) | tool coverage rig |
 
 Each area also has its gate files: `KNOWN_FAILING` and `PATHS` (see [the gate](#the-kernel-rig-gate)).
 

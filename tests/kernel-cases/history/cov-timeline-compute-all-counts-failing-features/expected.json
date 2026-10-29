@@ -1,0 +1,16 @@
+{
+ "sources": [],
+ "what": "timeline.compute_all after the block is deleted: the round and the cut fail",
+ "source": "invariants",
+ "method": "3 features left (Round, the sketch, Notch); Round and Notch have no body: 2 errors; no body",
+ "body_count": 0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "features": 3,
+    "errors": 2
+   }
+  }
+ ]
+}
