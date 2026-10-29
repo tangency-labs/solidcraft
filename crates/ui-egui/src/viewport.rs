@@ -2642,9 +2642,6 @@ fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
     solidcraft_gpu::view::analysis_uniform(app.session.analysis.map(|a| a.mode()), crate::access::map(app).as_ref())
 }
 
-/// While Draft, Accessibility or Curvature Map analysis is on, what each of its colours means and
-/// the values it stands for, at the bottom left of the viewport (#973). The colours alone don't
-/// say, and with colour vision loss they can be hard to tell apart.
 /// Why the model cannot be placed, across the bottom of the viewport, while it cannot: the
 /// viewport then shows no placed bodies (see `open_meshing::session_world`).
 fn placement_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
@@ -2654,6 +2651,9 @@ fn placement_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     painter.text(pos2(rect.center().x, rect.bottom() - 24.0), Align2::CENTER_BOTTOM, text, FontId::proportional(t.font_button), t.error);
 }
 
+/// While Draft, Accessibility or Curvature Map analysis is on, what each of its colours means and
+/// the values it stands for, at the bottom left of the viewport (#973). The colours alone don't
+/// say, and with colour vision loss they can be hard to tell apart.
 fn analysis_legend(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
     use solidcraft_engine::SurfaceAnalysis as A;
     let t = Tokens::get();
@@ -3967,7 +3967,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     }
     let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
-    analysis_legend(app, &painter, rect);
+    analysis_legend(app, &painter, overlay_rect);
     placement_note(app, &painter, overlay_rect);
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 

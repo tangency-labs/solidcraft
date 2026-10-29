@@ -968,7 +968,14 @@ fn loft_cut_through_a_shelled_basin_in_either_order() {
             assert!(r.is_ok(), "{pad:?} reverse {reverse}: {r:?}");
             let v = volume(&mut s);
             assert!((v - want).abs() < 1.0, "{pad:?} reverse {reverse}: {v} vs {want}");
-            assert_eq!(measure(&mut s)["body_count"], 1);
+            // The loft's top section is the basin's whole outline at z = 10, so the cut leaves the
+            // walls above it touching the rest only along their outer rim: two bodies, as a cut's
+            // pieces are (18480 mm³ of walls from z = 10 to 30, and the floor part below).
+            let m = measure(&mut s);
+            assert_eq!(m["body_count"], 2, "{m}");
+            let upper =
+                m["bodies"].as_array().unwrap().iter().find(|b| b["bbox"]["min"][2].as_f64().is_some_and(|z| (z - 10.0).abs() < 1e-9)).unwrap();
+            assert!((upper["volume_mm3"].as_f64().unwrap() - 18480.0).abs() < 1e-6, "{upper}");
         }
     }
     // As a new body and joined: a valid solid of positive volume either way.
