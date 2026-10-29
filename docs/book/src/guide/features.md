@@ -205,7 +205,9 @@ Section Analysis cuts the view, not the design: what lies beyond the section's p
 and the cut faces are hatched (Hatch off draws them in each body's own colour). It changes no
 geometry and is no step in the undo history. A section has up to six planes, and it hides what
 lies beyond all of them at once: one plane hides its side, two square to each other cut a quarter
-away.
+away. As on a drawing, each plane's cut faces are hatched their own way, at 45° on the first
+plane, 135° on the second, then 30°, 60°, 120° and 150°, measured on the plane as seen from the
+side it cuts away (upright on a wall, along X on a floor).
 
 - The toolbar's **Section Analysis** starts a new section on a plane or planar face; its arrow
   and **Distance** move the cut along the plane's normal.

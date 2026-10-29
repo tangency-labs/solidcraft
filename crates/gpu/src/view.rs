@@ -155,9 +155,9 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 /// The shader's `U`: the view-projection matrix, 3 `vec4`s, the section's
 /// [`MAX_SECTION_PLANES`] planes, 6 more `vec4`s (the last carries the ambient occlusion
 /// radius), the 8 analysis colours, their flags, the depth direction, the two whole-body
-/// highlight colours, the product lights (a flag and count, then 21 lights of 4 `vec4`s) and
-/// the sky (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 416 + 16 * (MAX_SECTION_PLANES as u64 - 1) + 16 + 21 * 64 + 16;
+/// highlight colours, the product lights (a flag and count, then 21 lights of 4 `vec4`s), each
+/// section plane's hatch and the sky (`uniform_bytes`).
+const UNIFORM_SIZE: u64 = 416 + 16 * (2 * MAX_SECTION_PLANES as u64 - 1) + 16 + 21 * 64 + 16;
 
 /// A body drawn from its display plan, evaluated on the GPU: the plan, and a palette index per
 /// face (the plan's face numbering; faces past the end take the last index).
@@ -4187,6 +4187,12 @@ pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -
         let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
     }
+    let vp = solidcraft_render::Mat4(cb.view_proj.map(|c| c.map(f64::from)));
+    for (k, c) in cb.clip.iter().enumerate() {
+        let n = Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+        let [x, y] = solidcraft_render::section_hatch(&vp, n, k, f64::from(w.max(1.0)), f64::from(h.max(1.0)));
+        v.extend([x as f32, y as f32, 0.0, 0.0]);
+    }
     v.extend(cb.sky.map(|value| if value.is_finite() { value } else { 0.0 }));
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
@@ -4423,18 +4429,29 @@ mod tests {
         assert_ne!(super::frame_key(&frame), previous);
     }
 
-    /// The uniform fills the shader's `U` exactly, the section's planes included.
+    /// The uniform fills the shader's `U` exactly, the section's planes and their hatch included.
     #[test]
     fn the_uniform_matches_the_shader_layout() {
         let mut f = cached_frame();
         f.clip = super::clip_planes(&[(super::Vec3::X, 1.0); super::MAX_SECTION_PLANES]);
         f.clip[super::MAX_SECTION_PLANES - 1] = [0.0, 0.0, 1.0, 7.25];
+        f.view_proj = solidcraft_render::Camera::default().view_proj(1.0, 40.0).to_f32();
         let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
         assert_eq!(bytes.len() as u64, super::UNIFORM_SIZE);
         let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
         assert_eq!(v[24..28], [1.0, 0.0, 0.0, 1.0], "the first plane follows the screen");
         let last = 16 + 8 + 4 * super::MAX_SECTION_PLANES;
         assert_eq!(v[last - 2..last], [1.0, 7.25], "the last plane sits before the cap colour");
+        // Each plane's hatch comes just before the sky, as the shared `section_hatch` has it.
+        let vp = solidcraft_render::Mat4(f.view_proj.map(|c| c.map(f64::from)));
+        let hatches = |v: &[f32]| v[v.len() - 4 - 4 * super::MAX_SECTION_PLANES..v.len() - 4].to_vec();
+        let hatch = &hatches(&v);
+        for (k, (h, c)) in hatch.as_chunks::<4>().0.iter().zip(&f.clip).enumerate() {
+            let n = super::Vec3::new(f64::from(c[0]), f64::from(c[1]), f64::from(c[2]));
+            let [x, y] = solidcraft_render::section_hatch(&vp, n, k, 64.0, 64.0);
+            assert_eq!(h, &[x as f32, y as f32, 0.0, 0.0], "plane {k}'s hatch");
+        }
+        assert_ne!(hatch[..2], hatch[4..6], "the first two planes, alike but for their place, hatch differently");
     }
 
     /// A frame with a fixed picture, and a key that names everything it shows.

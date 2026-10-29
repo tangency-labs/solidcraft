@@ -94,6 +94,38 @@ pub const MAX_SECTION_PLANES: usize = 6;
 /// The section cap's default tint, as in the viewport.
 pub const SECTION_CAP: Rgb = Rgb(214, 128, 72);
 
+/// The angle (degrees) each plane's cut faces are hatched at, by the plane's place in the
+/// section, in the plane's own frame ([`section_hatch_line`]).
+pub const SECTION_HATCH_ANGLES: [f64; MAX_SECTION_PLANES] = [45.0, 135.0, 30.0, 60.0, 120.0, 150.0];
+
+/// The section plane's own frame (right, up) as seen from the side its normal `n` points to,
+/// world Z up: fixed by the plane alone, so its hatch keeps its direction as the camera moves.
+pub fn section_plane_frame(n: Vec3) -> (Vec3, Vec3) {
+    let n = n.normalized().unwrap_or(Vec3::Z);
+    let right = if n.z.abs() < 0.9 { Vec3::Z.cross(n) } else { Vec3::X - n * n.x };
+    let right = right.normalized().unwrap_or_else(|| n.any_perp());
+    (right, n.cross(right))
+}
+
+/// The direction of the hatch lines on the `index`-th plane (normal `n`) of a section.
+pub fn section_hatch_line(n: Vec3, index: usize) -> Vec3 {
+    let (right, up) = section_plane_frame(n);
+    let a = SECTION_HATCH_ANGLES[index % MAX_SECTION_PLANES].to_radians();
+    right * a.cos() + up * a.sin()
+}
+
+/// The `index`-th section plane's hatch on a `w × h` picture through `view_proj`: the stripe
+/// phase is `x·s[0] + y·s[1]` (pixels, y down), a stripe every 9/√2 pixels, the lines running
+/// as the plane's hatch line looks at the centre of the picture. Face on, the first plane's
+/// hatch is the 45 degree stripes of old: `(x + y) / 9`.
+pub fn section_hatch(view_proj: &crate::Mat4, n: Vec3, index: usize, w: f64, h: f64) -> [f64; 2] {
+    let (l, o) = (view_proj.apply(section_hatch_line(n, index)), view_proj.apply(Vec3::ZERO));
+    let (dx, dy) = ((l[0] - o[0]) * w, (o[1] - l[1]) * h);
+    let len = dx.hypot(dy);
+    let across = if len > 1e-12 && len.is_finite() { [-dy / len, dx / len] } else { [std::f64::consts::FRAC_1_SQRT_2; 2] };
+    across.map(|c| c * std::f64::consts::SQRT_2 / 9.0)
+}
+
 /// RGBA pixels (`w × h`) to PNG bytes.
 pub fn png(w: usize, h: usize, rgba: Vec<u8>) -> Option<Vec<u8>> {
     let img = image::RgbaImage::from_raw(u32::try_from(w).ok()?, u32::try_from(h).ok()?, rgba)?;

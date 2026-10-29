@@ -110,11 +110,13 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     // The section hides what lies on the positive side of every plane, so the cut is where the
     // ray leaves that stretch.
     let radius = scene.radius.max(1.0);
-    let cut_depth = |at: Vec3| -> Option<f32> {
+    // The cut on the view ray through `at`: its screen depth and the plane it lies on.
+    let cut_at = |at: Vec3| -> Option<(Option<f32>, usize)> {
         let dir = if cam.fov > 0.0 { at - cam.eye() } else { -view_dir };
-        let p = at + dir * hidden_until(at, dir, &scene.clip, 1e-3 * (1.0 + radius))?;
-        project(p).map(|q| q[2] as f32)
+        let (t, k) = hidden_until(at, dir, &scene.clip, 1e-3 * (1.0 + radius))?;
+        Some((project(at + dir * t).map(|q| q[2] as f32), k))
     };
+    let hatch: Vec<[f64; 2]> = scene.clip.iter().enumerate().map(|(k, (n, _))| crate::section_hatch(&vp, *n, k, w as f64, h as f64)).collect();
     let cap_slope =
         scene.clip.iter().filter_map(|(n, d)| cap_plane(cam, *n, *d, radius, &project)).map(|[a, b, _]| a.hypot(b) as f32).fold(0.0, f32::max);
     let mut cap_depth = if scene.clip.is_empty() { Vec::new() } else { vec![f32::INFINITY; sw * sh] };
@@ -195,19 +197,22 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             let n = (ns[0] * p0 + ns[1] * p1 + ns[2] * p2).normalized().unwrap_or(Vec3::Z);
                             // A see-through body has no cut face: the interior already shows.
                             let cut = !pass.glass() && !scene.clip.is_empty() && inside;
+                            let exit = if cut { cut_at(at) } else { None };
                             if let Some(d) = cap_depth.get_mut(i).filter(|_| !pass.glass()) {
-                                *d = if cut { cut_depth(at).map_or(f32::INFINITY, |c| c.min(z)) } else { f32::INFINITY };
+                                *d = exit.and_then(|(cz, _)| cz).map_or(f32::INFINITY, |c| c.min(z));
                             }
                             if cut {
                                 // The cut: the body's colour tinted toward the cap colour, hatched
-                                // at 45 degrees (as the viewport draws it); a plain cap is the
-                                // body's own colour.
+                                // at its plane's angle (as the viewport draws it); a plain cap is
+                                // the body's own colour.
                                 if scene.plain_cap {
                                     c.put(x, y, base, 1.0);
                                     continue;
                                 }
                                 let tinted: [f64; 3] = std::array::from_fn(|k| base[k] + (cap_tint[k] - base[k]) * 0.35);
-                                let k = if ((x + y) / SS) % 9 < 2 { 0.6 } else { 1.0 };
+                                let s = hatch.get(exit.map_or(0, |(_, k)| k)).copied().unwrap_or([1.0 / 9.0; 2]);
+                                let phase = (x as f64 * s[0] + y as f64 * s[1]) / SS as f64;
+                                let k = if phase.rem_euclid(1.0) < 2.0 / 9.0 { 0.6 } else { 1.0 };
                                 c.put(x, y, tinted.map(|v| v * k), 1.0);
                                 continue;
                             }
@@ -311,10 +316,11 @@ fn hidden(p: Vec3, clip: &[(Vec3, f64)]) -> bool {
 }
 
 /// Where the ray `at + dir·t` leaves the stretch the section hides (each plane moved `margin`
-/// to its hidden side), as `t`; None when it never is hidden or never leaves.
-fn hidden_until(at: Vec3, dir: Vec3, clip: &[(Vec3, f64)], margin: f64) -> Option<f64> {
-    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
-    for (n, d) in clip {
+/// to its hidden side), as `t` and the plane it leaves by; None when it never is hidden or
+/// never leaves.
+fn hidden_until(at: Vec3, dir: Vec3, clip: &[(Vec3, f64)], margin: f64) -> Option<(f64, usize)> {
+    let (mut lo, mut hi, mut by) = (f64::NEG_INFINITY, f64::INFINITY, 0);
+    for (k, (n, d)) in clip.iter().enumerate() {
         // n·(at + dir·t) > d + margin: t·dn > s.
         let (dn, s) = (n.dot(dir), d + margin - n.dot(at));
         if dn.abs() < 1e-12 {
@@ -323,11 +329,11 @@ fn hidden_until(at: Vec3, dir: Vec3, clip: &[(Vec3, f64)], margin: f64) -> Optio
             }
         } else if dn > 0.0 {
             lo = lo.max(s / dn);
-        } else {
-            hi = hi.min(s / dn);
+        } else if s / dn < hi {
+            (hi, by) = (s / dn, k);
         }
     }
-    (hi.is_finite() && lo < hi).then_some(hi)
+    (hi.is_finite() && lo < hi).then_some((hi, by))
 }
 
 /// The parts of segment `p`–`q` the section keeps: all but the stretch on the positive side of
@@ -406,7 +412,7 @@ pub fn render_transparent(scene: &mut Scene, cam: &Camera, w: usize, h: usize) -
 mod tests {
     use super::*;
     use crate::StandardView;
-    use crate::scene::{SceneLine, SceneMesh};
+    use crate::scene::{MAX_SECTION_PLANES, SECTION_HATCH_ANGLES, SceneLine, SceneMesh};
     use solidcraft_geom::Mesh;
     use std::sync::Arc;
 
@@ -630,5 +636,121 @@ mod tests {
                 assert_eq!(drawn, whole, "fov {fov}, radius {radius}: parts of the lines on the face are hidden");
             }
         }
+    }
+
+    /// A closed block from `lo` to `hi`, its faces wound outward.
+    fn block(lo: Vec3, hi: Vec3) -> Mesh {
+        let d = hi - lo;
+        // Each face: a corner and two edges whose cross product points out.
+        let faces = [
+            (lo, Vec3::Z * d.z, Vec3::Y * d.y),
+            (Vec3::new(hi.x, lo.y, lo.z), Vec3::Y * d.y, Vec3::Z * d.z),
+            (lo, Vec3::X * d.x, Vec3::Z * d.z),
+            (Vec3::new(lo.x, hi.y, lo.z), Vec3::Z * d.z, Vec3::X * d.x),
+            (lo, Vec3::Y * d.y, Vec3::X * d.x),
+            (Vec3::new(lo.x, lo.y, hi.z), Vec3::X * d.x, Vec3::Y * d.y),
+        ];
+        let mut m = Mesh::default();
+        for (f, (o, a, b)) in faces.into_iter().enumerate() {
+            let n = a.cross(b).normalized().unwrap_or(Vec3::Z);
+            let k = m.positions.len() as u32;
+            m.positions.extend([o, o + a, o + a + b, o + b]);
+            m.normals.extend([n; 4]);
+            m.triangles.extend([[k, k + 1, k + 2], [k, k + 2, k + 3]]);
+            m.tri_face.extend([f as u32; 2]);
+        }
+        m
+    }
+
+    /// The screen angle (degrees from +x, counterclockwise, 0..180) the stripes of the
+    /// `half`-pixel square about (`cx`, `cy`) of a `w`-wide picture run at: the direction along
+    /// which the pixels keep their shade.
+    fn hatch_angle(rgba: &[u8], w: usize, (cx, cy): (usize, usize), half: usize) -> f64 {
+        let lum = |x: usize, y: usize| rgba.get((y * w + x) * 4..(y * w + x) * 4 + 3).map_or(0, |p| p.iter().map(|c| u32::from(*c)).sum::<u32>());
+        let window = || (cy - half..cy + half).flat_map(move |y| (cx - half..cx + half).map(move |x| (x, y)));
+        let (lo, hi) = window().map(|(x, y)| lum(x, y)).fold((u32::MAX, 0), |(a, b), l| (a.min(l), b.max(l)));
+        let dark = |x: usize, y: usize| lum(x, y) * 2 < lo + hi;
+        // Every step up to half the window, so a step that skips whole stripes does not pass.
+        let mismatches = |deg: f64| {
+            let (c, s) = (deg.to_radians().cos(), -deg.to_radians().sin());
+            (1..=half / 2)
+                .map(|r| {
+                    let (dx, dy) = (c * r as f64, s * r as f64);
+                    window()
+                        .filter(|&(x, y)| {
+                            let (u, v) = ((x as f64 + dx).round() as usize, (y as f64 + dy).round() as usize);
+                            dark(x, y) != dark(u, v)
+                        })
+                        .count()
+                })
+                .sum::<usize>()
+        };
+        (0..180).map(f64::from).min_by_key(|d| mismatches(*d)).unwrap_or(f64::NAN)
+    }
+
+    /// Lines at `a` and `b` degrees run the same way, give or take `tol`.
+    fn same_way(a: f64, b: f64, tol: f64) -> bool {
+        let d = (a - b).rem_euclid(180.0);
+        d.min(180.0 - d) <= tol
+    }
+
+    /// Each plane's cut faces are hatched at the angle for its place in the section, measured
+    /// in the plane's own frame: a horizontal cut seen from above, as the first plane and then
+    /// after other planes (which cut nothing away themselves) up to the last, shows its stripes
+    /// at 45, 135, 30, 60, 120 and 150 degrees on screen, in an orthographic view and a
+    /// perspective one.
+    #[test]
+    fn each_plane_of_a_section_hatches_at_its_own_angle() {
+        for fov in [0.0f64, 0.5] {
+            for (k, want) in SECTION_HATCH_ANGLES.iter().enumerate() {
+                let mut clip = vec![(Vec3::X, -1e4); k];
+                clip.push((Vec3::Z, 10.0));
+                let body = SceneMesh::solid(Arc::new(block(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 20.0))), Rgb(150, 160, 175));
+                let scene = Scene { meshes: vec![body], radius: 40.0, clip, ..Default::default() };
+                let mut cam = Camera { distance: if fov > 0.0 { 25.0 / (fov * 0.5).tan() } else { 50.0 }, fov, ..Default::default() };
+                cam.set_view(StandardView::Top);
+                let c = render(&scene, &cam, 160, 160);
+                let got = hatch_angle(&c.rgba, c.w, (80, 80), 24);
+                assert!(same_way(got, *want, 2.0), "fov {fov}, plane {k}: hatched at {got} degrees, not {want}");
+            }
+        }
+    }
+
+    /// A single plane hatches as it always has: seen face on, the stripes `(x + y) / 9` of old,
+    /// at 45 degrees, and the hatch on hostile planes stays finite.
+    #[test]
+    fn a_single_plane_hatches_at_45_degrees_as_before() {
+        let mut cam = Camera { distance: 50.0, ..Default::default() };
+        cam.set_view(StandardView::Top);
+        let vp = cam.view_proj(1.5, 40.0);
+        let s = crate::section_hatch(&vp, Vec3::Z, 0, 300.0, 200.0);
+        assert!((s[0] - 1.0 / 9.0).abs() < 1e-6 && (s[1] - 1.0 / 9.0).abs() < 1e-6, "{s:?}");
+        cam.set_view(StandardView::Front);
+        let vp = cam.view_proj(1.5, 40.0);
+        let s = crate::section_hatch(&vp, -Vec3::Y, 0, 300.0, 200.0);
+        assert!((s[0] - 1.0 / 9.0).abs() < 1e-6 && (s[1] - 1.0 / 9.0).abs() < 1e-6, "a front cut: {s:?}");
+        for n in [Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 1.0), Vec3::new(1e300, -1e300, 0.0), cam.back()] {
+            let s = crate::section_hatch(&vp, n, 7, 300.0, 200.0);
+            assert!(s.iter().all(|c| c.is_finite()), "{n:?}: {s:?}");
+        }
+    }
+
+    /// A plane's frame depends on the plane alone: square, in the plane, upright on a wall and
+    /// along X on a floor, so the hatch keeps its direction on the cut as the camera moves.
+    #[test]
+    fn a_section_plane_has_its_own_upright_frame() {
+        for n in [Vec3::X, -Vec3::Y, Vec3::new(1.0, 1.0, 0.5), Vec3::Z, -Vec3::Z, Vec3::new(0.1, 0.2, 0.97)] {
+            let n = n.normalized().unwrap_or(Vec3::Z);
+            let (u, v) = crate::section_plane_frame(n);
+            assert!(u.dot(n).abs() < 1e-12 && v.dot(n).abs() < 1e-12 && u.dot(v).abs() < 1e-12, "{n:?}: {u:?} {v:?}");
+            assert!((u.len() - 1.0).abs() < 1e-12 && (v.len() - 1.0).abs() < 1e-12 && (u.cross(v) - n).len() < 1e-12, "{n:?}");
+            for k in 0..MAX_SECTION_PLANES {
+                assert!(crate::section_hatch_line(n, k).dot(n).abs() < 1e-12, "{n:?} {k}: the hatch lies in the plane");
+            }
+        }
+        let (u, v) = crate::section_plane_frame(Vec3::X);
+        assert!((u - Vec3::Y).len() < 1e-12 && (v - Vec3::Z).len() < 1e-12, "a wall's frame: {u:?} {v:?}");
+        let (u, v) = crate::section_plane_frame(Vec3::Z);
+        assert!((u - Vec3::X).len() < 1e-12 && (v - Vec3::Y).len() < 1e-12, "a floor's frame: {u:?} {v:?}");
     }
 }

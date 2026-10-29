@@ -20,6 +20,7 @@ struct U {
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
+    hatch: array<vec4<f32>, 6>, // each section plane's hatch: stripe phase pixel · xy (`section_hatch`)
     sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
 
@@ -292,31 +293,48 @@ fn touch_depth(wp: vec3<f32>, z: f32) -> f32 {
     return clamp(min(pulled, z) - 2.0 * slope, 0.0, 1.0);
 }
 
-/// Depth of the section's cut on the view ray through `wp` (a far wall seen through the cut),
-/// never behind the wall itself (`z`): where the ray leaves the stretch the section hides, on
-/// the positive side of every plane.
-fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
-    var dir = -u.back.xyz;
-    if (u.eye.w > 0.5) { dir = wp - u.eye.xyz; }
-    // The hidden stretch `wp + dir * t`, lo < t < hi: n·p > d is t·dn > d - n·wp.
+fn view_ray(wp: vec3<f32>) -> vec3<f32> {
+    if (u.eye.w > 0.5) { return wp - u.eye.xyz; }
+    return -u.back.xyz;
+}
+
+/// Where the view ray `wp + view_ray(wp) * t` leaves the stretch the section hides: `t` (1e30
+/// when it never is hidden or never leaves) and the plane it leaves by.
+struct Exit {
+    t: f32,
+    k: u32,
+};
+
+fn cut_exit(wp: vec3<f32>) -> Exit {
+    let dir = view_ray(wp);
+    let none = Exit(1e30, 0u);
+    // The hidden stretch, lo < t < hi: n·p > d is t·dn > d - n·wp.
     var lo = -1e30;
-    var hi = 1e30;
+    var e = none;
     for (var k = 0u; k < 6u; k++) {
         let c = u.clip[k];
         if (length(c.xyz) < 0.5) { continue; }
         let dn = dot(c.xyz, dir);
         let s = c.w - dot(c.xyz, wp);
         if (abs(dn) < 1e-9) {
-            if (s >= 0.0) { return z; }
+            if (s >= 0.0) { return none; }
         } else if (dn > 0.0) {
             lo = max(lo, s / dn);
-        } else {
-            hi = min(hi, s / dn);
+        } else if (s / dn < e.t) {
+            e = Exit(s / dn, k);
         }
     }
-    if (hi > 1e29 || lo >= hi) { return z; }
-    let p = wp + dir * hi;
-    let c = u.vp * vec4<f32>(p, 1.0);
+    if (lo >= e.t) { return none; }
+    return e;
+}
+
+/// Depth of the section's cut on the view ray through `wp` (a far wall seen through the cut),
+/// never behind the wall itself (`z`): where the ray leaves the stretch the section hides, on
+/// the positive side of every plane.
+fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
+    let e = cut_exit(wp);
+    if (e.t > 1e29) { return z; }
+    let c = u.vp * vec4<f32>(wp + view_ray(wp) * e.t, 1.0);
     if (c.w <= 0.0) { return z; }
     if (reversed()) { return clamp(c.z / c.w, z, 1.0); }
     return clamp(c.z / c.w, 0.0, z);
@@ -331,11 +349,11 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     if (clipped(i.wp)) { discard; }
     if (!front && sectioned()) {
         // The cut face in its body's colour ("from component" colouring), tinted toward the
-        // cap colour so it reads as a cut, hatched at 45 degrees on screen; with the hatch off
+        // cap colour so it reads as a cut, hatched at its plane's angle; with the hatch off
         // (`u.cap.a` 0), plain in the body's own colour.
         if (u.cap.a < 0.5) { return out_color(vec4<f32>(i.c.rgb, 1.0)); }
         let base = mix(i.c.rgb, u.cap.rgb, 0.35);
-        let h = fract((i.pos.x + i.pos.y) / 9.0);
+        let h = fract(dot(i.pos.xy, u.hatch[cut_exit(i.wp).k].xy));
         return out_color(vec4<f32>(select(base, base * 0.6, h < 0.22), 1.0));
     }
     if (u.ana.x > 0.5 && length(i.n) > 0.5) {

@@ -204,8 +204,35 @@ fn pictures_show_the_section_and_its_cap() {
     }
 }
 
+/// The screen angle (degrees from +x, counterclockwise, 0..180) the stripes of the
+/// `half`-pixel square about (`cx`, `cy`) of a `w`-wide picture run at: the direction along
+/// which the pixels keep their shade, at every step up to half the square.
+fn hatch_angle(rgba: &[u8], w: usize, (cx, cy): (usize, usize), half: usize) -> f64 {
+    let lum = |x: usize, y: usize| rgba.get((y * w + x) * 4..(y * w + x) * 4 + 3).map_or(0, |p| p.iter().map(|c| u32::from(*c)).sum::<u32>());
+    let window = || (cy - half..cy + half).flat_map(move |y| (cx - half..cx + half).map(move |x| (x, y)));
+    let (lo, hi) = window().map(|(x, y)| lum(x, y)).fold((u32::MAX, 0), |(a, b), l| (a.min(l), b.max(l)));
+    let dark = |x: usize, y: usize| lum(x, y) * 2 < lo + hi;
+    let mismatches = |deg: f64| {
+        let (c, s) = (deg.to_radians().cos(), -deg.to_radians().sin());
+        (1..=half / 2)
+            .map(|r| {
+                let (dx, dy) = (c * r as f64, s * r as f64);
+                window().filter(|&(x, y)| dark(x, y) != dark((x as f64 + dx).round() as usize, (y as f64 + dy).round() as usize)).count()
+            })
+            .sum::<usize>()
+    };
+    (0..180).map(f64::from).min_by_key(|d| mismatches(*d)).unwrap_or(f64::NAN)
+}
+
+/// How far apart lines at `a` and `b` degrees run (0..90).
+fn angle_between(a: f64, b: f64) -> f64 {
+    let d = (a - b).rem_euclid(180.0);
+    d.min(180.0 - d)
+}
+
 /// Two planes cut a quarter of the box away (what both hide): the cut faces in the cap colour
-/// hide what lies inside the rest, and the picture is the CPU rasterizer's, near enough.
+/// hide what lies inside the rest, and the picture is the CPU rasterizer's, near enough. Each
+/// plane's cut is hatched its own way, the same on the GPU as on the CPU.
 #[test]
 fn pictures_cut_with_two_planes() {
     let Some(c) = capturer() else { return };
@@ -237,6 +264,17 @@ fn pictures_cut_with_two_planes() {
         let (gpu_cap, cpu_cap) = (warm(&img), warm(&cpu));
         assert!(gpu_cap > 500, "fov {fov}: cap pixels {gpu_cap}");
         assert!(gpu_cap.abs_diff(cpu_cap) * 10 < cpu_cap, "fov {fov}: GPU cap {gpu_cap} px, CPU {cpu_cap} px");
+        // The middle of each plane's cut face: the first plane's (y = 15), the second's (x = 20).
+        let angles = [Vec3::new(30.0, 15.0, 10.0), Vec3::new(20.0, 7.5, 10.0)].map(|p| {
+            let (x, y, _) = cam.to_screen(p, 300.0, 220.0, sc.radius).unwrap();
+            let at = (x as usize, y as usize);
+            (hatch_angle(&img, 300, at, 10), hatch_angle(&cpu, 300, at, 10))
+        });
+        for (k, (gpu, cpu)) in angles.iter().enumerate() {
+            assert!(angle_between(*gpu, *cpu) <= 3.0, "fov {fov}, plane {k}: GPU hatch at {gpu} degrees, CPU at {cpu}");
+        }
+        let ((first, _), (second, _)) = (angles[0], angles[1]);
+        assert!(angle_between(first, second) >= 30.0, "fov {fov}: both cuts hatched alike, at {first} and {second} degrees");
     }
 }
 
