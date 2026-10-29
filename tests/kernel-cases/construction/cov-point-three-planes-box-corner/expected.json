@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "the corner where three box faces meet",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): x = 40, y = 30, z = 20 meet at (40,30,20)",
+ "construction": {
+  "P": {
+   "point": [
+    40,
+    30,
+    20
+   ]
+  }
+ }
+}

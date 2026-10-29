@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "a point on another construction point",
+ "source": "analytic",
+ "method": "the point where XY, XZ and YZ meet is the origin; a point on it is too",
+ "construction": {
+  "P": {
+   "point": [
+    0,
+    0,
+    0
+   ]
+  }
+ }
+}
