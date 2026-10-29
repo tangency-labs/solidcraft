@@ -44,6 +44,7 @@ One directory per area, one per case: `tests/kernel-cases/<area>/<id>/`.
 | `construction` (construction planes, axes and points: `construct.*`) | tool coverage rig |
 | `inspect` (the inspect commands that return numbers) | tool coverage rig |
 | `history` (the timeline's suppress, reorder, delete, roll back, edit and folders; configuration rows, columns and rules; parameters that drive geometry) | tool coverage rig |
+| `assemblies` (joints and couplings, motion studies, contact, components and occurrences, interference and clearance between placed parts: placements and answers worked out by hand) | rig coverage |
 
 Each area also has its gate files: `KNOWN_FAILING` and `PATHS` (see [the gate](#the-kernel-rig-gate)).
 
