@@ -610,9 +610,10 @@ mod tests {
 
     /// A smooth edge (a round's seam with the face it runs into) has nothing to round: refused
     /// before SMLib, saying so. An edge that runs on tangentially into one left out is SMLib's to
-    /// end: where it cannot (the end face's top edge into the round's end arc) the refusal says
-    /// why, and rounded with its tangent chain the edge builds; where it can (a vertical edge run
-    /// on up a top round's end arc into the corner, ladder 07-fillets/018) it builds.
+    /// end: the end face's top edge into the round's end arc builds, its round run on through the
+    /// arc's round until it leaves the material (rig fillets/1207-fillet-box-end-edge-into-
+    /// unblended-round), and with its tangent chain the edge builds too; a vertical edge run on
+    /// up a top round's end arc into the corner (ladder 07-fillets/018) builds.
     #[test]
     fn smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why() {
         let b = cube();
@@ -620,10 +621,12 @@ mod tests {
         // the seam where the r3 round meets the top, 3 in from the old edge
         let seam = imp::blend(&rounded, "fillet", Kind::Round, &[Vec3::new(10.0, 17.0, 20.0)], &[1.0]).unwrap_err().to_string();
         assert!(seam.contains("is smooth: its faces meet tangentially, so there is nothing to round"), "{seam}");
-        // the end face's top edge runs on tangentially into the round's end arc
+        // the end face's top edge runs on tangentially into the round's end arc: its r1 round
+        // goes on along y through the r3 round until that drops below it, at y = 17 + sqrt(5)
+        // (the rig case's closed form: 8000 - 20 (9 - 9 pi/4) - 17 (1 - pi/4) - 0.218236)
         let top = Vec3::new(0.0, 8.0, 20.0);
-        let alone = imp::blend(&rounded, "fillet", Kind::Round, &[top], &[1.0]).unwrap_err().to_string();
-        assert!(alone.contains("continues tangentially"), "{alone}");
+        let alone = fillet(&rounded, &[top], 1.0).unwrap();
+        assert!((volume(&alone) - 7957.505202).abs() < 1e-3, "{}", volume(&alone));
         let chain = crate::tangent_chain(&rounded, &[top]).unwrap();
         assert!(chain.len() > 1, "{chain:?}");
         let whole = fillet(&rounded, &chain, 1.0).unwrap();
