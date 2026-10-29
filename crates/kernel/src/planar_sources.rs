@@ -40,23 +40,48 @@ pub(super) fn actual_planes(body: &Body) -> Result<Vec<Option<Plane>>> {
         .collect())
 }
 
-/// How far apart the normals' x components of two planes `same_support` accepts can be, with
-/// room to spare: their unit normals are within about 1e-12 of each other.
-const NORMAL_WINDOW: f64 = 1e-9;
+/// The resolution two planar supports are compared at: SMLib's own, by which it calls two planes
+/// coincident (SmPlane::CoincidenceCheck): a distance within the body's intersection tolerance
+/// (the record's `tolerance`, SMLib's XSectTol3d) and normals within the angle that tolerance
+/// makes across the body (`tolerance / size`; SMLib takes the plane's own extent, the body's is
+/// at least as large, so this is no looser), never finer than rounding. Faces SMLib rebuilt
+/// through a boolean lie within it of the plane they were made on (a cut cap at z = 10 came back
+/// 2.1e-11 off and 1.4e-12 rad turned), not within a few ulps of it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Resolution {
+    linear: f64,
+    angular: f64,
+}
 
-/// The entries of `sorted` (ordered by their plane's normal x) whose normal x is within
-/// [`NORMAL_WINDOW`] of `nx`: the only ones `same_support` can accept for a plane with that normal.
-fn normal_window<T>(sorted: &[T], plane: impl Fn(&T) -> &Plane, nx: f64) -> &[T] {
-    let first = sorted.partition_point(|t| plane(t).normal().x < nx - NORMAL_WINDOW);
-    let last = sorted.partition_point(|t| plane(t).normal().x <= nx + NORMAL_WINDOW);
+impl Resolution {
+    pub(super) fn of(body: &Body) -> Self {
+        let tolerance = body.record().tolerance;
+        let size = body.size();
+        let rounding = 4096. * f64::EPSILON;
+        let linear = if tolerance.is_finite() && tolerance > 0. { tolerance } else { 0. };
+        let angular = if size.is_finite() && size > 0. { linear / size } else { 0. };
+        Resolution { linear: linear.max(rounding * (1. + size.max(0.))), angular: angular.max(rounding) }
+    }
+}
+
+/// The entries of `sorted` (ordered by their plane's normal x) whose normal x is within the
+/// resolution's angle of `nx` (and rounding): the only ones `same_support` can accept for a plane
+/// with that normal.
+fn normal_window<T>(sorted: &[T], plane: impl Fn(&T) -> &Plane, nx: f64, at: Resolution) -> &[T] {
+    let window = 2. * at.angular + 1e-12;
+    let first = sorted.partition_point(|t| plane(t).normal().x < nx - window);
+    let last = sorted.partition_point(|t| plane(t).normal().x <= nx + window);
     sorted.get(first..last.max(first)).unwrap_or_default()
 }
 
-pub(super) fn same_support(a: &Plane, b: &Plane) -> bool {
-    let error = 4096. * f64::EPSILON * (1. + a.origin.len() + b.origin.len());
-    a.normal().cross(b.normal()).len() <= 4096. * f64::EPSILON
-        && a.normal().dot(b.normal()) > 0.
-        && (a.origin - b.origin).dot(a.normal()).abs() <= error
+/// Whether `a` and `b` are one oriented plane at resolution `at`: normals the same way within its
+/// angle, each origin within its distance of the other plane.
+pub(super) fn same_support(a: &Plane, b: &Plane, at: Resolution) -> bool {
+    let (na, nb) = (a.normal(), b.normal());
+    na.cross(nb).len() <= at.angular
+        && na.dot(nb) > 0.
+        && (b.origin - a.origin).dot(na).abs() <= at.linear
+        && (a.origin - b.origin).dot(nb).abs() <= at.linear
 }
 
 fn base_plane(source: &FaceSource, actual: &Plane) -> Option<Plane> {
@@ -195,6 +220,7 @@ impl Body {
         if open.len() > 256 {
             return Ok(self);
         }
+        let at = Resolution::of(&self);
         let opening_tolerance = if shell.is_some() { inputs.iter().map(|input| input.size()).fold(0., f64::max) * 1e-4 + 1e-6 } else { 0. };
         let mapped = guard("exact planar support lineage", || {
             let mut competing = Vec::new();
@@ -226,7 +252,7 @@ impl Body {
                     unknown_supports.push(actual);
                     continue;
                 };
-                if !same_support(&plane, &actual) || (shell.is_some() && open.iter().any(|p| actual.height(*p).abs() <= opening_tolerance)) {
+                if !same_support(&plane, &actual, at) || (shell.is_some() && open.iter().any(|p| actual.height(*p).abs() <= opening_tolerance)) {
                     unknown_supports.push(actual);
                     continue;
                 }
@@ -254,16 +280,16 @@ impl Body {
                 if let Some(actual) = actual {
                     let mut blocked = false;
                     let nx = actual.normal().x;
-                    for plane in normal_window(&unknown_supports, |p| p, nx) {
+                    for plane in normal_window(&unknown_supports, |p| p, nx, at) {
                         work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("unknown planar source comparison budget exceeded".into()))?;
-                        if same_support(plane, &actual) {
+                        if same_support(plane, &actual, at) {
                             blocked = true;
                             break;
                         }
                     }
-                    for plane in normal_window(&competing, |p| p, nx) {
+                    for plane in normal_window(&competing, |p| p, nx, at) {
                         work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("planar tool comparison budget exceeded".into()))?;
-                        if same_support(plane, &actual) {
+                        if same_support(plane, &actual, at) {
                             blocked = true;
                             break;
                         }
@@ -286,9 +312,9 @@ impl Body {
                         continue;
                     }
                     let mut chosen: Option<(Plane, &FaceSource, bool, usize)> = None;
-                    for (plane, source, inner, cost) in normal_window(&candidates, |c| &c.0, nx) {
+                    for (plane, source, inner, cost) in normal_window(&candidates, |c| &c.0, nx, at) {
                         work = work.checked_sub(1).ok_or_else(|| KernelError::Invalid("planar source comparison budget exceeded".into()))?;
-                        if same_support(plane, &actual) {
+                        if same_support(plane, &actual, at) {
                             if let Some((previous_plane, previous_source, previous_inner, _)) = chosen {
                                 let Some(remaining) = identity_bytes.checked_sub(*cost) else {
                                     chosen = None;
@@ -444,7 +470,9 @@ mod tests {
             .map(|(i, p)| {
                 let p = (*p)?;
                 let find = |of: &Body, ps: &[Option<Plane>]| {
-                    ps.iter().position(|q| q.is_some_and(|q| same_support(&q, &p))).and_then(|i| of.face_sources()?[i].clone())
+                    ps.iter()
+                        .position(|q| q.is_some_and(|q| same_support(&q, &p, Resolution::of(&combined))))
+                        .and_then(|i| of.face_sources()?[i].clone())
                 };
                 let in_a = face_points(&combined, i).iter().all(|q| q.x <= a_right + 1e-9);
                 if in_a {
@@ -496,7 +524,7 @@ mod tests {
                 if matches!(s, Some(FaceSource::ExtrudeSide { coalesced: true, plane: None, .. })) {
                     assert!(cup.face_plane(i).is_none(), "loss witness is not source authority");
                 } else if s.is_some() {
-                    assert!(same_support(&cup.face_plane(i).unwrap(), &cup.planar_face(i).unwrap()));
+                    assert!(same_support(&cup.face_plane(i).unwrap(), &cup.planar_face(i).unwrap(), Resolution::of(&cup)));
                 }
             }
             let moved = transform_matrix(&cup, [[0., 1., 0., 0.], [-1., 0., 0., 0.], [0., 0., 1., 0.], [100., 200., 300., 1.]]).unwrap();

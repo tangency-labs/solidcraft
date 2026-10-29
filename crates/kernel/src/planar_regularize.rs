@@ -41,13 +41,14 @@ impl Body {
                 return Ok(None);
             }
             let actual = super::planar_sources::actual_planes(&self)?;
+            let at = super::planar_sources::Resolution::of(&self);
             let valid: Vec<_> = actual
                 .iter()
                 .zip(sources)
                 .map(|(actual, s)| {
                     s.as_ref()
                         .and_then(super::planar_sources::certified_plane)
-                        .filter(|p| actual.is_some_and(|actual| super::planar_sources::same_support(p, &actual)))
+                        .filter(|p| actual.is_some_and(|actual| super::planar_sources::same_support(p, &actual, at)))
                 })
                 .collect();
             let record = self.record();
