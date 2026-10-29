@@ -4,7 +4,7 @@
 //! parameter can be referenced by name from any expression; the dependency graph and cycles
 //! come from the expression references.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -516,19 +516,50 @@ impl Document {
         if rows.len() > 10_000 {
             return Err(DocError::Invalid("too many parameters".into()));
         }
-        // Each row is checked and applied as `change_param` would, but the parameters are
-        // evaluated once for all of them, not once per row (thousands of rows took minutes).
+        let mut row_by_name: BTreeMap<&str, usize> = BTreeMap::new();
+        for (index, (name, _, _, _)) in rows.iter().enumerate() {
+            row_by_name.insert(name, index);
+        }
+        let mut dependents = vec![Vec::new(); rows.len()];
+        let mut dependency_count = vec![0; rows.len()];
+        for (index, (_, expression, _, _)) in rows.iter().enumerate() {
+            let dependencies: BTreeSet<usize> =
+                expr::references(expression).iter().filter_map(|name| row_by_name.get(name.as_str()).copied()).collect();
+            dependency_count[index] = dependencies.len();
+            for dependency in dependencies {
+                dependents[dependency].push(index);
+            }
+        }
+        let mut ready: VecDeque<usize> = dependency_count.iter().enumerate().filter_map(|(index, count)| (*count == 0).then_some(index)).collect();
+        let mut ordered_rows = Vec::with_capacity(rows.len());
+        while let Some(index) = ready.pop_front() {
+            ordered_rows.push(rows[index].clone());
+            for dependent in &dependents[index] {
+                dependency_count[*dependent] -= 1;
+                if dependency_count[*dependent] == 0 {
+                    ready.push_back(*dependent);
+                }
+            }
+        }
+        if ordered_rows.len() != rows.len() {
+            return Err(DocError::Expr("circular parameter references in import".into()));
+        }
+
+        // Apply rows in dependency order while keeping the fast incremental evaluation for large
+        // imports. This also lets unit inference use rows that appeared later in the input.
         let mut next = self.clone();
         let (mut vals, _) = next.param_values();
-        for (n, e, u, c) in &rows {
-            next.import_row(n, e, u.as_deref(), c.as_deref(), &mut vals)?;
+        let mut names = Vec::new();
+        for (n, e, u, c) in ordered_rows {
+            next.import_row(&n, &e, u.as_deref(), c.as_deref(), &mut vals)?;
+            names.push(n);
         }
         let (_, errors) = next.param_values();
         if let Some(e) = rows.iter().find_map(|(n, ..)| errors.get(n)) {
             return Err(DocError::Expr(e.clone()));
         }
         *self = next;
-        Ok(rows.into_iter().map(|(n, ..)| n).collect())
+        Ok(names)
     }
 
     /// One imported row: the checks and change of `change_param` (a feature's parameter) or
