@@ -94,14 +94,27 @@ fn validate_body(body: &Body) -> Vec<ValidationError> {
     }
     for face in &body.faces {
         for loop_ in &face.loops {
-            if let crate::model::Bound::Edges(edges) = &loop_.bound {
-                for edge in edges {
-                    if edge.edge >= body.edges.len() {
+            match &loop_.bound {
+                crate::model::Bound::Edges(edges) => {
+                    for edge in edges {
+                        if edge.edge >= body.edges.len() {
+                            errors.push(ValidationError {
+                                step_id: Some(body.step_id),
+                                message: format!(
+                                    "face #{} references missing edge {}",
+                                    face.step_id, edge.edge
+                                ),
+                            });
+                        }
+                    }
+                }
+                &crate::model::Bound::Vertex(vertex) => {
+                    if vertex >= body.vertices.len() {
                         errors.push(ValidationError {
                             step_id: Some(body.step_id),
                             message: format!(
-                                "face #{} references missing edge {}",
-                                face.step_id, edge.edge
+                                "face #{} references missing vertex {vertex}",
+                                face.step_id
                             ),
                         });
                     }
@@ -157,6 +170,30 @@ mod tests {
             validate(&file, &model).is_empty(),
             "{:?}",
             validate(&file, &model)
+        );
+    }
+
+    #[test]
+    fn reports_a_vertex_loop_of_a_missing_vertex() {
+        let text = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n#6=FACE('',(#7));#7=FACE_OUTER_BOUND('',#8,.T.);#8=POLY_LOOP('',(#9,#10,#11));#9=CARTESIAN_POINT('',(0.,0.,0.));#10=CARTESIAN_POINT('',(3.,0.,0.));#11=CARTESIAN_POINT('',(0.,4.,0.));\nENDSEC;\nEND-ISO-10303-21;\n";
+        let file = parse(text.as_bytes(), &Limits::default()).unwrap();
+        let mut model = map_file(&file, &Limits::default());
+        let nv = model.bodies[0].vertices.len();
+        let vertex_loop = |v| crate::model::Loop {
+            outer: false,
+            orientation: true,
+            bound: crate::model::Bound::Vertex(v),
+        };
+        // A vertex loop of an existing vertex is consistent.
+        model.bodies[0].faces[0].loops.push(vertex_loop(nv - 1));
+        assert!(validate(&file, &model).is_empty());
+        model.bodies[0].faces[0].loops.push(vertex_loop(nv));
+        let errors = validate(&file, &model);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message == format!("face #6 references missing vertex {nv}")),
+            "{errors:?}"
         );
     }
 
