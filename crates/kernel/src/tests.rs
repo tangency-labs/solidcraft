@@ -1969,7 +1969,7 @@ fn fillet_mixed_arc_and_line_joint_preserves_both_section_radii() {
             if !mitres.insert(id) {
                 continue;
             }
-            let curve = solidcraft_geom::brep::eval::CurveEval::new(&edge.curve).unwrap();
+            let curve = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).unwrap();
             let [lo, hi] = edge.interval;
             for i in 0..=257 {
                 let p = curve.point(lo + (hi - lo) * f64::from(i) / 257.0).unwrap();

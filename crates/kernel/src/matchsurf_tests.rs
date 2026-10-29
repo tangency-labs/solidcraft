@@ -60,7 +60,7 @@ fn edge_at(body: &Body, p: Vec3) -> Chain {
     let mut best: Option<(f64, usize)> = None;
     for u in edges {
         let e = &r.edges[u.edge as usize];
-        let m = CurveEval::new(&e.curve).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
+        let m = CurveEval::new(e.parameters()).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
         let d = m.dist(p);
         if best.is_none_or(|(b, _)| d < b) {
             best = Some((d, u.edge as usize));
