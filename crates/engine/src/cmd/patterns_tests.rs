@@ -1064,6 +1064,7 @@ fn pattern_count_integer_parameters_survive_save_and_reject_fractional_edits() -
     let invalid = Session::new(solidcraft_doc::Document::from_json(&saved.to_json())?);
     assert!(invalid.model.results.iter().any(|r| r.error.as_ref().is_some_and(|e| e.contains("a count must be a whole number;"))));
     Ok(())
+}
 
 /// Whether `body` has a hole through (x, y): no material there, material 2 mm beside it.
 fn hole_at(s: &Session, x: f64, y: f64) -> bool {
