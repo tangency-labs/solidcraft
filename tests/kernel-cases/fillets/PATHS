@@ -1,0 +1,15 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Fillets and chamfers (constant, per-edge, variable, G2 corners), with the drafts, shells, holes
+# and patterns they round, and the continuity the blends are graded on.
+crates/doc/src/hole_reference.rs
+crates/kernel/src/blend*.rs
+crates/kernel/src/continuity.rs
+crates/kernel/src/continuity_order.rs
+crates/kernel/src/corner_g2.rs
+crates/kernel/src/draft_corners.rs
+crates/kernel/src/fill.rs
+crates/kernel/src/offset.rs
+crates/kernel/src/offset_backend.rs
+crates/kernel/src/polyhedron.rs

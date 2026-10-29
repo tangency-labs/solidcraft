@@ -1,0 +1,15 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Sheet metal: rules, flanges, folds, unfold/refold, flat patterns, convert to sheet metal, with
+# the parameters that drive them.
+crates/doc/src/body_transfer_sheet.rs
+crates/doc/src/params.rs
+crates/doc/src/sheet.rs
+crates/doc/src/sheet_convert.rs
+crates/doc/src/sheet_face_names.rs
+crates/engine/src/cmd/parameters.rs
+crates/engine/src/cmd/sheet.rs
+crates/kernel/src/offset_backend.rs
+crates/kernel/src/polyhedron.rs
+crates/kernel/src/sew.rs

@@ -1,0 +1,30 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Combine, cuts, holes, patterns, split, mirror, draft, emboss, remove, press/pull, delete face,
+# coils, text, surface extend/thicken, and bodies moved between components.
+crates/doc/src/body_transfer.rs
+crates/doc/src/body_transfer_sheet.rs
+crates/doc/src/eval_more.rs
+crates/doc/src/eval_surface.rs
+crates/doc/src/hole_reference.rs
+crates/doc/src/thread_catalog.rs
+crates/engine/src/cmd/component.rs
+crates/engine/src/cmd/delete.rs
+crates/engine/src/cmd/features_more.rs
+crates/engine/src/cmd/surface.rs
+crates/kernel/src/assemble.rs
+crates/kernel/src/delete_face.rs
+crates/kernel/src/draft_corners.rs
+crates/kernel/src/emboss.rs
+crates/kernel/src/fill.rs
+crates/kernel/src/helix.rs
+crates/kernel/src/intersection.rs
+crates/kernel/src/offset.rs
+crates/kernel/src/offset_backend.rs
+crates/kernel/src/polybool.rs
+crates/kernel/src/polyhedron.rs
+crates/kernel/src/sew.rs
+crates/kernel/src/splitface.rs
+crates/kernel/src/surface_extend.rs
+crates/kernel/src/surfaces.rs
