@@ -1716,9 +1716,29 @@ impl Sketch {
         }
     }
 
-    /// Axis-aligned bounds of all geometry (for views).
+    /// Axis-aligned bounds of all geometry (for views). An arc's are exact: its polyline's points
+    /// need not reach the circle's extremes (a whole circle is one arc, whose chords start at its
+    /// start angle), so the quarter points it sweeps through are added.
     pub fn bounds(&self) -> Option<(Vec2, Vec2)> {
-        let b: Aabb2 = (0..self.curves.len()).flat_map(|i| self.segs(i)).flat_map(|s| s.polyline(0.5)).collect();
+        let extremes = |s: &Seg2| -> Vec<Vec2> {
+            let Seg2::Arc { center, radius, start, sweep } = *s else { return Vec::new() };
+            let (lo, hi) = if sweep >= 0.0 { (start, start + sweep) } else { (start + sweep, start) };
+            let quarter = std::f64::consts::FRAC_PI_2;
+            let first = (lo / quarter).ceil() as i64;
+            let last = (hi / quarter).floor() as i64;
+            if !(lo.is_finite() && hi.is_finite()) || last - first > 4 {
+                return Vec::new();
+            }
+            (first..=last).map(|k| center + Vec2::from_angle(k as f64 * quarter) * radius).collect()
+        };
+        let b: Aabb2 = (0..self.curves.len())
+            .flat_map(|i| self.segs(i))
+            .flat_map(|s| {
+                let mut pts = s.polyline(0.5);
+                pts.extend(extremes(&s));
+                pts
+            })
+            .collect();
         (!b.is_empty()).then_some((b.min, b.max))
     }
 }
