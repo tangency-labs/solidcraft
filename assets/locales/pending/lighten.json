@@ -18,5 +18,17 @@
   "zh": {
     "cmd.solid.lighten": "减重",
     "help.solid.lighten": "按草图轮廓切除凹槽，在相接轮廓之间以及零件外形内侧留下壁厚。用于在保留圆刀可加工壁厚的同时减轻实体。"
+  },
+  "ar": {
+    "cmd.solid.lighten": "تخفيف",
+    "help.solid.lighten": "يقطع جيوبًا من حدود الرسم ويترك جدارًا بين الحدود المتلاصقة وداخل محيط الجزء. استخدمه لتخفيف الجسم الصلب مع الإبقاء على جدران تستطيع أداة مستديرة تشغيلها."
+  },
+  "he": {
+    "cmd.solid.lighten": "הקלה",
+    "help.solid.lighten": "חותך כיסים מפרופילי סקיצה ומשאיר דופן בין פרופילים נוגעים ובתוך מתאר החלק. לשימוש להקלת גוף מוצק תוך השארת דפנות שכלי עגול יכול לעבד."
+  },
+  "vi": {
+    "cmd.solid.lighten": "Làm nhẹ",
+    "help.solid.lighten": "Cắt các hốc từ biên dạng phác thảo, để lại thành giữa các biên dạng tiếp xúc và bên trong đường bao chi tiết. Dùng để giảm khối lượng khối đặc trong khi giữ các thành mà dao tròn có thể gia công."
   }
 }
