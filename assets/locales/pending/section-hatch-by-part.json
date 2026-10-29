@@ -1,8 +1,18 @@
 {
+  "ar": {
+    "prefs.section_hatch": "تهشير المقطع",
+    "prefs.section_hatch_by_part": "حسب الجزء",
+    "prefs.section_hatch_one": "نمط واحد"
+  },
   "en": {
     "prefs.section_hatch": "Section hatch",
     "prefs.section_hatch_by_part": "By part",
     "prefs.section_hatch_one": "One style"
+  },
+  "he": {
+    "prefs.section_hatch": "קווקוו חתך",
+    "prefs.section_hatch_by_part": "לפי חלק",
+    "prefs.section_hatch_one": "סגנון אחד"
   },
   "ja": {
     "prefs.section_hatch": "断面ハッチング",

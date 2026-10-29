@@ -1279,3 +1279,19 @@ fn a_fillet_folded_through_flat_is_refused_like_a_fold() {
     }
     assert!(refused.is_some_and(|s| (7..=9).contains(&s)), "refused at {refused:?}");
 }
+
+/// A sketch's bounds reach a circle's and an arc's extremes, not only the points of their
+/// polylines: a whole circle is one arc whose chords start at its start angle, and a circle of
+/// radius 5 at (-300, 0) spans x from -305 exactly.
+#[test]
+fn bounds_reach_the_extremes_of_circles_and_arcs() {
+    let mut sk = Sketch::new();
+    sk.add_circle(v(-300.0, 0.0), 5.0, None, None).unwrap();
+    let (lo, hi) = sk.bounds().unwrap();
+    assert!(lo.dist(v(-305.0, -5.0)) < 1e-9 && hi.dist(v(-295.0, 5.0)) < 1e-9, "{lo:?} {hi:?}");
+    // A quarter arc from (10, 0) to (0, 10) about the origin: its corners, no more.
+    let mut sk = Sketch::new();
+    sk.add_arc(v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), [None; 3], None).unwrap();
+    let (lo, hi) = sk.bounds().unwrap();
+    assert!(lo.dist(v(0.0, 0.0)) < 1e-9 && hi.dist(v(10.0, 10.0)) < 1e-9, "{lo:?} {hi:?}");
+}

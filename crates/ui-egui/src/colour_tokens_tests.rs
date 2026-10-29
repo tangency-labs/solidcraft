@@ -274,9 +274,10 @@ fn every_engine_colour_tag_is_placed() {
         "AXIS_Y",
         "AXIS_Z",
     ];
-    // Bodies, edges, profiles, the grid and the background: the GPU viewport draws these from
-    // their own tokens; the engine's values are only the headless snapshot's.
-    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP"];
+    // Bodies, edges, profiles, the grid, the background and Isocurve Analysis curves (the accent):
+    // the GPU viewport draws these from their own tokens; the engine's values are only the
+    // headless snapshot's.
+    const NEUTRAL: &[&str] = &["BODY", "BODY_SELECTED", "EDGE", "PROFILE", "GRID", "GRID_MAJOR", "BG_TOP", "BG_BOTTOM", "SECTION_CAP", "ISOCURVE"];
     let src = include_str!("../../engine/src/view.rs");
     let start = src.find("pub mod colors {").unwrap_or(0);
     let block = &src[start..];
