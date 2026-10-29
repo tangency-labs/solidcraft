@@ -1274,6 +1274,14 @@ impl Sketch {
     /// the point opposite the major end to the major end, the minor axis line held on the
     /// ellipse at one end, both bisected by the centre. None for an ellipse without them (one
     /// from an older design, or whose axes were deleted).
+    ///
+    /// The axes are read from the constraints alone, with no mark in the design: any line the
+    /// centre bisects through the major end, and any other with an end held on the ellipse,
+    /// first in curve order, counts, construction or not (a diameter drawn that way before the
+    /// minor axis is taken for it). Deleting the midpoint or point-on-curve constraint makes
+    /// it an ellipse without axes. Each call scans curves times constraints, and `chain` and a
+    /// line drag ask it for every ellipse: microseconds at everyday sizes, though a sketch near
+    /// the curve and constraint limits would want an index from centre points to their lines.
     pub fn ellipse_axes(&self, e: usize) -> Option<EllipseAxes> {
         let Some(CurveKind::Ellipse { c, m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };
         let line = |l: usize| match self.curves.get(l).map(|x| &x.kind) {
