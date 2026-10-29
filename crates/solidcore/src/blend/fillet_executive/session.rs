@@ -85,6 +85,7 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 mod big_radius;
 mod classification;
 mod concave_nxn;
+mod corner_marks;
 mod crossing_rails;
 mod finish;
 mod original_merge;

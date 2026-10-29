@@ -848,6 +848,8 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         vertex_corner_map: BTreeMap::new(),
         edgeuse_solver_map: BTreeMap::new(),
         self_intersection_handler: None,
+        blend_curve_at_thirds: false,
+        mark_corner_patches: false,
     };
     // The executive constructor sets this after constructing its SmMerge base.
     executive.intersector.ignore_tangency = true;

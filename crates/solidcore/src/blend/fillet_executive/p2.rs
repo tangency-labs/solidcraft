@@ -662,6 +662,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             .ok_or_else(|| first("no radius"))?;
         let mut generator: Option<O> = None;
 
+        let at_thirds = self.blend_curve_at_thirds;
         let generator_spec = |kind: FilletSurfaceGeneratorType, circular_tol: f64| match kind {
             FilletSurfaceGeneratorType::Linear => Some(FilletSurfaceGenerator::Linear),
             FilletSurfaceGeneratorType::Circular => Some(FilletSurfaceGenerator::circular(
@@ -670,10 +671,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 false,
                 false,
             )),
-            FilletSurfaceGeneratorType::BlendCurve => Some(FilletSurfaceGenerator::blend_curve(
-                params.thumbweight,
-                params.continuity,
-            )),
+            FilletSurfaceGeneratorType::BlendCurve => {
+                Some(FilletSurfaceGenerator::blend_curve_at_thirds(
+                    params.thumbweight,
+                    params.continuity,
+                    at_thirds,
+                ))
+            }
             FilletSurfaceGeneratorType::Unknown => None,
         };
 

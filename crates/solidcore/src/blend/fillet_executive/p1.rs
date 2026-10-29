@@ -46,6 +46,7 @@
 //! | [`FilletExecutive::add_fillet_surface_generator`] | `AddFilletSurfaceGenerator`                |
 //! | [`FilletExecutive::remove_from_topo_edges`] | `RemoveFromTopoEdges`                            |
 //! | [`FilletExecutive::set_do_global_merge`], [`FilletExecutive::set_do_trimming`], [`FilletExecutive::set_self_intersection_handler`] | `SetDoGlobalMerge`, `SetDoTrimming`, `SetSelfIntersectionHandler` |
+//! | [`FilletExecutive::set_blend_curve_at_thirds`], [`FilletExecutive::set_mark_corner_patches`] | the fork's `SetBlendCurveAtThirds` (tangency-labs/smlib `fd3b6a7`), `SetMarkCornerPatches` (`60af574`); off by default |
 //! | [`is_radius_supported`]                | `SmFilletExecutive::IsRadiusSupported` (static)       |
 //! | fields `fillet`, `pseudo_brep`, `corners`, `solvers`, `error` | `GetFilletBrep`, `GetPseudoBrep`, `GetFilletCorners`, `GetFilletSolvers`, `GetFilletErrorInfo` |
 //! | [`FilletExecutive::fillet_corner_of_vertex`] | `GetFilletCornerOfVertex`                       |
@@ -696,6 +697,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             vertex_corner_map: BTreeMap::new(),
             edgeuse_solver_map: BTreeMap::new(),
             self_intersection_handler: None,
+            blend_curve_at_thirds: false,
+            mark_corner_patches: false,
         }
     }
 
@@ -828,6 +831,18 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// `SetDoTrimming`.
     pub fn set_do_trimming(&mut self, value: bool) {
         self.options.trimming = value;
+    }
+
+    /// `SetBlendCurveAtThirds` (the fork's, tangency-labs/smlib `fd3b6a7`): before
+    /// `SetFilletParameters`, which creates the section generators with it.
+    pub fn set_blend_curve_at_thirds(&mut self, value: bool) {
+        self.blend_curve_at_thirds = value;
+    }
+
+    /// `SetMarkCornerPatches` (the fork's, tangency-labs/smlib `60af574`): before
+    /// `DoFilleting`.
+    pub fn set_mark_corner_patches(&mut self, value: bool) {
+        self.mark_corner_patches = value;
     }
 
     /// `SetSelfIntersectionHandler`.

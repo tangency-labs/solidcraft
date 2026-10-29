@@ -149,6 +149,9 @@ pub mod ids {
     pub const TESSELLATING: u64 = 124;
     /// `SM_AI_REPLACE_COMPOSITES`.
     pub const REPLACE_COMPOSITES: u64 = 126;
+    /// `SM_AI_FILLET_CORNER_FACE` (the fork's, tangency-labs/smlib `60af574`): a face of
+    /// a set-back fillet corner's patch (`SmFilletExecutive::SetMarkCornerPatches`).
+    pub const FILLET_CORNER_FACE: u64 = 132;
     /// `SM_AI_METRIC_BASE`: first of the ids used by metric attributes (150-199).
     pub const METRIC_BASE: u64 = 150;
     /// `SM_AI_MASS_PROPERTIES`.

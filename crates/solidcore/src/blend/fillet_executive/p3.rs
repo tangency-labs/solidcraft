@@ -494,6 +494,14 @@ pub struct FilletExecutive<O> {
     pub edgeuse_solver_map: BTreeMap<O, O>,
     /// `m_pSelfIntersectionHandler` (added by `blend.fillet_executive_p1`).
     pub self_intersection_handler: Option<O>,
+    /// `m_bBlendCurveAtThirds` (the fork's, tangency-labs/smlib `fd3b6a7`; `FALSE` from
+    /// the constructor): `SetFilletParameters` builds its blend-curve generators with
+    /// their sections at thirds of the way to the corner.
+    pub blend_curve_at_thirds: bool,
+    /// `m_bMarkCornerPatches` (the fork's, tangency-labs/smlib `60af574`; `FALSE` from
+    /// the constructor): `DoFilleting` tags each face of a set-back corner's patch with
+    /// an `SM_AI_FILLET_CORNER_FACE` mark naming the corner before the merge.
+    pub mark_corner_patches: bool,
 }
 
 /// Error-only corner metadata, requested only after a corner operation fails.

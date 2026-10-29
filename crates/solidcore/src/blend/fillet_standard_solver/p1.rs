@@ -52,6 +52,9 @@
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
+//! - **Sections at thirds.** [`BlendCurveCrossSectionFsg::at_thirds`] is the fork's
+//!   `m_bAtThirds` (tangency-labs/smlib `fd3b6a7`, not in SMLib at the pin; off unless
+//!   the executive's `SetBlendCurveAtThirds` is set, so the default is the pinned C++).
 //! - **Object model.** `SmConstantRadiusFS` is the co-ported [`ConstantRadiusAssistedFs`]
 //!   of `blend.fillet_custom_solver` (the members of `SmFilletSolver`,
 //!   `SmConstantRadiusFS` and `SmConstantRadiusAssistedFS` are the same), aliased as
@@ -2849,14 +2852,20 @@ pub struct BlendCurveCrossSectionFsg {
     pub continuity: u32,
     /// `m_dBlendScale`: the scale of the end derivatives.
     pub blend_scale: f64,
+    /// `m_bAtThirds` (the fork's, tangency-labs/smlib `fd3b6a7`): the sections' inner
+    /// control points sit a third and two thirds of the way from each contact to
+    /// where the contacts' tangent lines meet, instead of the faired Hermite scaled
+    /// by the blend scale.
+    pub at_thirds: bool,
 }
 
 impl Default for BlendCurveCrossSectionFsg {
-    /// `SmBlendCurveCrossSectionFSG()`: blend scale `1.5`, `G1`.
+    /// `SmBlendCurveCrossSectionFSG()`: blend scale `1.5`, `G1`, not at thirds.
     fn default() -> Self {
         Self {
             continuity: 1,
             blend_scale: 1.5,
+            at_thirds: false,
         }
     }
 }
@@ -3221,6 +3230,49 @@ impl BlendCurveCrossSectionFsg {
                     *v = if n < 2 { *v * s * s } else { *v * s * s * s };
                 }
                 degree = 7;
+            }
+        }
+        // At thirds (fork fd3b6a7): the Hermite's inner control points (P0 + D0/n,
+        // P1 - D1/n for degree n) a third of the way from each contact to where the two
+        // contact tangent lines meet, so D_i is n/3 of that distance; the higher
+        // derivatives keep their curvature with it.
+        if self.at_thirds {
+            let [d0, d1] = vectors;
+            let l0 = d0.length();
+            let l1 = d1.length();
+            let w = p1 - p2;
+            if l0 > EFF_ZERO && l1 > EFF_ZERO {
+                let d0 = d0 / l0;
+                let d1 = d1 / l1;
+                // Lines P0 + u d0 and P1 - v d1 (u, v > 0 run towards the corner).
+                let b = -d0.dot(d1);
+                let den = 1.0 - b * b;
+                if den > 1.0e-10 {
+                    let dd = d0.dot(w);
+                    let e = -d1.dot(w);
+                    let u = (b * e - dd) / den;
+                    let v = (e - b * dd) / den;
+                    if u > EFF_ZERO && v > EFF_ZERO {
+                        let n = degree as f64;
+                        let k0 = (n / 3.0) * u / l0;
+                        let k1 = (n / 3.0) * v / l1;
+                        let [v0, v1] = &mut vectors;
+                        *v0 *= k0;
+                        *v1 *= k1;
+                        if let Some(h) = higher_order_vecs.as_mut() {
+                            let len = h.len();
+                            for (index, vec) in h.iter_mut().enumerate() {
+                                *vec = match index {
+                                    0 => *vec * (k0 * k0),
+                                    1 => *vec * (k1 * k1),
+                                    2 if len == 4 => *vec * (k0 * k0 * k0),
+                                    3 if len == 4 => *vec * (k1 * k1 * k1),
+                                    _ => *vec,
+                                };
+                            }
+                        }
+                    }
+                }
             }
         }
         BSplineCurve::create_interpolating_curve(

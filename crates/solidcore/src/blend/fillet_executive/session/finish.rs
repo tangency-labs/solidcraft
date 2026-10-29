@@ -505,6 +505,9 @@ impl FilletSession<'_> {
                 session.refuse_crossing_rails(k)?;
             }
             session.shrink_fillet_faces(k)?;
+            // The fork's SetMarkCornerPatches (60af574): mark the set-back corners'
+            // patch faces, which the merge copies into the target with their marks.
+            session.mark_corner_patches()?;
             let editing = session.objects.target.editing_enabled();
             session.objects.target.set_editing_enabled(true);
             let result = session.merge_fillet(k);
