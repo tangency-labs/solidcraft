@@ -123,6 +123,20 @@ class Real(unittest.TestCase):
                     rx = plan.glob_regex(g)
                     self.assertTrue(any(rx.match(t) for t in tracked), f"{area}: {g} matches no file")
 
+    def test_an_area_names_only_its_own_files(self):
+        # The shared core is in PATHS-ALL; an area's PATHS repeating it (or a whole crate's
+        # folder) would only blur what the area is about.
+        ls = ["git", "ls-files", "--cached", "--others", "--exclude-standard"]
+        files = subprocess.run(ls, cwd=ROOT, check=True, capture_output=True, text=True).stdout.split("\n")
+        shared = plan.read_globs(os.path.join(ROOT, plan.CASES, "PATHS-ALL"))
+        core = {f for f in files if plan.matches(shared, f)}
+        for area, globs in plan.areas(ROOT).items():
+            for g in globs:
+                rx = plan.glob_regex(g)
+                overlap = sorted(f for f in core if rx.match(f))
+                with self.subTest(area=area, glob=g):
+                    self.assertFalse(overlap, f"{area}/PATHS: {g} names shared-core files (PATHS-ALL): {overlap[:3]}")
+
     def test_the_workflow_triggers_on_every_glob(self):
         events = trigger_globs()
         self.assertEqual(events["pull_request"], events["push"])
