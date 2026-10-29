@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "config.activate of a row that suppresses the hole",
+ "method": "the 40x30x10 block without its hole: V = 12000; 6 faces",
+ "body_count": 1,
+ "volume_mm3": 12000.0,
+ "faces": 6,
+ "source": "analytic"
+}
