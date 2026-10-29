@@ -1068,6 +1068,12 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     own.push(Item::sep());
     own.push(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "component": id })));
+    if doc.links.contains_key(&id) {
+        own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+    } else if id != 0 && app.session.can_extract(id) {
+        own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
+    }
+    own.push(Item::sep());
     own.push(
         act("ui.appearance", "Appearance", "appearance")
             .key("A")
@@ -1079,11 +1085,6 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         own.push(cmd(app, "component.cycle_color", "Cycle Component Color").with(json!({"component": id})));
     }
     own.push(Item::sep());
-    if doc.links.contains_key(&id) {
-        own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
-    } else if id != 0 && app.session.can_extract(id) {
-        own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
-    }
     own.push(act("ui.properties", "Properties", "measure").with(json!({ "component": id })));
     if id == 0 {
         own.push(act("ui.designProperties", "Design Properties", "settings"));

@@ -1867,8 +1867,11 @@ fn keys_walk_into_nested_flyouts_and_left_steps_back_one_level() {
     h.app.menu.key_row = rows.iter().position(|i| i.id == "ui.group.component");
     h.step(&json!({"key":"ArrowRight"})).unwrap();
     assert!(rect_of("menu:ui.rename:Rename").is_some(), "Right opens the Component flyout");
-    h.step(&json!({"key":"ArrowDown"})).unwrap();
-    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    let own = &find(&rows, "Component").children;
+    let downs = own.iter().filter(|i| i.enabled && i.id != "-" && !i.id.starts_with('#')).position(|i| i.id == "ui.appearance").unwrap();
+    for _ in 0..downs {
+        h.step(&json!({"key":"ArrowDown"})).unwrap();
+    }
     h.step(&json!({"key":"ArrowRight"})).unwrap();
     h.frames(2);
     assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "Right on Appearance opens its quick choices");

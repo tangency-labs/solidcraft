@@ -400,11 +400,11 @@ mod tests {
         app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [5, 0, 0], "capture": false})).unwrap();
         assert!(find(&app, component).is_none());
         app.run("component.revert_position", json!({})).unwrap();
-        // In Relink Source's place in the Component flyout, right before Properties
+        // In Relink Source's place in the Component flyout, right below Rename
         let rows = context_menu::items(&app, &Target::Component { id: component });
         let ids: Vec<&str> = rows.iter().find(|i| i.label == "Component").unwrap().children.iter().map(|i| i.id.as_str()).collect();
-        let properties = ids.iter().position(|i| *i == "ui.properties").unwrap();
-        assert_eq!(ids.get(properties.wrapping_sub(1)), Some(&"ui.extractComponent"));
+        let rename = ids.iter().position(|i| *i == "ui.rename").unwrap();
+        assert_eq!(ids.get(rename + 1), Some(&"ui.extractComponent"));
         let item = find(&app, component).unwrap();
         let chosen = folder.join("bracket").to_string_lossy().into_owned();
         app.services.pick_save = Some(Box::new(move |name, extensions| {
