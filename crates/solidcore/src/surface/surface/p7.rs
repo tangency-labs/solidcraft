@@ -1829,8 +1829,9 @@ impl Surface {
         // sweep vector
         let sweep_vec = projection_vector.unitize()? * projection_distance;
 
-        // swept surface
-        let mut sweep_curve = curve.clone();
+        // swept surface (CreateLinearSweep sweeps the projected curve's own NURB:
+        // an exact copy, not the copy constructor's knot fix-up)
+        let mut sweep_curve = curve.clone_exact();
         let mut projection_surface = Surface::from(BSplineSurface::create_linear_sweep(
             &mut sweep_curve,
             sweep_vec,
