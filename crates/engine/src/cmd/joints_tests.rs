@@ -235,21 +235,40 @@ fn interference_finds_a_peg_overlapping_a_small_rib() {
     assert!((lo[0].as_f64().unwrap_or(0.0) - 19.7).abs() < 1e-6 && (hi[0].as_f64().unwrap_or(0.0) - 19.85).abs() < 1e-6, "{i}");
 }
 
-/// An arc revolved up to a post ends on the post's wall, where the two bodies can't be
-/// intersected: the pair is listed as unchecked instead of passing as clear.
+/// A pair interference can't check is listed as unchecked, with its reason, instead of passing
+/// as clear. Truck could not intersect an arc revolved up to a post's wall; SMLib does, exactly,
+/// so the pair that can't be checked is now an imported mesh beside a solid.
 #[test]
 fn interference_lists_a_pair_it_could_not_check() {
+    // A quarter ring revolved round z through the post, brought in as an imported mesh (an STL
+    // of it): a mesh body has no exact surfaces to intersect, so its pair with the post is listed
+    // as not checked, with the reason, rather than read as clear.
+    let dir = std::env::temp_dir().join(format!("solidcraft-unchecked-pair-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("arc.stl");
+    let mut source = Session::default();
+    run(&mut source, "sketch.create", json!({"name": "Profile", "plane": "XZ"}));
+    run(&mut source, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [15, 5]}));
+    run(&mut source, "sketch.finish", json!({}));
+    run(
+        &mut source,
+        "solid.revolve",
+        json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "90 deg", "body_name": "Arc"}),
+    );
+    run(&mut source, "file.export", json!({"path": stl.to_string_lossy()}));
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 14, -5], "radius": 4, "height": 15, "body_name": "Post"}));
-    run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XZ"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [15, 5]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "to": [4, 14, 2], "body_name": "Arc"}));
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect();
+    assert_eq!(mesh.len(), 1, "{mesh:?}");
     let i = run(&mut s, "inspect.interference", json!({}));
     assert_eq!(i["count"], 0, "{i}");
     let unchecked = i["unchecked"].as_array().cloned().unwrap_or_default();
     assert_eq!(unchecked.len(), 1, "{i}");
-    assert!(unchecked[0]["reason"].as_str().is_some_and(|r| r.starts_with("not verified") && !r.contains("displacement")), "{i}");
+    assert_eq!(unchecked[0]["a"].as_str(), mesh.first().map(String::as_str), "{i}");
+    assert_eq!(unchecked[0]["reason"], "mesh body: not checked", "{i}");
     // Bodies that are clear of each other, or overlap plainly, leave the list empty.
     let mut s = two_cubes();
     let i = run(&mut s, "inspect.interference", json!({}));
