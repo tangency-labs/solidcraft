@@ -1677,9 +1677,33 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
     assert_eq!((r["axis"].clone(), r["measured"].clone()), (json!("major"), json!(20.0)), "{r}");
 }
 
+/// With one half-axis already dimensioned, D on the outline gives the other one wherever the
+/// text is pulled: guessing the one that is already there would only be refused. Either order,
+/// with both axes, with one deleted and with none.
+#[test]
+fn an_ellipse_s_second_half_axis_is_the_one_not_yet_dimensioned() {
+    for gone in [&[][..], &["major"][..], &["minor"][..], &["major", "minor"][..]] {
+        for (first, at, second) in [("major", [3.0, 16.0], "minor"), ("minor", [30.0, 3.0], "major")] {
+            let mut s = new_sketch();
+            let (e, major, minor) = ellipse_with_axes(&mut s, false);
+            let deleted: Vec<String> = gone.iter().map(|g| if *g == "major" { major.clone() } else { minor.clone() }).collect();
+            if !deleted.is_empty() {
+                run(&mut s, "sketch.delete", json!({"entities": deleted}));
+            }
+            let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+            assert_eq!(r["axis"], json!(first), "{gone:?}: {r}");
+            let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+            assert_eq!(r["axis"], json!(second), "{gone:?}, {first} first, then text at {at:?} again: {r}");
+            assert!(r["param"].is_string(), "{gone:?}: the second one drives: {r}");
+        }
+    }
+}
+
 /// A half-axis and its whole axis are one dimension: whichever comes second is determined by
 /// the first, so the Dimension tool's `if_redundant: "driven"` adds it as a reference, and
-/// without it the command refuses it. Both orders, both axes.
+/// without it the command refuses it. Both orders, both axes. After the whole axis, D on the
+/// outline with no type gives the other half-axis, the one not yet held; the same half-axis
+/// is asked for by its type.
 #[test]
 fn an_ellipse_half_axis_and_its_whole_axis_determine_each_other() {
     for (axis, text_at) in [("major", [3.0, 16.0]), ("minor", [30.0, 3.0])] {
@@ -1687,8 +1711,15 @@ fn an_ellipse_half_axis_and_its_whole_axis_determine_each_other() {
             let mut s = new_sketch();
             let (e, major, minor) = ellipse_with_axes(&mut s, false);
             let line = if axis == "major" { major } else { minor };
-            let half = json!({"entities": [e], "text_at": text_at});
+            let half = json!({"entities": [e], "text_at": text_at, "type": axis});
             let whole = json!({"entities": [line]});
+            if !half_first {
+                let mut t = new_sketch();
+                let (e, major, minor) = ellipse_with_axes(&mut t, false);
+                run(&mut t, "sketch.dimension", json!({"entities": [if axis == "major" { major } else { minor }]}));
+                let r = run(&mut t, "sketch.dimension", json!({"entities": [e], "text_at": text_at}));
+                assert_ne!(r["axis"], json!(axis), "{axis}: after the whole axis, the other half-axis: {r}");
+            }
             let (first, second) = if half_first { (half, whole) } else { (whole, half) };
             let r = run(&mut s, "sketch.dimension", first);
             assert!(r["param"].is_string(), "{axis}: the first one drives: {r}");

@@ -2871,6 +2871,12 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 if matches!(ty.as_str(), "auto" | "major" | "minor") {
                     let (major, minor) = sk.ellipse_axis_lines(c).unwrap_or((None, None));
                     let ends = (m, major.map(|(_, m2)| m2), minor.map(|(_, n1, n2)| [n1, n2]));
+                    // With one half-axis already held, the other is the only one left to guess.
+                    let ty = match (ty.as_str(), half_axes_held(sk, c, cp, m, major, minor)) {
+                        ("auto", (true, false)) => "minor".to_string(),
+                        ("auto", (false, true)) => "major".to_string(),
+                        _ => ty.clone(),
+                    };
                     let (which, end) = ellipse_half_axis(sk, cp, ends, r, &ty, text_at, previous_axis.as_deref());
                     axis = Some(which);
                     match end {
@@ -3160,6 +3166,36 @@ fn auto_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
 /// a dimension being placed keeps the half-axis it had, so the preview does not flip back and
 /// forth while the pointer crosses slowly.
 const HALF_AXIS_DEAD_ZONE: f64 = 1.25;
+
+/// Whether a driving dimension already holds ellipse `e`'s major and its minor half-axis: a
+/// half-axis to an axis end (or the minor radius), or the whole axis, along its line or between
+/// its ends.
+fn half_axes_held(sk: &Sketch, e: usize, c: usize, m: usize, major: Option<(usize, usize)>, minor: Option<(usize, usize, usize)>) -> (bool, bool) {
+    let pair = |p: usize, q: usize, a: usize, b: usize| (p == a && q == b) || (p == b && q == a);
+    let mut held = (false, false);
+    for k in sk.constraints.iter().filter(|k| !k.driven) {
+        match k.kind {
+            ConstraintKind::Distance { p, q, .. } => {
+                let major_end = |x: usize| x == m || major.is_some_and(|(_, m2)| x == m2);
+                let minor_end = |x: usize| minor.is_some_and(|(_, n1, n2)| x == n1 || x == n2);
+                if pair(p, q, c, m) || major.is_some_and(|(_, m2)| pair(p, q, c, m2) || pair(p, q, m, m2)) {
+                    held.0 = true;
+                } else if minor.is_some_and(|(_, n1, n2)| pair(p, q, n1, n2)) || (p == c && minor_end(q)) || (q == c && minor_end(p)) {
+                    held.1 = true;
+                } else if (p == c && major_end(q)) || (q == c && major_end(p)) {
+                    held.0 = true;
+                }
+            }
+            ConstraintKind::Length { l, .. } => {
+                held.0 |= major.is_some_and(|(line, _)| line == l);
+                held.1 |= minor.is_some_and(|(line, ..)| line == l);
+            }
+            ConstraintKind::Radius { c: on, .. } => held.1 |= on == e,
+            _ => {}
+        }
+    }
+    held
+}
 
 /// Which half-axis of an ellipse a dimension measures, and the axis end it goes to. `ends` is
 /// what it has of its axes: the major end (always its own), the point opposite it, the minor
