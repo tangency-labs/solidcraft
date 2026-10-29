@@ -750,6 +750,16 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
+    // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
+    // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
+    // macOS version than the GPU's Metal compiler supports. Re-launching with
+    // SYSTEM_VERSION_COMPAT=1 makes the OS report the real (older) version so wgpu selects
+    // a standard the compiler accepts. The variable must be set before the process starts, so
+    // we detect OCLP here and re-exec immediately, before any macOS framework call (#3080, #4605).
+    #[cfg(target_os = "macos")]
+    if let Err(e) = startup::relaunch_with_version_compat() {
+        log::warn!("startup: OCLP check failed (continuing normally): {e}");
+    }
     // Validate before legacy adoption, crash markers or any user preference read.
     let settings = settings_dir().map_err(|error| eframe::Error::AppCreation(error.into()))?;
     if std::env::var_os("SOLIDCRAFT_SETTINGS_DIR").is_none() {
