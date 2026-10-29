@@ -1673,6 +1673,8 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
     run(&mut s, "sketch.delete", json!({"entities": [minor]}));
     let line = run(&mut s, "sketch.line", json!({"points": [[40, -30], [40, 30]], "connect": false}))["curves"][0].as_str().unwrap().to_string();
     let copy = run(&mut s, "sketch.mirror", json!({"entities": [e, major], "line": line}))["curves"][0].as_str().unwrap().to_string();
+    let sk = sketch(&s);
+    assert!(sk.ellipse_axis_lines(sk.curve_index(&copy).unwrap()).is_none(), "the mirror has no axes");
     let r = run(&mut s, "sketch.dimension", json!({"entities": [copy], "text_at": [77, 16]}));
     assert_eq!((r["axis"].clone(), r["measured"].clone()), (json!("major"), json!(20.0)), "{r}");
 }
@@ -1696,6 +1698,24 @@ fn an_ellipse_s_second_half_axis_is_the_one_not_yet_dimensioned() {
             assert_eq!(r["axis"], json!(second), "{gone:?}, {first} first, then text at {at:?} again: {r}");
             assert!(r["param"].is_string(), "{gone:?}: the second one drives: {r}");
         }
+    }
+    // The whole axis held counts too: as a distance between its ends, or as its line's length
+    // with the other axis deleted.
+    for axis in ["major", "minor"] {
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, false);
+        let line = if axis == "major" { &major } else { &minor };
+        run(&mut s, "sketch.dimension", json!({"entities": [format!("{line}.start"), format!("{line}.end")], "type": "distance"}));
+        let at = if axis == "major" { [3.0, 16.0] } else { [30.0, 3.0] };
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+        assert_ne!(r["axis"], json!(axis), "{axis} held between its ends: {r}");
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, false);
+        let (line, other) = if axis == "major" { (major, minor) } else { (minor, major) };
+        run(&mut s, "sketch.delete", json!({"entities": [other]}));
+        run(&mut s, "sketch.dimension", json!({"entities": [line]}));
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+        assert_ne!(r["axis"], json!(axis), "{axis} held by its line, the other axis deleted: {r}");
     }
 }
 

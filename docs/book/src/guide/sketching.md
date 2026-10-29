@@ -325,6 +325,7 @@ As with a Center Rectangle's diagonals, trim, extend and break stop at them, and
 ellipse is deleted.
 Click the ellipse and pull the value across its major axis for the major half-axis, or out past an
 end of the major axis for the minor half-axis, also on an ellipse whose axis lines were deleted;
+once one half-axis has a dimension, the next click on the ellipse gives the other;
 click an axis line for the whole axis. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 

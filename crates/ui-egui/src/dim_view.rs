@@ -1479,7 +1479,8 @@ mod tests {
 
     /// An ellipse's half-axis placement starts from where its text is: neither the draft made
     /// before the text was placed (the minor half-axis by default) nor the dimension placed
-    /// before it biases which half-axis it takes near the boundary.
+    /// before it biases which half-axis it takes near the boundary. (That dimension is undone
+    /// first: while it holds the major half-axis, D gives the minor one wherever the text is.)
     #[test]
     fn an_ellipse_half_axis_placement_starts_from_where_its_text_is() {
         cancel();
@@ -1500,6 +1501,8 @@ mod tests {
         h.step(&json!({"key":"Enter"})).unwrap();
         h.settle();
         assert!(!editing());
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
         // The next one on the same ellipse, picked near the boundary on the minor side, the
         // text where it was picked: the minor.
         h.step(&json!({"click":{"sketch":[14.863,-5.353]}})).unwrap();
