@@ -708,6 +708,42 @@ fn fillet_and_chamfers() {
     assert!(s.execute("sketch.fillet", &json!({"a": l[0], "b": l[2], "radius": 1})).is_err(), "no shared corner");
 }
 
+/// A rectangle drawn as four separate lines (each its own points, the corners held by
+/// coincident constraints) offsets as one closed shape, every side the same way. Its lines used
+/// to be offset one by one, each to the left of the way it was drawn: both horizontals moved up
+/// and the corners came apart.
+#[test]
+fn offset_of_lines_drawn_one_by_one_stays_a_closed_shape() {
+    let mut s = new_sketch();
+    for pts in [[[0, 0], [20, 0]], [[20, 0], [20, 10]], [[0, 10], [20, 10]], [[0, 0], [0, 10]]] {
+        run(&mut s, "sketch.line", json!({"points": pts}));
+    }
+    let r = run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": 2}));
+    let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
+    assert_eq!(made.len(), 4, "{r}");
+    let sk = sketch(&s);
+    let ends: Vec<(Vec2, Vec2, usize, usize)> = made
+        .iter()
+        .map(|id| match sk.curves[sk.curve_index(id).unwrap()].kind {
+            CurveKind::Line { a, b } => (sk.points[a].pos, sk.points[b].pos, a, b),
+            _ => panic!("{id} is not a line"),
+        })
+        .collect();
+    // Every side 2 in: the bottom up, the top down, the sides in.
+    let mut ys: Vec<f64> = ends.iter().filter(|e| (e.0.y - e.1.y).abs() < 1e-9).map(|e| e.0.y).collect();
+    let mut xs: Vec<f64> = ends.iter().filter(|e| (e.0.x - e.1.x).abs() < 1e-9).map(|e| e.0.x).collect();
+    ys.sort_by(f64::total_cmp);
+    xs.sort_by(f64::total_cmp);
+    assert!(ys.len() == 2 && (ys[0] - 2.0).abs() < 1e-9 && (ys[1] - 8.0).abs() < 1e-9, "{ys:?}");
+    assert!(xs.len() == 2 && (xs[0] - 2.0).abs() < 1e-9 && (xs[1] - 18.0).abs() < 1e-9, "{xs:?}");
+    // Closed: each corner point is shared by two of the new lines.
+    for (_, _, a, b) in &ends {
+        for p in [a, b] {
+            assert_eq!(ends.iter().filter(|e| e.2 == *p || e.3 == *p).count(), 2, "corner {p} is shared");
+        }
+    }
+}
+
 #[test]
 fn offset_chain_mirror_patterns_move_scale() {
     let mut s = new_sketch();
