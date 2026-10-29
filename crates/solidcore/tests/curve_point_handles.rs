@@ -55,8 +55,10 @@ fn opaque_curve_comparison_uses_natural_not_query_interval() {
     );
     second.objects[0] = first.objects[0];
     solver.curve = None;
-    assert!(solver
-        .identical_solutions(&first, &second)
-        .unwrap_err()
-        .is_unported());
+    // a curve handle whose natural interval nothing can reach is invalid input
+    // (geom::solution_array's curve_natural_interval)
+    assert!(matches!(
+        solver.identical_solutions(&first, &second).unwrap_err(),
+        solidcore::SolidError::InvalidInput { .. }
+    ));
 }

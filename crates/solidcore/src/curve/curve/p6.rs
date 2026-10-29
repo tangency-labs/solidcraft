@@ -86,12 +86,15 @@ use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
-use crate::geom::global_solver::{GlobalSolve, GlobalSolver, SolutionRequested, SolverOperation};
+use crate::geom::global_solver::{
+    GlobalSolve, GlobalSolver, PreferredSolution, SolutionPairType, SolutionRequested,
+    SolverOperation,
+};
 use crate::geom::object::ObjectRef;
 use crate::geom::polar_box::{PolarBox, PolarBoxState};
 use crate::geom::pseudo_box::{Planar, PseudoBox};
 use crate::geom::solution_array::{
-    ObjectKind, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
+    ObjectKind, ParameterDomains, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
 use crate::geom::tol::{approx_tol_3d, are_same, is_zero, SmallTopoType, ZONE_TOL_3D};
 use crate::geom::vector3d::{Point3, Vec3};
@@ -134,6 +137,50 @@ impl SolutionObject for CurveHandle {
 
     fn natural_interval(&self) -> Option<Extent1d> {
         Some(self.0)
+    }
+}
+
+/// The two curves of [`Curve::global_coincidence_checker`] as its merged solutions name
+/// them (upstream's `this` and `crOtherCurve`): each handle's natural interval is its
+/// curve's (a handle's own answer first).
+struct CurvePair<O> {
+    objects: [Option<O>; 2],
+    intervals: [Extent1d; 2],
+}
+
+impl<O: SolutionObject> ParameterDomains<O> for CurvePair<O> {
+    fn natural_interval(&self, curve: &O) -> Option<Extent1d> {
+        curve.natural_interval().or_else(|| {
+            self.objects
+                .iter()
+                .zip(&self.intervals)
+                .find_map(|(h, ivl)| (h.as_ref() == Some(curve)).then_some(*ivl))
+        })
+    }
+}
+
+/// The `SmGlobalSolver` merging the split parts' solutions, its `IdenticalSolutions`
+/// (not overridden upstream) reading the curves' natural intervals ([`CurvePair`]).
+struct MergeSolver<'t, O> {
+    base: GlobalSolver<'t, O>,
+    domains: CurvePair<O>,
+}
+
+impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for MergeSolver<'t, O> {
+    fn solver(&self) -> &GlobalSolver<'t, O> {
+        &self.base
+    }
+
+    fn solver_mut(&mut self) -> &mut GlobalSolver<'t, O> {
+        &mut self.base
+    }
+
+    fn identical_solutions(
+        &self,
+        sol1: &Solution<O>,
+        sol2: &Solution<O>,
+    ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
+        self.base.identical_solutions_in(sol1, sol2, &self.domains)
     }
 }
 
@@ -1533,7 +1580,15 @@ impl Curve {
                     .solutions,
                 );
             }
-            return self.merge_split_solutions(k, &parts, interval, other, other_interval, true);
+            return self.merge_split_solutions(
+                k,
+                &parts,
+                interval,
+                other,
+                other_interval,
+                true,
+                objects,
+            );
         }
 
         // Do the same recursive division if the second curve is closed.
@@ -1557,7 +1612,15 @@ impl Curve {
                     .solutions,
                 );
             }
-            return self.merge_split_solutions(k, &parts, interval, other, other_interval, false);
+            return self.merge_split_solutions(
+                k,
+                &parts,
+                interval,
+                other,
+                other_interval,
+                false,
+                objects,
+            );
         }
 
         // Two non closed intervals: drop the endPoints, sort them and test the
@@ -1817,7 +1880,9 @@ impl Curve {
     /// [`Curve::global_coincidence_checker`] (this curve split when `split_this`,
     /// else the other), skipping point solutions across a closed seam, sorted by all
     /// parameters, and decides whether more work is needed: not when the leading
-    /// contiguous run of range solutions covers all of either interval.
+    /// contiguous run of range solutions covers all of either interval. The solutions
+    /// name this curve and `other` (`objects`), whose natural intervals the merge's
+    /// `IdenticalSolutions` reads ([`MergeSolver`]).
     fn merge_split_solutions<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -1826,13 +1891,21 @@ impl Curve {
         other: &Self,
         other_interval: &Extent1d,
         split_this: bool,
+        objects: [Option<O>; 2],
     ) -> Result<Coincidence<O>> {
         // Now Combine the solutions if there are any
-        let mut gs: GlobalSolver<'_, O> = GlobalSolver::new();
-        gs.num_trees = 2;
-        gs.num_variables = 2;
-        gs.tolerance_3d = 0.0;
-        gs.set_solutions(SolutionArray::new());
+        let mut base: GlobalSolver<'_, O> = GlobalSolver::new();
+        base.num_trees = 2;
+        base.num_variables = 2;
+        base.tolerance_3d = 0.0;
+        base.set_solutions(SolutionArray::new());
+        let mut gs = MergeSolver {
+            base,
+            domains: CurvePair {
+                objects,
+                intervals: [self.natural_interval(), other.natural_interval()],
+            },
+        };
 
         for part in parts {
             for sol in part {
@@ -1868,7 +1941,7 @@ impl Curve {
                 gs.add_sorted_solution(sol, SortKey::ByAllParameters, true)?;
             }
         }
-        let solutions = gs.set_solutions(SolutionArray::new());
+        let solutions = gs.base.set_solutions(SolutionArray::new());
 
         // accumulate coincident range domains
         let mut check_ivl1 = Extent1d::new();
