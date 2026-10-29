@@ -769,7 +769,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
         v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
         v.push(Item::sep());
-        if app.session.section.is_some() {
+        if !app.session.section.is_empty() {
             v.push(act("ui.unsection", "Remove Section", "section"));
         }
         v.push(act("ui.origin", if app.origin_shown() { "Hide Origin" } else { "Show Origin" }, "origin"));
@@ -1691,7 +1691,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.origin" => app.set_origin_shown(!app.origin_shown()),
         "ui.clear" => drop(app.run("select.clear", json!({}))),
         "ui.unsection" => {
-            app.tree.hidden_section = None;
+            app.tree.hidden_section.clear();
             drop(app.run("inspect.section", json!({"clear": true})));
         }
         "ui.editSection" => crate::dialogs::edit_section(app),
@@ -2327,7 +2327,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         Target::Canvas { id } => doc.canvases.iter().any(|c| c.id == *id),
         Target::PointCloud { id } => doc.point_clouds.iter().any(|c| c.id == *id),
         // Shown or hidden, the browser lists it.
-        Target::Section => app.session.section.is_some() || app.tree.hidden_section.is_some(),
+        Target::Section => !app.session.section.is_empty() || !app.tree.hidden_section.is_empty(),
     };
     if found {
         return Ok(());
