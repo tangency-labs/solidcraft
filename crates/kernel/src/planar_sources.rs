@@ -225,9 +225,13 @@ impl Body {
         let mapped = guard("exact planar support lineage", || {
             let mut competing = Vec::new();
             for plane in blocker.map(actual_planes).transpose()?.into_iter().flatten().flatten() {
-                // A tool face blocks a face on its plane facing either way.
+                // A cut's tool face enters the result turned round (the wall of the hollow it
+                // leaves), so it competes only with a face on its plane facing against it: a
+                // pocket's floor, or a target face the tool sat on from outside. A tool face that
+                // faces the same way as the target's face on its plane (a pocket cut down from a
+                // cap, its top on the cap) is the tool's own outside and leaves the cap the cap.
                 let opposing = Plane::new(plane.origin, plane.x, -plane.y).ok_or_else(|| KernelError::Invalid("invalid opposing plane".into()))?;
-                competing.extend([plane, opposing]);
+                competing.push(opposing);
             }
             competing.sort_by(|a, b| a.normal().x.total_cmp(&b.normal().x));
             let mut candidates = Vec::new();

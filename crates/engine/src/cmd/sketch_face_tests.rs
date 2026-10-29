@@ -75,11 +75,26 @@ fn explicit_rebind_preserves_geometry_dimensions_context_and_one_undo() {
 #[test]
 fn unsupported_face_has_explicit_fixed_alternative_and_no_live_projection() {
     let mut s = Session::default();
-    // A top half Offset Face raised: no construction certificate and no exact history name yet.
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Base"}));
-    run(&mut s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
-    run(&mut s, "solid.offset_face", json!({"faces":[[10,15,20]],"distance":5}));
-    let mut pick = top_pick(&s, "Base");
+    // A rib's wall: a rib reports no roles for the faces it builds (Traced::unnamed), so the
+    // wall has no construction certificate and no exact history name to attach by.
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
+    run(&mut s, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+    let mut pick = {
+        let world = s.world_state().unwrap();
+        let body = world.body("L").unwrap();
+        let face = body
+            .body
+            .faces(0.01)
+            .unwrap()
+            .into_iter()
+            .find(|face| face.plane_normal.is_some_and(|n| n.dot(Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
+            .unwrap();
+        json!({"body":"L","index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
+    };
     let before = s.doc.to_json();
     let error = s.execute("sketch.create", &json!({"plane":pick})).unwrap_err();
     assert!(error.to_string().contains("fixed"), "{error}");
@@ -353,6 +368,10 @@ fn freezing_rebuilt_arc_borders_keeps_authored_dimension_entity_indices() {
     run(&mut s, "sketch.line", json!({"points":[format!("{arc}.end"),format!("{arc}.start")],"infer":false}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":profile,"distance":10,"operation":"new","body_name":"Sector"}));
+    // A notch clear of the sector until `notch` moves it across the arc at 90°: then the top face's
+    // arc border is rebuilt in two arcs and the notch's sides.
+    run(&mut s, "parameters.add", json!({"name":"notch","expression":"30 mm"}));
+    run(&mut s, "solid.box", json!({"corner":["-1 mm","notch","-1 mm"],"length":2,"width":2,"height":12,"operation":"cut","targets":["Sector"]}));
     let pick = top_pick(&s, "Sector");
     let id = run(&mut s, "sketch.create", json!({"plane":pick}))["sketch"].as_u64().unwrap();
     let circle = run(&mut s, "sketch.circle.center", json!({"center":[20,20],"radius":2}))["curves"][0].as_str().unwrap().to_owned();
@@ -360,7 +379,8 @@ fn freezing_rebuilt_arc_borders_keeps_authored_dimension_entity_indices() {
     run(&mut s, "sketch.finish", json!({}));
     let before_count = s.model.state().sketch(id).unwrap().sketch.curves.len();
     run(&mut s, "parameters.change", json!({"name":"turn","expression":"300 deg"}));
-    assert!(s.model.result(id).unwrap().error.is_none());
+    run(&mut s, "parameters.change", json!({"name":"notch","expression":"9 mm"}));
+    assert!(s.model.result(id).unwrap().error.is_none(), "{:?}", s.model.result(id).unwrap().error);
     let visible = s.model.state().sketch(id).unwrap().sketch.clone();
     assert_ne!(visible.curves.len(), before_count, "fixture must rebuild projected topology");
     let mut pick = top_pick(&s, "Sector");
