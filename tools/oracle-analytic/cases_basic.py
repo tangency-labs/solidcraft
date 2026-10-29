@@ -371,6 +371,74 @@ def c16_sweep():
                   "from the bend axis along the bisector) + 2 end disks", 1, mp.v, A, mp.com(), [-r, -r, 0], [50, r, 50 + r], 5)
 
 
+def c17_loft():
+    """A ruled loft from the 40 x 40 square at z = 0 to the circle r 10 at z = 40. Each side of the
+    square runs to one quarter of the circle, the corner (20, -20) to angle -45 deg, and both by
+    their own parameters: the side linearly, the quarter as the exact rational quadratic arc
+    (middle weight sqrt(2) / 2) that is the circle's B-spline form. Point (u, t) of a wall is
+    (1 - t) S(u) + t C(u) at height 40 t, so the section at t is the blend of the two loops and
+    its area A(t) = (1 - t)^2 A_S + t^2 A_C + t (1 - t) M with M the mixed area
+    1/2 int (S x C' + C x S') du."""
+    h, half, r = 40.0, 20.0, 10.0
+    w = math.sqrt(2.0) / 2.0
+    corners = [(half, -half), (half, half), (-half, half), (-half, -half)]
+
+    def side(k, t):
+        (ax, ay), (bx, by) = corners[k], corners[(k + 1) % 4]
+        return (ax + (bx - ax) * t, ay + (by - ay) * t), (bx - ax, by - ay)
+
+    def quarter(k, t):
+        a0 = -PI / 4 + k * PI / 2
+        p0 = (r * math.cos(a0), r * math.sin(a0))
+        p2 = (r * math.cos(a0 + PI / 2), r * math.sin(a0 + PI / 2))
+        p1 = (p0[0] + p2[0], p0[1] + p2[1])  # the control polygon's corner, sqrt(2) r out
+        b = [(1 - t) ** 2, 2 * t * (1 - t) * w, t * t]
+        db = [-2 * (1 - t), 2 * (1 - 2 * t) * w, 2 * t]
+        d = sum(b)
+        dd = sum(db)
+        n = [sum(bi * q[i] for bi, q in zip(b, (p0, p1, p2))) for i in range(2)]
+        dn = [sum(bi * q[i] for bi, q in zip(db, (p0, p1, p2))) for i in range(2)]
+        return (n[0] / d, n[1] / d), ((dn[0] * d - n[0] * dd) / (d * d), (dn[1] * d - n[1] * dd) / (d * d))
+
+    xs, ws = GL
+    a_s, a_c = (2 * half) ** 2, PI * r * r
+    mixed = 0.0
+    area_walls = 0.0
+    for k in range(4):
+        for x, wu in zip(xs, ws):
+            u = 0.5 * (x + 1)
+            (s, ds), (c, dc) = side(k, u), quarter(k, u)
+            mixed += 0.5 * wu * 0.5 * ((s[0] * dc[1] - s[1] * dc[0]) + (c[0] * ds[1] - c[1] * ds[0]))
+            for y, wt in zip(xs, ws):
+                t = 0.5 * (y + 1)
+                pu = ((1 - t) * ds[0] + t * dc[0], (1 - t) * ds[1] + t * dc[1], 0.0)
+                pt = (c[0] - s[0], c[1] - s[1], h)
+                n = (pu[1] * pt[2] - pu[2] * pt[1], pu[2] * pt[0] - pu[0] * pt[2], pu[0] * pt[1] - pu[1] * pt[0])
+                area_walls += 0.25 * wu * wt * math.sqrt(sum(v * v for v in n))
+    int_a = a_s / 3 + a_c / 3 + mixed / 6
+    int_ta = a_s / 12 + a_c / 4 + mixed / 12
+    V = h * int_a
+    zc = h * int_ta / int_a
+    return result(
+        "ruled loft, square 40 at z 0 to circle r 10 at z 40, each side on one rational quarter of the circle "
+        "(corner (20, -20) at -45 deg): A(t) = (1-t)^2 A_S + t^2 A_C + t(1-t) M, M = 1/2 int (S x C' + C x S') du "
+        "(Gauss-Legendre on the exact rational arcs), V = h (A_S/3 + A_C/3 + M/6), z_c = h (A_S/12 + A_C/4 + M/12) / (V/h), "
+        "wall area = int |P_u x P_t| du dt",
+        1,
+        V,
+        area_walls + a_s + a_c,
+        (0.0, 0.0, zc),
+        (-half, -half, 0.0),
+        (half, half, h),
+        faces=6,
+        note="a difference of definition with the FreeCAD (OpenCASCADE) loft, which runs each side to the quarter at "
+        "uniform angle (arc length): that correspondence has no exact rational B-spline form, and SolidCraft keeps its "
+        "surfaces exact; OpenCASCADE's volume is 35125.50 mm^3 (0.13% more). The reference.stl is OpenCASCADE's, so "
+        "the surface comparison is left out",
+        compare=["body_count", "volume_mm3", "area_mm2", "center_of_mass", "bbox", "faces"],
+    )
+
+
 def c18_hole_features():
     T = 15.0
     mp = MP().add(*box_mp([0, 0, 0], [60, 40, T]))
@@ -542,6 +610,7 @@ CASES = {
     "14-combine-cut": c14_combine_cut,
     "15-combine-intersect": c15_combine_intersect,
     "16-sweep": c16_sweep,
+    "17-loft": c17_loft,
     "18-hole-features": c18_hole_features,
     "19-l-bracket-constrained": c19_l_bracket,
     "20-slot-constrained": c20_slot,
