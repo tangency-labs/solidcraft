@@ -1133,7 +1133,8 @@ fn graded(a: [f64; 2], b: [f64; 2], sa: f64, sb: f64, h: f64, speed: [f64; 2], f
     all.into_iter().filter(|t| *t > 0.0 && *t < 1.0).collect()
 }
 
-/// Every boundary segment (consecutive nodes of a loop) is the side of exactly one triangle:
+/// Every boundary segment (consecutive nodes of a loop) is the side of exactly one triangle (two
+/// for a slit the loops run along both ways):
 /// the face covers its boundary with nothing missing or doubled, so it meets its neighbours
 /// exactly. Some boundary nodes are one vertex, a side ending on any of them the same side: pole
 /// copies of one node (consecutive in a loop, at one point, the segment between them of no
@@ -1186,12 +1187,19 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], uvs: &[[f6
             }
         }
     }
-    ranges.iter().all(|r| {
-        (0..r.len()).all(|k| {
+    // Each boundary side has a triangle for every time the loops run along it: one, or two for
+    // a slit (a side run out and back, where the face meets itself along a line: a hole's wall
+    // touching the wall round it), one triangle either side.
+    let mut runs: HashMap<(u32, u32), u32> = HashMap::new();
+    for r in ranges {
+        for k in 0..r.len() {
             let (a, b) = segment(r, k);
-            side(a, b).is_none_or(|k| sides.get(&k).copied() == Some(1))
-        })
-    })
+            if let Some(k) = side(a, b) {
+                *runs.entry(k).or_default() += 1;
+            }
+        }
+    }
+    runs.iter().all(|(k, n)| sides.get(k).copied() == Some(*n))
 }
 
 #[cfg(test)]
