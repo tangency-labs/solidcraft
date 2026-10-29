@@ -85,7 +85,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
         Stage::Look => {
             ui_kit::StageBar::caption(ui, app.tr("render.pick_label"));
             let modes = ["body", "face", "component"];
-            let mut selected = modes.iter().position(|mode| *mode == app.ui.pick_mode()).unwrap_or(0);
+            let mut selected = modes.iter().position(|mode| *mode == crate::selection_mode::render_filter(app.ui.pick_mode)).unwrap_or(0);
             let pick = ui.add_enabled_ui(!crate::render_workspace::result_active(app), |ui| {
                 if ui_kit::segmented(
                     ui,

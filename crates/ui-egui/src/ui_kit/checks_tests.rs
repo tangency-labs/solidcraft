@@ -246,7 +246,7 @@ fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x(
                 };
                 appearance.pbr = Some(Default::default());
                 appearance.local.overwrite = true;
-                app.ui.pick_bodies = true;
+                app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
                 if name == "preferences" {
                     crate::prefs::open_at(&mut app, crate::prefs::PAGE_GRAPHICS);
                 }

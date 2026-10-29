@@ -1650,3 +1650,21 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
     assert_eq!(s.doc.canvases[0].data.as_ptr(), image, "undo brings back the same image");
     assert_eq!(s.doc.canvases[0].bytes().as_deref(), Some(png.as_slice()));
 }
+
+/// `select.mode` (#4255) names every selection mode and gives it back; anything else is refused.
+/// A window setting: the design, its history and the selection are untouched.
+#[test]
+fn select_mode_takes_each_mode_and_leaves_the_design_alone() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "Body1"}]}));
+    let (doc, undo, selection) = (s.doc.to_json(), s.undo.len(), s.selection.clone());
+    for mode in crate::PickMode::ALL {
+        let name = serde_json::to_value(mode).unwrap();
+        assert_eq!(run(&mut s, "select.mode", json!({"mode": name})), json!({"mode": name}));
+    }
+    for p in [json!({}), json!({"mode": "edges"}), json!({"mode": 1}), json!({"mode": null}), json!({"mode": "Bodies"})] {
+        assert!(s.execute("select.mode", &p).is_err(), "{p}");
+    }
+    assert_eq!((s.doc.to_json(), s.undo.len(), s.selection.clone()), (doc, undo, selection));
+}

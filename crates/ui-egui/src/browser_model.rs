@@ -105,6 +105,11 @@ impl Model {
             }
             self.body_paths = Some(paths);
         }
+        self.placed_path(body)
+    }
+
+    /// [`Model::body_path`] once its walk has run for this model (else None).
+    pub fn placed_path(&self, body: &str) -> Option<Vec<u64>> {
         self.body_paths.as_ref()?.get(body).cloned()
     }
 }

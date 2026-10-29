@@ -1264,6 +1264,21 @@ fn prepare_model(app: &mut SolveApp) {
     }
 }
 
+/// Walk the placements once for this model, so [`body_placement`] can answer without `&mut`
+/// (the Parts and Components selection modes pick while the view draws).
+pub(crate) fn prepare_body_paths(app: &mut SolveApp) {
+    prepare_model(app);
+    if let Some(model) = app.tree.model.as_mut() {
+        model.body_path(&app.session, "");
+    }
+}
+
+/// The placement a placed body (by its world name) belongs to, after [`prepare_body_paths`]; None
+/// for a body of the top-level design.
+pub(crate) fn body_placement(app: &SolveApp, body: &str) -> Option<Vec<u64>> {
+    app.tree.model.as_ref().filter(|model| model.matches(&app.session))?.placed_path(body)
+}
+
 fn model_placement(app: &mut SolveApp, path: &[u64]) -> Option<std::sync::Arc<solidcraft_engine::occurrences::OccurrencePlacement>> {
     prepare_model(app);
     app.tree.model.as_mut()?.placement(&app.session, path)
