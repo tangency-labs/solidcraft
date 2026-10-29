@@ -709,11 +709,18 @@ fn a_face_engraved_with_text_projects_its_letters_exactly_and_extrudes() {
     assert!(r.error.is_none(), "{r:?}");
     let face = before - volume(&mut s);
     assert!((face - taken).abs() < 1e-6 * before, "{face} {taken}");
-    // Its sketch got the letters as Bézier pieces.
+    // Its sketch got the letters as their exact pieces: the outline's quadratic Béziers, which are
+    // parabolic arcs, come in as conics (or as control-point splines).
     let st = s.model.state();
     let sketch = &st.sketches.last().unwrap().sketch;
-    let pieces =
-        sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
+    let pieces = sketch
+        .curves
+        .iter()
+        .filter(|c| {
+            c.link.is_some()
+                && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. } | solidcraft_sketch::CurveKind::Conic { .. })
+        })
+        .count();
     assert!(pieces > 100, "{pieces}");
 }
 
