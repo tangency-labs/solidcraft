@@ -8624,6 +8624,17 @@ fn placed_key(b: &ModelBody, m: &crate::Mat) -> (usize, [u64; 16]) {
 /// [`world_state`], reusing the bodies `placed` holds from an earlier call and leaving it holding
 /// this call's.
 pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut PlacedBodies) -> ModelState {
+    world_state_moved_reusing(doc, st, &std::collections::BTreeMap::new(), placed_before)
+}
+
+/// [`world_state_reusing`] with the occurrences in `moves` placed by those transforms (in their
+/// parents) instead of their own ([`Document::placements_moved`]).
+pub fn world_state_moved_reusing(
+    doc: &Document,
+    st: &ModelState,
+    moves: &std::collections::BTreeMap<u64, crate::Mat>,
+    placed_before: &mut PlacedBodies,
+) -> ModelState {
     if doc.occurrences.is_empty() {
         return st.clone();
     }
@@ -8646,7 +8657,7 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
         path
     };
     let mut out = ModelState { body_counter: st.body_counter, ..Default::default() };
-    let placements = doc.placements();
+    let placements = doc.placements_moved(moves);
     // A body moved in from another component keeps its place (its offset).
     let body_matrix = |b: &ModelBody, m: &crate::Mat| doc.model_body_offset(b).map(|o| crate::mat_mul(m, o)).unwrap_or(*m);
     // Every body placed elsewhere than its definition, placed on all cores: a large assembly

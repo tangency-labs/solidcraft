@@ -3102,13 +3102,14 @@ pub(crate) fn unfinished(app: &SolveApp) -> bool {
         || app.viewport.joint_handles.is_some()
         || app.viewport.text_drag.is_some()
         || crate::occurrence_drag::active(app)
+        || crate::joint_drag::active(app)
 }
 
 /// Cancels what one Esc cancels before it reaches the dialog, the selection or the sketch:
 /// a drag, the Select Other list, or the active tool's points and then the tool. The view's
 /// corner Cancel (#6709) takes this step first too. Returns whether anything was cancelled.
 pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
-    if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+    if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) || crate::joint_drag::cancel(app) {
         return true;
     }
     if crate::select_other::is_open(app) {

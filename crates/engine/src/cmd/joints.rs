@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
 use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
+use solidcraft_doc::{Document, ModelState};
 use solidcraft_geom::{Aabb3, Vec3};
 
 use super::CommandSpec;
@@ -53,7 +54,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          the occurrence named; or, when nothing moved, the first held value's why); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo)",
     ),
     CommandSpec::new("joint.reach", "Reach Point", reach).icon("reach").params(
-        "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does          (contact sets are not checked) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); reason: why nothing can move",
+        "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does          (contact sets are not checked); from?: [{joint, values}] (the values those joints start from instead of the design's, as joint.list gives them: where a drag's last frame started) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); reason: why nothing can move",
     ),
     CommandSpec::new("joint.motion_link", "Motion Link", motion_link)
         .at("SOLID", "ASSEMBLE")
@@ -131,10 +132,18 @@ pub fn place(s: &mut Session) -> joints::Solution {
 /// may have changed). One that can't be worked out (its parameter gone) keeps its numbers; the
 /// solve leaves that joint out and says why.
 fn reexpress(s: &mut Session) {
-    let params = joints::Params::new(&s.doc);
-    let changed: Vec<(usize, (f64, f64, Vec<f64>))> = s
-        .doc
-        .assembly
+    let changed = reexpressed(&s.doc);
+    if !changed.is_empty() {
+        set_reexpressed(s.doc_mut(), changed);
+    }
+}
+
+/// The joints whose expressions now give other offsets, angles or values: (index, new ones).
+type Reexpressed = Vec<(usize, (f64, f64, Vec<f64>))>;
+
+fn reexpressed(doc: &Document) -> Reexpressed {
+    let params = joints::Params::new(doc);
+    doc.assembly
         .joints
         .iter()
         .enumerate()
@@ -144,11 +153,10 @@ fn reexpress(s: &mut Session) {
             joints::clamp(j, &mut q);
             ((o, a) != (j.offset, j.angle) || q != j.values).then_some((i, (o, a, q)))
         })
-        .collect();
-    if changed.is_empty() {
-        return;
-    }
-    let doc = s.doc_mut();
+        .collect()
+}
+
+fn set_reexpressed(doc: &mut Document, changed: Reexpressed) {
     for (i, (o, a, q)) in changed {
         if let Some(j) = doc.assembly.joints.get_mut(i) {
             (j.offset, j.angle, j.values) = (o, a, q);
@@ -160,22 +168,28 @@ fn reexpress(s: &mut Session) {
 /// or a cam's profile may have changed). A coupling that can't be worked out (its face gone)
 /// keeps its last ratio and table; `joint.list` says why.
 fn recouple(s: &mut Session) {
-    if s.doc.assembly.links.iter().all(|l| l.coupling.is_none()) {
-        return;
+    let changed = recoupled(&s.doc, &s.model.state());
+    if !changed.is_empty() {
+        set_recoupled(s.doc_mut(), changed);
     }
-    let st = s.model.state();
-    let changed: Vec<(usize, (f64, Vec<f64>))> = s
-        .doc
-        .assembly
+}
+
+/// The coupled motion links whose ratio or cam table came out otherwise: (index, new ones).
+type Recoupled = Vec<(usize, (f64, Vec<f64>))>;
+
+fn recoupled(doc: &Document, st: &ModelState) -> Recoupled {
+    if doc.assembly.links.iter().all(|l| l.coupling.is_none()) {
+        return Vec::new();
+    }
+    doc.assembly
         .links
         .iter()
         .enumerate()
-        .filter_map(|(i, l)| joints::coupling_values(&s.doc, &st, l)?.ok().filter(|(r, t)| *r != l.ratio || *t != l.lift).map(|v| (i, v)))
-        .collect();
-    if changed.is_empty() {
-        return;
-    }
-    let doc = s.doc_mut();
+        .filter_map(|(i, l)| joints::coupling_values(doc, st, l)?.ok().filter(|(r, t)| *r != l.ratio || *t != l.lift).map(|v| (i, v)))
+        .collect()
+}
+
+fn set_recoupled(doc: &mut Document, changed: Recoupled) {
     for (i, (r, t)) in changed {
         if let Some(l) = doc.assembly.links.get_mut(i) {
             l.ratio = r;
@@ -1045,7 +1059,20 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Array(a)) if a.len() <= MAX_REACH_JOINTS => Some(a.iter().map(|v| joint_id(s, Some(v), cmd)).collect::<Result<BTreeSet<u64>>>()?),
         Some(_) => return Err(bad(cmd, format!("`joints` must be a list of joints (ids or names), at most {MAX_REACH_JOINTS}"))),
     };
+    let from = match p.get("from") {
+        None => Vec::new(),
+        Some(Value::Array(a)) if a.len() <= MAX_REACH_JOINTS => a.iter().map(|v| start_values(s, v, cmd)).collect::<Result<Vec<_>>>()?,
+        Some(_) => return Err(bad(cmd, format!("`from` must be a list of {{joint, values}}, at most {MAX_REACH_JOINTS}"))),
+    };
     let before = super::motion::positions(s);
+    if !from.is_empty() {
+        let doc = s.doc_mut();
+        for (id, q) in from {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) {
+                j.values = q;
+            }
+        }
+    }
     let st = s.model.state();
     let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
     let reached = match &r {
@@ -1112,6 +1139,63 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         out["continuous"] = json!(true);
     }
     Ok(out)
+}
+
+/// One of `joint.reach`'s `from`: a joint and the values it starts from (joint.list's units),
+/// within its limits.
+fn start_values(s: &Session, v: &Value, cmd: &str) -> Result<(u64, Vec<f64>)> {
+    let id = joint_id(s, v.get("joint"), cmd)?;
+    let j = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "`from`: no such joint"))?;
+    let given: Vec<f64> = v.get("values").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+    let n = j.kind.dofs().len();
+    if given.len() != n || given.iter().any(|x| !x.is_finite() || x.abs() > 1e9) {
+        return Err(bad(cmd, format!("`from`: {} takes {n} finite values", j.name)));
+    }
+    let mut q: Vec<f64> = given.iter().enumerate().map(|(i, x)| if j.kind.is_angle(i) { x.to_radians() } else { *x }).collect();
+    joints::clamp(j, &mut q);
+    Ok((id, q))
+}
+
+/// `joint.reach`'s `from` for starting from the joint values `start` (joint id → values): those
+/// that differ from `design`'s, in joint.list's units. A joint drag passes it on release, so the one
+/// reach that applies the drag is the reach its last frame showed.
+pub fn reach_from(design: &Document, start: &BTreeMap<u64, Vec<f64>>) -> Value {
+    design
+        .assembly
+        .joints
+        .iter()
+        .filter_map(|j| Some((j, start.get(&j.id).filter(|q| **q != j.values)?)))
+        .map(|(j, q)| {
+            let values: Vec<f64> = q.iter().enumerate().map(|(i, v)| if j.kind.is_angle(i) { v.to_degrees() } else { *v }).collect();
+            json!({"joint": j.id, "values": values})
+        })
+        .collect()
+}
+
+/// One frame of a joint drag, shown before it is applied (#6325): what `joint.reach` with
+/// `quiet` does to the design (the inverse kinematics, then the solve that places every
+/// occurrence), done to `doc`, the drag's own copy of it. A drag ran the command on each pointer
+/// move, which evaluated the whole design again, re-placed and redrew it and kept an undo step up
+/// to date; the drag now shows each frame and applies only the last.
+pub fn reach_preview(doc: &mut Document, st: &ModelState, r: &joints::Reach) -> std::result::Result<joints::Reached, String> {
+    let reached = joints::reach(doc, st, r);
+    if let Ok(x) = &reached {
+        for (id, q) in &x.values {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == *id) {
+                j.values.clone_from(q);
+            }
+        }
+    }
+    // As `place` does after it.
+    let changed = reexpressed(doc);
+    set_reexpressed(doc, changed);
+    let changed = recoupled(doc, st);
+    set_recoupled(doc, changed);
+    let sol = joints::solve_holding_with_analysis(doc, st, &joints::Held::new(), joints::Analysis::Placement);
+    if !sol.world.is_empty() {
+        doc.apply_joint_solution(&sol);
+    }
+    reached
 }
 
 /// The centre of the box around an occurrence's bodies, in its own coordinates (its origin when

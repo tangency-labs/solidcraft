@@ -276,6 +276,21 @@ fn world_cache_requires_exact_design_model_pending_and_author_context() {
     assert!(!Arc::ptr_eq(&initial, &pending));
     let name = session.occurrence_placement(&[second]).unwrap().bodies[0].world.clone();
     assert!(pending.body(&name).unwrap().mesh().bounds().min.dist(Vec3::new(10., 20., 0.)) < 1e-9);
+    // A joint drag's frame (#6325) places its occurrences over the pending move, for the design it
+    // was worked out for only, and leaves the design and the pending move alone.
+    let mut moved = crate::doc::IDENTITY;
+    moved[3] = [0., 0., 30., 1.];
+    session.drag_preview = Some(crate::DragPreview { design: session.doc.clone(), moves: [(second, moved)].into() });
+    let dragged = session.world_state();
+    assert!(!Arc::ptr_eq(&pending, &dragged));
+    assert!(dragged.body(&name).unwrap().mesh().bounds().min.dist(Vec3::new(0., 0., 30.)) < 1e-9);
+    assert!(Arc::ptr_eq(&dragged, &session.world_state()), "a frame shown twice is placed once");
+    let design = session.doc.clone();
+    session.drag_preview = Some(crate::DragPreview { design: Arc::new((*design).clone()), moves: [(second, moved)].into() });
+    let other = session.world_state();
+    assert!(other.body(&name).unwrap().mesh().bounds().min.dist(Vec3::new(10., 20., 0.)) < 1e-9, "a frame for another design is left out");
+    session.drag_preview = None;
+    assert!(session.world_state().body(&name).unwrap().mesh().bounds().min.dist(Vec3::new(10., 20., 0.)) < 1e-9);
     run(&mut session, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
     let authored = session.world_state();
     assert!(!Arc::ptr_eq(&pending, &authored));
