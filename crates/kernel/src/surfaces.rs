@@ -1718,8 +1718,9 @@ mod tests {
         assert!(walls.is_surface() && walls.face_count() == 4 && rel(area(&walls), 80.0) < 1e-9);
         let pts: Vec<Vec3> = (0..=10).map(|i| Vec3::new(0.0, 0.0, i as f64)).collect();
         assert!(rel(area(&sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &pts).unwrap()), 100.0) < 1e-6);
-        // A smooth point path: a quarter circle of radius 30 in the YZ plane. One smooth wall (not
-        // forty ruled strips), a piece of cylinder: 10 × 15π.
+        // A point path through a quarter circle of radius 30 in the YZ plane: the path is its
+        // lines (no wall is fitted through the points), a wall along each of the 40, together
+        // 10 × the polyline's length, within 10⁻⁴ of the cylinder's 10 × 15π.
         let arc: Vec<Vec3> = (0..=40)
             .map(|i| {
                 let t = i as f64 / 40.0 * FRAC_PI_2;
@@ -1727,14 +1728,16 @@ mod tests {
             })
             .collect();
         let curved = sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &arc).unwrap();
-        assert_eq!(curved.face_count(), 1, "smooth wall");
+        assert_eq!(curved.face_count(), 40, "a wall along each line");
         let want = 10.0 * 30.0 * FRAC_PI_2;
         assert!(rel(area(&curved), want) < 2e-3, "{} vs {want}", area(&curved)); // (measured on meshes)
-        // A bent chain along the same path: two smooth walls joined by one shared seam edge.
+        // A bent chain along the same path: two walls along each line, sharing every seam: the
+        // profile's two segments at each of the 41 points and its three vertices along each of
+        // the 40 lines.
         let bent = vec![line[0], Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, 5.0) }];
         let two = sweep_sheet_points(&Plane::XY, &[bent], &arc).unwrap();
-        assert_eq!(two.face_count(), 2);
-        assert_eq!(two.edge_count(), 7, "the walls share their seam");
+        assert_eq!(two.face_count(), 2 * 40);
+        assert_eq!(two.edge_count(), 2 * 41 + 3 * 40, "the walls share their seams");
     }
 
     #[test]

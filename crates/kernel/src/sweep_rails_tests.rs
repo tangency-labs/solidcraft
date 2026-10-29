@@ -146,7 +146,8 @@ fn two_rails_carry_a_line_between_arcs() {
 
 /// Rails the sweep cannot follow are refused with a reason, never a panic: three rails, a rail
 /// with a bad point, a rail with a twist or scale besides, a rail starting on the path, a rail
-/// that stops short, rails along a path with a corner.
+/// that stops short, a straight rail along a path with a corner (a rail must turn with the path
+/// at its corners).
 #[test]
 fn rails_the_sweep_cannot_follow_are_refused() {
     let rail = vec![Vec3::new(10.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 40.0)];
@@ -162,5 +163,5 @@ fn rails_the_sweep_cannot_follow_are_refused() {
     refuse(railed(vec![vec![Vec3::new(10.0, 0.0, 0.0), Vec3::new(8.0, 0.0, 20.0)]], RailFit::Scale), &up(), "whole length");
     refuse(railed(vec![rail.clone(), rail.clone()], RailFit::Scale), &up(), "start at the same point");
     let bent = vec![Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 20.0)];
-    refuse(railed(vec![vec![Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 30.0)]], RailFit::Scale), &bent, "sharp corners");
+    refuse(railed(vec![vec![Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 30.0)]], RailFit::Scale), &bent, "the guide rails have to turn with it");
 }
