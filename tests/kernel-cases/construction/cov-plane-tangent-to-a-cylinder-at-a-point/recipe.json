@@ -1,0 +1,36 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     60,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 10,
+    "body_name": "Cyl",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "construct.plane.tangent",
+   "params": {
+    "face": {
+     "face": [
+      65,
+      0,
+      5
+     ]
+    },
+    "at": [
+     66,
+     8,
+     5
+    ],
+    "name": "T"
+   }
+  }
+ ]
+}

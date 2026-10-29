@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a plane through a diagonal axis in XY, square to XY",
+ "source": "analytic",
+ "method": "the axis from (0,0,0) to (10,10,0); square to XY and holding it: normal (1,1,0) x Z = (1,-1,0), through the origin",
+ "construction": {
+  "P": {
+   "plane": {
+    "through": [
+     5,
+     5,
+     7
+    ],
+    "normal": [
+     1,
+     -1,
+     0
+    ]
+   }
+  }
+ }
+}

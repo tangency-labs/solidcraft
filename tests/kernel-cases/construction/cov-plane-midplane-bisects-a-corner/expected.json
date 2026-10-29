@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the midplane of two box sides meeting at a corner",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): x = 40 and y = 30 meet on the vertical line through (40,30); the plane bisecting the box's 90 deg corner holds (1,1,0) and Z: normal (1,-1,0), through (40,30,0)",
+ "construction": {
+  "M": {
+   "plane": {
+    "through": [
+     40,
+     30,
+     0
+    ],
+    "normal": [
+     1,
+     -1,
+     0
+    ]
+   }
+  }
+ }
+}

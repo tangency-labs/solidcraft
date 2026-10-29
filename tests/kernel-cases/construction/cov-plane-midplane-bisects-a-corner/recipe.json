@@ -1,0 +1,33 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.plane.midplane",
+   "params": {
+    "a": {
+     "face": [
+      40,
+      15,
+      10
+     ]
+    },
+    "b": {
+     "face": [
+      20,
+      30,
+      10
+     ]
+    },
+    "name": "M"
+   }
+  }
+ ]
+}
