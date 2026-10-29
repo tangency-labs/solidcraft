@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "center": [
+     0,
+     0,
+     60
+    ],
+    "radius": 5,
+    "body_name": "Ball",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "construct.point.center",
+   "params": {
+    "of": {
+     "face": [
+      5,
+      0,
+      60
+     ]
+    },
+    "name": "C"
+   }
+  }
+ ]
+}
