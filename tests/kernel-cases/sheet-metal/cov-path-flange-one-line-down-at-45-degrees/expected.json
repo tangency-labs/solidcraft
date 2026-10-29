@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "sheet.path_flange along one line drawn 45 degrees down and out from the top edge of a 100 x 60 x 2 base, 20 long: a single bend down",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.5. One line, one 45 degree bend, turning down (the path heads below the sheet): setback (R + T)tan(22.5 deg) = 1.656854 off the base and off the flange's 20 (to its outer face from the virtual sharp). V = 2*100*((60 - s) + (20 - s)) + (pi/4)((R+T)^2 - R^2)/2*100 = 15808.497198",
+ "body_count": 1,
+ "volume_mm3": 15808.497198241515,
+ "results": [
+  {
+   "step": 10,
+   "json": {
+    "bends": [
+     {
+      "angle_deg": 45.0,
+      "direction": "down",
+      "radius": 2.0
+     }
+    ]
+   }
+  }
+ ]
+}
