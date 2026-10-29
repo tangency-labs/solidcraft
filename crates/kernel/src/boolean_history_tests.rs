@@ -188,15 +188,16 @@ fn faces_of(h: &History) -> Vec<(Change, Vec<FaceOrigin>)> {
 }
 
 /// A boolean with a sphere (no prism, no coincident faces): a box with a corner taken
-/// off by a sphere. The three faces at the corner get a notch, the sphere's patches inside the
-/// box bound it, meeting the box's faces along new edges.
+/// off by a sphere. The three faces at the corner get a notch, the sphere's one face (SMLib's
+/// sphere is one periodic face) bounds it inside the box, meeting each notched face along a new
+/// edge.
 #[test]
 fn box_minus_sphere() {
     let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
     let b = crate::sphere(Vec3::new(10.0, 10.0, 10.0), 4.0).unwrap();
     let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
     let h = verified(&r, &[&a, &b], 0.02);
-    assert_eq!(changes(h), [3, 6, 0, 0, 0], "{}", show(h));
+    assert_eq!(changes(h), [3, 4, 0, 0, 0], "{}", show(h));
     let from_b: BTreeSet<usize> = h
         .faces
         .iter()
@@ -206,9 +207,9 @@ fn box_minus_sphere() {
             _ => None,
         })
         .collect();
-    assert_eq!(from_b.len(), 3);
-    // Each notched box face meets two of the sphere's patches.
-    assert_eq!(meets(h).len(), 6, "{}", show(h));
+    assert_eq!(from_b.len(), 1);
+    // Each notched box face meets the sphere.
+    assert_eq!(meets(h).len(), 3, "{}", show(h));
     assert!(meets(h).iter().all(|(x, y)| matches!((x, y), (FaceOrigin::Face { operand: 0, .. }, FaceOrigin::Face { operand: 1, .. }))));
 }
 
@@ -231,9 +232,10 @@ fn box_union_box_prism() {
         })
         .collect();
     origins.sort();
-    // All of a's faces, and b's but the end inside a.
+    // All of a's faces, and b's but the end inside a (its face at x = 5).
     let mut want: Vec<FaceOrigin> = (0..6).map(|i| face(0, i)).chain((0..6).map(|i| face(1, i))).collect();
-    let inside = face(1, 4);
+    let inside =
+        face(1, b.faces(1e-3).unwrap().iter().position(|f| (f.centroid.x - 5.0).abs() < 1e-6 && f.plane_normal.is_some_and(|n| n.x < -0.9)).unwrap());
     want.retain(|o| *o != inside);
     assert_eq!(origins, want, "{}", show(h));
     // b's four sides meet a's face at x = 10.
@@ -243,22 +245,22 @@ fn box_union_box_prism() {
     assert!(h.edges.iter().all(|e| e.origins.len() == 1));
 }
 
-/// A through hole: the box's sides are kept, top and bottom get the hole, the cylinder's two
-/// half walls line it, meeting top and bottom along its rims, and meet each other along the
-/// cylinder's own seams.
+/// A through hole: the box's sides are kept, top and bottom get the hole, the cylinder's wall
+/// (one periodic face) lines it, meeting top and bottom along its rims, and closes on itself
+/// along the cylinder's own seam.
 #[test]
 fn box_minus_cylinder_prism() {
     let a = boxed(0.0, 0.0, 0.0, 10.0, 10.0, 10.0);
     let b = crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 12.0).unwrap();
     let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
     let h = verified(&r, &[&a, &b], 0.01);
-    assert_eq!(changes(h), [4, 4, 0, 0, 0], "{}", show(h));
-    let walls = from(h, face(1, 1)).len() + from(h, face(1, 2)).len();
-    assert_eq!(walls, 2, "{}", show(h));
-    // Rims: each wall meets top and bottom.
-    assert_eq!(meets(h).len(), 4, "{}", show(h));
+    assert_eq!(changes(h), [4, 3, 0, 0, 0], "{}", show(h));
+    let side = (0..b.face_count()).find(|i| b.planar_face(*i).is_none()).unwrap();
+    assert_eq!(from(h, face(1, side)).len(), 1, "{}", show(h));
+    // Rims: the wall meets top and bottom.
+    assert_eq!(meets(h).len(), 2, "{}", show(h));
     let seams = h.edges.iter().filter(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { operand: 1, .. }])).count();
-    assert_eq!(seams, 2);
+    assert_eq!(seams, 1);
     // Every other edge is one of the box's twelve.
     let boxed_edges: BTreeSet<_> = h.edges.iter().flat_map(|e| &e.origins).filter(|o| matches!(o, EdgeOrigin::Edge { operand: 0, .. })).collect();
     assert_eq!(boxed_edges.len(), 12);
@@ -320,9 +322,9 @@ fn a_cut_of_two_pieces_composes_the_pieces() {
     let b = crate::sphere(Vec3::new(15.0, 5.0, 10.0), 7.0).unwrap();
     let r = boolean(&a, &b, BoolOp::Cut).unwrap().unwrap();
     let h = verified(&r, &[&a, &b], 0.02);
-    // Both pieces are bitten: the sphere's patches inside each line its bite.
-    let bites: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 1, .. })).collect();
-    assert!(bites.len() >= 2, "{}", show(h));
+    // Both pieces are bitten: a piece of the sphere's face lines each bite.
+    let bites = h.faces.iter().filter(|f| matches!(f.origins.as_slice(), [FaceOrigin::Face { operand: 1, .. }])).count();
+    assert!(bites >= 2, "{}", show(h));
     let targets: BTreeSet<_> = h.faces.iter().flat_map(|f| &f.origins).filter(|o| matches!(o, FaceOrigin::Face { operand: 0, .. })).collect();
     assert_eq!(targets.len(), 12);
 }
@@ -341,10 +343,10 @@ fn faceted_tool() {
     assert_eq!(h.faces.iter().filter(|f| matches!(f.origins.first(), Some(FaceOrigin::Face { operand: 1, .. }))).count(), 3);
 }
 
-/// A partial-depth cut of stepped prisms: walls over one segment through successive slabs are
-/// sewn as one face (coalesced), which comes from the operand walls under it in every slab.
+/// A partial-depth cut of a prism by a narrower one: the stock's walls run whole from 0 to 20,
+/// one face each past the cutter's floor, untouched (Kept).
 #[test]
-fn coalesced_stepped_walls() {
+fn stepped_cut_keeps_the_stock_walls_whole() {
     use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
     for curved in [true, false] {
         let (outer, inner) = if curved {
@@ -357,20 +359,19 @@ fn coalesced_stepped_walls() {
         let cutter = crate::extrude(&Plane::XY, &[Region2 { outer: inner, holes: vec![] }], 2.0, 22.0).unwrap().pop().unwrap();
         let r = boolean(&stock, &cutter, BoolOp::Cut).unwrap().unwrap();
         let h = verified(&r, &[&stock, &cutter], 0.01);
-        // The stock's walls run whole from 0 to 20, one face each, past the cutter's floor.
-        let walls: Vec<usize> = (0..r.face_count()).filter(|i| r.face_was_coalesced(*i)).collect();
-        assert_eq!(walls.len(), if curved { 2 } else { 4 }, "{}", show(h));
+        let walls: Vec<usize> =
+            stock.faces(1e-3).unwrap().iter().enumerate().filter(|(_, f)| f.plane_normal.is_none_or(|n| n.z.abs() < 0.5)).map(|(i, _)| i).collect();
+        assert_eq!(walls.len(), if curved { 1 } else { 4 });
         for i in walls {
-            assert!(matches!(h.faces[i].origins.as_slice(), [FaceOrigin::Face { operand: 0, .. }]), "{}", show(h));
-            assert_eq!(h.faces[i].change, Change::Modified, "{}", show(h));
+            let pieces = from(h, face(0, i));
+            assert_eq!(pieces.len(), 1, "{}", show(h));
+            assert_eq!(h.faces[pieces[0]].change, Change::Kept, "{}", show(h));
         }
     }
 }
 
-/// A step cut into a box: the stepped prism path sews the box's face 3 in pieces at the
-/// slab stations, and the joining of generated walls on their common supports makes it one face
-/// again; the joined body keeps the sewn body's history composed through the join. A certified
-/// box (whose planar regularization would join the same pieces) gets the same history.
+/// A step cut into a box: the box's top (z = 7.5) loses the step's corner, one face still
+/// (Modified). A certified box gets the same history as a plain one.
 #[test]
 fn regularized_step_cut() {
     let (pa, pb) = (boxed(0.0, 0.0, 0.0, 30.0, 35.0, 7.5), boxed(0.0, 30.0, 2.5, 22.5, 50.0, 25.0));
@@ -379,9 +380,10 @@ fn regularized_step_cut() {
     let h = verified(&r, &[&a, &b], 0.01);
     let plain = boolean(&pa, &pb, BoolOp::Cut).unwrap().unwrap();
     let ph = verified(&plain, &[&pa, &pb], 0.01);
-    let joined = from(ph, face(0, 3));
+    let top = pa.faces(1e-3).unwrap().iter().position(|f| (f.centroid.z - 7.5).abs() < 1e-9).unwrap();
+    let joined = from(ph, face(0, top));
     assert_eq!(joined.len(), 1, "{}", show(ph));
-    assert_eq!(faces_of(ph)[joined[0]], (Change::Modified, vec![face(0, 3)]));
+    assert_eq!(faces_of(ph)[joined[0]], (Change::Modified, vec![face(0, top)]));
     assert_eq!(faces_of(h), faces_of(ph), "{}", show(h));
 }
 

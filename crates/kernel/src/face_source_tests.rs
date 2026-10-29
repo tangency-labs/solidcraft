@@ -272,7 +272,7 @@ fn constructed_annulus_sides_follow_exact_source_edges() {
             }
             assert!(vertices > 0);
         }
-        assert_eq!((outer, inner), (2, 2), "full circles split into two actual edges each");
+        assert_eq!((outer, inner), (1, 1), "each full circle sweeps one side face");
         assert_eq!(sources.iter().filter(|source| matches!(source, Some(FaceSource::ExtrudeCap { .. }))).count(), 2);
     }
 }
@@ -311,7 +311,7 @@ fn constructed_large_arc_split_and_reversal_preserve_one_source_segment() {
                 _ => None,
             })
             .collect();
-        assert_eq!(arcs.len(), 2, "large input arc explicitly creates two actual boundary edges");
+        assert_eq!(arcs.len(), 1, "the large input arc sweeps one side face");
         assert!(arcs.iter().all(|(radius, sweep)| (**radius - 10.).abs() < 1e-12 && (sweep.abs() - std::f64::consts::PI * 5. / 3.).abs() < 1e-12));
         assert_eq!(sources.iter().filter(|source| matches!(source, Some(FaceSource::ExtrudeSide { segment: Seg2::Line { .. }, .. }))).count(), 1);
         let mesh = body.mesh(&crate::MeshTolerance::chord(0.001)).unwrap();

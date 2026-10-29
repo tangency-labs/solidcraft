@@ -31,7 +31,9 @@ fn cylinder_measures_match_analytic() {
     let a = 2.0 * PI * 225.0 + 2.0 * PI * 15.0 * 50.0;
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(rel(m.area, a) < 5e-4, "{} vs {a}", m.area);
-    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (3, 2, 2), "{:?}", m.merged);
+    // Two closed circles and the side's seam (the ladder's count: each whole curve once, and each
+    // cylinder's seam); a vertex on each circle.
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (3, 3, 2), "{:?}", m.merged);
     assert_eq!(m.merged.face_types.get("cylinder"), Some(&1));
 }
 
@@ -1001,13 +1003,16 @@ fn sphere_booleans() {
     let s = sphere(Vec3::ZERO, 15.0).unwrap();
     let m = measure(&s).unwrap();
     assert!(rel(m.volume, 4.0 / 3.0 * PI * 3375.0) < 1e-3, "{}", m.volume);
-    assert_eq!((m.merged.faces, m.merged.edges), (1, 0));
+    // One spherical face, closed along its seam from pole to pole.
+    assert_eq!((m.merged.faces, m.merged.edges), (1, 1));
     // A ball cut out of the top face of a slab (oracle 14).
     let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
     let c = boolean(&b, &s, BoolOp::Cut).unwrap().unwrap();
     let m = measure(&c).unwrap();
     assert!(rel(m.volume, 50.0 * 50.0 * 20.0 - 2.0 / 3.0 * PI * 3375.0) < 1e-3, "{}", m.volume);
-    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (7, 13, 9));
+    // The box's 6 faces and the sphere's; its 12 edges, the rim circle and the sphere's seam down
+    // to its pole; its 8 corners, the rim's vertex and the pole.
+    assert_eq!((m.merged.faces, m.merged.edges, m.merged.vertices), (7, 14, 10));
 }
 
 #[test]
