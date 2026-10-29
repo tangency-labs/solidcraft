@@ -35,7 +35,7 @@
 //! | Rust                                   | Upstream                                              |
 //! |----------------------------------------|-------------------------------------------------------|
 //! | [`ErrorInfo::new`], `ErrorInfo::default` (co-port) | `SmFilletErrorInfo(pFilletExec)`, `SmFilletErrorInfo()`, `set()` |
-//! | [`ErrorInfo::note_error`], [`ErrorInfo::note_edge_error`], [`ErrorInfo::note_merge_error`], [`ErrorInfo::note_corner_error`], [`ErrorInfo::note_fillet_edge_error`], [`ErrorInfo::note_intersection_error`] | the six `SmFilletErrorInfo::NoteError` overloads (cpp:117, 150, 173, 199, 231, 256) |
+//! | [`ErrorInfo::note_error`], [`ErrorInfo::note_edge_error`], [`ErrorInfo::note_vertex_error`], [`ErrorInfo::note_merge_error`], [`ErrorInfo::note_corner_error`], [`ErrorInfo::note_fillet_edge_error`], [`ErrorInfo::note_intersection_error`] | the seven `SmFilletErrorInfo::NoteError` overloads (cpp:117, 131, 150, 173, 199, 231, 256) |
 //! | `ErrorInfo::assign` (co-port)          | `SmFilletErrorInfo::operator=`                        |
 //! | [`FilletExecutive::new`], [`ExecutiveObjects`] | `SmFilletExecutive::SmFilletExecutive`        |
 //! | [`FilletExecutive::load_fillet_solver`] | `LoadFilletSolver` |
@@ -75,7 +75,11 @@
 //!   text is cut to 1023 bytes as `snprintf` into the `SM_TBLOCK_SIZE` buffers does, at
 //!   a character boundary (upstream may cut inside a UTF-8 sequence; that case is not
 //!   compared). The vertex overload of `NoteError` (cpp:131) reads the vertex's number
-//!   but stores nothing, and is not ported. The codes are typed
+//!   but stores nothing in the pin; [`ErrorInfo::note_vertex_error`] ports the fork's
+//!   recording behaviour, and the executive consults it only under
+//!   [`crate::kernel::UpstreamFixes::fillet_vertex_error_diagnostics`] (WR-513, #1469).
+//!   The caller supplies the vertex's point (the C++ overload reads it from the vertex).
+//!   The codes are typed
 //!   ([`FilletErrorType`], [`FilStatus`], [`FilletEdgeType`]) and stored as their
 //!   upstream values. `NoteFilletError` on a fillet edge whose type `GetName` writes
 //!   no name for is [`SolidError::InvalidInput`]: upstream prints an uninitialised
@@ -438,6 +442,36 @@ impl<O: Copy + PartialEq> ErrorInfo<O> {
         self.code = code as i32;
         self.status = status as i32;
         self.comment = tblock_text(comment);
+    }
+
+    /// `NoteError(pBadVert, eVertexStatus, eErrorCode, cComment)`: an error at a filleted
+    /// vertex; nothing for a null vertex.
+    ///
+    /// The pinned overload reads the vertex number and records nothing (the issue #1469
+    /// defect). This stores the vertex, its point, the status, the code and the comment;
+    /// the executive calls it only when
+    /// [`crate::kernel::UpstreamFixes::fillet_vertex_error_diagnostics`] is on.
+    /// `location` is the vertex point the caller resolved (the fork's corrected overload
+    /// reads it from `pBadVert->GetPoint()`); a null comment keeps the old one, as its
+    /// `if (cComment != NULL)` guard does.
+    pub fn note_vertex_error(
+        &mut self,
+        vertex: Option<O>,
+        location: Option<Point3>,
+        status: FilStatus,
+        code: FilletErrorType,
+        comment: Option<&str>,
+    ) {
+        if vertex.is_none() {
+            return;
+        }
+        self.vertex = vertex;
+        self.location = location;
+        self.code = code as i32;
+        self.status = status as i32;
+        if comment.is_some() {
+            self.comment = tblock_text(comment);
+        }
     }
 
     /// `NoteError(eErrorCode, eEdgeStatus, pFilletedEdge, pSideFace, pFilletEdge,
@@ -979,6 +1013,23 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     }
 }
 
+/// What the owner's `SmFilletCorner::Create` factory did for one vertex.
+///
+/// `SmFilletCorner::Create` returns a corner pointer or null; the null case is split
+/// here so an owner that can resolve the vertex's point can feed the opt-in vertex
+/// error note without changing the existing factory signature.
+#[derive(Debug, Clone, Copy)]
+pub enum CornerCreation<O> {
+    /// The factory created a corner of this identity.
+    Created(O),
+    /// No corner type handles the vertex. `location` is its point when the owner could
+    /// resolve it; the fork's corrected overload reads it from the vertex.
+    Unsupported {
+        /// The vertex's point when the owner resolved it.
+        location: Option<Point3>,
+    },
+}
+
 impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// `SmFilletExecutive::CreateFilletCorners`: create corners in the native
     /// filleted-vertex order using the owner's actual corner factory and store.
@@ -987,6 +1038,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     /// the identity of the corner it allocated, or `None` for an unsupported
     /// corner. Successful corners replace pending entries; unsupported corners
     /// remain pending. The optional error info is assigned only after the loop.
+    ///
+    /// This keeps the original factory shape. An owner that can resolve a missing
+    /// vertex's point uses [`Self::create_fillet_corners_recording_vertex_errors`].
     ///
     /// # Errors
     ///
@@ -1001,6 +1055,38 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         mut create: impl FnMut(&Kernel, &Self, Option<O>, &[O]) -> Result<Option<O>>,
         error_info: Option<&mut ErrorInfo<O>>,
     ) -> Result<()> {
+        self.create_fillet_corners_recording_vertex_errors(
+            k,
+            |k, executive, vertex, pending| {
+                Ok(match create(k, executive, vertex, pending)? {
+                    Some(corner) => CornerCreation::Created(corner),
+                    None => CornerCreation::Unsupported { location: None },
+                })
+            },
+            error_info,
+        )
+    }
+
+    /// [`Self::create_fillet_corners`] with the vertex's point supplied on an
+    /// unsupported corner, so the opt-in `fixes.fillet_vertex_error_diagnostics` can
+    /// retain the fields written by the fork's corrected vertex `NoteError` overload.
+    ///
+    /// With the fix off (the default), an unsupported corner records nothing and keeps
+    /// its pending entry, exactly as [`Self::create_fillet_corners`] and the pinned
+    /// `CreateFilletCorners` do. With it on, the executive records the vertex, its
+    /// location, `SM_FIL_FAILURE`, `FilletErrorType::CornerUnsupported` and
+    /// `"Corner case not implemented"` (the fork's note) and still keeps the pending
+    /// entry: retaining the note does not change the operation's result or topology.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::create_fillet_corners`].
+    pub fn create_fillet_corners_recording_vertex_errors(
+        &mut self,
+        k: &Kernel,
+        mut create: impl FnMut(&Kernel, &Self, Option<O>, &[O]) -> Result<CornerCreation<O>>,
+        error_info: Option<&mut ErrorInfo<O>>,
+    ) -> Result<()> {
         use crate::blend::fillet_executive::p3::VertexEntry;
 
         const OP: &str = "blend::fillet_executive::p1::FilletExecutive::create_fillet_corners";
@@ -1012,10 +1098,23 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 }
                 None => return Err(SolidError::null_pointer(OP)),
             };
-            if let Some(corner) = create(k, self, vertex, pending)? {
-                self.corners.push(corner);
-                self.vertex_corner_map
-                    .insert(vertex, VertexEntry::Corner(corner));
+            match create(k, self, vertex, pending)? {
+                CornerCreation::Created(corner) => {
+                    self.corners.push(corner);
+                    self.vertex_corner_map
+                        .insert(vertex, VertexEntry::Corner(corner));
+                }
+                CornerCreation::Unsupported { location } => {
+                    if k.fixes.fillet_vertex_error_diagnostics {
+                        self.error.note_vertex_error(
+                            vertex,
+                            location,
+                            FilStatus::Failure,
+                            FilletErrorType::CornerUnsupported,
+                            Some("Corner case not implemented"),
+                        );
+                    }
+                }
             }
         }
         if let Some(info) = error_info {
@@ -1638,6 +1737,143 @@ mod tests {
             (x.error.executive, x.pseudo_brep),
             (Some(H(9)), Some(H(10)))
         );
+    }
+
+    #[test]
+    fn vertex_error_note_retains_all_fields_and_keeps_a_null_comment() {
+        let mut e = ErrorInfo::<H>::new(Some(H(9)));
+        let first = Point3::new(1.0, 2.0, 3.0);
+        e.note_vertex_error(
+            Some(H(4)),
+            Some(first),
+            FilStatus::Failure,
+            FilletErrorType::CornerUnsupported,
+            Some("Corner case not implemented"),
+        );
+        assert_eq!(e.vertex, Some(H(4)));
+        assert_eq!(e.location, Some(first));
+        assert_eq!((e.status, e.code), (2, 9));
+        assert_eq!(e.comment, "Corner case not implemented");
+        // The port keeps its existing codes 0..=8 (pinned 0..=7 plus `NoRoom` = 8)
+        // and gives the new code 9.
+        assert_eq!(FilletErrorType::CornerUnsupported as i32, 9);
+        assert_eq!(FilletErrorType::NoRoom as i32, 8);
+        // No edge field is touched by the vertex overload.
+        assert_eq!((e.edge, e.edges.len(), e.surfaces.len()), (None, 0, 0));
+
+        // A null comment keeps the old text (the fork's `if (cComment != NULL)`), but
+        // every other field is replaced.
+        let second = Point3::new(-1.0, 0.5, 7.0);
+        e.note_vertex_error(
+            Some(H(5)),
+            Some(second),
+            FilStatus::Processed,
+            FilletErrorType::BadTrim,
+            None,
+        );
+        assert_eq!(e.vertex, Some(H(5)));
+        assert_eq!(e.location, Some(second));
+        assert_eq!((e.status, e.code), (1, 6));
+        assert_eq!(e.comment, "Corner case not implemented");
+
+        // A null vertex records nothing, as the pinned overload returns early.
+        e.note_vertex_error(
+            None,
+            Some(first),
+            FilStatus::Failure,
+            FilletErrorType::BadMerge,
+            Some("ignored"),
+        );
+        assert_eq!(e.vertex, Some(H(5)));
+        assert_eq!(e.location, Some(second));
+        assert_eq!((e.status, e.code), (1, 6));
+        assert_eq!(e.comment, "Corner case not implemented");
+    }
+
+    #[test]
+    fn create_corners_notes_an_unsupported_vertex_only_when_opted_in() {
+        use crate::blend::fillet_executive::p3::VertexEntry;
+
+        let point = Point3::new(4.0, 5.0, 6.0);
+        for (fix, expected) in [(false, (0, None, None)), (true, (9, Some(H(3)), None))] {
+            let mut k = Kernel::default();
+            k.fixes.fillet_vertex_error_diagnostics = fix;
+            let mut executive = corner_creation_executive();
+            executive.filleted_vertices = vec![Some(H(3))];
+            executive
+                .vertex_corner_map
+                .insert(Some(H(3)), VertexEntry::SolverEdgeuses(vec![H(20)]));
+            let mut info = ErrorInfo::new(None);
+            info.code = 99;
+            executive
+                .create_fillet_corners_recording_vertex_errors(
+                    &k,
+                    |_, _, vertex, _| {
+                        assert_eq!(vertex, Some(H(3)));
+                        Ok(CornerCreation::Unsupported {
+                            location: Some(point),
+                        })
+                    },
+                    Some(&mut info),
+                )
+                .unwrap();
+            // The optional out-parameter copy follows upstream `operator=`, which does
+            // not copy the location, comment or entity name.
+            assert_eq!((info.code, info.vertex, info.location), expected);
+            assert_eq!(info.comment, "<no comment>\n");
+            if fix {
+                assert_eq!(info.status, 2);
+                assert_eq!(executive.error.status, 2);
+                assert_eq!(executive.error.location, Some(point));
+                assert_eq!(executive.error.comment, "Corner case not implemented");
+            } else {
+                // The pinned default: no note, so the executive's own info is untouched.
+                assert_eq!(
+                    (
+                        executive.error.code,
+                        executive.error.status,
+                        executive.error.vertex,
+                        executive.error.location
+                    ),
+                    (0, 0, None, None)
+                );
+                assert_eq!(executive.error.comment, "<no comment>\n");
+            }
+            // Diagnostics only: the pending entry and the corner list are unchanged.
+            assert!(executive.corners.is_empty());
+            assert_eq!(
+                executive.vertex_corner_map.get(&Some(H(3))),
+                Some(&VertexEntry::SolverEdgeuses(vec![H(20)]))
+            );
+        }
+    }
+
+    #[test]
+    fn create_corners_original_factory_shape_still_notes_without_a_location() {
+        use crate::blend::fillet_executive::p3::VertexEntry;
+
+        let mut k = Kernel::default();
+        k.fixes.fillet_vertex_error_diagnostics = true;
+        let mut executive = corner_creation_executive();
+        executive.filleted_vertices = vec![Some(H(3))];
+        executive
+            .vertex_corner_map
+            .insert(Some(H(3)), VertexEntry::SolverEdgeuses(vec![H(20)]));
+        executive
+            .create_fillet_corners(&k, |_, _, _, _| Ok(None), None)
+            .unwrap();
+        assert_eq!(
+            (
+                executive.error.code,
+                executive.error.vertex,
+                executive.error.location
+            ),
+            (9, Some(H(3)), None)
+        );
+        // The `None` error-info argument still leaves the executive's own record
+        // readable, with the fork's status and comment.
+        assert_eq!(executive.error.status, 2);
+        assert_eq!(executive.error.comment, "Corner case not implemented");
     }
 
     fn corner_creation_executive() -> FilletExecutive<H> {

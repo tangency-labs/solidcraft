@@ -302,6 +302,15 @@ pub enum FilletErrorType {
     /// refuse a blend larger than its faces). Only those opt-ins record it; with them off the port
     /// reports pin codes only.
     NoRoom = 8,
+    /// `SM_FILERR_CORNER_UNSUPPORTED` (SolidCraft change, tangency-labs/smlib@a73cf5e): a
+    /// filleted vertex no `SmFilletCorner` type handles. This port keeps its existing codes
+    /// 0..=8 (pinned 0..=7 plus `NoRoom` = 8) and gives the new code 9; the fork's enum has
+    /// `SM_FILERR_NOT_EXACT` = 9 and its
+    /// `SM_FILERR_CORNER_UNSUPPORTED` = 10, but this port defines no `NOT_EXACT` code. It is
+    /// not the C API's `SMLIB_ERR_CORNER_UNSUPPORTED` (-1111), which is a capi status and has
+    /// no mapping here. Only `fixes.fillet_vertex_error_diagnostics` records it (#1469); with
+    /// it off the port reports pin codes only.
+    CornerUnsupported = 9,
 }
 
 /// `SmFilletCornerType`: the kind of corner where fillets meet.

@@ -23,7 +23,12 @@
 //! fillet-edge attribute) after `StitchAndOrient`; here the session, which holds the
 //! only borrow of `brep`, is dropped first. Attributes carry no geometry, so the
 //! stitch and orientation see the same topology and geometry. A body whose corners
-//! need an unported corner kind returns `Unported` from the session.
+//! need an unported corner kind returns `Unported` from the session. The
+//! whole-operation wrappers here drop their session and return only the later fillet
+//! failure, so the executive's own error info is not in their `Result`: a caller that
+//! needs the retained missing-corner note (`fixes.fillet_vertex_error_diagnostics`)
+//! drives [`FilletSession`] directly and reads
+//! [`FilletSession::error_info`].
 //! [`circular_fillet`] and [`chamfer_fillet`] ignore `LoadFilletSolver`'s status
 //! as upstream does, and skip an edge whose solver constructor fails (upstream's
 //! constructor only signals the error and leaves a solver without surfaces, which
@@ -82,6 +87,11 @@ fn invalid_input() -> SolidError {
 /// cross-section (`xsect_type` 0 linear, 2 blend curve, any other value circular),
 /// then `StitchAndOrient` with its defaults. `continuity` (1, 2 or 3 for G1-G3) and
 /// `thumbweight` apply to blend-curve cross-sections.
+///
+/// The executive's own error info is not returned here: this wrapper drops its session
+/// and returns only the later fillet failure. A caller that needs the retained
+/// missing-corner note (`fixes.fillet_vertex_error_diagnostics`) drives
+/// [`FilletSession`] directly and reads [`FilletSession::error_info`].
 ///
 /// # Errors
 /// `SM_ERR_INVALID_INPUT` for an empty edge list or a radius below 8 times the
