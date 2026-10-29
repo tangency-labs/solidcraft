@@ -50,6 +50,17 @@ fn rhino_box_imports_as_a_solid() {
     imports_the_block(bytes, "block.3dm");
 }
 
+#[test]
+fn a_file_name_with_umlauts_names_the_product() {
+    imports_the_block(BLOCK_FCSTD, "Hülse.FCStd");
+    imports_the_block(BLOCK_3DM, "Würfel ä.3dm");
+    let step = "#1=PRODUCT('cadmpeg_model','cadmpeg_model','',(#2));".to_string();
+    assert_eq!(
+        name_unnamed_products(step, "dir/Hülse Bob's.FCStd"),
+        "#1=PRODUCT('H\\X2\\00FC\\X0\\lse Bob''s','H\\X2\\00FC\\X0\\lse Bob''s','',(#2));"
+    );
+}
+
 /// Only FreeCAD and Rhino contents are read: STEP text, garbage, a bad ZIP and empty input are
 /// refused with a message, as are ACIS, ShapeManager and commercial formats whatever their bytes.
 #[test]
