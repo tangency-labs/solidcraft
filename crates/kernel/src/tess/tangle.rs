@@ -95,11 +95,46 @@ pub(crate) fn crossing(s: &EvalSurface, reach: f64, loops: &[seam::Loop]) -> Vec
                 out.push(x.at);
                 out.push(y.at);
             }
+            // A node of one chord lying on the other (inside it, not at its ends) is no crossing,
+            // but no triangulation can keep both as constraints either: where two curves leave a
+            // vertex they touch at along one tangent (a circle touching another from inside), the
+            // inner one's node can fall on the outer one's chord (with the outer chord twice the
+            // inner, exactly so but for the next order). The chord the node lies on is halved.
+            // (Not where the two chords run along one line: a seam's two uses, a period apart,
+            // lie on each other as copies.)
+            if !along(x.a, x.b, y.a, y.b) && [y.a, y.b].iter().any(|q| on(x.a, x.b, *q)) {
+                out.push(x.at);
+            }
+            if !along(y.a, y.b, x.a, x.b) && [x.a, x.b].iter().any(|q| on(y.a, y.b, *q)) {
+                out.push(y.at);
+            }
         }
     }
     out.sort_unstable();
     out.dedup();
     out
+}
+
+/// Whether `q` lies on the segment `ab` within [`STRADDLE`] (of the segment's squared length,
+/// off its line) strictly between its ends (not at either, by the same measure along it).
+fn on(a: [f64; 2], b: [f64; 2], q: [f64; 2]) -> bool {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = dx * dx + dy * dy;
+    if !(len2 > 0.0) {
+        return false;
+    }
+    let (qx, qy) = (q[0] - a[0], q[1] - a[1]);
+    let off = (dx * qy - dy * qx).abs();
+    let along = (dx * qx + dy * qy) / len2;
+    off <= 1e3 * STRADDLE * len2 && along > 1e-6 && along < 1.0 - 1e-6
+}
+
+/// Whether `c` and `d` both lie on the line of `ab` (within [`on`]'s measure).
+fn along(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> bool {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len2 = dx * dx + dy * dy;
+    let off = |q: [f64; 2]| (dx * (q[1] - a[1]) - dy * (q[0] - a[0])).abs();
+    len2 > 0.0 && off(c) <= 1e3 * STRADDLE * len2 && off(d) <= 1e3 * STRADDLE * len2
 }
 
 /// Whether the segments `ab` and `cd` cross: each one's ends strictly either side of the other.

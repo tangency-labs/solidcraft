@@ -996,3 +996,22 @@ fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
     assert!(sides.contains(&(2, 3)) && !sides.contains(&(0, 1)), "{tris:?}");
     assert!(after < 0.5 * before, "{before} -> {after}");
 }
+
+/// A disc with a boss standing on it tangent inside its rim: the disc's top is a ring whose inner
+/// circle touches the outer one, one loop through the touching vertex. There both circles leave
+/// along one tangent, and with the outer chord twice the inner (as their samplings fall) the inner
+/// circle's first node lies on the outer's last chord: no triangulation keeps both. That chord is
+/// halved, and the ring meshes strictly, to its area (300 pi), not the inner disc's.
+#[test]
+fn a_ring_touching_itself_at_a_vertex_meshes_strictly() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let prism = |c: Vec2, r: f64, z0: f64, z1: f64| {
+        ok(crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(c, r), holes: vec![] }], z0, z1)).pop().unwrap()
+    };
+    let stepped =
+        ok(crate::boolean(&prism(Vec2::ZERO, 20.0, 0.0, 5.0), &prism(Vec2::new(10.0, 0.0), 10.0, 5.0, 15.0), crate::BoolOp::Union)).unwrap();
+    let (_, stats) = ok(plan(&record(&stepped), 1e-4, None));
+    assert!(stats.lenient.is_empty(), "{:?}", stats.lenient.iter().map(|r| &r.reason).collect::<Vec<_>>());
+    let ring = ok(stepped.faces(1e-4)).into_iter().find(|f| (f.centroid.z - 5.0).abs() < 1e-6).unwrap();
+    assert!((ring.area - 300.0 * PI).abs() < 0.05, "ring area {}", ring.area);
+}
