@@ -160,6 +160,8 @@ fn pictures_show_the_section_and_its_cap() {
         let mut cam = view::home_camera(&s).unwrap();
         cam.fov = fov;
         let mut sc = view::scene(&s, &cam).unwrap();
+        // The cap in the cap colour: a part's hatch colour is the one its name picks (#8529).
+        sc.part_hatch = None;
         // A marker inside the body, behind the cut face.
         let red = Rgb(255, 0, 0);
         sc.lines.push(SceneLine {

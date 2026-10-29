@@ -1103,10 +1103,11 @@ mod tests {
         assert!(matches!(&target.certificate, Some(solidcraft_engine::doc::config::FaceCertificate::ExtrudeSide { curve, .. }) if curve == "outer"));
         let state = h.app.session.model.state();
         let body = state.body("Ring").unwrap();
+        // The outer circle, one closed curve, is one wall face.
         let indices = h.app.session.doc.configuration_face_indices(body, target).unwrap();
-        assert_eq!(indices.len(), 2);
+        assert_eq!(indices.len(), 1);
         let painted = h.app.session.doc.face_colors(body);
-        assert_eq!(painted.len(), 2);
+        assert_eq!(painted.len(), 1);
         assert!(painted.iter().all(|(index, _)| indices.contains(index)));
     }
 

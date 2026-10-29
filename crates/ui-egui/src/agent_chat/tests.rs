@@ -2293,12 +2293,17 @@ fn the_picks_go_with_the_next_message_once() {
 }
 
 /// Two clicks on two rims are two things, not four edges (a click on a rim selects both halves for
-/// the commands; the chat counts and describes what was clicked).
+/// the commands; the chat counts and describes what was clicked). The cylinder is a circle drawn
+/// as two half arcs, extruded, so each rim is in two halves.
 #[test]
 fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     use solidcraft_engine::Sel;
     let (mut app, script, ctx) = app_with_script();
-    app.run("solid.cylinder", json!({"radius": 10, "height": 20})).expect("a cylinder");
+    app.run("sketch.create", json!({"plane": "XY"})).expect("a sketch");
+    app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 10]})).expect("an arc");
+    app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [10, 0], "through": [0, -10]})).expect("an arc");
+    app.run("sketch.finish", json!({})).expect("the sketch");
+    app.run("solid.extrude", json!({"distance": 20})).expect("a cylinder");
     let (name, top, bottom, mid_top, mid_bottom) = {
         let st = crate::open_meshing::session_world(&app.session);
         let body = &st.bodies[0];

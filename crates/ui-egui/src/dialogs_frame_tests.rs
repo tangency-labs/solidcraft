@@ -139,7 +139,11 @@ fn a_whole_sketch_section_stays_whole_through_an_edit() {
     let c = apply_commands(&app, &e).unwrap();
     assert!(c[0].1["params"].get("profiles").is_none(), "{}", c[0].1);
     run_all(&mut app, c);
-    assert!((volume(&mut app) - before).abs() < 1e-6 * before, "still the ring, not the filled circle");
+    // To the accuracy SMLib measures at (1e-4 relative, the finest it takes: kernel
+    // `measure::ACCURACY`); the ring's exact π (20² − 17²) 600 = 209230.07 mm³ came out
+    // 209229.86 before the turn and 209230.43 after it. The filled circle would be 3.6 times it.
+    let after = volume(&mut app);
+    assert!((after - before).abs() < 1e-4 * before, "still the ring, not the filled circle: {after} mm³, {before} before");
     // Unticked, the section is a built-in profile again.
     let mut e = edit_dialog(&app, f, None).unwrap();
     member(&mut e).whole = None;
