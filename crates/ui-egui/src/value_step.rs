@@ -121,6 +121,12 @@ fn wheel_tenths(ui: &egui::Ui, key: egui::Id) -> i64 {
     out
 }
 
+/// Character range of a plain number, excluding surrounding whitespace and its unit suffix.
+pub(crate) fn number_range(text: &str) -> Option<std::ops::Range<usize>> {
+    let number = plain(text)?;
+    Some(text.get(..number.start)?.chars().count()..text.get(..number.end)?.chars().count())
+}
+
 /// A plain number in a field's text: where the number is, its value, its decimal places and
 /// decimal mark.
 struct Plain {

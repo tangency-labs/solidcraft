@@ -451,7 +451,7 @@ fn section_with_badge<R>(
     let mut open = !pending && (searching || ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open));
     let (rect, response) = ui.allocate_exact_size(
         vec2(dimension(ui.available_width()), if compact { t.control_height - t.space_4 } else { row_height() }),
-        egui::Sense::click(),
+        egui::Sense::CLICK,
     );
     crate::prefs_search::follow(ui, title, rect);
     if response.hovered() || response.has_focus() {

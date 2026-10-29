@@ -53,13 +53,15 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
 fn tab_visits_expression_fields_in_row_order() {
     let ctx = crate::fonts::test_context();
     let mut first = "1".to_string();
-    let mut second = String::new();
+    let mut second = "20 mm".to_string();
     let mut draw = |ui: &mut Ui| {
         row(ui, "First value", |ui| {
             field(ui, &mut first);
         });
-        row(ui, "Second value", |ui| {
-            field(ui, &mut second);
+        section(ui, "direction2", "Direction 2", true, |ui| {
+            row(ui, "Second value", |ui| {
+                field(ui, &mut second);
+            });
         });
     };
     frame(&ctx, vec![], &mut draw);
@@ -69,7 +71,7 @@ fn tab_visits_expression_fields_in_row_order() {
     frame(&ctx, key(egui::Key::Tab), &mut draw);
     frame(&ctx, vec![egui::Event::Text("2".to_string())], &mut draw);
     assert_eq!(first, "1");
-    assert_eq!(second, "2");
+    assert_eq!(second, "2 mm");
 }
 
 #[test]
@@ -676,4 +678,82 @@ fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
     assert_eq!(typed("0-5", 100.0), Some(-5.0));
     assert_eq!(typed("1e-3+1", 0.0), Some(1.001));
     assert_eq!(typed("abc", 1.0), None);
+}
+
+#[test]
+fn tab_skips_count_arrows_in_both_directions_and_pointer_still_steps() {
+    let ctx = crate::fonts::test_context();
+    let mut quantity = "123".to_string();
+    let mut spacing = "20 mm".to_string();
+    let mut draw = |ui: &mut Ui| {
+        count_row(ui, "Quantity", &mut quantity, &Count { min: 1, max: 1000, eval: &|text| text.parse().ok() });
+        row(ui, "Spacing", |ui| {
+            field(ui, &mut spacing);
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = scenario::handle_at("dialog:Quantity").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    let quantity_focus = ctx.memory(|m| m.focused());
+    frame(&ctx, key(egui::Key::Tab), &mut draw);
+    frame(&ctx, vec![egui::Event::Text("2".to_string())], &mut draw);
+    let reverse = key(egui::Key::Tab)
+        .into_iter()
+        .map(|event| match event {
+            egui::Event::Key { key, physical_key, pressed, repeat, .. } => {
+                egui::Event::Key { key, physical_key, pressed, repeat, modifiers: egui::Modifiers::SHIFT }
+            }
+            event => event,
+        })
+        .collect();
+    frame(&ctx, reverse, &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(ctx.memory(|m| m.focused()), quantity_focus);
+    let range = egui::TextEdit::load_state(&ctx, quantity_focus.unwrap()).unwrap().cursor.char_range().unwrap();
+    assert_eq!((range.primary.index.min(range.secondary.index).0, range.primary.index.max(range.secondary.index).0), (0, 3));
+    let up = scenario::handle_at("dialog:Quantity up").unwrap();
+    frame(&ctx, pointer(up, true), &mut draw);
+    frame(&ctx, pointer(up, false), &mut draw);
+    assert_eq!(spacing, "2 mm", "Tab must go directly from Quantity to Spacing and preserve its unit");
+    assert_eq!(quantity, "124", "the up arrow remains clickable");
+}
+
+#[test]
+fn tab_selects_the_number_and_typing_preserves_units() {
+    for (original, selected, replaced) in [
+        ("4 mm", "4", "7 mm"),
+        ("-2.5 cm", "-2.5", "7 cm"),
+        ("2,5 mm", "2,5", "7 mm"),
+        (" 4 mm", "4", " 7 mm"),
+        ("\u{2003}4 mm", "4", "\u{2003}7 mm"),
+        ("45 deg", "45", "7 deg"),
+        ("8\"", "8", "7\""),
+        ("width / 2", "width / 2", "7"),
+    ] {
+        let ctx = crate::fonts::test_context();
+        let mut first = "1".to_string();
+        let mut value = original.to_string();
+        let mut draw = |ui: &mut Ui| {
+            row(ui, "First", |ui| {
+                field(ui, &mut first);
+            });
+            row(ui, "Value", |ui| {
+                field(ui, &mut value);
+            });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let at = scenario::handle_at("dialog:First").unwrap();
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        frame(&ctx, key(egui::Key::Tab), &mut draw);
+        frame(&ctx, vec![], &mut draw);
+        let id = ctx.memory(|m| m.focused()).unwrap();
+        let range = egui::TextEdit::load_state(&ctx, id).unwrap().cursor.char_range().unwrap();
+        let start = range.primary.index.min(range.secondary.index).0;
+        let end = range.primary.index.max(range.secondary.index).0;
+        assert_eq!(original.chars().skip(start).take(end - start).collect::<String>(), selected, "{original}");
+        frame(&ctx, vec![egui::Event::Text("7".to_string())], &mut draw);
+        assert_eq!(value, replaced, "{original}");
+    }
 }

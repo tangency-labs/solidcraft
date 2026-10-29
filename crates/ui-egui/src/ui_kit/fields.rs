@@ -51,7 +51,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let row = label(ui).to_owned();
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
         let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::CLICK);
         let enabled = ui.is_enabled() && next.is_some();
         if enabled && arrow.hovered() {
             painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
@@ -266,6 +266,17 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+    // Keyboard focus selects a plain number without its unit, or the whole expression.
+    if completion
+        && response.gained_focus()
+        && !ui.input(|i| i.pointer.any_down() || i.pointer.any_released())
+        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id)
+    {
+        let range = crate::value_step::number_range(value).unwrap_or(0..value.chars().count());
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(range.start), egui::text::CCursor::new(range.end))));
+        state.store(ui.ctx(), response.id);
+        ui.ctx().request_repaint();
+    }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
             let id = egui::Id::new("sc_value_fields");

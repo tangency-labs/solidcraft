@@ -2674,6 +2674,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let selected_item = inp.items.first().filter(|_| !inp.multi).map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default();
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active;
@@ -2686,7 +2687,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     } else if custom_axis || stored_reference.is_some() {
                         crate::i18n::tr("dialog.custom_axis").into()
                     } else if !inp.multi {
-                        inp.items.first().map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default()
+                        selected_item
                     } else {
                         let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
                         crate::i18n::format("dialog.selected_count", &[("count", &count.to_string())])
@@ -2737,7 +2738,13 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         egui::pos2(chip_rect.right() - t.space_24 / 2.0, chip_rect.center().y),
                         vec2(t.space_24, t.space_24),
                     );
-                    let button = crate::ui_kit::icon_button_at_with_sense(ui, rect, "close", "Clear the selection", if tab_order { egui::Sense::CLICK } else { egui::Sense::click() });
+                    let button = crate::ui_kit::icon_button_at_with_sense(
+                        ui,
+                        rect,
+                        "close",
+                        "Clear the selection",
+                        if tab_order { egui::Sense::CLICK } else { egui::Sense::click() },
+                    );
                     crate::scenario::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
                     if button.clicked() {
                         clear = Some(i);
@@ -3385,7 +3392,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let pointer_busy = ctx.input(|i| i.pointer.any_down() || i.pointer.any_pressed() || i.pointer.any_released());
     if d.restore_value_focus && !pointer_busy {
         d.restore_value_focus = false;
-        let target = value_fields.iter().find(|(id, _)| Some(*id) == d.value_focus).or_else(|| value_fields.first());
+        // Pattern/Mirror resume Tab from the active selection after a canvas pick.
+        // Preserve an existing value editor, but do not focus one merely as a fallback.
+        let target = value_fields
+            .iter()
+            .find(|(id, _)| Some(*id) == d.value_focus)
+            .or_else(|| if selection_tab_order(&d.kind) { None } else { value_fields.first() });
         if let Some(&(id, length)) = target {
             d.focus = false;
             ctx.memory_mut(|memory| memory.request_focus(id));
