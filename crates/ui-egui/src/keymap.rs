@@ -649,7 +649,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 action = Some((String::new(), chosen));
             }
             ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
-            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only).on_hover_text(app.tr("ui.sketch_keys_only_tip"));
+            ui_kit::checkbox(ui, app.tr("ui.sketch_keys_only"), &mut app.preferences.sketch_keys_only)
+                .on_hover_text(app.tr("ui.sketch_keys_only_tip"));
         }
         // The list Help and Home open looks like the Shortcuts page of Preferences: say it can't
         // be changed here, and lead to the page where it can (#7409).
