@@ -141,24 +141,30 @@ fn extrude_sides_follow_profile_segments_in_any_order() {
         // The certificates are produced as before.
         assert!(b.face_sources().unwrap().iter().all(Option::is_some));
     }
-    // The +x side is whichever segment of the given loop runs along x = 40.
+    // The +x side is whichever segment of the given loop runs along x = 40 (the hole's wall at
+    // x = 10 faces +x too).
     let r = &variants[2];
     let b = crate::extrude(&Plane::XY, std::slice::from_ref(r), 0.0, 10.0).unwrap().pop().unwrap();
     let k = r.outer.segs.iter().position(|s| s.start().x == 40.0 && s.end().x == 40.0).unwrap();
-    let side = b.faces(1e-3).unwrap().iter().position(|f| f.plane_normal.is_some_and(|n| n.dist(Vec3::X) < 1e-9)).unwrap();
+    let side = b
+        .faces(1e-3)
+        .unwrap()
+        .iter()
+        .position(|f| f.plane_normal.is_some_and(|n| n.dist(Vec3::X) < 1e-9) && (f.centroid.x - 40.0).abs() < 1e-6)
+        .unwrap();
     assert_eq!(origins(&b)[side], [P(k)]);
 }
 
-/// A big arc is built as two edges: both faces come from it.
+/// A big arc sweeps one face, as every segment does.
 #[test]
-fn extrude_a_big_arc_gives_two_faces_of_one_segment() {
+fn extrude_a_big_arc_gives_one_face_of_one_segment() {
     let (a, b) = (Vec2::new(10.0 * (0.3f64).cos(), -10.0 * (0.3f64).sin()), Vec2::new(10.0 * (0.3f64).cos(), 10.0 * (0.3f64).sin()));
     let arc = Seg2::Arc { center: Vec2::ZERO, radius: 10.0, start: 0.3, sweep: TAU - 0.6 };
     let r = Region2 { outer: Loop2 { segs: vec![arc, Seg2::Line { a, b }] }, holes: vec![] };
     let body = crate::extrude(&Plane::XY, std::slice::from_ref(&r), 0.0, 5.0).unwrap().pop().unwrap();
     let got = origins(&body);
     assert_eq!(got, expected_extrusion(&body, &Plane::XY, &r, 5.0));
-    assert_eq!(got.iter().filter(|o| **o == [P(0)]).count(), 2);
+    assert_eq!(got.iter().filter(|o| **o == [P(0)]).count(), 1);
     assert_eq!(got.iter().filter(|o| **o == [P(1)]).count(), 1);
 }
 
@@ -177,18 +183,18 @@ fn primitives_report_their_construction() {
         assert_eq!(o, &[want]);
     }
     assert!(b.face_sources().unwrap().iter().all(|s| matches!(s, Some(crate::FaceSource::Box { .. }))));
-    // Cylinder: a circle of two arcs, extruded.
+    // Cylinder: a circle (one arc), extruded.
     let c = crate::cylinder(Vec3::ZERO, Vec3::Z, 5.0, 8.0).unwrap();
     let r = Region2 { outer: Loop2::circle_from(Vec2::ZERO, 5.0, crate::build::SEAM_ANGLE), holes: vec![] };
     let frame = Plane::from_normal(Vec3::ZERO, Vec3::Z).unwrap();
     let want = expected_extrusion(&c, &frame, &r, 8.0);
     assert_eq!(origins(&c), want);
-    // Sphere: six patches, all from the arc of the half disc it revolves.
+    // Sphere: one face, from the arc of the half disc it revolves.
     let s = crate::sphere(Vec3::ZERO, 5.0).unwrap();
-    assert_eq!(origins(&s), vec![vec![P(0)]; 6]);
-    // Torus: a circle re-split for its seam, turned in three: each face from both arcs.
+    assert_eq!(origins(&s), vec![vec![P(0)]]);
+    // Torus: one face, from the circle (segment 0) it turns.
     let t = crate::torus(Vec3::ZERO, 10.0, 2.0).unwrap();
-    assert_eq!(origins(&t), vec![vec![P(0), P(1)]; 6]);
+    assert_eq!(origins(&t), vec![vec![P(0)]]);
 }
 
 /// The plane the revolve tests sketch in (x across, y up the world z axis, the revolve axis).
@@ -209,31 +215,28 @@ fn expected_revolution(b: &Body, r: &Region2) -> Vec<Vec<FaceOrigin>> {
 #[test]
 fn revolve_partial_and_full() {
     let r = Region2 { outer: rect(10.0, 0.0, 20.0, 5.0), holes: vec![rect(12.0, 1.0, 14.0, 2.0).reversed()] };
-    // Under half a turn truck sweeps in two parts, beyond it in three; a full turn has no caps,
-    // and its planar faces (from the segments square to the axis) are whole (#726), as a partial
+    // SMLib turns each segment into one face whatever the angle; a full turn has no caps, and
+    // its planar faces (from the segments square to the axis) are whole (#726), as a partial
     // turn's are when it is final (`revolve_whole`).
     let segs: Vec<Seg2> = r.outer.segs.iter().chain(r.holes.iter().flat_map(|h| &h.segs)).cloned().collect();
     for whole in [false, true] {
-        for (angle, parts, caps) in [(FRAC_PI_2, 2, 2), (1.5 * PI, 3, 2), (TAU, 3, 0)] {
+        for (angle, caps) in [(FRAC_PI_2, 2), (1.5 * PI, 2), (TAU, 0)] {
             let revolve = if whole { crate::revolve_whole } else { crate::revolve };
             let b = revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();
             let got = origins(&b);
             assert_eq!(got, expected_revolution(&b, &r), "angle {angle}, whole {whole}");
-            for (k, s) in segs.iter().enumerate() {
-                let square = matches!(s, Seg2::Line { a, b } if (a.y - b.y).abs() < 1e-12);
-                let want = if (angle == TAU || whole) && square { 1 } else { parts };
-                assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), want, "segment {k} at angle {angle}, whole {whole}");
+            for k in 0..segs.len() {
+                assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k} at angle {angle}, whole {whole}");
             }
             assert_eq!(got.iter().filter(|o| **o == [START] || **o == [END]).count(), caps);
         }
     }
 }
 
-/// Loops given clockwise, a hole that is a full circle of three arcs: extrude numbers every
-/// face by the segment as given; revolve re-seams the circle into two half circles, each from
-/// every given arc it runs over.
+/// Loops given clockwise, a hole that is a full circle of three arcs: extrude and revolve
+/// number every face by the segment as given, one face each.
 #[test]
-fn clockwise_loops_and_a_reseamed_circle_keep_their_numbers() {
+fn clockwise_loops_and_a_circle_of_arcs_keep_their_numbers() {
     let (c, rad) = (Vec2::new(20.0, 10.0), 4.0);
     let arcs = [(0.3, 2.0), (2.3, 2.5), (4.8, TAU - 4.5)];
     let ccw = Loop2 { segs: arcs.iter().map(|&(start, sweep)| Seg2::Arc { center: c, radius: rad, start, sweep }).collect() };
@@ -245,28 +248,14 @@ fn clockwise_loops_and_a_reseamed_circle_keep_their_numbers() {
     for k in 0..7 {
         assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k}");
     }
-    // Revolved, the circle restarts at 0.4142 rad: the half from there runs over the first two
-    // arcs (6, 5), the other half over all three (it ends past the first arc's start).
-    let first_half = |q: Vec2| (q - c).angle().rem_euclid(TAU);
+    // Revolved, each arc turns into a face of its own, as the rectangle's sides do.
     for angle in [FRAC_PI_2, TAU] {
         let b = crate::revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, angle).unwrap().pop().unwrap();
         let got = origins(&b);
-        let want = expected_revolution(&b, &r);
-        let (_, centres) = mesh_points(&b);
-        let mut halves = [0, 0];
-        for ((g, w), centres) in got.iter().zip(&want).zip(&centres) {
-            let flat: Vec<Vec2> = centres.iter().map(|p| Vec2::new(p.x.hypot(p.y), p.z)).collect();
-            if flat.iter().all(|q| (q.dist(c) - rad).abs() < 0.1) {
-                let first = flat.iter().all(|q| (0.4142 - 1e-3..=0.4142 + PI + 1e-3).contains(&first_half(*q)));
-                assert_eq!(g, &if first { vec![P(5), P(6)] } else { vec![P(4), P(5), P(6)] }, "angle {angle}");
-                halves[usize::from(!first)] += 1;
-            } else {
-                assert_eq!(g, w, "angle {angle}");
-            }
+        assert_eq!(got, expected_revolution(&b, &r), "angle {angle}");
+        for k in 0..7 {
+            assert_eq!(got.iter().filter(|o| **o == [P(k)]).count(), 1, "segment {k} at angle {angle}");
         }
-        // Truck turns each half in as many parts as each rectangle side.
-        let parts = got.iter().filter(|o| **o == [P(0)]).count();
-        assert_eq!(halves, [parts, parts], "angle {angle}");
     }
 }
 
@@ -278,11 +267,11 @@ fn revolve_with_an_edge_on_the_axis() {
     let got = origins(&partial);
     assert_eq!(got, expected_revolution(&partial, &r));
     assert_eq!(got.len(), 5);
-    // A full turn: the radial segments 0 and 2 sweep discs, segment 1 the cylinder (three parts).
+    // A full turn: the radial segments 0 and 2 sweep discs, segment 1 the cylinder (one face).
     let full = crate::revolve(&SIDE, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
     let got = origins(&full);
     assert_eq!(got, expected_revolution(&full, &r));
-    assert_eq!(got.iter().filter(|o| **o == [P(1)]).count(), 3);
+    assert_eq!(got.iter().filter(|o| **o == [P(1)]).count(), 1);
     assert_eq!(got.iter().filter(|o| **o == [P(0)] || **o == [P(2)]).count(), 2);
     // A cone: the slanted segment ends on the axis (the apex), the base disc.
     let tri = Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(0.0, 8.0)]), holes: vec![] };
@@ -292,7 +281,7 @@ fn revolve_with_an_edge_on_the_axis() {
     let turned = Region2 { outer: rotated(&tri.outer.reversed(), 1), holes: vec![] };
     let cone = crate::revolve(&SIDE, std::slice::from_ref(&turned), Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
     assert_eq!(origins(&cone), expected_revolution(&cone, &turned));
-    // A half disc: a sphere, every patch from the arc (segment 1 here).
+    // A half disc: a sphere, its one face from the arc (segment 1 here).
     let half = Region2 {
         outer: Loop2 {
             segs: vec![
@@ -303,7 +292,7 @@ fn revolve_with_an_edge_on_the_axis() {
         holes: vec![],
     };
     let ball = crate::revolve(&SIDE, std::slice::from_ref(&half), Vec2::ZERO, Vec2::Y, TAU).unwrap().pop().unwrap();
-    assert_eq!(origins(&ball), vec![vec![P(1)]; 6]);
+    assert_eq!(origins(&ball), vec![vec![P(1)]]);
 }
 
 #[test]

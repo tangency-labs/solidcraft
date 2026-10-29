@@ -378,7 +378,8 @@ fn a_cylinder_wall_split_along_its_seam_meshes_round() {
     let outer: Vec<bool> = (0..cup.face_count())
         .map(|i| matches!(face_surface(&cup, i), Some(FaceSurface::Cylinder { radius, .. }) if (radius - 50.0).abs() < 1e-6))
         .collect();
-    assert_eq!(outer.iter().filter(|o| **o).count(), 2);
+    // One periodic face (SMLib sweeps the one circle segment once), its seam split at z = 2.
+    assert_eq!(outer.iter().filter(|o| **o).count(), 1);
     for tol in [display_tol(&cup), 0.1, 0.01] {
         let m = cup.mesh(&crate::MeshTolerance::chord(tol)).unwrap();
         assert_eq!(open_sides(&m, 1e-6), 0);

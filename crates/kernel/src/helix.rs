@@ -147,7 +147,8 @@ mod tests {
         let region = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 2.0), holes: vec![] };
         let b = sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 8.0, 3.0).unwrap();
         let v = crate::measure(&b).unwrap().volume;
-        assert_eq!(b.face_count(), 4, "two smooth walls and two caps");
+        // SMLib sweeps the circle (one segment) as one smooth wall.
+        assert_eq!(b.face_count(), 3, "one smooth wall and two caps");
         let want = std::f64::consts::PI * 4.0 * std::f64::consts::TAU * 20.0 * 3.0;
         assert!((v - want).abs() / want < 1e-3, "{v} vs {want}");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 3.0, 3.0).is_err(), "pitch below the section");
