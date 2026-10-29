@@ -1237,3 +1237,19 @@ fn rectangular_to_object_references_follow_them() {
     cold.refresh();
     assert!(hole_at(&cold, 80.0, 80.0) && !hole_at(&cold, 100.0, 100.0));
 }
+
+/// A construction plane later in the timeline than the pattern is refused, as for an extrude: the
+/// pattern could not follow it (#8527), and keeps the copies it had.
+#[test]
+fn rectangular_to_a_later_construction_plane_is_refused() {
+    let mut s = feature_pattern_plate();
+    run(&mut s, "solid.pattern.rectangular", json!({"features":["Hole"],"dir1":[1,0,0],"count1":2,"spacing1":20,"name":"Pattern"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 100, "name": "Late"}));
+    let err = s
+        .execute("timeline.redefine", &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+            "features":["Hole"],"dir1":[1,0,0],"count1":2,"to1":{"plane":"Late"}}}))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("must come earlier in the timeline"), "{err}");
+    assert!(hole_at(&s, 80.0, 60.0) && !hole_at(&s, 100.0, 60.0));
+}
