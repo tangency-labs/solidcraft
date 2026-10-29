@@ -374,3 +374,46 @@ fn linked_conic_curves_take_the_n_prefix_not_the_constraints_k() {
     let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
     assert_eq!(ids, vec!["l1".to_string(), "n1".to_string()], "linked curve ids");
 }
+
+/// #5388: a circle the user drew on a projected hole's centre survives when the face changes
+/// shape and its projection is rebuilt (a second hole added to the face). It stays on that
+/// hole's centre while the hole is there, and on a free point where it was once it is gone.
+#[test]
+fn rebuilt_face_keeps_a_users_circle_on_its_projected_centre() {
+    let mut sk = Sketch::new();
+    let hole = |c: Vec2| LinkGeom::Circle(c, 2.1);
+    let face_with = |holes: &[Vec2]| square(15.0).into_iter().chain(holes.iter().map(|c| hole(*c))).collect::<Vec<_>>();
+    let link = sk.add_link(LinkKind::Project, face(), &face_with(&[Vec2::ZERO])).unwrap();
+    // The projected hole's centre point.
+    let centre = sk
+        .link_curves(&link)
+        .into_iter()
+        .find_map(|i| match sk.curves[i].kind {
+            CurveKind::Circle { c, .. } => Some(c),
+            _ => None,
+        })
+        .unwrap();
+    let mine = sk.add_curve(CurveKind::Circle { c: centre, r: 5.25 }, Some("c_mine")).unwrap();
+    assert!(sk.curves[mine].link.is_none());
+    // The face gains two more holes: the projection's shape changes, so it is rebuilt.
+    assert!(sk.update_link(&link, &face_with(&[Vec2::ZERO, Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0)])).unwrap());
+    let centre_of_mine = |sk: &Sketch| {
+        let kept = sk.curves.iter().find(|c| c.id == "c_mine").expect("the user's circle survives the rebuild");
+        assert!(kept.link.is_none());
+        match kept.kind {
+            CurveKind::Circle { c, r } => {
+                assert_eq!(r, 5.25);
+                assert!(sk.points[c].pos.len() < 1e-9, "still at the hole's centre: {:?}", sk.points[c].pos);
+                c
+            }
+            ref k => panic!("not a circle: {k:?}"),
+        }
+    };
+    let c = centre_of_mine(&sk);
+    assert_eq!(sk.points[c].link.as_deref(), Some(link.as_str()), "it stays on the hole's projected centre");
+    assert_eq!(sk.link_curves(&link).len(), 4 + 3, "the projection is the new outline and holes");
+    // The hole it was drawn on goes: the circle stays where it was, on a point of its own.
+    assert!(sk.update_link(&link, &face_with(&[Vec2::new(-10.0, 0.0), Vec2::new(10.0, 0.0)])).unwrap());
+    let c = centre_of_mine(&sk);
+    assert!(sk.points[c].link.is_none() && !sk.points[c].fixed, "it sits on a point of its own, not a projected one");
+}

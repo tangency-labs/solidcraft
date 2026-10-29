@@ -136,6 +136,51 @@ fn sketch_on_face_projects_its_edges_and_follows_edits() {
     assert!(w.is_none(), "{w:?}");
 }
 
+/// A tab drawn from a corner of a projected face, with its side held on the face's edge,
+/// follows the face when the face changes shape (a second hole) and grows: the projection is
+/// rebuilt, and the tab keeps its corner and its edge instead of losing its lines or being left
+/// behind inside the grown plate.
+#[test]
+fn a_tab_on_a_projected_face_follows_the_face_when_its_projection_is_rebuilt() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "60 mm"}));
+    let plate = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 0], [60, 40], [0, 40]], "closed": true, "infer": true, "ids": ["a", "b", "c", "d"]}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "a.start", "b": "origin"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["a"], "value": "w"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["b"], "value": 40}));
+    run(&mut s, "sketch.circle.center", json!({"center": [15, 20], "diameter": 6}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.project", json!({"refs": [{"face": [30, 5, 10]}]}));
+    let at = |c: &Value, end: &str, axis: usize| c[end][axis].as_f64().unwrap();
+    let right = linked_curves(&inspect(&mut s))
+        .into_iter()
+        .find(|c| (at(c, "start_at", 0) - 60.0).abs() < 1e-9 && (at(c, "end_at", 0) - 60.0).abs() < 1e-9)
+        .unwrap();
+    let id = right["id"].as_str().unwrap();
+    let corner = if (at(&right, "end_at", 1) - 40.0).abs() < 1e-9 { format!("{id}.end") } else { format!("{id}.start") };
+    let tab = ids(&run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [corner, [75, 40], [75, 25], format!("on:{id}:60,25")], "closed": true, "infer": true}),
+    )["curves"]);
+    run(&mut s, "sketch.dimension", json!({"entities": [tab[0]], "value": 15}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "direction": "negative", "operation": "join"}));
+    let reach = |s: &Session| s.model.state().body("Plate").unwrap().mesh().bounds().max.x;
+    assert!((reach(&s) - 75.0).abs() < 1e-6, "{}", reach(&s));
+    // The plate gets a second hole and grows to 80 mm.
+    run(&mut s, "sketch.edit", json!({"sketch": plate}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, 20], "diameter": 6}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "80 mm"}));
+    let failed: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert!((reach(&s) - 95.0).abs() < 1e-6, "the tab stays on the plate's grown edge: {}", reach(&s));
+}
+
 #[test]
 fn auto_project_can_be_turned_off() {
     let mut s = Session::default();

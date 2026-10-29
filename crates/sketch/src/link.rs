@@ -16,6 +16,8 @@ const MERGE_TOL: f64 = 1e-7;
 
 #[path = "link_loops.rs"]
 mod loops;
+#[path = "link_rebuild.rs"]
+mod rebuild;
 /// Most entities a single link may produce.
 pub const MAX_LINK_ENTITIES: usize = 20_000;
 
@@ -692,7 +694,8 @@ impl Sketch {
         Ok(id)
     }
 
-    fn build_link(&mut self, id: &str, lay: &Layout) -> Result<()> {
+    /// Make the entities of link `id` for `lay`. Returns the point each layout point became.
+    fn build_link(&mut self, id: &str, lay: &Layout) -> Result<Vec<Option<usize>>> {
         let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
         let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {
             if let Some(Some(i)) = idx.get(li) {
@@ -740,13 +743,14 @@ impl Sketch {
         for li in &lay.lone {
             point(self, *li)?;
         }
-        Ok(())
+        Ok(idx)
     }
 
     /// Replace a link's geometry with a newly resolved one. When the shape is the same (same
     /// curve kinds sharing the same points) the entities keep their ids and only move, so
-    /// constraints and dimensions on them survive; otherwise the link is rebuilt. Returns
-    /// `true` when it was rebuilt.
+    /// constraints and dimensions on them survive; otherwise the link is rebuilt, and the
+    /// sketch's own curves and constraints on it move to the new entities that match the old
+    /// ones (`rebuild_link`). Returns `true` when it was rebuilt.
     pub fn update_link(&mut self, id: &str, geom: &[LinkGeom]) -> Result<bool> {
         if self.link(id).is_none() {
             return Err(SketchError::Unknown(id.into()));
@@ -1059,9 +1063,8 @@ impl Sketch {
             }
             return Ok(false);
         }
-        // Rebuild: drop the old entities (constraints on them go too) and make new ones.
-        self.drop_link_entities(id);
-        self.build_link(id, &lay)?;
+        // Rebuild: new entities, and what the sketch held on the old ones moves to them.
+        self.rebuild_link(id, &lay, &points, &curves, cur.as_deref())?;
         Ok(true)
     }
 
@@ -1078,16 +1081,6 @@ impl Sketch {
             self.points.iter().map(|p| by_id.get(p.id.as_str()).copied().unwrap_or(p.pos)).collect()
         };
         self.points.iter().zip(&was).any(|(p, w)| p.pos != *w).then_some(was)
-    }
-
-    fn drop_link_entities(&mut self, id: &str) {
-        let curves = self.link_curves(id);
-        let keep = self.links.clone();
-        self.remove_curves(&curves);
-        let pts = self.link_points(id);
-        self.remove_points(&pts);
-        // Removal prunes empty links; this one stays.
-        self.links = keep;
     }
 
     /// Mark a link as lost (its reference was not found); its geometry stays as it was.
