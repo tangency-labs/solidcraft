@@ -26,6 +26,8 @@ pub struct SectionParams {
     pub clear: Option<bool>,
     /// Add the plane to the section instead of replacing it (at most 6 planes).
     pub add: Option<bool>,
+    /// Move this plane (by id) to `plane`, keeping the others.
+    pub replace: Option<u64>,
     /// Take this plane (by id) out of the section.
     pub remove: Option<u64>,
 }

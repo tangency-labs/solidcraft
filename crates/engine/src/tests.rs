@@ -1778,6 +1778,15 @@ fn section_analysis_with_several_planes() {
     assert_eq!(r["planes"].as_array().map(Vec::len), Some(5), "{r}");
     let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "at": 9, "add": true}));
     assert_eq!(r["section"]["id"].as_u64(), Some(7), "a new plane takes a new id: {r}");
+    // Replace moves one plane in place: its id, its place in the list and the others stay.
+    let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "at": 12, "replace": 3}));
+    let ids: Vec<u64> = s.section.iter().map(|c| c.id).collect();
+    assert_eq!((ids, r["section"]["id"].as_u64(), r["section"]["at"].as_f64()), (vec![1, 3, 4, 5, 6, 7], Some(3), Some(12.0)), "{r}");
+    assert!((s.section[1].origin.y - 12.0).abs() < 1e-12 && (s.section[1].normal - Vec3::Y).len() < 1e-12, "{:?}", s.section[1]);
+    assert!(!s.section_hatch, "replacing keeps the hatch unless it is given");
+    let onto = s.execute("inspect.section", &json!({"plane": "XZ", "at": 9, "replace": 3})).unwrap_err();
+    assert!(onto.to_string().contains("already cuts with this plane"), "onto another plane: {onto}");
+    run(&mut s, "inspect.section", json!({"plane": "XZ", "at": 12, "replace": 3}));
     // A plane without `add` replaces the section, as before.
     let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
     assert_eq!((s.section.len(), r["section"]["id"].as_u64()), (1, Some(1)), "{r}");
@@ -1807,6 +1816,13 @@ fn section_analysis_refuses_hostile_params() {
         json!({"remove": "1"}),
         json!({"remove": 1, "plane": "XY"}),
         json!({"remove": 1, "add": true}),
+        json!({"plane": "XY", "replace": 9}),
+        json!({"plane": "XY", "replace": -1}),
+        json!({"plane": "XY", "replace": "1"}),
+        json!({"plane": "XY", "replace": 1, "add": true}),
+        json!({"plane": "XY", "replace": 1, "remove": 1}),
+        json!({"replace": 1}),
+        json!({"plane": {"origin": [0, 0, 0], "normal": [1e308, 1e308, 1e308]}, "replace": 1}),
         json!({"plane": "XY", "add": "yes"}),
         json!({"plane": "XY", "add": 1}),
         json!({"plane": {"origin": [0, 0, 0], "normal": [1e308, 1e308, 1e308]}, "add": true}),

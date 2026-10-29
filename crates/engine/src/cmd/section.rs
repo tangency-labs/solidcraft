@@ -18,9 +18,10 @@ pub static COMMANDS: &[CommandSpec] =
     .at("SOLID", "INSPECT").icon("section").noundo().params(
         "plane: XY|XZ|YZ | construction plane name or id | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
-         flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true, or as it was with add); \
+         flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true, or as it was with add or replace); \
          add?: bool (add the plane to the section, starting one if there is none, instead of replacing it: the section hides what \
-         lies on the positive side of every plane, so two square planes cut a quarter away; at most 6 planes); or remove: a plane's id (take that plane out; the last turns the section off); \
+         lies on the positive side of every plane, so two square planes cut a quarter away; at most 6 planes); \
+         replace?: a plane's id (move that plane to `plane`, keeping its id and the others); or remove: a plane's id (take that plane out; the last turns the section off); \
          or clear: true (all planes). Returns section: the plane made {id, origin, normal, hatch, and for a named plane axis and at} \
          (null when the section is off), and planes: [{id, origin, normal}], every plane of the section",
     )];
@@ -37,6 +38,21 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => false,
         Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`add` must be true or false"))?,
     };
+    let id_of = |key: &str| -> Result<Option<u64>> {
+        match p.get(key).filter(|v| !v.is_null()) {
+            None => Ok(None),
+            Some(v) => v.as_u64().map(Some).ok_or_else(|| bad(cmd, format!("`{key}` must be the id of one of the section's planes"))),
+        }
+    };
+    let replace = id_of("replace")?;
+    if replace.is_some() && (add || p.get("remove").is_some_and(|v| !v.is_null())) {
+        return Err(bad(cmd, "`replace` moves one plane: give it without `add` or `remove`"));
+    }
+    if let Some(id) = replace
+        && !s.section.iter().any(|c| c.id == id)
+    {
+        return Err(bad(cmd, format!("the section has no plane {id}")));
+    }
     if let Some(v) = p.get("remove").filter(|v| !v.is_null()) {
         if p.get("plane").is_some() || add {
             return Err(bad(cmd, "give either a `plane` to cut with or the `remove` id of one, not both"));
@@ -70,23 +86,33 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let hatch = match bool_(p, "hatch") {
         Some(h) => h,
-        None if add => s.section_hatch,
+        None if add || replace.is_some() => s.section_hatch,
         None => true,
     };
-    let id = if add {
+    let tol = 1e-9 * (1.0 + origin.len());
+    let twice = |s: &Session| {
+        s.section.iter().any(|c| Some(c.id) != replace && (c.normal - normal).len() <= 1e-9 && c.normal.dot(origin - c.origin).abs() <= tol)
+    };
+    if (add || replace.is_some()) && twice(s) {
+        return Err(bad(cmd, "the section already cuts with this plane"));
+    }
+    let id = if let Some(id) = replace {
+        for c in s.section.iter_mut().filter(|c| c.id == id) {
+            (c.origin, c.normal) = (origin, normal);
+        }
+        id
+    } else if add {
         if s.section.len() >= MAX_SECTION_PLANES {
             return Err(bad(cmd, format!("a section cuts with at most {MAX_SECTION_PLANES} planes; remove one first")));
         }
-        let tol = 1e-9 * (1.0 + origin.len());
-        if s.section.iter().any(|c| (c.normal - normal).len() <= 1e-9 && c.normal.dot(origin - c.origin).abs() <= tol) {
-            return Err(bad(cmd, "the section already cuts with this plane"));
-        }
-        s.section.iter().map(|c| c.id).max().unwrap_or(0) + 1
+        let id = s.section.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+        s.section.push(SectionPlane { id, origin, normal });
+        id
     } else {
         s.section.clear();
+        s.section.push(SectionPlane { id: 1, origin, normal });
         1
     };
-    s.section.push(SectionPlane { id, origin, normal });
     s.section_hatch = hatch;
     s.status_slot(crate::status_items::StatusId::Section, true);
     s.status_activated(crate::status_items::StatusId::Section);
