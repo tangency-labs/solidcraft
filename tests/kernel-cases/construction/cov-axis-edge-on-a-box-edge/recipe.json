@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.axis.edge",
+   "params": {
+    "edge": {
+     "edge": [
+      20,
+      30,
+      20
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}
