@@ -138,7 +138,7 @@ fn named_links(sk: &Sketch, p: &Value, cmd: &str) -> Result<Vec<String>> {
 /// The sketches a command works on: `sketch`, else the active one, else every sketch with
 /// references (when `all`), in timeline order.
 fn target_sketches(s: &Session, p: &Value, cmd: &str, all: bool) -> Result<Vec<u64>> {
-    if p.get("sketch").is_some() || s.active_sketch.is_some() || !all {
+    if p.get("sketch").is_some_and(|v| !v.is_null()) || s.active_sketch.is_some() || !all {
         return Ok(vec![sketch_store::target(s, p, cmd)?]);
     }
     Ok(s.doc
