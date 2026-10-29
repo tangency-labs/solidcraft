@@ -3804,11 +3804,12 @@ impl Renderer {
             }
         };
         // Instanced meshes, with the pipeline for smooth and for flat triangles.
-        let instanced = |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
-            for d in b.instanced.iter().filter(|d| d.look == InstanceLook::Opaque && (d.closed || !counting)) {
-                d.draw(pass, smooth, flat, tally);
-            }
-        };
+        let instanced =
+            |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
+                for d in b.instanced.iter().filter(|d| d.look == InstanceLook::Opaque && (d.closed || !counting)) {
+                    d.draw(pass, smooth, flat, tally);
+                }
+            };
         // Whole highlighted bodies: the model's own evaluated plan triangles, drawn again in a
         // highlight colour (the pipeline adds or replaces the vertex colour).
         let tinted = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, plans: &[Arc<solidcraft_geom::tess::TessPlan>]| {
