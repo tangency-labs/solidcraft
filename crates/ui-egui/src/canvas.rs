@@ -739,6 +739,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
     let clear = crate::place_gizmo::arrow_clearance(app, d);
+    let section = matches!(d.kind, Kind::Section { .. });
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -751,6 +752,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let mut box_at = bs + vec2(16.0, -30.0);
     // Where the box hangs from: the arrow's tip, or the base when there is no arrow.
     let mut anchor = bs;
+    // A section's box goes past the arrow's tip, clear of where a press takes the arrow: the
+    // arrow is what a section is mostly moved with.
+    let mut past_tip = None;
     if let (Some(n), Some(l)) = (dir, len.filter(|_| kind == ValueKind::Length)) {
         let n = n * sign;
         let baseline = to_span.map(f64::abs).unwrap_or(0.0);
@@ -788,15 +792,25 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             }
             box_at = ts + vec2(14.0, -12.0);
             anchor = ts;
+            if section {
+                past_tip = Some((bs, ts));
+            }
         }
     }
     let note = crate::drag_extrude::step_note(app);
     // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
     // Clear of the command window first, then off the placement handles: the handles have the
     // last word, as a box over a grip takes the press meant for it (#6608).
-    let place = box_place(app, proj);
+    let mut place = box_place(app, proj);
     let size = box_size(ui, egui::Id::new("sc_canvas_area"), label, note.as_deref());
-    let box_at = clear_of_dialog(rect_at(box_at, egui::Align2::LEFT_TOP, size), place).min;
+    let rect = match past_tip {
+        Some((from, ts)) => {
+            place.handles = Some(arrow_grab(from, ts));
+            keep_in_view(past_arrow(from, ts, size), place.view)
+        }
+        None => rect_at(box_at, egui::Align2::LEFT_TOP, size),
+    };
+    let box_at = clear_of_dialog(rect, place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
     value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), BoxPlace { dialog: None, ..place });
     if *value != before
@@ -1037,6 +1051,40 @@ fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> e
 /// How far (logical points) from an arrow's stem a press still takes the arrow.
 const ARROW_STEM_REACH: f32 = 6.0;
 
+/// The square about an arrow's tip a press takes the arrow in (logical points).
+const ARROW_TIP: f32 = 20.0;
+
+/// The room a value box placed past an arrow leaves around where a press takes the arrow.
+const ARROW_BOX_GAP: f32 = 12.0;
+
+/// Where a press takes the arrow from `from` to its tip `ts`: the tip's square and the stem's
+/// reach, as one rectangle.
+fn arrow_grab(from: Pos2, ts: Pos2) -> egui::Rect {
+    egui::Rect::from_center_size(ts, vec2(ARROW_TIP, ARROW_TIP)).union(egui::Rect::from_two_pos(from, ts).expand(ARROW_STEM_REACH))
+}
+
+/// Where a value box of `size` goes past the tip of the arrow from `from` to `ts`: beyond the
+/// end the arrow points at, centred on its line, and [`ARROW_BOX_GAP`] clear of
+/// [`arrow_grab`].
+fn past_arrow(from: Pos2, ts: Pos2, size: egui::Vec2) -> egui::Rect {
+    let u = Some((ts - from).normalized()).filter(|u| u.is_finite() && u.length() > 0.5).unwrap_or(vec2(0.0, -1.0));
+    let pivot = match (u.x.abs() > u.y.abs(), u.x > 0.0, u.y > 0.0) {
+        (true, true, _) => egui::Align2::LEFT_CENTER,
+        (true, false, _) => egui::Align2::RIGHT_CENTER,
+        (false, _, true) => egui::Align2::CENTER_TOP,
+        (false, _, false) => egui::Align2::CENTER_BOTTOM,
+    };
+    let grab = arrow_grab(from, ts).expand(ARROW_BOX_GAP);
+    let mut rect = rect_at(ts + u * (ARROW_TIP * 0.5 + ARROW_BOX_GAP), pivot, size);
+    for _ in 0..16 {
+        if !rect.intersects(grab) {
+            break;
+        }
+        rect = rect.translate(u * 4.0);
+    }
+    rect
+}
+
 /// The distance from `p` to the segment from `a` to `b` on screen.
 fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
     let v = b - a;
@@ -1075,7 +1123,7 @@ fn drag_arrow(
     let mut ts = tip(l)?;
     // Where the drawn arrow starts: the base, or past the cleared marker.
     let start = |ts: Pos2| if clear_px > 0.0 && (ts - bs).length() > clear_px { bs + (ts - bs).normalized() * clear_px } else { bs };
-    let at_tip = egui::Rect::from_center_size(ts, vec2(20.0, 20.0));
+    let at_tip = egui::Rect::from_center_size(ts, vec2(ARROW_TIP, ARROW_TIP));
     // Over the stem, the arrow answers where the pointer is. A placement handle the arrow crosses
     // (the turn ring's grip) keeps the pointer: the arrow then answers nowhere.
     let hover = ui.input(|i| i.pointer.hover_pos());
@@ -2132,6 +2180,53 @@ mod tests {
                 h.ctx.memory(|m| m.layer_id_at(box_rect.center())).is_some_and(|l| l.id == egui::Id::new("sc_prefs")),
                 "Preferences covers the Distance box where they overlap"
             );
+        }
+    }
+
+    /// A box placed past an arrow keeps clear of where a press takes the arrow, whichever way the
+    /// arrow points on screen, however long it is.
+    #[test]
+    fn a_box_past_an_arrow_keeps_clear_of_its_grab() {
+        let size = vec2(132.0, 24.0);
+        let ts = egui::pos2(500.0, 400.0);
+        for k in 0..32 {
+            let a = k as f32 * std::f32::consts::TAU / 32.0;
+            for len in [0.0, 40.0, 120.0] {
+                let from = ts - vec2(a.cos(), a.sin()) * len;
+                let rect = past_arrow(from, ts, size);
+                assert!((rect.size() - size).length() < 1e-3, "{rect:?}");
+                let grab = arrow_grab(from, ts).expand(ARROW_BOX_GAP - 0.5);
+                assert!(!rect.intersects(grab), "angle {a}, length {len}: the box {rect:?} meets the arrow's grab {grab:?}");
+            }
+        }
+    }
+
+    /// #8717: Section Analysis's distance box sits clear of its arrow, so a press meant for the
+    /// arrow takes the arrow: at close, typical and far zooms, from the side and at a slant.
+    #[test]
+    fn the_section_box_keeps_clear_of_its_arrow() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.session.selection = vec![Sel::Plane { name: "XY".into() }];
+        h.app.start("inspect.section");
+        for view in [
+            solidcraft_engine::geom::Vec3::new(1.0, -1.0, 1.0),
+            solidcraft_engine::geom::Vec3::new(0.0, -1.0, 0.0),
+            solidcraft_engine::geom::Vec3::new(-1.0, -0.3, 0.4),
+        ] {
+            for distance in [60.0, 150.0, 400.0, 1200.0] {
+                let mut cam = h.app.cam.looking_from(view);
+                cam.target = solidcraft_engine::geom::Vec3::ZERO;
+                cam.distance = distance;
+                h.app.cam = cam;
+                h.frames(4);
+                let tip = crate::scenario::handle_at("arrow").expect("the section's arrow");
+                let base = h.at(&serde_json::json!({"world": [0, 0, 0]})).map(|p| egui::pos2(p[0] as f32, p[1] as f32)).unwrap();
+                let field = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).expect("the distance box");
+                let grab = arrow_grab(base, tip);
+                assert!(!field.intersects(grab.expand(ARROW_STEM_REACH)), "view {view:?} at {distance}: the box {field:?} meets the arrow {grab:?}");
+            }
         }
     }
 
