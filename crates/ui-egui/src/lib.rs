@@ -532,6 +532,9 @@ pub struct SolveApp {
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
     pub start_after_roll: Option<(String, u64)>,
+    /// A history command stopped while it computed (#4053), its worker left to finish unseen:
+    /// asked again for the same design, the command takes it up rather than computing it again.
+    pub stopped: Option<deferred::Deferred>,
     /// A delete's check of what it takes with it or breaks, computing off the window thread
     /// ([`deferred::DeleteCheck`], #2678).
     pub delete_check: Option<deferred::DeleteCheck>,
@@ -735,6 +738,7 @@ impl SolveApp {
             deferred: None,
             deferred_queue: Vec::new(),
             start_after_roll: None,
+            stopped: None,
             delete_check: None,
             apply_off_thread: None,
             #[cfg(test)]

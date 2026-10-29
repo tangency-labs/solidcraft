@@ -1,0 +1,14 @@
+{
+  "en": {
+    "dialog.computing_stop": "Stop",
+    "dialog.computing_stopped": "Stopped: nothing was changed. The stopped computation may keep the processor busy until it ends."
+  },
+  "ja": {
+    "dialog.computing_stop": "停止",
+    "dialog.computing_stopped": "停止しました。何も変更されていません。停止した計算は終わるまでプロセッサーを使い続けることがあります。"
+  },
+  "zh": {
+    "dialog.computing_stop": "停止",
+    "dialog.computing_stopped": "已停止：没有任何更改。已停止的计算在结束前可能仍会占用处理器。"
+  }
+}
