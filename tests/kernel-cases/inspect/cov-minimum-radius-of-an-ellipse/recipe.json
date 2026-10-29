@@ -1,0 +1,38 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "S"
+   }
+  },
+  {
+   "command": "sketch.ellipse",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "major": [
+     10,
+     0
+    ],
+    "minor_radius": 4
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "inspect.minimum_radius",
+   "params": {
+    "sketch": "S",
+    "curves": [
+     "e1"
+    ]
+   }
+  }
+ ]
+}
