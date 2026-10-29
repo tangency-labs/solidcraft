@@ -1755,12 +1755,21 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
             }
         }
     };
+    // A tangent point at a curve's other end would leave nothing of it (a quarter arc rounded
+    // with its own radius was left as an arc of no length): that radius does not fit, as one too
+    // large for two lines doesn't.
+    let far = |c: usize| ends(c).map(|(a, b)| if a == q { b } else { a }).and_then(|f| sk.point(f));
+    let (far_a, far_b) = (far(ca), far(cb));
+    let used_up = |t: Vec2, end: Option<Vec2>| end.is_some_and(|e| t.dist(e) < TOL * 10.0);
     let mut best: Option<(f64, Vec2, Vec2, Vec2)> = None;
     for oa in offsets(&sa) {
         for ob in offsets(&sb) {
             for cen in intersections(&oa, &ob) {
                 let (ta, tb) = (sa.project(cen), sb.project(cen));
                 if on_bounded(&sa, ta).is_none() || on_bounded(&sb, tb).is_none() || ta.dist(pc) < 1e-9 || tb.dist(pc) < 1e-9 {
+                    continue;
+                }
+                if used_up(ta, far_a) || used_up(tb, far_b) {
                     continue;
                 }
                 let score = ta.dist(pc) + tb.dist(pc);

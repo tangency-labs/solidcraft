@@ -117,6 +117,22 @@ fn a_chamfer_where_two_lines_lie_in_line_is_refused() {
     }
 }
 
+/// A round that would use up a whole arc is refused, as one too large for two lines is: a
+/// quarter arc of radius 5 running into a line along it, rounded with radius 5, was left as an
+/// arc of no length (found by a local trim fuzzer).
+#[test]
+fn a_fillet_that_would_use_up_an_arc_is_refused() {
+    let mut s = new_sketch();
+    // Centre (15, 5): from (10, 5) down to (15, 0), where the line along y = 0 leaves it.
+    let through = [15.0 - 2.5 * 2f64.sqrt(), 5.0 - 2.5 * 2f64.sqrt()];
+    let a = curves(&run(&mut s, "sketch.arc.three_point", json!({"start": [10, 5], "end": [15, 0], "through": through})))[0].clone();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [format!("{a}.end"), [-35, 0]], "infer": false})))[0].clone();
+    let n = sk(&s).curves.len();
+    let e = s.execute("sketch.fillet", &json!({"a": a, "b": l, "radius": 5})).unwrap_err().to_string();
+    assert!(e.contains("does not fit"), "{e}");
+    assert_eq!(sk(&s).curves.len(), n);
+}
+
 /// The ids of the constraints driven by the model parameter `name`.
 fn driven_by(s: &Session, name: &str) -> Vec<String> {
     sk(s).constraints.iter().filter(|c| c.param.as_deref() == Some(name)).map(|c| c.id.clone()).collect()
