@@ -411,3 +411,27 @@ fn a_line_a_hair_off_vertical_is_vertical() {
     let (_, y) = member_axes(Vec3::new(1e-3, 0.0, 1.0), 0.0).unwrap();
     assert!(y.z > 0.0 && y.x < 0.0, "{y:?}");
 }
+
+#[test]
+fn end_cap_outlines_inset_and_chamfer_exactly() {
+    use crate::end_cap::{chamfered, inset};
+    // A 40 square with corners of radius 6, in by 3: a 34 square with corners of radius 3.
+    let tube = Profile::RectTube { width: 40.0, height: 40.0, wall: 3.0, outer_radius: Some(6.0) }.region().unwrap();
+    let lp = inset(&tube.outer, 3.0).unwrap();
+    close(lp.signed_area(), 34.0 * 34.0 - (4.0 - std::f64::consts::PI) * 9.0, "rounded inset");
+    // In by 8, past the rounding: a sharp 24 square.
+    close(inset(&tube.outer, 8.0).unwrap().signed_area(), 24.0 * 24.0, "sharp inset");
+    // Chamfers at least the rounding cut it away; shorter ones are refused.
+    close(chamfered(&lp, 3.0).unwrap().signed_area(), 34.0 * 34.0 - 4.0 * 4.5, "chamfer");
+    assert!(chamfered(&lp, 2.0).is_err());
+    assert!(chamfered(&lp, 17.0).is_err());
+    let round = Profile::RoundTube { diameter: 40.0, wall: 3.0 }.region().unwrap();
+    close(inset(&round.outer, 2.0).unwrap().signed_area(), std::f64::consts::PI * 324.0, "round inset");
+    assert!(inset(&round.outer, 20.0).is_err());
+    assert!(chamfered(&inset(&round.outer, 2.0).unwrap(), 1.0).is_err());
+    let angle = Profile::Angle { width: 40.0, height: 40.0, thickness: 4.0, root_radius: None, toe_radius: None }.region().unwrap();
+    assert!(inset(&angle.outer, 1.0).is_err());
+    for d in [f64::NAN, f64::INFINITY, -1.0, 1e300] {
+        let _ = inset(&tube.outer, d).and_then(|l| chamfered(&l, d));
+    }
+}

@@ -992,6 +992,24 @@ pub enum FeatureKind {
     },
     /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
     /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
+    /// Plates closing open ends of frame members (#4003), one body per end, each the member
+    /// profile's outer outline set in from its edge.
+    FrameEndCap {
+        ends: Vec<crate::end_cap::End>,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        /// The inset from the outline's edge as a length; none: `ratio` of the thickness.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Inset")]
+        offset: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Inset Ratio")]
+        ratio: Option<Expr>,
+        #[walk(length = "Corner Chamfer")]
+        chamfer: Expr,
+        #[serde(default)]
+        direction: crate::end_cap::Direction,
+    },
     FrameMember {
         path_sketch: SketchId,
         /// The lines, by curve id; none: every straight line drawn in the sketch (not
@@ -2366,6 +2384,7 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurfaceFeature",
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
+            FeatureKind::FrameEndCap { .. } => "EndCapFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -2449,6 +2468,7 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurface",
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
+            FeatureKind::FrameEndCap { .. } => "EndCap",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",

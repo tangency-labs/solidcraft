@@ -2,7 +2,7 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles. Corners, trims, end caps, gussets, welds and the cut list follow.
+members and their profiles, and end caps. Corners, trims, gussets, welds and the cut list follow.
 
 ## The workflow
 
@@ -24,7 +24,7 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap until corner treatments land.
 
-The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member and
+The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, End Cap and
 Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
 the selected body (or the last body of the active component).
 
@@ -73,6 +73,37 @@ Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). SolidCraft ships no vendor's or standard's size table: you give the
 dimensions of the stock you buy. Any other section, a vendor's aluminium extrusion for example, comes
 from a sketch: draw it or insert the vendor's DXF.
+
+## End caps
+
+**End Cap** (WELDMENTS › CREATE, `frame.end_cap`) closes open ends of members with plates, one
+separate body per end, named after the member (`Post End Cap`). Pick the end faces in the view:
+each must be a flat end of a frame member, square to its line.
+
+- The plate follows the profile's outer outline, set in from its edge by the **Inset**: a length,
+  or a **Ratio of thickness** (default 0.5, so a 6 mm cap sits 3 mm in from the edge). A rounded
+  corner keeps its rounding less the inset; a corner rounded less than the inset becomes sharp.
+- **Thickness** is the plate's thickness. **Outward** puts it past the end, so the frame gets
+  longer by the thickness; **Inward** cuts the member back by the thickness and puts the plate
+  where the end was, so the frame keeps its length.
+- **Corner Chamfer** cuts each corner along both edges, measured from where the edges meet. On a
+  rounded corner it must be at least the rounding, which it cuts away; a round cap has no corners
+  to chamfer.
+- Caps follow the member: change its profile, its line or the frame sketch and they move and
+  resize with it. Renaming the member keeps them. A cap whose member or face is gone reports an
+  error instead of picking another end.
+- Caps follow convex outlines of lines and arcs: round and rectangular bars and tubes, and profile
+  sketches of that shape. An angle, channel or I-beam, whose outline turns inward, is refused, as
+  are an inset or chamfer that leaves no plate.
+
+```json
+{"command": "frame.end_cap", "params": {"faces": [{"face": [18.5, 0, 300], "body": "Post", "index": 7}], "thickness": 6}}
+{"command": "frame.end_cap", "params": {"faces": [{"face": [18.5, 0, 0], "body": "Post", "index": 6}], "thickness": "cap_t", "offset": 2, "chamfer": 4, "direction": "inward"}}
+```
+
+`faces` are picks as the view makes them: a world point on the face, its body and face index
+(`path` for a face in another occurrence). Give the inset as `offset` (a length) or `ratio`, not
+both. **Edit Feature** reopens the dialog with the faces and values.
 
 ## Built-in profiles
 

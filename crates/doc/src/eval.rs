@@ -2746,7 +2746,7 @@ pub fn curve_pick_error(e: solidcraft_sketch::CurvePick, ids: &[String], sketch:
     }
 }
 
-fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String {
+pub(crate) fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String {
     if let Some(n) = f.body_names.get(k)
         && !n.is_empty()
         && state.body(n).is_none()
@@ -8002,6 +8002,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
+        FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin } => {
             let m = val(vals, margin, Kind::Length)?;
