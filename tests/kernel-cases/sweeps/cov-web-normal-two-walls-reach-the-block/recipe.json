@@ -1,0 +1,97 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      -20.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "WebS"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      10,
+      5
+     ],
+     [
+      20,
+      5
+     ]
+    ],
+    "ids": [
+     "w1"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      40,
+      5
+     ],
+     [
+      50,
+      5
+     ]
+    ],
+    "ids": [
+     "w2"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "WebS"
+   }
+  },
+  {
+   "command": "solid.web",
+   "params": {
+    "sketch": "WebS",
+    "curves": [
+     "w1",
+     "w2"
+    ],
+    "thickness": 2,
+    "direction": "normal"
+   }
+  }
+ ]
+}

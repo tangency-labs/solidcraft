@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "Boundary Fill of the cell inside one cylinder and outside the other: the crescent",
+ "source": "analytic",
+ "method": "A minus the lens: 1000 pi - 1228.370; faces: bottom, top, A's outer arc, B's inner arc = 4",
+ "body_count": 1,
+ "faces": 4,
+ "volume_mm3": 1913.222954981036,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   10
+  ]
+ }
+}

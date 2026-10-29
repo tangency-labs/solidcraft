@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a cell point outside every tool encloses nothing: refused",
+ "source": "analytic",
+ "method": "(50,50,5) is in neither cylinder: no cell there, a clean refusal",
+ "outcome": "refused",
+ "refusal": "outside every tool"
+}
