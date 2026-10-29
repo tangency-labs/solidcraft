@@ -42,6 +42,7 @@ pub(crate) use features::{EdgeRefForm, axis_dir_form, edge_ref_form, sketch_key}
 pub use features::{auto_operation, extrude_reach, shown_scope};
 pub use join_pieces::{Addition, addition};
 pub use sketch::dimension_roles;
+pub use sketch_construction::{ConstructionLine, construction_line_choice, construction_line_mode, construction_line_solutions};
 pub use sketch_import::drawing_import_command;
 pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
@@ -93,6 +94,7 @@ mod sketch_3d;
 mod sketch_canvas;
 pub mod sketch_clipboard;
 mod sketch_constraints;
+mod sketch_construction;
 mod sketch_create;
 mod sketch_ends;
 mod sketch_equation;
@@ -288,6 +290,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     let mut v: Vec<&'static CommandSpec> = Vec::new();
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
+    v.extend(sketch_construction::COMMANDS.iter());
     v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());

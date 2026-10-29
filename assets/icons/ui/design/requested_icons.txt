@@ -70,6 +70,16 @@ configuration_table	false
 conic	false
 constrainer	false
 construction	false
+construction_line	false
+construction_line_angle	false
+construction_line_bisector	false
+construction_line_horizontal	false
+construction_line_parallel	false
+construction_line_perpendicular	false
+construction_line_tangent_at	false
+construction_line_tangent_external	false
+construction_line_tangent_two	false
+construction_line_vertical	false
 contact_all	false
 contact_new	false
 contact_off	false

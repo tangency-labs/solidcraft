@@ -772,7 +772,7 @@ fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Direction leaving curve `ci` at its end point `pi` (continuing the curve past that end).
-fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
+pub(super) fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
     match sk.curves.get(ci)?.kind {
         CurveKind::Line { a, b } => {
             let (pa, pb) = (sk.point(a)?, sk.point(b)?);

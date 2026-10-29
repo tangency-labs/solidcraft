@@ -39,6 +39,7 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
     use ValueKind::*;
     let b = DimBox::new;
     match (cmd, n) {
+        ("sketch.construction_line.angle", 1) => vec![b("Angle", Angle)],
         ("sketch.line" | "sketch.line.midpoint", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
         ("sketch.rectangle.two_point" | "sketch.rectangle.center", 1) => vec![b("Width", Length), b("Height", Length)],
         ("sketch.rectangle.rounded", 1) => vec![b("Width", Length), b("Height", Length), b("Radius", Length)],
@@ -72,6 +73,9 @@ fn eval(doc: &Document, text: &str, kind: ValueKind) -> solidcraft_engine::doc::
 /// Whether a box becomes one of the shape's dimensions. A rounded rectangle's radius is its own
 /// parameter (sent with the shape); sides and rho are counts and shape factors.
 fn is_dimension(t: &Tool, label: &str) -> bool {
+    if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() {
+        return t.cmd == "sketch.construction_line.angle" && label == "Angle";
+    }
     !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
 
@@ -88,6 +92,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
     let Some(a) = t.pts.last().map(|p| p.0) else { return h };
     let lk = |l: &str| locked(app, t, l);
     match (t.cmd, t.pts.len()) {
+        ("sketch.construction_line.angle", 1) => a + Vec2::from_angle(lk("Angle").unwrap_or_else(|| (h - a).angle())) * (h - a).len().max(1.0),
         ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => {
             let v = h - a;
             let len = lk("Length").unwrap_or(v.len());
@@ -243,6 +248,7 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
     let off = 20.0 * px;
     match (t.cmd, t.pts.len()) {
+        ("sketch.construction_line.angle", 1) => vec![((e - a).angle(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => line_boxes(a, e, px, off),
         // The midpoint line runs from the end's mirror image through the midpoint to the end,
         // so its length is the whole line: twice the distance from the midpoint to the cursor.

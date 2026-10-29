@@ -246,8 +246,15 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "SKETCH",
         panel: "CREATE",
-        promoted: 4,
-        ids: &["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center", "sketch.arc.three_point", "sketch.infinite"],
+        promoted: 5,
+        ids: &[
+            "sketch.line",
+            "sketch.rectangle.two_point",
+            "sketch.circle.center",
+            "sketch.arc.three_point",
+            "sketch.construction_line",
+            "sketch.infinite",
+        ],
     },
     Section {
         tab: "SKETCH",
@@ -431,6 +438,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),
     ("sketch.constraint.horizontal_vertical", "Horiz./Vert."),
+    ("sketch.construction_line", "X-Lines"),
     ("sketch.create", "New Sketch"),
     ("sketch.dimension", "Dimension"),
     ("sketch.finish", "Finish Sketch"),
@@ -449,6 +457,11 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
 
 pub fn ribbon_button_label(command: &CommandSpec) -> &str {
     RIBBON_LABELS.iter().find(|(id, _)| *id == command.id).map_or(command.label, |(_, label)| *label)
+}
+
+/// Families keep their full menu title while using the first command's compact ribbon name.
+pub fn ribbon_family_label(family: &crate::sketch_families::Family) -> &'static str {
+    family.commands.first().and_then(|first| RIBBON_LABELS.iter().find(|(id, _)| id == first)).map_or(family.label, |(_, label)| *label)
 }
 
 /// Registry placement → default ribbon destination, after explicit id overrides.
@@ -846,6 +859,9 @@ mod tests {
         }
         assert_eq!(ribbon_button_label(solidcraft_engine::find_command("sketch.create").unwrap()), "New Sketch");
         assert_eq!(solidcraft_engine::find_command("sketch.create").unwrap().label, "Create Sketch");
+        let construction = crate::sketch_families::family("sketch.construction_line").unwrap();
+        assert_eq!(ribbon_family_label(construction), "X-Lines");
+        assert_eq!(construction.label, "Construction Line");
     }
 
     #[test]
@@ -856,7 +872,12 @@ mod tests {
             assert!(lists.iter().any(|(_, (cmds, _))| cmds.iter().any(|x| x.id == c.id)), "lost toolbar command {} ({}/{})", c.id, c.tab, c.panel);
         }
         for (s, (cmds, n)) in lists {
-            assert!(n <= 4 || (s.tab == "SKETCH" && s.panel == "CONSTRAIN" && n == 7), "{}/{} promotes {n} commands", s.tab, s.panel);
+            assert!(
+                n <= 4 || (s.tab == "SKETCH" && ((s.panel == "CONSTRAIN" && n == 7) || (s.panel == "CREATE" && n == 5))),
+                "{}/{} promotes {n} commands",
+                s.tab,
+                s.panel
+            );
             for id in s.ids {
                 assert!(specs.iter().any(|c| c.id == *id), "unknown layout id {id}");
             }

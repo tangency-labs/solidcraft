@@ -1362,7 +1362,15 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let lists: Vec<_> = crate::toolbar_custom::panel_lists(&tab)
             .into_iter()
             .filter(|(panel, _, _)| editing_in_place || !(tab == "MODEL" && *panel == "FINISH EDITING"))
-            .map(|(panel, cmds, promote)| {
+            .map(|(panel, mut cmds, promote)| {
+                let promote = if tab == "SKETCH" && panel == "CREATE" && !app.preferences.sketch_construction_lines {
+                    promote.saturating_sub(1)
+                } else {
+                    promote
+                };
+                if !app.preferences.sketch_construction_lines {
+                    cmds.retain(|c| solidcraft_engine::cmd::construction_line_mode(c.id).is_none());
+                }
                 let mut shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
                 // Gallery cells are painted together after the large buttons, in reading order.
                 if tab == "SKETCH" && panel == "CONSTRAIN" {
@@ -1386,7 +1394,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .map(|c| {
                         let family = crate::sketch_families::family(c.id)
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
-                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), |f| f.label);
+                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), crate::workspace::ribbon_family_label);
                         if labels {
                             ButtonSize { width: ribbon_button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
                         } else {
@@ -1572,7 +1580,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // The title sits on the same line as the other buttons' labels.
                     if labels {
                         let title_y = whole.top() + 39.0;
-                        let galley = ribbon_button_galley(&painter, app.tr_label(f.label), ar.width() - 16.0, t.text);
+                        let galley =
+                            ribbon_button_galley(&painter, app.tr_label(crate::workspace::ribbon_family_label(f)), ar.width() - 16.0, t.text);
                         painter.galley(pos2(ar.center().x - 4.0, title_y - galley.size().y / 2.0), galley, t.text);
                         dropdown_arrow(&painter, pos2(ar.right() - 6.0, title_y + 0.5), t.text_dim);
                     } else {

@@ -349,6 +349,18 @@ mod tests {
     }
 
     #[test]
+    fn construction_operation_names_exist_in_every_supported_catalog() {
+        let family = crate::sketch_families::family("sketch.construction_line").unwrap();
+        for catalog in LOCALES {
+            assert!(catalog.messages().get("ui.construction.ribbon_label").is_some_and(|v| !v.trim().is_empty()), "{}: ribbon label", catalog.id);
+            for id in family.commands {
+                let key = format!("cmd.{id}");
+                assert!(catalog.messages().get(&key).is_some_and(|v| !v.trim().is_empty()), "{}: {key}", catalog.id);
+            }
+        }
+    }
+
+    #[test]
     fn alias_resolution_regression() {
         static LEGACY: Catalog = Catalog::new("test-legacy", "Test", r#"{"Pitch":"legacy pitch"}"#);
         static ALIAS: Catalog = Catalog::new("test-alias", "Test", r#"{"coupling.pitch":"mechanical pitch"}"#);

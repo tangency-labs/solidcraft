@@ -86,6 +86,37 @@ a line type of their own and keep showing. Projected geometry that carries the c
 line type, such as the trace of a plane, answers to **Projected Geometries** instead. The
 option changes display only. Construction curves were already outside every profile.
 
+The **Construction Line** drop-down in Sketch **CREATE** draws infinite reference lines
+directly. It contains two-point, horizontal, vertical, angle, parallel, perpendicular, tangent
+through an external point, tangent at a curve point, common tangent, and angle-bisector tools.
+These lines remain construction geometry regardless of the Sketch Palette's drawing line type.
+Turn off **Extended construction line tools** in Preferences > Sketch to restore the earlier menu.
+
+For horizontal or vertical lines, click the point to pass through. For a line at an angle,
+click its point, then type the angle from sketch X in the inline box and press Enter, or click
+the direction. Angle expressions can refer to parameters and follow their later changes.
+Parallel and perpendicular lines ask for a straight sketch line, then a point;
+the reference stays picked so you can place several lines. Right-click clears the current
+points and references; Escape ends the tool.
+
+Tangents through an external point take a circle or circular arc, the external point, and a
+click choosing the desired preview. A common tangent takes two circles/arcs and a click choosing
+the solution. Contacts outside an arc's drawn sweep are excluded. A tangent at a curve point
+takes a circle/arc and a contact point, or an endpoint of an open spline or conic. Interior
+free-form contacts and ellipse tangents are not supported by these tools yet. A bisector takes
+two intersecting straight lines; click near the desired one of the two preview lines. Parallel
+or coincident references have no unique angle bisector and are refused.
+
+Each placement is one undo step. Direction, parallel, perpendicular, tangency and bisector
+relations are kept as ordinary sketch constraints; the reference geometry follows later edits
+within those constraints. Programmatic callers can use `sketch.construction_line` with `mode`,
+or one of its named variants. `near` chooses the closest solution; `solution` chooses its
+zero-based index. For example:
+
+```json
+{"command":"sketch.construction_line.parallel","params":{"curve":"l1","at":[20,10]}}
+```
+
 Polygon tools show their edge outline while positioning the second point, so the orientation
 can be checked before placement. Inscribed and circumscribed polygons retain their support
 circle and update the outline when the inline **Sides** value changes.

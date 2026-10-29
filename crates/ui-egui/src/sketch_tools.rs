@@ -37,6 +37,16 @@ const EXTEND_BINDINGS: &[Binding] = &[
 
 /// Per-tool modifier descriptors owned by this host file.
 pub const MODIFIERS: &[ToolModifiers] = &[
+    ToolModifiers { tool: "sketch.construction_line", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.horizontal", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.vertical", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.angle", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.parallel", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.perpendicular", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.tangent_external", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.tangent_at", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.tangent_two", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
+    ToolModifiers { tool: "sketch.construction_line.bisector", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.project", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.intersect", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.include_3d", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -701,6 +711,7 @@ pub fn delete_glyph(app: &mut SolveApp) -> bool {
 /// What the extra tools do with clicks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
+    Construction,
     /// Each click on model geometry runs the command with that reference.
     ModelRef,
     /// Click a curve of the active sketch where it should change.
@@ -724,6 +735,9 @@ pub fn takes(id: &str, hit: &Hit) -> bool {
 }
 
 fn mode(id: &str) -> Option<Mode> {
+    if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+        return Some(Mode::Construction);
+    }
     Some(match id {
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
@@ -772,6 +786,9 @@ pub fn image_placement_finished(tool: &Tool) -> bool {
 }
 
 pub fn hint(id: &str) -> Option<String> {
+    if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+        return Some(crate::sketch_construction::hint(id));
+    }
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
@@ -962,6 +979,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
     let at = sketch_point_at(app, proj, pos);
     let cmd = tool.cmd;
     match m {
+        Mode::Construction => crate::sketch_construction::on_click(app, tool, &hits, at),
         Mode::ModelRef if cmd == "inspect.curvature_comb" => {
             let params = hits.iter().find_map(|h| match h {
                 Hit::SketchCurve { sketch, id, .. } => Some(json!({"sketch": sketch, "curves": [id]})),
@@ -1213,6 +1231,10 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
 /// Typed values are checked first, so a rejected one stays in its box to be corrected rather
 /// than reaching the command.
 pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<String>)) {
+    if solidcraft_engine::cmd::construction_line_mode(tool.cmd).is_some() {
+        crate::sketch_construction::place_point(app, tool, p);
+        return;
+    }
     if tool.cmd == "sketch.circle.two_tangent" && tool.picks.len() == 2 {
         if let Err(error) = crate::sketch_dims::validate(app, tool) {
             app.set_status(error, true);
@@ -1387,6 +1409,10 @@ fn extend_preview_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<Vec<Vec
 
 /// Rubber band for point tools and pick markers.
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
+    if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() {
+        crate::sketch_construction::preview(app, t, painter, proj);
+        return;
+    }
     let Some(sid) = active_sketch(app) else { return };
     let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return };

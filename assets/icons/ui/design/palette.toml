@@ -204,7 +204,10 @@ constraint = [
   "c_polygon", "c_smooth", "c_symmetry", "c_tangent",
 ]
 construction = [
-  "centerline", "construction", "infinite",
+  "centerline", "construction", "construction_line", "construction_line_angle",
+  "construction_line_bisector", "construction_line_horizontal", "construction_line_parallel",
+  "construction_line_perpendicular", "construction_line_tangent_at", "construction_line_tangent_external",
+  "construction_line_tangent_two", "construction_line_vertical", "infinite",
 ]
 mesh = [
   "mesh_body",

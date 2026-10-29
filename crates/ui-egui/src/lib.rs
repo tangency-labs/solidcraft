@@ -238,6 +238,7 @@ mod sketch3d_frame_ui_tests;
 pub(crate) mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
+mod sketch_construction;
 pub mod sketch_dims;
 pub(crate) mod sketch_display;
 #[cfg(test)]
