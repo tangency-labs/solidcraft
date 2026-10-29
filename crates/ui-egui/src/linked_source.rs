@@ -293,7 +293,7 @@ mod tests {
     }
 
     fn menu(app: &SolveApp, target: Target) -> Option<context_menu::Item> {
-        context_menu::items(app, &target).into_iter().find(|i| i.id == "ui.relinkSource")
+        context_menu::entries(app, &target).into_iter().find(|i| i.id == "ui.relinkSource")
     }
 
     fn answer(app: &mut SolveApp, path: Option<String>) {
@@ -393,16 +393,17 @@ mod tests {
         let made = app.run("component.create", json!({"name": "Bracket", "grounded": false})).unwrap();
         let (component, occurrence) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
         app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
-        let find = |app: &SolveApp, id: u64| context_menu::items(app, &Target::Component { id }).into_iter().find(|i| i.id == "ui.extractComponent");
+        let find =
+            |app: &SolveApp, id: u64| context_menu::entries(app, &Target::Component { id }).into_iter().find(|i| i.id == "ui.extractComponent");
         assert!(find(&app, 0).is_none());
         // Not offered while the component can't go: here, moved without Capture Position
         app.run("occurrence.move", json!({"occurrence": occurrence, "translate": [5, 0, 0], "capture": false})).unwrap();
         assert!(find(&app, component).is_none());
         app.run("component.revert_position", json!({})).unwrap();
-        // In Relink Source's place, right after Properties
-        let ids: Vec<String> = context_menu::items(&app, &Target::Component { id: component }).into_iter().map(|i| i.id).collect();
-        let properties = ids.iter().position(|i| i == "ui.properties").unwrap();
-        assert_eq!(ids.get(properties + 1).map(String::as_str), Some("ui.extractComponent"));
+        // In Relink Source's place, first in the File flyout
+        let rows = context_menu::items(&app, &Target::Component { id: component });
+        let file = rows.iter().find(|i| i.label == "File").unwrap();
+        assert_eq!(file.children.first().map(|i| i.id.as_str()), Some("ui.extractComponent"));
         let item = find(&app, component).unwrap();
         let chosen = folder.join("bracket").to_string_lossy().into_owned();
         app.services.pick_save = Some(Box::new(move |name, extensions| {

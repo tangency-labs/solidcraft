@@ -38,9 +38,9 @@ fn find(items: &[Item], label: &str) -> Item {
         .unwrap_or_else(|| panic!("no `{label}` in {:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>()))
 }
 
-/// Run the item labelled `label` of the target's menu.
+/// Run the item labelled `label` of the target's menu or one of its flyouts.
 fn act(app: &mut SolveApp, t: &Target, label: &str) {
-    let item = find(&context_menu::items(app, t), label);
+    let item = find(&context_menu::entries(app, t), label);
     context_menu::run_item(app, &item, pos2(0.0, 0.0));
 }
 
@@ -468,6 +468,13 @@ fn component_menu_activates_grounds_and_pastes() {
     let t = Target::Component { id: c };
     act(&mut app, &t, "Activate");
     assert_eq!(app.session.active_component, c);
+    let rows = context_menu::items(&app, &t);
+    assert!(find(&rows, "Position").children.iter().any(|i| i.id == "occurrence.ground"), "Ground sits in the Position flyout");
+    assert!(!rows.iter().any(|i| i.id == "occurrence.ground"));
+    assert!(
+        rows.iter().any(|i| i.id == "ui.moveOccurrence") && rows.iter().any(|i| i.id == "ui.appearance"),
+        "the everyday actions stay on the menu"
+    );
     // The design's first part comes in grounded (#2804); the menu frees it and grounds it again.
     assert!(app.session.doc.occurrence_of(c).unwrap().grounded);
     act(&mut app, &t, "Unground");
@@ -483,7 +490,7 @@ fn component_menu_activates_grounds_and_pastes() {
     act(&mut app, &placement, "Copy");
     assert_eq!(app.copied_placements.len(), 1, "{:?}", app.status);
     let design = Target::Component { id: 0 };
-    assert!(find(&context_menu::items(&app, &design), "Paste New").enabled);
+    assert!(find(&context_menu::entries(&app, &design), "Paste New").enabled);
     act(&mut app, &design, "Paste New");
     assert_eq!(app.session.doc.components.len(), 2);
 }
@@ -612,7 +619,7 @@ fn expand_and_collapse_all_open_the_browser_tree_from_the_design_menu() {
     let mut app = sample_app();
     let n = app.session.undo.len();
     let root = Target::Component { id: 0 };
-    assert!(context_menu::items(&app, &root).iter().any(|i| i.label == "Expand All" && i.id == "browser.expand_all"));
+    assert!(context_menu::entries(&app, &root).iter().any(|i| i.label == "Expand All" && i.id == "browser.expand_all"));
     act(&mut app, &root, "Collapse All");
     assert!(app.tree.collapsed.contains("c0/bodies"), "{:?}", app.tree.collapsed);
     assert!(!app.tree.collapsed.contains("c0"), "the design row stays open: {:?}", app.tree.collapsed);

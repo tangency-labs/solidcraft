@@ -121,16 +121,16 @@ fn occurrence_second_row_selects_exact_path_and_menu_actions() {
     let bounds = crate::viewport::selection_bounds(&h.app).unwrap();
     assert!((bounds.center().x - 55.0).abs() < 1e-8);
     let target = Target::Occurrence { path: vec![second] };
-    let items = context_menu::items(&h.app, &target);
+    let items = context_menu::entries(&h.app, &target);
     // Copy takes this placement (the row right-clicked). Paste New pastes an independent copy of
     // it into the design, never into itself: off on its own row, on on the design's.
     let copy = items.iter().find(|i| i.id == "ui.copy").unwrap();
     assert!(copy.enabled);
     context_menu::run_item(&mut h.app, copy, egui::Pos2::ZERO);
     assert_eq!(h.app.copied_placements, vec![vec![second]]);
-    let own = context_menu::items(&h.app, &target);
+    let own = context_menu::entries(&h.app, &target);
     assert!(!own.iter().find(|i| i.id == "ui.pasteNew").unwrap().enabled, "not into itself");
-    let design = context_menu::items(&h.app, &Target::Component { id: 0 });
+    let design = context_menu::entries(&h.app, &Target::Component { id: 0 });
     let independent = design.iter().find(|i| i.id == "ui.pasteNew").unwrap();
     assert!(independent.enabled);
     assert_eq!(independent.params.as_ref().unwrap()["component"], 0);
@@ -156,16 +156,14 @@ fn turn_up_axis_follows_the_placement_right_clicked() {
     // Whichever placement comes first, a grounded one can't turn and a free one can.
     let (mut h, _, first, second) = fixture();
     let turns = |h: &Harness, occurrence: u64| {
-        let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![occurrence] });
-        let turn = items.into_iter().find(|i| i.id == "ui.turnUpAxis").unwrap();
-        let children: Vec<_> = turn.children.iter().map(|c| (c.enabled, c.params.as_ref().unwrap()["occurrence"].as_u64())).collect();
-        (turn.enabled, children)
+        let items = context_menu::entries(&h.app, &Target::Occurrence { path: vec![occurrence] });
+        items.iter().filter(|i| i.id == "occurrence.move").map(|c| (c.enabled, c.params.as_ref().unwrap()["occurrence"].as_u64())).collect::<Vec<_>>()
     };
     for (grounded, free) in [(first, second), (second, first)] {
         h.app.run("occurrence.ground", json!({"occurrence": grounded, "grounded": true})).unwrap();
         h.app.run("occurrence.ground", json!({"occurrence": free, "grounded": false})).unwrap();
-        assert_eq!(turns(&h, free), (true, vec![(true, Some(free)); 2]), "free placement {free}");
-        assert_eq!(turns(&h, grounded), (false, vec![(false, Some(grounded)); 2]), "grounded placement {grounded}");
+        assert_eq!(turns(&h, free), vec![(true, Some(free)); 2], "free placement {free}");
+        assert_eq!(turns(&h, grounded), vec![(false, Some(grounded)); 2], "grounded placement {grounded}");
     }
 }
 
@@ -240,7 +238,7 @@ fn occurrence_delete_targets_second_copy_even_if_first_was_selected() {
 fn occurrence_new_component_keeps_inactive_second_parent_authoring_context() {
     let (mut h, _, first, second) = fixture();
     assert_eq!(h.app.session.active_component, 0);
-    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![second] });
+    let items = context_menu::entries(&h.app, &Target::Occurrence { path: vec![second] });
     let create = items.iter().find(|i| i.id == "component.create").unwrap();
     assert_eq!(create.params.as_ref().unwrap()["parent_path"], json!([second]));
     context_menu::run_item(&mut h.app, create, egui::Pos2::ZERO);
@@ -359,7 +357,7 @@ fn a_copied_component_pastes_into_its_parent_not_into_itself() {
     click(&mut h, &[second], "row");
     let own = Target::Occurrence { path: vec![second] };
     let design = Target::Component { id: 0 };
-    let find = |h: &Harness, target: &Target, id: &str| context_menu::items(&h.app, target).into_iter().find(|i| i.id == id).unwrap();
+    let find = |h: &Harness, target: &Target, id: &str| context_menu::entries(&h.app, target).into_iter().find(|i| i.id == id).unwrap();
     assert!(!find(&h, &own, "ui.pasteNew").enabled, "nothing copied yet");
     let copy = find(&h, &own, "ui.copy");
     context_menu::run_item(&mut h.app, &copy, egui::Pos2::ZERO);
@@ -481,7 +479,7 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[20,0,0],"body_name":"Second"})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();
     let target = Target::Occurrence { path: vec![first] };
-    let has = |h: &Harness, id: &str| context_menu::items(&h.app, &target).iter().any(|i| i.id == id);
+    let has = |h: &Harness, id: &str| context_menu::entries(&h.app, &target).iter().any(|i| i.id == id);
     assert!(!has(&h, "component.from_bodies"), "Several bodies only: two bodies keep their folder");
     h.app.preferences.browser_bodies_folders = BodiesFolders::Never;
     let items = context_menu::items(&h.app, &target);

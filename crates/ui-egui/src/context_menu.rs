@@ -928,68 +928,73 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
     // The component's menu asks its first placement; this row may be another one.
     let movable = !placement.grounded && app.session.held_by_rigid_group(placement.occurrence).is_none();
-    for item in &mut entries {
-        match item.id.as_str() {
-            "ui.activate" => {
-                item.params = Some(json!({"component": placement.component, "occurrence": placement.occurrence, "path": path}));
-                item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
-            }
-            "ui.editInPlace" => item.params = Some(json!({"component": placement.component, "path": path})),
-            "occurrence.ground" => {
-                item.label = if placement.grounded { "Unground" } else { "Ground" }.into();
-                item.params = Some(json!({"occurrence": placement.occurrence, "grounded": !placement.grounded}));
-            }
-            "ui.moveOccurrence" => {
-                item.params = Some(json!({"occurrence": placement.occurrence, "path": path}));
-                item.enabled = movable;
-            }
-            "ui.properties" => item.params = Some(json!({"occurrence": placement.occurrence, "path": path})),
-            "ui.turnUpAxis" => {
-                item.enabled = movable;
-                for child in &mut item.children {
-                    child.enabled = movable;
-                    if let Some(params) = child.params.as_mut() {
-                        params["occurrence"] = json!(placement.occurrence);
-                    }
-                }
-            }
-            "occurrence.copy" => item.params = Some(json!({"occurrence": placement.occurrence, "translate": [10,10,0]})),
-            "ui.paste" | "ui.pasteNew" => item.params = Some(json!({"component": placement.component, "path": path})),
-            "component.create" => item.params = Some(json!({"parent": placement.component, "parent_path": path})),
-            "ui.rename" => item.label = "Rename Component".into(),
-            "ui.appearance" => item.label = "Component Appearance".into(),
-            "ui.material" => item.label = "Component Physical Material".into(),
-            "ui.delete" => item.params = Some(json!({"occurrences": [placement.occurrence]})),
-            "ui.hide" | "ui.show" => {
-                item.id = "browser.visibility".into();
-                item.params = Some(json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
-                item.enabled = true;
-            }
-            "ui.isolate" => {
-                item.id = "ui.isolateOccurrence".into();
-                item.params = Some(json!({"path": path}));
-            }
-            "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
-            "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
-            _ => {}
+    let retarget = |item: &mut Item| match item.id.as_str() {
+        "ui.activate" => {
+            item.params = Some(json!({"component": placement.component, "occurrence": placement.occurrence, "path": path}));
+            item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
         }
+        "ui.editInPlace" => item.params = Some(json!({"component": placement.component, "path": path})),
+        "occurrence.ground" => {
+            item.label = if placement.grounded { "Unground" } else { "Ground" }.into();
+            item.params = Some(json!({"occurrence": placement.occurrence, "grounded": !placement.grounded}));
+        }
+        "ui.moveOccurrence" => {
+            item.params = Some(json!({"occurrence": placement.occurrence, "path": path}));
+            item.enabled = movable;
+        }
+        "ui.properties" => item.params = Some(json!({"occurrence": placement.occurrence, "path": path})),
+        "occurrence.move" => {
+            item.enabled = movable;
+            if let Some(params) = item.params.as_mut() {
+                params["occurrence"] = json!(placement.occurrence);
+            }
+        }
+        "occurrence.copy" => item.params = Some(json!({"occurrence": placement.occurrence, "translate": [10,10,0]})),
+        "ui.paste" | "ui.pasteNew" => item.params = Some(json!({"component": placement.component, "path": path})),
+        "component.create" => item.params = Some(json!({"parent": placement.component, "parent_path": path})),
+        "ui.rename" => item.label = "Rename Component".into(),
+        "ui.appearance" => item.label = "Component Appearance".into(),
+        "ui.material" => item.label = "Component Physical Material".into(),
+        "ui.delete" => item.params = Some(json!({"occurrences": [placement.occurrence]})),
+        "ui.hide" | "ui.show" => {
+            item.id = "browser.visibility".into();
+            item.params = Some(json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
+            item.enabled = true;
+        }
+        "ui.isolate" => {
+            item.id = "ui.isolateOccurrence".into();
+            item.params = Some(json!({"path": path}));
+        }
+        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
+        "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
+        _ => {}
+    };
+    for item in &mut entries {
+        retarget(item);
+        item.children.iter_mut().for_each(retarget);
     }
     entries
 }
 
 /// "Turn Up Axis": a quarter turn about X of a component's occurrence for a file saved with the
 /// other axis up, one `occurrence.move` (one undo step).
-fn turn_up_axis(occurrence: u64, enabled: bool) -> Item {
-    let mut item = act("ui.turnUpAxis", "Turn Up Axis", "move").on(enabled);
-    item.children = [("Y up \u{2192} Z up", "90 deg"), ("Z up \u{2192} Y up", "-90 deg")]
-        .into_iter()
-        .map(|(label, angle)| {
-            act("occurrence.move", label, "move").with(json!({"occurrence": occurrence, "axis": [1, 0, 0], "angle": angle})).on(enabled)
-        })
-        .collect();
+fn turn_up_axis(occurrence: u64, enabled: bool) -> Vec<Item> {
+    let mut v = vec![Item::heading("Turn Up Axis")];
+    v.extend([("Y up \u{2192} Z up", "90 deg"), ("Z up \u{2192} Y up", "-90 deg")].into_iter().map(|(label, angle)| {
+        act("occurrence.move", label, "move").with(json!({"occurrence": occurrence, "axis": [1, 0, 0], "angle": angle})).on(enabled)
+    }));
+    v
+}
+
+/// A category row whose entries open in a flyout; menus nest one level only.
+fn group(label: &str, icon: &str, children: Vec<Item>) -> Item {
+    let mut item = act(&format!("ui.group.{}", label.to_lowercase()), label, icon).on(children.iter().any(|c| c.enabled));
+    item.children = children;
     item
 }
 
+/// The everyday actions stay on the menu; positioning, files, creation and browser display open
+/// in category flyouts.
 fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let doc = &app.session.doc;
     let occ = doc.occurrence_of(id);
@@ -1003,67 +1008,35 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let into = json!({ "component": id, "path": app.session.doc.first_path(id) });
     let pastes_here = crate::edit_clipboard::can_paste_into(app, id);
     let mut v = Vec::new();
+    let mut position = Vec::new();
     if doc.parts.contains_key(&id) {
         v.push(cmd(app, "parts.resize", "Edit").with(json!({"component":id})));
     }
+    v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
     if id != 0 {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
-        v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
+        let movable = !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none();
         if doc.links.contains_key(&id) {
             v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
             v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
         }
-        v.push(cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })));
-        v.push(
-            act("ui.moveOccurrence", "Move/Copy", "move")
-                .key("M")
-                .with(json!({ "occurrence": oid }))
-                .on(!grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none()),
+        v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(movable));
+        position.push(
+            cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })),
         );
-        v.push(turn_up_axis(oid, !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none()));
-        v.push(cmd(app, "component.capture_position", "Capture Position").on(!app.session.pending_moves.is_empty()));
-        v.push(cmd(app, "component.revert_position", "Revert Position").on(!app.session.pending_moves.is_empty()));
+        position.push(cmd(app, "component.capture_position", "Capture Position").on(!app.session.pending_moves.is_empty()));
+        position.push(cmd(app, "component.revert_position", "Revert Position").on(!app.session.pending_moves.is_empty()));
         // An imported assembly moves as one until its rigid group is released.
         if !app.session.contents_joints(id).is_empty() {
-            v.push(cmd(app, "component.unlock", "Unlock Contents").with(json!({ "component": id })));
+            position.push(cmd(app, "component.unlock", "Unlock Contents").with(json!({ "component": id })));
         }
-        v.push(Item::sep());
-    } else {
-        v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
-    }
-    v.push(cmd(app, "component.create", "New Component").with(json!({ "parent": id })));
-    if id == 0 {
-        v.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+        position.push(Item::sep());
+        position.extend(turn_up_axis(oid, movable));
     }
     v.push(Item::sep());
-    v.push(act("ui.material", "Physical Material", "material").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(
-        act("ui.appearance", "Appearance", "appearance")
-            .key("A")
-            .with(if id == 0 { json!({ "bodies": names }) } else { json!({"component": id}) })
-            .on(id != 0 || !bodies.is_empty()),
-    );
-    if id != 0 {
-        v.push(cmd(app, "component.cycle_color", "Cycle Component Color").with(json!({"component": id})));
-    }
-    v.push(act("ui.properties", "Properties", "measure").with(json!({ "component": id })));
-    if doc.links.contains_key(&id) {
-        v.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
-    } else if id != 0 && app.session.can_extract(id) {
-        v.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
-    }
-    if id == 0 {
-        v.push(act("ui.designProperties", "Design Properties", "settings"));
-    }
-    v.push(Item::sep());
-    v.push(act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(
-        act("ui.sendToSlicer", "Send to Slicer", "export")
-            .with(json!({ "bodies": names }))
-            .on(!bodies.is_empty() && crate::dialogs_save_mesh::available(app)),
-    );
+    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
     v.push(Item::sep());
     // The clipboard, then Delete and Rename, in the same place for the design and its components
     // (the design is copied as a saved design to link, and is neither cut nor deleted).
@@ -1074,25 +1047,47 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)));
     }
     v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").with(into.clone()).on(pastes_here));
-    v.push(
-        act("ui.pasteNew", "Paste New", "paste")
-            .key("Ctrl+Shift+V")
-            .with(into.clone())
-            .on(pastes_here && crate::edit_clipboard::pasting_components(app)),
-    );
     if id != 0 {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
     v.push(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "component": id })));
     v.push(Item::sep());
-    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(act("ui.showAll", "Show All Bodies", "eye"));
-    v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
-    v.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
+    v.push(
+        act("ui.appearance", "Appearance", "appearance")
+            .key("A")
+            .with(if id == 0 { json!({ "bodies": names }) } else { json!({"component": id}) })
+            .on(id != 0 || !bodies.is_empty()),
+    );
+    v.push(act("ui.material", "Physical Material", "material").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    if !position.is_empty() {
+        v.push(group("Position", "move", position));
+    }
+    let mut file = Vec::new();
+    if doc.links.contains_key(&id) {
+        file.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+    } else if id != 0 && app.session.can_extract(id) {
+        file.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
+    }
+    if !file.is_empty() {
+        file.push(Item::sep());
+    }
+    file.push(act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    file.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    file.push(
+        act("ui.sendToSlicer", "Send to Slicer", "export")
+            .with(json!({ "bodies": names }))
+            .on(!bodies.is_empty() && crate::dialogs_save_mesh::available(app)),
+    );
+    v.push(group("File", "export", file));
+    let mut new = vec![cmd(app, "component.create", "New Component").with(json!({ "parent": id }))];
+    if id == 0 {
+        new.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    }
+    new.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
     if id != 0 {
         // Keep the component in the design but leave its features out of the History bar (#10393).
         let hidden = doc.component_history_hidden(id);
-        v.push(
+        new.push(
             cmd(
                 app,
                 if hidden { "component.show_history" } else { "component.hide_history" },
@@ -1101,9 +1096,26 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
             .with(json!({ "component": id })),
         );
     }
+    new.push(
+        act("ui.pasteNew", "Paste New", "paste")
+            .key("Ctrl+Shift+V")
+            .with(into.clone())
+            .on(pastes_here && crate::edit_clipboard::pasting_components(app)),
+    );
+    v.push(group("New", "component", new));
+    let mut display = vec![act("ui.showAll", "Show All Bodies", "eye")];
+    if id != 0 {
+        display.push(cmd(app, "component.cycle_color", "Cycle Component Color").with(json!({"component": id})));
+    }
+    display.push(Item::sep());
+    display.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
+    display.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    v.push(group("Display", "eye", display));
     v.push(Item::sep());
-    v.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
-    v.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    v.push(act("ui.properties", "Properties", "measure").with(json!({ "component": id })));
+    if id == 0 {
+        v.push(act("ui.designProperties", "Design Properties", "settings"));
+    }
     v
 }
 
@@ -2189,14 +2201,20 @@ pub fn describe(app: &SolveApp) -> Value {
     })
 }
 
+/// Every entry of a target's menu, its rows first and then what their flyouts hold.
+pub fn entries(app: &SolveApp, target: &Target) -> Vec<Item> {
+    let roots = items(app, target);
+    let mut all = roots.clone();
+    all.extend(roots.into_iter().flat_map(|item| item.children));
+    all
+}
+
 /// Pick an item of the open menu by id or label (for `ui.menuPick`).
 pub fn pick(app: &mut SolveApp, key: &str) -> Result<Value, String> {
     let Some(at) = app.viewport.context_menu else { return Err("no menu is open".into()) };
     let target = app.menu.target.clone();
     let mut all = if app.menu.radial { radial_items(app) } else { Vec::new() };
-    let roots = items(app, &target);
-    all.extend(roots.iter().cloned());
-    all.extend(roots.into_iter().flat_map(|item| item.children));
+    all.extend(entries(app, &target));
     let item =
         all.into_iter().find(|i| !i.is_sep() && !i.is_heading() && (i.id == key || i.label == key)).ok_or_else(|| format!("no menu item `{key}`"))?;
     if !item.enabled {
