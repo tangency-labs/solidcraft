@@ -5734,7 +5734,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 AxisRef::Model { geo } if model_axis_sel(s, geo).is_none() => serde_json::to_value(geo).ok(),
                 _ => None,
             };
-            d.kind = Kind::Revolve { angle: angle.to_string(), operation: op_index(operation), axis: stored_axis };
+            d.kind = Kind::Revolve { angle: shown_expr(angle, ValueKind::Angle), operation: op_index(operation), axis: stored_axis };
             d.extra.insert("convention".into(), json!(convention));
             if let Some(a2) = angle2 {
                 d.extra.insert("angle2".into(), json!(a2));
@@ -6444,7 +6444,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d.kind = Kind::Thread {
                 designation: designation.clone().unwrap_or_default(),
-                length: length.as_deref().map(str::to_string).unwrap_or_default(),
+                length: length.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
                 handedness: *handedness,
                 suggested: None,
                 of: Vec::new(),
@@ -6495,8 +6495,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start(if *web { "solid.web" } else { "solid.rib" })?;
             d.kind = Kind::Rib {
                 web: *web,
-                thickness: thickness.to_string(),
-                depth: depth.as_deref().map(str::to_string).unwrap_or_default(),
+                thickness: shown_expr(thickness, ValueKind::Length),
+                depth: depth.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
                 flip: *flip,
                 normal: *normal,
             };
