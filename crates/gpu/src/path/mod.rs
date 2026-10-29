@@ -86,7 +86,7 @@ fn checked_creation<T>(device: &wgpu::Device, create: impl FnOnce() -> Result<T>
 pub fn host() -> Result<ImageHost> {
     let (adapter, device, queue) = open_headless()?;
     log::info!("gpu-path adapter: {} ({:?})", adapter.get_info().name, adapter.get_info().device_type);
-    ImageHost::with_executor(Arc::new(Executor::new(device, queue)?))
+    ImageHost::with_executor(Arc::new(Executor::new(device, queue, &adapter.get_info())?))
 }
 
 /// Open an independent job device on the viewport's selected adapter. In particular,
@@ -108,13 +108,14 @@ pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
     if info.backend != wgpu::Backend::Vulkan {
         let (vulkan, _) = crate::select::pick_vulkan(policy, |i| i.vendor == info.vendor && i.device == info.device)
             .ok_or_else(|| gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)))?;
+        let vulkan_info = vulkan.get_info();
         let (device, queue) = open_device(&vulkan)?;
         log::info!("gpu-path viewport GPU: {} through Vulkan", info.name);
-        return ImageHost::with_executor(Arc::new(Executor::new(device, queue)?));
+        return ImageHost::with_executor(Arc::new(Executor::new(device, queue, &vulkan_info)?));
     }
     let (device, queue) = open_device(adapter)?;
     log::info!("gpu-path viewport adapter: {} ({:?})", info.name, info.device_type);
-    ImageHost::with_executor(Arc::new(Executor::new(device, queue)?))
+    ImageHost::with_executor(Arc::new(Executor::new(device, queue, &info)?))
 }
 
 // D3D12 shader compilation is avoided; the user can select a CPU image method instead.
@@ -147,7 +148,7 @@ fn open_device(adapter: &wgpu::Adapter) -> Result<(wgpu::Device, wgpu::Queue)> {
     let required_limits = device_limits(adapter.limits())?;
     pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("solidcraft progressive path"),
-        required_features: crate::depth_features(adapter),
+        required_features: crate::depth_features(adapter) | (adapter.features() & wgpu::Features::PIPELINE_CACHE),
         required_limits,
         ..Default::default()
     }))
@@ -166,6 +167,8 @@ struct Context {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
+    // Compiled pipelines kept between runs, where the backend has a pipeline cache (#3433).
+    cache: Option<crate::shader_cache::ShaderCache>,
     // Built and warmed by the first denoised job, then shared by later ones.
     denoise: std::sync::OnceLock<denoise::Pipelines>,
     layout: wgpu::BindGroupLayout,
@@ -204,8 +207,9 @@ struct Executor {
     context: Arc<Context>,
 }
 impl Executor {
-    fn new(device: wgpu::Device, queue: wgpu::Queue) -> Result<Self> {
+    fn new(device: wgpu::Device, queue: wgpu::Queue, adapter: &wgpu::AdapterInfo) -> Result<Self> {
         device_limits(device.limits())?;
+        let cache = crate::shader_cache::ShaderCache::open(&device, adapter, "gpu-path");
         let healthy = Arc::new(AtomicBool::new(true));
         let uncaptured = healthy.clone();
         device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
@@ -248,11 +252,14 @@ impl Executor {
             module: &shader,
             entry_point: Some("main"),
             compilation_options: Default::default(),
-            cache: None,
+            cache: cache.as_ref().map(crate::shader_cache::ShaderCache::get),
         });
         checked(scopes)?;
         warm_up(&device, &queue, &pipeline, &placeholder_bind(&device, &layout, 7)?, &healthy)?;
-        Ok(Self { context: Arc::new(Context { healthy, device, queue, pipeline, layout, denoise: std::sync::OnceLock::new() }) })
+        if let Some(cache) = &cache {
+            cache.save();
+        }
+        Ok(Self { context: Arc::new(Context { healthy, device, queue, pipeline, layout, cache, denoise: std::sync::OnceLock::new() }) })
     }
 }
 

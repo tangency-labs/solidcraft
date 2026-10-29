@@ -26,6 +26,8 @@ pub mod path;
 mod pbr;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod select;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod shader_cache;
 pub mod view;
 
 /// The tessellation compute shader (WGSL).

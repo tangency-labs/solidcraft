@@ -141,7 +141,7 @@ fn f64_atrous_preserves_body_normal_depth_and_albedo_edges() {
     }
 }
 fn context() -> Option<Arc<Context>> {
-    let (_, device, queue) = match open_headless() {
+    let (adapter, device, queue) = match open_headless() {
         Ok(v) => v,
         Err(e) => {
             // The path tracer runs on Vulkan only: where the backends in use leave Vulkan out
@@ -151,7 +151,7 @@ fn context() -> Option<Arc<Context>> {
             return None;
         }
     };
-    Some(Executor::new(device, queue).unwrap().context)
+    Some(Executor::new(device, queue, &adapter.get_info()).unwrap().context)
 }
 fn request(size: u32) -> ImageRequest {
     let mut camera = Camera { distance: 4.0, ..Default::default() };

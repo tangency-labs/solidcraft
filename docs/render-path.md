@@ -25,6 +25,13 @@ equal per sample with DXC and about 55% slower with FXC, and it compiles the pat
 at every start (about 82 s with DXC, about 2 hours with FXC), where Vulkan's compiled
 pipelines persist between runs.
 
+Compiled pipelines persist between runs in a wgpu pipeline cache (#3433), so only the
+first start on a machine compiles the path shader (minutes on a cold driver). The cache
+lives in `%LOCALAPPDATA%\SolidCraft\cache\shaders` or `$XDG_CACHE_HOME/solidcraft/shaders`;
+`SOLIDCRAFT_SHADER_CACHE` names another folder, or `off` disables it. A file that fails its
+checksum, or comes from another driver or wgpu version, is ignored and rewritten; deleting
+the folder is always safe.
+
 In the Render workspace, select **GPU path tracing** and samples per pixel before
 checking or starting an image. These controls are transient image-job
 intent that can also be retained in typed saved setups. Each new saved concept

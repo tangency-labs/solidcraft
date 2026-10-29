@@ -126,7 +126,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
    - Non-test code never uses `unwrap`, `expect`, `panic!` or indexing on input-derived data.
      There's no `unsafe` outside `apps/solidcraft/src/open_documents.rs` (macOS file-open events),
      `apps/solidcraft/src/native_crash.rs` (Windows native crash capture) and
-     `crates/threedx-client/src/macos.rs` (the 3Dconnexion driver's client API on macOS), and the
+     `crates/threedx-client/src/macos.rs` (the 3Dconnexion driver's client API on macOS) and
+     `crates/gpu-native/src/pipeline_cache.rs` (the persistent GPU pipeline cache, #3236), and the
      compiler denies it.
    - An unsupported case returns an error ("not supported yet: …"); it never panics.
    - Every call into truck goes through `solidcraft_kernel::guard`.
