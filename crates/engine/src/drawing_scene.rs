@@ -93,6 +93,13 @@ pub struct SheetView {
     pub stale: Vec<u64>,
 }
 
+/// The id of the sheet `named` names in `drawing` (its id or its one name), refused as `cmd`: the
+/// sheet a command asks to draw.
+pub fn sheet_id(drawing: &Drawing, named: &str, cmd: &str) -> Result<u64> {
+    let at = drawing.sheet_index(named).map_err(|e| bad(cmd, e.to_string()))?;
+    drawing.sheets.get(at).map(|sheet| sheet.id).ok_or_else(|| bad(cmd, format!("no sheet `{named}`")))
+}
+
 /// Sheet `sheet` of `drawing`, one of `s`'s design's drawings, drawn at once: its border, then each
 /// of its views by id. A view with nothing to measure, or one that can't be drawn, is left out and
 /// says why; the sheet is refused only when it can't be drawn at all.
@@ -364,4 +371,4 @@ pub(crate) fn forget_closed(s: &mut Session) {
 
 #[cfg(test)]
 #[path = "drawing_scene_tests.rs"]
-mod tests;
+pub(crate) mod tests;

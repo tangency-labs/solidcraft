@@ -19,7 +19,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 /// A block 100 x 50 x 20 mm along X, Y and Z from the origin, and a drawing of it on A3 with the
 /// ISO border: the front view at 1:2 centred at (150, 150), and the view above it, the top view in
 /// third angle, lined up with it at y 220. The session, the sheet and the two views' ids.
-fn front_and_top() -> (Session, u64, [u64; 2]) {
+pub(crate) fn front_and_top() -> (Session, u64, [u64; 2]) {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
     run(&mut s, "drawing.create", json!({}));
@@ -40,7 +40,7 @@ fn front_and_top() -> (Session, u64, [u64; 2]) {
 }
 
 /// Component `L{level}`, placed inside `L{level - 1}` (the design itself at level 0).
-fn nest(s: &mut Session, level: u64) {
+pub(crate) fn nest(s: &mut Session, level: u64) {
     let (component, parent) = (1000 + level, if level == 0 { 0 } else { 1000 + level - 1 });
     let doc = s.doc_mut();
     doc.components.push(solidcraft_doc::Component { id: component, name: format!("L{level}"), parent, ..Default::default() });

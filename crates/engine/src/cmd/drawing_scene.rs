@@ -6,9 +6,8 @@ use serde_json::Value;
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
-use crate::drawing_scene::{CMD, Status};
-use crate::params::bad;
-use crate::schema::drawing_scene::{SheetPaperScene, SheetSceneParams, SheetSceneResult, SheetSceneView};
+use crate::drawing_scene::CMD;
+use crate::schema::drawing_scene::{SheetPaperScene, SheetSceneParams, SheetSceneResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -26,23 +25,9 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Draw Sheet", crat
 fn scene(s: &mut Session, p: &Value) -> Result<Value> {
     let request: SheetSceneParams = crate::schema::read(CMD, p)?;
     let d = s.drawing(CMD)?.clone();
-    let at = d.sheet_index(&request.sheet).map_err(|e| bad(CMD, e.to_string()))?;
-    let sheet = d.sheets.get(at).map(|sheet| sheet.id).ok_or_else(|| bad(CMD, format!("no sheet `{}`", request.sheet)))?;
+    let sheet = crate::drawing_scene::sheet_id(&d, &request.sheet, CMD)?;
     let built = crate::drawing_scene::build(s, &d, sheet)?;
-    let views = built
-        .views
-        .into_iter()
-        .map(|v| SheetSceneView {
-            view: ids::encode(v.view),
-            status: v.status.name(),
-            reason: match v.status {
-                Status::Drawn => None,
-                Status::Placeholder(why) => Some(why.to_string()),
-                Status::Failed(why) => Some(why),
-            },
-            stats: v.stats.map(Into::into),
-        })
-        .collect();
+    let views = built.views.into_iter().map(Into::into).collect();
     let reply = SheetSceneResult { sheet: ids::encode(sheet), scene: SheetPaperScene(built.scene), views, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }

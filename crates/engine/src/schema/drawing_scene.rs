@@ -4,10 +4,12 @@ use std::borrow::Cow;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
+use solidcraft_doc::ids;
 use solidcraft_geom::paper::ObjectKind;
 
 use super::drawing_sheet::sheet_ref;
 use super::drawing_view::{LinesStatsResult, paper_scene_schema};
+use crate::drawing_scene::{Status, ViewState};
 
 /// Draw one sheet of the open drawing. Read-only.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -45,6 +47,18 @@ pub struct SheetSceneView {
     /// What working out its lines cost, when they were.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<LinesStatsResult>,
+}
+
+impl From<ViewState> for SheetSceneView {
+    fn from(v: ViewState) -> Self {
+        let status = v.status.name();
+        let reason = match v.status {
+            Status::Drawn => None,
+            Status::Placeholder(why) => Some(why.to_string()),
+            Status::Failed(why) => Some(why),
+        };
+        SheetSceneView { view: ids::encode(v.view), status, reason, stats: v.stats.map(Into::into) }
+    }
 }
 
 /// What `drawing.scene` returns.

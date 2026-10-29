@@ -572,6 +572,7 @@
   "cmd.drawing_dimension_add": "図面寸法を追加",
   "cmd.drawing_dimension_edit": "図面寸法を編集",
   "cmd.drawing_dimension_inspect": "図面寸法を確認",
+  "cmd.drawing_export": "シートを書き出す",
   "cmd.drawing_inspect": "図面を確認",
   "cmd.drawing_list": "図面を一覧表示",
   "cmd.drawing_open": "図面を開く",
