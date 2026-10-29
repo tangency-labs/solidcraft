@@ -1,0 +1,67 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Tri"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      20,
+      0
+     ],
+     [
+      0,
+      20
+     ],
+     [
+      0,
+      0
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.boundary",
+   "params": {
+    "sketch": "Tri",
+    "curves": [
+     "l1",
+     "l2",
+     "l3"
+    ],
+    "body_name": "Patch"
+   }
+  }
+ ]
+}

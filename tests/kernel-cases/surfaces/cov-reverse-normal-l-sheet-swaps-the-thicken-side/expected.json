@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "the L sheet of two walls (30 and 20, 20 deep) turned over, then thickened +2: the side -2 took before, into the inside corner",
+ "source": "analytic",
+ "method": "kernel-cases/shell/5326: -2 is the inside of this sheet's corner; with every normal reversed +2 is. Each wall offset 2 toward the other, the slabs overlap in 2 x 2: V = (30*2 + 20*2 - 2*2) 20 = 1920, an L prism of 8 faces",
+ "body_count": 1,
+ "faces": 8,
+ "volume_mm3": 1920.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   30,
+   20,
+   20
+  ]
+ }
+}

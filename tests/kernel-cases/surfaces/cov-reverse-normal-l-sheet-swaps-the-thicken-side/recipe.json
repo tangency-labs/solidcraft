@@ -1,0 +1,88 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "S"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      30,
+      0
+     ],
+     [
+      30,
+      20
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.extrude",
+   "params": {
+    "sketch": "S",
+    "curves": [
+     "l1",
+     "l2"
+    ],
+    "distance": 20,
+    "body_name": "L"
+   }
+  },
+  {
+   "command": "surface.reverse_normal",
+   "params": {
+    "body": "L"
+   }
+  },
+  {
+   "command": "surface.thicken",
+   "params": {
+    "bodies": [
+     "L"
+    ],
+    "thickness": 2,
+    "operation": "new",
+    "body_name": "Wall"
+   }
+  },
+  {
+   "command": "solid.remove",
+   "params": {
+    "bodies": [
+     "L"
+    ]
+   }
+  }
+ ]
+}

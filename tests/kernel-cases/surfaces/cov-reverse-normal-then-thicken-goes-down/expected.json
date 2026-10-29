@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "a 10 x 10 sheet patched on XY (normal +z) turned over, then thickened 2 along its normal: the slab lies below it",
+ "source": "analytic",
+ "method": "the patch of an XY sketch faces +z; reversed it faces -z, and a positive thickness goes along the normal: the box 10 x 10 x 2 at z -2..0, V = 200, 6 faces; the sheet is removed so only the slab is graded",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 200.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   -2
+  ],
+  "max": [
+   10,
+   10,
+   0
+  ]
+ }
+}
