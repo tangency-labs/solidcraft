@@ -181,6 +181,8 @@ use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_S
 use crate::topology::topology::TopologyRecords;
 use crate::topology::{vertex, Brep, FaceId, VertexId};
 
+pub mod copy;
+
 /// `SM_UNDEF_ULONG` on LP64 (`0xFFFFFFFFFFFFFFFE`... upstream's `ULONG_MAX - 1`).
 pub const UNDEF_ULONG: u64 = u64::MAX - 1;
 
