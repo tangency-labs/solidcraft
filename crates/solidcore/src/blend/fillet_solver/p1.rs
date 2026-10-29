@@ -173,7 +173,9 @@ fn invalid(reason: &'static str) -> SolidError {
 /// upstream, not a status) pass through.
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
-        SolidError::Unported { .. } | SolidError::InvalidInput { .. } => e,
+        SolidError::Unported { .. }
+        | SolidError::InvalidInput { .. }
+        | SolidError::PortInvariant { .. } => e,
         _ => SolidError::sm_err(op),
     }
 }
@@ -3060,7 +3062,9 @@ fn binormal_status_ignored(
             if e.is_unported()
                 || matches!(
                     e,
-                    SolidError::NotFound { .. } | SolidError::InvalidInput { .. }
+                    SolidError::NotFound { .. }
+                        | SolidError::InvalidInput { .. }
+                        | SolidError::PortInvariant { .. }
                 ) =>
         {
             Err(e)

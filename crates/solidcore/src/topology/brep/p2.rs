@@ -1926,7 +1926,7 @@ fn region_post_insert_shell(b: &mut Brep, r: RegionId, s: ShellId) -> Result<()>
 fn region_remove_shell(b: &mut Brep, s: ShellId) -> Result<()> {
     let r = shell_region(b, s)?.ok_or(null_deref("shell without region"))?;
     match shell::region_remove_shell(b, r, s) {
-        Err(SolidError::InvalidInput { .. }) | Ok(()) => Ok(()),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) | Ok(()) => Ok(()),
         Err(e) => Err(e),
     }
 }

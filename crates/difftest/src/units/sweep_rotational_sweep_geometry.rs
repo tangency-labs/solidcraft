@@ -408,7 +408,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => SM_ERR_INVALID_INPUT,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }

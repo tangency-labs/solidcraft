@@ -472,7 +472,7 @@ fn link(i: i64) -> Option<NodeId> {
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> i64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         SolidError::Upstream { code, .. } => i64::from(*code),
         _ => -1,
     }

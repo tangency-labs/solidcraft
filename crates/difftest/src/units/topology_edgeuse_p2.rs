@@ -613,7 +613,7 @@ fn run_rust_op(
             let mate = eu1::mate(b, eu);
             let r = eu2::check_and_set_uv_trim_curve(&k, b, eu, curve, *adjust, rec.as_mut());
             match (r, mate) {
-                (Err(e), _) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => {
+                (Err(e), _) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     Err(e)
                 }
                 (_, Err(e)) => Err(e),
@@ -702,7 +702,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } => Ok(Output::err("null_deref")),
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

@@ -63,7 +63,7 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 fn status(e: &solidcore::SolidError) -> f64 {
     match e {
         solidcore::SolidError::Upstream { code, .. } => f64::from(*code),
-        solidcore::SolidError::InvalidInput { .. } => 1007.0,
+        solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,
     }
 }

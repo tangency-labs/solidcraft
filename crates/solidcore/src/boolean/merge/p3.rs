@@ -336,7 +336,12 @@ pub fn boolean_trees<D: BooleanDriver>(
                 .map_err(|e| {
                     // undefined behaviour the port detects (InvalidInput) keeps its
                     // error, as Unported does
-                    if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) {
+                    if e.is_unported()
+                        || matches!(
+                            e,
+                            SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                        )
+                    {
                         e
                     } else {
                         SolidError::sm_err(OP)

@@ -3165,7 +3165,7 @@ mod tests {
                 entity: EntityRef::Edge(EdgeId::from_index(7)),
             },
             SolidError::PreparationRequired { operation: OP },
-            SolidError::invalid_input("topology::brep_cache", "edge owner is not in source B-rep"),
+            SolidError::port_invariant("topology::brep_cache", "edge owner is not in source B-rep"),
         ];
         for e in internal {
             assert_eq!(ray_success(&Err(e.clone())), Err(e));

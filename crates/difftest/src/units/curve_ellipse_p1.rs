@@ -494,7 +494,7 @@ fn b(x: bool) -> f64 {
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }
@@ -1114,7 +1114,7 @@ fn reads_uninitialised(i: &Inputs) -> bool {
     for op in &i.ops {
         if let OpJ::Assert { given } = op {
             let mut list = AssertArray::new();
-            if let Err(SolidError::InvalidInput { reason, .. }) =
+            if let Err(SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }) =
                 a.assert_valid(&k, Some(&mut list), *given, KEY_A, KEY_POLAR)
             {
                 if reason.contains("uninitialised") {

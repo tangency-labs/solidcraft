@@ -848,10 +848,10 @@ fn run_cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
 fn status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
-        SolidError::InvalidInput { operation, .. } if *operation == "heal::stitch::p1" => {
+        SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } if *operation == "heal::stitch::p1" => {
             NULL_DEREF
         }
-        SolidError::InvalidInput { .. } => SM_ERR_INVALID_INPUT,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => -9.0,
     }
 }

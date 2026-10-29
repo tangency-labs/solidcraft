@@ -172,7 +172,10 @@ fn null(reason: &'static str) -> SolidError {
 const fn must_propagate(e: &SolidError) -> bool {
     matches!(
         e,
-        SolidError::Unported { .. } | SolidError::InvalidInput { .. } | SolidError::NotFound { .. }
+        SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
+            | SolidError::NotFound { .. }
     )
 }
 

@@ -114,7 +114,7 @@ fn lookup<T: Copy>(table: &[(&str, T)], name: &str) -> Result<T, HarnessError> {
 
 fn status_code(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => f64::from(SM_ERR_INVALID_INPUT),
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => f64::from(SM_ERR_INVALID_INPUT),
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }

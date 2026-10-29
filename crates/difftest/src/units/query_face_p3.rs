@@ -834,7 +834,7 @@ fn rust_bisector(k: &Kernel, b: &Brep, c: &BisectorCase) -> Result<Output, Harne
                 return Ok(d);
             }
             return Ok(match &e {
-                SolidError::InvalidInput { reason, .. }
+                SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }
                     if *reason == "FaceUVDomain Not contained by SurfaceUVDomain" =>
                 {
                     status_err(SM_ERR_INVALID_INPUT as f64)

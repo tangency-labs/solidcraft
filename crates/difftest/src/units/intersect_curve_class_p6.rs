@@ -414,7 +414,7 @@ fn put_pc(out: &mut Vec<f64>, pc: &PointClassification<Handle>, g: &Geometry) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,
     }
 }

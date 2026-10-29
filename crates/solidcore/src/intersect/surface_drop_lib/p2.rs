@@ -342,7 +342,7 @@ fn find_degen_param(
 fn status_of(e: &SolidError) -> i32 {
     match e {
         SolidError::Upstream { code, .. } => *code,
-        SolidError::InvalidInput { .. } => SM_ERR_INVALID_INPUT,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => SM_ERR,
     }
 }

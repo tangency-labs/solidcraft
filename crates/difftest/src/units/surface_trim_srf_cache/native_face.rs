@@ -303,7 +303,7 @@ fn probes(k: &Kernel, brep: &Brep, face: FaceId, input: &Inputs) -> SolidResult<
 fn status(error: SolidError) -> SolidResult<f64> {
     match error {
         SolidError::Upstream { code, .. } => Ok(f64::from(code)),
-        SolidError::InvalidInput { .. } => Ok(1007.0),
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         other => Err(other),
     }
 }

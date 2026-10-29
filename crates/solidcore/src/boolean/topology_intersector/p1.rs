@@ -235,7 +235,11 @@ pub(super) const fn dangling(reason: &'static str) -> SolidError {
 pub(super) fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }

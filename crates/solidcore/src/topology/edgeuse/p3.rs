@@ -128,11 +128,13 @@ fn null(reason: &'static str) -> SolidError {
 /// dereference.
 fn vec_status<T>(r: Result<T>) -> Result<T> {
     r.map_err(|e| match e {
-        SolidError::InvalidInput { .. } => SolidError::Upstream {
-            operation: OP,
-            code: 1007, // SM_ERR_INVALID_INPUT
-            entity: None,
-        },
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
+            SolidError::Upstream {
+                operation: OP,
+                code: 1007, // SM_ERR_INVALID_INPUT
+                entity: None,
+            }
+        }
         e => e,
     })
 }
@@ -1615,6 +1617,7 @@ pub fn get_or_create_uv_trim_curve(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
         ) => return Err(e),
         Err(e) => {

@@ -1594,7 +1594,11 @@ pub fn crv_remove_knots(cur: &mut Curve, tol: f64) -> Result<bool> {
 fn span_maxima_result(r: Result<SpanMaxima>) -> Result<Option<SpanMaxima>> {
     match r {
         Ok(sm) => Ok(Some(sm)),
-        Err(e @ (SolidError::InvalidInput { .. } | SolidError::Unported { .. })) => Err(e),
+        Err(
+            e @ (SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
+            | SolidError::Unported { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }

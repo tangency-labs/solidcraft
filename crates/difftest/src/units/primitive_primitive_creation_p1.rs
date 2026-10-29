@@ -431,7 +431,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. }) => 1007,
+                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
                 Err(solidcore::SolidError::Upstream { code, .. }) => code,
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -465,7 +465,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. }) => 1007,
+                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
                 Err(solidcore::SolidError::Upstream { code, .. }) => code,
                 Err(_) => solidcore::error::SM_ERR,
             };
@@ -522,7 +522,7 @@ fn rust(i: &Inputs) -> solidcore::Result<Vec<f64>> {
             let status = match result {
                 Ok(()) => 0,
                 Err(e) if e.is_unported() => return Err(e),
-                Err(solidcore::SolidError::InvalidInput { .. }) => 1007,
+                Err(solidcore::SolidError::InvalidInput { .. } | solidcore::SolidError::PortInvariant { .. }) => 1007,
                 Err(solidcore::SolidError::Upstream { code, .. }) => code,
                 Err(_) => solidcore::error::SM_ERR,
             };

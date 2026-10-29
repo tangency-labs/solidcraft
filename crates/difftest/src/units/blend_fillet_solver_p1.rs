@@ -656,7 +656,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }
@@ -959,7 +959,7 @@ fn rust_brep(
                     put_crv(&k, o, copy.as_ref().or(edge_curve));
                     Ok(())
                 }
-                Err(SolidError::InvalidInput { .. }) => {
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     o.push(-2.0);
                     Ok(())
                 }
@@ -1031,7 +1031,7 @@ fn rust_brep(
             let side = EdgeuseId::from_index(eid(r[3])?);
             let one = |res: Result<usize, SolidError>| match res {
                 Ok(v) => Ok(v as f64),
-                Err(SolidError::InvalidInput { .. }) => Ok(-2.0),
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(-2.0),
                 Err(e) => Err(e),
             };
             (|| -> Result<(), SolidError> {
@@ -1051,7 +1051,7 @@ fn rust_brep(
                     o.extend([b(tangent), b(opposite)]);
                     Ok(())
                 }
-                Err(SolidError::InvalidInput { .. }) => {
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     o.push(-2.0);
                     Ok(())
                 }

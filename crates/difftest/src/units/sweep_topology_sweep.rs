@@ -86,7 +86,7 @@ fn entity_id(e: Option<E>) -> i64 {
 fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::Upstream { code, .. } => i64::from(*code),
-        SolidError::InvalidInput { .. } => 1007,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         SolidError::Nlib { .. } => 1001,
         _ => -1,
     }

@@ -643,7 +643,7 @@ fn point(out: &mut Vec<f64>, p: Vec3) {
 }
 pub(super) fn status(error: SolidError) -> SolidResult<f64> {
     match error {
-        SolidError::InvalidInput { .. } => Ok(1007.0),
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(1007.0),
         SolidError::Upstream { code, .. } => Ok(f64::from(code)),
         error => Err(error),
     }
@@ -892,7 +892,7 @@ fn setback_fillet_edges(
     }
     // SmApiSetBevelCorners ignores the ordinary StitchAndOrient return status.
     match stitch_and_orient(k, body, &StitchAndOrientOptions::default()) {
-        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::InvalidInput { .. }) => Ok(()),
+        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(()),
         Err(error) => Err(error.into()),
     }
 }
@@ -987,7 +987,7 @@ fn law_fillet_edges(
         session.do_fillet(k)?;
     }
     match stitch_and_orient(k, body, &StitchAndOrientOptions::default()) {
-        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::InvalidInput { .. }) => Ok(()),
+        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(()),
         Err(error) => Err(error),
     }
 }

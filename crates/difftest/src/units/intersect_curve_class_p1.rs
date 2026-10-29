@@ -1105,7 +1105,7 @@ pub(crate) fn build_pool(objects: &[ObjIn]) -> Result<Pool, HarnessError> {
 pub(crate) fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,
     }
 }

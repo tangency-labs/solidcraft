@@ -2588,7 +2588,7 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(NULL_DEREF);
             Ok(None)
         }
-        Err(SolidError::InvalidInput { .. }) => {
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
             // upstream's SM_ERR_INVALID_INPUT status of a callee
             o.push(SM_ERR_INVALID_INPUT);
             Ok(None)

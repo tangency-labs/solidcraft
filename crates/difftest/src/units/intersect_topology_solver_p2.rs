@@ -651,7 +651,7 @@ fn static_rust(case: &Case) -> Result<Output, HarnessError> {
                 return Ok(deferred);
             }
             let status = match e {
-                SolidError::InvalidInput { .. } => 1007.0,
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
                 SolidError::Upstream { code, .. } => f64::from(code),
                 _ => return Err(HarnessError::new(e.to_string())),
             };

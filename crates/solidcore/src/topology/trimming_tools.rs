@@ -2543,7 +2543,15 @@ pub fn mirror_curve(
 pub fn is_iso_curve_at(curve: &Curve, side: SurfParamType, low: f64, tol_2d: f64) -> Result<bool> {
     let canon = match bspline_of(curve).and_then(|c| c.canonical()) {
         Ok(c) => c,
-        Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => return Err(e),
+        Err(e)
+            if e.is_unported()
+                || matches!(
+                    e,
+                    SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                ) =>
+        {
+            return Err(e)
+        }
         Err(_) => return Ok(true),
     };
     let coord = usize::from(side != SurfParamType::U);

@@ -64,7 +64,7 @@ fn cclosest(o: &mut Vec<f64>, p: api::CurveClosestPoint) {
 }
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007.,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.,
     }

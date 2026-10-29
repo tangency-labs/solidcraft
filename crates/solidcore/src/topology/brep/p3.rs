@@ -167,6 +167,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<()> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         Ok(_) | Err(_) => Ok(()),

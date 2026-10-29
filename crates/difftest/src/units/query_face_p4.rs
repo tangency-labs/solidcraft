@@ -1115,7 +1115,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(d);
             }
             match &e {
-                SolidError::InvalidInput { reason, .. }
+                SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }
                     if *reason == qf4::NOT_THIS_FACE || *reason == qf4::NO_SURFACE =>
                 {
                     SM_ERR_INVALID_INPUT

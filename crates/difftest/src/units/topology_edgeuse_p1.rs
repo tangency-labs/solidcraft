@@ -1455,7 +1455,7 @@ pub(crate) fn import_raw_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), H
 fn slot<T>(r: Result<T, SolidError>, f: impl FnOnce(T) -> i64) -> Result<i64, SolidError> {
     match r {
         Ok(v) => Ok(f(v)),
-        Err(SolidError::InvalidInput { .. }) => Ok(NULL_DEREF),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(NULL_DEREF),
         Err(e) => Err(e),
     }
 }
@@ -1680,7 +1680,7 @@ fn eu_state(k: &Kernel, b: &Brep, eu: Option<EdgeuseId>, out: &mut Vec<f64>) -> 
 fn status_of(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
-        SolidError::InvalidInput { .. } => NULL_DEREF as f64,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => NULL_DEREF as f64,
         _ => -9.0,
     }
 }
@@ -1840,7 +1840,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let e = eid(*eu);
             let mate = match eu1::mate(b, e) {
                 Ok(m) => m,
-                Err(SolidError::InvalidInput { .. }) => {
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     return Ok(Output::new().values("state", vec![NULL_DEREF as f64]))
                 }
                 Err(x) => return Err(x.into()),
@@ -1872,7 +1872,7 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             };
             match r {
                 Ok(()) => {}
-                Err(SolidError::InvalidInput { .. }) => {
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     return Ok(Output::new().values("state", vec![NULL_DEREF as f64]))
                 }
                 Err(x) => return Err(x.into()),

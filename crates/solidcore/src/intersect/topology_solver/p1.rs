@@ -2220,6 +2220,7 @@ pub(super) fn face_point_classify<O: Copy>(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
             | SolidError::PreparationRequired { .. }),
         ) => Err(e),
         // (status ignored, as upstream)

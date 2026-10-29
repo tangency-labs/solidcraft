@@ -178,7 +178,10 @@ pub struct LoopCrossings<O> {
 const fn is_status(e: &SolidError) -> bool {
     !matches!(
         e,
-        SolidError::Unported { .. } | SolidError::InvalidInput { .. } | SolidError::NotFound { .. }
+        SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
+            | SolidError::NotFound { .. }
     )
 }
 
@@ -349,7 +352,7 @@ fn set_props_stage_2<O: LoopObject, G: ClassGeometry<O>>(
     // an `InvalidInput` of `FaceProps` is an upstream null dereference (UB-131 for the
     // face pointer `SetProps_Gaps` left unset): it propagates instead of being ignored
     match props.set_props_stage2(k, b, f, face_index, HealerOpType::All) {
-        Err(e @ SolidError::InvalidInput { .. }) => Err(e),
+        Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => Err(e),
         r => ignore_status(r),
     }
 }
@@ -372,7 +375,7 @@ fn set_props_stage_2_mut<O: LoopObject, G: ClassGeometryMut<O>>(
         ));
     };
     match props.set_props_stage2_mut(k, b, f, face_index, HealerOpType::All) {
-        Err(e @ SolidError::InvalidInput { .. }) => Err(e),
+        Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => Err(e),
         r => ignore_status(r),
     }
 }
@@ -505,7 +508,11 @@ fn edgeuse_evaluate_binormal<O: ClassObject, G: ClassGeometry<O>>(
             *binormal = r.binormal;
             Ok(())
         }
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }),
+        ) => Err(e),
         Err(_) => {
             *point = Vec3::ZERO;
             Ok(())

@@ -166,7 +166,7 @@ fn as_sm_err(e: SolidError) -> SolidError {
 /// input upstream mishandles, e.g. `FindOuterLoops`' zero-area loop, UB-119) go through.
 fn plane_failed(e: SolidError) -> SolidError {
     match e {
-        SolidError::InvalidInput { .. } => e,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => e,
         other => as_sm_err(other),
     }
 }

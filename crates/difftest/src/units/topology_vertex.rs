@@ -1498,7 +1498,7 @@ impl From<HarnessError> for Fail {
 fn or_null<T>(r: Result<T, SolidError>) -> Result<Option<T>, SolidError> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(SolidError::InvalidInput { .. }) => Ok(None),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(None),
         Err(e) => Err(e),
     }
 }

@@ -178,7 +178,7 @@ fn rust_record(op: &Level0Op, b: &Brep, c: [usize; 10]) -> Result<Vec<f64>, Soli
                     ]),
                     // the intersector-form trim polygon of fewer than four points the
                     // shim skips (upstream reads `lNum - 4`)
-                    Err(SolidError::InvalidInput { reason, .. })
+                    Err(SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. })
                         if reason.contains("fewer than four control points") =>
                     {
                         o.extend([SKIPPED; 2]);

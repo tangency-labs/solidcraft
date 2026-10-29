@@ -946,8 +946,11 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
 
     for &id in &curve_pnts {
         // (status ignored, but linking a linked point is undefined upstream)
-        if let Err(e @ (SolidError::InvalidInput { .. } | SolidError::Unported { .. })) =
-            v.intersector_mut().add_point_to_curve(id)
+        if let Err(
+            e @ (SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
+            | SolidError::Unported { .. }),
+        ) = v.intersector_mut().add_point_to_curve(id)
         {
             return Err(e);
         }
@@ -1512,8 +1515,11 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         } else {
             // the points between are through points (status ignored, but linking
             // a linked point is undefined upstream)
-            if let Err(e @ (SolidError::InvalidInput { .. } | SolidError::Unported { .. })) =
-                v.intersector_mut().add_through_point(pid)
+            if let Err(
+                e @ (SolidError::InvalidInput { .. }
+                | SolidError::PortInvariant { .. }
+                | SolidError::Unported { .. }),
+            ) = v.intersector_mut().add_through_point(pid)
             {
                 return Err(e);
             }

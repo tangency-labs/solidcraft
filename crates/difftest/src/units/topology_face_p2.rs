@@ -1755,7 +1755,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     o.extend([p.x, p.y, p.z]);
                 }
             }
-            Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
             Err(e) => o.extend([status_of(e)?, 0.0]),
             }
         }
@@ -1792,7 +1792,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     }
                 }
             }
-            Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
             Err(e) => o.extend([status_of(e)?, 0.0, 0.0, 0.0, 0.0, 0.0]),
         },
         OpIn::Trim {
@@ -1841,7 +1841,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                         None => o.push(-1.0),
                     }
                 }
-                Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
                 Err(e) => o.extend([
                     status_of(e)?,
                     if *want_3d { 0.0 } else { -1.0 },
@@ -1898,7 +1898,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
             };
             match fp2::fix_uv_trim_curves(&k, b, cur, p, v, *tol, *dist, &dom) {
                 Ok(fixed) => o.extend([0.0, flag(fixed)]),
-                Err(SolidError::InvalidInput { .. }) => return Ok(vec![NULL_DEREF]),
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Ok(vec![NULL_DEREF]),
                 Err(e) => o.extend([status_of(e)?, 0.0]),
             }
             put_curve(&mut o, uv_of(b, Some(cur))?.as_ref())?;
@@ -1936,7 +1936,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                     o.push(which.map_or(-1.0, |w| w as f64));
                     put_curve(&mut o, found.as_ref())?;
                 }
-                Err(SolidError::InvalidInput { .. }) => return Ok(vec![NULL_DEREF]),
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Ok(vec![NULL_DEREF]),
                 Err(e) => o.extend([status_of(e)?, -1.0, -1.0]),
             }
             o.extend(slots.iter().map(|s| flag(s.is_some())));
@@ -1952,7 +1952,7 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
                 flag(r.on_singularity),
                 flag(r.crosses_missing_seam),
             ]),
-            Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
             Err(e) => return Err(e.into()),
         },
         OpIn::Rescue { f, to_null } => {

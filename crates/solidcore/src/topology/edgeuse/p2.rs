@@ -147,7 +147,10 @@ fn edge_set_tolerance(b: &mut Brep, eu: EdgeuseId, tolerance: f64) -> Result<()>
 fn ser_as_true(e: &SolidError) -> bool {
     !matches!(
         e,
-        SolidError::Unported { .. } | SolidError::InvalidInput { .. } | SolidError::NotFound { .. }
+        SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
+            | SolidError::NotFound { .. }
     )
 }
 
@@ -176,6 +179,7 @@ pub(crate) fn binormal_ignoring_status(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         Err(_) => Ok(BinormalEval {

@@ -1073,7 +1073,15 @@ impl SurfOfExtrusion {
             Some(&mut out.curve_types),
         ) {
             Ok(r) => Ok(r.needs_more_intersections),
-            Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => Err(e),
+            Err(e)
+                if e.is_unported()
+                    || matches!(
+                        e,
+                        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                    ) =>
+            {
+                Err(e)
+            }
             Err(_) => Ok(false),
         }
     }

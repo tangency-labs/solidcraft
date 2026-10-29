@@ -829,9 +829,11 @@ pub fn make_faceuse_attempt_with(
                 None,
             ) {
                 Ok(sector) => sector.radial_edgeuse,
-                Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::InvalidInput { .. }
+                    | SolidError::PortInvariant { .. }),
+                ) => return Err(e),
                 Err(_) => None,
             };
             // add the classified radial sector's Edgeuse to the sFaceEdgeuses list
@@ -1373,7 +1375,11 @@ fn null_first<O: PartialEq + Copy>(list: &mut [Option<O>], item: O) {
 fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }

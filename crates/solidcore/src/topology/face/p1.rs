@@ -341,7 +341,15 @@ fn has_near_misses<O: LoopObject>(
 ) -> Result<bool> {
     match c.has_near_misses(k, geometry, false) {
         Ok(v) => Ok(v),
-        Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => Err(e),
+        Err(e)
+            if e.is_unported()
+                || matches!(
+                    e,
+                    SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                ) =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(false),
     }
 }

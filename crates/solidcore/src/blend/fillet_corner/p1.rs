@@ -1185,7 +1185,10 @@ pub fn check_nx1_degeneracy_status(
         match eu3::evaluate_binormal(k, b, eu, t, false, &options) {
             Ok(e) => Ok(Ok(e.face_normal)),
             Err(e @ (SolidError::Unported { .. } | SolidError::NotFound { .. })) => Err(e),
-            Err(e @ SolidError::InvalidInput { reason, .. }) if reason == NULL_DEREF => Err(e),
+            Err(
+                e @ (SolidError::InvalidInput { reason, .. }
+                | SolidError::PortInvariant { reason, .. }),
+            ) if reason == NULL_DEREF => Err(e),
             Err(e) => Ok(Err(e)),
         }
     };

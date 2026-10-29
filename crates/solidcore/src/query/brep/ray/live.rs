@@ -527,6 +527,7 @@ impl<'a> BrepFaceServices<'a> {
             Err(
                 e @ (SolidError::Unported { .. }
                 | SolidError::InvalidInput { .. }
+                | SolidError::PortInvariant { .. }
                 | SolidError::PreparationRequired { .. }),
             ) => return Err(e),
             Err(_) if ignore_native_status => {}

@@ -337,7 +337,7 @@ fn status(e: &SolidError) -> f64 {
         SolidError::NotConverged { operation, .. } if operation.starts_with("nurbs::bezier") => {
             1000.0
         }
-        SolidError::InvalidInput { reason, .. } if *reason == BARE_FLAG_REASON => 1000.0,
+        SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason == BARE_FLAG_REASON => 1000.0,
         _ => -1.0,
     }
 }

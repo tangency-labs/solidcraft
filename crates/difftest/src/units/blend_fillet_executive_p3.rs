@@ -853,7 +853,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(deferred);
             }
             match error {
-                SolidError::InvalidInput { .. } => 1007,
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
                 SolidError::Upstream { code, .. } => code,
                 other => return Err(HarnessError::new(other.to_string())),
             }

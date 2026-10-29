@@ -539,7 +539,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         // every InvalidInput of the op is a null dereference upstream (the empty list is
         // screened above): a missing radial (`NULL_DEREF`) or, from unit
         // `topology.edgeuse_p1`, a missing edge; the shim refuses both
-        Err(SolidError::InvalidInput { .. }) => Ok(Output::err("refused")),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(Output::err("refused")),
         Err(e) => Ok(rust_err(&e)),
     }
 }

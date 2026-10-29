@@ -3579,7 +3579,7 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, Fa
             o.push(f64::from(code));
             Ok(None)
         }
-        Err(SolidError::InvalidInput { .. }) => {
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
             o.push(NULL_DEREF);
             Ok(None)
         }
@@ -3868,7 +3868,7 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
                 }
                 match ti::find_first_lowest_dimension_sol(&sols) {
                     Ok(idx) => o.push(idx as f64),
-                    Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+                    Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -4294,7 +4294,7 @@ fn run_part2_op(
                 // (without the maps, a definition with both finals is the port's
                 // InvalidInput, which the shim refuses with -2 alone)
                 let r = ti.set_relationships(k, two);
-                if matches!(r, Err(SolidError::InvalidInput { .. })) {
+                if matches!(r, Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) {
                     o.push(NULL_DEREF);
                     return Ok(());
                 }

@@ -123,7 +123,7 @@ fn status_of(r: &solidcore::Result<()>) -> Result<i64, HarnessError> {
     match r {
         Ok(()) => Ok(SM_SUCCESS),
         Err(SolidError::Upstream { code, .. }) => Ok(i64::from(*code)),
-        Err(SolidError::InvalidInput { .. }) => Ok(SM_ERR_INVALID_INPUT),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(HarnessError::new(format!("rust_error: {e}"))),
     }
 }

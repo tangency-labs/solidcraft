@@ -428,7 +428,7 @@ fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
         Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
-        Err(SolidError::InvalidInput { reason, .. }) if *reason == BARE_FLAG_REASON => BARE_FLAG,
+        Err(SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }) if *reason == BARE_FLAG_REASON => BARE_FLAG,
         Err(SolidError::NotConverged { operation, .. })
             if operation.ends_with("srf_adv::p2::extend_by_dist_at_depth") =>
         {

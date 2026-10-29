@@ -735,7 +735,7 @@ fn rust_edgeuse(i: &Inputs) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                SolidError::InvalidInput { .. } => Ok(Output::err("null_deref")),
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
                 e => Err(harness(format!("rust: {e}"))),
             }
         }
@@ -1041,7 +1041,7 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }

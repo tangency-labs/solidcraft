@@ -293,7 +293,12 @@ fn curve_of<O: Copy>(geometry: &impl ClassGeometry<O>, o: Option<O>) -> Result<&
 /// A status upstream ignores, except the errors that cannot be ignored here: unported
 /// callees and undefined behaviour upstream.
 fn ignore_soft<T>(r: Result<T>) -> Result<()> {
-    if let Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) = r {
+    if let Err(
+        e @ (SolidError::Unported { .. }
+        | SolidError::InvalidInput { .. }
+        | SolidError::PortInvariant { .. }),
+    ) = r
+    {
         return Err(e);
     }
     Ok(())
@@ -789,7 +794,11 @@ pub fn find_ed_on_degen_face<O: Copy + PartialEq>(
 fn degen_face_choice(r: Result<u64>) -> Result<u64> {
     match r {
         Ok(n) => Ok(n),
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }),
+        ) => Err(e),
         Err(_) => Ok(0),
     }
 }
@@ -3564,9 +3573,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let split_pt =
             match self.proto_edge_evaluate(k, geometry, orig_pe, split_param, true, false) {
                 Ok((Some(p), _)) => p,
-                Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
-                    return Err(e)
-                }
+                Err(
+                    e @ (SolidError::Unported { .. }
+                    | SolidError::InvalidInput { .. }
+                    | SolidError::PortInvariant { .. }),
+                ) => return Err(e),
                 _ => Vec3::UNDEF,
             };
 

@@ -186,7 +186,7 @@ fn output(open_status: i64, recs: &[Rec]) -> Output {
 /// Status for a Rust error (see module docs).
 fn status_of(e: &SolidError) -> Result<i64, HarnessError> {
     match e {
-        SolidError::InvalidInput { .. } => Ok(ST_SHORT),
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(ST_SHORT),
         SolidError::Upstream { code, .. } => Ok(i64::from(*code)),
         other => Err(HarnessError::new(format!("unexpected error {other}"))),
     }

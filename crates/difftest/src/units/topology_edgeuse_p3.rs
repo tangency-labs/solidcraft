@@ -516,7 +516,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                         "SmSurfaceCache::SubdivideToTolerances past MAX_SUBDIVISION_NODES (port bound)",
                     ))
                 }
-                SolidError::InvalidInput { .. } => Ok(Output::err("null_deref")),
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(Output::err("null_deref")),
                 e => Err(harness(format!("rust: {e}"))),
             }
         }

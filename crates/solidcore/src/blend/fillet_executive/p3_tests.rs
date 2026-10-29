@@ -760,7 +760,7 @@ fn uninitialized_changes_only_generic_error_members() {
     let mut k = Kernel::default();
     assert!(matches!(
         executive.do_fillet(&mut k, &mut access),
-        Err(SolidError::InvalidInput { .. })
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })
     ));
     assert_eq!(executive.error.code, 1);
     assert_eq!(executive.error.status, 9);

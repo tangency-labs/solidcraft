@@ -111,7 +111,7 @@ fn explicit_definition_does_not_resolve_an_opaque_label() {
     ];
     assert!(matches!(
         run_rust(&i, &mut Stats::default()),
-        Err(SolidError::InvalidInput { .. })
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })
     ));
 }
 

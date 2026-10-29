@@ -482,11 +482,13 @@ fn evaluate_binormal_step_off(
 /// status (not a null dereference), which `SER` passes on unchanged.
 fn vec_status<T>(r: Result<T>, operation: &'static str) -> Result<T> {
     r.map_err(|e| match e {
-        SolidError::InvalidInput { .. } => SolidError::Upstream {
-            operation,
-            code: SM_ERR_INVALID_INPUT,
-            entity: None,
-        },
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
+            SolidError::Upstream {
+                operation,
+                code: SM_ERR_INVALID_INPUT,
+                entity: None,
+            }
+        }
         e => e,
     })
 }

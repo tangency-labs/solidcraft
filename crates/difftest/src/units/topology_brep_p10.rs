@@ -314,7 +314,7 @@ fn builds(i: &Inputs, data: &BrepData) -> bool {
     };
     !matches!(
         make_topology_from_data(&mut k, &mut b, &mut data, &mut env, options),
-        Err(SolidError::InvalidInput { .. })
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })
     )
 }
 
@@ -400,7 +400,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::Upstream { code, .. } => i64::from(*code),
-        SolidError::InvalidInput { .. } => -2,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => -2,
         _ => -1,
     }
 }

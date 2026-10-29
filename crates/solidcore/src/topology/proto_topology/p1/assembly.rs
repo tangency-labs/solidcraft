@@ -159,7 +159,10 @@ impl Assembly {
         let status = list.remove(this, records, instance);
         store_list(records, this, list)?;
         match status {
-            Err(e @ crate::error::SolidError::InvalidInput { .. }) => Err(e),
+            Err(
+                e @ (crate::error::SolidError::InvalidInput { .. }
+                | crate::error::SolidError::PortInvariant { .. }),
+            ) => Err(e),
             Ok(()) | Err(_) => Ok(()),
         }
     }
@@ -180,8 +183,10 @@ impl Assembly {
         let instances = Self::assembly_instances(records, this)?;
         let mut list = list_of(records, this)?;
         for i in instances {
-            if let Err(e @ crate::error::SolidError::InvalidInput { .. }) =
-                list.remove(this, records, i)
+            if let Err(
+                e @ (crate::error::SolidError::InvalidInput { .. }
+                | crate::error::SolidError::PortInvariant { .. }),
+            ) = list.remove(this, records, i)
             {
                 return Err(e);
             }

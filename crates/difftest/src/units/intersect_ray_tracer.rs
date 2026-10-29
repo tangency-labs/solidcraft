@@ -457,7 +457,7 @@ fn build_poly(
 /// The status of a failed Rust operation, as upstream numbers it.
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => 1001.0,
     }

@@ -356,7 +356,11 @@ const fn dangling(reason: &'static str) -> SolidError {
 fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -2016,7 +2020,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             // definition to both edges' curves.
             let mid_pt = match d.evaluate_mid(k, brep, true, false) {
                 Ok((Some(p), _)) => p,
-                Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => {
+                Err(e)
+                    if e.is_unported()
+                        || matches!(
+                            e,
+                            SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                        ) =>
+                {
                     return Err(e)
                 }
                 _ => Vec3::UNDEF,

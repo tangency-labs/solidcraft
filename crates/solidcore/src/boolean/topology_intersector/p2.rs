@@ -1903,9 +1903,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // Do the intersection.
                 let split = match super::p1::test_and_split_two_edges(k, brep, e1, e2, this_tol) {
                     Ok(s) => s,
-                    Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
-                        return Err(e)
-                    }
+                    Err(
+                        e @ (SolidError::Unported { .. }
+                        | SolidError::InvalidInput { .. }
+                        | SolidError::PortInvariant { .. }),
+                    ) => return Err(e),
                     Err(e) => {
                         if ignore_problems {
                             continue;
@@ -2198,7 +2200,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             Ok(()) => out.imprinted_edges.push(e),
                             Err(
                                 err @ (SolidError::Unported { .. }
-                                | SolidError::InvalidInput { .. }),
+                                | SolidError::InvalidInput { .. }
+                                | SolidError::PortInvariant { .. }),
                             ) => return Err(err),
                             Err(_) => {
                                 if !ignore_problems {

@@ -926,7 +926,7 @@ fn rust_err(e: &SolidError) -> Output {
     if let Some(o) = Output::unported(e) {
         return o;
     }
-    let failed = if matches!(e, SolidError::InvalidInput { .. }) {
+    let failed = if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
         NULL_DEREF
     } else {
         1

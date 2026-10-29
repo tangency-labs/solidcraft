@@ -1930,7 +1930,14 @@ fn vertex_faces<O: ClassObject>(g: &impl ClassGeometry<O>, v: O) -> Result<Vec<O
 fn face_point_classified(r: Result<()>) -> Result<bool> {
     match r {
         Ok(()) => Ok(true),
-        Err(e) if matches!(e, SolidError::InvalidInput { .. }) => Err(e),
+        Err(e)
+            if matches!(
+                e,
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+            ) =>
+        {
+            Err(e)
+        }
         Err(e) => Ok(ignored(Err::<(), _>(e))?.is_some()),
     }
 }

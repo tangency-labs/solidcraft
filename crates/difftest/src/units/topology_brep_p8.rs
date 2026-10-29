@@ -447,7 +447,7 @@ fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
             "SmTrimmingTools::FindOuterLoops",
         )))),
         Err(SolidError::Upstream { code, .. }) => Ok(f64::from(*code)),
-        Err(SolidError::InvalidInput { .. }) => Ok(1007.0),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(1007.0),
         Err(e) => Err(match Output::unported(e) {
             Some(o) => Fail::Deferred(Box::new(o)),
             None => hfail(format!("rust: {e}")),

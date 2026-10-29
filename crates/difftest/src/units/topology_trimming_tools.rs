@@ -1188,7 +1188,7 @@ fn find_outer(
             o.push(0.0);
             put_outer(o, &ordered, &counts, &orients, normal, &outer);
         }
-        Err(SolidError::InvalidInput { .. }) => o.extend([0.0, NULL_DEREF]),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.extend([0.0, NULL_DEREF]),
         Err(e) => {
             o.push(status::<()>(&Err(e))?);
         }

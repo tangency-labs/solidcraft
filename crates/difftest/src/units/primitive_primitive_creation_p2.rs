@@ -38,7 +38,7 @@ struct Inputs {
 fn error(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
-        SolidError::InvalidInput { .. } => 1007.,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.,
         _ => 1001.,
     }
 }

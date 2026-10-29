@@ -684,7 +684,7 @@ fn status<T>(r: &Result<T, SolidError>) -> Result<f64, Fail> {
     match r {
         Ok(_) => Ok(0.0),
         Err(SolidError::Upstream { code, .. }) => Ok(f64::from(*code)),
-        Err(SolidError::InvalidInput { .. }) => Ok(SM_ERR_INVALID_INPUT),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(SM_ERR_INVALID_INPUT),
         Err(e) => Err(match Output::unported(e) {
             Some(o) => Fail::Deferred(Box::new(o)),
             None => hfail(format!("rust: {e}")),

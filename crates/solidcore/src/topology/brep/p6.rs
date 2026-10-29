@@ -473,7 +473,9 @@ fn delete_shell(
 // not on the region's list, `InvalidInput` in the shell port) is the native status.
 fn region_remove(brep: &mut Brep, region: RegionId, shell: ShellId) -> Result<()> {
     shell::region_remove_shell(brep, region, shell).map_err(|error| match error {
-        SolidError::InvalidInput { .. } => SolidError::sm_err(OP),
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
+            SolidError::sm_err(OP)
+        }
         other => other,
     })
 }
@@ -899,7 +901,8 @@ fn build_face(
             let shell_region = deref(eu::shell_region(brep, shell_vu)?)?;
             match shell::region_remove_shell(brep, shell_region, shell_vu) {
                 // `SmOwningTopology::Remove`'s SM_ERR (not on the list) is ignored
-                Ok(()) | Err(SolidError::InvalidInput { .. }) => {}
+                Ok(())
+                | Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {}
                 Err(error) => return Err(error),
             }
             delete_shell(k, brep, env, shell_vu)?;
@@ -1673,6 +1676,7 @@ fn native<T>(r: Result<T>) -> Result<Option<T>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         Err(_) => Ok(None),
@@ -2254,6 +2258,7 @@ fn ignore_status(r: Result<()>) -> Result<()> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
         ) => Err(e),
         _ => Ok(()),

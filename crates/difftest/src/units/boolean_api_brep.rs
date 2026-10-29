@@ -422,7 +422,7 @@ fn ub_242(i: &Inputs) -> Result<bool, HarnessError> {
 /// The `SmStatus` of a Rust error; `-1` for one upstream cannot return.
 fn status(e: &SolidError) -> i64 {
     match e {
-        SolidError::InvalidInput { .. } => SM_ERR_INVALID_INPUT,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         SolidError::Upstream { code, .. } => i64::from(*code),
         _ => -1,
     }
@@ -759,7 +759,7 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
                     Ok(record(0, o))
                 }
                 // Rejected: no result (`cleared`) and the list untouched.
-                Err(e) if matches!(e, SolidError::InvalidInput { .. }) => {
+                Err(e) if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
                     seen(&e);
                     Ok(record(status(&e), vec![1, count(v.len())?]))
                 }

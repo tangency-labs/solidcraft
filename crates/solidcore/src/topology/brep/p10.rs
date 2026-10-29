@@ -1650,9 +1650,11 @@ fn set_primary_edgeuses(b: &mut Brep, data: &BrepData, built: &Built) -> Result<
         // This takes care of next/last pointers.
         match edge::reset_primary_edgeuse(b, e, prim) {
             Err(err) if err.is_unported() => return Err(err),
-            Err(err @ (SolidError::InvalidInput { .. } | SolidError::NotFound { .. })) => {
-                return Err(err)
-            }
+            Err(
+                err @ (SolidError::InvalidInput { .. }
+                | SolidError::PortInvariant { .. }
+                | SolidError::NotFound { .. }),
+            ) => return Err(err),
             // the status is ignored upstream
             Ok(()) | Err(_) => {}
         }

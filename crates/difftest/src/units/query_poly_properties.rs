@@ -71,7 +71,7 @@ fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
         // SM_ERR_INVALID_INPUT
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         _ => -1.0,
     }
 }

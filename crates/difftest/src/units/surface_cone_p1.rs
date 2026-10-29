@@ -516,7 +516,7 @@ fn push_v(o: &mut Vec<f64>, v: Vec3) {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::Upstream { code, .. } => f64::from(*code),
-        SolidError::InvalidInput { .. } => SM_ERR_INVALID_INPUT,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => -1.0,
     }
 }

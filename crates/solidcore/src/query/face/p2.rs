@@ -600,6 +600,7 @@ fn surface_cache_of_face(
             match e {
                 SolidError::Unported { .. }
                 | SolidError::InvalidInput { .. }
+                | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. } => Err(e),
                 // else - get or make SurfaceCache
                 _ => Ok(FaceSurfaceCache {
@@ -1213,6 +1214,7 @@ pub fn classify_param_on_faces(
             Err(
                 e @ (SolidError::Unported { .. }
                 | SolidError::InvalidInput { .. }
+                | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. }),
             ) => Err(e),
             _ => Ok(pc.point_class()),

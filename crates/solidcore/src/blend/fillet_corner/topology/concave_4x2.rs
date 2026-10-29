@@ -40,7 +40,7 @@ use crate::topology::{Brep, EdgeuseId, VertexId};
 fn status_angle(e: &SolidError) -> f64 {
     let code = match e {
         SolidError::Upstream { code, .. } => *code,
-        SolidError::InvalidInput { .. } => SM_ERR_INVALID_INPUT,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => SM_ERR,
     };
     f64::from(code)

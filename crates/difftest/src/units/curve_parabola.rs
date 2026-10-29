@@ -125,7 +125,7 @@ fn harness(msg: &str) -> HarnessError {
 
 fn status_code(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => SM_ERR_INVALID_INPUT,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }

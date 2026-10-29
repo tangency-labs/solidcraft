@@ -1897,9 +1897,11 @@ impl OffsetGeometryCreation {
                 operation: "geom::extent2d::Extent2d::intersect",
                 ..
             }) => return Err(sm_err(OP_UPDATE)),
-            Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => {
-                return Err(e)
-            }
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::InvalidInput { .. }
+                | SolidError::PortInvariant { .. }),
+            ) => return Err(e),
             Err(_) => return Err(sm_err(OP_UPDATE)),
         };
 

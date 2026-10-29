@@ -368,7 +368,7 @@ fn setup<T>(r: solidcore::Result<T>, what: &str) -> Result<T, Fail> {
 /// cannot return.
 fn status(e: &SolidError) -> i64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         SolidError::Upstream { code, .. } => i64::from(*code),
         _ => -1,
     }

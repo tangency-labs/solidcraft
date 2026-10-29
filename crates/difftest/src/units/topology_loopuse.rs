@@ -506,7 +506,7 @@ impl From<HarnessError> for Fail {
 fn slot<T>(r: Result<T, SolidError>) -> Result<Option<T>, Fail> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(SolidError::InvalidInput { .. }) => Ok(None),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(None),
         Err(e) => Err(fail(&e)),
     }
 }

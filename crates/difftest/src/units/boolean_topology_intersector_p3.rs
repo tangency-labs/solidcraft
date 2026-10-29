@@ -510,7 +510,7 @@ fn status<T>(r: Result<T, SolidError>, o: &mut Vec<f64>) -> Result<Option<T>, So
             o.push(f64::from(code));
             Ok(None)
         }
-        Err(SolidError::InvalidInput { .. }) => {
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
             o.push(NULL_DEREF);
             Ok(None)
         }

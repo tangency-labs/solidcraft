@@ -1935,7 +1935,10 @@ impl PolyBrep {
         if let Some(v) = x.vertex {
             // the status is ignored upstream
             if let Err(err) = self.vertex_remove_poly_edge(v, e) {
-                if matches!(err, SolidError::InvalidInput { .. }) {
+                if matches!(
+                    err,
+                    SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
+                ) {
                     return Err(err);
                 }
             }

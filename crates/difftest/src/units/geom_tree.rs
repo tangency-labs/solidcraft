@@ -291,7 +291,7 @@ fn flag(b: bool) -> i64 {
 /// Upstream status of a Rust error.
 fn status_of(e: &SolidError) -> i64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         SolidError::Upstream { code, .. } => i64::from(*code),
         _ => 1001,
     }

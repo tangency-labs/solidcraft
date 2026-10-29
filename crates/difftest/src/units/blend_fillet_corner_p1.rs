@@ -391,7 +391,7 @@ fn v3(a: [f64; 3]) -> Vec3 {
 fn status_of(e: &SolidError) -> Option<f64> {
     match e {
         SolidError::Upstream { code, .. } => Some(f64::from(*code)),
-        SolidError::InvalidInput { reason, .. } if *reason != NULL_DEREF => Some(1007.0),
+        SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason != NULL_DEREF => Some(1007.0),
         _ => None,
     }
 }
@@ -402,7 +402,7 @@ pub(super) fn rust_err(e: &SolidError) -> Output {
     if let Some(o) = Output::unported(e) {
         return o;
     }
-    if matches!(e, SolidError::InvalidInput { reason, .. } if *reason == NULL_DEREF) {
+    if matches!(e, SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason == NULL_DEREF) {
         return Output::err("refused");
     }
     match status_of(e) {
@@ -930,7 +930,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
                     match corner::check_nx1_degeneracy(&k, &mut t.brep, v, e) {
                         Ok(f) => Ok(vec![flag(f)]),
                         Err(e) if e.is_unported() => Err(e),
-                        Err(e) if matches!(&e, SolidError::InvalidInput { reason, .. } if *reason == NULL_DEREF) => {
+                        Err(e) if matches!(&e, SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason == NULL_DEREF) => {
                             Err(e)
                         }
                         Err(e) => Ok(vec![model_status(&e)]),
@@ -1898,7 +1898,7 @@ fn corner_err(e: &SolidError) -> Result<f64, Box<Output>> {
     if let Some(o) = Output::unported(e) {
         return Err(Box::new(o));
     }
-    if matches!(e, SolidError::InvalidInput { reason, .. } if *reason == NULL_DEREF) {
+    if matches!(e, SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if *reason == NULL_DEREF) {
         return Err(Box::new(Output::err("refused")));
     }
     Ok(model_status(e))

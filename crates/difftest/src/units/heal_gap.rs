@@ -1174,7 +1174,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             let args = topo_args(&b, c, *kind, *sel0, *sel1, *f0, *f1, *uv)?;
             match topo_rust(&k, &mut b, &args) {
                 Ok(v) => o = v,
-                Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+                Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
                 Err(e) => return rust_fail(&e),
             }
         }

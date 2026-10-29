@@ -71,7 +71,7 @@ fn res<T>(r: solidcore::Result<T>, status_out: &mut f64, skip: &mut bool) -> Res
             if let Some(o) = Output::unported(&e) {
                 return Err(Fail::Deferred(Box::new(o)));
             }
-            if matches!(e, SolidError::InvalidInput { .. }) {
+            if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) {
                 *skip = true;
             } else {
                 *status_out = status(&e);

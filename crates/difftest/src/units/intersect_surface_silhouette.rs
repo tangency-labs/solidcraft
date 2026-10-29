@@ -346,7 +346,7 @@ fn rust_curve(d: &CurveData) -> Result<BSplineCurve, HarnessError> {
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }

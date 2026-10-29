@@ -321,7 +321,7 @@ impl From<HarnessError> for Fail {
 /// cannot return.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::InvalidInput { .. } => 1007.0,
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
         SolidError::Upstream { code, .. } => f64::from(*code),
         _ => -1.0,
     }
@@ -581,7 +581,7 @@ fn branch(a: usize, b: usize) -> [Option<NodeId>; MAX_SOLVER_TREES] {
 
 /// True for the error `ComputeSingularityPoint` returns on a ninth singular direction.
 fn is_sing_overflow(e: &SolidError) -> bool {
-    matches!(e, SolidError::InvalidInput { reason, .. } if reason.starts_with("more than 8 singular"))
+    matches!(e, SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. } if reason.starts_with("more than 8 singular"))
 }
 
 struct Ctx<'a> {

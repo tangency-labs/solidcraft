@@ -751,7 +751,7 @@ fn run_curve(k: &Kernel, input: &CurveInput, cpp: bool) -> Result<Output, Harnes
             }
             Ok(curve_output(0, values))
         }
-        Err(SolidError::InvalidInput { .. }) => Ok(curve_output(1007, values)),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(curve_output(1007, values)),
         Err(SolidError::Upstream { code, .. }) => Ok(curve_output(code, values)),
         Err(e) => Ok(rust_err(&e)),
     }

@@ -1315,7 +1315,11 @@ impl FilletCorner {
     ) -> Result<bool> {
         match self.analytic_corner_surface(env) {
             Ok(made) => Ok(made),
-            Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::InvalidInput { .. }
+                | SolidError::PortInvariant { .. }),
+            ) => Err(e),
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean
             Err(_) => Ok(true),
         }
@@ -2199,7 +2203,11 @@ fn unitize_ser(v: Vec3, operation: &'static str) -> Result<Vec3> {
 fn soft<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::InvalidInput { .. }
+            | SolidError::PortInvariant { .. }),
+        ) => Err(e),
         Err(_) => Ok(None),
     }
 }

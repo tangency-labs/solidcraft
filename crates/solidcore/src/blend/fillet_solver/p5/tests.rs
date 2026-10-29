@@ -551,7 +551,10 @@ fn a_broken_corner_callee_cannot_spin_the_segment_walk_forever() {
         ..Script::default()
     };
     let result = f.context().process(id, &mut vec![], &mut script);
-    assert!(matches!(result, Err(SolidError::InvalidInput { .. })));
+    assert!(matches!(
+        result,
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })
+    ));
     assert_eq!(script.find_count, 44);
 }
 #[test]
@@ -1049,7 +1052,7 @@ fn rollover_trim_uses_the_live_solver_at_its_nonzero_id() {
             &f.solver,
             &f.target
         ),
-        Err(SolidError::InvalidInput { .. })
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })
     ));
 }
 

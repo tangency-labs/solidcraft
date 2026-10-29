@@ -659,7 +659,7 @@ fn run_rust(k: &Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>), Sol
             };
             match res {
                 Ok(()) => {}
-                Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => return Err(e),
+                Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => return Err(e),
                 Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
                 Err(e) => return Err(e),
             }

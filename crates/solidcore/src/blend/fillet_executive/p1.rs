@@ -1428,6 +1428,7 @@ pub fn remove_topo_edges(k: &mut Kernel, b: &mut Brep, edges: &[Option<EdgeId>])
                     if let Err(
                         e @ (SolidError::Unported { .. }
                         | SolidError::InvalidInput { .. }
+                        | SolidError::PortInvariant { .. }
                         | SolidError::NotFound { .. }),
                     ) = brep_p5::delete_topological_vertex(k, b, editing, Some(vertex), None)
                     {

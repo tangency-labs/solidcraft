@@ -462,7 +462,7 @@ fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
         Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
-        Err(SolidError::InvalidInput { reason, .. }) if *reason == BARE_FLAG_REASON => 1000.0,
+        Err(SolidError::InvalidInput { reason, .. } | SolidError::PortInvariant { reason, .. }) if *reason == BARE_FLAG_REASON => 1000.0,
         Err(_) => -1.0,
     }
 }

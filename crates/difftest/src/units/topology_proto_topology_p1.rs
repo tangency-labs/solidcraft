@@ -717,7 +717,7 @@ const REFUSED: f64 = f64::MIN;
 /// refusal, as the shim refuses those inputs.
 fn st3<T>(r: solidcore::Result<T>) -> Result<Result<T, f64>, Fail> {
     match r {
-        Err(SolidError::InvalidInput { .. }) => Ok(Err(REFUSED)),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(Err(REFUSED)),
         r => st(r),
     }
 }
@@ -2805,7 +2805,7 @@ fn run_proto(
                     &mut output,
                 )
                 .map_err(|error| match error {
-                    SolidError::InvalidInput { operation, .. } => SolidError::Upstream {
+                    SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } => SolidError::Upstream {
                         operation,
                         code: solidcore::error::SM_ERR_INVALID_INPUT,
                         entity: None,
@@ -5090,7 +5090,7 @@ fn transform_status(res: solidcore::Result<()>) -> Result<f64, Fail> {
         Err(e) => match Output::unported(&e) {
             Some(d) => return Err(Fail::Deferred(Box::new(d))),
             None => match e {
-                SolidError::InvalidInput { .. } => 1007.0,
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
                 e => status(&e),
             },
         },

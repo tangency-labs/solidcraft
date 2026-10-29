@@ -443,7 +443,7 @@ fn put_list<I: ArenaId>(o: &mut Vec<f64>, r: Result<Vec<I>, SolidError>) -> Resu
             o.push(v.len() as f64);
             o.extend(v.iter().map(|x| f64::from(x.index())));
         }
-        Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+        Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
         Err(e) => return Err(fail(&e)),
     }
     Ok(())
@@ -768,7 +768,7 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
         OpIn::Connected { kind, index } => match fp4::is_connected_to(&b, f, target(*kind, *index))
         {
             Ok(c) => o.push(flag(c)),
-            Err(SolidError::InvalidInput { .. }) => o.push(NULL_DEREF),
+            Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => o.push(NULL_DEREF),
             Err(e) => return Err(fail(&e)),
         },
         OpIn::Line {

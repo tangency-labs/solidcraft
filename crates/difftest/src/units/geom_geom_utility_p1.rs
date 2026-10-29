@@ -116,7 +116,7 @@ fn lookup(name: &str) -> Result<Op, HarnessError> {
 /// Upstream status of a Rust error, or `None` for errors with no upstream status.
 fn status_code(e: &SolidError) -> Option<f64> {
     match e {
-        SolidError::InvalidInput { .. } => Some(1007.0),
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Some(1007.0),
         SolidError::Upstream { code, .. } => Some(f64::from(*code)),
         _ => None,
     }

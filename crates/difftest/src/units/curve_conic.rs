@@ -103,7 +103,7 @@ fn lookup(name: &str) -> Result<(Op, bool), HarnessError> {
 
 fn status_code(e: &SolidError) -> i64 {
     match e {
-        SolidError::InvalidInput { .. } => i64::from(SM_ERR_INVALID_INPUT),
+        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => i64::from(SM_ERR_INVALID_INPUT),
         SolidError::Upstream { code, .. } => i64::from(*code),
         _ => -1,
     }

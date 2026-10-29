@@ -599,7 +599,7 @@ fn rust(p: &Parsed) -> Result<Output, HarnessError> {
         Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| {
             Output::err(match e {
                 SolidError::Upstream { code, .. } => format!("status_{code}"),
-                SolidError::InvalidInput { .. } => "status_1007".into(),
+                SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => "status_1007".into(),
                 other => format!("rust_error: {other}"),
             })
         })),
