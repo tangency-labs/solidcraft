@@ -18,9 +18,9 @@
    "step": 3,
    "pointer": "/interferences/0/center",
    "json": [
-    10,
-    10,
-    10
+    10.0,
+    10.0,
+    10.0
    ]
   }
  ]

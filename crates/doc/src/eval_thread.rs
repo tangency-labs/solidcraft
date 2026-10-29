@@ -473,11 +473,7 @@ fn thread_grooves(
     let section_of = |g: &crate::thread_forms::GrooveProfile| -> (Vec<Vec2>, f64) {
         let (tl, th) = (g.flank_lo.tan(), g.flank_hi.tan());
         if taper.is_none() {
-            let (r0, r1) = if t.internal {
-                (radius.min(g.crest_r) - 0.1 * p, g.root_r)
-            } else {
-                (g.root_r, radius.max(d / 2.0) + 0.05 * p)
-            };
+            let (r0, r1) = if t.internal { (radius.min(g.crest_r) - 0.1 * p, g.root_r) } else { (g.root_r, radius.max(d / 2.0) + 0.05 * p) };
             let ((lo0, hi0), (lo1, hi1)) = (g.extents(p, r0), g.extents(p, r1));
             let wide = g.width(p, if t.internal { r0 } else { r1 });
             return (vec![Vec2::new(r0, -lo0), Vec2::new(r1, -lo1), Vec2::new(r1, hi1), Vec2::new(r0, hi0)], wide);

@@ -22,9 +22,9 @@
    "step": 3,
    "pointer": "/bodies/1/center",
    "json": [
-    60,
-    0,
-    5
+    60.0,
+    0.0,
+    5.0
    ]
   },
   {

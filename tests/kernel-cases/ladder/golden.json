@@ -1106,15 +1106,15 @@
     },
     "ladder/06-threads/023-external-1-2-npt": {
       "measured": {
-        "area_mm2": 3317.0130177354845,
+        "area_mm2": 3023.0574338103247,
         "body_count": 1,
-        "edges": 144,
-        "faces": 63,
-        "vertices": 83,
-        "volume_mm3": 8227.34635260655
+        "edges": 119,
+        "faces": 51,
+        "vertices": 70,
+        "volume_mm3": 8226.404188726101
       },
-      "seconds": 1.619294352,
-      "status": "fail"
+      "seconds": 1.41498452,
+      "status": "pass"
     },
     "ladder/06-threads/024-internal-rc-1-2-taper": {
       "measured": {
@@ -1993,5 +1993,5 @@
       "status": "pass"
     }
   },
-  "reason": "SMLib 60b1c6a: tiers 05 and 06 take the UNC, UNF, Rc and NPT tapped holes, the pipe threads, the steep flank and the tip options, tier 12 (sheet metal) is new; the 139 cases before keep their statuses and counts, their volumes and areas re-measured within 2e-6"
+  "reason": "06/023 (1/2-14 NPT) passes: a taper thread's groove follows its crest cone, so no sliver of the flanks is left (volume 8226.4042 against the standard's 8226.4049); the other cases as recorded on SMLib 60b1c6a"
 }

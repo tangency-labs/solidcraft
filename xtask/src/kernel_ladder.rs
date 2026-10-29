@@ -318,7 +318,8 @@ mod tests {
             "ladder/01-a/001-x": {"status": "pass", "seconds": 1.0, "measured": {"faces": 6}},
             "ladder/01-a/002-y": {"status": "fail", "seconds": 1.0}
         }});
-        let run = |x: Value, y: Value| gate(&t, &BTreeMap::from([("ladder/01-a/001-x".to_string(), x), ("ladder/01-a/002-y".to_string(), y)]), &golden);
+        let run =
+            |x: Value, y: Value| gate(&t, &BTreeMap::from([("ladder/01-a/001-x".to_string(), x), ("ladder/01-a/002-y".to_string(), y)]), &golden);
         // Ten times slower is the machine, not a change.
         assert!(run(json!({"status": "pass", "seconds": 10.0, "measured": {"faces": 6}}), json!({"status": "fail"})).is_ok());
         let fixed = run(json!({"status": "pass", "measured": {"faces": 6}}), json!({"status": "pass"})).unwrap_err();
