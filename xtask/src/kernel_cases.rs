@@ -335,6 +335,10 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
     }
     let o = options(rest, "target/kernel-cases")?;
     let dir = root().join("tests/kernel-cases");
+    if rest.contains(&"--coverage") {
+        println!("{}", run_coverage(&o, &dir)?);
+        return Ok(());
+    }
     let list = cases(&dir, o.area.as_deref())?;
     if list.is_empty() {
         return Err(format!("no cases (recipe.json + expected.json) under {}", dir.display()));
@@ -410,9 +414,145 @@ fn gate(text: &str, cases: &[String], statuses: &[&str]) -> Result<String, Strin
     }
 }
 
+/// The commands of the registry (`solidcraft-cli commands`): each id, with whether it is only
+/// planned (registered, not built yet).
+fn registry(o: &Options) -> Result<Vec<(String, bool)>, String> {
+    let mut cmd = match &o.cli {
+        Some(bin) => Command::new(bin),
+        None => {
+            let mut c = cargo();
+            c.args(["run", "-q", "--release", "-p", "solidcraft-cli", "--"]);
+            c
+        }
+    };
+    let out = cmd.current_dir(root()).arg("commands").output().map_err(|e| format!("solidcraft-cli: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("solidcraft-cli commands failed:\n{}", String::from_utf8_lossy(&out.stderr)));
+    }
+    let list: Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("commands JSON: {e}"))?;
+    let list = list.as_array().ok_or("commands JSON: not a list")?;
+    Ok(list.iter().filter_map(|c| Some((c["id"].as_str()?.to_string(), c["planned"].as_str().is_some_and(|p| !p.is_empty())))).collect())
+}
+
+/// Every command id the command scripts (`recipe.json`) under `dir` run, at any depth.
+fn used_commands(dir: &Path) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).map_err(|e| format!("{}: {e}", d.display()))?.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if p.file_name().is_some_and(|n| n == "recipe.json") {
+                let text = std::fs::read_to_string(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                out.extend(recipe_commands(&text).map_err(|e| format!("{}: {e}", p.display()))?);
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+/// The command ids a recipe runs: each `commands[].command` of a command script. An oracle
+/// recipe (no `commands`) names features, not commands, and counts none.
+fn recipe_commands(text: &str) -> Result<Vec<String>, String> {
+    let v: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let Some(list) = v.get("commands") else { return Ok(Vec::new()) };
+    let list = list.as_array().ok_or("`commands` is not a list")?;
+    list.iter()
+        .enumerate()
+        .map(|(i, c)| c["command"].as_str().map(str::to_string).ok_or_else(|| format!("commands[{i}] has no `command` id")))
+        .collect()
+}
+
+/// One line of `tests/kernel-cases/EXEMPT`: a command with no case (its reason is for readers).
+#[derive(Debug, PartialEq)]
+struct Exempt<'a> {
+    id: &'a str,
+    /// Listed under `[to cover]`: a geometry command still waiting for its case.
+    to_cover: bool,
+}
+
+/// The section header of the commands that make geometry but have no case yet.
+const TO_COVER: &str = "[to cover]";
+
+/// The commands `tests/kernel-cases/EXEMPT` exempts from the coverage check: one per line,
+/// `<id>  <why it has no case>`; `#` starts a comment line. The lines before `[to cover]` have no
+/// geometry to grade; those after it make geometry and wait for a case, so that section only
+/// shrinks. Each section is sorted, with no id twice in the file, and every line gives a reason.
+fn exempt(text: &str) -> Result<Vec<Exempt<'_>>, String> {
+    let mut out: Vec<Exempt> = Vec::new();
+    let mut to_cover = false;
+    let mut last: Option<&str> = None;
+    for (n, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line == TO_COVER {
+            if to_cover {
+                return Err(format!("line {}: a second {TO_COVER} section", n + 1));
+            }
+            to_cover = true;
+            last = None;
+            continue;
+        }
+        let (id, why) = line.split_once(char::is_whitespace).map_or((line, ""), |(c, w)| (c, w.trim()));
+        if why.is_empty() {
+            return Err(format!("line {}: {id} gives no reason (`<id>  <why it has no case>`)", n + 1));
+        }
+        if out.iter().any(|e| e.id == id) {
+            return Err(format!("line {}: {id} is listed twice", n + 1));
+        }
+        if let Some(prev) = last
+            && prev > id
+        {
+            return Err(format!("line {}: {id} is out of order after {prev}: keep each section sorted", n + 1));
+        }
+        last = Some(id);
+        out.push(Exempt { id, to_cover });
+    }
+    Ok(out)
+}
+
+/// The coverage check: every built command of `registry` (id, planned) is in `used` (run by a
+/// case) or exempted by `exempt_text`; an exemption names a registered command that no case
+/// uses, so a case that comes removes its line.
+fn coverage(registry: &[(String, bool)], used: &[String], exempt_text: &str) -> Result<String, String> {
+    let listed = exempt(exempt_text)?;
+    let mut problems = Vec::new();
+    for e in &listed {
+        if !registry.iter().any(|(id, _)| id == e.id) {
+            problems.push(format!("EXEMPT lists {}, which is not a registry command: remove its line", e.id));
+        } else if used.iter().any(|u| u == e.id) {
+            problems.push(format!("EXEMPT lists {}, which a case now uses: remove its line", e.id));
+        }
+    }
+    let mut covered = 0;
+    for (id, _) in registry.iter().filter(|(_, planned)| !planned) {
+        if used.iter().any(|u| u == id) {
+            covered += 1;
+        } else if !listed.iter().any(|e| e.id == id) {
+            problems.push(format!("NO CASE: {id} (add a case under tests/kernel-cases/, or a line to EXEMPT)"));
+        }
+    }
+    if !problems.is_empty() {
+        return Err(format!("kernel-cases coverage:\n  {}", problems.join("\n  ")));
+    }
+    let to_cover = listed.iter().filter(|e| e.to_cover).count();
+    Ok(format!("kernel-cases coverage: {covered} commands have a case, {} have no geometry, {to_cover} still to cover", listed.len() - to_cover))
+}
+
+fn run_coverage(o: &Options, dir: &Path) -> Result<String, String> {
+    let file = dir.join("EXEMPT");
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+    coverage(&registry(o)?, &used_commands(dir)?, &text).map_err(|e| format!("{}: {e}", file.display()))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::gate;
+    use super::{Exempt, coverage, exempt, gate, recipe_commands};
 
     fn run(text: &str, cases: &[(&str, &str)]) -> Result<String, String> {
         let names: Vec<String> = cases.iter().map(|(c, _)| c.to_string()).collect();
@@ -437,5 +577,44 @@ mod tests {
         assert!(run("b x\na y\n", &[("a", "fail"), ("b", "fail")]).unwrap_err().contains("out of order"));
         assert!(run("a x\na y\n", &[("a", "fail")]).unwrap_err().contains("a repeat of"));
         assert!(run("a\n", &[("a", "fail")]).unwrap_err().contains("gives no cause"));
+    }
+
+    #[test]
+    fn a_recipe_names_the_commands_of_its_script() {
+        let script = r#"{"base": "../a", "commands": [{"command": "solid.box", "params": {}}, {"command": "solid.fillet"}]}"#;
+        assert_eq!(recipe_commands(script).unwrap(), ["solid.box", "solid.fillet"]);
+        assert!(recipe_commands(r#"{"id": "01-box", "features": []}"#).unwrap().is_empty());
+        assert!(recipe_commands(r#"{"commands": [{"params": {}}]}"#).unwrap_err().contains("no `command` id"));
+        assert!(recipe_commands(r#"{"commands": {}}"#).unwrap_err().contains("not a list"));
+    }
+
+    #[test]
+    fn the_exempt_list_has_two_sorted_sections_with_a_reason_each() {
+        let text = "# header\nview.fit  camera only\nview.top  camera only\n\n[to cover]\nsolid.cone  surfaces area\n";
+        assert_eq!(
+            exempt(text).unwrap(),
+            [Exempt { id: "view.fit", to_cover: false }, Exempt { id: "view.top", to_cover: false }, Exempt { id: "solid.cone", to_cover: true },]
+        );
+        assert!(exempt("view.top x\nview.fit x\n").unwrap_err().contains("out of order"));
+        assert!(exempt("view.fit x\n[to cover]\nview.fit y\n").unwrap_err().contains("listed twice"));
+        assert!(exempt("view.fit\n").unwrap_err().contains("gives no reason"));
+        assert!(exempt("[to cover]\n[to cover]\n").unwrap_err().contains("second"));
+    }
+
+    #[test]
+    fn coverage_fails_on_a_command_with_no_case_and_on_a_stale_exemption() {
+        let registry: Vec<(String, bool)> =
+            [("solid.box", false), ("solid.cone", false), ("view.fit", false), ("surface.fillet", true)].map(|(i, p)| (i.to_string(), p)).to_vec();
+        let used = ["solid.box".to_string()];
+        let list = "view.fit  camera only\n[to cover]\nsolid.cone  surfaces area\n";
+        let ok = coverage(&registry, &used, list).unwrap();
+        assert!(ok.contains("1 commands have a case, 1 have no geometry, 1 still to cover"), "{ok}");
+        let missing = coverage(&registry, &used, "view.fit  camera only\n").unwrap_err();
+        assert!(missing.contains("NO CASE: solid.cone"), "{missing}");
+        assert!(!missing.contains("surface.fillet"), "a planned command needs no case: {missing}");
+        let covered = coverage(&registry, &["solid.box".into(), "solid.cone".into()], list).unwrap_err();
+        assert!(covered.contains("EXEMPT lists solid.cone, which a case now uses"), "{covered}");
+        let gone = coverage(&registry, &used, "view.fit  camera only\nview.gone  removed\n[to cover]\nsolid.cone  x\n").unwrap_err();
+        assert!(gone.contains("view.gone, which is not a registry command"), "{gone}");
     }
 }
