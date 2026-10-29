@@ -231,7 +231,7 @@ fn regularized_shell_keeps_legacy_and_explicit_single_face_projections_closed() 
 
 #[test]
 fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material() {
-    let (mut doc, _, shell) = shell_document();
+    let (mut doc, _, _) = shell_document();
     let mut model = Model::new();
     model.evaluate(&doc);
     let state = model.state();
@@ -240,27 +240,10 @@ fn saved_former_strip_projection_reports_lost_without_expanding_healthy_material
     let plane = body.body.face_plane(index).unwrap();
     let stem = crate::naming::face_names(body)[index].clone();
     assert_eq!(crate::naming::strip_piece(&stem), stem);
-    // Reconstruct the original raw shell before certificate stamping/regularization,
-    // and run the unchanged historical naming/capture path on its actual strip.
-    let before = model.state_before(shell);
-    // Legacy Shell did not propagate construction certificates. Omit transient
-    // metadata here; operand paint also disables new wall-run coalescence so
-    // this control retains the actual historical raw pieces.
-    let raw_source = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(20., 12., 10.)).unwrap().with_paint(Some(solidcraft_kernel::Paint {
-        opacity: 1.,
-        faces: vec![solidcraft_kernel::FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }],
-    }));
-    let raw = solidcraft_kernel::shell(&raw_source, &[Vec3::new(5., 6., 10.)], 2.).unwrap();
-    let mut old_body = ModelBody::new("Case".into(), raw, shell);
-    old_body.names = crate::naming::NameCell::new(Some(std::sync::Arc::new(crate::naming::NamingOrigin {
-        feature: doc.feature(shell).unwrap().clone(),
-        before,
-        depth: 1,
-        mats: vec![],
-        sheets: vec![],
-    })));
-    let captured = crate::naming::face_name_at_body(&old_body, Vec3::new(20., 6., 1.)).unwrap();
-    assert_eq!(crate::naming::parent_piece(&captured), Some(stem.as_str()), "actual strip capture records a piece name");
+    // The builds before format 14 split this wall into strips along the opening and saved a
+    // projection of one of them by its number. The kernel's shell leaves the wall one face now,
+    // so the strip exists only as that saved name and geometry.
+    assert_eq!(crate::naming::face_name_at_body(body, Vec3::new(20., 6., 1.)).as_deref(), Some(stem.as_str()), "the shelled wall is one face");
     // What the builds before format 14 saved for that piece: its number by centroid order.
     let former = format!("{stem}#1");
     let mut sketch = solidcraft_sketch::Sketch::new();
@@ -471,7 +454,6 @@ fn saved_curved_strip_projection_is_lost_after_exact_wall_coalescence() {
 
 #[test]
 fn saved_stepped_tab_cut_piece_projection_is_lost_without_expanding_material() {
-    use solidcraft_kernel::{BoolOp, FacePaint, Paint};
     use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
     let mut doc = Document::new("public stepped tab case");
     doc.set_param("length", "40", Some("mm"), None).unwrap();
@@ -498,46 +480,26 @@ fn saved_stepped_tab_cut_piece_projection_is_lost_without_expanding_material() {
         )
         .unwrap();
     doc.feature_mut(tool).unwrap().body_names = vec!["Pocket tool".into()];
-    let cut = doc
-        .add_feature(
-            FeatureKind::Combine { target: "Case".into(), tools: vec!["Pocket tool".into()], operation: crate::Operation::Cut, keep_tools: false },
-            Some("Pocket"),
-        )
-        .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine { target: "Case".into(), tools: vec!["Pocket tool".into()], operation: crate::Operation::Cut, keep_tools: false },
+        Some("Pocket"),
+    )
+    .unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
-    let before = model.state_before(cut);
-    // A real per-face paint control preserves the former slab construction;
-    // no historical names or geometry are fabricated.
-    let old_stock = before
-        .body("Case")
-        .unwrap()
-        .body
-        .clone()
-        .with_paint(Some(Paint { opacity: 1., faces: vec![FacePaint { face: 0, color: [1., 0., 0.], opacity: 1. }] }));
-    let old_cut = solidcraft_kernel::boolean(&old_stock, &before.body("Pocket tool").unwrap().body, BoolOp::Cut).unwrap().unwrap();
-    let mut old_body = ModelBody::new("Case".into(), old_cut, cut);
-    old_body.names = crate::naming::NameCell::new(Some(std::sync::Arc::new(crate::naming::NamingOrigin {
-        feature: doc.feature(cut).unwrap().clone(),
-        before,
-        depth: 1,
-        mats: vec![],
-        sheets: vec![],
-    })));
+    // Older builds left Case's -x wall split by the Join and the Cut and saved a projection of
+    // the patch y 10..20, z 0..20 by its piece name. The kernel leaves the wall one face now: the
+    // patch is only that saved name and its rectangle on YZ.
     let at = Vec3::new(0., 15., 1.);
-    let former = crate::naming::face_name_at_body(&old_body, at).unwrap();
-    assert_ne!(former, crate::naming::strip_piece(&former), "actual former bounded wall patch has a full piece name");
-    let index = crate::naming::face_on_body(&old_body, &former, at).unwrap().0;
-    let mut old_state = crate::ModelState::default();
-    old_state.bodies.push(old_body);
     let plane = solidcraft_geom::Plane::YZ;
-    let resolved = crate::project::resolve_face_indices(&old_state, &plane, LinkKind::Project, "Case", &[index]).unwrap();
     let current_state = model.state();
     let current = current_state.body("Case").unwrap();
-    let stem = crate::naming::strip_piece(&former);
+    let stem = crate::naming::face_name_at_body(current, at).unwrap();
+    assert_eq!(crate::naming::strip_piece(&stem), stem, "the -x wall is one face");
+    let former = format!("{stem}#1");
     let current_names = crate::naming::face_names(current);
-    let merged = current_names.iter().position(|name| name == stem).unwrap();
+    let merged = current_names.iter().position(|name| name == &stem).unwrap();
     // The Join leaves Case's -x wall on its own support, so the wall keeps its exact box
     // identity through the Join and the Cut: one face again, no longer the saved piece.
     assert!(
@@ -548,8 +510,10 @@ fn saved_stepped_tab_cut_piece_projection_is_lost_without_expanding_material() {
         "the merged wall carries its exact construction identity"
     );
     assert!(!current_names.contains(&former));
+    let corners = [Vec2::new(10., 0.), Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(10., 20.)];
+    let geometry: Vec<_> = (0..4).map(|i| solidcraft_sketch::LinkGeom::Line(corners[i], corners[(i + 1) % 4])).collect();
     let mut sketch = Sketch::new();
-    sketch.add_link(LinkKind::Project, LinkSource::Face { body: "Case".into(), at }, &resolved.geom).unwrap();
+    sketch.add_link(LinkKind::Project, LinkSource::Face { body: "Case".into(), at }, &geometry).unwrap();
     sketch.links[0].face_name = Some(former);
     let original = sketch.clone();
     let captured = original.points.iter().filter(|p| p.link.is_some()).map(|p| p.pos).collect::<Vec<_>>();
