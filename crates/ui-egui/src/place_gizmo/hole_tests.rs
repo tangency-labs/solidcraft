@@ -304,3 +304,59 @@ fn a_held_marker_seen_end_on_leaves_the_pointer_to_the_view() {
     let c = handle_at("hole:0").expect("the hole's marker");
     assert!(crate::place_gizmo::contains_pointer(&h.app, c), "seen from the top it drags along the edge again");
 }
+
+#[test]
+fn over_a_hole_marker_the_cursor_is_move_and_select_other_yields_to_it() {
+    let mut h = blocks();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(10.0, 10.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    let c = handle_at("hole:0").expect("a marker");
+    let on = [f64::from(c.x) + 6.0, f64::from(c.y)];
+    h.step(&json!({"move": on})).unwrap();
+    h.frames(2);
+    assert_eq!(h.output.cursor_icon, egui::CursorIcon::Move, "the move cursor, as over the other markers");
+    // Without markers, a hold there lists what is under the pointer.
+    crate::prefs::set(&mut h.app, &json!({"hole_moves": false})).unwrap();
+    h.frames(2);
+    h.step(&json!({"hold": on})).unwrap();
+    h.frames(2);
+    assert!(crate::select_other::is_open(&h.app), "no marker: Select Other opens there");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(!crate::select_other::is_open(&h.app));
+    assert_eq!(places(&h).len(), 1, "{:?}", places(&h));
+    // With the marker, the press is the marker's: no list, and its release is the marker's click.
+    crate::prefs::set(&mut h.app, &json!({"hole_moves": true})).unwrap();
+    h.frames(2);
+    h.step(&json!({"hold": on})).unwrap();
+    h.frames(2);
+    assert!(!crate::select_other::is_open(&h.app), "Select Other yields to the marker");
+    assert!(places(&h).is_empty(), "the marker took the press: {:?}", places(&h));
+}
+
+#[test]
+fn the_dragged_footprint_is_the_holes_mouth() {
+    let mut h = blocks();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let base = Vec3::new(10.0, 10.0, 20.0);
+    let n = Vec3::new(0.0, 0.0, 1.0);
+    let radius = |h: &Harness| {
+        let d = h.app.dialog.as_ref().expect("a dialog is open");
+        let pts = super::footprint(&h.app, d, base, n);
+        assert!(!pts.is_empty());
+        pts.iter().map(|p| p.dist(base)).fold(0.0, f64::max)
+    };
+    let set = |h: &mut Harness, k: usize| {
+        if let Some(crate::dialogs::Kind::Hole { diameter, kind, cb_diameter, cs_diameter, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            (*kind, *diameter, *cb_diameter, *cs_diameter) = (k, "4 mm".into(), "8 mm".into(), "12 mm".into());
+        }
+    };
+    set(&mut h, 0);
+    assert!((radius(&h) - 2.0).abs() < 1e-9, "a simple hole: the bore");
+    set(&mut h, 1);
+    assert!((radius(&h) - 4.0).abs() < 1e-9, "a counterbore: its diameter");
+    set(&mut h, 2);
+    assert!((radius(&h) - 6.0).abs() < 1e-9, "a countersink: its diameter");
+}
