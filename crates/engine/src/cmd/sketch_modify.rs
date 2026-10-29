@@ -29,17 +29,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance", created_doc!())),
+        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}) | a, b: a corner of two lines; distance", created_doc!())),
     CommandSpec::new("sketch.chamfer.distance_angle", "Distance and Angle Chamfer", chamfer_dist_angle)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_angle")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance: along a, angle: deg from a", created_doc!())),
+        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines; distance: along a, angle: deg from a", created_doc!())),
     CommandSpec::new("sketch.chamfer.two_distance", "Two Distance Chamfer", chamfer_two)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_two_distances")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance: along a, distance2: along b", created_doc!())),
+        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines; distance: along a, distance2: along b", created_doc!())),
     CommandSpec::new("sketch.offset", "Offset", offset)
         .at("SKETCH", "MODIFY")
         .icon("offset")
@@ -1621,15 +1621,20 @@ fn corner_arg(q: &Value) -> Value {
     }
 }
 
+/// The corners a fillet or chamfer works on: several at once (`points`), each like a single
+/// `point`, or the one corner `point` or `a`, `b` name.
+fn corner_list(p: &Value, cmd: &str) -> Result<Vec<Value>> {
+    match p.get("points").and_then(Value::as_array) {
+        Some(a) if !a.is_empty() && a.len() <= 500 => Ok(a.iter().map(corner_arg).collect()),
+        Some(_) => Err(bad(cmd, "`points` must list 1…500 corners")),
+        None => Ok(vec![p.clone()]),
+    }
+}
+
 fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = req_expr(cmd, p, "radius")?;
-    // Several corners at once (`points`), each like a single `point`.
-    let corners: Vec<Value> = match p.get("points").and_then(Value::as_array) {
-        Some(a) if !a.is_empty() && a.len() <= 500 => a.iter().map(corner_arg).collect(),
-        Some(_) => return Err(bad(cmd, "`points` must list 1…500 corners")),
-        None => vec![p.clone()],
-    };
+    let corners = corner_list(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
         if !(r > 1e-9 && r < 1e8) {
@@ -1779,29 +1784,52 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     }
 }
 
-fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl FnOnce(f64) -> Result<(f64, f64)>) -> Result<Value> {
+fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<(f64, f64)>) -> Result<Value> {
+    let corners = corner_list(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        refuse_spatial_corner(sk, p, cmd)?;
-        refuse_infinite_corner(sk, p, cmd)?;
-        refuse_offset_corner(sk, p, cmd)?;
-        weld_corner(sk, p);
-        let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
-        let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
-        let (u, v) = ((pa - pc).normalized().unwrap_or(Vec2::X), (pb - pc).normalized().unwrap_or(Vec2::Y));
-        let corner_angle = u.cross(v).atan2(u.dot(v)).abs();
-        // Lines in line with each other, or lying on each other, have no corner to cut, as a
-        // fillet refuses them: on two lines lying on each other the chamfer was a line of no
-        // length between their cut-back ends.
-        if !(2e-6..=std::f64::consts::PI - 2e-9).contains(&corner_angle) {
-            return Err(bad(cmd, "the lines are parallel"));
+        // Every corner is cut alike, in one edit: a corner that can't be cut refuses them all.
+        // A corner named twice (its point, then its two lines, say) would be cut again where
+        // the first cut left a new corner, so it is refused.
+        let mut seen = std::collections::BTreeSet::new();
+        for q in &corners {
+            if let Ok((la, lb, c, _, _)) = corner(sk, q, cmd)
+                && !seen.insert((c, la.min(lb), la.max(lb)))
+            {
+                return Err(bad(cmd, "a corner is listed twice"));
+            }
         }
-        let (da, db) = dists(corner_angle)?;
-        let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
-        let l = sk.add_line_pts(ta, tb, None)?;
-        Ok((ids_of(sk, &[l]), kept_json(vec![kept])))
+        let (mut lines, mut kept) = (Vec::new(), Vec::new());
+        for q in &corners {
+            let (l, k) = chamfer_corner(sk, q, cmd, &dists)?;
+            lines.push(l);
+            kept.push(k);
+        }
+        Ok((ids_of(sk, &lines), kept_json(kept)))
     })?;
     let (curves, (vc, moved)) = out;
     Ok(json!({"curves": curves, "virtual_corners": vc, "moved_to_virtual_corner": moved, "sketch": info}))
+}
+
+/// Cut one corner (`point` or `a`, `b`) of two lines with a straight line, `dists` giving how
+/// far back along each line from the corner's angle: the new line and what became of the corner.
+fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) -> Result<(f64, f64)>) -> Result<(usize, CornerKept)> {
+    refuse_spatial_corner(sk, p, cmd)?;
+    refuse_infinite_corner(sk, p, cmd)?;
+    refuse_offset_corner(sk, p, cmd)?;
+    weld_corner(sk, p);
+    let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
+    let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
+    let (u, v) = ((pa - pc).normalized().unwrap_or(Vec2::X), (pb - pc).normalized().unwrap_or(Vec2::Y));
+    let corner_angle = u.cross(v).atan2(u.dot(v)).abs();
+    // Lines in line with each other, or lying on each other, have no corner to cut, as a
+    // fillet refuses them: on two lines lying on each other the chamfer was a line of no
+    // length between their cut-back ends.
+    if !(2e-6..=std::f64::consts::PI - 2e-9).contains(&corner_angle) {
+        return Err(bad(cmd, "the lines are parallel"));
+    }
+    let (da, db) = dists(corner_angle)?;
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
+    Ok((sk.add_line_pts(ta, tb, None)?, kept))
 }
 
 fn chamfer_equal(s: &mut Session, p: &Value) -> Result<Value> {
