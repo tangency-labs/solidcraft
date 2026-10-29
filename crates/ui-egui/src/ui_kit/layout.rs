@@ -351,7 +351,13 @@ pub(super) fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut U
 /// Publish geometry without replacing native accessibility. Tokens: `none`.
 pub(super) fn publish_geometry(ui: &Ui, response: &Response) {
     let label = label(ui);
-    scenario::publish_target_as(&format!("dialog:{label}"), &format!("dialog:widget:{label}"), response.rect);
+    scenario::publish_rect(&format!("dialog:widget:{label}"), response.rect);
+    // A click lands where the field shows: a field scrolled out of a dialog's field area, under
+    // its footer, has no handle (a click at its centre would press the button over it).
+    let shown = response.rect.intersect(ui.clip_rect());
+    if shown.is_positive() {
+        scenario::publish_handle(&format!("dialog:{label}"), shown.center());
+    }
 }
 
 #[cfg(test)]

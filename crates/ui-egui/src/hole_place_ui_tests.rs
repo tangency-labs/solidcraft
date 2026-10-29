@@ -304,6 +304,9 @@ fn the_dialog_shows_the_sizes_beside_a_section_of_the_hole() {
 #[test]
 fn tapped_thread_depth_field_keeps_focus_and_typing_separate_from_acceptance() {
     let mut h = Harness::new();
+    // Tall enough for the tapped hole's rows and its section, so the partial depth field shows
+    // above the dialog's footer (at 1000 px it scrolls under OK, and has no handle).
+    h.call("ui.resize", json!({"width": 1600, "height": 1400}));
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
     let hole = h.app.run("solid.hole", json!({"position":[20,15,20],"thread":"M6","depth":12})).unwrap()["feature"].as_u64().unwrap();
     let original = h.app.session.doc.to_json();
