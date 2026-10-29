@@ -2787,7 +2787,7 @@ fn lighten(s: &mut Session, p: &Value) -> Result<Value> {
             through_all,
             to,
             trim,
-            targets: string_list(p, "targets").into_iter().map(BodyName).collect(),
+            targets: string_list(cmd, p, "targets")?.into_iter().map(BodyName).collect(),
         },
     )
 }
