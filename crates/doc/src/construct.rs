@@ -430,6 +430,14 @@ pub enum ExtentTarget {
 
 /// A To / From Object reference as it is now.
 pub(crate) fn extent_target(ctx: &Ctx, g: &GeoRef) -> Result<ExtentTarget> {
+    // A construction plane later in the timeline would be read as it is defined, once: moving it
+    // would not recompute this feature. As with a later sketch, axis or point, it is refused.
+    if let GeoRef::Plane { plane } = g
+        && let Some(later) = later_plane(ctx, plane, 0)
+    {
+        let name = ctx.doc.feature(later).map_or_else(|| later.to_string(), |f| f.name.clone());
+        return Err(DocError::Invalid(format!("the plane `{name}` must come earlier in the timeline")));
+    }
     Ok(match g {
         GeoRef::Plane { .. } | GeoRef::Face { .. } => ExtentTarget::Plane(plane(ctx, g)?),
         GeoRef::World { .. } | GeoRef::Axis { .. } => {
@@ -442,6 +450,20 @@ pub(crate) fn extent_target(ctx: &Ctx, g: &GeoRef) -> Result<ExtentTarget> {
             ExtentTarget::Point(point(ctx, g)?)
         }
     })
+}
+
+/// A construction plane `p` is or is built on that the model `ctx.st` has not evaluated yet.
+fn later_plane(ctx: &Ctx, p: &PlaneRef, depth: usize) -> Option<u64> {
+    if depth > 64 {
+        return None;
+    }
+    match p {
+        PlaneRef::Construction { feature } => (!ctx.st.construct.iter().any(|c| c.feature == feature.0)).then_some(feature.0),
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } => {
+            later_plane(ctx, base, depth + 1)
+        }
+        _ => None,
+    }
 }
 
 impl ExtentTarget {

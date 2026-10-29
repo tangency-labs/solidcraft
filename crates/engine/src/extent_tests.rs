@@ -337,3 +337,19 @@ fn extrude_to_a_slanted_plane_ends_along_it() {
     assert!((b["volume_mm3"].as_f64().unwrap() - 1500.0).abs() < 1e-3, "{b}");
     assert!((b["bbox"]["min"][2].as_f64().unwrap() - 5.0).abs() < 1e-6, "{b}");
 }
+
+/// A construction plane after the extrude in the timeline is refused: moving it would not
+/// recompute the extrude, which would keep the end it was first given.
+#[test]
+fn extrude_to_a_later_construction_plane_is_refused() {
+    let mut s = Session::default();
+    square_on_xy(&mut s);
+    run(&mut s, "solid.extrude", json!({"sketch": "P", "distance": 10, "name": "Post", "body_name": "Post"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 30, "name": "Reach"}));
+    let err = s
+        .execute("timeline.redefine", &json!({"feature": "Post", "command": "solid.extrude", "params": {"sketch": "P", "to": {"plane": "Reach"}}}))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("must come earlier in the timeline"), "{err}");
+    assert_eq!(z_range(&mut s, "Post"), (0.0, 10.0));
+}
