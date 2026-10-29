@@ -590,6 +590,36 @@
    }
   },
   {
+   "name": "api_shell_cylinder_r5_top_open_tol_1e6",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2548-2563 (the tangency-labs/solidcore#1453 cylinder at source tolerance 1e-6: inner floor circle, seam and rim marched)",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 5,
+     "height": 10
+    },
+    "faces": [
+     {
+      "origin": "source",
+      "index": 1
+     }
+    ],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
    "name": "member_cylinder_extend_inset_past_radius",
    "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp:269-295 (extend corners)",
    "inputs": {

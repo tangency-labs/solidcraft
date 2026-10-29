@@ -29,6 +29,8 @@
 //! | [`OffsetBrep`]                                              | what the unit reads from and writes to the two B-reps |
 //! | `VertexOffsetBrep` (private)                                | the vertex creator's topology/owned-geometry subset |
 //! | `FaceOffsetBrep` (private)                                   | the face creator's topology/owned-geometry subset |
+//! | `create_analytic_extension` (private)                       | the SolidCraft fork's `sm_CreateAnalyticExtension` (tangency-labs/smlib@fddc366, @98ab1b0; opt-in) |
+//! | `exact_piece` (private)                                     | the fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366; opt-in) |
 //!
 //! Deviations:
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
@@ -109,11 +111,17 @@
 //!   line as the [`Curve`] itself, so `GetDegree` / `IsLine` / `IsArc` / `Evaluate`
 //!   dispatch on an `SmLine` (or other analytic) centre line as upstream does
 //!   (`SmFilletStandardSolver.cpp:3353-3384`).
+//! - **Opt-in fork fix.** With `Kernel::fixes.offset_analytic_mate_edges` (WR-495),
+//!   `mate_edges` runs the SolidCraft fork's exact-piece swap (tangency-labs/smlib@fddc366
+//!   with @98ab1b0) between the marched intersection and its trimming; off, it is
+//!   upstream's. `exact_piece` counts the whole turns it moves a conic angle by and
+//!   returns [`SolidError::NotConverged`] past `MAX_EXACT_PIECE_TURNS` (65536), where
+//!   the fork's loop would not end for a non-finite or huge angle.
 //! - **Recursion.** None.
 
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
-use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -137,12 +145,15 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
 use crate::query::edge::ClosestPoint;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN as OFFSET_SS_UNKNOWN};
 use crate::surface::surface::p1::SurfaceSolveContext;
-use crate::surface::surface::p2::{SurfaceKind, TsectCurveType};
+use crate::surface::surface::p2::{
+    SurfaceKind, TsectCurveType, CONE_TYPE, CYLINDER_TYPE, PLANE_TYPE, SPHERE_TYPE, TORUS_TYPE,
+};
+use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::SurfaceCache;
@@ -156,6 +167,11 @@ const OP_UPDATE: &str = "offset::offset_geometry_creation::update_face_surface_d
 const OP_EXTEND: &str = "offset::offset_geometry_creation::extend_trim_edges";
 const OP_MATE: &str = "offset::offset_geometry_creation::mate_edges";
 const OP_EDGEUSE: &str = "offset::offset_geometry_creation::edgeuse_offset";
+const OP_EXACT_PIECE: &str = "offset::offset_geometry_creation::exact_piece";
+
+/// The most whole turns `exact_piece` moves a conic's angle by (a guard: the angles
+/// are within a few turns of each other).
+const MAX_EXACT_PIECE_TURNS: u32 = 1 << 16;
 
 /// The `operation` of the [`SolidError::InvalidInput`] this module raises where upstream
 /// dereferences a null pointer or a failed cast (undefined behaviour), so that a runner
@@ -1008,6 +1024,208 @@ fn store_surface<O: ClassObject>(brep: &mut impl OffsetBrep<O>, surface: Surface
 /// `SmPoint3d::DistanceBetween`.
 fn distance(a: Point3, b: Point3) -> f64 {
     a.distance(b)
+}
+
+/// `smos_Max`: `a > b ? a : b`.
+fn smos_max(a: f64, b: f64) -> f64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// `smos_Min`: `a < b ? a : b`.
+fn smos_min(a: f64, b: f64) -> f64 {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+
+/// The fork's `sm_CreateAnalyticExtension` (tangency-labs/smlib@fddc366 with
+/// @98ab1b0, behind [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`]): a
+/// plane, cylinder, cone, sphere or torus copied and extended as itself where the
+/// offset's extended surfaces (`GetCreateExtendedSurface`, tangent (G1R) B-spline
+/// extensions) still are that surface: a plane all round, a cylinder or cone along its
+/// rulings (a cone up to its apex), each side by `dist` (3D) unless it is a
+/// singularity. Not round a turn, where the tangent extension leaves the surface.
+/// `None` for any other surface.
+fn create_analytic_extension(k: &Kernel, surface: &Surface, dist: f64) -> Result<Option<Surface>> {
+    let ty = surface.type_code();
+    let plane = ty == PLANE_TYPE;
+    if !plane && ty != CYLINDER_TYPE && ty != CONE_TYPE && ty != SPHERE_TYPE && ty != TORUS_TYPE {
+        return Ok(None);
+    }
+
+    let domain = surface.step_uv_domain();
+    let max = if plane {
+        domain
+    } else {
+        surface.max_analytic_domain(k)?
+    };
+    let (mut new_min, mut new_max) = (domain.min(), domain.max());
+    for dir in 0..2 {
+        // 0 = u, 1 = v
+        if !plane && (dir == 0 || ty == SPHERE_TYPE || ty == TORUS_TYPE) {
+            continue; // a turn: the faces' extensions are not the surface there
+        }
+        let lo = if dir == 0 {
+            domain.min().x
+        } else {
+            domain.min().y
+        };
+        let hi = if dir == 0 {
+            domain.max().x
+        } else {
+            domain.max().y
+        };
+        let mid = if dir == 0 {
+            0.5 * (domain.min().y + domain.max().y)
+        } else {
+            0.5 * (domain.min().x + domain.max().x)
+        };
+        let mut grow = [0.0_f64, 0.0];
+        for (side, g) in grow.iter_mut().enumerate() {
+            let at = if side == 0 { lo } else { hi };
+            let uv = if dir == 0 {
+                Point2::new(at, mid)
+            } else {
+                Point2::new(mid, at)
+            };
+            let from = if side == 0 { Side::Left } else { Side::Right };
+            let ders = surface.evaluate_step(
+                k,
+                uv,
+                1,
+                1,
+                EvaluateFlags {
+                    u_side: from,
+                    v_side: from,
+                    only_upper_half: false,
+                    non_zero_tangents: true,
+                },
+            )?;
+            // upstream's [D, Dv, Du, Duv]: Du is ders[1][0], Dv is ders[0][1]
+            let der = if dir == 0 {
+                ders.get(1).and_then(|r| r.first())
+            } else {
+                ders.first().and_then(|r| r.get(1))
+            };
+            let speed = der.ok_or(dangling("surface derivative"))?.length();
+            if speed > EFF_ZERO {
+                // no extension through a singularity
+                *g = dist / speed;
+            }
+        }
+        let [grow_lo, grow_hi] = grow;
+        let mut new_lo = lo - grow_lo;
+        let mut new_hi = hi + grow_hi;
+        if !plane {
+            // a cylinder's or cone's rulings, as far as the cone reaches (its apex)
+            let (max_lo, max_hi) = (max.min().y, max.max().y);
+            new_lo = smos_max(new_lo, smos_min(lo, max_lo));
+            new_hi = smos_min(new_hi, smos_max(hi, max_hi));
+        }
+        if dir == 0 {
+            new_min.x = new_lo;
+            new_max.x = new_hi;
+        } else {
+            new_min.y = new_lo;
+            new_max.y = new_hi;
+        }
+    }
+
+    let mut copy = surface.copy(k)?;
+    copy.adjust_step_uv_domain(k, &Extent2d::from_points(new_min, new_max))?;
+    Ok(Some(copy))
+}
+
+/// The fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366, behind
+/// [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`]): the exact line or
+/// conic of `exact` that `marched` (a marched intersection piece) approximates, as a
+/// copy over the same span: from `marched`'s start point to its end point, the way
+/// round through its middle (all of a closed conic for a closed piece). `None` when no
+/// line or conic of `exact` runs through all three points within `tol`.
+fn exact_piece(k: &Kernel, marched: &Curve, exact: &[Curve], tol: f64) -> Result<Option<Curve>> {
+    let ivl = marched.natural_interval();
+    // start, middle, end
+    let p = [
+        marched.evaluate_point(k, ivl.min())?,
+        marched.evaluate_point(k, ivl.evaluate(0.5))?,
+        marched.evaluate_point(k, ivl.max())?,
+    ];
+    for candidate in exact {
+        let line = candidate.is_kind_of(LINE_TYPE);
+        if !line && !candidate.is_kind_of(ELLIPSE_TYPE) {
+            continue;
+        }
+        let mut t = [0.0_f64; 3];
+        let mut on = true;
+        for (tk, pk) in t.iter_mut().zip(p.iter()) {
+            if !on {
+                break;
+            }
+            *tk = candidate.step_inversion(k, *pk)?;
+            let on_curve = candidate.evaluate_step_point(k, *tk)?;
+            on = distance(on_curve, *pk) <= tol;
+        }
+        if !on {
+            continue;
+        }
+        let [t0, t1, t2] = t;
+        let [p0, _, p2] = p;
+        let span = if line {
+            Extent1d::from_min_max(smos_min(t0, t2), smos_max(t0, t2))
+        } else {
+            // a conic: its STEP parameter is its angle in degrees
+            let turn = 360.0;
+            // `angle` moved into (from, from + turn]; the turns are counted so that a
+            // parameter far outside a turn cannot loop without bound (the angles are
+            // a conic's STEP parameters, within a few turns)
+            let after = |mut angle: f64, from: f64| -> Result<f64> {
+                let mut turns = 0_u32;
+                while angle <= from {
+                    angle += turn;
+                    turns += 1;
+                    if turns > MAX_EXACT_PIECE_TURNS {
+                        return Err(SolidError::NotConverged {
+                            operation: OP_EXACT_PIECE,
+                            iterations: turns,
+                        });
+                    }
+                }
+                while angle > from + turn {
+                    angle -= turn;
+                    turns += 1;
+                    if turns > MAX_EXACT_PIECE_TURNS {
+                        return Err(SolidError::NotConverged {
+                            operation: OP_EXACT_PIECE,
+                            iterations: turns,
+                        });
+                    }
+                }
+                Ok(angle)
+            };
+            if distance(p0, p2) <= tol {
+                Extent1d::from_min_max(t0, t0 + turn)
+            } else if after(t1, t0)? < after(t2, t0)? {
+                Extent1d::from_min_max(t0, after(t2, t0)?)
+            } else {
+                Extent1d::from_min_max(t2, after(t0, t2)?)
+            }
+        };
+        let mut copy = candidate.copy(k)?;
+        match copy.kind_mut() {
+            CurveKind::Line(l) => l.adjust_step_interval(&span)?,
+            CurveKind::Ellipse(e) => e.adjust_step_interval(k, &span, None)?,
+            // (only lines and conics reach here)
+            _ => return Err(sm_err(OP_EXACT_PIECE)),
+        }
+        return Ok(Some(copy));
+    }
+    Ok(None)
 }
 
 /// `pSur->CreateOffsetSurface(ctx, signed_distance, approx_tol_3d, rNewSurface)`: the
@@ -2939,6 +3157,11 @@ impl OffsetGeometryCreation {
     /// UV curves and becomes the geometry of both offset edge uses
     /// (`ReplaceEdgeCurves`, oriented by the original edge uses).
     ///
+    /// With [`crate::kernel::UpstreamFixes::offset_analytic_mate_edges`] (the SolidCraft
+    /// fork's tangency-labs/smlib@fddc366 and @98ab1b0), each marched intersection
+    /// piece that lies on an exact line or conic of analytic copies of the two face
+    /// surfaces is first replaced by that curve, with UV curves dropped from it.
+    ///
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` for a null edge use or a missing UV curve; `SM_ERR`
@@ -2998,7 +3221,7 @@ impl OffsetGeometryCreation {
         } else {
             &s2
         };
-        let ssi = s1.global_surface_intersect_with_context(
+        let mut ssi = s1.global_surface_intersect_with_context(
             k,
             [Some(ext_surface1), Some(ext_surface2)],
             &mut OffsetSurfaceSolveContext(brep),
@@ -3009,6 +3232,79 @@ impl OffsetGeometryCreation {
             Some(ssi_tol),
             Some(deg20_rad),
         )?;
+
+        // `Kernel::fixes.offset_analytic_mate_edges` (tangency-labs/smlib@fddc366 and
+        // @98ab1b0, #1453/#1130): two analytic surfaces meet on lines and conics. The
+        // marched intersection of their B-spline extensions gives the pieces (bounded by
+        // the extended domains and seams) and their UV curves; each piece that lies on
+        // both extended surfaces as the exact curve between the same ends (within the
+        // analytic surfaces, not on a tangent extension) is replaced by that curve, its
+        // UV curves dropped from it.
+        if k.fixes.offset_analytic_mate_edges {
+            let ext_dist = self.offset_distance().abs() * 5.0;
+            let analytic1 = create_analytic_extension(k, surface_of(brep, surf1)?, ext_dist)?;
+            let analytic2 = create_analytic_extension(k, surface_of(brep, surf2)?, ext_dist)?;
+            if let (Some(analytic1), Some(analytic2)) = (&analytic1, &analytic2) {
+                if !ssi.curves_3d.is_empty() {
+                    let exact = analytic1.global_surface_intersect(
+                        k,
+                        &analytic1.natural_uv_domain_with_nurb(k)?,
+                        analytic2,
+                        &analytic2.natural_uv_domain_with_nurb(k)?,
+                        use_surface_edges,
+                        Some(ssi_tol),
+                        Some(deg20_rad),
+                    )?;
+                    let tol = brep.brep_tolerance(edge)?;
+                    for ii in 0..ssi.curves_3d.len() {
+                        let marched = ssi.curves_3d.get(ii).ok_or(dangling("curve index"))?;
+                        if marched.is_degenerate(k, EFF_ZERO, None)? {
+                            continue;
+                        }
+                        let Some(piece) = exact_piece(k, marched, &exact.curves_3d, tol)? else {
+                            continue;
+                        };
+                        let mut uv: [Option<Curve>; 2] = [None, None];
+                        for (i_surf, slot) in uv.iter_mut().enumerate() {
+                            let (ext, dom) = if i_surf == 0 {
+                                (&s1, &domain1)
+                            } else {
+                                (other, &domain2)
+                            };
+                            let dropped = ext.drop_curve::<NoObject>(
+                                k,
+                                dom,
+                                &piece,
+                                &piece.natural_interval(),
+                                ssi_tol,
+                                true,
+                                None,
+                                true,
+                            )?;
+                            if dropped.uv_curves.len() == 1 && dropped.max_drop_to_surf <= tol {
+                                *slot = dropped.uv_curves.into_iter().next();
+                            }
+                        }
+                        let [Some(uv1), Some(uv2)] = uv else {
+                            // The piece leaves an extended surface where it is a tangent
+                            // (G1R) extension, not the analytic surface: there the marched
+                            // piece is these surfaces' intersection.
+                            continue;
+                        };
+                        if let Some(c) = ssi.curves_3d.get_mut(ii) {
+                            *c = piece;
+                        }
+                        if let Some(c) = ssi.surface1_uv_curves.get_mut(ii) {
+                            *c = Some(uv1);
+                        }
+                        if let Some(c) = ssi.surface2_uv_curves.get_mut(ii) {
+                            *c = Some(uv2);
+                        }
+                    }
+                }
+            }
+        }
+
         let mut curves_3d: Vec<O> = Vec::new();
         let mut surface1_uv_curves: Vec<Option<O>> = Vec::new();
         let mut surface2_uv_curves: Vec<Option<O>> = Vec::new();
