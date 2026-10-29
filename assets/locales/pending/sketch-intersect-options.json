@@ -23,6 +23,30 @@
     "ui.sketch_intersect_projection_link": "投影链接",
     "ui.sketch_project_geometry": "几何体"
   },
+  "ar": {
+    "prefs.project_options_dialog": "مربع حوار خيارات Project",
+    "prefs.project_options_dialog_note": "تشغيل: اختر الهندسة أو الأجسام ورابط الإسقاط قبل الإسقاط. إيقاف: الإبقاء على سير العمل السابق بالاختيار المباشر.",
+    "ui.sketch_intersect_geometry": "الهندسة",
+    "ui.sketch_intersect_selection_filter": "مرشح التحديد",
+    "ui.sketch_intersect_projection_link": "رابط الإسقاط",
+    "ui.sketch_project_geometry": "الهندسة"
+  },
+  "he": {
+    "prefs.project_options_dialog": "תיבת האפשרויות של Project",
+    "prefs.project_options_dialog_note": "פעיל: לבחור גאומטריה או גופים וקישור הטלה לפני ההטלה. כבוי: להשאיר את זרימת העבודה הקודמת של בחירה ישירה.",
+    "ui.sketch_intersect_geometry": "גאומטריה",
+    "ui.sketch_intersect_selection_filter": "מסנן בחירה",
+    "ui.sketch_intersect_projection_link": "קישור הטלה",
+    "ui.sketch_project_geometry": "גאומטריה"
+  },
+  "vi": {
+    "prefs.project_options_dialog": "Hộp thoại tùy chọn Project",
+    "prefs.project_options_dialog_note": "Bật: chọn Hình học hoặc Thân và Liên kết chiếu trước khi chiếu. Tắt: giữ quy trình chọn trực tiếp trước đây.",
+    "ui.sketch_intersect_geometry": "Hình học",
+    "ui.sketch_intersect_selection_filter": "Bộ lọc lựa chọn",
+    "ui.sketch_intersect_projection_link": "Liên kết chiếu",
+    "ui.sketch_project_geometry": "Hình học"
+  },
   "de": {
     "prefs.project_options_dialog": "Project-Optionendialog",
     "prefs.project_options_dialog_note": "Ein: Vor dem Projizieren Geometrie oder Körper und die Projektionsverknüpfung auswählen. Aus: Den bisherigen Direktwahl-Ablauf beibehalten.",
