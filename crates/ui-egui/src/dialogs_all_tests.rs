@@ -1243,3 +1243,41 @@ fn pattern_says_why_a_clicked_sketch_is_not_taken() {
     assert!(!crate::i18n::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
     assert!(!crate::i18n::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
 }
+
+/// Features stored with bare numbers edit with their units written out, as the Plastic ones do
+/// (#1936): Fillet, Chamfer, Shell and Draft. OK in the editor keeps the feature in place.
+#[test]
+fn stored_bare_numbers_edit_with_their_units() {
+    use serde_json::{Value, json};
+    let cases: [(&str, Value, &[&str]); 5] = [
+        ("solid.fillet", json!({"edges": [[20, 0, 20]], "radius": 2}), &["2 mm"]),
+        ("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "distance2": 1.5}), &["1 mm", "1.5 mm"]),
+        ("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "angle": 30}), &["1 mm", "30 deg"]),
+        ("solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2}), &["2 mm"]),
+        ("solid.draft", json!({"faces": [[0, 15, 10]], "angle": 3, "neutral": "XY"}), &["3 deg"]),
+    ];
+    for (command, params, expected) in cases {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run(command, params).unwrap();
+        h.frames(2);
+        let id = h.app.session.doc.features.last().unwrap().id;
+        let count = h.app.session.doc.features.len();
+        h.app.edit_feature(id);
+        h.frames(4);
+        let shown = match &h.app.dialog.as_ref().unwrap().kind {
+            Kind::Fillet { radius, ctype: 0, .. } => vec![radius.clone()],
+            Kind::Fillet { radius, distance2, ctype: 1, .. } => vec![radius.clone(), distance2.clone()],
+            Kind::Fillet { radius, angle, ctype: 2, .. } => vec![radius.clone(), angle.clone()],
+            Kind::Shell { thickness } => vec![thickness.clone()],
+            Kind::Draft { angle } => vec![angle.clone()],
+            other => panic!("{command}: {other:?}"),
+        };
+        assert_eq!(shown, expected, "{command}");
+        h.step(&json!({"widget": "OK"})).unwrap();
+        h.frames(4);
+        assert!(h.app.dialog.is_none(), "{command}: OK applies the unchanged editor");
+        assert_eq!(h.app.session.doc.features.len(), count, "{command}: the feature is redefined in place");
+    }
+}

@@ -107,11 +107,11 @@ crate::dialog_descriptor::dialog_descriptors! {
     pub enum Kind {
         Shell("solid.shell", "SHELL", [("Faces/Body", FACES, true)],
             FeatureKind::Shell { thickness, .. }) {
-            thickness: String = "2 mm".into() => thickness.to_string(),
+            thickness: String = "2 mm".into() => shown_expr(thickness, ValueKind::Length),
         } => json!({"thickness": thickness});
         Draft("solid.draft", "DRAFT", [("Faces", FACES, true), ("Neutral plane", PLANES | PLANAR_FACES, false)],
             FeatureKind::Draft { angle, .. }) {
-            angle: String = "5 deg".into() => angle.to_string(),
+            angle: String = "5 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
         // A point picked as well puts the plane through it instead of at the distance.
         OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS, false)],
@@ -5773,17 +5773,17 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 |i: usize, p: Vec3| f.edge_names.get(i).and_then(|name| named_refill(s, body.as_deref(), name, p, true)).or_else(|| edge_sel(s, p));
             let chamfer = matches!(f.kind, FeatureKind::Chamfer { .. });
             let mut d = start(if chamfer { "solid.chamfer" } else { "solid.fillet" })?;
-            d.kind = fillet_kind(radius, chamfer);
+            d.kind = fillet_kind(&shown_expr(radius, ValueKind::Length), chamfer);
             if let Kind::Fillet { chain, ctype, distance2, angle, flip, .. } = &mut d.kind {
                 *chain = false;
                 // An unequal chamfer: two distances, or a distance and an angle.
                 if let FeatureKind::Chamfer { distance2: d2, angle: a, flip: f, .. } = &f.kind {
                     if let Some(v) = d2 {
                         *ctype = 1;
-                        *distance2 = v.to_string();
+                        *distance2 = shown_expr(v, ValueKind::Length);
                     } else if let Some(v) = a {
                         *ctype = 2;
-                        *angle = v.to_string();
+                        *angle = shown_expr(v, ValueKind::Angle);
                     }
                     *flip = *f;
                 }
