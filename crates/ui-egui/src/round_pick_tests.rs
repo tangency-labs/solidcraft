@@ -24,7 +24,9 @@ fn shaft() -> Harness {
     h
 }
 
-/// The shaft's wall, top rim and top cap, as picks.
+/// The shaft's wall, top rim and top cap, as picks. The rim is picked at the middle of its
+/// polyline: its first point is the vertex where the wall's seam meets it, as near the seam as
+/// the rim.
 fn picks(h: &Harness) -> (Sel, Sel, Sel) {
     use solidcraft_engine::kernel::{FaceSurface, face_surface};
     let st = h.app.session.world_state().unwrap();
@@ -42,7 +44,7 @@ fn picks(h: &Harness) -> (Sel, Sel, Sel) {
         .enumerate()
         .find_map(|(index, e)| {
             let c = solidcraft_engine::kernel::edge_circle(&b.body, index)?;
-            (c.center.z > 9.0).then(|| Sel::Edge { body: "Shaft".into(), index, point: e[0] })
+            (c.center.z > 9.0).then(|| Sel::Edge { body: "Shaft".into(), index, point: crate::viewport::polyline_mid(e) })
         })
         .unwrap();
     (wall, rim, cap)

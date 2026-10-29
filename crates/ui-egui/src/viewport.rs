@@ -9473,7 +9473,8 @@ mod tests {
     fn cosmetic_threads_use_depth_tested_lines_and_keep_selection_and_wireframe() {
         let mut s = solidcraft_engine::Session::default();
         s.execute("solid.cylinder", &json!({"radius":3,"height":10})).unwrap();
-        s.execute("solid.thread", &json!({"face":[3,0,5],"designation":"M6","length":5})).unwrap();
+        // A pick in the middle of a face free at both ends names the end the thread starts from.
+        s.execute("solid.thread", &json!({"face":[3,0,5],"designation":"M6","length":5,"from":[3,0,0]})).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
         let count = |sc: GpuScene| {
             sc.merged()
