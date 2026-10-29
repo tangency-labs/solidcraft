@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a cylinder's top face projected onto a sketch 10 mm above it and extruded: the projected circle is the profile",
+ "source": "analytic",
+ "method": "the top's loop is the circle r10: extruded 5 from z=20, a second cylinder 500 pi beside the first 1000 pi",
+ "body_count": 2,
+ "volume_mm3": 4712.38898038469,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   25
+  ]
+ }
+}
