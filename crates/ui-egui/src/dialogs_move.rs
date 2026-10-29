@@ -172,19 +172,19 @@ fn copies(d: &Dialog) -> bool {
 }
 
 /// Whether a Move dialog takes the components picked (not their bodies) into its bodies input: a
-/// click on a component in the component pick mode, or a Browser row. Not when it edits a move
+/// click on a component in the Parts selection mode, or a Browser row. Not when it edits a move
 /// that is already a feature (its picks stay bodies). Without Create Copy the components still
 /// move their bodies (`targets`).
 pub(crate) fn picks_components(app: &SolveApp) -> bool {
     app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::Move { .. }) && d.active == 0 && d.editing.is_none())
 }
 
-/// What a click picks in a Move dialog: with the component pick mode on, the component a body
-/// belongs to (copied as a component with Create Copy, see `targets`), otherwise the pick as it was.
+/// What a click picks in a Move dialog: in the Parts selection mode, the part a body belongs to
+/// (copied as a component with Create Copy, see `targets`), otherwise the pick as it was.
 pub(crate) fn component_pick(app: &SolveApp, hit: &crate::viewport::Hit, sel: Sel) -> Sel {
     let (crate::viewport::Hit::Face { body, .. }, Sel::Body { .. }) = (hit, &sel) else { return sel };
-    if app.ui.pick_components && picks_components(app) {
-        let occurrence = crate::viewport::component_selection(app, body);
+    if app.ui.pick_mode == solidcraft_engine::PickMode::Parts && picks_components(app) {
+        let occurrence = crate::selection_mode::part_of(app, body);
         if matches!(occurrence, Sel::Occurrence { .. }) {
             return occurrence;
         }

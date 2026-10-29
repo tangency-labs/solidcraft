@@ -1289,7 +1289,7 @@ mod tests {
             h.app.home.open = false;
             h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
             h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
-            let original = (h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies);
+            let original = (h.app.preferences.sketch_exit_view, h.app.ui.pick_mode);
             for (query, target, option) in [
                 ("When a sketch ends", "prefs:sketch_exit_view:choices", "Keep"),
                 ("Return to the view before", "prefs:sketch_exit_view:previous", "Return to the view before"),
@@ -1329,7 +1329,7 @@ mod tests {
                     let group = crate::scenario::rect_of(&format!("dialog:row:{query}")).unwrap();
                     assert!((actual.left() - group.left()).abs() <= 1.0, "{theme}: {query} has no phantom label column beside its cards");
                 }
-                assert_eq!((h.app.preferences.sketch_exit_view, h.app.ui.pick_bodies), original, "navigation does not change a choice");
+                assert_eq!((h.app.preferences.sketch_exit_view, h.app.ui.pick_mode), original, "navigation does not change a choice");
             }
         }
     }

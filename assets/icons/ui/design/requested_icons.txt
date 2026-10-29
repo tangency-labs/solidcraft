@@ -242,6 +242,12 @@ scale	false
 screw	false
 section	false
 select	false
+select_bodies	false
+select_components	false
+select_faces_edges	false
+select_features	false
+select_parts	false
+select_sketch	false
 send	false
 settings	false
 settings_profile	false

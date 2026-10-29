@@ -7,6 +7,9 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+use super::check::whole;
+use crate::PickMode;
+
 /// Assistant visibility is UI-owned and takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -132,57 +135,45 @@ pub struct RestoreCheckpointParams {
     pub forget: Option<bool>,
 }
 
-#[cfg(test)]
-mod tests {
-    use serde_json::{Value, json};
-
-    use super::{
-        AssistantParams, CheckpointParams, CheckpointResult, RedoParams, RedoResult, RepeatParams, RestoreCheckpointParams, UndoParams, UndoResult,
-    };
-    use crate::Session;
-    use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
-    use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
-
-    #[test]
-    fn schemas_and_the_key_check_agree() {
-        assert_keys(input_schema_for::<RepeatParams>(), &[]);
-        assert_keys(input_schema_for::<AssistantParams>(), &[]);
-        assert_keys(input_schema_for::<UndoParams>(), &[]);
-        assert_keys(input_schema_for::<RedoParams>(), &[]);
-        assert_keys(input_schema_for::<CheckpointParams>(), &[]);
-        assert_keys(input_schema_for::<RestoreCheckpointParams>(), &["checkpoint", "forget"]);
-    }
-
-    #[test]
-    fn strict_keeps_todays_errors() {
-        assert_strict_keeps_todays_errors(&[
-            ("edit.restore_checkpoint", json!({"checkpoint": "first"})),
-            ("edit.restore_checkpoint", json!({"checkpoint": -1})),
-        ]);
-    }
-
-    /// Undo, redo, a checkpoint, going back to it and forgetting one, in Warn: each reply matches
-    /// its output schema and carries no warning.
-    #[test]
-    fn replies_match_the_output_schema() {
-        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
-        let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"));
-        let matches = |schema: schemars::Schema, id: &str, reply: &Value| {
-            let schema = schema.as_value();
-            assert!(reply.get("param_warnings").is_none() && conforms(schema, schema, reply), "{id}: {reply} doesn't match {schema}");
-        };
-        run("solid.box", json!({"length": 10, "width": 10, "height": 10}));
-        matches(output_schema_for::<UndoResult>(), "edit.undo", &run("edit.undo", json!({})));
-        matches(output_schema_for::<RedoResult>(), "edit.redo", &run("edit.redo", json!({})));
-        let taken = run("edit.checkpoint", json!({}));
-        matches(output_schema_for::<CheckpointResult>(), "edit.checkpoint", &taken);
-        run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
-        let back = run("edit.restore_checkpoint", json!({"checkpoint": taken["checkpoint"]}));
-        assert_eq!(back["restored"], true, "{back}");
-        matches(output_schema_for::<CheckpointResult>(), "edit.restore_checkpoint", &back);
-        let again = run("edit.checkpoint", json!({}));
-        let dropped = run("edit.restore_checkpoint", json!({"checkpoint": again["checkpoint"], "forget": true}));
-        assert_eq!(dropped["restored"], false, "{dropped}");
-        matches(output_schema_for::<CheckpointResult>(), "edit.restore_checkpoint", &dropped);
-    }
+/// Choose what a click on the model picks while no dialog or tool takes the pick: faces, edges
+/// and vertices; the face's whole body; the feature that made it; the innermost placement or the
+/// top-level component holding it; or sketch geometry only. A window setting: the design, its
+/// history and the selection are untouched.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SelectModeParams {
+    /// The selection mode.
+    #[serde(deserialize_with = "pick_mode")]
+    #[schemars(schema_with = "pick_mode_schema")]
+    pub mode: PickMode,
 }
+
+/// A selection mode, read by the handler's own reader.
+fn pick_mode<'de, D: serde::Deserializer<'de>>(d: D) -> Result<PickMode, D::Error> {
+    crate::cmd::pick_mode(&Value::deserialize(d)?).map_err(|e| serde::de::Error::custom(whole(e)))
+}
+
+/// The modes' ids, as one string enum.
+fn pick_mode_schema(_: &mut SchemaGenerator) -> Schema {
+    let ids: Vec<Value> = PickMode::ALL.iter().filter_map(|m| serde_json::to_value(m).ok()).collect();
+    json_schema!({
+        "description": "faces (faces, edges and vertices), bodies, features, parts (the innermost placement), components (the top-level placement) or sketch (sketch curves, points and profiles).",
+        "type": "string",
+        "enum": ids
+    })
+}
+
+/// What `select.mode` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SelectModeResult {
+    /// The selection mode now on.
+    #[schemars(schema_with = "pick_mode_schema")]
+    pub mode: PickMode,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+#[cfg(test)]
+#[path = "edit_tests.rs"]
+mod tests;

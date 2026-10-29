@@ -336,7 +336,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     assistant(&mut h, &mut requested);
 
     let navigation = h.app.preferences.navigation_bar.clone();
-    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","spin","fit","look_at","home","selection_mode","visual_style","projection","display","grid","ground_shadow","ambient_occlusion"]}}));
     collect(&mut h, "navigation catalogue", &mut requested);
     let size = h.ctx.content_rect().size();
     h.call("ui.resize", json!({"width":500,"height":800}));
@@ -349,7 +349,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     h.call("ui.prefs", json!({"navigation_bar":navigation}));
     h.frames(3);
 
-    for (handle, surface) in [("nav:slot:visual_style", "navigation visual styles"), ("nav:view", "navigation display")] {
+    for (handle, surface) in [
+        ("nav:slot:selection_mode", "navigation selection modes"),
+        ("nav:slot:visual_style", "navigation visual styles"),
+        ("nav:view", "navigation display"),
+    ] {
         click(&mut h, handle);
         h.frames(3);
         collect(&mut h, surface, &mut requested);
