@@ -653,9 +653,19 @@ pub fn drag_end() {
     DRAG.with(|g| *g.borrow_mut() = None);
 }
 
+/// [`label`] for a dimension drawn as `frame`: an ellipse's minor half-axis is a length, as
+/// it is measured to its axis end, so it has no R.
+pub fn frame_label(frame: &DimFrame, k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
+    label_marked(k, !matches!(frame, DimFrame::HalfAxis { .. }), expr, driven, units, decimals)
+}
+
 /// The text shown for a dimension: the value (R / Ø for radius and diameter, degrees for
 /// angles), "fx: value" when an expression drives it, in parentheses when driven.
 pub fn label(k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
+    label_marked(k, true, expr, driven, units, decimals)
+}
+
+fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, driven: bool, units: &str, decimals: u8) -> String {
     let v = k.value().unwrap_or(0.0);
     // Retain deliberately authored trailing zeros in a four-place inch literal too.
     let authored_four = units == "in"
@@ -669,7 +679,7 @@ pub fn label(k: &ConstraintKind, expr: Option<&str>, driven: bool, units: &str, 
     // A length says its unit, as the value inputs and the pointer's coordinates do (#1155).
     let num = if k.is_angle() { format!("{:.1}°", v.to_degrees()) } else { format!("{} {units}", crate::prefs::length_number(v, units, decimals)) };
     let num = match k {
-        ConstraintKind::Radius { .. } => format!("R{num}"),
+        ConstraintKind::Radius { .. } if radius_mark => format!("R{num}"),
         ConstraintKind::Diameter { .. } | ConstraintKind::LinearDiameter { .. } => format!("Ø{num}"),
         _ => num,
     };
@@ -776,7 +786,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let Some(frame) = dim_frame(sk, &c.kind) else { continue };
         let anchor = match frame {
             DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
-            DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } => center,
+            DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
             DimFrame::Angular { vertex, .. } => vertex,
         };
         // Millimetres per pixel at the dimension.
@@ -798,8 +808,11 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         } else {
             tk.dimension
         };
-        let galley =
-            painter.layout_no_wrap(label(&c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals), font.clone(), col);
+        let galley = painter.layout_no_wrap(
+            frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
+            font.clone(),
+            col,
+        );
         let size = galley.size() + vec2(6.0, 2.0);
         let half = Vec2::new(f64::from(size.x) * 0.5 * px, f64::from(size.y) * 0.5 * px);
         // Unplaced linear dimensions sit outside the shape they measure.
@@ -818,7 +831,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             let row = (f64::from(size.y) + 2.0) * px;
             let base = text.unwrap_or_else(|| default_text_offset(&frame, px));
             text = Some(match frame {
-                DimFrame::Linear { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
+                DimFrame::Linear { .. } | DimFrame::HalfAxis { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
                 _ => base + base.normalized().unwrap_or(Vec2::X) * row,
             });
             lay = dim_layout_reaching(&frame, text, px, half, reach);
@@ -1561,6 +1574,11 @@ mod tests {
         let radius = ConstraintKind::Radius { c: 0, value: 1.2345 * 25.4 };
         assert_eq!(label(&radius, Some("1.2345 in"), false, "in", 2), "R1.2345 in");
         assert_eq!(label(&radius, Some("width / 2"), true, "in", 2), "(fx: R1.2345 in)");
+        // An ellipse's minor half-axis is a length to its axis end: no R.
+        let half_axis = DimFrame::HalfAxis { center: Vec2::ZERO, dir: Vec2::Y, len: 8.0 };
+        let minor = ConstraintKind::Radius { c: 0, value: 8.0 };
+        assert_eq!(frame_label(&half_axis, &minor, None, false, "mm", 2), "8.00 mm");
+        assert_eq!(frame_label(&half_axis, &minor, Some("width / 2"), true, "mm", 2), "(fx: 8.00 mm)");
         let diameter = ConstraintKind::Diameter { c: 0, value: 0.001 * 25.4 };
         assert_eq!(label(&diameter, None, false, "in", 2), "Ø0.001 in");
         assert_eq!(crate::prefs::length_number(25.4 * (1.0 + 1e-12), "in", 2), "1.000");

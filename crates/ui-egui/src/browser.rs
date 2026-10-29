@@ -3275,7 +3275,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             let Some(frame) = dim_frame(sk, &c.kind) else { continue };
             let anchor = match frame {
                 DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,
-                DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } => center,
+                DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
                 DimFrame::Angular { vertex, .. } => vertex,
             };
             let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
@@ -3286,7 +3286,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
             let col = if c.driven { tk.dimension_driven } else { tk.dimension };
             let galley = painter.layout_no_wrap(
-                crate::dim_view::label(&c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
+                crate::dim_view::frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
                 FontId::proportional(tk.font_caption),
                 col,
             );
