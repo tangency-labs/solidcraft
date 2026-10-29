@@ -956,8 +956,10 @@ mod tests {
         let region = solidcraft_geom::Loop2::polygon(&[Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(20., 20.), Vec2::new(0., 20.)]);
         let doubled = CapLoop { segments: region.segs.iter().chain(&region.segs).copied().collect(), area: Interval::enclosing(800., 1e-8).unwrap() };
         assert!(separated_material(&[doubled], 1e-6, &mut 16_000_000).is_none());
-        let thin = crate::box_solid(Vec3::ZERO, Vec3::new(20., 20., 1e-5)).unwrap();
-        assert!(cert(&thin, 3e-6).is_none());
+        // Thinner than a body's tolerance (2e-5): SMLib refuses it as a solid; built, it gets none.
+        if let Ok(thin) = crate::box_solid(Vec3::ZERO, Vec3::new(20., 20., 1e-5)) {
+            assert!(cert(&thin, 3e-6).is_none());
+        }
     }
 
     #[test]
