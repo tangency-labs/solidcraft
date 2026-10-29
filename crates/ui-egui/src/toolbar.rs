@@ -1680,7 +1680,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .chain(gallery.iter().filter(|_| !collapsed && drawn > large.len()).map(|c| c.id))
                 .collect();
             let hidden = |id: &str| cmds.iter().any(|c| c.id == id) && !drawn_ids.contains(&id);
-            let hidden_running = running.as_deref().is_some_and(hidden);
+            let hidden_running = app.preferences.ribbon_reveal && running.as_deref().is_some_and(hidden);
             let hidden_reveal = reveal.as_ref().filter(|r| hidden(r.id));
             let panel_open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open"))) == Some(popup_id);
             let accent = crate::theme::TabAccent::for_tab(&t, &tab);

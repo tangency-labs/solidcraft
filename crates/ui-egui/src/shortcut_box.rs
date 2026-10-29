@@ -631,7 +631,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !open {
         return;
     }
-    preview(app, now, hovered.filter(|_| app.sbox.moved && menu.is_none()));
+    preview(app, now, hovered.filter(|_| app.preferences.ribbon_reveal && app.sbox.moved && menu.is_none()));
     if app.sbox.reveal.is_some() {
         ctx.request_repaint();
     }
@@ -674,7 +674,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 close(app);
                 app.start(id);
                 // The ribbon shows where it was started from: its button or section label pulses.
-                app.sbox.reveal = Some(Reveal { id, since: now, preview: false, back: String::new() });
+                if app.preferences.ribbon_reveal {
+                    app.sbox.reveal = Some(Reveal { id, since: now, preview: false, back: String::new() });
+                }
             } else if let Some(row) = design.get(index.saturating_sub(rows.len())).filter(|_| index >= rows.len()) {
                 let target = row.target.clone();
                 close(app);
@@ -765,6 +767,7 @@ mod tests {
         use crate::scenario::rect_of;
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        h.app.preferences.ribbon_reveal = true;
         h.frames(3);
         assert_eq!(h.app.ui.tab, "MODEL");
         let away = rect_of("toolbar").unwrap().center_bottom() + vec2(0.0, 300.0);
@@ -824,6 +827,39 @@ mod tests {
         h.frames((REVEAL_PULSE * 60.0) as usize + 2);
         assert!(rect_of("ribbon:reveal").is_none(), "the pulse ends");
         assert_eq!(rect_of("ribbon:running_section:MODEL:ARRANGE"), Some(label), "marked while it runs");
+    }
+
+    /// Without the preference (the default) the ribbon stays as it was: hovering a result
+    /// neither switches the tab nor opens a drop-down, and a command started from a drop-down
+    /// doesn't mark its section label.
+    #[test]
+    fn without_the_preference_hovering_a_result_leaves_the_ribbon_alone() {
+        use crate::scenario::rect_of;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        assert!(!h.app.preferences.ribbon_reveal, "off by default");
+        let away = rect_of("toolbar").unwrap().center_bottom() + vec2(0.0, 300.0);
+        h.call("ui.move", json!({"x": away.x, "y": away.y}));
+        h.call("ui.palette", json!({}));
+        h.frames(10);
+        for (query, id) in [("stitch", "surface.stitch"), ("circular", "solid.pattern.circular")] {
+            h.app.sbox.text = query.into();
+            h.frames(2);
+            let row = rect_of(&format!("search:command:{id}")).unwrap_or_else(|| panic!("no result row for {id}"));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y + 1.0}));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y}));
+            h.frames(3);
+            assert_eq!(h.app.ui.tab, "MODEL", "{id}");
+            assert!(h.app.sbox.reveal.is_none(), "{id}");
+            assert!(rect_of("ribbon:reveal").is_none() && rect_of("toolbar_dropdown").is_none(), "{id}");
+        }
+        h.call("ui.key", json!({"key": "Enter"}));
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+        assert!(h.app.sbox.reveal.is_none());
+        assert!(rect_of("ribbon:reveal").is_none());
+        assert!(rect_of("ribbon:running_section:MODEL:ARRANGE").is_none());
     }
 
     #[test]

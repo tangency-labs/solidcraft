@@ -1,0 +1,10 @@
+{
+  "en": {
+    "prefs.ribbon_reveal": "Show search results in the ribbon",
+    "prefs.ribbon_reveal_note": "Hovering a result in Search commands shows where the command sits in the ribbon: its tab, its button or its row in a panel's drop-down. A command started from the search blinks there, and a running command from a drop-down marks its panel."
+  },
+  "de": {
+    "prefs.ribbon_reveal": "Suchergebnisse im Menüband zeigen",
+    "prefs.ribbon_reveal_note": "Steht der Zeiger über einem Ergebnis in Befehle suchen, zeigt das Menüband, wo der Befehl liegt: seine Registerkarte, seine Schaltfläche oder seine Zeile im Aufklappmenü eines Panels. Ein aus der Suche gestarteter Befehl blinkt dort, und ein laufender Befehl aus einem Aufklappmenü markiert sein Panel."
+  }
+}

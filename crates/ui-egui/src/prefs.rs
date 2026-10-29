@@ -1058,6 +1058,11 @@ preference_settings! {
     /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
     /// tools then start a sketch first (#7904).
     sketch_tab_always: bool = false, PAGE_INTERFACE => check_id("prefs.sketch_tab_always");
+    /// Hovering a result in Search commands shows the command's place in the ribbon: its tab,
+    /// its button or its row in a section's drop-down (#7287). A command started from the search
+    /// blinks there, and a running command that sits in a drop-down marks its section label. Off
+    /// by default: the ribbon stays as it was.
+    ribbon_reveal: bool = false, PAGE_INTERFACE => check_id("prefs.ribbon_reveal");
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_INTERFACE;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -4897,6 +4902,7 @@ mod tests {
             ("layout", json!("compact"), PAGE_INTERFACE),
             ("ribbon_labels", json!(false), PAGE_INTERFACE),
             ("sketch_tab_always", json!(true), PAGE_INTERFACE),
+            ("ribbon_reveal", json!(true), PAGE_INTERFACE),
             ("dialog_buttons", json!("top"), PAGE_INTERFACE),
             ("toast_place", json!("centre"), PAGE_INTERFACE),
             ("timeline_left", json!(true), PAGE_INTERFACE),
