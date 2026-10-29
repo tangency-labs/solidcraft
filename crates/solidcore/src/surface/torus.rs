@@ -44,7 +44,10 @@
 //!   the torus's `ConvertUVFromNURBSToSTEP`, and returns a failed corner conversion
 //!   (upstream ignores it and reads the corner it may not have written).
 //!   [`Torus::intersect_with_plane`] runs the inherited `IntersectWithPlane` with the
-//!   torus's iso circles.
+//!   torus's iso circles. Opt-in fork fix: a minor iso circle whose start lies on the
+//!   axis takes its direction from its midpoint, not the start point again
+//!   (`Kernel::fixes.torus_iso_circle_axis_from_midpoint`, WR-504, #1514; off by
+//!   default, upstream gives it no direction).
 //! - **Iso endpoint angles.** Correct upstream's explicit-domain endpoint vectors
 //!   to be relative to the iso circle's center, not the torus origin (#774).
 //!   Extraction, periodic wrapping and interval-length policy remain unchanged.
@@ -870,6 +873,11 @@ impl Torus {
     /// interval or, with `domain`, the angles of the curve's ends. A degenerate
     /// extraction is returned as the B-spline.
     ///
+    /// With the opt-in
+    /// [`UpstreamFixes::torus_iso_circle_axis_from_midpoint`](crate::kernel::UpstreamFixes::torus_iso_circle_axis_from_midpoint)
+    /// (WR-504) a minor circle whose start lies on the axis takes its direction from its
+    /// midpoint, as upstream's fallback intends; by default it reuses the start vector.
+    ///
     /// # Errors
     ///
     /// Those of the extraction, the end-point evaluations and the circle.
@@ -1510,9 +1518,19 @@ fn iso_curve(
         let mut x_axis = torus_z_axis.cross(nurb_min_vec.cross(torus_z_axis));
         let mut length = x_axis.length();
         if length < EFF_ZERO_SQRT {
-            // (the mid point is evaluated but not used upstream)
-            let _ = ignored(iso.curve.evaluate_point(nurb_ivl.evaluate(0.5)))?;
-            x_axis = torus_z_axis.cross(nurb_min_vec).cross(torus_z_axis);
+            if k.fixes.torus_iso_circle_axis_from_midpoint {
+                // WR-504 (#1514, opt-in): the direction comes from the mid point, as the
+                // fallback intends; it is read now, so a failed evaluation propagates (the
+                // fork's SER, smlib@672a437ee; v1.0.1 ignores it)
+                let mid_point = iso.curve.evaluate_point(nurb_ivl.evaluate(0.5))?;
+                let mid_vec = mid_point - torus_origin;
+                x_axis = torus_z_axis.cross(mid_vec.cross(torus_z_axis));
+            } else {
+                // (the mid point is evaluated but not used upstream; the start vector is
+                // used again, which is zero on the axis)
+                let _ = ignored(iso.curve.evaluate_point(nurb_ivl.evaluate(0.5)))?;
+                x_axis = torus_z_axis.cross(nurb_min_vec).cross(torus_z_axis);
+            }
             length = x_axis.length();
         }
         x_axis = Div::div(x_axis, length);
@@ -2158,5 +2176,73 @@ mod tests {
                 off.major_radius()
             );
         }
+    }
+
+    /// tangency-labs/solidcore#1514 (WR-504; tangency-labs/smlib#40): a horn torus (R 5,
+    /// r 5) whose tube starts at 180 degrees touches the axis at the torus origin, so each
+    /// minor iso circle starts there. `CreateIsoParametricCurve` finds no direction from
+    /// the start point and falls back to the midpoint; with
+    /// `torus_iso_circle_axis_from_midpoint` the circle gets that direction and its
+    /// analytic domain, and it starts at the origin.
+    #[test]
+    fn issue_1514_horn_torus_minor_iso_circle_takes_direction_from_midpoint() {
+        let frame = Axis2Placement::IDENTITY;
+        let dom = Extent2d::from_bounds(0.0, 180.0, 360.0, 540.0);
+        let t = Torus::create_canonical(
+            &Kernel::default(),
+            &frame,
+            5.0,
+            5.0,
+            TorusOptions {
+                swap_uv: false,
+                inside_out: false,
+                circle_nurb: None,
+            },
+            Some(&dom),
+        )
+        .expect("horn torus");
+        let domain = t.base.base.natural_uv_domain();
+        let fixed = domain.u_interval().evaluate(0.25);
+
+        let mut k = Kernel::default();
+        k.fixes.torus_iso_circle_axis_from_midpoint = true;
+        let iso = t
+            .create_iso_parametric_curve(&k, SurfParamType::U, fixed, None, false)
+            .expect("minor iso circle");
+        let CurveKind::Ellipse(circle) = iso.curve.kind() else {
+            panic!("expected a circle");
+        };
+        let x = circle.position().x_axis();
+        assert!((x.length() - 1.0).abs() < 1e-9, "x axis not unit: {x:?}");
+        assert!(
+            (circle.x_radius() - 5.0).abs() < 1e-9,
+            "radius {}",
+            circle.x_radius()
+        );
+        assert!(circle.is_analytic(), "no analytic domain");
+        let ivl = circle.step_interval();
+        assert!(
+            (ivl.length() - 360.0).abs() < 1e-9,
+            "analytic domain {ivl:?}"
+        );
+        let start = circle.evaluate_step_point(ivl.min()).expect("start point");
+        assert!(
+            (start - frame.origin()).length() < 1e-9,
+            "start {start:?} is not the torus origin"
+        );
+
+        // flag off (upstream): the start vector is zero on the axis, so the circle has
+        // no direction
+        let off = t
+            .create_iso_parametric_curve(&Kernel::default(), SurfParamType::U, fixed, None, false)
+            .expect("minor iso circle");
+        let CurveKind::Ellipse(off_circle) = off.curve.kind() else {
+            panic!("expected a circle");
+        };
+        assert!(
+            !off_circle.position().x_axis().x.is_finite(),
+            "upstream direction {:?}",
+            off_circle.position().x_axis()
+        );
     }
 }
