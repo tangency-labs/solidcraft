@@ -47,7 +47,7 @@ commands:
                   replay the reference tests (tests/oracle/*/recipe.json), compare with each
                   case's expected.json and write docs/oracle.md (--cli: a solidcraft-cli
                   already built, instead of cargo run --release)
-  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE]
+  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE] [--coverage]
                   the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ on
                   SMLib (one process each, killed after --timeout, default 180 s), grade it against
                   the case's own answer and write docs/kernel-cases.md; DIR (default
@@ -62,6 +62,9 @@ commands:
                   docs/kernel-ladder.md (DIR default target/kernel-ladder); --record re-measures
                   the golden and re-sorts each tier by time; --gate fails on any case whose status
                   or counts differ from the golden, instead of the report
+                  --coverage: instead of running cases, fail on a registry command (the CLI's
+                  `commands`, planned ones aside) that no recipe.json under tests/kernel-cases/
+                  uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;

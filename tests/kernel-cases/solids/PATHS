@@ -1,0 +1,9 @@
+# Source files whose change must rerun the solids area (cones, scale, align, bounding solids).
+apps/solidcraft-cli/src/kernel_cases.rs
+crates/doc/src/eval.rs
+crates/doc/src/eval_more.rs
+crates/engine/src/cmd/features.rs
+crates/engine/src/cmd/features_more.rs
+crates/kernel/src/**
+crates/smlib/**
+tests/kernel-cases/solids/**
