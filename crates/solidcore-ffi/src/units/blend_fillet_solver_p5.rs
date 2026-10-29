@@ -12,8 +12,11 @@
 //! real `SmLine` rails inside a real planar face; Rust uses the real classification
 //! reset and propagates remaining topology/refinement dependencies.
 //! Native fixture construction, evaluation and destruction run in a bounded Linux/macOS
-//! worker executed with `posix_spawn` (a fresh allocator image). A signal, destructor abort or stalled worker is a native exception,
-//! never an operation status or rejected fixture. No SMLib pointer crosses IPC.
+//! worker executed with `posix_spawn` (a fresh allocator image). A C++ exception the worker
+//! catches is `SC_ERR_EXCEPTION`; each containment failure (pipe, spawn, reply timeout,
+//! short reply, nonzero exit, signal or destructor abort, reaping) has its own
+//! `SC_ERR_WORKER_*` status and a stderr line naming the stage and errno. None is ever
+//! an operation status or a rejected fixture. No SMLib pointer crosses IPC.
 //! The multi-interval rail-copy guard rejects null curves only after the
 //! defined null-surface return; earlier returns remain covered.
 //! Unsupported platforms fail closed rather than executing SMLib in process.
@@ -95,7 +98,9 @@ pub fn validate(input: &[f64]) -> bool {
 ///
 /// # Errors
 /// `InvalidArgument` for an incomplete/unsafe fixture, or native shim failure.
-/// Native worker exceptions, signals, aborts and timeouts return `FfiError::Status(SC_ERR_EXCEPTION)`.
+/// A C++ exception in the worker returns `FfiError::Status(SC_ERR_EXCEPTION)`; a worker
+/// that cannot be run, stalls, crashes or aborts returns the matching
+/// `FfiError::Status(SC_ERR_WORKER_*)` ([`crate::SC_ERR_WORKER_SIGNAL`] and the rest).
 pub fn eval(input: &[f64]) -> Result<Vec<f64>, FfiError> {
     if !validate(input) {
         return Err(FfiError::InvalidArgument("rollover fixture".into()));

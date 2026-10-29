@@ -70,11 +70,11 @@ def main():
         if result.returncode:
             raise RuntimeError(result.stdout + result.stderr)
     print(f"ALLOCATION PASS: {count} probes, 0 host crashes; statuses={dict(statuses)}")
-    print("SIGNAL PASS: native SIGSEGV and SIGABRT contained as SC_ERR_EXCEPTION")
+    print("SIGNAL PASS: native SIGSEGV and SIGABRT contained as SC_ERR_WORKER_SIGNAL")
     result = run([binary, "signal", 3], cwd=root, timeout=40)
     if result.returncode:
         raise RuntimeError(result.stdout + result.stderr)
-    print("TIMEOUT PASS: stalled worker killed and reaped as SC_ERR_EXCEPTION", flush=True)
+    print("TIMEOUT PASS: stalled worker killed and reaped as SC_ERR_WORKER_TIMEOUT", flush=True)
     result = run([binary, "exit", 0], cwd=root, timeout=40)
     if result.returncode:
         raise RuntimeError(result.stdout + result.stderr)

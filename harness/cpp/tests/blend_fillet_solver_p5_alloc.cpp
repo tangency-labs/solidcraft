@@ -121,7 +121,8 @@ int main(int argc,char**argv) {
         sc_rollover::test_signal=value;
         int status=sc_rollover::isolated(0,input,12,out,128,&len);
         std::printf("worker signal contained: status=%d\n",status);
-        return status==SC_ERR_EXCEPTION?0:3;
+        // 0 SIGSEGV, 1 SIGABRT: the worker's own death; 3: a stalled worker
+        return status==(value==3?SC_ERR_WORKER_TIMEOUT:SC_ERR_WORKER_SIGNAL)?0:3;
     }
     if(std::strcmp(argv[1],"direct")==0) {
         input[0]=value;
@@ -138,5 +139,7 @@ int main(int argc,char**argv) {
         :sc_blend_fillet_solver_p5_eval(input,12,out,128,&len);
     new_failure=calloc_failure=-1;
     std::printf("contained %s index=%ld target=%d status=%d\n",argv[1],value,target,status);
-    return status==SC_OK || status==SC_ERR_EXCEPTION || status==SC_ERR_ARG?0:4;
+    // (a noexcept destructor aborting on the injected failure is a worker signal)
+    return status==SC_OK || status==SC_ERR_EXCEPTION || status==SC_ERR_ARG
+        || status==SC_ERR_WORKER_SIGNAL?0:4;
 }

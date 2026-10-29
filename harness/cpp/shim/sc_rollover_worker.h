@@ -7,6 +7,8 @@
 #include <array>
 #include <cerrno>
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
 #if defined(__linux__) || defined(__APPLE__)
 #include <fcntl.h>
 #include <poll.h>
@@ -16,6 +18,17 @@
 #include <unistd.h>
 extern char** environ;
 #endif
+// Containment failures, one status per stage, distinct from SC_ERR_EXCEPTION (which
+// stays the worker's own report of a C++ exception caught at the shim boundary).
+// Mirrored by solidcore-ffi's status names; each also writes its stage and errno to
+// stderr.
+#define SC_ERR_WORKER_PIPE (-1120)    // pipe2 / request write failed
+#define SC_ERR_WORKER_SPAWN (-1121)   // posix_spawn (or its file actions) failed
+#define SC_ERR_WORKER_TIMEOUT (-1122) // no reply within the poll timeout; worker killed
+#define SC_ERR_WORKER_IO (-1123)      // short or failed read, or a malformed reply header
+#define SC_ERR_WORKER_EXIT (-1124)    // worker exited with a nonzero code
+#define SC_ERR_WORKER_SIGNAL (-1125)  // worker killed by a signal (native crash or abort)
+#define SC_ERR_WORKER_WAIT (-1126)    // waitpid did not reap the worker
 namespace sc_rollover {
 constexpr size_t INPUT_LIMIT=70, OUTPUT_LIMIT=4096;
 struct Request { int64_t operation,count;
@@ -62,16 +75,29 @@ inline bool write_all(int fd, const void* data, size_t n) {
         if(sent<=0) return false; p+=sent; n-=static_cast<size_t>(sent); }
     return true;
 }
-inline bool read_all(int fd, void* data, size_t n) {
+enum class ReadResult { Ok, Timeout, Short, Error };
+// Reads exactly n bytes, waiting at most 30 s for each chunk.
+inline ReadResult read_exact(int fd, void* data, size_t n) {
     char* p=static_cast<char*>(data);
     while(n) {
         pollfd event{fd,POLLIN,0};
         int ready; do { ready=::poll(&event,1,30000); } while(ready<0 && errno==EINTR);
-        if(ready<=0) return false;
+        if(ready==0) return ReadResult::Timeout;
+        if(ready<0) return ReadResult::Error;
         ssize_t got=::read(fd,p,n); if(got<0 && errno==EINTR) continue;
-        if(got<=0) return false; p+=got; n-=static_cast<size_t>(got);
+        if(got==0) return ReadResult::Short;
+        if(got<0) return ReadResult::Error;
+        p+=got; n-=static_cast<size_t>(got);
     }
-    return true;
+    return ReadResult::Ok;
+}
+inline bool read_all(int fd, void* data, size_t n) { return read_exact(fd,data,n)==ReadResult::Ok; }
+// One stderr line per containment failure: the stage, errno and the worker's pid.
+inline int32_t stage_failure(int32_t status, const char* stage, int error, pid_t child) {
+    std::fprintf(stderr,"sc_rollover: worker %s failed (status %d, errno %d: %s, pid %ld)\n",
+                 stage,static_cast<int>(status),error,error?std::strerror(error):"none",
+                 static_cast<long>(child));
+    return status;
 }
 #endif
 // One bounded request is written into a private pipe before spawn: no parent
@@ -82,8 +108,12 @@ inline int32_t isolated(int64_t operation,const double* input,int64_t count,
 #if (defined(__linux__) || defined(__APPLE__)) && defined(SC_ROLLOVER_WORKER_PATH)
     if(count<0 || count>static_cast<int64_t>(INPUT_LIMIT)) return SC_ERR_ARG;
     int in[2],result[2];
-    if(!cloexec_pipe(in)) return SC_ERR_EXCEPTION;
-    if(!cloexec_pipe(result)) {::close(in[0]);::close(in[1]);return SC_ERR_EXCEPTION;}
+    if(!cloexec_pipe(in)) return stage_failure(SC_ERR_WORKER_PIPE,"pipe2",errno,-1);
+    if(!cloexec_pipe(result)) {
+        int error=errno;
+        ::close(in[0]);::close(in[1]);
+        return stage_failure(SC_ERR_WORKER_PIPE,"pipe2",error,-1);
+    }
     Request request{operation,count
 #ifdef SC_ROLLOVER_FAULT_TEST
         ,fail_new,fail_calloc,test_signal
@@ -91,31 +121,60 @@ inline int32_t isolated(int64_t operation,const double* input,int64_t count,
     };
     bool okay=write_all(in[1],&request,sizeof(request)) &&
         write_all(in[1],input,static_cast<size_t>(count)*sizeof(double));
+    int write_error=okay?0:errno;
     ::close(in[1]);
-    posix_spawn_file_actions_t actions;
-    if(::posix_spawn_file_actions_init(&actions)!=0) {
-        ::close(in[0]);::close(result[0]);::close(result[1]);return SC_ERR_EXCEPTION;
+    if(!okay) {
+        ::close(in[0]);::close(result[0]);::close(result[1]);
+        return stage_failure(SC_ERR_WORKER_PIPE,"request write",write_error,-1);
     }
-    okay=okay && ::posix_spawn_file_actions_adddup2(&actions,in[0],STDIN_FILENO)==0;
-    okay=okay && ::posix_spawn_file_actions_adddup2(&actions,result[1],STDOUT_FILENO)==0;
+    posix_spawn_file_actions_t actions;
+    int error=::posix_spawn_file_actions_init(&actions);
+    if(error!=0) {
+        ::close(in[0]);::close(result[0]);::close(result[1]);
+        return stage_failure(SC_ERR_WORKER_SPAWN,"posix_spawn_file_actions_init",error,-1);
+    }
+    error=::posix_spawn_file_actions_adddup2(&actions,in[0],STDIN_FILENO);
+    if(error==0) error=::posix_spawn_file_actions_adddup2(&actions,result[1],STDOUT_FILENO);
     const char* path=SC_ROLLOVER_WORKER_PATH;
     char* argv[]={const_cast<char*>(path),const_cast<char*>("--rollover-worker"),nullptr};
     pid_t child=-1;
-    int error=okay?spawn_worker(&child,path,&actions,argv):-1;
+    if(error==0) error=spawn_worker(&child,path,&actions,argv);
     ::posix_spawn_file_actions_destroy(&actions);
     ::close(in[0]);::close(result[1]);
-    if(error!=0) {::close(result[0]);return SC_ERR_EXCEPTION;}
+    if(error!=0) {::close(result[0]);return stage_failure(SC_ERR_WORKER_SPAWN,"posix_spawn",error,-1);}
     Header header{SC_ERR_EXCEPTION,0};
     std::array<double,OUTPUT_LIMIT> buffer{};
-    okay=read_all(result[0],&header,sizeof(header));
-    if(okay && (header.length<0 || header.length>static_cast<int64_t>(OUTPUT_LIMIT))) okay=false;
-    if(okay && header.status==SC_OK)
-        okay=read_all(result[0],buffer.data(),static_cast<size_t>(header.length)*sizeof(double));
+    ReadResult read=read_exact(result[0],&header,sizeof(header));
+    int read_error=read==ReadResult::Error?errno:0;
+    bool malformed=read==ReadResult::Ok &&
+        (header.length<0 || header.length>static_cast<int64_t>(OUTPUT_LIMIT));
+    if(read==ReadResult::Ok && !malformed && header.status==SC_OK) {
+        read=read_exact(result[0],buffer.data(),static_cast<size_t>(header.length)*sizeof(double));
+        if(read==ReadResult::Error) read_error=errno;
+    }
     ::close(result[0]);
-    if(!okay) ::kill(child,SIGKILL); // only our own failed/stalled worker
+    bool replied=read==ReadResult::Ok && !malformed;
+    if(!replied) ::kill(child,SIGKILL); // only our own failed/stalled worker
     int status=0;pid_t reaped;
     do {reaped=::waitpid(child,&status,0);} while(reaped<0 && errno==EINTR);
-    if(!okay || reaped!=child || !WIFEXITED(status) || WEXITSTATUS(status)!=0) return SC_ERR_EXCEPTION;
+    int wait_error=reaped<0?errno:0;
+    // A stalled worker is the timeout, whatever our SIGKILL made of its exit status.
+    if(read==ReadResult::Timeout) return stage_failure(SC_ERR_WORKER_TIMEOUT,"reply (30 s timeout)",0,child);
+    if(reaped!=child) return stage_failure(SC_ERR_WORKER_WAIT,"waitpid",wait_error,child);
+    // A worker that died before replying in full reports how it died. A SIGKILL after a
+    // failed read is ours (the read stage is reported below).
+    if(WIFSIGNALED(status) && !(!replied && WTERMSIG(status)==SIGKILL)) {
+        std::fprintf(stderr,"sc_rollover: worker pid %ld killed by signal %d\n",
+                     static_cast<long>(child),WTERMSIG(status));
+        return SC_ERR_WORKER_SIGNAL;
+    }
+    if(WIFEXITED(status) && WEXITSTATUS(status)!=0) {
+        std::fprintf(stderr,"sc_rollover: worker pid %ld exited with code %d\n",
+                     static_cast<long>(child),WEXITSTATUS(status));
+        return SC_ERR_WORKER_EXIT;
+    }
+    if(!replied) return stage_failure(SC_ERR_WORKER_IO,malformed?"reply header":"reply read",read_error,child);
+    if(!WIFEXITED(status)) return stage_failure(SC_ERR_WORKER_WAIT,"waitpid status",0,child);
     if(header.status!=SC_OK) return static_cast<int32_t>(header.status);
     return sc_copy_out(buffer.data(),header.length,out,cap,len);
 #else

@@ -54,6 +54,21 @@ pub const SC_ERR_ARG: i32 = -1002;
 /// Status of a case whose C++ side ran in a fresh child process ([`isolate`]) that did
 /// not finish normally (a native crash, the 600 s alarm, an abnormal exit).
 pub const SC_ERR_CHILD_CRASHED: i32 = -1100;
+/// Shim status: the isolated worker's pipes could not be made or written
+/// (`harness/cpp/shim/sc_rollover_worker.h`; the shim also logs the stage and errno).
+pub const SC_ERR_WORKER_PIPE: i32 = -1120;
+/// Shim status: the isolated worker could not be spawned.
+pub const SC_ERR_WORKER_SPAWN: i32 = -1121;
+/// Shim status: the isolated worker did not reply within its timeout and was killed.
+pub const SC_ERR_WORKER_TIMEOUT: i32 = -1122;
+/// Shim status: the isolated worker's reply was short, unreadable or malformed.
+pub const SC_ERR_WORKER_IO: i32 = -1123;
+/// Shim status: the isolated worker exited with a nonzero code.
+pub const SC_ERR_WORKER_EXIT: i32 = -1124;
+/// Shim status: the isolated worker was killed by a signal (a native crash or abort).
+pub const SC_ERR_WORKER_SIGNAL: i32 = -1125;
+/// Shim status: the isolated worker could not be reaped.
+pub const SC_ERR_WORKER_WAIT: i32 = -1126;
 /// Shim status on wasm32: the C++ kernel is not linked (returned by every stub of the
 /// module that `scripts/wasm_stub.py` generates for `difftest --digest-dir`).
 pub const SC_ERR_UNLINKED: i32 = -1009;
@@ -67,6 +82,13 @@ pub fn status_name(s: i32) -> String {
         SC_ERR_ARG => "shim_rejected_args".into(),
         SC_ERR_UNLINKED => "cpp_unlinked".into(),
         SC_ERR_CHILD_CRASHED => "cpp_child_crashed".into(),
+        SC_ERR_WORKER_PIPE => "cpp_worker_pipe_failed".into(),
+        SC_ERR_WORKER_SPAWN => "cpp_worker_spawn_failed".into(),
+        SC_ERR_WORKER_TIMEOUT => "cpp_worker_timeout".into(),
+        SC_ERR_WORKER_IO => "cpp_worker_short_reply".into(),
+        SC_ERR_WORKER_EXIT => "cpp_worker_nonzero_exit".into(),
+        SC_ERR_WORKER_SIGNAL => "cpp_worker_signal".into(),
+        SC_ERR_WORKER_WAIT => "cpp_worker_not_reaped".into(),
         other => format!("status_{other}"),
     }
 }
