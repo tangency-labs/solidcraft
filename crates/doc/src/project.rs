@@ -426,7 +426,10 @@ fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &
     let mut out = Vec::new();
     for (e, exact) in edges.iter().zip(exact_edges(body, plane, edges)) {
         match exact {
-            Some(g) => out.extend(g),
+            Some(mut g) => {
+                at_vertices(body, mesh, plane, *e, &mut g);
+                out.extend(g);
+            }
             None => {
                 if let Some(pts) = mesh.edges.get(*e) {
                     out.extend(fit_world(plane, pts));
@@ -435,6 +438,51 @@ fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &
         }
     }
     out
+}
+
+/// Edge `e`'s exact pieces `g` with their outer ends on the edge's vertices, where they lie
+/// within the edge's and the reading's tolerance of them. An edge's curve need only pass within
+/// its tolerance of its vertices, and an arc is read off a NURBS within the planar-edge
+/// tolerance: one SMLib made (a shell's offset corner) ended 2e-6 mm from the line it meets, and
+/// the two ends, not taken for one point, left the loop open, so an offset of one curve found
+/// no chain to follow. The vertex is the point both edges share.
+fn at_vertices(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, e: usize, g: &mut [LinkGeom]) {
+    let record = body.body.record();
+    let Some(edge) = record.edges.get(e) else { return };
+    let Some((first, last)) = mesh.edges.get(e).and_then(|pts| pts.first().zip(pts.last())) else { return };
+    // The pieces are read within the planar-edge tolerance of the edge's curve, which passes
+    // within its own tolerance of the vertices.
+    let tol = edge.vertices.iter().filter_map(|v| record.vertices.get(*v as usize)).map(|v| v.tolerance).fold(edge.tolerance, f64::max)
+        + body.body.planar_edges_tolerance();
+    // Each vertex moves the piece end nearest it (the pieces' order and direction need not be
+    // the edge's).
+    for v in [plane.to_local(*first), plane.to_local(*last)] {
+        let mut best: Option<(f64, &mut Vec2)> = None;
+        for piece in g.iter_mut() {
+            if let LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } = piece {
+                for p in [a, b] {
+                    let d = p.dist(v);
+                    if d <= tol && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+                        best = Some((d, p));
+                    }
+                }
+            }
+        }
+        if let Some((_, p)) = best {
+            *p = v;
+        }
+    }
+    // An arc is its centre and two ends on one circle: with its ends moved, its centre moves to
+    // the nearest point equally far from both (on their bisector), or the sketch would move an
+    // end back off the vertex onto the circle through the other.
+    for piece in g.iter_mut() {
+        if let LinkGeom::Arc { c, a, b } = piece
+            && let Some(across) = Vec2::new(a.y - b.y, b.x - a.x).normalized()
+        {
+            let mid = (*a + *b) * 0.5;
+            *c = mid + across * (*c - mid).dot(across);
+        }
+    }
 }
 
 /// A boundary segment as the link geometry that is the same curve.

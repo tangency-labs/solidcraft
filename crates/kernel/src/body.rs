@@ -1198,6 +1198,13 @@ impl Body {
             .collect())
     }
 
+    /// How far [`Body::planar_edges`] lets a piece it reads as a line or an arc lie from the
+    /// edge's curve (a NURBS within this of a circle is that arc), so how far a piece's ends may
+    /// lie from the edge's vertices.
+    pub fn planar_edges_tolerance(&self) -> f64 {
+        (self.size() * 1e-7).max(1e-9) * 10.0
+    }
+
     /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
     /// arcs, and free-form curves as the Bézier spans they are, for a sketch to project them.
     /// `None` for an edge that doesn't lie in a plane parallel to `plane`, isn't read exactly or
@@ -1206,7 +1213,7 @@ impl Body {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
-        let tol = (self.size() * 1e-7).max(1e-9) * 10.0;
+        let tol = self.planar_edges_tolerance();
         indices
             .iter()
             .map(|i| {
