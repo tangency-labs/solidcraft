@@ -734,6 +734,7 @@ struct CachedEval {
     error: Option<String>,
     warning: Option<String>,
     import_report: Option<Arc<kernel::ImportReport>>,
+    repair: Option<Arc<kernel::RepairReport>>,
     ms: f64,
     state: Arc<ModelState>,
     /// What the state costs, worked out once when it was stored (see
@@ -943,6 +944,9 @@ pub struct FeatureResult {
     /// (`warning` is the first of them as the kernel words them).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub import_report: Option<Arc<kernel::ImportReport>>,
+    /// What a Repair Part feature changed, face by face (the command's reply says it).
+    #[serde(skip)]
+    pub repair: Option<Arc<kernel::RepairReport>>,
     pub ms: f64,
     pub skipped: bool,
     /// Not evaluated on the document's current inputs: a feature at or after a sketch shown live
@@ -1874,6 +1878,7 @@ impl Model {
                     error: None,
                     warning: None,
                     import_report: None,
+                    repair: None,
                     ms: 0.0,
                     skipped: true,
                     stale: false,
@@ -1910,6 +1915,7 @@ impl Model {
                     error: c.error,
                     warning: c.warning,
                     import_report: c.import_report,
+                    repair: c.repair,
                     ms: c.ms,
                     skipped: false,
                     stale: false,
@@ -1944,6 +1950,7 @@ impl Model {
             }
             let mut warning = None;
             let mut import_report = None;
+            let mut repair = None;
             // Face references by name: move each face point onto its named face (on the body the
             // feature names, when it names one and the face is there).
             let renamed;
@@ -1967,7 +1974,8 @@ impl Model {
             let r = match frame_error.or(bad_param) {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
-                    eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+                    eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair)
+                        .map_err(|e| kernel::KernelError::Failed(e.to_string()))
                 }),
             };
             if r.is_ok() {
@@ -2023,6 +2031,7 @@ impl Model {
                     error: error.clone(),
                     warning: warning.clone(),
                     import_report: import_report.clone(),
+                    repair: repair.clone(),
                     ms,
                     bytes: state.added_bytes(&before),
                     state: state.clone(),
@@ -2041,6 +2050,7 @@ impl Model {
                 error,
                 warning,
                 import_report,
+                repair,
                 ms,
                 skipped: false,
                 stale: false,
@@ -6237,6 +6247,7 @@ fn eval_feature(
     st: &mut ModelState,
     warning: &mut Option<String>,
     import_report: &mut Option<Arc<kernel::ImportReport>>,
+    repair: &mut Option<Arc<kernel::RepairReport>>,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -7040,6 +7051,7 @@ fn eval_feature(
             }
             let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             *target = result;
+            *repair = Some(Arc::new(report));
             Ok(())
         }
         FeatureKind::MeshImport { meshes, .. } => {

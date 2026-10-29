@@ -815,12 +815,12 @@ pub(crate) fn counted(f: &solidcraft_doc::Feature, i: usize) -> bool {
     f.body_names.get(i).is_none_or(|n| n.trim().is_empty()) && (f.shell_piece_order || i < f.body_names.len() || !first)
 }
 
-/// Repair Part (#8371): the part's repair is worked out first (refused with why when nothing
-/// applies), then made a feature, which works it out again as it evaluates; the reply says what
-/// changed, face by face.
+/// Repair Part (#8371): a feature, which repairs the part as it evaluates (a part with nothing
+/// to repair fails it, with why, and the command changes nothing); the reply is what that
+/// evaluation changed, face by face.
 fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
     use solidcraft_doc::expr::Kind;
-    use solidcraft_kernel::{Continuity, RepairOptions, SurfaceKind};
+    use solidcraft_kernel::{Continuity, SurfaceKind};
     let cmd = "body.repair";
     let name = str_(p, "body").filter(|b| !b.trim().is_empty()).ok_or_else(|| bad(cmd, "`body` must name the part to repair"))?.to_string();
     let state = s.model.state();
@@ -830,11 +830,17 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let gap = expr(p, "gap").unwrap_or_else(|| "0.2 mm".into());
     check_expr(s, &gap, Kind::Length, cmd, "gap")?;
-    let gap_mm = s.doc.eval(&gap, Kind::Length).map_err(|e| bad(cmd, format!("gap: {e}")))?;
     let patch_holes = bool_(p, "patch_holes").unwrap_or(false);
-    let (repaired, report) =
-        solidcraft_kernel::repair(&source.body, &RepairOptions { gap: gap_mm, patch_holes }).map_err(|e| bad(cmd, e.to_string()))?;
-    let volume = if report.closed { solidcraft_kernel::measure(&repaired).ok().map(|m| m.volume) } else { None };
+    let v = add_feature(s, p, FeatureKind::Repair { body: name.clone().into(), gap, patch_holes })?;
+    let field = |k: &str| v.get(k).cloned().unwrap_or(Value::Null);
+    let feature = field("feature").as_u64().unwrap_or(0);
+    let report = s
+        .model
+        .result(feature)
+        .and_then(|r| r.repair.clone())
+        .ok_or_else(|| crate::EngineError::Other(format!("{cmd}: the feature kept no report of the repair")))?;
+    let repaired = s.model.state().body(&name).map(|b| b.body.clone());
+    let volume = repaired.filter(|_| report.closed).and_then(|b| solidcraft_kernel::measure(&b).ok()).map(|m| m.volume);
     let surface = |k: SurfaceKind| format!("{k:?}").to_lowercase();
     let face = |face: usize, k: SurfaceKind, why: &str| RepairFace { face, surface: surface(k), why: why.to_string() };
     let done = RepairDone {
@@ -862,13 +868,10 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
         modelling: report.modelling,
         volume,
     };
-    let kind = FeatureKind::Repair { body: name.clone().into(), gap, patch_holes };
-    let v = add_feature(s, p, kind)?;
-    let field = |k: &str| v.get(k).cloned().unwrap_or(Value::Null);
     let list =
         |k: &str| v.get(k).and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     let reply = RepairResult {
-        feature: field("feature").as_u64().unwrap_or(0),
+        feature,
         name: field("name").as_str().unwrap_or_default().to_string(),
         bodies: list("bodies"),
         created_bodies: list("created_bodies"),

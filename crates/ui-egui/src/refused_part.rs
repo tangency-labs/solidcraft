@@ -9,7 +9,7 @@ use solidcraft_engine::doc::{FeatureKind, ModelState, PlaneRef};
 
 use crate::SolveApp;
 
-/// The command that repairs a part (planned).
+/// The command that repairs a part (Repair Part).
 pub(crate) const REPAIR: &str = "body.repair";
 
 /// A part an operation uses that the kernel refuses.
@@ -102,7 +102,7 @@ pub(crate) fn next_frame(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Repair the part (the command says when it cannot yet).
+/// Repair the part with the command's defaults (it says why when nothing applies).
 pub(crate) fn repair(app: &mut SolveApp, body: &str) {
     if let Err(e) = app.run(REPAIR, json!({ "body": body })) {
         app.set_status(e, true);
