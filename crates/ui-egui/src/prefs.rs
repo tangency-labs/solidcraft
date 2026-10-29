@@ -637,6 +637,10 @@ preference_settings! {
     /// the tap maker's drills; off by default: the tap maker's drill (M8: 6.8 mm). Saved designs
     /// keep the drill they stored either way.
     metric_tap_drill_major_less_pitch: bool = false, PAGE_DESIGN => check_id("prefs.metric_tap_drill_major_less_pitch");
+    /// New symmetric surface extrudes go their distance each way, as before they matched solid
+    /// extrudes; off by default: the distance is the total, split evenly around the start plane.
+    /// Saved designs keep the reading they stored either way.
+    surface_extrude_symmetric_per_side: bool = false, PAGE_DESIGN => check_id("prefs.surface_extrude_symmetric_per_side");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
@@ -1122,8 +1126,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
-    // The hole command reads the metric tapped drill rule from the session.
+    // The hole command reads the metric tapped drill rule from the session, Surface Extrude its
+    // symmetric reading.
     app.session.metric_tap_drill_major_less_pitch = app.preferences.metric_tap_drill_major_less_pitch;
+    app.session.surface_extrude_symmetric_per_side = app.preferences.surface_extrude_symmetric_per_side;
     // The profiler records while the preference is on (switched when it changes; at start-up only
     // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
     let profile = app.preferences.profile_operations;
@@ -2482,6 +2488,34 @@ mod tests {
         // A design opened or started keeps the user's choice.
         h.app.run("file.new", json!({})).unwrap();
         assert!(h.app.session.metric_tap_drill_major_less_pitch);
+    }
+
+    /// New symmetric surface extrudes read their distance as the total, as solid extrudes do; the
+    /// preference brings back the distance on each side they took before. It reaches the command
+    /// whether set through the control channel or the Preferences page, and survives a new design.
+    #[test]
+    fn the_surface_extrude_preference_keeps_the_distance_on_each_side() {
+        use serde_json::json;
+        let height = |h: &mut crate::scenario::Harness, name: &str| {
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("surface.extrude", json!({"distance":"10 mm","direction":"symmetric","body_name":name})).unwrap();
+            let st = h.app.session.world_state().unwrap();
+            let b = st.body(name).unwrap().mesh().bounds();
+            b.max.z - b.min.z
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.frames(1);
+        assert!(!h.app.preferences.surface_extrude_symmetric_per_side, "off by default");
+        assert!((height(&mut h, "Total") - 10.0).abs() < 1e-7);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"surface_extrude_symmetric_per_side": true}));
+        h.frames(2);
+        assert!(h.app.session.surface_extrude_symmetric_per_side);
+        assert!((height(&mut h, "Each") - 20.0).abs() < 1e-7);
+        h.app.run("file.new", json!({})).unwrap();
+        assert!(h.app.session.surface_extrude_symmetric_per_side);
     }
 
     #[test]

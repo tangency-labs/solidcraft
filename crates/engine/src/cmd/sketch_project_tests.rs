@@ -379,14 +379,28 @@ fn three_d_sketch_curves() {
     let src = s.doc.features.last().unwrap().id;
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = run(&mut s, "sketch.project_to_surface", json!({"curves": [{"sketch": src, "curve": l}], "face": [0, 0, 20]}));
+    // The line's projection where it first meets the sphere: the arc of the great circle in y = 0
+    // from x = -10 to 10 over the top (z = √(400 − x²)), one wire though SMLib splits it at the
+    // pole, and no curve on the far side.
+    assert_eq!(r["links"][0]["wires"].as_array().unwrap().len(), 1, "{r}");
     let wid = r["links"][0]["wires"][0].as_str().unwrap().to_string();
     let st = s.model.state();
     let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
     let w = &sk.wires[sk.wire_index(&wid).unwrap()];
-    assert!(w.pts.len() > 20);
-    for p in &w.pts {
-        assert!((p.len() - 20.0).abs() < 0.1, "{p:?}");
-        assert!(p.z > 0.0);
+    assert!(!w.exact.is_empty());
+    // SMLib makes projected curves to a millionth of the body's size (the sphere's 40 mm box).
+    let tol = 40.0 * 1e-6;
+    let ends = [*w.pts.first().unwrap(), *w.pts.last().unwrap()];
+    let top = 300f64.sqrt();
+    assert!(ends.iter().all(|e| (e.x.abs() - 10.0).abs() < tol && e.y.abs() < tol && (e.z - top).abs() < tol), "{ends:?}");
+    assert!((ends[0].x + ends[1].x).abs() < tol, "{ends:?}");
+    // Along its exact curves (the wire's points are its spans' polygon), on the sphere's top.
+    for c in &w.exact {
+        let eval = solidcraft_geom::brep::eval::CurveEval::new(&c.curve).unwrap();
+        for k in 0..=32 {
+            let p = eval.point(c.interval[0] + (c.interval[1] - c.interval[0]) * f64::from(k) / 32.0).unwrap();
+            assert!((p.len() - 20.0).abs() < tol && p.y.abs() < tol && p.z >= top - tol, "{p:?}");
+        }
     }
     // Delete the wire.
     run(&mut s, "sketch.delete", json!({"entities": [wid]}));

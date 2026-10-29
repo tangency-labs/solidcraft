@@ -5118,6 +5118,15 @@ fn path_points(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Option<
     for id in ids {
         if let Some(wi) = ps.sketch.wire_index(id) {
             pieces.push(match ps.sketch.wires.get(wi) {
+                // A drawn 3D arc is its circle, from its start counter-clockwise about its normal
+                // (its three fit points define it; a spline through them is not the arc).
+                Some(solidcraft_sketch::Wire { arc: Some(arc), .. }) => {
+                    let x = (arc.start - arc.center).normalized().ok_or_else(|| DocError::Invalid("a 3D arc of no radius".into()))?;
+                    let y = arc.normal.cross(x);
+                    let frame = solidcraft_geom::brep::Frame { origin: arc.center.into(), x_axis: x.into(), y_axis: y.into() };
+                    let circle = solidcraft_geom::brep::Curve::Circle { frame, radius: arc.radius };
+                    kernel::PathPiece::Segs(kernel::curve_path(&circle, [0.0, solidcraft_sketch::arc_sweep(arc)])?)
+                }
                 Some(w) if w.fit.len() >= 3 => kernel::PathPiece::Spline { fit: w.fit.clone(), reversed: false },
                 Some(w) if !w.exact.is_empty() => {
                     let mut segs = Vec::new();

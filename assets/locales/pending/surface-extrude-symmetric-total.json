@@ -1,0 +1,30 @@
+{
+  "en": {
+    "prefs.surface_extrude_symmetric_per_side": "Symmetric surface extrudes go the distance each way (10 mm: 20 mm in all), as before, not the total like solid extrudes",
+    "prefs.surfaces": "Surfaces"
+  },
+  "ar": {
+    "prefs.surface_extrude_symmetric_per_side": "يمتد بثق السطح المتماثل بالمسافة في كل جانب كما كان من قبل (10 مم: 20 مم إجمالًا)، لا بالمسافة الكلية كبثق المجسم",
+    "prefs.surfaces": "الأسطح"
+  },
+  "he": {
+    "prefs.surface_extrude_symmetric_per_side": "שליפת משטח סימטרית נשלפת את המרחק לכל צד כמו קודם (10 מ\"מ: 20 מ\"מ בסך הכול), ולא את המרחק הכולל כמו שליפת גוף",
+    "prefs.surfaces": "משטחים"
+  },
+  "ja": {
+    "prefs.surface_extrude_symmetric_per_side": "対称のサーフェス押し出しを、ソリッドの押し出しのような合計ではなく、以前のように両側にそれぞれその距離だけ押し出す（10 mm: 合計 20 mm）",
+    "prefs.surfaces": "サーフェス"
+  },
+  "zh": {
+    "prefs.surface_extrude_symmetric_per_side": "对称曲面拉伸像以前一样向两侧各拉伸该距离（10 mm：共 20 mm），而非像实体拉伸那样取总距离",
+    "prefs.surfaces": "曲面"
+  },
+  "de": {
+    "prefs.surface_extrude_symmetric_per_side": "Symmetrische Flächen-Extrusionen wie bisher um den Abstand nach jeder Seite (10 mm: insgesamt 20 mm), nicht um die Gesamtlänge wie Volumen-Extrusionen",
+    "prefs.surfaces": "Flächen"
+  },
+  "ko": {
+    "prefs.surface_extrude_symmetric_per_side": "대칭 서피스 돌출을 솔리드 돌출처럼 전체 거리가 아니라 이전처럼 양쪽으로 각각 그 거리만큼 돌출 (10 mm: 총 20 mm)",
+    "prefs.surfaces": "서피스"
+  }
+}

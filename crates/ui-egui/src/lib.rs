@@ -978,8 +978,10 @@ impl SolveApp {
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
-        // The preference the hole command reads, current even before the next frame applies it.
+        // The preferences the hole and surface extrude commands read, current even before the
+        // next frame applies them.
         self.session.metric_tap_drill_major_less_pitch = self.preferences.metric_tap_drill_major_less_pitch;
+        self.session.surface_extrude_symmetric_per_side = self.preferences.surface_extrude_symmetric_per_side;
         let t0 = now_ms();
         let r = self.session.execute(id, &params).map_err(|e| e.to_string());
         self.big_operation |= now_ms() - t0 >= recovery_ui::BIG_OPERATION_MS;

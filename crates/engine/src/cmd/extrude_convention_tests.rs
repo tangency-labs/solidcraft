@@ -123,23 +123,102 @@ fn symmetric_extrude_thin_wall_uses_total_distance_and_to_object_remains_one_sid
     check(&fixture(json!({"to":[0,0,10]})), 0.0, 10.0);
 }
 
+/// The z range of surface body `name`.
+fn sheet_z(s: &Session, name: &str) -> (f64, f64) {
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    let st = s.model.state();
+    let bounds = st.body(name).unwrap().mesh().bounds();
+    (bounds.min.z, bounds.max.z)
+}
+
+fn assert_z(s: &Session, name: &str, lo: f64, hi: f64) {
+    let (z0, z1) = sheet_z(s, name);
+    assert!((z0 - lo).abs() < 1e-7 && (z1 - hi).abs() < 1e-7, "{name}: {z0}..{z1}, want {lo}..{hi}");
+}
+
+/// A symmetric surface extrude reads its distance as a solid one does: the total, split evenly
+/// around the start plane, through a redefine and a save.
 #[test]
-fn surface_extrude_shared_extent_retains_its_existing_per_side_semantics() {
+fn surface_extrude_symmetric_distance_is_the_total_like_solid_extrude() {
     let mut s = fixture(json!({}));
     run(&mut s, "surface.extrude", json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","name":"Sheet","body_name":"Sheet"}));
-    let check_sheet = |s: &Session| {
-        let st = s.model.state();
-        let bounds = st.body("Sheet").unwrap().mesh().bounds();
-        assert!((bounds.min.z + 10.0).abs() < 1e-7 && (bounds.max.z - 10.0).abs() < 1e-7);
-    };
-    check_sheet(&s);
+    assert_z(&s, "Sheet", -5.0, 5.0);
+    let FeatureKind::SurfaceExtrude { extent, .. } = &s.doc.find_feature("Sheet").unwrap().kind else { panic!("surface extrude") };
+    assert_eq!(extent.convention, ExtrudeConvention::TotalDistance);
     run(
         &mut s,
         "timeline.redefine",
         json!({"feature":"Sheet","command":"surface.extrude","params":{"sketch":"Square","distance":"10 mm","direction":"symmetric","body_name":"Sheet"}}),
     );
-    check_sheet(&s);
-    check_sheet(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()));
+    assert_z(&s, "Sheet", -5.0, 5.0);
+    assert_z(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), "Sheet", -5.0, 5.0);
+    // A one-sided surface extrude made symmetric splits its distance too, as a solid one does.
+    run(&mut s, "surface.extrude", json!({"sketch":"Square","distance":"10 mm","convention":"legacy_per_side","name":"Wall","body_name":"Wall"}));
+    assert_z(&s, "Wall", 0.0, 10.0);
+    run(&mut s, "timeline.edit", json!({"feature":"Wall","set":{"extent":{"direction":"symmetric"}}}));
+    assert_z(&s, "Wall", -5.0, 5.0);
+}
+
+/// Surface extrudes saved before they matched solid ones stored `legacy_per_side` (or, older
+/// still, no marker): they rebuild the distance on each side, and keep it through edits.
+#[test]
+fn older_symmetric_surface_extrudes_keep_the_distance_on_each_side() {
+    let mut s = fixture(json!({}));
+    run(
+        &mut s,
+        "surface.extrude",
+        json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","convention":"legacy_per_side","name":"Sheet","body_name":"Sheet"}),
+    );
+    assert_z(&s, "Sheet", -10.0, 10.0);
+    let marked: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let mut unmarked = marked.clone();
+    unmarked["format"] = json!("solidcraft/21");
+    unmarked.as_object_mut().unwrap().remove("format_pending");
+    for f in unmarked["features"].as_array_mut().unwrap() {
+        if let Some(extent) = f.get_mut("extent").and_then(Value::as_object_mut) {
+            extent.remove("convention");
+        }
+    }
+    for saved in [marked, unmarked] {
+        let mut s = Session::new(Document::from_json(&saved.to_string()).unwrap());
+        assert_z(&s, "Sheet", -10.0, 10.0);
+        run(&mut s, "timeline.edit", json!({"feature":"Sheet","set":{"extent":{"distance":"12 mm"}}}));
+        assert_z(&s, "Sheet", -12.0, 12.0);
+        run(
+            &mut s,
+            "timeline.redefine",
+            json!({"feature":"Sheet","command":"surface.extrude","params":{"sketch":"Square","distance":"10 mm","direction":"symmetric","body_name":"Sheet"}}),
+        );
+        assert_z(&s, "Sheet", -10.0, 10.0);
+    }
+}
+
+/// The preference brings back the per-side reading for new surface extrudes only: solid
+/// extrudes and an explicit `convention` are unchanged by it.
+#[test]
+fn the_per_side_preference_keeps_the_older_surface_extrude_reading() {
+    let mut s = fixture(json!({}));
+    s.surface_extrude_symmetric_per_side = true;
+    run(&mut s, "surface.extrude", json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","name":"Sheet","body_name":"Sheet"}));
+    assert_z(&s, "Sheet", -10.0, 10.0);
+    let FeatureKind::SurfaceExtrude { extent, .. } = &s.doc.find_feature("Sheet").unwrap().kind else { panic!("surface extrude") };
+    assert_eq!(extent.convention, ExtrudeConvention::LegacyPerSide);
+    run(
+        &mut s,
+        "surface.extrude",
+        json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","convention":"total_distance","name":"Total","body_name":"Total"}),
+    );
+    assert_z(&s, "Total", -5.0, 5.0);
+    run(&mut s, "solid.extrude", json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","operation":"new","body_name":"Solid"}));
+    assert_z(&s, "Solid", -5.0, 5.0);
+    // The saved marker, not the preference, decides on reopening.
+    s.surface_extrude_symmetric_per_side = false;
+    let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert_z(&reopened, "Sheet", -10.0, 10.0);
+    // A design opened or started keeps the user's choice.
+    s.surface_extrude_symmetric_per_side = true;
+    s.replace_design(Session::default());
+    assert!(s.surface_extrude_symmetric_per_side);
 }
 
 /// A second distance goes the other way from the first side (#2700): along the normal when the

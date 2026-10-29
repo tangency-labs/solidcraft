@@ -40,6 +40,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let check = setting::metric_tap_drill_major_less_pitch(app, ui);
         crate::scenario::publish_handle("prefs:metric_tap_drill_major_less_pitch", check.rect.center());
     });
+    ui_kit::settings_section(ui, "surfaces", app.tr("prefs.surfaces"), |ui| {
+        let check = setting::surface_extrude_symmetric_per_side(app, ui);
+        crate::scenario::publish_handle("prefs:surface_extrude_symmetric_per_side", check.rect.center());
+    });
     ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
         ui.horizontal_wrapped(|ui| {
             for (id, label, y_up) in [("z", "Z up", false), ("y", "Y up", true)] {

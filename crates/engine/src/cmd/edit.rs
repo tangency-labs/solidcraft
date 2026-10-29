@@ -1047,12 +1047,16 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
-    if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
+    // A one-sided extrude made symmetric takes the convention a new one would: its old marker
+    // never read a symmetric distance.
+    let maker = if matches!(f.kind, FeatureKind::SurfaceExtrude { .. }) { "surface.extrude" } else { "solid.extrude" };
+    if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. })
+    | (FeatureKind::SurfaceExtrude { extent: old, .. }, FeatureKind::SurfaceExtrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
         && old.direction != solidcraft_doc::Direction::Symmetric
         && new.direction == solidcraft_doc::Direction::Symmetric
         && set.get("extent").and_then(|e| e.get("convention")).is_none()
     {
-        new.convention = solidcraft_doc::ExtrudeConvention::TotalDistance;
+        new.convention = super::features::default_extrude_convention(s, maker);
     }
     if std::mem::discriminant(&nf.kind) != std::mem::discriminant(&f.kind) {
         return Err(bad(cmd, "the feature type cannot change"));
@@ -1410,10 +1414,10 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && matches!(cid, "solid.extrude" | "surface.extrude")
         && let Some(parameters) = params.as_object_mut()
     {
-        let convention = if cid == "surface.extrude" || extent.direction == solidcraft_doc::Direction::Symmetric {
+        let convention = if extent.direction == solidcraft_doc::Direction::Symmetric {
             extent.convention
         } else {
-            solidcraft_doc::ExtrudeConvention::TotalDistance
+            super::features::default_extrude_convention(s, cid)
         };
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }

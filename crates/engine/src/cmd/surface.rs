@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.extrude", "Surface Extrude", surface_extrude)
         .at("SURFACE", "CREATE")
         .icon("surface_extrude")
-        .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr; direction?: positive|negative|symmetric; distance2?: expr; start_offset?: expr; name?, body_name? (a surface body: walls only, no caps)"),
+        .params("sketch?: id|name; curves?: [curve ids] (open or closed chains of curves meeting end to end) and/or profiles? (their boundaries; the default when no curves are given); distance: expr; direction?: positive|negative|symmetric (symmetric: distance is the total, split evenly around the start plane, as solid.extrude); convention?: total_distance|legacy_per_side (as solid.extrude; default total_distance, or legacy_per_side, the distance on each side, under the user's preference for the older reading); distance2?: expr; start_offset?: expr; name?, body_name? (a surface body: walls only, no caps)"),
     CommandSpec::new("surface.revolve", "Surface Revolve", surface_revolve)
         .at("SURFACE", "CREATE")
         .icon("surface_revolve")
@@ -797,7 +797,8 @@ mod tests {
         // The line's wall and the half circle's (radius 5): length × height.
         let want = (10.0 + std::f64::consts::PI * 5.0) * 4.0;
         assert!((area(&s, "Wall") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Wall"));
-        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 2, "direction": "symmetric", "body_name": "Both"}));
+        // Symmetric: the distance is the total, split evenly around the sketch plane.
+        run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 4, "direction": "symmetric", "body_name": "Both"}));
         let bb = solidcraft_kernel::measure(&s.world_state().unwrap().body("Both").unwrap().body).unwrap().bbox;
         assert!((bb.min.z + 2.0).abs() < 1e-9 && (bb.max.z - 2.0).abs() < 1e-9, "{bb:?}");
         run(&mut s, "edit.undo", json!({}));
