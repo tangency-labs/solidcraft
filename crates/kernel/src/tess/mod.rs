@@ -924,6 +924,7 @@ fn plan_face(
     // Whatever the layout, no triangle leaves the surface by more than the tolerance.
     if !planar {
         sag::refine(s, tol, reach, &fixed, &mut all, &mut triangles, MAX_REFINE);
+        sag::flip(s, tol, reach, &fixed, &all, &mut triangles);
     }
     // Both evaluators take a closed spline's parameters inside its active interval.
     for q in &mut all {
