@@ -170,6 +170,7 @@ pub(super) fn implicit_iso(
     | SurfaceKind::SrfInVolume(_) = surface.kind()
     {
         return Ok(Curve::from(IsoCurve::from_surface(
+            k,
             surface.clone_for_evaluation()?,
             direction,
             value,

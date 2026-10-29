@@ -4426,7 +4426,15 @@ mod tests {
         surface.set_owner(Some(face));
         surface.set_owner_zone_tol_3d(Some(0.125));
         let source = Curve::from(
-            IsoCurve::from_surface(surface, SurfParamType::U, 0.25, false, false).unwrap(),
+            IsoCurve::from_surface(
+                &Kernel::default(),
+                surface,
+                SurfParamType::U,
+                0.25,
+                false,
+                false,
+            )
+            .unwrap(),
         );
         let copy = source.clone_for_evaluation().unwrap();
         let CurveKind::Iso(iso) = copy.kind() else {
@@ -4518,7 +4526,8 @@ mod tests {
         loop {
             let mut s = SurfOfExtrusion::empty();
             s.gen_curve = Some(curve.clone());
-            match IsoCurve::from_surface(Surface::from(s), SurfParamType::U, 0.0, true, false) {
+            let k = Kernel::default();
+            match IsoCurve::from_surface(&k, Surface::from(s), SurfParamType::U, 0.0, true, false) {
                 Ok(iso) => curve = Curve::from(iso),
                 Err(e) => {
                     assert!(matches!(e, SolidError::InvalidInput { .. }));

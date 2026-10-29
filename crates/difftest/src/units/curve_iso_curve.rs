@@ -383,19 +383,20 @@ fn surf_param(code: i32) -> Result<SurfParamType, HarnessError> {
 }
 
 fn make(
+    k: &solidcore::kernel::Kernel,
     srf: impl Into<solidcore::surface::surface::Surface>,
     p: &Params0,
 ) -> Result<IsoCurve, HarnessError> {
-    IsoCurve::from_surface(srf.into(), surf_param(p.sp)?, p.iso, p.from_left, p.clamp)
+    IsoCurve::from_surface(k, srf.into(), surf_param(p.sp)?, p.iso, p.from_left, p.clamp)
         .map_err(|e| harness(e.to_string()))
 }
 
-fn build(c: &CurveIn) -> Result<IsoCurve, HarnessError> {
+fn build(k: &solidcore::kernel::Kernel, c: &CurveIn) -> Result<IsoCurve, HarnessError> {
     let srf = match &c.srf {
         Some(s) => to_surface(s)?,
         None => BSplineSurface::new(),
     };
-    make(srf, &c.params)
+    make(k, srf, &c.params)
 }
 
 fn flag(b: bool) -> f64 {
@@ -478,7 +479,7 @@ fn rust_op(k: &solidcore::kernel::Kernel, i: &Inputs, o: &mut Vec<f64>) -> Resul
         return Ok(());
     }
     let ci = i.curve.as_ref().ok_or_else(|| harness("missing curve"))?;
-    let iso = build(ci)?;
+    let iso = build(k, ci)?;
     let c = Curve::from(iso.clone());
     match &i.op {
         OpIn::State => state(o, &c)?,
@@ -518,11 +519,11 @@ fn rust_op(k: &solidcore::kernel::Kernel, i: &Inputs, o: &mut Vec<f64>) -> Resul
         OpIn::Eq { other } => match other {
             OtherIn::Itself => o.push(flag(c.approx_eq(k, &c)?)),
             OtherIn::Own(b) => {
-                let b = Curve::from(build(b)?);
+                let b = Curve::from(build(k, b)?);
                 o.extend([flag(c.approx_eq(k, &b)?), flag(b.approx_eq(k, &c)?)]);
             }
             OtherIn::SameSurface(p) => {
-                let b = Curve::from(make(iso.surface().clone(), p)?);
+                let b = Curve::from(make(k, iso.surface().clone(), p)?);
                 o.extend([flag(c.approx_eq(k, &b)?), flag(b.approx_eq(k, &c)?)]);
             }
         },
@@ -534,7 +535,7 @@ fn rust_op(k: &solidcore::kernel::Kernel, i: &Inputs, o: &mut Vec<f64>) -> Resul
             o.extend(c.class_string().bytes().map(f64::from));
         }
         OpIn::UvIsoLine => {
-            let line = iso.create_uv_iso_line()?;
+            let line = iso.create_uv_iso_line_with_nurb(k)?;
             o.push(0.0);
             o.extend([line.type_code() as f64, line.dim() as f64]);
             let ivl = line.natural_interval();

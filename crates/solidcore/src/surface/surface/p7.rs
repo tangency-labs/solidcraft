@@ -235,8 +235,7 @@ pub fn base_evaluate_normal<S: SurfaceEvaluate + ?Sized>(
         }
     }
 
-    // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
-    let uv_domain = surface.natural_uv_domain_if_built();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     let mut step = 1.0e-8;
 
     // First check for the parallel-derivatives case (the lengths of the
@@ -2064,7 +2063,8 @@ pub struct HigherOrderDerivs {
 ///
 /// # Errors
 ///
-/// Those of `Evaluate1stDerivatives`.
+/// Those of `Evaluate1stDerivatives` and of the natural domain (a lazy analytic
+/// surface makes its NURB first).
 pub fn compute_higher_order_derivs<S: SurfaceEvaluate + ?Sized>(
     k: &Kernel,
     surface: &S,
@@ -2074,8 +2074,7 @@ pub fn compute_higher_order_derivs<S: SurfaceEvaluate + ?Sized>(
     want_g4: bool,
 ) -> Result<HigherOrderDerivs> {
     // locals
-    // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
-    let domain = surface.natural_uv_domain_if_built();
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
 
     // finite difference step - watch for stepping out of surface boundaries
     let mut step = EFF_ZERO_SQRT / 1000.0; // 1.0e-9
@@ -2138,7 +2137,8 @@ pub fn compute_higher_order_derivs<S: SurfaceEvaluate + ?Sized>(
 ///
 /// # Errors
 ///
-/// Those of `Evaluate1stDerivatives`; the status of `Unitize` for a zero result.
+/// Those of `Evaluate1stDerivatives` and of the natural domain (a lazy analytic
+/// surface makes its NURB first); the status of `Unitize` for a zero result.
 pub fn compute_inward_vector<S: SurfaceEvaluate + ?Sized>(
     k: &Kernel,
     surface: &S,
@@ -2148,8 +2148,7 @@ pub fn compute_inward_vector<S: SurfaceEvaluate + ?Sized>(
     let (_, du, dv) = evaluate_1st_derivatives(k, surface, uv, Side::Left, Side::Left)?;
 
     // towards midPoint UV vec
-    // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
-    let mid_uv = surface.natural_uv_domain_if_built().evaluate(0.5, 0.5);
+    let mid_uv = surface.natural_uv_domain_with_nurb(k)?.evaluate(0.5, 0.5);
     let dir_uv = mid_uv - uv;
     let dir_uv = dir_uv.unitize().unwrap_or(dir_uv);
 

@@ -486,6 +486,7 @@ fn face_remove_loop(b: &mut Brep, f: FaceId, l: Option<LoopId>) -> Result<()> {
 /// one to `del_f`. `SetSurface` is `void` upstream; the only failure the port can
 /// raise is [`SolidError::Unported`] from its notification.
 fn swap_face_surfaces(
+    k: &Kernel,
     b: &mut Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
     surv_f: FaceId,
@@ -495,11 +496,11 @@ fn swap_face_surfaces(
     deref(b.face(surv_f)?.surface.as_ref(), OP_DELETE_EDGE)?;
     let del_surface = deref(b.face_mut(del_f)?.surface.take(), OP_DELETE_EDGE)?;
     let surv_this = key_of(EntityRef::Face(surv_f));
-    let surv_old = face1::set_surface(b, surv_f, surv_this, del_surface, false)?;
+    let surv_old = face1::set_surface(k, b, surv_f, surv_this, del_surface, false)?;
     // the survivor's surface was checked above
     let surv_old = deref(surv_old, OP_DELETE_EDGE)?;
     let del_this = key_of(EntityRef::Face(del_f));
-    face1::set_surface(b, del_f, del_this, surv_old, false)?;
+    face1::set_surface(k, b, del_f, del_this, surv_old, false)?;
     Ok(())
 }
 
@@ -982,7 +983,7 @@ fn delete_manifold_edge(
                 // when DelF owns the surface to keep
                 if surface_of(b, df)? == Some(keep) {
                     // swap the surfaces between the faces
-                    swap_face_surfaces(b, env.key_of, sf, df)?;
+                    swap_face_surfaces(k, b, env.key_of, sf, df)?;
                     if flip_face {
                         ignore_status(face1::flip_face_orientation(b, sf))?;
                     }

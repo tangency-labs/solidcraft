@@ -1122,7 +1122,8 @@ pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
 }
 
 /// `SetSurface`: gives the face `surface` (owned by the face, `this`) and its natural
-/// domain. The previous surface is dropped with `delete_current`, else returned.
+/// domain (`GetNaturalUVDomain`, which makes a lazy analytic's missing NURB). The
+/// previous surface is dropped with `delete_current`, else returned.
 /// The `SM_NO_CHANGE_GEOMETRY` notification runs with the empty notification
 /// environment of a B-rep face and null data (see [`set_surface_notified`] for a
 /// caller's environment and the surfaces' identities).
@@ -1130,8 +1131,9 @@ pub fn flip_face_orientation(b: &mut Brep, f: FaceId) -> Result<()> {
 /// # Errors
 ///
 /// [`SolidError::NotFound`] for a dangling id; those of the `SM_NO_CHANGE_GEOMETRY`
-/// notification ([`fp3::notify`]).
+/// notification ([`fp3::notify`]); [`SolidError::Unported`] from making the NURB.
 pub fn set_surface(
+    k: &Kernel,
     b: &mut Brep,
     f: FaceId,
     this: ObjectRef,
@@ -1140,7 +1142,7 @@ pub fn set_surface(
 ) -> Result<Option<Surface>> {
     // inform the public
     face_notify_change_geometry(b, f)?;
-    store_surface(b, f, this, surface, delete_current)
+    store_surface(k, b, f, this, surface, delete_current)
 }
 
 /// [`set_surface`] notified through the caller's `env`: `SM_NO_CHANGE_GEOMETRY` carries
@@ -1152,6 +1154,7 @@ pub fn set_surface(
 ///
 /// As [`set_surface`].
 pub fn set_surface_notified(
+    k: &Kernel,
     b: &mut Brep,
     env: &mut crate::topology::edge::NotifyEnv<'_>,
     f: FaceId,
@@ -1170,17 +1173,21 @@ pub fn set_surface_notified(
         NotifyOperation::ChangeGeometry,
         [new_ref, None, old_ref],
     )?;
-    store_surface(b, f, this, surface, delete_current)
+    store_surface(k, b, f, this, surface, delete_current)
 }
 
 /// `SetSurface` after its notification.
 fn store_surface(
+    k: &Kernel,
     b: &mut Brep,
     f: FaceId,
     this: ObjectRef,
     mut surface: Surface,
     delete_current: bool,
 ) -> Result<Option<Surface>> {
+    // (the domain is read first, so that a failing make leaves the face as it was)
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
+
     // when asked - delete current surface
     let face = b.face_mut(f)?;
     let mut old = face.surface.take();
@@ -1189,8 +1196,7 @@ fn store_surface(
     }
 
     // update the Face domain, change the surface owner, save the surface
-    // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
-    face.uv_domain = surface.natural_uv_domain_if_built();
+    face.uv_domain = uv_domain;
     surface.set_owner(Some(this));
     face.surface = Some(surface);
     b.geometry_owner_keys.insert(EntityRef::Face(f), this);
@@ -2236,12 +2242,12 @@ pub fn move_seam_notified<O: LoopObject>(
                         false,
                     )?;
                 } else {
-                    set_surface_notified(b, env, f, this, joined, true, [None, None])?;
+                    set_surface_notified(k, b, env, f, this, joined, true, [None, None])?;
                 }
             } else if has_brep(b, f)? {
                 replace_surface(k, b, f, this, joined)?;
             } else {
-                set_surface(b, f, this, joined, true)?;
+                set_surface(k, b, f, this, joined, true)?;
             }
         }
     }
@@ -2829,13 +2835,38 @@ mod tests {
         // old surface is dropped (`bDeleteCurrFace`) or handed back
         let (mut b, f, _, _) = plane_face_with_faceuses();
         let s = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::X));
-        let domain = s.natural_uv_domain_if_built();
-        assert!(set_surface(&mut b, f, me(f), s, true).unwrap().is_none());
+        let domain = s.natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(set_surface(&k, &mut b, f, me(f), s, true)
+            .unwrap()
+            .is_none());
         let face = b.face(f).unwrap();
         assert_eq!(face.uv_domain, domain);
         assert_eq!(face.surface.as_ref().unwrap().owner(), Some(me(f)));
         let s = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Y));
-        assert!(set_surface(&mut b, f, me(f), s, false).unwrap().is_some());
+        assert!(set_surface(&k, &mut b, f, me(f), s, false)
+            .unwrap()
+            .is_some());
+
+        // a lazy analytic (no NURB yet) gives the face the domain of the NURB it makes,
+        // as `GetNaturalUVDomain` does upstream, not its NURB-less base's empty one
+        let lazy = Surface::from(crate::surface::cone::Cone::new_bounded(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            2.0,
+            1.0,
+            0.0,
+            270.0,
+            3.0,
+            false,
+            false,
+            false,
+        ));
+        assert!(lazy.natural_uv_domain_if_built().is_degenerate(0.0));
+        let domain = lazy.natural_uv_domain_with_nurb(&k).unwrap();
+        assert!(!domain.is_degenerate(0.0));
+        set_surface(&k, &mut b, f, me(f), lazy, true).unwrap();
+        assert_eq!(b.face(f).unwrap().uv_domain, domain);
 
         // SwapUV starts at `GetBrep()->GetContext()`: null without a B-rep
         let (mut b, f) = plane_face();

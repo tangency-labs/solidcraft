@@ -169,8 +169,10 @@ impl<'a, S> TangentField<'a, S> {
     ///
     /// # Errors
     ///
-    /// None (the `Result` is kept for upstream's constructor statuses).
+    /// Those of the surface's natural UV domain when `uv_domain` is `None` (a lazy
+    /// analytic surface makes its NURB first, [`SolidError::Unported`]).
     pub fn new(
+        k: &Kernel,
         uv_curve: &'a Curve,
         surface: &'a S,
         dir_type: TangentDirType,
@@ -185,8 +187,7 @@ impl<'a, S> TangentField<'a, S> {
         // set m_vUVDomain
         let uv_domain = match uv_domain {
             Some(d) => d,
-            // (a generic `SurfaceEvaluate` receiver: the trait has no kernel)
-            None => surface.natural_uv_domain_if_built(),
+            None => surface.natural_uv_domain_with_nurb(k)?,
         };
         Ok(Self {
             uv_curve,
@@ -224,6 +225,7 @@ impl<'a, S> TangentField<'a, S> {
 
         // allocate SmTangentField
         Self::new(
+            k,
             base_uv_curve,
             surface,
             TangentDirType::Interpolate, // for now, only value supported
@@ -946,8 +948,16 @@ mod tests {
         let srf = unit_square();
         let s = Vec3::new(0.0, 1.0, 0.0);
         let e = Vec3::new(0.0, 0.0, 1.0);
-        let tf = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, Some(domain()))
-            .unwrap();
+        let tf = TangentField::new(
+            k,
+            &uv,
+            &srf,
+            TangentDirType::Interpolate,
+            s,
+            e,
+            Some(domain()),
+        )
+        .unwrap();
         assert_eq!(tf.evaluate_point(k, 0.0).unwrap(), s);
         assert_eq!(tf.evaluate_point(k, 1.0).unwrap(), e);
         let d = tf.evaluate(k, 1.0, 1).unwrap();
@@ -956,7 +966,7 @@ mod tests {
         // inside the interval: the surface normal (surface::surface::p7) is available
         assert!(tf.evaluate_point(k, 0.5).is_ok());
         // without a domain: the surface's natural UV domain
-        let n = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, None).unwrap();
+        let n = TangentField::new(k, &uv, &srf, TangentDirType::Interpolate, s, e, None).unwrap();
         assert_eq!(n.evaluate_point(k, 0.0).unwrap(), s);
     }
 
@@ -973,14 +983,23 @@ mod tests {
         let srf = unit_square();
         let s = Vec3::new(0.0, 1.0, 0.0);
         let e = Vec3::new(0.0, 0.0, 1.0);
-        let a = TangentField::new(&uv, &srf, TangentDirType::Interpolate, s, e, Some(domain()))
+        let a = TangentField::new(
+            k,
+            &uv,
+            &srf,
+            TangentDirType::Interpolate,
+            s,
+            e,
+            Some(domain()),
+        )
+        .unwrap();
+        let b = TangentField::new(k, &uv, &srf, TangentDirType::Constant, s, e, Some(domain()))
             .unwrap();
-        let b =
-            TangentField::new(&uv, &srf, TangentDirType::Constant, s, e, Some(domain())).unwrap();
         assert!(a.approx_eq(k, &a).unwrap());
         assert!(!a.approx_eq(k, &b).unwrap());
         let srf2 = unit_square();
         let c = TangentField::new(
+            k,
             &uv,
             &srf2,
             TangentDirType::Interpolate,

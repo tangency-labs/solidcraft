@@ -145,6 +145,7 @@ impl SurfPtSolveStepper<'_> {
             _ => return Ok(false),
         };
         let curve = Curve::from(IsoCurve::from_surface(
+            k,
             self.base.surface().clone_for_evaluation()?,
             param,
             iso,

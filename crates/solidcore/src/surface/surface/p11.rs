@@ -1307,7 +1307,7 @@ impl<'t, O: SolutionObject + 't> SsGlobalSolver<'t, '_, O> {
                     ),
                 };
                 // SmIsoCurve(*pSrfEval, dir, value, bFlag) over the evaluated surface
-                let ic = boundary_iso_curve(own_view.eval, dir, value, from_left)?;
+                let ic = boundary_iso_curve(k, own_view.eval, dir, value, from_left)?;
                 // (IsDegenerate's default tolerance SM_EFF_ZERO; the iso curve's kind)
                 if ic.is_degenerate(k, EFF_ZERO, None)? {
                     continue;

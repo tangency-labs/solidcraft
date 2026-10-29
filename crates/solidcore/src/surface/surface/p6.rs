@@ -1742,7 +1742,7 @@ pub fn sc_local_solve<O: SolutionObject>(
             } else {
                 (uv_domain.min().x, true)
             };
-            let ic = boundary_iso_curve(srf_eval, SurfParamType::U, u, from_left)?;
+            let ic = boundary_iso_curve(k, srf_eval, SurfParamType::U, u, from_left)?;
 
             if !ic.is_degenerate(k, EFF_ZERO, None)? {
                 let v_ivl = Extent1d::from_min_max(uv_domain.min().y, uv_domain.max().y);
@@ -1775,7 +1775,7 @@ pub fn sc_local_solve<O: SolutionObject>(
             } else {
                 (uv_domain.min().y, true)
             };
-            let ic = boundary_iso_curve(srf_eval, SurfParamType::V, v, from_left)?;
+            let ic = boundary_iso_curve(k, srf_eval, SurfParamType::V, v, from_left)?;
 
             if !ic.is_degenerate(k, EFF_ZERO, None)? {
                 let u_ivl = Extent1d::from_min_max(uv_domain.min().x, uv_domain.max().x);
@@ -2010,12 +2010,14 @@ fn param_direction_ignored(k: &Kernel, surface: &Surface, uv: Point2, vec: Vec3)
 
 /// `SmIsoCurve(*pSrfEval, dir, value, bFromLeft)` (input clamped) as a curve.
 pub(super) fn boundary_iso_curve(
+    k: &Kernel,
     surface: &Surface,
     dir: SurfParamType,
     value: f64,
     from_left: bool,
 ) -> Result<Curve> {
     Ok(Curve::from(IsoCurve::from_surface(
+        k,
         surface.clone_for_evaluation()?,
         dir,
         value,

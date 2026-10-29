@@ -1403,7 +1403,7 @@ pub fn remove_topo_edges(k: &mut Kernel, b: &mut Brep, edges: &[Option<EdgeId>])
                 let this = face_p2::surface(b, delete_face)?
                     .and_then(Surface::owner)
                     .unwrap_or_else(|| loopuse::notify_ref(EntityRef::Face(delete_face)));
-                face_p1::set_surface(b, delete_face, this, new_surface, true)?;
+                face_p1::set_surface(k, b, delete_face, this, new_surface, true)?;
             }
         }
 

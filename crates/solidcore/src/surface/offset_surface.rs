@@ -2142,18 +2142,13 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Offset
 /// The NURB of a B-spline kind surface (`GetOrCreateGwNurbPointer`, which calls the
 /// virtual `MakeNurb` when it is missing): the B-spline's (a plain B-spline cannot make
 /// one), the plane's (made on a copy when missing), the surface of revolution's (also
-/// of a cone, cylinder, sphere or torus) and the surface of extrusion's.
-/// A surface of revolution is not given a missing NURB here (its `MakeNurb` needs the
-/// kernel's tolerances, which evaluations do not take, and a default kernel would
-/// substitute tolerances silently). No defined upstream run reaches that case: the
-/// offset's constructor and `ReadFromDB` first evaluate the base (`IsPeriodic`,
-/// `GetSingularities`), and `SmBSplineSurface::Evaluate` passes `m_pNurb` to NLib
-/// without creating it, which is undefined for a NURB-less base. Every Rust
-/// constructor path builds the NURB (`SurfOfRevolution::new` alone does not, as
-/// upstream's constructor; such a base fails here with `SM_ERR_NULL_POINTER`).
-fn nurb_of(surface: &Surface) -> Result<crate::nurbs::srf_basic::Surface> {
+/// of a cone, cylinder, sphere or torus) and the surface of extrusion's. A lazy
+/// analytic's missing NURB is made with the kernel's tolerances and kept on the surface
+/// ([`Surface::kind_with_nurb`], as its evaluations make it); a make that leaves none
+/// (a failing `MakeNurb`, whose status upstream ignores) is `SM_ERR_NULL_POINTER`.
+fn nurb_of(k: &Kernel, surface: &Surface) -> Result<crate::nurbs::srf_basic::Surface> {
     let missing = || SolidError::null_pointer(OP_EXTEND);
-    match surface.kind() {
+    match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => b.gw_nurb().cloned().ok_or_else(missing),
         SurfaceKind::Plane(p) => p.base_with_nurb()?.gw_nurb().cloned().ok_or_else(missing),
         SurfaceKind::SurfOfRevolution(s) => s.base().gw_nurb().cloned().ok_or_else(missing),
@@ -2166,8 +2161,8 @@ fn nurb_of(surface: &Surface) -> Result<crate::nurbs::srf_basic::Surface> {
 }
 
 /// One NLib G1R extension of `surface` reaching `uv` (the fork's `sm_ExtendToward`).
-fn extend_toward(surface: &Surface, uv: Point2) -> Result<Surface> {
-    let sur = nurb_of(surface)?;
+fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
+    let sur = nurb_of(k, surface)?;
     let mut esur: Option<UnboundedExtension> = None;
     match eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur) {
         Err(e) if e.is_unported() => return Err(e),
@@ -2238,7 +2233,7 @@ fn extend_from_base(
     let low = if domain.contains_point(low_uv, 0.0) {
         None
     } else {
-        Some(extend_toward(base, low_uv)?)
+        Some(extend_toward(k, base, low_uv)?)
     };
     let from = low.as_ref().unwrap_or(base);
     if from
@@ -2247,7 +2242,7 @@ fn extend_from_base(
     {
         return Ok(low);
     }
-    Ok(Some(extend_toward(from, high_uv)?))
+    Ok(Some(extend_toward(k, from, high_uv)?))
 }
 
 /// `sm_ExtendSurface`: makes `uv` lie in the domain of `surface` by wrapping it in
@@ -2333,7 +2328,7 @@ fn extend_surface(
     }
 
     // extend the NURB (the extension is kept between the two tries, as upstream's esur)
-    let sur = nurb_of(surface)?;
+    let sur = nurb_of(k, surface)?;
     let mut esur: Option<UnboundedExtension> = None;
     let first = eval_pt_derivs_unbounded(&sur, s_uv.x, s_uv.y, 0, ExtendContinuity::G1R, &mut esur);
     if let Err(e) = first {
@@ -2495,6 +2490,14 @@ impl SurfaceEvaluate for OffsetEval<'_> {
 
     fn natural_uv_domain_if_built(&self) -> Extent2d {
         self.with_extension(|ext| domain_with(&self.off.surface, ext.current()))
+    }
+
+    fn natural_uv_domain_with_nurb(&self, k: &Kernel) -> Result<Extent2d> {
+        // the extension of the call, else the base (as OffsetSurface::natural_uv_domain_with_nurb)
+        self.with_extension(|ext| match ext.current() {
+            Some(e) => e.natural_uv_domain_with_nurb(k),
+            None => self.off.surface.natural_uv_domain_with_nurb(k),
+        })
     }
 
     fn evaluate(

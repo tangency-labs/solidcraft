@@ -3279,7 +3279,7 @@ pub fn intersect_srf_bndry_crv(
     };
 
     // specify CurveSurface 3DIsoParameterCurve
-    let iso = super::p6::boundary_iso_curve(curve_surface, param, iso_parameter, true)?;
+    let iso = super::p6::boundary_iso_curve(k, curve_surface, param, iso_parameter, true)?;
 
     // skip degenerate curves
     if iso.is_degenerate(k, EFF_ZERO, None)? {

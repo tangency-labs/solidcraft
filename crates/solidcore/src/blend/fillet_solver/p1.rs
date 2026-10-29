@@ -2691,7 +2691,7 @@ impl<'a> FindClippedRadiusEfo<'a> {
                 .surface
                 .clone(),
         );
-        let iso = IsoCurve::from_surface(surface, self.surf_param, self.iso_param, true, false)?;
+        let iso = IsoCurve::from_surface(k, surface, self.surf_param, self.iso_param, true, false)?;
         let curve = Curve::from(iso);
         let interval = curve.natural_interval();
         let found = other.local_curve_intersect(

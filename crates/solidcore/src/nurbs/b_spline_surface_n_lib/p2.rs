@@ -594,6 +594,7 @@ fn interpolated_tangent_field_curve(
 ) -> Result<BSplineCurve> {
     let base_uv = as_sm_curve(uv_curve);
     let field = TangentField::new(
+        k,
         &base_uv,
         surface,
         TangentDirType::Interpolate,

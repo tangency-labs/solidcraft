@@ -2116,9 +2116,10 @@ impl Surface {
     /// of revolution reads the domain of the NURB its `MakeNurb` gives
     /// ([`Surface::kind_with_nurb`]), where [`Surface::natural_uv_domain_if_built`] answers the
     /// NURB-less base's empty domain; an offset surface reads its base's (or extended
-    /// surface's) the same way ([`OffsetSurface::natural_uv_domain_with_nurb`]). A
-    /// surface of extrusion already answers from its generator, and every other kind as
-    /// [`Surface::natural_uv_domain_if_built`].
+    /// surface's) the same way ([`OffsetSurface::natural_uv_domain_with_nurb`]), and so
+    /// does a lazy surface of extrusion (`SmSurfOfExtrusion` does not override
+    /// `GetNaturalUVDomain`: its made NURB's domain, whatever the generator's kind).
+    /// Every other kind answers as [`Surface::natural_uv_domain_if_built`].
     ///
     /// # Errors
     ///
@@ -2130,6 +2131,8 @@ impl Surface {
             SurfaceKind::Sphere(s) => s.base().base().natural_uv_domain(),
             SurfaceKind::Torus(s) => s.base().base().natural_uv_domain(),
             SurfaceKind::OffsetSurface(s) => s.natural_uv_domain_with_nurb(k)?,
+            // (the made kind: its base holds the NURB unless the make failed)
+            SurfaceKind::SurfOfExtrusion(s) => s.natural_uv_domain_for_query(),
             // (the other kinds are never lazy)
             _ => self.natural_uv_domain_if_built(),
         })
@@ -2290,9 +2293,14 @@ impl Surface {
         let iso = |param: SurfParamType, value: f64| -> Result<Curve> {
             Ok(Curve::from(match self.kind() {
                 SurfaceKind::BSpline(bs) => IsoCurve::new(bs.clone(), param, value, true, true),
-                _ => {
-                    IsoCurve::from_surface(self.clone_for_evaluation()?, param, value, true, true)?
-                }
+                _ => IsoCurve::from_surface(
+                    k,
+                    self.clone_for_evaluation()?,
+                    param,
+                    value,
+                    true,
+                    true,
+                )?,
             }))
         };
 

@@ -4,7 +4,8 @@
 //! analytic surfaces always hold `m_pNurb`, and its `const` queries reach it through
 //! `GetOrCreateGwNurbPointer`. Each kind is checked against a copy whose NURB was made
 //! up front, bit for bit: evaluation, the area integrand's first derivatives, the
-//! normal, an iso curve and the bounding box.
+//! normal, an iso curve, the bounding box, the API evaluations' domain check, a
+//! clamped `SmIsoCurve` and its UV line, and an offset's extension of the surface.
 
 #![allow(
     clippy::unwrap_used,
@@ -14,6 +15,7 @@
 )]
 
 use solidcore::curve::curve::Curve;
+use solidcore::curve::iso_curve::IsoCurve;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::kernel::Kernel;
@@ -22,6 +24,7 @@ use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
 use solidcore::surface::cone::Cone;
+use solidcore::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use solidcore::surface::sphere::{Sphere, SphereOptions};
 use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
@@ -100,6 +103,25 @@ fn answers(k: &Kernel, s: &Surface, dom: &Extent2d, uv: Point2) -> Vec<String> {
         "{:?}",
         s.calculate_bounding_box(k, dom, [true, false, false], false)
     ));
+    // SmApiEvaluateSurfacePoint checks `uv` against GetNaturalUVDomain
+    out.push(format!(
+        "{:?}",
+        solidcore::query::brep::evaluate_surface_point(k, Some(s), uv)
+    ));
+    // SmIsoCurve(.., bClampInput = TRUE) clamps to GetNaturalUVDomain, and
+    // CreateUVIsoLine spans it
+    let past = dom.max().x + 0.5 * dom.size().x;
+    out.push(
+        match IsoCurve::from_surface(k, s.clone(), SurfParamType::U, past, true, true) {
+            Ok(iso) => {
+                let line = iso
+                    .create_uv_iso_line_with_nurb(k)
+                    .map(|l| l.natural_interval());
+                format!("{:?} {line:?}", iso.iso_parameter())
+            }
+            Err(e) => format!("Err({e:?})"),
+        },
+    );
     out
 }
 
@@ -209,4 +231,34 @@ fn lazy_analytic_surfaces_answer_as_if_their_nurb_were_made() {
     )
     .unwrap();
     check(&k, "surface of extrusion", &Surface::from(extrusion));
+}
+
+/// An offset that extends its lazy base past the base domain (`sm_ExtendSurface`, which
+/// reads the base's NURB through `GetOrCreateGwNurbPointer`) extends it as it extends
+/// the made base.
+#[test]
+fn an_offset_extends_a_lazy_base_as_a_made_one() {
+    let k = Kernel::default();
+    let (o, x, y) = (
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    let cylinder = Cone::new_bounded(o, x, y, 2.0, 2.0, 0.0, 270.0, 3.0, false, false, false);
+    let lazy = Surface::from(cylinder);
+    assert!(is_lazy(&lazy), "the fixture must start without its NURB");
+    let reference = made(&k, &lazy);
+    // (the made reference has its NURB: built)
+    let dom = reference.natural_uv_domain_if_built();
+    // past the high v side, inside u
+    let uv = Point2::new(dom.evaluate(0.5, 0.5).x, dom.max().y + 0.25 * dom.size().y);
+    let extended = |base: &Surface| {
+        let mut off = OffsetSurface::new(&k, 0.25, base.clone(), true, SS_UNKNOWN).unwrap();
+        off.set_allow_extension(true);
+        let point = off.evaluate_point_extending(&k, uv);
+        format!("{point:?} {:?}", off.natural_uv_domain_with_nurb(&k))
+    };
+    let want = extended(&reference);
+    assert!(!want.starts_with("Err"), "the made base extends: {want}");
+    assert_eq!(extended(&lazy), want);
 }

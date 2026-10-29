@@ -463,12 +463,14 @@ pub struct IsoParametricCurve {
 
 /// An `SmIsoCurve` of the original concrete surface.
 fn iso_curve_of(
+    k: &Kernel,
     surface: &Surface,
     param: SurfParamType,
     iso: f64,
     from_left: bool,
 ) -> Result<IsoCurve> {
     IsoCurve::from_surface(
+        k,
         surface.clone_for_evaluation()?,
         param,
         iso,
@@ -596,11 +598,11 @@ impl Surface {
         }
 
         // define the isoParameter Curve as an object
-        let iso = iso_curve_of(self, param, iso_parameter, true)?;
+        let iso = iso_curve_of(k, self, param, iso_parameter, true)?;
 
         // when asked - build OptUVIsoCurve (status ignored)
         let uv_iso_curve = if want_uv_iso_curve {
-            ignored(iso.create_uv_iso_line())?
+            ignored(iso.create_uv_iso_line_with_nurb(k))?
         } else {
             None
         };
@@ -2051,7 +2053,7 @@ pub fn sp_local_solve<O: SolutionObject>(
                         kk == 0,
                     )
                 };
-                let iso = Curve::from(iso_curve_of(surface, dir, param_value, from_left)?);
+                let iso = Curve::from(iso_curve_of(k, surface, dir, param_value, from_left)?);
 
                 // for NonDegenerate Boundary Curves
                 if !iso.is_degenerate(k, EFF_ZERO, None)? {

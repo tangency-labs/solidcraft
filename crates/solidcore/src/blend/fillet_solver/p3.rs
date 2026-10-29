@@ -482,7 +482,7 @@ impl FilletSolver {
 
                 // Create iso-curve (the iso parameter is not clamped to the natural
                 // domain of the surface)
-                let iso_curve = iso_curve_of(ops.solver(), si, surf_param, iso_param)?;
+                let iso_curve = iso_curve_of(k, ops.solver(), si, surf_param, iso_param)?;
 
                 // get OtherOffsetSurface/IsoParameterCurve intersection
                 let other = Surface::from(
@@ -533,7 +533,7 @@ impl FilletSolver {
                         ops.solver_mut().set_surfaces_to_zero_offset()?;
 
                         // the iso curve points at the (now zero-offset) surface
-                        let iso_curve = iso_curve_of(ops.solver(), si, surf_param, iso_param)?;
+                        let iso_curve = iso_curve_of(k, ops.solver(), si, surf_param, iso_param)?;
                         let plane_orig = iso_curve.evaluate_point(k, t_found);
                         ops.solver_mut()
                             .keep_extension_of_iso_copy(si, &iso_curve)?;
@@ -706,6 +706,7 @@ impl FilletSolver {
 /// `SmIsoCurve(*GetSurface(lSurfIndex), eSurfParam, dIsoParam, TRUE, FALSE)` on a copy
 /// of the solver's offset surface.
 fn iso_curve_of(
+    k: &Kernel,
     solver: &FilletSolver,
     surf_index: usize,
     surf_param: SurfParamType,
@@ -718,6 +719,7 @@ fn iso_curve_of(
         .surface
         .clone();
     Ok(Curve::from(IsoCurve::from_surface(
+        k,
         Surface::from(s),
         surf_param,
         iso_param,

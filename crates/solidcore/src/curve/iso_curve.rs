@@ -9,7 +9,7 @@
 //! | [`IsoCurve::new`], [`IsoCurve::from_surface`] | `SmIsoCurve(crSurface, eSurfParam, dIsoParameter, bFromLeft, bClampInput)` |
 //! | `Drop` (implicit)                      | `~SmIsoCurve`                                  |
 //! | [`IsoCurve::approx_eq`]                | `SmIsoCurve::operator==`                       |
-//! | [`IsoCurve::create_uv_iso_line`]       | `SmIsoCurve::CreateUVIsoLine`                  |
+//! | [`IsoCurve::create_uv_iso_line`], [`IsoCurve::create_uv_iso_line_with_nurb`] | `SmIsoCurve::CreateUVIsoLine` |
 //! | [`IsoCurve::calculate_continuities`]   | `SmIsoCurve::CalculateContinuities`            |
 //! | [`IsoCurve::natural_interval`]         | `SmIsoCurve::GetNaturalInterval`               |
 //! | [`IsoCurve::evaluate`]                 | `SmIsoCurve::Evaluate`                         |
@@ -26,6 +26,14 @@
 //!   This extension is needed by `surface.surface_point_solve_p3` boundary solves.
 //!   The general constructor bounds owned geometry nesting to `MAX_GEOMETRY_NESTING` before
 //!   any recursive surface dispatch; the B-spline constructor cannot nest.
+//! - **Natural domain.** Upstream's `GetNaturalUVDomain` makes a lazy analytic's
+//!   missing NURB first. [`IsoCurve::from_surface`] (its clamp) and
+//!   [`IsoCurve::create_uv_iso_line_with_nurb`] read the domain so, with the kernel.
+//!   [`IsoCurve::new`] holds a B-spline, which is never lazy. The kernel-free
+//!   [`IsoCurve::create_uv_iso_line`] and [`IsoCurve::natural_interval`] read the
+//!   surface's domain as far as it is built
+//!   ([`Surface::natural_uv_domain_if_built`]), which is the same for every surface
+//!   but a lazy analytic.
 //! - **Equality.** `operator==` accepts identical surface pointers before comparing the
 //!   surfaces (`SmBSplineSurface::operator==`); the port always compares the surfaces
 //!   ([`Surface::approx_eq`]; comparison failures propagate).
@@ -53,6 +61,7 @@ use crate::curve::curve::Curve;
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::Point2;
@@ -118,22 +127,23 @@ impl IsoCurve {
         from_left: bool,
         clamp_input: bool,
     ) -> Self {
-        Self::from_surface_inner(
-            Surface::from(surface),
-            surf_param,
-            iso_parameter,
-            from_left,
-            clamp_input,
-        )
+        let surface = Surface::from(surface);
+        // (a B-spline is never lazy: its domain is built)
+        let clamp_domain = clamp_input.then(|| surface.natural_uv_domain_if_built());
+        Self::from_surface_inner(surface, surf_param, iso_parameter, from_left, clamp_domain)
     }
 
     /// The implicit iso curve of any concrete surface, preserving its evaluation dispatch.
+    /// With `clamp_input` the iso parameter is clamped to the surface's natural domain
+    /// (`GetNaturalUVDomain`, which makes a lazy analytic's missing NURB).
     ///
     /// # Errors
     ///
     /// `InvalidInput` when `surface` nests deeper than
-    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1.
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING) - 1;
+    /// [`SolidError::Unported`] from making the NURB.
     pub fn from_surface(
+        k: &Kernel,
         surface: Surface,
         surf_param: SurfParamType,
         iso_parameter: f64,
@@ -141,21 +151,28 @@ impl IsoCurve {
         clamp_input: bool,
     ) -> Result<Self> {
         surface.check_evaluation_copy_depth(1)?;
+        let clamp_domain = if clamp_input {
+            Some(surface.natural_uv_domain_with_nurb(k)?)
+        } else {
+            None
+        };
         Ok(Self::from_surface_inner(
             surface,
             surf_param,
             iso_parameter,
             from_left,
-            clamp_input,
+            clamp_domain,
         ))
     }
 
+    /// The constructor body; `clamp_domain` is the surface's natural domain when the
+    /// input is clamped (`bClampInput`).
     fn from_surface_inner(
         surface: Surface,
         surf_param: SurfParamType,
         iso_parameter: f64,
         from_left: bool,
-        clamp_input: bool,
+        clamp_domain: Option<Extent2d>,
     ) -> Self {
         let mut c = Self {
             surface: Box::new(surface),
@@ -163,12 +180,10 @@ impl IsoCurve {
             iso_parameter,
             from_left,
         };
-        if !clamp_input {
+        let Some(uv_domain) = clamp_domain else {
             return c;
-        }
+        };
 
-        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
-        let uv_domain = c.surface.natural_uv_domain_if_built();
         if surf_param == SurfParamType::U {
             if uv_domain.min().x > iso_parameter {
                 c.iso_parameter = uv_domain.min().x;
@@ -232,16 +247,32 @@ impl IsoCurve {
     }
 
     /// The UV line of the `C_uv(s)` part of `S(C_uv(s))` (`CreateUVIsoLine`), a 2D
-    /// `SmLine`.
+    /// `SmLine`, over the surface's domain as far as it is built
+    /// ([`Surface::natural_uv_domain_if_built`]: an iso curve of a lazy analytic uses
+    /// [`IsoCurve::create_uv_iso_line_with_nurb`]).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] unless the curve is constant `u` (upstream tests
     /// `SM_SP_U` twice).
     pub fn create_uv_iso_line(&self) -> Result<Curve> {
+        self.uv_iso_line(self.surface.natural_uv_domain_if_built())
+    }
+
+    /// [`IsoCurve::create_uv_iso_line`] over the surface's natural domain as upstream
+    /// reads it (`GetNaturalUVDomain`, which makes a lazy analytic's missing NURB).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`IsoCurve::create_uv_iso_line`]; [`SolidError::Unported`] from making
+    /// the NURB.
+    pub fn create_uv_iso_line_with_nurb(&self, k: &Kernel) -> Result<Curve> {
+        self.uv_iso_line(self.surface.natural_uv_domain_with_nurb(k)?)
+    }
+
+    /// The body of `CreateUVIsoLine` over the surface's natural `domain`.
+    fn uv_iso_line(&self, domain: Extent2d) -> Result<Curve> {
         // locals
-        // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
-        let domain = self.surface.natural_uv_domain_if_built();
         let mut line_point = Point3::new(domain.min().x, domain.min().y, 0.0);
         let (line_ivl, line_unit_vec) = if self.surf_param == SurfParamType::U {
             line_point.x = self.iso_parameter;
@@ -404,6 +435,7 @@ impl IsoCurve {
 
         // load obj
         Self::from_surface(
+            k,
             surface,
             // a code outside the enum behaves as a non-`SM_SP_U` value everywhere here
             SurfParamType::from_code(surf_param).unwrap_or(SurfParamType::Unknown),
