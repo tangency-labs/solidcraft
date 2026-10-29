@@ -1,0 +1,29 @@
+{
+ "sources": [],
+ "what": "a hinged arm moved off its joint, then joint.solve",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); the hinge at 0 places Arm at (20,0,5); joint.solve re-places it there after a move of (0,0,50)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 10,
+   "json": {
+    "conflicts": [],
+    "errors": []
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}
