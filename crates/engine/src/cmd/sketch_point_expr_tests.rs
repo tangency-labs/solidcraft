@@ -129,3 +129,61 @@ fn a_point_its_parameters_put_out_of_range_is_an_error_not_a_crash() {
     let r = Session::new(solidcraft_doc::Document::from_json(&hostile).unwrap());
     assert!(r.model.results.iter().any(|r| r.error.is_some()), "the sketch reports the bad point");
 }
+
+/// A line from a point placed by parameters, tangent to an arc at the arc's start (the end they
+/// share): the two tangents from the point are mirror images, and the sketch was drawn on one.
+/// Moved by its parameters, the line stays on the side it was drawn on (the arc's centre keeps
+/// its side of the line; the other tangent solves every constraint too), and where the move can
+/// only end on the other side (a straight walk there runs through the arc) it says so.
+#[test]
+fn a_tangent_from_a_placed_point_keeps_the_side_it_was_drawn_on() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "ex", "expression": "30 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "ey", "expression": "-12 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = 7.5_f64;
+    let e0 = Vec2::new(30.0, -12.0);
+    // The tangent point left of origin -> E, and the arc on from it.
+    let a = e0.y.atan2(e0.x) + (r / e0.len()).acos();
+    let at = |t: f64| [r * t.cos(), r * t.sin()];
+    run(&mut s, "sketch.point", json!({"point": ["ex", "ey"], "id": "e"}));
+    run(&mut s, "sketch.point", json!({"point": [0, 0], "id": "o"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["o"], "fixed": true}));
+    run(&mut s, "sketch.point", json!({"point": at(a + 1.2), "id": "q"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entities": ["q"], "fixed": true}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": at(a), "end": at(a + 1.2), "through": at(a + 0.6), "connect": false, "id": "round"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "round.center", "b": "o"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "round.end", "b": "q"}));
+    run(&mut s, "sketch.line", json!({"points": ["e", "round.start"], "ids": ["flank"]}));
+    run(&mut s, "sketch.constraint.tangent", json!({"a": "flank", "b": "round"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    let f = s.doc.find_feature("S").unwrap().id;
+    // +1: the tangent point left of origin -> E, as drawn.
+    let side = |s: &Session| {
+        let st = s.model.state();
+        let sk = &st.sketch(f).unwrap().sketch;
+        let Some(solidcraft_sketch::CurveKind::Line { a, b }) = sk.curves.iter().find(|c| c.id == "flank").map(|c| &c.kind) else {
+            panic!("no flank")
+        };
+        let (e, t) = (sk.points[*a].pos, sk.points[*b].pos);
+        (e.cross(t).signum(), (t.len() - r).abs() < 1e-6)
+    };
+    assert_eq!(side(&s), (1.0, true));
+    let mut flipped = Vec::new();
+    for (x, y) in [(12, -25), (-20, -18), (-28, 5), (-10, 26), (18, 22), (30, -12), (-30, -2), (25, 15), (5, -30), (-25, 20), (30, -12)] {
+        run(&mut s, "parameters.change", json!({"name": "ex", "expression": format!("{x} mm")}));
+        run(&mut s, "parameters.change", json!({"name": "ey", "expression": format!("{y} mm")}));
+        let (sd, on) = side(&s);
+        let warned = s.model.results.iter().any(|r| r.warning.is_some() || r.error.is_some());
+        assert!(on || warned, "({x}, {y}): the tangent point is off the arc without a word");
+        if sd != 1.0 && !warned {
+            flipped.push((x, y));
+        }
+        // Reached in a straight walk that stays clear of the arc: kept, and nothing to say.
+        if [(12, -25), (-20, -18), (5, -30), (25, 15)].contains(&(x, y)) {
+            assert!(sd == 1.0 && !warned, "({x}, {y}): side {sd}, warned {warned}");
+        }
+    }
+    assert!(flipped.is_empty(), "the tangent went over to the other side, without a word, at {flipped:?}");
+}

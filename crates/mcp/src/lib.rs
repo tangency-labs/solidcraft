@@ -25,7 +25,8 @@ use solidcraft_engine::io::vfs::{self, PathScope};
 /// The folders `solidcraft-cli mcp` lets its agent read, write and delete in by default: the
 /// app's own recovery folder, this server's private scratch folder (screenshots), and each
 /// `allowed` folder (`--allow-path`). The open design's folder joins on every call when it is a
-/// safe one (`vfs::design_folder_refusal`; the server adds it). The working folder, the home
+/// safe one (`vfs::design_folder_refusal`; the server adds it), and stays for the rest of the run
+/// like the folder of every design a call opens or saves (#7181). The working folder, the home
 /// folder and anything above it never count by themselves, so `~/.ssh`, `~/.bashrc` and other
 /// dotfiles are out of reach unless a folder holding them is allowed on purpose.
 pub fn agent_scope(allowed: impl IntoIterator<Item = PathBuf>) -> PathScope {

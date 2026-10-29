@@ -110,6 +110,15 @@ pub fn bounds(s: &Session) -> Aabb3 {
     bounds_by(s, |body| body.mesh_bounds())
 }
 
+/// The Point Clouds folder's tree key (`Visibility::hidden_folders`).
+pub const POINT_CLOUDS_FOLDER: &str = "c0/point_clouds";
+
+/// The point clouds drawn now: shown, in a shown folder.
+pub fn shown_point_clouds(s: &Session) -> impl Iterator<Item = &solidcraft_doc::point_cloud::PointCloud> {
+    let folder = !s.folder_hidden(POINT_CLOUDS_FOLDER);
+    s.doc.point_clouds.iter().filter(move |c| folder && c.visible)
+}
+
 /// [`bounds`] without meshing anything: a body not meshed yet counts with its outline
 /// ([`solidcraft_kernel::Body::outline_bounds`]), which a face curving out past all of its edges
 /// can exceed. Frames a design whose bodies are still being meshed.
@@ -134,6 +143,11 @@ fn bounds_by(s: &Session, of: impl Fn(&solidcraft_doc::ModelBody) -> Aabb3) -> A
             for p in &w.pts {
                 b.add(*p);
             }
+        }
+    }
+    for c in shown_point_clouds(s) {
+        for p in c.world_corners().into_iter().flatten() {
+            b.add(p);
         }
     }
     b
@@ -848,10 +862,15 @@ fn sketch_component_visible(s: &Session, id: u64) -> bool {
     s.occurrence_visible(&path)
 }
 
-/// Is a sketch used by a later feature?
+/// Is a sketch used by a later feature? A sheet metal base or contour flange uses its sketch as
+/// an Extrude does: shown, its lines lie on the sheet's edges and take the clicks meant for
+/// them (#6804).
 pub fn sketch_consumed(s: &Session, id: u64) -> bool {
     use solidcraft_doc::FeatureKind;
-    s.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if sketch == id))
+    s.doc.features.iter().any(|f| {
+        matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } if sketch == id)
+    })
 }
 
 /// Camera framing the model (iso view).

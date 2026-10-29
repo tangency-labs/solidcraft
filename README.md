@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icons/app/linux/exports/hicolor/256x256/apps/ai.storyteller.solidcraft.png" width="96" height="96" alt="SolidCraft" />
+  <img src="assets/icons/app/linux/exports/hicolor/256x256/apps/io.tangencylabs.solidcraft.png" width="96" height="96" alt="SolidCraft" />
 </p>
 
 <h1 align="center">SolidCraft</h1>
@@ -58,9 +58,9 @@
 - **Web:** [try it in your browser][web-app], no install.
 
 ARM64 and 32-bit builds, portable zip, .deb, .rpm, Flatpak and the other packages are on the
-[downloads page](docs/downloads.md). The downloads aren't signed yet: on Windows choose
-**More info**, then **Run anyway** in SmartScreen; on macOS right-click SolidCraft and choose **Open**
-the first time. On SolidCraft 0.11 to 0.14, download once by hand; see
+[downloads page](docs/downloads.md). The macOS app is signed with a Developer ID and notarized by
+Apple. The Windows downloads aren't signed yet: choose **More info**, then **Run anyway** in
+SmartScreen. On SolidCraft 0.11 to 0.14, download once by hand; see
 [updating](https://docs.solidcraft.io/guide/updates.html#updating-from-011-to-014).
 
 ## What works
@@ -74,7 +74,7 @@ other is a tracked bug.
 - **Parameters and configurations** with unit-aware expressions.
 - **Assemblies** with joints, motion studies, contact sets, interference and mass properties.
 - **Sheet metal** with flanges, hems, fold/unfold and flat patterns, and plastic enclosure features.
-- **Files:** STEP, IGES, 3MF, STL, OBJ and glTF in and out where supported, URDF export, `.solidcraft` designs.
+- **Files:** STEP, IGES, 3MF, STL, OBJ and glTF in and out where supported, URDF export, `.sc` designs (`.solidcraft` files from earlier releases still open).
 - **Desktop app, browser app, headless CLI and MCP server**, all running the same commands.
 
 The full list is in [docs/capabilities.md](docs/capabilities.md) and [docs/features.md](docs/features.md);
@@ -120,6 +120,12 @@ the clean-room and licence rules, and where help is wanted most. Open work is in
 
 SolidCraft's continuous integration runs on [Blacksmith](https://www.blacksmith.sh), which
 sponsors its CI minutes.
+
+## Disclaimer
+
+The files in this repository are provided as is, without warranty, liability or indemnity, and
+Tangency Labs and the contributors accept no responsibility for any harmful or unlawful use of
+them: read [DISCLAIMER.md](DISCLAIMER.md).
 
 ## Licence
 

@@ -52,6 +52,21 @@ impl Sketch {
         })
     }
 
+    /// An arc an offset made round its source's own centre (#6569). Its ends are held while the
+    /// sketch solves, so its own condition, both ends as far from the centre, only tied that
+    /// centre (and the source with it) to the middle of the held ends: a slot offset by 1 mm
+    /// could no longer be moved by the dimension that places it. The source's own arc keeps the
+    /// centre, and the offset is rebuilt from the source after the solve.
+    pub(crate) fn offset_arc_follows_source(&self, curve: usize) -> bool {
+        if self.offsets.is_empty() {
+            return false;
+        }
+        let Some(arc) = self.curves.get(curve) else { return false };
+        let CurveKind::Arc { c: centre, .. } = arc.kind else { return false };
+        let output = |id: &str| self.offsets.iter().any(|o| o.owns_output(id));
+        output(&arc.id) && self.curves.iter().enumerate().any(|(k, other)| k != curve && other.kind.uses(centre) && !output(&other.id))
+    }
+
     /// Endpoints of a normal-distance annotation, evaluated from its source curve.
     pub fn offset_dimension_points(&self, output: &str) -> Option<(Vec2, Vec2)> {
         let (source, forward, distance) = self

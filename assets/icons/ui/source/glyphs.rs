@@ -15,6 +15,17 @@ pub(crate) fn transport_glyph(p: &egui::Painter, c: egui::Pos2, what: &str, col:
         }
         "back" => tri(-1.0, 0.0),
         "forward" => tri(1.0, 0.0),
+        // Play History: larger than the step arrows so it doesn't read as Forward, and two bars
+        // while it plays.
+        "play" => {
+            let pts = vec![pos2(c.x - 4.5, c.y - 7.0), pos2(c.x + 6.5, c.y), pos2(c.x - 4.5, c.y + 7.0)];
+            p.add(egui::Shape::convex_polygon(pts, col, Stroke::NONE));
+        }
+        "pause" => {
+            for dx in [-3.0, 3.0] {
+                p.rect_filled(Rect::from_center_size(pos2(c.x + dx, c.y), vec2(3.0, 12.0)), 0.5, col);
+            }
+        }
         _ => {
             tri(1.0, -1.0);
             bar(5.0);

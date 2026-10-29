@@ -6,7 +6,7 @@
 
 use std::cell::RefCell;
 
-use egui::{Shape, Stroke};
+use egui::Stroke;
 use serde_json::json;
 use solidcraft_engine::geom::Vec2;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
@@ -246,7 +246,101 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = Tokens::get();
     if let (Some(a), Some(b)) = (to(i.guide.0), to(i.guide.1)) {
-        painter.add(Shape::dashed_line(&[a, b], Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+        painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+    }
+}
+
+/// A hovered centre or straight-edge midpoint. Transient, per viewport, never a constraint.
+#[derive(Default)]
+pub(crate) struct Tracking {
+    sketch: Option<u64>,
+    document: std::sync::Weak<solidcraft_engine::doc::Document>,
+    anchor: Option<String>,
+    pub(crate) guide: Option<(Vec2, Vec2)>,
+}
+
+impl Tracking {
+    fn reference(sk: &Sketch, index: usize) -> Option<Vec2> {
+        if !solidcraft_engine::view::sketch_curve_visible(sk, index) {
+            return None;
+        }
+        match sk.curves.get(index)?.kind {
+            CurveKind::Line { a, b } => Some((sk.point(a)? + sk.point(b)?) * 0.5),
+            CurveKind::Circle { .. } | CurveKind::Arc { .. } => sk.center(index),
+            _ => None,
+        }
+    }
+
+    fn update(&mut self, sk: &Sketch, plane: &solidcraft_engine::geom::Plane, proj: &Proj, cursor: egui::Pos2) {
+        self.guide = None;
+        let to = |p: Vec2| proj.to_screen(plane.to_world(p));
+        // Screen-space tolerances stay the same at any zoom; only visible references wake.
+        let mut nearest = 8.0;
+        for (index, curve) in sk.curves.iter().enumerate() {
+            let Some(p) = Self::reference(sk, index).and_then(to).filter(|p| proj.rect.contains(*p)) else { continue };
+            let distance = cursor.distance(p);
+            if distance < nearest {
+                nearest = distance;
+                self.anchor = Some(curve.id.clone());
+            }
+        }
+        let Some((anchor, origin)) = self.anchor.as_deref().and_then(|id| {
+            let anchor = Self::reference(sk, sk.curve_index(id)?)?;
+            Some((anchor, to(anchor)?))
+        }) else {
+            self.anchor = None;
+            return;
+        };
+        if !proj.rect.contains(origin) {
+            return;
+        }
+        let (ray, direction) = proj.ray(cursor);
+        let Some(world) = plane.intersect_ray(ray, direction) else { return };
+        let at = plane.to_local(world);
+        if !at.x.is_finite() || !at.y.is_finite() {
+            return;
+        }
+        // Finite guides connect the reference to the cursor's projection onto its axis.
+        // No model-space length cap: the viewport clips them, as it does other sketch guides.
+        let mut distance = 6.0;
+        for end in [Vec2::new(at.x, anchor.y), Vec2::new(anchor.x, at.y)] {
+            let Some(screen) = to(end) else { continue };
+            let off_axis = cursor.distance(screen);
+            if origin.distance(screen) > 8.0 && off_axis < distance {
+                distance = off_axis;
+                self.guide = Some((anchor, end));
+            }
+        }
+    }
+}
+
+/// Visual H/V tracking works before a tool's first click and while simply editing a sketch.
+/// Existing snaps, picks and constraints retain their behaviour.
+pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: &Proj, cursor: Option<egui::Pos2>) {
+    crate::scenario::publish_count("sketch_tracking_guides", 0.0);
+    let document = std::sync::Arc::downgrade(&app.session.doc);
+    let active = app.session.active_sketch;
+    let tracking = &mut app.viewport.tracking;
+    if tracking.sketch != active || !tracking.document.ptr_eq(&document) {
+        *tracking = Tracking { sketch: active, document, ..Default::default() };
+    }
+    let state = app.session.world_state();
+    let Some((ss, cursor)) = active
+        .and_then(|id| state.sketch(id))
+        .zip(cursor)
+        .filter(|_| app.preferences.sketch_tracking_guides && !crate::drag_snap::suppressed() && app.viewport.point_drag.is_none())
+    else {
+        *tracking = Tracking::default();
+        return;
+    };
+    tracking.update(&ss.sketch, &ss.plane, proj, cursor);
+    crate::scenario::publish_count("sketch_tracking_guides", usize::from(tracking.guide.is_some()) as f64);
+    if let Some((a, b)) = tracking.guide
+        && let (Some(a), Some(b)) = (proj.to_screen(ss.plane.to_world(a)), proj.to_screen(ss.plane.to_world(b)))
+    {
+        let tk = Tokens::get();
+        painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+        painter.circle_stroke(a, 4.0, Stroke::new(1.0, tk.rubber_band));
     }
 }
 
@@ -259,6 +353,44 @@ mod tests {
         let _ = s.add_line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 10.0), None, None, Some("l1"));
         let _ = s.add_circle(Vec2::new(30.0, 0.0), 5.0, None, Some("c1"));
         s
+    }
+
+    #[test]
+    fn tracking_has_pixel_tolerance_and_only_spans_reference_to_cursor() {
+        use solidcraft_engine::geom::Plane;
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.cam.yaw = 0.0;
+        app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        let mut sk = Sketch::new();
+        sk.add_circle(Vec2::new(-10.0, 3.0), 5.0, None, Some("c")).unwrap();
+        sk.add_line(Vec2::new(10.0, -20.0), Vec2::new(30.0, -20.0), None, None, Some("l")).unwrap();
+        for zoom in [60.0, 180.0] {
+            app.cam.distance = zoom;
+            let proj = crate::viewport::projection(&app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0)));
+            let to = |p: Vec2| proj.to_screen(Plane::XY.to_world(p)).unwrap();
+            let mut tracking = Tracking::default();
+            let centre = Vec2::new(-10.0, 3.0);
+            tracking.update(&sk, &Plane::XY, &proj, to(centre));
+            assert!(tracking.guide.is_none(), "no zero-length guide at the centre");
+            for end in [Vec2::new(35.0, 3.0), Vec2::new(-35.0, 3.0), Vec2::new(-10.0, 38.0), Vec2::new(-10.0, -38.0)] {
+                tracking.update(&sk, &Plane::XY, &proj, to(end));
+                let (a, b) = tracking.guide.expect("all four directions");
+                assert!(a.dist(centre) < 1e-4 && b.dist(end) < 1e-4);
+            }
+            let end = Vec2::new(35.0, 3.0);
+            tracking.update(&sk, &Plane::XY, &proj, to(end) + egui::vec2(0.0, 5.0));
+            assert!(tracking.guide.is_some(), "5 screen points from the axis");
+            tracking.update(&sk, &Plane::XY, &proj, to(end) + egui::vec2(0.0, 7.0));
+            assert!(tracking.guide.is_none(), "7 screen points from the axis");
+            let mid = Vec2::new(20.0, -20.0);
+            tracking.update(&sk, &Plane::XY, &proj, to(mid));
+            tracking.update(&sk, &Plane::XY, &proj, to(Vec2::new(20.0, 20.0)));
+            assert!(tracking.guide.unwrap().0.dist(mid) < 1e-8, "new MID replaces centre");
+            sk.curves.iter_mut().find(|c| c.id == "l").unwrap().id = "renamed".into();
+            tracking.update(&sk, &Plane::XY, &proj, to(Vec2::new(20.0, 20.0)));
+            assert!(tracking.guide.is_none(), "removed references cannot leave a stale guide");
+            sk.curves.iter_mut().find(|c| c.id == "renamed").unwrap().id = "l".into();
+        }
     }
 
     #[test]

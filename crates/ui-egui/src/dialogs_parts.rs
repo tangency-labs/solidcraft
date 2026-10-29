@@ -50,6 +50,16 @@ pub fn families(v: &Value) -> Vec<Family> {
         .collect()
 }
 
+/// A family's name in the user's language, by its id in the library: the library's own (English)
+/// name for a family the catalogs don't know.
+pub(crate) fn family_name(f: &Family) -> String {
+    let id = format!("parts.family.{}", f.id);
+    match crate::i18n::tr(&id) {
+        shown if shown == id => f.name.clone(),
+        shown => shown.to_string(),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Pt {
     pub family: usize,
@@ -98,6 +108,18 @@ pub fn insert_params(lib: &[Family], k: &Pt, hole: Option<&Sel>) -> Result<Value
     Ok(p)
 }
 
+/// Where the Length list opens for a size: the index of the length an insert of it gets when
+/// none is asked for, which `parts.library` reports beside the size's table values. The list
+/// carries no item of its own for it, so a size whose default is missing opens on the first.
+fn default_length(f: &Family, size: usize, lengths: &[f64]) -> usize {
+    f.sizes
+        .get(size)
+        .and_then(|(_, row)| row.get("default_length"))
+        .and_then(Value::as_f64)
+        .and_then(|d| lengths.iter().position(|l| (*l - d).abs() < 1e-9))
+        .unwrap_or(0)
+}
+
 /// A picture of the part alone.
 fn picture(p: &Value) -> Option<egui::ColorImage> {
     let mut s = Session::default();
@@ -129,7 +151,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
         return false;
     }
     let names: Vec<String> =
-        lib.iter().map(|f| if f.standard.is_empty() { f.name.clone() } else { format!("{} ({})", f.name, f.standard) }).collect();
+        lib.iter().map(|f| if f.standard.is_empty() { family_name(f) } else { format!("{} ({})", family_name(f), f.standard) }).collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     let before = k.family;
     choice_row(ui, "Type", "pt_family", &mut k.family, &refs);
@@ -139,18 +161,22 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     }
     let Some(f) = lib.get(k.family) else { return false };
     let sizes: Vec<&str> = f.sizes.iter().map(|s| s.0.as_str()).collect();
+    let was_size = k.size;
     choice_row(ui, "Size", "pt_size", &mut k.size, &sizes);
+    // Each size has a default length of its own, so a new size resolves the Length list again.
+    if k.size != was_size {
+        k.length = None;
+    }
     if let Some(ls) = &f.lengths {
-        let mut labels = vec!["Default".to_string()];
-        labels.extend(ls.iter().map(|l| crate::prefs::show_mm(app, *l, 1)));
+        let labels: Vec<String> = ls.iter().map(|l| crate::prefs::show_mm(app, *l, 1)).collect();
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let mut i = k.length.map_or(0, |x| x + 1);
+        let mut i = k.length.unwrap_or_else(|| default_length(f, k.size, ls));
         form_row(ui, "Length", |ui| {
             combo(ui, "pt_len", &refs, &mut i);
-            k.length = i.checked_sub(1);
+            k.length = Some(i);
         });
     }
-    text_row(ui, "Name", &mut k.name, "automatic");
+    text_row(ui, "Name", &mut k.name, crate::i18n::tr("parts.automatic_name"));
     // The part, and its table values.
     let key = (k.family, k.size, k.length);
     let tex_id = egui::Id::new("sc_part_picture");
@@ -178,8 +204,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pt, inputs: &[SelInpu
     if let Some((_, row)) = f.sizes.get(k.size)
         && let Some(o) = row.as_object()
     {
-        for (key, v) in o.iter().filter(|(key, _)| key.as_str() != "size") {
-            form_row(ui, &key.replace('_', " "), |ui| {
+        // `default_length` picks the Length list's opening value; it is not a dimension.
+        for (key, v) in o.iter().filter(|(key, _)| !matches!(key.as_str(), "size" | "default_length")) {
+            let label = dimension_label(key).map_or_else(|| key.replace('_', " "), str::to_string);
+            form_row(ui, &label, |ui| {
                 crate::ui_kit::text(
                     ui,
                     &v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_else(|| v.to_string()),
@@ -212,6 +240,27 @@ pub fn commands(app: &SolveApp, k: &Pt, inputs: &[SelInput]) -> Result<Vec<(Stri
     Ok(vec![(id.into(), p)])
 }
 
+/// The message a size's dimension is labelled with, by its key in the library: "Head height",
+/// not `head_height`. A key the library adds later shows as it is until it has one here.
+fn dimension_label(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "across_flats" => "parts.dimension.across_flats",
+        "bore" => "parts.dimension.bore",
+        "d" => "parts.dimension.d",
+        "head_diameter" => "parts.dimension.head_diameter",
+        "head_height" => "parts.dimension.head_height",
+        "height" => "parts.dimension.height",
+        "inner" => "parts.dimension.inner",
+        "outer" => "parts.dimension.outer",
+        "pitch" => "parts.dimension.pitch",
+        "socket" => "parts.dimension.socket",
+        "socket_depth" => "parts.dimension.socket_depth",
+        "thickness" => "parts.dimension.thickness",
+        "width" => "parts.dimension.width",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,7 +269,8 @@ mod tests {
     fn lib() -> Vec<Family> {
         families(&json!({"families": [
             {"family": "socket_head_cap_screw", "name": "Socket Head Cap Screw", "standard": "ISO 4762",
-             "sizes": [{"size": "M5", "head_diameter": 8.5}, {"size": "M6", "head_diameter": 10}], "lengths": [10, 16, 20]},
+             "sizes": [{"size": "M5", "head_diameter": 8.5, "default_length": 16},
+                       {"size": "M6", "head_diameter": 10, "default_length": 20}], "lengths": [10, 16, 20]},
             {"family": "bearing", "name": "Deep Groove Ball Bearing", "standard": "", "sizes": [{"size": "608", "bore": 8}], "lengths": null},
         ]}))
     }
@@ -232,6 +282,32 @@ mod tests {
         assert_eq!(l[0].sizes[1].0, "M6");
         assert_eq!(l[0].lengths.as_deref(), Some(&[10.0, 16.0, 20.0][..]));
         assert!(l[1].lengths.is_none());
+    }
+
+    /// The library's families are named in the user's language, and a family the catalogs
+    /// don't know keeps the library's name.
+    #[test]
+    fn family_names_follow_the_language() {
+        let l = families(&solidcraft_engine::Session::default().execute("parts.library", &json!({})).unwrap());
+        assert!(l.len() >= 7, "{}", l.len());
+        let _german = crate::i18n::scope("de");
+        for f in &l {
+            assert_ne!(family_name(f), f.name, "{}", f.id);
+        }
+        let unknown = Family { id: "spring".into(), name: "Spring".into(), standard: String::new(), sizes: vec![], lengths: None };
+        assert_eq!(family_name(&unknown), "Spring");
+    }
+
+    /// The Length list is lengths only: it opens on the size's default rather than on an item
+    /// called “Default”, and a size that reports none opens on the first length.
+    #[test]
+    fn the_length_list_opens_on_the_size_s_default() {
+        let l = lib();
+        let ls = l[0].lengths.clone().unwrap_or_default();
+        assert_eq!(default_length(&l[0], 0, &ls), 1, "M5 opens on 16");
+        assert_eq!(default_length(&l[0], 1, &ls), 2, "M6 opens on 20");
+        assert_eq!(default_length(&l[1], 0, &ls), 0, "a size without one opens on the first length");
+        assert_eq!(default_length(&l[0], 99, &ls), 0, "so does a size that is not there");
     }
 
     /// A hole pick seats the part (`at`); without one it goes to the origin along Z.
@@ -248,5 +324,25 @@ mod tests {
         assert_eq!(p["name"], "Front bearing");
         assert!(p.get("length").is_none());
         assert!(insert_params(&[], &k, None).is_err());
+    }
+
+    /// Every dimension the library gives for a size is labelled in words, in each family.
+    #[test]
+    fn every_library_dimension_has_a_label_in_words() {
+        let mut s = solidcraft_engine::Session::default();
+        let l = families(&s.execute("parts.library", &json!({})).unwrap());
+        assert!(l.len() >= 7, "{}", l.len());
+        for f in &l {
+            for (size, row) in &f.sizes {
+                for key in row.as_object().into_iter().flat_map(|o| o.keys()).filter(|k| !matches!(k.as_str(), "size" | "default_length")) {
+                    let label = dimension_label(key).map(crate::i18n::tr);
+                    assert!(
+                        label.is_some_and(|l| l.starts_with(char::is_uppercase) && !l.contains('_') && !l.starts_with("parts.")),
+                        "{} {size}: {key} is labelled {label:?}",
+                        f.name
+                    );
+                }
+            }
+        }
     }
 }

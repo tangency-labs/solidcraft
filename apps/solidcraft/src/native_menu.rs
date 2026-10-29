@@ -146,13 +146,18 @@ impl NativeMenu {
     }
 
     fn action_enabled(action: &FileAction, app: &SolveApp, ctx: &egui::Context) -> bool {
-        action.enabled(app)
-            || (matches!(action, FileAction::Undo | FileAction::Redo) && ctx.egui_wants_keyboard_input() && FileAction::Settings.enabled(app))
+        action.menu_enabled(app, ctx.egui_wants_keyboard_input())
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
         for (item, action) in &self.actions {
             let enabled = Self::action_enabled(action, app, ctx);
+            if item.is_enabled() != enabled {
+                item.set_enabled(enabled);
+            }
+        }
+        for (item, action) in &self.help_actions {
+            let enabled = solidcraft_ui_egui::help::available(app, action);
             if item.is_enabled() != enabled {
                 item.set_enabled(enabled);
             }

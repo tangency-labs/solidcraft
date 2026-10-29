@@ -165,6 +165,12 @@ fn admit_source_with_limits(
     if !request.camera.is_valid() {
         return Err(JobError::new(ErrorCode::InvalidRequest, "invalid image camera"));
     }
+    if request.studio_weights.is_some_and(|weights| weights.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))) {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "invalid studio visibility weights"));
+    }
+    if request.integrator == super::Integrator::Raytrace && request.studio_weights.is_some() {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "CPU ray tracing uses explicit lights rather than studio_weights"));
+    }
     if scene.meshes.len() > max_bodies {
         return Err(limit("too many product bodies"));
     }
@@ -658,7 +664,7 @@ impl ImageTask {
         }
         let triangle = self.triangle.as_mut().ok_or_else(|| invalid("missing raster triangle"))?;
         let eye = (self.request.camera.fov > 0.0).then(|| self.request.camera.eye());
-        raster_pixel(triangle, self.sw, self.back, eye, &mut self.pixels, &mut self.depth)?;
+        raster_pixel(triangle, self.sw, self.back, eye, self.request.studio_weights, &mut self.pixels, &mut self.depth)?;
         triangle.x += 1;
         if triangle.x > triangle.bounds[1] {
             triangle.x = triangle.bounds[0];
@@ -717,7 +723,16 @@ impl ImageTask {
     }
 }
 
-fn raster_pixel(t: &Triangle, width: usize, back: Vec3, eye: Option<Vec3>, pixels: &mut [[u8; 4]], depth: &mut [f32]) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn raster_pixel(
+    t: &Triangle,
+    width: usize,
+    back: Vec3,
+    eye: Option<Vec3>,
+    studio_weights: Option<[f64; 3]>,
+    pixels: &mut [[u8; 4]],
+    depth: &mut [f32],
+) -> Result<()> {
     let [a, b, c] = t.points;
     let (x, y) = (t.x as f64 + 0.5, t.y as f64 + 0.5);
     let w0 = ((b[0] - x) * (c[1] - y) - (b[1] - y) * (c[0] - x)) / t.area;
@@ -753,7 +768,13 @@ fn raster_pixel(t: &Triangle, width: usize, back: Vec3, eye: Option<Vec3>, pixel
     let colour = if let Some(surface) = t.surface {
         let world = t.world.iter().zip(weights).fold(Vec3::ZERO, |p, (v, w)| p + *v * (w / sum));
         let view = eye.map_or(back, |eye| eye - world);
-        let radiance = crate::studio::shade(surface, n, view).map_err(|e| invalid(&e.to_string()))?;
+        let radiance = crate::studio::shade_weighted(surface, n, view, studio_weights.unwrap_or([1.0; 3])).map_err(|e| invalid(&e.to_string()))?;
+        let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
+        [mapped.x, mapped.y, mapped.z]
+    } else if let Some(weights) = studio_weights {
+        let [r, g, b] = t.colour;
+        let surface = crate::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
+        let radiance = crate::studio::shade_weighted(surface, n, back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {

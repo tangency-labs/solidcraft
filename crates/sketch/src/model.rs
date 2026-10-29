@@ -1582,7 +1582,7 @@ impl Sketch {
                 if !(rho.is_finite() && *rho > 1e-6 && *rho < 1.0 - 1e-6) {
                     return Err(SketchError::Invalid("rho must be between 0 and 1".into()));
                 }
-                "k"
+                "n"
             }
         };
         let id = self.curve_id(id, prefix)?;
@@ -1603,9 +1603,50 @@ impl Sketch {
         let mut orphans: Vec<usize> = owned.into_iter().filter(|p| *p != 0 && !self.point_used_by_curve(*p)).collect();
         orphans.sort_unstable();
         orphans.dedup();
+        self.keep_ties_through(&orphans);
         self.remove_points(&orphans);
         self.prune_links();
         self.prune_patterns();
+    }
+
+    /// Points held together only through points about to go stay together: two rectangles'
+    /// corners made coincident with one arc end are tied to each other when a trim takes that
+    /// end away, instead of coming apart where they still meet.
+    fn keep_ties_through(&mut self, gone: &[usize]) {
+        if gone.is_empty() {
+            return;
+        }
+        let gone: std::collections::BTreeSet<usize> = gone.iter().copied().collect();
+        let n = self.points.len();
+        // Coincident groups with every point, and with the points that stay only.
+        let (mut all, mut kept): (Vec<usize>, Vec<usize>) = ((0..n).collect(), (0..n).collect());
+        for c in &self.constraints {
+            if let ConstraintKind::Coincident { p, q } = c.kind {
+                union(&mut all, p, q);
+                if !gone.contains(&p) && !gone.contains(&q) {
+                    union(&mut kept, p, q);
+                }
+            }
+        }
+        let mut first = std::collections::BTreeMap::<usize, usize>::new();
+        let mut ties = Vec::new();
+        for x in (0..n).filter(|x| !gone.contains(x)) {
+            let group = find(&mut all, x);
+            match first.get(&group).copied() {
+                None => {
+                    first.insert(group, x);
+                }
+                Some(f) if find(&mut kept, f) != find(&mut kept, x) => {
+                    union(&mut kept, f, x);
+                    ties.push((f, x));
+                }
+                Some(_) => {}
+            }
+        }
+        for (p, q) in ties {
+            // Only a full sketch refuses one more; the points then come apart as before.
+            let _ = self.add_constraint(ConstraintKind::Coincident { p, q }, None);
+        }
     }
 
     fn point_used_by_curve(&self, p: usize) -> bool {

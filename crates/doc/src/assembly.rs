@@ -124,6 +124,48 @@ fn identity() -> Mat {
     IDENTITY
 }
 
+/// How a component counts in the bill of materials of an assembly it is placed in. It is a part
+/// property (the `bom_type` key of the component's [`Metadata`](crate::Metadata)); a component
+/// without one is [`BomType::Normal`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BomType {
+    /// A row of its own; every occurrence adds to its quantity.
+    #[default]
+    Normal,
+    /// No row of its own: what it holds counts as if placed directly in its parent.
+    Phantom,
+    /// Shown, but counted nowhere, and nothing inside it is counted either.
+    Reference,
+    /// Bought: one row, with nothing inside it counted or listed.
+    Purchased,
+    /// Made as one item that doesn't come apart (a welded frame): one row in the assembly it is
+    /// placed in. What it holds is listed in its own bill of materials, and its purchased parts
+    /// also in the parts-only list of the assembly it is placed in.
+    Inseparable,
+}
+
+impl BomType {
+    /// Every type, in the order commands and documentation list them.
+    pub const ALL: [BomType; 5] = [BomType::Normal, BomType::Phantom, BomType::Reference, BomType::Purchased, BomType::Inseparable];
+
+    /// The word the design file and commands use.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BomType::Normal => "normal",
+            BomType::Phantom => "phantom",
+            BomType::Reference => "reference",
+            BomType::Purchased => "purchased",
+            BomType::Inseparable => "inseparable",
+        }
+    }
+
+    /// The type a word names, if it names one.
+    pub fn parse(word: &str) -> Option<BomType> {
+        BomType::ALL.into_iter().find(|t| t.as_str() == word)
+    }
+}
+
 /// How deep and how many placements [`Document::placements`] walks.
 pub const MAX_PLACEMENT_DEPTH: usize = 64;
 pub const MAX_PLACEMENTS: usize = 100_000;
@@ -150,10 +192,13 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
             map_plane_ref(m, base);
             map_geo_ref(m, point);
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, .. } => {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } => {
             map_plane_ref(m, base);
             *axis_origin = apply_point(m, *axis_origin);
             *axis_dir = apply_vector(m, *axis_dir);
+            if let Some(g) = line {
+                map_geo_ref(m, g);
+            }
         }
         // Named origin planes and construction planes are the component's own.
         PlaneRef::Origin { .. } | PlaneRef::Construction { .. } => {}
@@ -208,6 +253,14 @@ pub fn map_point_expr(m: &Mat, p: &mut crate::PointExpr) {
         }
         *out = e.into();
     }
+}
+
+/// Map a displacement given as length expressions, retaining its parameter dependencies.
+/// Unlike a point, a displacement is unaffected by the frame's translation.
+pub fn map_vector_expr(m: &Mat, v: &mut crate::PointExpr) {
+    let mut rotation = *m;
+    rotation[3] = [0.0, 0.0, 0.0, 1.0];
+    map_point_expr(&rotation, v);
 }
 
 impl FeatureKind {
@@ -269,6 +322,12 @@ impl Document {
         Some((c, m))
     }
 
+    /// World transform of one placement of `component`: the occurrence `path` from the root
+    /// (empty for the root itself). `None` when the path no longer leads to that component.
+    pub fn path_transform(&self, component: u64, path: &[u64]) -> Option<Mat> {
+        self.path_placement(path).and_then(|(c, m)| (c == component).then_some(m))
+    }
+
     /// Every placement of each component: (component, occurrence path ids, world transform).
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
@@ -304,9 +363,10 @@ impl Document {
     pub fn body_frames_with_source(&self, st: &crate::ModelState) -> Vec<(String, String, u64, Vec<u64>, Mat)> {
         let mut out = Vec::new();
         let owners = self.model_body_components(st);
+        let names = WorldNames::new(self, st);
         for (comp, path, m) in self.placements() {
             for (b, _) in st.bodies.iter().zip(&owners).filter(|(_, owner)| **owner == comp) {
-                let name = self.world_body_name(st, &b.name, comp, &path);
+                let name = names.name(&b.name, comp, &path);
                 let w = match self.model_body_offset(b) {
                     Some(o) => mat_mul(&m, o),
                     None => m,
@@ -319,38 +379,10 @@ impl Document {
 
     /// Computed placement name. Source names retain priority; ambiguous labels use full IDs.
     /// Resolves label ambiguity with bounded dynamic counts instead of expanding all placements.
+    /// To name many placed bodies, make one [`WorldNames`] and ask it for each.
     pub fn world_body_name(&self, st: &crate::ModelState, source: &str, component: u64, path: &[u64]) -> String {
-        if path == self.first_path(component) {
-            return source.to_string();
-        }
-        let names: Vec<&str> = path.iter().filter_map(|id| self.occurrences.iter().find(|o| o.id == *id)).map(|o| o.name.as_str()).collect();
-        let label = names.join("/");
-        let candidate = format!("{source} ({label})");
-        let mut counts = std::collections::BTreeMap::from([(0, 1usize)]);
-        for name in &names {
-            let mut next = std::collections::BTreeMap::<u64, usize>::new();
-            for o in self.occurrences.iter().filter(|o| o.name == *name) {
-                if let Some(count) = counts.get(&o.parent) {
-                    let n = next.entry(o.component).or_default();
-                    *n = (*n + count).min(2);
-                }
-            }
-            counts = next;
-        }
-        let ambiguous = counts.get(&component).copied().unwrap_or(0) > 1;
-        // Slash and reserved-marker names could alias concatenated labels or fallback keys.
-        let reserved =
-            self.occurrences.iter().any(|o| o.name.contains('/') || o.name.contains("@occ[")) || st.bodies.iter().any(|b| b.name.contains("@occ["));
-        if !ambiguous && !reserved && st.body(&candidate).is_none() {
-            return candidate;
-        }
-        let ids = path.iter().map(u64::to_string).collect::<Vec<_>>().join("/");
-        let encoded = serde_json::to_string(source).unwrap_or_else(|_| source.to_string());
-        let mut key = format!("{encoded}@occ[{ids}]");
-        while st.body(&key).is_some() {
-            key.push('#');
-        }
-        key
+        // One name: scanning the design once is cheaper than indexing it first.
+        placed_name(&Scan { doc: self, st }, source, component, path)
     }
 
     /// The occurrence path of a component's first placement.
@@ -386,12 +418,36 @@ impl Document {
         false
     }
 
+    /// Would putting a placement of `component` into `parent` put it inside itself: is `parent`
+    /// the component, or inside it, created in it or placed in it at any depth? Placements can sit
+    /// apart from where their component was created ([`Self::component_within`] follows only
+    /// that), so both are followed.
+    pub fn inside_component(&self, parent: u64, component: u64) -> bool {
+        if self.component_within(parent, component) {
+            return true;
+        }
+        let mut stack = vec![component];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) || seen.len() > MAX_PLACEMENTS {
+                continue;
+            }
+            for o in self.occurrences.iter().filter(|o| o.parent == c) {
+                if o.component == parent {
+                    return true;
+                }
+                stack.push(o.component);
+            }
+        }
+        false
+    }
+
     /// Add an occurrence of an existing component into `parent`.
     pub fn add_occurrence(&mut self, component: u64, parent: u64, transform: Mat) -> Result<u64> {
         if component == 0 || !self.components.iter().any(|c| c.id == component) {
             return Err(DocError::Unknown(format!("component {component}")));
         }
-        if self.component_within(parent, component) {
+        if self.inside_component(parent, component) {
             return Err(DocError::Invalid("a component can't contain itself".into()));
         }
         if self.occurrences.len() >= 100_000 {
@@ -404,4 +460,141 @@ impl Document {
         self.occurrences.push(crate::Occurrence { id, component, parent, name: format!("{cname}:{k}"), transform, grounded: false });
         Ok(id)
     }
+}
+
+/// The names of a design's placed bodies ([`Document::world_body_name`]), with what naming one
+/// needs from the whole design worked out once: the occurrences by id, by name and by
+/// component, the model's body names, and whether any name could alias a label or fallback key.
+/// Naming each body of an assembly is then as cheap as its occurrence path, not a scan of the
+/// whole design.
+pub struct WorldNames<'a> {
+    /// The first occurrence with each id.
+    by_id: std::collections::HashMap<u64, &'a crate::Occurrence>,
+    /// The occurrences with each name, in document order.
+    by_name: std::collections::HashMap<&'a str, Vec<&'a crate::Occurrence>>,
+    /// Each component's first occurrence ([`Document::occurrence_of`]).
+    first_of: std::collections::HashMap<u64, &'a crate::Occurrence>,
+    bodies: std::collections::HashSet<&'a str>,
+    /// Some occurrence or body name has a slash or the fallback key's marker.
+    reserved: bool,
+}
+
+impl<'a> WorldNames<'a> {
+    pub fn new(doc: &'a Document, st: &'a crate::ModelState) -> WorldNames<'a> {
+        let mut by_id = std::collections::HashMap::with_capacity(doc.occurrences.len());
+        let mut by_name: std::collections::HashMap<&str, Vec<&crate::Occurrence>> = std::collections::HashMap::new();
+        let mut first_of = std::collections::HashMap::new();
+        for o in &doc.occurrences {
+            by_id.entry(o.id).or_insert(o);
+            by_name.entry(o.name.as_str()).or_default().push(o);
+            first_of.entry(o.component).or_insert(o);
+        }
+        let reserved =
+            doc.occurrences.iter().any(|o| o.name.contains('/') || o.name.contains("@occ[")) || st.bodies.iter().any(|b| b.name.contains("@occ["));
+        let bodies = st.bodies.iter().map(|b| b.name.as_str()).collect();
+        WorldNames { by_id, by_name, first_of, bodies, reserved }
+    }
+
+    /// The world name of the body `source` of `component` placed through `path`.
+    pub fn name(&self, source: &str, component: u64, path: &[u64]) -> String {
+        placed_name(self, source, component, path)
+    }
+}
+
+/// What naming a placed body looks up in the design: by scanning it ([`Scan`], for one name)
+/// or through its indexes ([`WorldNames`], for many).
+trait NameLookup {
+    fn occurrence(&self, id: u64) -> Option<&crate::Occurrence>;
+    fn each_named(&self, name: &str, f: &mut dyn FnMut(&crate::Occurrence));
+    fn first_of(&self, component: u64) -> Option<&crate::Occurrence>;
+    fn reserved(&self) -> bool;
+    fn has_body(&self, name: &str) -> bool;
+}
+
+/// Lookups by scanning the design.
+struct Scan<'a> {
+    doc: &'a Document,
+    st: &'a crate::ModelState,
+}
+
+impl NameLookup for Scan<'_> {
+    fn occurrence(&self, id: u64) -> Option<&crate::Occurrence> {
+        self.doc.occurrences.iter().find(|o| o.id == id)
+    }
+    fn each_named(&self, name: &str, f: &mut dyn FnMut(&crate::Occurrence)) {
+        self.doc.occurrences.iter().filter(|o| o.name == name).for_each(f);
+    }
+    fn first_of(&self, component: u64) -> Option<&crate::Occurrence> {
+        self.doc.occurrence_of(component)
+    }
+    fn reserved(&self) -> bool {
+        self.doc.occurrences.iter().any(|o| o.name.contains('/') || o.name.contains("@occ["))
+            || self.st.bodies.iter().any(|b| b.name.contains("@occ["))
+    }
+    fn has_body(&self, name: &str) -> bool {
+        self.st.body(name).is_some()
+    }
+}
+
+impl NameLookup for WorldNames<'_> {
+    fn occurrence(&self, id: u64) -> Option<&crate::Occurrence> {
+        self.by_id.get(&id).copied()
+    }
+    fn each_named(&self, name: &str, f: &mut dyn FnMut(&crate::Occurrence)) {
+        self.by_name.get(name).into_iter().flatten().copied().for_each(f);
+    }
+    fn first_of(&self, component: u64) -> Option<&crate::Occurrence> {
+        self.first_of.get(&component).copied()
+    }
+    fn reserved(&self) -> bool {
+        self.reserved
+    }
+    fn has_body(&self, name: &str) -> bool {
+        self.bodies.contains(name)
+    }
+}
+
+/// The world name of the body `source` of `component` placed through `path` (see
+/// [`Document::world_body_name`]).
+fn placed_name(l: &impl NameLookup, source: &str, component: u64, path: &[u64]) -> String {
+    // The occurrence path of the component's first placement ([`Document::first_path`]).
+    let mut first = Vec::new();
+    let mut c = component;
+    for _ in 0..1000 {
+        if c == 0 {
+            break;
+        }
+        let Some(o) = l.first_of(c) else { break };
+        first.insert(0, o.id);
+        c = o.parent;
+    }
+    if path == first {
+        return source.to_string();
+    }
+    let names: Vec<&str> = path.iter().filter_map(|id| l.occurrence(*id)).map(|o| o.name.as_str()).collect();
+    let label = names.join("/");
+    let candidate = format!("{source} ({label})");
+    let mut counts = std::collections::BTreeMap::from([(0, 1usize)]);
+    for name in &names {
+        let mut next = std::collections::BTreeMap::<u64, usize>::new();
+        l.each_named(name, &mut |o| {
+            if let Some(count) = counts.get(&o.parent) {
+                let n = next.entry(o.component).or_default();
+                *n = (*n + count).min(2);
+            }
+        });
+        counts = next;
+    }
+    let ambiguous = counts.get(&component).copied().unwrap_or(0) > 1;
+    // Slash and reserved-marker names could alias concatenated labels or fallback keys.
+    if !ambiguous && !l.reserved() && !l.has_body(&candidate) {
+        return candidate;
+    }
+    let ids = path.iter().map(u64::to_string).collect::<Vec<_>>().join("/");
+    let encoded = serde_json::to_string(source).unwrap_or_else(|_| source.to_string());
+    let mut key = format!("{encoded}@occ[{ids}]");
+    while l.has_body(&key) {
+        key.push('#');
+    }
+    key
 }

@@ -7,6 +7,7 @@
 //! gitignored and attributed in ATTRIBUTION.md. The book itself is built by `mdbook` (a separate
 //! tool, not a dependency) into `target/book`.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::Value;
@@ -14,7 +15,7 @@ use serde_json::Value;
 use crate::cargo;
 
 /// Toolbar tabs in toolbar order; commands not on the toolbar come last, grouped by id prefix.
-const TABS: &[&str] = &["SOLID", "SKETCH", "SURFACE", "SHEET METAL", "PLASTIC"];
+const TABS: &[&str] = &["SOLID", "SKETCH", "SURFACE", "SHEET METAL", "WELDMENTS", "PLASTIC"];
 const SNAPSHOT_SIZE: (&str, &str) = ("960", "600");
 
 pub fn run(root: &Path, build: bool) -> Result<(), String> {
@@ -29,7 +30,9 @@ pub fn run(root: &Path, build: bool) -> Result<(), String> {
         return Err(format!("solidcraft-cli commands failed:\n{}", String::from_utf8_lossy(&out.stderr)));
     }
     let cmds: Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("commands JSON: {e}"))?;
-    let md = reference(cmds.as_array().map(Vec::as_slice).unwrap_or_default());
+    let cmds = cmds.as_array().ok_or("commands JSON must be an array")?;
+    let guides = load_guides(&book.join("command-guides"), cmds)?;
+    let md = reference(cmds, &guides);
     write(&book.join("src/reference/commands.md"), &md)?;
 
     let gen_dir = book.join("src/generated");
@@ -81,18 +84,28 @@ fn json_files(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
 }
 
 /// The command reference page: one section per toolbar tab and panel, in registry order.
-fn reference(cmds: &[Value]) -> String {
+fn reference(cmds: &[Value], guides: &BTreeMap<String, String>) -> String {
     let mut md = format!(
         "# Command reference\n\nBrowse commands by their names and default keyboard shortcuts. \
          Entries are organized by command group and panel; ungrouped commands follow by area.\n\n\
          For step-by-step instructions, start with the [window tour](../guide/ui-tour.md), \
          [sketching guide](../guide/sketching.md) or [solid features guide](../guide/features.md). \
-         Each entry links to a related guide when one is available.\n\n\
+         Practical command guides below explain prerequisites, options and examples in place. \
+         Entries without a practical guide link to an overview instead. \
+         [Contribute a guide, tip, demo or model link](../dev/command-guides.md).\n\n\
          Expand **Automation details** for the command ID and parameters used by scripts, the CLI and MCP. \
          In that notation, `?` marks an optional parameter and `expr` means a number or an expression with units.\n\n\
          This catalog is generated from `solidcraft-cli commands` by `cargo xtask book` ({} commands).\n",
         cmds.len()
     );
+    let practical: Vec<_> = cmds.iter().filter(|c| guides.contains_key(command_text(c, "id"))).collect();
+    if !practical.is_empty() {
+        md.push_str("\n**Practical guides:**\n\n");
+        for command in practical {
+            md.push_str(&format!("- {}\n", command_link(command)));
+        }
+        md.push('\n');
+    }
     let mut sections: Vec<(String, Vec<&Value>)> = Vec::new();
     for tab in TABS {
         for c in cmds.iter().filter(|c| command_text(c, "tab") == *tab) {
@@ -109,6 +122,7 @@ fn reference(cmds: &[Value]) -> String {
     for (title, list) in sections {
         md.push_str(&format!("\n## {}\n\n", prose(&title)));
         for c in list {
+            md.push_str(&format!("<a id=\"{}\"></a>\n\n", command_anchor(command_text(c, "id"))));
             let label = command_text(c, "label").trim();
             md.push_str(&format!("### {}\n\n", prose(if label.is_empty() { "Unnamed command" } else { label })));
             let tab = command_text(c, "tab").trim();
@@ -121,7 +135,10 @@ fn reference(cmds: &[Value]) -> String {
             if !shortcut.is_empty() {
                 md.push_str(&format!("**Default keyboard shortcut:** {}\n\n", prose(shortcut)));
             }
-            if let Some((label, path)) = guide(c) {
+            if let Some(text) = guides.get(command_text(c, "id")) {
+                md.push_str(text);
+                md.push_str("\n\n");
+            } else if let Some((label, path)) = guide(c) {
                 md.push_str(&format!("Read the [{label}]({path}).\n\n"));
             }
             md.push_str("<details>\n<summary>Automation details</summary>\n\n");
@@ -141,6 +158,73 @@ fn reference(cmds: &[Value]) -> String {
         }
     }
     md
+}
+
+/// Hand-authored Markdown is reviewed documentation, separate from registry metadata.
+/// Unknown filenames fail the build rather than silently dropping a renamed command's guide.
+fn load_guides(dir: &Path, cmds: &[Value]) -> Result<BTreeMap<String, String>, String> {
+    let mut guides = BTreeMap::new();
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("command guides {}: {e}", dir.display()))?;
+    for entry in entries {
+        let path = entry.map_err(|e| format!("command guides: {e}"))?.path();
+        if path.extension().is_none_or(|ext| ext != "md") {
+            continue;
+        }
+        let id = path.file_stem().and_then(|stem| stem.to_str()).ok_or_else(|| format!("invalid guide filename: {}", path.display()))?;
+        if !cmds.iter().any(|c| command_text(c, "id") == id) {
+            return Err(format!("command guide {}: unknown command `{id}`", path.display()));
+        }
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("command guide {}: {e}", path.display()))?;
+        if text.trim().is_empty() {
+            return Err(format!("command guide {} is empty", path.display()));
+        }
+        guides.insert(id.to_string(), command_links(&text, cmds).map_err(|e| format!("command guide {}: {e}", path.display()))?);
+    }
+    Ok(guides)
+}
+
+/// A small explicit book directive; ordinary Markdown links, tables and images stay untouched.
+fn command_links(text: &str, cmds: &[Value]) -> Result<String, String> {
+    let mut output = String::new();
+    let mut rest = text;
+    while let Some((before, link)) = rest.split_once("{{#command") {
+        output.push_str(before);
+        // Other directive names (for example {{#commands ...}}) are not ours.
+        if link.starts_with(|c: char| !c.is_whitespace() && c != '}') {
+            output.push_str("{{#command");
+            rest = link;
+            continue;
+        }
+        let (id, after) = link.split_once("}}").ok_or("unterminated {{#command ...}} link")?;
+        let id = id.trim();
+        if id.is_empty() {
+            return Err("missing command ID in {{#command ...}} link".into());
+        }
+        let command = cmds.iter().find(|c| command_text(c, "id") == id).ok_or_else(|| format!("unknown related command `{id}`"))?;
+        output.push_str(&command_link(command));
+        rest = after;
+    }
+    output.push_str(rest);
+    Ok(output)
+}
+
+fn command_link(command: &Value) -> String {
+    let id = command_text(command, "id");
+    let label = command_text(command, "label").trim();
+    format!("[{}](#{})", prose(if label.is_empty() { id } else { label }), command_anchor(id))
+}
+
+/// Keep dotted command IDs readable, with an unambiguous escape for any other input byte.
+fn command_anchor(id: &str) -> String {
+    let mut anchor = String::from("command-");
+    for byte in id.bytes() {
+        if byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_') {
+            anchor.push(char::from(byte));
+        } else {
+            anchor.push_str(&format!("-{byte:02x}"));
+        }
+    }
+    anchor
 }
 
 fn command_text<'a>(command: &'a Value, key: &str) -> &'a str {
@@ -197,6 +281,10 @@ fn add<'a>(sections: &mut Vec<(String, Vec<&'a Value>)>, title: String, c: &'a V
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn reference(cmds: &[Value]) -> String {
+        super::reference(cmds, &BTreeMap::new())
+    }
 
     fn decoded_code(text: &str) -> String {
         text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
@@ -287,5 +375,95 @@ mod tests {
             assert!(reference(&[cmd]).contains(&format!("Read the [{label}]({path}).")));
         }
         assert!(guide(&json!({"id":"future.unlisted","tab":"NEW WORKSPACE"})).is_none());
+    }
+
+    #[test]
+    fn practical_content_is_inline_and_automation_stays_complete() {
+        let cmds = [
+            json!({"id":"solid.extrude","label":"Extrude","tab":"SOLID","params":"distance: expr"}),
+            json!({"id":"sheet.hem","label":"Hem","tab":"SHEET METAL","params":"edges; length"}),
+        ];
+        let text = "Choose a closed region.\n\n#### Options\n\n| Choice | Effect |\n|---|---|\n| Distance | Size of the block |\n\nSee {{#command sheet.hem}}.\n\n![Example](../generated/bracket.png)";
+        let guides = BTreeMap::from([("solid.extrude".into(), command_links(text, &cmds).unwrap())]);
+        let md = super::reference(&cmds, &guides);
+        assert!(md.contains("<a id=\"command-solid.extrude\"></a>"));
+        assert!(md.contains("| Distance | Size of the block |"));
+        assert!(md.contains("See [Hem](#command-sheet.hem)."));
+        assert!(md.contains("![Example](../generated/bracket.png)"));
+        assert!(!md.contains("Read the [solid features guide]"), "an inline guide replaces the generic overview link");
+        assert!(md.contains("Read the [sheet metal guide]"), "unwritten entries keep their overview");
+        assert!(md.find("Choose a closed region.").unwrap() < md.find("<details>").unwrap());
+        assert!(md.contains("<code>solid.extrude</code>"));
+        assert!(md.contains("distance: expr</code></pre>"));
+        assert_eq!(md.matches("<details>").count(), 2);
+    }
+
+    #[test]
+    fn related_command_links_use_current_labels_and_refuse_stale_ids() {
+        let cmds = [json!({"id":"sheet.hem","label":"Hem [updated]"})];
+        assert_eq!(
+            command_links("Use {{#command sheet.hem}} twice: {{#command sheet.hem}}.", &cmds).unwrap(),
+            "Use [Hem \\[updated\\]](#command-sheet.hem) twice: [Hem \\[updated\\]](#command-sheet.hem)."
+        );
+        assert!(command_links("{{#command missing.tool}}", &cmds).unwrap_err().contains("unknown related command"));
+        assert!(command_links("{{#command sheet.hem", &cmds).unwrap_err().contains("unterminated"));
+        for unfinished in ["{{#command", "{{#command\t", "{{#command sheet.hem}"] {
+            assert!(command_links(unfinished, &cmds).unwrap_err().contains("unterminated"));
+        }
+        for empty in ["{{#command}}", "{{#command }}", "{{#command\n}}"] {
+            assert!(command_links(empty, &cmds).unwrap_err().contains("missing command ID"));
+        }
+        assert_eq!(command_links("{{#command\t sheet.hem\n}}", &cmds).unwrap(), "[Hem \\[updated\\]](#command-sheet.hem)");
+        let other = "{{#commands sheet.hem}} then {{#command sheet.hem}}";
+        assert_eq!(command_links(other, &cmds).unwrap(), "{{#commands sheet.hem}} then [Hem \\[updated\\]](#command-sheet.hem)");
+        let ordinary = "[Demo](https://example.com/demo) and `distance: 20`";
+        assert_eq!(command_links(ordinary, &cmds).unwrap(), ordinary);
+    }
+
+    #[test]
+    fn practical_index_lists_only_available_guides_with_current_safe_labels() {
+        let cmds = [
+            json!({"id":"solid.extrude","label":"Extrude [updated]"}),
+            json!({"id":"sheet.flange","label":"Flange"}),
+            json!({"id":"sheet.hem","label":" "}),
+        ];
+        let guides = BTreeMap::from([("sheet.hem".into(), "Hem guide".into()), ("solid.extrude".into(), "Extrude guide".into())]);
+        let md = super::reference(&cmds, &guides);
+        let index = md.split("**Practical guides:**\n\n").nth(1).unwrap().split("\n## ").next().unwrap();
+        assert_eq!(index, "- [Extrude \\[updated\\]](#command-solid.extrude)\n- [sheet.hem](#command-sheet.hem)\n\n");
+        assert!(!reference(&cmds).contains("**Practical guides:**"));
+    }
+
+    #[test]
+    fn stable_command_anchors_cannot_inject_markup_or_collide_with_escaped_ids() {
+        assert_eq!(command_anchor("solid.extrude"), "command-solid.extrude");
+        assert_eq!(command_anchor("odd.<tag>&id"), "command-odd.-3ctag-3e-26id");
+        assert_ne!(command_anchor("odd.<tag>"), command_anchor("odd.-3ctag-3e"));
+    }
+
+    #[test]
+    fn guide_files_load_without_a_hardcoded_list_and_refuse_orphaned_or_empty_entries() {
+        struct Fixture(std::path::PathBuf);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("solidcraft-book-guides-{}-{stamp}", std::process::id()));
+        // Atomic creation establishes ownership of this fresh directory before cleanup.
+        std::fs::create_dir(&path).unwrap();
+        let dir = Fixture(path);
+        let cmds = [json!({"id":"solid.extrude","label":"Extrude"}), json!({"id":"sheet.hem","label":"Hem"})];
+        let source = "A readable guide.\n\nSee {{#command sheet.hem}}.";
+        std::fs::write(dir.0.join("solid.extrude.md"), source).unwrap();
+        std::fs::write(dir.0.join("notes.txt"), "not a guide").unwrap();
+        let guides = load_guides(&dir.0, &cmds).unwrap();
+        assert_eq!(guides.len(), 1);
+        assert_eq!(guides.get("solid.extrude").unwrap(), "A readable guide.\n\nSee [Hem](#command-sheet.hem).");
+        assert!(load_guides(&dir.0, &[]).unwrap_err().contains("unknown command"));
+        assert!(load_guides(&dir.0.join("missing-directory"), &cmds).is_err());
+        std::fs::write(dir.0.join("solid.extrude.md"), " \n").unwrap();
+        assert!(load_guides(&dir.0, &cmds).unwrap_err().contains("is empty"));
     }
 }

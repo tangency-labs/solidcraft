@@ -157,7 +157,8 @@ pub struct Entry {
     /// ACP: what to start.
     pub argv: Vec<String>,
     pub version: Option<String>,
-    /// `signed_in`, `key`, `signed_out`, `unknown` (found agents), or empty.
+    /// `login_found`, `key`, `signed_out`, `unknown` from discovery, `signed_in` after a
+    /// successful connection, or empty for an untested custom agent.
     pub login: &'static str,
     /// Found installed (not added by the user).
     pub found: bool,
@@ -216,6 +217,13 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
         }));
     }
     out.extend(app.preferences.agents.iter().map(Entry::from_config));
+    for entry in &mut out {
+        if entry.kind == Kind::Acp
+            && let Some(signed_in) = app.agent_chat.login_results.get(&entry.id)
+        {
+            entry.login = if *signed_in { "signed_in" } else { "signed_out" };
+        }
+    }
     out
 }
 
@@ -261,6 +269,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
+    ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls

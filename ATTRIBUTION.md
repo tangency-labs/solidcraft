@@ -128,14 +128,14 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/fonts/ibm-plex-mono/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-sans/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/icons/app/linux/exports/hicolor/128x128/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/16x16/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/24x24/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/256x256/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/32x32/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/48x48/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/512x512/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
-| assets/icons/app/linux/exports/hicolor/64x64/apps/ai.storyteller.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/128x128/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/16x16/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/24x24/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/256x256/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/32x32/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/48x48/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/512x512/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
+| assets/icons/app/linux/exports/hicolor/64x64/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/shared/source/app_icon.rs | SolidCraft contributors | Original SolidCraft drawing code: the borderless mark, drawn from the faces and gradients of assets/icons/app/macos/source/SolidCraft.icon/Assets/03-solid-blue-cutout.svg | MIT OR Apache-2.0 |
 | assets/icons/app/shared/source/windows_ico.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/icons/app/windows/exports/solidcraft-executable.ico | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
@@ -171,9 +171,13 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/locales/zh.json | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
 | assets/locales/zh-TW.json | SolidCraft contributors | Original Traditional Chinese (Taiwan) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
 | assets/materials/library.rs | SolidCraft contributors | Original SolidCraft resource data or drawing code, collected without redesign | MIT OR Apache-2.0 |
-| assets/platforms/linux/ai.storyteller.solidcraft.desktop | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
-| assets/platforms/linux/ai.storyteller.solidcraft.metainfo.xml.in | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
-| assets/platforms/linux/ai.storyteller.solidcraft.mime.xml | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
+| assets/platforms/linux/io.tangencylabs.solidcraft.desktop | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
+| assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
+| assets/platforms/linux/io.tangencylabs.solidcraft.mime.xml | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
+| assets/platforms/macos/dmg/background.tiff | SolidCraft contributors | original disk image window background (blueprint sheet: grid, double border, circles, centre lines, leader arrow, title block) drawn by assets/platforms/macos/dmg/make_background.py in IBM Plex Sans/Mono; 1x and 2x representations | MIT OR Apache-2.0 |
+| assets/platforms/macos/dmg/make_background.py | SolidCraft contributors | authoring script that draws the disk image background (Pillow); not part of any build | MIT OR Apache-2.0 |
+| assets/platforms/macos/dmg/layout.json | SolidCraft contributors | disk image window size, icon size and icon positions shared by the background script and settings.py | MIT OR Apache-2.0 |
+| assets/platforms/macos/dmg/settings.py | SolidCraft contributors | dmgbuild settings (MIT, https://github.com/dmgbuild/dmgbuild) for the SolidCraft disk image; original settings, no dmgbuild code copied | MIT OR Apache-2.0 |
 | assets/platforms/macos/Info.plist.in | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/macos/README.txt | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
 | assets/platforms/windows/solidcraft.en-us.wxl | PhotoCraft / SolidCraft contributors | PhotoCraft packaging templates (https://github.com/storytold/photocraft), adapted for SolidCraft | Apache-2.0 |
@@ -288,6 +292,53 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/icons/ui/design/svg/model/colored_components_off.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/combine.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/component.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+
+### Render workspace icon drafts
+
+Original SolidCraft drawings, Open for owner review; no runtime assignments.
+
+| File | Author | Source | Licence |
+|---|---|---|---|
+| assets/icons/ui/design/svg/model/render_all_shots.svg | SolidCraft contributors | original Camera icon master (64 grid): stacked camera bodies with a lower-right play badge | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_appearance.svg | SolidCraft contributors | original Looks icon master (64 grid): shaded look sphere on the top corner of an accent-shaded cube | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_aspect_frame.svg | SolidCraft contributors | original Camera icon master (64 grid): wide rounded frame with two opposite corner brackets | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_backdrop.svg | SolidCraft contributors | original Studio icon master (64 grid): grey cube in front of a tall upright accent panel | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_cancel.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round stop badge | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_check.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round check badge | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_compare.svg | SolidCraft contributors | original Output icon master (64 grid): two grey pictures split by a vertical slider with opposed arrows | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_copy_look.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere in a square frame offset from a second frame outline | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_execute.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a lower-right round play badge | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_export_image.svg | SolidCraft contributors | original Output icon master (64 grid): picture with a large outward diagonal arrow at the upper right | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_exposure.svg | SolidCraft contributors | original Camera icon master (64 grid): split light and accent disc with plus and minus marks | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_fit_product.svg | SolidCraft contributors | original Camera icon master (64 grid): grey cube inside four corner brackets | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_frame_guides.svg | SolidCraft contributors | original Camera icon master (64 grid): rounded frame with a rule-of-thirds grid and four accent nodes | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_from_material.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere struck through above a plain grey slab | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_ground.svg | SolidCraft contributors | original Studio icon master (64 grid): grey cube on a slab with an accent contact patch | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_lens.svg | SolidCraft contributors | original Camera icon master (64 grid): concentric lens rings around an accent centre | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_library.svg | SolidCraft contributors | original Studio icon master (64 grid): row of three look spheres, middle one accent, on a shelf bar | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_light_area.svg | SolidCraft contributors | original Lights icon master (64 grid): slanted flat panel above a dotted accent stem | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_light_by_highlight.svg | SolidCraft contributors | original Lights icon master (64 grid): shaded sphere with a ringed highlight target and dotted stem arriving from above | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_light_point.svg | SolidCraft contributors | original Lights icon master (64 grid): round source disc with centre dot above a dotted accent stem | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_light_spot.svg | SolidCraft contributors | original Lights icon master (64 grid): cone source with curved rim above a dotted accent stem | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_lighting_presets.svg | SolidCraft contributors | original Studio icon master (64 grid): two stacked cards, the front one holding a light bulb | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_output_size.svg | SolidCraft contributors | original Output icon master (64 grid): picture frame with a diagonal double-headed dimension arrow | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_paint.svg | SolidCraft contributors | original Looks icon master (64 grid): flat brush with an accent tip, light ferrule and slate handle | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_pick_up.svg | SolidCraft contributors | original Looks icon master (64 grid): eyedropper with a grey bulb, slate crossbar and accent sampling tip | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_quality.svg | SolidCraft contributors | original Output icon master (64 grid): three rising bars, the tallest in accent | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_replace_all.svg | SolidCraft contributors | original Looks icon master (64 grid): grey sample sphere with an arrow to an accent sphere beside a second one | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_results.svg | SolidCraft contributors | original Output icon master (64 grid): stack of two pictures, the front one showing a landscape | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_same_look.svg | SolidCraft contributors | original Looks icon master (64 grid): look sphere and three cubes, the two matching cubes ringed | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_shot.svg | SolidCraft contributors | original Camera icon master (64 grid): camera body with a lower-right plus badge | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_shots_strip.svg | SolidCraft contributors | original Camera icon master (64 grid): strip of three small frames, the middle one in accent | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_solo_light.svg | SolidCraft contributors | original Lights icon master (64 grid): point source and dotted stem inside four corner focus brackets | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_sun.svg | SolidCraft contributors | original Lights icon master (64 grid): source disc with eight short radial rays | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_transparent_background.svg | SolidCraft contributors | original Output icon master (64 grid): grey cube on a checker tile | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_update_shot.svg | SolidCraft contributors | original Camera icon master (64 grid): camera body with a lower-right refresh badge | MIT OR Apache-2.0 |
+
+### UI icon masters (continued)
+
+| File | Author | Source | Licence |
+|---|---|---|---|
 | assets/icons/ui/design/svg/model/compute.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/configuration_table.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/conic.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
@@ -377,6 +428,21 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/icons/ui/design/svg/flat/shield.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/status_recovery.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/frame_member.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/render_environment.svg | SolidCraft contributors | original Studio icon master (64 grid): dome with a grey cube inside | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_shaded.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_wireframe.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_hidden_edges.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/style_translucent.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_faces_edges.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_bodies.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_features.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_parts.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_components.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/select_sketch.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/display.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/grid.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/ground_shadow.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/ambient_occlusion.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/placeholder.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/plane.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/plane_angle.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
@@ -519,6 +585,30 @@ Editable drawing code, native projects and shipped exports are collected under `
 | docs/book/src/og.png | SolidCraft contributors | copy of assets/branding/web/source/og.png staged by cargo xtask book (gitignored) | MIT OR Apache-2.0 |
 | docs/sponsors/blacksmith-ci-powered.png | Blacksmith (blacksmith.sh) | "CI powered by Blacksmith" sponsor banner supplied by Blacksmith for the sponsorship credit; used only to credit the sponsor, not part of the application | © Blacksmith, used with permission |
 | assets/icons/ui/design/svg/model/path_flange.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| docs/book/src/generated/hem.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/hem.json`; gitignored), original sheet metal demonstration | MIT OR Apache-2.0 |
+| docs/book/scripts/hem.json | SolidCraft contributors | original parametric recipe for an 80 × 50 mm sheet with an 8 mm returned edge, authored for the command guide | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/clay.json | SolidCraft contributors | original SolidCraft theme file (Clay, light): warm paper palette chosen for SolidCraft | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/clay-dark.json | SolidCraft contributors | original SolidCraft theme file (Clay Dark): warm charcoal palette chosen for SolidCraft | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/cone.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| assets/locales/ar.json | Abdullah (A-AL-ANAZI) | Original Arabic translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/he.json | SolidCraft contributors | Original Hebrew translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/cga.json | SolidCraft contributors | original SolidCraft theme file using the 16 colours of the IBM Color Graphics Adapter (black, cyan, magenta, and white of its high-intensity palette 1 for the interface) | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/1-bit.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/1-bit-dark.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
+| `assets/locales/pending/navbar-customisation.json` | SolidCraft contributors | Original navigation bar editor translations | MIT OR Apache-2.0 |
+| `assets/locales/pending/navbar-slots.json` | SolidCraft contributors | Original navigation slot translations | MIT OR Apache-2.0 |
+| assets/locales/bs.json | Tarik Sijercic (tsijercic1) | Original Bosnian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/hr.json | Tarik Sijercic (tsijercic1) | Original Croatian translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/locales/sr.json | Tarik Sijercic (tsijercic1) | Original Serbian (ekavian, Cyrillic) translation of SolidCraft's English catalog; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/finish_edit.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
+| `assets/locales/pending/sketch-tracking-guides.json` | SolidCraft contributors | Original alignment-guide preference labels and help text | MIT OR Apache-2.0 |
+| assets/locales/pending/point-clouds.json | SolidCraft contributors | Original point-cloud UI strings and translations | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/feature_group.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/mesh_body.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/timeline_play.svg | SolidCraft contributors | Original history playback icon; canonical grey_cube base and original action cue | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/timeline_stop.svg | SolidCraft contributors | Original history playback icon; canonical grey_cube base and original action cue | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/flat/status_pin.svg | SolidCraft contributors | Original analytic pin icon for persistent viewport results | MIT OR Apache-2.0 |
+| assets/locales/pending/render-wear.json | SolidCraft contributors | Original UI labels and translations | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

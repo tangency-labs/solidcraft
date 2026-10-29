@@ -168,13 +168,8 @@ fn tangent_chains_follow_smooth_edges() {
     assert_eq!(seam.tangent_chain(0, 5f64.to_radians()), vec![0]);
 }
 
-/// #3745: the tangent chain of a long helix (a thread's crest, in many edge pieces) is found
-/// without scanning every edge for every edge of it: hovering a threaded part's edge looked for
-/// its rim this way, and took seconds inside the frame. Every piece joins, in edge order, and
-/// a mesh of 3 000 pieces takes well under a frame.
-#[test]
-fn a_long_helical_tangent_chain_is_found_quickly() {
-    let pieces = 3_000usize;
+/// A helix of `pieces` edge pieces (a thread's crest), each five points long.
+fn helix(pieces: usize) -> Mesh {
     let at = |t: f64| Vec3::new(4.0 * t.cos(), 4.0 * t.sin(), 0.2 * t);
     let step = 0.05;
     let mut m = Mesh::default();
@@ -185,13 +180,78 @@ fn a_long_helical_tangent_chain_is_found_quickly() {
     }
     // The mesh's points (its size sets the join tolerance).
     m.positions = m.edges.iter().flatten().copied().collect();
+    m
+}
+
+/// The tangent chain of a helix of `pieces` pieces: every piece of it joins, and how long finding
+/// the chain took. The mesh is built before the clock starts.
+fn helix_chain(pieces: usize) -> std::time::Duration {
+    let m = helix(pieces);
     let began = std::time::Instant::now();
     let chain = m.tangent_chain(pieces / 2, 2f64.to_radians());
-    let ms = began.elapsed().as_secs_f64() * 1000.0;
+    let took = began.elapsed();
     let mut sorted = chain.clone();
     sorted.sort_unstable();
     assert_eq!(sorted, (0..pieces).collect::<Vec<_>>(), "every piece of the helix is in the chain");
-    assert!(ms < 200.0, "{ms:.1} ms for {pieces} pieces");
+    took
+}
+
+/// Whether a job four times the size took at most about twice linear: `pair` times the small job,
+/// then the big one. Linear is 4x, the quadratic that the bug cost 16x or more, so eight times the
+/// small time is the limit. The load of the other test binaries can rise between the two runs, so a
+/// pair that misses is measured again, up to three times. Load only ever slows a run, so each size
+/// keeps its fastest time and the ratio is taken of those: a retry cannot pass a regression on a
+/// small run that a spike happened to slow, once an earlier small run was fast.
+///
+/// `slack` is the room the noise of a busy machine gets, on top of the ratio.
+fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration), slack: std::time::Duration) -> Result<(), String> {
+    let limit = |small: f64| 8.0 * small + slack.as_secs_f64();
+    let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
+    let mut runs = Vec::new();
+    for _ in 0..3 {
+        let (s, b) = pair();
+        small = small.min(s.as_secs_f64());
+        big = big.min(b.as_secs_f64());
+        runs.push(format!("{s:?} then {b:?}"));
+        if big < limit(small) {
+            return Ok(());
+        }
+    }
+    Err(format!("{}; fastest {small:.3} s and {big:.3} s, limit {:.3} s", runs.join(", "), limit(small)))
+}
+
+#[test]
+fn scales_linearly_keeps_each_sizes_fastest_run() {
+    let pairs = |p: Vec<(u64, u64)>| {
+        let mut p = p.into_iter().map(|(s, b)| (std::time::Duration::from_millis(s), std::time::Duration::from_millis(b)));
+        move || p.next().unwrap_or((std::time::Duration::from_secs(1), std::time::Duration::from_secs(1)))
+    };
+    let slack = std::time::Duration::from_millis(0);
+    // Linear: four times the work, four times the time.
+    assert!(scales_linearly(pairs(vec![(5, 20)]), slack).is_ok());
+    // A big run slowed by load, then a quiet pair.
+    assert!(scales_linearly(pairs(vec![(5, 80), (5, 20)]), slack).is_ok());
+    // A quadratic cost (16x) whose later small runs a spike slowed: the fast first one still counts.
+    let r = scales_linearly(pairs(vec![(5, 80), (15, 80), (15, 80)]), slack);
+    assert!(r.as_ref().is_err_and(|e| e.contains("fastest 0.005 s and 0.080 s, limit 0.040 s")), "{r:?}");
+}
+
+/// #3745: the tangent chain of a long helix (a thread's crest, in many edge pieces) is found
+/// without scanning every edge for every edge of it: hovering a threaded part's edge looked for
+/// its rim this way, and took seconds inside the frame. Every piece joins, in edge order.
+///
+/// A ratio and not a limit: a test must not depend on wall-clock timing (CONTRIBUTING.md), the
+/// machine is busy. Four times the pieces must not cost sixteen times the time.
+#[test]
+fn a_long_helical_tangent_chain_is_found_quickly() {
+    /// The room the noise of a run on a busy machine gets, on top of the ratio: the chain of 750
+    /// pieces takes a fraction of a second, so this is the noise of one run and not a change of
+    /// scale.
+    const SLACK: std::time::Duration = std::time::Duration::from_millis(20);
+    let pieces = 3_000usize;
+    if let Err(missed) = scales_linearly(|| (helix_chain(pieces / 4), helix_chain(pieces)), SLACK) {
+        panic!("{pieces} pieces took {missed}");
+    }
 }
 
 #[test]
@@ -786,4 +846,49 @@ fn a_box_from_points_holds_them_and_grows() {
     let both = b.intersection(&b.inflated(1.0).intersection(&Aabb3 { min: Vec3::new(0.0, 1.0, 4.0), max: Vec3::new(9.0, 9.0, 9.0) }));
     assert_eq!((both.min, both.max), (Vec3::new(0.0, 1.0, 4.0), Vec3::new(1.0, 2.0, 5.0)));
     assert!(b.intersection(&far).is_empty());
+}
+
+/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
+/// points moved, its length scales, and an arc stays an arc turning the same way.
+#[test]
+fn a_similarity_moves_each_kind_of_segment_exactly() {
+    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+    let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];
+    for (i, q) in p.iter_mut().take(6).enumerate() {
+        *q = Vec2::new(i as f64, (i * i) as f64 * 0.3);
+    }
+    let segments = [
+        Seg2::Line { a: Vec2::new(1.0, 2.0), b: Vec2::new(4.0, -1.0) },
+        Seg2::Arc { center: Vec2::new(2.0, 1.0), radius: 3.0, start: 0.4, sweep: -2.1 },
+        Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1.0, 2.0), p2: Vec2::new(3.0, 2.0), p3: Vec2::new(4.0, 0.0) },
+        Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w: std::f64::consts::FRAC_1_SQRT_2 },
+        Seg2::Bezier { n: 5, p },
+    ];
+    for seg in segments {
+        let moved = seg.similar(&m);
+        for i in 0..=8 {
+            let t = f64::from(i) / 8.0;
+            assert!((moved.point_at(t) - m.apply(seg.point_at(t))).len() < 1e-9, "{seg:?} at {t}");
+        }
+        assert!((moved.length() - seg.length() * m.scale()).abs() < 1e-9 * seg.length().max(1.0), "{seg:?}");
+        assert_eq!(std::mem::discriminant(&moved), std::mem::discriminant(&seg));
+    }
+    // An arc keeps its sweep: the turning direction survives a similarity.
+    let arc = Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start: 0.0, sweep: -1.0 };
+    assert!(matches!(arc.similar(&m), Seg2::Arc { sweep, .. } if sweep == -1.0));
+    // The identity changes nothing.
+    let identity = Similarity2::new(1.0, 0.0, Vec2::ZERO).unwrap();
+    for seg in segments {
+        assert_eq!(seg.similar(&identity), seg);
+    }
+    // A similarity scales by a finite number above 0, and turns and moves by finite ones.
+    for (scale, angle, shift) in [
+        (0.0, 0.0, Vec2::ZERO),
+        (-1.0, 0.0, Vec2::ZERO),
+        (f64::NAN, 0.0, Vec2::ZERO),
+        (1.0, f64::INFINITY, Vec2::ZERO),
+        (1.0, 0.0, Vec2::new(f64::NAN, 0.0)),
+    ] {
+        assert!(Similarity2::new(scale, angle, shift).is_none(), "{scale} {angle} {shift:?}");
+    }
 }

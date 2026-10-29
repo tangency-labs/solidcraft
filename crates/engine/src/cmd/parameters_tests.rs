@@ -753,3 +753,160 @@ fn flipped_offset_sketch_plane_follows_its_parameter() {
     run(&mut s, "parameters.change", json!({"name": "d", "expression": "50 mm"}));
     assert!((volume(&mut s) - 400.0 * 50.0).abs() < 1e-6, "{}", volume(&mut s));
 }
+
+/// A value typed as `name = expression` in any value input defines the user parameter `name`
+/// and leaves the input using it (#4071): a feature's distance, an angle, a count, a sheet metal
+/// rule and a canvas offset. The parameter takes the input's unit, the design's for a bare length.
+#[test]
+fn any_value_input_can_define_a_parameter() {
+    let mut s = Session::default();
+    block(&mut s);
+    let r = run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": "depth = 15", "operation": "new", "body_name": "Second"}));
+    assert_eq!(r["defined"], "depth", "{r}");
+    assert_eq!(r["definitions"], json!([{"name": "depth", "expression": "15", "unit": "mm"}]), "{r}");
+    let l = run(&mut s, "parameters.list", json!({}));
+    assert_eq!((row(&l, "depth")["source"].as_str(), row(&l, "depth")["expression"].as_str()), (Some("user"), Some("15")), "{l}");
+    // The input shows the name afterwards, and follows the parameter.
+    let input = l["parameters"].as_array().unwrap().iter().find(|r| r["feature"] == "Extrude2" && r["input"] == "Distance").unwrap().clone();
+    assert_eq!(input["expression"], "depth", "{input}");
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 10.0 + 40.0 * 30.0 * 15.0) < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "depth", "expression": "20 mm"}));
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 10.0 + 40.0 * 30.0 * 20.0) < 1e-9);
+    // One undo removes the feature and its parameter together.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.param("depth").is_none());
+    assert!(s.doc.features.iter().all(|f| f.name != "Extrude2"));
+    run(&mut s, "edit.redo", json!({}));
+    assert!(s.doc.param("depth").is_some());
+
+    // An angle input's parameter is in degrees; `#name` works as in a dimension.
+    let r = run(&mut s, "solid.extrude", json!({"sketch": "Base", "distance": 5, "taper": "#draft = 2", "operation": "new"}));
+    assert_eq!(r["definitions"][0], json!({"name": "draft", "expression": "2", "unit": "deg"}), "{r}");
+
+    // Sheet metal rules and a canvas offset take one too.
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel", "thickness": "gauge = 2", "active": true}));
+    assert_eq!((s.doc.sheet.rules[0].thickness.as_str(), s.doc.param("gauge").map(|p| p.expr.as_str())), ("gauge", Some("2")));
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "offset": "lift = 15"}));
+    match &s.doc.canvases[0].plane {
+        solidcraft_doc::PlaneRef::Offset { distance, .. } => assert_eq!(distance.as_ref(), "lift"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(s.doc.param("lift").map(|p| (p.expr.as_str(), p.unit.as_str())), Some(("15", "mm")));
+}
+
+/// In an inch design a bare number defines a parameter in inches, as the bare value would read;
+/// a value with a unit keeps it.
+#[test]
+fn a_defined_length_takes_the_design_unit() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    let r = run(&mut s, "solid.box", json!({"length": "l = 2", "width": "w = 25.4 mm", "height": 1}));
+    assert_eq!(
+        r["definitions"],
+        json!([{"name": "l", "expression": "2 in", "unit": "in"}, {"name": "w", "expression": "25.4 mm", "unit": "in"}]),
+        "{r}"
+    );
+    assert!(rel(volume(&mut s), 50.8 * 25.4 * 25.4) < 1e-9);
+}
+
+/// A definition that cannot be made fails the command and leaves the design as it was: a taken,
+/// reserved or malformed name, no value, a value that names itself, two different values for one
+/// name, and a parameter's or configuration cell's own expression.
+#[test]
+fn a_refused_definition_changes_nothing() {
+    let mut s = Session::default();
+    block(&mut s);
+    let undo = s.undo.len();
+    let features = s.doc.features.len();
+    let refused = [
+        (json!({"distance": "len = 5"}), "there is already a parameter `len`: type `len` to use it"),
+        (json!({"distance": "mm = 5"}), "`mm` is a unit name"),
+        (json!({"distance": "pi = 5"}), "`pi` is a constant"),
+        (json!({"distance": "w ="}), "`w =` needs a value after the `=`"),
+        (json!({"distance": "w = "}), "needs a value"),
+        (json!({"distance": "w = w + 1"}), "w"),
+        (json!({"distance": "w = = 3"}), "unexpected `=`"),
+        (json!({"distance": "= 5 ="}), ""),
+        (json!({"distance": "w = 5", "distance2": "w = 6"}), "`w` is defined twice"),
+    ];
+    for (p, message) in refused {
+        let mut q = json!({"sketch": "Base", "operation": "new"});
+        for (k, v) in p.as_object().unwrap() {
+            q[k] = v.clone();
+        }
+        let e = err(&mut s, "solid.extrude", q.clone());
+        assert!(e.contains(message), "{q}: {e}");
+        assert_eq!((s.undo.len(), s.doc.features.len()), (undo, features), "{q}: a refused definition changed the design");
+        assert!(s.doc.param("w").is_none(), "{q}");
+    }
+    // The same definition twice is one parameter.
+    let r = run(&mut s, "solid.extrude", json!({"sketch": "Base", "operation": "new", "distance": "w = 5", "distance2": "w = 5"}));
+    assert_eq!(r["definitions"].as_array().map(Vec::len), Some(1), "{r}");
+    run(&mut s, "edit.undo", json!({}));
+    // A parameter's own expression or a configuration cell defines nothing.
+    let e = err(&mut s, "parameters.add", json!({"name": "a", "expression": "b = 5"}));
+    assert!(e.contains("cannot define another parameter `b`"), "{e}");
+    assert!(s.doc.param("a").is_none() && s.doc.param("b").is_none());
+    let e = err(&mut s, "parameters.change", json!({"changes": {"len": "b = 5"}}));
+    assert!(e.contains("change it on its own to rename it"), "{e}");
+    // Text that only looks like a definition, where no value is read, is left alone.
+    let r = run(&mut s, "parameters.add", json!({"name": "label", "expression": "a = b", "unit": "text"}));
+    assert!(r.get("defined").is_none(), "{r}");
+}
+
+/// Changing a parameter to `name = expression` names it (#4071): the dimension's or feature
+/// input's own parameter is renamed, references follow, and it takes the expression; no other
+/// parameter is made. One undo takes both back.
+#[test]
+fn changing_a_parameter_to_a_definition_renames_it() {
+    let mut s = Session::default();
+    block(&mut s);
+    let l = run(&mut s, "parameters.list", json!({"filter": "feature"}));
+    let d = l["parameters"].as_array().unwrap().iter().find(|r| r["input"] == "Distance").unwrap()["name"].as_str().unwrap().to_string();
+    let count = run(&mut s, "parameters.list", json!({}))["count"].clone();
+    let r = run(&mut s, "parameters.change", json!({"name": d, "expression": "height = 12"}));
+    assert_eq!((r["name"].as_str(), r["renamed"]["from"].as_str()), (Some("height"), Some(d.as_str())), "{r}");
+    assert_eq!(expr_of(&mut s, "height"), "12");
+    assert!(rel(volume(&mut s), 40.0 * 30.0 * 12.0) < 1e-9);
+    assert_eq!(run(&mut s, "parameters.list", json!({}))["count"], count, "no extra parameter");
+    // A dimension's parameter too; whatever refers to it follows.
+    let width =
+        s.doc.sketch(s.doc.features[0].id).unwrap().constraints.iter().find_map(|c| c.param.clone().filter(|p| expr_of_now(&s, p) == "40")).unwrap();
+    run(&mut s, "solid.box", json!({"length": width.clone(), "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    run(&mut s, "parameters.change", json!({"name": width, "expression": "wide = 50"}));
+    assert_eq!(expr_of(&mut s, "wide"), "50");
+    assert!(rel(volume(&mut s), 50.0 * 30.0 * 12.0 + 50.0 * 25.0) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.param("wide").is_none());
+    assert_eq!(expr_of_now(&s, &width), "40");
+    // Its own name is just a change; a taken name is refused.
+    run(&mut s, "parameters.change", json!({"name": "height", "expression": "height = 14"}));
+    assert_eq!(expr_of(&mut s, "height"), "14");
+    let e = err(&mut s, "parameters.change", json!({"name": "height", "expression": "len = 3"}));
+    assert!(e.contains("there is already a parameter `len`"), "{e}");
+    let e = err(&mut s, "parameters.change", json!({"name": "height", "new_name": "h", "expression": "x = 3"}));
+    assert!(e.contains("not both"), "{e}");
+}
+
+fn expr_of_now(s: &Session, name: &str) -> String {
+    s.doc.param(name).map(|p| p.expr.clone()).unwrap_or_default()
+}
+
+/// A dimension made as `w = 20` shows `w`; typing `w = 30` over it sets `w` rather than being
+/// refused as a taken name (#4071).
+#[test]
+fn a_definition_of_the_parameter_a_value_names_changes_it() {
+    let mut s = Session::default();
+    block(&mut s);
+    run(&mut s, "solid.box", json!({"length": "w = 20", "width": 5, "height": 5, "corner": [100, 0, 0]}));
+    let l = run(&mut s, "parameters.list", json!({"filter": "feature"}));
+    let d = l["parameters"].as_array().unwrap().iter().find(|r| r["expression"] == "w").unwrap()["name"].as_str().unwrap().to_string();
+    let r = run(&mut s, "parameters.change", json!({"name": d, "expression": "w = 30"}));
+    assert_eq!((r["name"].as_str(), r["changed_through"].as_str()), (Some("w"), Some(d.as_str())), "{r}");
+    assert_eq!((expr_of(&mut s, "w"), expr_of(&mut s, &d)), ("30".to_string(), "w".to_string()));
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "q = w * 2", "kind": "length"}));
+    assert_eq!((r["ok"].as_bool(), r["value"].as_f64(), r["defines"].as_str()), (Some(true), Some(60.0), Some("q")), "{r}");
+}

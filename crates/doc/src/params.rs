@@ -225,6 +225,12 @@ impl Document {
     /// A typed length that is a bare number means the design's units: it gets that unit written
     /// in (feature inputs are stored in mm otherwise). Anything else is returned unchanged.
     pub fn with_design_unit(&self, e: &str, kind: Kind) -> String {
+        // A definition's value reads as the value would (#4071): `w = 2` is `w = 2 in`.
+        if let Some((name, rhs)) = expr::definition(e)
+            && expr::is_bare_number(rhs)
+        {
+            return format!("{name} = {}", self.with_design_unit(rhs, kind));
+        }
         let u = self.units.trim();
         let bare = expr::is_bare_number(e);
         if kind == Kind::Length && bare && !u.is_empty() && u != "mm" && expr::unit_info(u).is_some_and(|(k, _)| k == Kind::Length) {
@@ -232,6 +238,22 @@ impl Document {
         } else {
             e.to_string()
         }
+    }
+
+    /// A measured length (mm) written as a value in the design's units, with its unit: `1 in`
+    /// for 25.4 mm in an inch design. Kept to the micrometre, as a millimetre value would be, so
+    /// a dimension that restates the geometry moves nothing. Returns (unit, expression).
+    pub fn design_length(&self, mm: f64) -> (String, String) {
+        let u = self.units.trim();
+        let per_unit = match expr::unit_info(u) {
+            Some((Kind::Length, s)) if u != "mm" && s.is_finite() && s > 0.0 => s,
+            _ => return ("mm".into(), format!("{} mm", (mm * 1e6).round() / 1e6)),
+        };
+        let decimals = (-(1e-6 / per_unit).log10()).ceil().clamp(0.0, 12.0) as usize;
+        let text = format!("{:.*}", decimals, mm / per_unit);
+        let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.') } else { &text };
+        let text = if text == "-0" { "0" } else { text };
+        (u.into(), format!("{text} {u}"))
     }
 
     /// Every length input of every feature as the geometry reads it (mm; a unit-less result is
@@ -1087,4 +1109,44 @@ pub(crate) fn numbers_after<'a>(base: &str, names: impl Iterator<Item = &'a str>
         .filter(|digits| !digits.is_empty() && !digits.starts_with('0') && digits.bytes().all(|b| b.is_ascii_digit()))
         .filter_map(|digits| digits.parse().ok())
         .collect()
+}
+
+#[cfg(test)]
+mod design_length_tests {
+    use crate::Document;
+
+    fn written(units: &str, mm: f64) -> (String, String) {
+        let mut doc = Document::new("Units");
+        doc.units = units.into();
+        doc.design_length(mm)
+    }
+
+    #[test]
+    fn a_measured_length_is_written_in_the_design_units() {
+        let w = |u: &str, e: &str| (u.to_string(), e.to_string());
+        assert_eq!(written("in", 25.4), w("in", "1 in"));
+        assert_eq!(written("in", 12.7), w("in", "0.5 in"));
+        assert_eq!(written("in", 10.0), w("in", "0.39370079 in"));
+        assert_eq!(written("cm", 12.34), w("cm", "1.234 cm"));
+        assert_eq!(written("mm", 12.3456789), w("mm", "12.345679 mm"));
+        assert_eq!(written("in", -25.4), w("in", "-1 in"));
+        assert_eq!(written("in", -1e-12), w("in", "0 in"));
+        // Unknown or non-length units keep millimetres.
+        assert_eq!(written("parsec", 5.0), w("mm", "5 mm"));
+        assert_eq!(written("deg", 5.0), w("mm", "5 mm"));
+        assert_eq!(written("", 5.0), w("mm", "5 mm"));
+    }
+
+    #[test]
+    fn the_written_value_reads_back_within_a_micrometre() {
+        for units in ["mm", "cm", "m", "in", "ft"] {
+            let mut doc = Document::new("Units");
+            doc.units = units.into();
+            for mm in [0.001, 1.0, 12.345_678_9, 25.4, 999.999, 12_345.678] {
+                let (_, e) = doc.design_length(mm);
+                let back = doc.eval(&e, crate::expr::Kind::Length).unwrap();
+                assert!((back - mm).abs() <= 1e-6, "{units} {mm}: {e} reads {back}");
+            }
+        }
+    }
 }

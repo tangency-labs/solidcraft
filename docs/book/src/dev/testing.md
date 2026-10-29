@@ -66,7 +66,12 @@ so in the PR.
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
 with doc tests alongside. Arguments after `--` go to each test binary, for example
 `cargo xtask test -- shell`. To run the test binaries sequentially instead, use
-`cargo test --workspace --profile ci`.
+`cargo test --workspace --profile ci`. On a loaded machine set `SOLIDCRAFT_TEST_JOBS=N` to
+bound how many test binaries and side commands run at once; each binary then gets
+`RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / N)` so the binaries in flight
+share the machine instead of each defaulting to one worker per CPU. Setting
+`RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` yourself overrides that split, and leaving
+`SOLIDCRAFT_TEST_JOBS` unset keeps the original all-at-once behaviour.
 
 ## Test-level scheduling for full local CI
 

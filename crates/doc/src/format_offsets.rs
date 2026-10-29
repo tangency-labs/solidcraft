@@ -49,32 +49,35 @@ fn validate_whole_reference(value: &Value) -> Result<()> {
             if total > 20_000 {
                 return Err(invalid());
             }
-            let mut previous = None;
-            // Bound each raw ID before any owned allocation. Require canonical order.
+            // Bound each raw ID before any owned allocation. A loop is a set of curves: its
+            // written order (any start, either direction) carries no meaning, so it is made
+            // canonical here instead of refusing the design (#6499).
+            let mut ids = Vec::with_capacity(values.len());
             for value in values {
-                let current = id(value)?;
-                if previous.is_some_and(|previous| previous >= current) {
-                    return Err(invalid());
-                }
-                previous = Some(current);
+                ids.push(id(value)?.to_owned());
             }
-            values.iter().map(|value| Ok(id(value)?.to_owned())).collect()
+            ids.sort();
+            if ids.windows(2).any(|pair| pair[0] == pair[1]) {
+                return Err(invalid());
+            }
+            Ok(ids)
         };
         let outer = boundary(profile.get("outer").ok_or_else(invalid)?)?;
         let holes = profile.get("holes").and_then(Value::as_array).ok_or_else(invalid)?;
         if holes.len() > 128 {
             return Err(invalid());
         }
-        let mut sorted_holes = Vec::with_capacity(holes.len());
         let mut all: BTreeSet<_> = outer.iter().cloned().collect();
+        let mut canonical_holes = Vec::with_capacity(holes.len());
         for hole in holes {
             let hole = boundary(hole)?;
-            if sorted_holes.last().is_some_and(|previous| previous >= &hole) || hole.iter().any(|curve| !all.insert(curve.clone())) {
+            if hole.iter().any(|curve| !all.insert(curve.clone())) {
                 return Err(invalid());
             }
-            sorted_holes.push(hole);
+            canonical_holes.push(hole);
         }
-        if !identities.insert((outer, sorted_holes)) {
+        canonical_holes.sort();
+        if canonical_holes.windows(2).any(|pair| pair[0] == pair[1]) || !identities.insert((outer, canonical_holes)) {
             return Err(invalid());
         }
     }
@@ -262,19 +265,19 @@ mod tests {
     }
 
     #[test]
-    fn whole_boundaries_raw_identity_is_bounded_canonical_and_complete() {
+    fn whole_boundaries_raw_identity_is_bounded_unique_and_complete() {
         let good = json!({"type":"whole_boundaries","profiles":[{"outer":["s2"],"holes":[["s1"]]}]});
         assert!(matches!(whole_profile_selection_from_value(&good).unwrap(), ProfileSel::WholeBoundaries { profiles } if profiles.len() == 1));
         let malformed = [
             json!({"type":"whole_boundaries","profiles":[]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":[],"holes":[]}]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":["s1","s1"],"holes":[]}]}),
-            json!({"type":"whole_boundaries","profiles":[{"outer":["s2","s1"],"holes":[]}]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":["s1"],"holes":[["s1"]]}]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":["s2"],"holes":[["s1"],["s1"]]}]}),
-            json!({"type":"whole_boundaries","profiles":[{"outer":["s2"],"holes":[["s3"],["s1"]]}]}),
+            json!({"type":"whole_boundaries","profiles":[{"outer":["s2"],"holes":[["s3"],["s1"]]},{"outer":["s2"],"holes":[["s1"],["s3"]]}]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":["s2"],"holes":[],"extra":true}]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":["s2"],"holes":[]},{"outer":["s2"],"holes":[]}]}),
+            json!({"type":"whole_boundaries","profiles":[{"outer":["s1","s2"],"holes":[]},{"outer":["s2","s1"],"holes":[]}]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":["x".repeat(513)],"holes":[]}]}),
             json!({"type":"whole_boundaries","profiles":[{"outer":["a\nb"],"holes":[]}]}),
         ];
@@ -298,6 +301,33 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert!(whole_profile_selection_from_value(&json!({"type":"whole_boundaries","profiles":aggregate})).is_err());
+    }
+
+    #[test]
+    fn a_whole_boundary_loop_is_accepted_in_any_written_order() {
+        // Any start and either direction of one closed loop name the same region (#6499).
+        for curves in
+            [json!(["s1", "s2", "s3", "s4"]), json!(["s2", "s3", "s4", "s1"]), json!(["s4", "s3", "s2", "s1"]), json!(["s3", "s4", "s1", "s2"])]
+        {
+            let value = json!({"type":"whole_boundaries","profiles":[{"outer":curves,"holes":[]}]});
+            let Some(ProfileSel::WholeBoundaries { profiles }) = whole_profile_selection_from_value(&value).ok() else {
+                panic!("reversed loop {value} refused");
+            };
+            assert_eq!(profiles.first().map(|profile| profile.outer.clone()), Some(["s1", "s2", "s3", "s4"].map(str::to_string).to_vec()));
+            assert!(profiles.first().is_some_and(|profile| profile.holes.is_empty()));
+            assert!(validate_raw(&json!({"features":[{"type":"extrude","profiles":value}]})).is_ok());
+        }
+        // Holes are a set of loops too, and the identity is canonical, so the same loop written
+        // in another order is still the same profile.
+        let holey = json!({"type":"whole_boundaries","profiles":[{"outer":["o2","o1"],"holes":[["h2","h3"],["h1"]]}]});
+        let Some(ProfileSel::WholeBoundaries { profiles }) = whole_profile_selection_from_value(&holey).ok() else {
+            panic!("hole loop order refused");
+        };
+        let profile = profiles.first().cloned().unwrap();
+        assert_eq!(profile.outer, ["o1".to_string(), "o2".to_string()]);
+        assert_eq!(profile.holes, vec![vec!["h1".to_string()], vec!["h2".to_string(), "h3".to_string()]]);
+        let saved = serde_json::to_value(ProfileSel::WholeBoundaries { profiles }).unwrap_or_default();
+        assert_eq!(saved, json!({"type":"whole_boundaries","profiles":[{"outer":["o1","o2"],"holes":[["h1"],["h2","h3"]]}]}));
     }
 
     #[test]

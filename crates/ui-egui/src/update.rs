@@ -4,6 +4,10 @@
 //! appears in the application bar beside Report a bug; it opens a small window with the version,
 //! the release notes and Download, Skip this version and Remind me later.
 //!
+//! A launcher (ArtCraft Launcher) can manage this copy: `SOLIDCRAFT_MANAGED_BY=<its name>`, or its
+//! `installed.json` records this installation. The checks run as before, but the window only says
+//! to update SolidCraft in that launcher: no Update now, no AppImage replacement, no Download.
+//!
 //! The request is the only thing sent: no identifiers, no usage data. A short timeout keeps it
 //! from hanging, a failed check (offline, rate limited) stays silent and is retried later, and
 //! development builds never check. Turning off Preferences ▸ General ▸ Check for updates
@@ -25,14 +29,14 @@ use crate::theme::Tokens;
 use crate::ui_kit;
 
 /// The repository releases come from.
-pub const REPO: &str = "bherbruck/solidcraft";
+pub const REPO: &str = "tangency-labs/solidcraft";
 /// The one request an update check makes.
-pub const LATEST_API: &str = "https://api.github.com/repos/bherbruck/solidcraft/releases/latest";
+pub const LATEST_API: &str = "https://api.github.com/repos/tangency-labs/solidcraft/releases/latest";
 /// Where Download goes when no package fits this installation.
-pub const RELEASES_PAGE: &str = "https://github.com/bherbruck/solidcraft/releases/latest";
-/// Release pages and assets must be on GitHub, under this repository. The repository is moving
-/// to the `tangency-labs` organisation, so releases may name either owner (the API request stays
-/// on the old name, which GitHub redirects after a transfer).
+pub const RELEASES_PAGE: &str = "https://github.com/tangency-labs/solidcraft/releases/latest";
+/// Release pages and assets must be on GitHub, under this repository. The repository moved to the
+/// `tangency-labs` organisation, so releases may still name either owner (older releases and the
+/// links GitHub redirects keep the old one).
 const RELEASE_PREFIXES: [&str; 2] = ["https://github.com/bherbruck/solidcraft/releases/", "https://github.com/tangency-labs/solidcraft/releases/"];
 
 /// A release page or asset URL: github.com, one of the two owners, exactly `solidcraft`, then
@@ -56,7 +60,7 @@ const MAX_ASSETS: usize = 400;
 const TAB_ROOM: f32 = 300.0;
 
 /// The Linux app ID (Flatpak, desktop files).
-pub const APP_ID: &str = "ai.storyteller.solidcraft";
+pub const APP_ID: &str = "io.tangencylabs.solidcraft";
 
 /// Why a check failed. Automatic checks never show it; Check now does.
 #[derive(Clone, Debug, PartialEq)]
@@ -275,6 +279,113 @@ fn msi_install_dir() -> Option<PathBuf> {
 
 #[cfg(all(not(windows), not(target_arch = "wasm32")))]
 fn msi_install_dir() -> Option<PathBuf> {
+    None
+}
+
+// ---- managed by a launcher --------------------------------------------------------------------
+
+/// Set by a launcher that installed and updates this copy; the value is its display name
+/// ("ArtCraft Launcher"). The window then points to it instead of replacing files itself.
+pub const MANAGED_ENV: &str = "SOLIDCRAFT_MANAGED_BY";
+
+/// The ArtCraft Launcher's name, shown when its install record (not the variable) says it manages this copy.
+const LAUNCHER_NAME: &str = "ArtCraft Launcher";
+
+/// The key the launcher files SolidCraft under in its `installed.json`.
+const LAUNCHER_APP_ID: &str = "solidcraft";
+
+/// The longest manager name shown (the variable is untrusted text).
+const MAX_MANAGER_NAME: usize = 64;
+
+/// A launcher's record file is a few KB; this is room for a hundred apps.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_RECORD_FILE: u64 = 1 << 20;
+
+/// `a` is `b` or inside it. Slashes, a trailing separator and Windows' `\\?\` prefix don't count;
+/// case counts only where the file system ignores it.
+fn same_or_inside(a: &Path, b: &Path, ignore_case: bool) -> bool {
+    let norm = |p: &Path| {
+        let mut t = p.to_string_lossy().replace('\\', "/");
+        if ignore_case {
+            t = t.to_lowercase();
+        }
+        t.strip_prefix("//?/").map_or(t.clone(), str::to_string).trim_end_matches('/').to_string()
+    };
+    let (a, b) = (norm(a), norm(b));
+    // The bare root (`/`, `C:\`) would hold every install.
+    !b.is_empty() && !b.ends_with(':') && (a == b || a.strip_prefix(&b).is_some_and(|rest| rest.starts_with('/')))
+}
+
+/// Whether the launcher's `installed.json` (`bytes`) records this installation: its `solidcraft`
+/// entry's `path` (the exe, the AppImage, the `.app`, or the folder of an unpacked tarball) is one
+/// of `places` or contains one.
+pub fn record_matches(bytes: &[u8], places: &[PathBuf], ignore_case: bool) -> bool {
+    let Ok(json) = serde_json::from_slice::<Value>(bytes) else { return false };
+    let Some(path) = json.get("apps").and_then(|a| a.get(LAUNCHER_APP_ID)).and_then(|r| r.get("path")).and_then(Value::as_str) else {
+        return false;
+    };
+    // A relative path would claim whatever it is read against. (Not `Path::is_absolute`: a record
+    // written on Windows has to read as absolute everywhere the tests run.)
+    let absolute = path.starts_with(['/', '\\'])
+        || path.as_bytes().get(1..3).is_some_and(|d| d.first() == Some(&b':') && d.get(1).is_some_and(|c| matches!(c, b'/' | b'\\')));
+    absolute && places.iter().any(|p| same_or_inside(p, Path::new(path), ignore_case))
+}
+
+/// Where the launcher keeps `installed.json` for this user, as the launcher itself works it out
+/// (`<local data>/artcraft-launcher`, or `ArtCraft Launcher` on Windows and macOS).
+fn launcher_record_path(os: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let var = |k: &str| env(k).filter(|v| !v.trim().is_empty()).map(PathBuf::from);
+    let (base, dir) = match os {
+        "windows" => (var("LOCALAPPDATA")?, "ArtCraft Launcher"),
+        "macos" => (var("HOME")?.join("Library/Application Support"), "ArtCraft Launcher"),
+        _ => (var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local/share")))?, "artcraft-launcher"),
+    };
+    Some(base.join(dir).join("installed.json"))
+}
+
+/// What manages this copy, if anything: the variable's value, else "ArtCraft Launcher" when its
+/// install record names this installation. Read-only: nothing is written or created.
+/// `read` returns a file's bytes.
+pub fn managed_by(
+    os: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+    exe: Option<&Path>,
+    kind: &InstallKind,
+    read: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> Option<String> {
+    if let Some(name) = env(MANAGED_ENV) {
+        let name: String = name.chars().filter(|c| !c.is_control()).take(MAX_MANAGER_NAME).collect();
+        if !name.trim().is_empty() {
+            return Some(name.trim().to_string());
+        }
+    }
+    let mut places: Vec<PathBuf> = exe.map(Path::to_path_buf).into_iter().collect();
+    if let InstallKind::AppImage(p) | InstallKind::MacApp(p) = kind {
+        places.push(p.clone());
+    }
+    // The launcher runs an unpacked tarball with its own HOME, so the usual place is out of reach:
+    // `<launcher data>/apps/solidcraft/…` has the record two levels up.
+    let beside_apps = exe.into_iter().flat_map(Path::ancestors).find(|a| a.file_name().is_some_and(|n| n == "apps")).and_then(Path::parent);
+    let records = beside_apps.map(|d| d.join("installed.json")).into_iter().chain(launcher_record_path(os, env));
+    let ignore_case = matches!(os, "windows" | "macos");
+    records.filter_map(|path| read(&path)).any(|bytes| record_matches(&bytes, &places, ignore_case)).then(|| LAUNCHER_NAME.to_string())
+}
+
+/// This machine's manager, looked up once.
+#[cfg(not(target_arch = "wasm32"))]
+fn this_managed_by(kind: &InstallKind) -> Option<String> {
+    use std::io::Read;
+    let env = |k: &str| std::env::var(k).ok();
+    let read = |p: &Path| {
+        let mut bytes = Vec::new();
+        std::fs::File::open(p).ok()?.take(MAX_RECORD_FILE).read_to_end(&mut bytes).ok()?;
+        Some(bytes)
+    };
+    managed_by(std::env::consts::OS, &env, std::env::current_exe().ok().as_deref(), kind, &read)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn this_managed_by(_kind: &InstallKind) -> Option<String> {
     None
 }
 
@@ -525,6 +636,9 @@ pub enum Status {
 pub struct Updater {
     /// The installation, looked up at the first frame.
     pub kind: Option<InstallKind>,
+    /// What manages this copy (`SOLIDCRAFT_MANAGED_BY`, or a launcher's record), looked up with
+    /// the installation: Some(None) is "nothing does".
+    pub managed: Option<Option<String>>,
     pub status: Status,
     /// The newest release found (whether or not it is offered).
     pub release: Option<Release>,
@@ -553,6 +667,15 @@ impl Updater {
     /// The installation (looked up on first use).
     pub fn kind(&mut self) -> &InstallKind {
         self.kind.get_or_insert_with(this_install)
+    }
+
+    /// The launcher that updates this copy, if one does (looked up on first use).
+    pub fn managed_by(&mut self) -> Option<&str> {
+        if self.managed.is_none() {
+            let kind = self.kind().clone();
+            self.managed = Some(this_managed_by(&kind));
+        }
+        self.managed.as_ref()?.as_deref()
     }
 }
 
@@ -678,6 +801,10 @@ fn poll(app: &mut SolveApp) {
 
 /// How this installation updates in place, when the host can download (None: Download only).
 pub fn install_method(app: &mut SolveApp) -> Option<install::Method> {
+    // A launcher updates its copies itself: no Update now, no replacing the AppImage under it.
+    if app.updater.managed_by().is_some() {
+        return None;
+    }
     if app.services.http_get.is_none() || app.services.http_download.is_none() {
         return None;
     }
@@ -802,6 +929,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let kind = app.updater.kind().clone();
     let install = install_method(app);
+    let managed = app.updater.managed_by().map(str::to_string);
     let arch = std::env::consts::ARCH;
     let t = Tokens::get();
     let one_click = install.is_some() && !matches!(app.updater.installed, Some(Err(_)));
@@ -824,6 +952,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         State::Downloading => ("", crate::i18n::tr("ui.cancel"), None),
         State::Restart => (crate::i18n::tr("update.restart"), crate::i18n::tr("update.restart_later"), None),
         State::Started => ("", crate::i18n::tr("ui.close"), None),
+        // Managed: nothing here installs or downloads; the launcher does.
+        State::Offer if managed.is_some() => ("", crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
         State::Offer => (primary, crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
     };
     let id = egui::Id::new("sc_update");
@@ -843,7 +973,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
             });
             let asset = release.asset_for(&kind, arch).map(|a| a.name.clone());
-            if let Some(cmd) = kind.update_command(asset.as_deref()) {
+            if let Some(manager) = &managed {
+                ui_kit::text(ui, &crate::i18n::format("update.managed", &[("manager", manager)]), ui_kit::Text::Report("managed", false));
+            } else if let Some(cmd) = kind.update_command(asset.as_deref()) {
                 let how = match kind {
                     InstallKind::Deb | InstallKind::Rpm | InstallKind::Snap { store: false } => "update.package_hint",
                     _ => "update.system_hint",
@@ -978,6 +1110,8 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let note = if kind == InstallKind::Web {
         crate::i18n::tr("update.prefs_web").to_string()
+    } else if can && let Some(manager) = app.updater.managed_by().map(str::to_string) {
+        crate::i18n::format("update.prefs_managed", &[("version", current_version()), ("manager", &manager)])
     } else if can {
         crate::i18n::format("update.prefs_note", &[("version", current_version()), ("kind", kind.label())])
     } else if let InstallKind::Flatpak(id) = &kind {

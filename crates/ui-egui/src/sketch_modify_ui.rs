@@ -48,6 +48,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.mirror", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     // Sketch Move: dialog/manipulator inherit only - no invented Alt-copy.
     ToolModifiers { tool: "sketch.move", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.transform", scopes: SELECT_MANIP, bindings: &[], audit: Audit::VerifiedNoOp },
     // Pattern spacing/count live in the dialog - no viewport modifier chords.
     ToolModifiers { tool: "sketch.pattern.rectangular", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.pattern.circular", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -103,6 +104,11 @@ pub enum Mod {
     /// turn about the centre, and whether the originals stay behind. The command already
     /// carries the copy flag, so the Create Copy row needs no engine change.
     Move { x: String, y: String, angle: String, copy: bool },
+    /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the middle
+    /// of their box. `x` and `y` move that middle, `factor` scales and `angle` turns about it.
+    /// `frame` is the box (middle and size in the sketch, kept up to date from the picks by
+    /// `sketch_transform_ui`) the window's size rows and the handles work on.
+    Transform { x: String, y: String, factor: String, angle: String, frame: Option<([f64; 2], [f64; 2])> },
     /// `sketch.pattern.rectangular`: how many instances along the picked direction and how far
     /// apart, then the same along a second picked direction (perpendicular by default).
     PatternRect {
@@ -138,6 +144,7 @@ impl Mod {
             Mod::Offset { .. } => "OFFSET",
             Mod::Mirror => "MIRROR",
             Mod::Move { .. } => "MOVE/COPY",
+            Mod::Transform { .. } => "TRANSFORM",
             Mod::PatternRect { .. } => "RECTANGULAR PATTERN",
             Mod::PatternCirc { .. } => "CIRCULAR PATTERN",
             Mod::Corner { chamfer: false, .. } => "FILLET",
@@ -151,6 +158,8 @@ impl Mod {
             Mod::Scale { factor } => Some(("Factor", ValueKind::Unitless, factor)),
             Mod::Offset { distance, .. } => Some(("Distance", ValueKind::Length, distance)),
             Mod::Move { x, .. } => Some(("X Distance", ValueKind::Length, x)),
+            // The handles in the viewport are its manipulator; the window has the numbers.
+            Mod::Transform { .. } => None,
             Mod::Mirror => None,
             Mod::PatternRect { spacing, .. } => Some(("Spacing", ValueKind::Length, spacing)),
             Mod::PatternCirc { angle, .. } => Some(("Angle", ValueKind::Angle, angle)),
@@ -167,6 +176,7 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Mirror line", AXES, false)],
         Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Center", SKETCH_POINTS, false)],
+        Mod::Transform { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true)],
         // The direction is optional: `sketch.pattern.rectangular` documents sketch x as its
         // default, the way the engine reads it.
         Mod::PatternRect { .. } => vec![
@@ -204,6 +214,13 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             flip: false,
         },
         "sketch.mirror" => Mod::Mirror,
+        "sketch.transform" => Mod::Transform {
+            x: crate::dialogs::length_default(&app.session, "0"),
+            y: crate::dialogs::length_default(&app.session, "0"),
+            factor: "1".into(),
+            angle: "0 deg".into(),
+            frame: None,
+        },
         "sketch.move" => Mod::Move {
             x: crate::dialogs::length_default(&app.session, "0"),
             y: crate::dialogs::length_default(&app.session, "0"),
@@ -239,6 +256,15 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
     let active = session.active_sketch?;
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } if *sketch != active => None,
+        Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Corner { .. })) => {
+            let state = session.world_state();
+            let sk = &state.sketch(active)?.sketch;
+            if sk.is_spatial_corner_curve(id) {
+                return None;
+            }
+            sk.curve_index(id)?;
+            d.active_input()?.accepts(hit, Some(active), |_, _| false)
+        }
         _ => d.active_input()?.accepts(hit, Some(active), |_, _| false),
     }
 }
@@ -332,6 +358,7 @@ pub(crate) fn command(k: &Mod) -> &'static str {
         Mod::Offset { .. } => "sketch.offset",
         Mod::Mirror => "sketch.mirror",
         Mod::Move { .. } => "sketch.move",
+        Mod::Transform { .. } => "sketch.transform",
         Mod::PatternRect { .. } => "sketch.pattern.rectangular",
         Mod::PatternCirc { .. } => "sketch.pattern.circular",
         Mod::Corner { chamfer: false, .. } => "sketch.fillet",
@@ -415,6 +442,25 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
             enter |= number(ui, "Angle", angle);
             ui_kit::options(ui, "move_options", &mut [("Create Copy", copy)]);
+        }
+        Mod::Transform { x, y, factor, angle, frame } => {
+            enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
+            // The size in millimetres follows the factor and the other way round; the aspect is kept.
+            if let Some((_, size)) = frame {
+                for (label, natural) in [("Width", size[0]), ("Height", size[1])] {
+                    let k = crate::prefs::parse_number(factor.trim()).filter(|k| *k > 0.0).unwrap_or(1.0);
+                    let mut shown = format!("{} mm", crate::sketch_transform_ui::plain(natural * k));
+                    if number(ui, label, &mut shown)
+                        && let Some(mm) = crate::prefs::parse_number(shown.trim_end_matches("mm").trim())
+                        && mm > 0.0
+                        && natural > 1e-9
+                    {
+                        *factor = format!("{}", ((mm / natural) * 1e6).round() / 1e6);
+                    }
+                }
+            }
+            enter |= number(ui, "Scale", factor);
+            enter |= number(ui, "Angle", angle);
         }
         Mod::PatternRect { count, spacing, count2, spacing2, alignment: a, alignment2, reversed, reversed2 } => {
             let (left1, left2) = (copies_left(doc, count2), copies_left(doc, count));
@@ -574,7 +620,8 @@ fn curve_ids(inputs: &[SelInput], i: usize) -> Vec<String> {
 /// A typed scale factor as the command wants it: the field evaluated against the document's
 /// parameters, in the range the command accepts. Checking the range here lets the window say
 /// so in its own error line instead of the status bar.
-fn factor(app: &SolveApp, text: &str) -> Result<f64, String> {
+pub(crate) fn factor(app: &SolveApp, text: &str) -> Result<f64, String> {
+    crate::length_input::no_definition(text, "Factor")?;
     let v = app.session.doc.eval(text.trim(), ValueKind::Unitless).map_err(|e| format!("Factor: {e}"))?;
     if !(v.is_finite() && v > 1e-9 && v < 1e6) {
         return Err("Factor must be a positive number".into());
@@ -585,11 +632,12 @@ fn factor(app: &SolveApp, text: &str) -> Result<f64, String> {
 /// A typed field as the command wants it: evaluated against the document's parameters, so an
 /// expression works, with a bare number read in the design's own units. An empty field is zero,
 /// the way an untouched row should leave the geometry where it is.
-fn value(app: &SolveApp, text: &str, kind: ValueKind, label: &str) -> Result<f64, String> {
+pub(crate) fn value(app: &SolveApp, text: &str, kind: ValueKind, label: &str) -> Result<f64, String> {
     let text = text.trim();
     if text.is_empty() {
         return Ok(0.0);
     }
+    crate::length_input::no_definition(text, label)?;
     let doc = &app.session.doc;
     let v = crate::length_input::eval(doc, text, kind).map_err(|e| format!("{label}: {e}"))?;
     if !v.is_finite() {
@@ -652,6 +700,7 @@ fn corner_ids(app: &SolveApp, inputs: &[SelInput], i: usize) -> Vec<String> {
 /// of a field, where an empty row means zero and a negative distance is a direction; neither is
 /// a radius or a chamfer leg, so this one is its own.
 fn corner_size(app: &SolveApp, label: &str, text: &str, kind: ValueKind) -> Result<f64, String> {
+    crate::length_input::no_definition(text, label)?;
     let doc = &app.session.doc;
     let v = crate::length_input::eval(doc, text.trim(), kind).map_err(|e| format!("{label}: {e}"))?;
     if !v.is_finite() || v <= 1e-9 {
@@ -714,6 +763,17 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             ("sketch.scale", p)
         }
+        Mod::Transform { x, y, factor: text, angle, frame } => {
+            let entities = entity_ids(&app.session, inputs, 0);
+            if entities.is_empty() {
+                return Err("Select the sketch curves or points to transform first".into());
+            }
+            let Some((middle, _)) = frame else { return Err("Select the sketch curves or points to transform first".into()) };
+            let f = factor(app, text)?;
+            let turn = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
+            let (dx, dy) = (value(app, x, ValueKind::Length, "X")?, value(app, y, ValueKind::Length, "Y")?);
+            ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": middle, "translate": [dx, dy]}))
+        }
         Mod::Offset { distance, distance2, mode, chain, flip } => {
             let curves = curve_ids(inputs, 0);
             if curves.is_empty() {
@@ -728,7 +788,12 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 }
                 if *mode == TWO_SIDES {
                     let d2 = signed_length(app, "Distance 2", distance2, false)?;
-                    m.insert("distance2".into(), json!(if d2 > 0.0 { distance2.trim().to_string() } else { format!("-({})", distance2.trim()) }));
+                    // The other way is the value negated; a definition keeps its name (#4071).
+                    let negated = match solidcraft_engine::doc::expr::definition(distance2) {
+                        Some((name, rhs)) => format!("{name} = -({rhs})"),
+                        None => format!("-({})", distance2.trim()),
+                    };
+                    m.insert("distance2".into(), json!(if d2 > 0.0 { distance2.trim().to_string() } else { negated }));
                 }
             }
             ("sketch.offset", params)
@@ -738,14 +803,26 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to mirror first".into());
             }
-            // The AXES mask also takes an origin axis, which is not a curve of this sketch and
-            // cannot be a mirror line.
             let line = match items(inputs, 1).first() {
-                Some(Sel::SketchCurve { id, .. }) => id.clone(),
-                Some(_) => return Err("The mirror line must be a straight curve of this sketch, not an origin axis".into()),
+                Some(Sel::SketchCurve { id, .. }) => json!(id),
+                Some(sel @ Sel::Axis { name }) if matches!(name.as_str(), "X" | "Y" | "Z") => {
+                    if let Some(axis) = crate::tools::sketch_axis_of(app, name) {
+                        json!(axis)
+                    } else {
+                        let (origin, dir) = crate::dialogs::axis_of(app, sel).ok_or("Select an origin axis")?;
+                        let st = app.session.world_state();
+                        let plane =
+                            st.sketch(app.session.active_sketch.ok_or("No sketch is being edited")?).ok_or("The sketch no longer exists")?.plane;
+                        if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(origin - plane.origin).abs() > 1e-6 {
+                            return Err("The origin axis must lie in the sketch plane".into());
+                        }
+                        json!({"axis":name})
+                    }
+                }
+                Some(_) => return Err("The mirror line must be a straight curve of this sketch or an origin axis in its plane".into()),
                 None => return Err("Select the mirror line".into()),
             };
-            if entities.contains(&line) {
+            if line.as_str().is_some_and(|line| entities.iter().any(|entity| entity == line)) {
                 return Err("The mirror line cannot also be mirrored".into());
             }
             ("sketch.mirror", json!({"entities": entities, "line": line}))

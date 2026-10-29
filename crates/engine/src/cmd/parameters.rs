@@ -3,9 +3,11 @@
 //! graph, CSV/JSON import and export, expression evaluation and autocomplete.
 
 use serde_json::{Value, json};
+use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::{self, Kind};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve_with};
 
-use super::CommandSpec;
+use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_, str_};
 use crate::{EngineError, Result, Session};
 
@@ -13,7 +15,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
         "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit; \
          a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
-             favorite?: bool, new_name?: rename (references follow); or delete: name; or changes: {name: expression, …} (existing \
+             favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
+         or sets `new` when the expression is just `new`); or delete: name; or changes: {name: expression, …} (existing \
          parameters, checked together and rebuilt once, all or nothing) → changed?: {name: value} (with changes), recomputed: features rebuilt, \
          restored: features whose earlier result for the same inputs was reused (e.g. a value set back), switched?: [{feature, name, suppressed}] \
          (the configuration rules that switch a feature's suppression and read a parameter whose value changed run in their order, as on \
@@ -85,6 +88,11 @@ pub(super) fn known(s: &Session, name: &str) -> bool {
     s.doc.param(name).is_some() || s.doc.text_param(name).is_some() || s.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == name))
 }
 
+/// Whether `name` is (or, with this unit, becomes) a text parameter, whose expression is text.
+fn is_text(s: &Session, name: &str, unit: Option<&str>) -> bool {
+    s.doc.text_param(name).is_some() || unit.is_some_and(solidcraft_doc::text_params::is_text_unit)
+}
+
 fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "parameters.change";
     let solved = s.solved_sketches();
@@ -104,13 +112,41 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         name = new.trim().to_string();
     }
     let has_expr = p.get("expression").is_some() || p.get("value").is_some();
-    let e = if has_expr {
+    let mut e = if has_expr {
         Some(expr_arg(p, "expression").or_else(|| expr_arg(p, "value")).ok_or_else(|| bad(cmd, "`expression` must be a number or text"))?)
     } else if out.get("renamed").is_some() || p.get("favorite").is_some() || p.get("comment").is_some() {
         None
     } else {
         return Err(bad(cmd, "`expression` must be a number or text"));
     };
+    // `name = expression` names the value being changed (#4071): the parameter (a dimension's
+    // `d7`, a feature input's) is renamed, references following, and takes the expression. A
+    // text parameter's text is only text.
+    if let Some((new, rhs)) = e.as_deref().filter(|_| !is_text(s, &name, str_(p, "unit"))).and_then(expr::definition) {
+        if out.get("renamed").is_some() {
+            return Err(bad(cmd, format!("`{new} = …` renames `{name}` already: give `new_name` or `name = expression`, not both")));
+        }
+        if rhs.is_empty() {
+            return Err(bad(cmd, format!("`{new} =` needs a value after the `=`")));
+        }
+        let (new, rhs) = (new.to_string(), rhs.to_string());
+        // A value that is just a parameter's name changes that parameter: a dimension made as
+        // `w = 20` shows `w`, and `w = 30` typed over it sets `w`.
+        let refers_to = s.doc.all_param_exprs().into_iter().find(|(n, _, _)| *n == name).map(|(_, e, _)| e);
+        if refers_to.as_deref().map(str::trim) == Some(new.as_str()) && s.doc.param(&new).is_some() {
+            out["changed_through"] = json!(name);
+            name = new.clone();
+        }
+        if new != name {
+            if known(s, &new) {
+                return Err(bad(cmd, format!("there is already a parameter `{new}`: type `{new}` to use it, or change it in Parameters")));
+            }
+            let n = s.doc_mut().rename_param(&name, &new)?;
+            out["renamed"] = json!({"from": name, "to": new, "references_updated": n});
+            name = new;
+        }
+        e = Some(rhs);
+    }
     let (unit, comment) = (str_(p, "unit"), str_(p, "comment"));
     let before = s.doc.param_values().0;
     match &e {
@@ -128,6 +164,9 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().set_favorite(&name, f)?;
     }
     let switched = switch_by_rules(s, &before);
+    if e.is_some() {
+        keep_dimension_start(s, &name);
+    }
     s.settle_value_edit(&solved)?;
     let (vals, _) = s.doc.param_values();
     if !switched.is_empty() {
@@ -146,6 +185,65 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// The point a length dimension keeps when its value changes: the first it measures from (a
+/// line's start). None for other dimensions.
+fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
+    match kind {
+        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => Some(*p),
+        ConstraintKind::Length { l, .. } => match sk.curves.get(*l)?.kind {
+            CurveKind::Line { a, .. } => Some(a),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A length dimension driven by `name` keeps its first point where it is when the value
+/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). The
+/// sketch is solved here with that point held, before the design evaluates from its stored
+/// positions. Where holding it can't solve (a symmetry moves both ends), evaluation solves as
+/// before.
+fn keep_dimension_start(s: &mut Session, name: &str) {
+    let targets: Vec<(u64, usize)> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Sketch { sketch, .. } => sketch
+                .constraints
+                .iter()
+                .find(|c| !c.driven && c.param.as_deref() == Some(name))
+                .and_then(|c| dimension_start(sketch, &c.kind))
+                .map(|p| (f.id, p)),
+            _ => None,
+        })
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    let vals = s.doc.evaluation_values();
+    for (id, start) in targets {
+        let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
+        let mut trial = stored.clone();
+        if s.doc.apply_dimension_values(&vals, &mut trial).is_err() {
+            continue;
+        }
+        let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
+        let hold = Hold { points: vec![start], radii: Vec::new() };
+        if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
+            continue;
+        }
+        if stored.points.len() == trial.points.len() {
+            // Only the points move: the stored dimensions keep their own values.
+            let mut kept = stored.clone();
+            for (p, q) in kept.points.iter_mut().zip(&trial.points) {
+                p.pos = q.pos;
+            }
+            let _ = sketch_store::write(s.doc_mut(), id, kept);
+        }
+    }
+}
+
 /// `parameters.change {changes}`: several existing parameters set at once, so a design is
 /// rebuilt once for all of them instead of once per parameter.
 fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -> Result<Value> {
@@ -157,11 +255,18 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     let mut list = Vec::with_capacity(map.len());
     for (name, e) in map {
         let e = expr_arg(&json!({"e": e}), "e").ok_or_else(|| bad(cmd, format!("`changes.{name}` must be a number or text")))?;
+        // Renaming is one parameter at a time (#4071).
+        if let Some((new, _)) = expr::definition(&e).filter(|_| !is_text(s, name.trim(), None)) {
+            return Err(bad(cmd, format!("`changes.{name}`: `{new} = …` would rename `{name}`; change it on its own to rename it")));
+        }
         list.push((name.trim().to_string(), e));
     }
     let before = s.doc.param_values().0;
     s.doc_mut().change_params_atomic(&list)?;
     let switched = switch_by_rules(s, &before);
+    for (name, _) in &list {
+        keep_dimension_start(s, name);
+    }
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
     let values: serde_json::Map<String, Value> = list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| v.v)))).collect();
@@ -369,7 +474,9 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
         Some(k) => v.to_kind_in(k, defaults).map(|x| (x, k)),
         None => v.kind().map(|k| (v.v, k)).ok_or_else(|| solidcraft_doc::DocError::Expr(format!("the result is {}", v.describe()))),
     });
-    Ok(match r {
+    // `name = expression` is worth its expression, and names what it would define (#4071).
+    let defines = expr::definition(&e).map(|(n, _)| n);
+    let mut out = match r {
         Ok((v, k)) => {
             let value = match k {
                 Kind::Length => expr::Value::length(v),
@@ -384,7 +491,11 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
             json!({"ok": true, "value": v, "kind": k, "display_value": shown, "references": refs})
         }
         Err(err) => json!({"ok": false, "error": err.to_string().trim_start_matches("expression: ").to_string(), "references": refs}),
-    })
+    };
+    if let Some(name) = defines {
+        out["defines"] = json!(name);
+    }
+    Ok(out)
 }
 
 fn complete(s: &mut Session, p: &Value) -> Result<Value> {

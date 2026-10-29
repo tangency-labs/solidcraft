@@ -13,13 +13,13 @@ pub(crate) use crate::expr::Kind;
 pub(crate) use crate::feature_geometry::Geo;
 pub(crate) use crate::feature_refs::Ref;
 pub(crate) use crate::params::ExprRole;
-use crate::{BodyName, Dir, Expr, FacePick, FeatureName, PlaneRef, PointExpr, Position, SketchId};
+use crate::{BodyName, Dir, Expr, FacePick, FeatureId, FeatureName, PlaneRef, PointExpr, Position, SketchId};
 
 /// An expression: its label, the expression, its kind and its role.
 pub(crate) type ExprItem<'a> = (&'static str, &'a Expr, Kind, ExprRole);
 pub(crate) type ExprItemMut<'a> = (&'static str, &'a mut Expr, Kind, ExprRole);
-pub(crate) type RefItem<'a> = Ref<&'a SketchId, &'a FeatureName, &'a BodyName>;
-pub(crate) type RefItemMut<'a> = Ref<&'a mut SketchId, &'a mut FeatureName, &'a mut BodyName>;
+pub(crate) type RefItem<'a> = Ref<&'a SketchId, &'a FeatureId, &'a FeatureName, &'a BodyName>;
+pub(crate) type RefItemMut<'a> = Ref<&'a mut SketchId, &'a mut FeatureId, &'a mut FeatureName, &'a mut BodyName>;
 pub(crate) type GeoItem<'a> = Geo<&'a Vec3, &'a PlaneRef, &'a GeoRef, &'a PointExpr, &'a ProfileSel>;
 pub(crate) type GeoItemMut<'a> = Geo<&'a mut Vec3, &'a mut PlaneRef, &'a mut GeoRef, &'a mut PointExpr, &'a mut ProfileSel>;
 
@@ -78,7 +78,8 @@ macro_rules! reference {
 }
 
 reference!(SketchId, Sketch);
-reference!(FeatureName, Feature);
+reference!(FeatureId, Feature);
+reference!(FeatureName, FeatureName);
 reference!(BodyName, Body);
 
 /// A point walks itself with its role: a face pick, a position or a direction. As a plain
@@ -393,11 +394,17 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { name } => f(Ref::Feature(name)),
-            Self::Offset { base, .. } | Self::AtAngle { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
+            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs(f, depth + 1);
                 point.walk_feature_refs(f, depth + 1);
+            }
+            Self::AtAngle { base, line, .. } => {
+                base.walk_feature_refs(f, depth + 1);
+                if let Some(g) = line {
+                    g.walk_feature_refs(f, depth + 1);
+                }
             }
             Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs(f, depth + 1);
@@ -418,11 +425,17 @@ impl PlaneRef {
             return;
         }
         match self {
-            Self::Construction { name } => f(Ref::Feature(name)),
-            Self::Offset { base, .. } | Self::AtAngle { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
+            Self::Construction { feature } => f(Ref::Feature(feature)),
+            Self::Offset { base, .. } | Self::Flipped { base, .. } => base.walk_feature_refs_mut(f, depth + 1),
             Self::ThroughPoint { base, point } => {
                 base.walk_feature_refs_mut(f, depth + 1);
                 point.walk_feature_refs_mut(f, depth + 1);
+            }
+            Self::AtAngle { base, line, .. } => {
+                base.walk_feature_refs_mut(f, depth + 1);
+                if let Some(g) = line {
+                    g.walk_feature_refs_mut(f, depth + 1);
+                }
             }
             Self::Midplane { a, b } | Self::TwoEdges { a, b } | Self::Perpendicular { plane: a, line: b } => {
                 a.walk_feature_refs_mut(f, depth + 1);
@@ -446,7 +459,7 @@ impl GeoRef {
             return;
         }
         match self {
-            Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::Feature(name)),
+            Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs(f, depth + 1),
             Self::Point { .. }
             | Self::Origin
@@ -464,7 +477,7 @@ impl GeoRef {
             return;
         }
         match self {
-            Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::Feature(name)),
+            Self::Axis { name } | Self::ConstructPoint { name } => f(Ref::FeatureName(name)),
             Self::Plane { plane } => plane.walk_feature_refs_mut(f, depth + 1),
             Self::Point { .. }
             | Self::Origin
@@ -530,6 +543,23 @@ impl Walk for AxisDef {
         plane_exprs_mut(self.refs_mut(), f)
     }
     construct_geometry!();
+}
+
+/// A feature's own reference to the model (a revolve's or circular pattern's axis on an edge or
+/// round face): walked like a construction axis's.
+impl Walk for GeoRef {
+    fn walk_exprs<'a>(&'a self, f: &mut dyn FnMut(ExprItem<'a>)) {
+        plane_exprs(vec![self], f)
+    }
+    fn walk_exprs_mut<'a>(&'a mut self, f: &mut dyn FnMut(ExprItemMut<'a>)) {
+        plane_exprs_mut(vec![self], f)
+    }
+    fn walk_geometry<'a>(&'a self, f: &mut dyn FnMut(GeoItem<'a>)) {
+        f(Geo::Construct(self))
+    }
+    fn walk_geometry_mut<'a>(&'a mut self, f: &mut dyn FnMut(GeoItemMut<'a>)) {
+        f(Geo::Construct(self))
+    }
 }
 
 impl Walk for PointDef {

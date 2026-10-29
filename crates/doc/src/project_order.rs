@@ -9,6 +9,13 @@ use crate::{DocError, Result};
 
 type Key = (i64, i64, i64);
 
+/// How far apart two edge ends of `mesh` may be and still meet. A round's fitted edges end a few
+/// 1e-5 mm short of their neighbours, far more than the tolerance that ranks equal areas (#8284).
+pub(super) fn join_tolerance(mesh: &Mesh) -> f64 {
+    let diagonal = mesh.bounds().diagonal();
+    (diagonal * 1e-6).max(1e-9)
+}
+
 /// Boundary of the picked face as drawn: a closed surface cut into pieces (a cylinder or a
 /// round's torus in halves) projects as the whole patch, since its seams are hidden.
 pub(super) fn face_edges(mesh: &Mesh, face: u32, plane: &Plane) -> Result<Vec<usize>> {
@@ -53,12 +60,13 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
     let origin = bounds.min;
     let local_origin = plane.to_local(origin);
     let tol = (bounds.diagonal() * 1e-8).max(1e-9);
-    if !tol.is_finite() {
+    let join = join_tolerance(mesh);
+    if !tol.is_finite() || !join.is_finite() {
         return Err(DocError::Invalid("face projection has invalid bounds".into()));
     }
     let key = |p: Vec3| -> Key {
         let p = p - origin;
-        ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64)
+        ((p.x / join).round() as i64, (p.y / join).round() as i64, (p.z / join).round() as i64)
     };
     if edges.iter().any(|e| !mesh.edges.get(*e).is_some_and(|p| p.len() >= 2 && p.iter().all(|p| p.is_finite()))) {
         return Err(DocError::Invalid("face projection has an invalid boundary edge".into()));
@@ -71,6 +79,9 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
         let b: Aabb3 = pts.iter().copied().collect();
         (key(b.min), key(b.max))
     };
+    // A round that dies away at a corner leaves an edge from a point to itself: it bounds nothing,
+    // and left in, it reads as a branch where the real edges meet.
+    edges.retain(|e| mesh.edges.get(*e).is_some_and(|p| p.len() > 2 || p.first().zip(p.last()).is_some_and(|(a, b)| a.dist(*b) > join)));
     edges.sort_by_key(|e| geometry_key(*e));
     let mut at: BTreeMap<Key, Vec<usize>> = BTreeMap::new();
     for e in &edges {
@@ -107,7 +118,7 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
                 *slot = true;
             }
             boundary.push(edge);
-            if current.dist(start) <= tol {
+            if current.dist(start) <= join {
                 break;
             }
             // Neighbouring quantization cells cover points on either side of a rounding
@@ -121,7 +132,7 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
                         if let Some(list) = at.get(&cell) {
                             incident.extend(list.iter().copied().filter(|e| {
                                 mesh.edges.get(*e).is_some_and(|p| {
-                                    p.first().is_some_and(|a| a.dist(current) <= tol) || p.last().is_some_and(|b| b.dist(current) <= tol)
+                                    p.first().is_some_and(|a| a.dist(current) <= join) || p.last().is_some_and(|b| b.dist(current) <= join)
                                 })
                             }));
                         }
@@ -148,7 +159,7 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
             edge = *next;
         }
         boundary.sort_by_key(|e| geometry_key(*e));
-        let closed = current.dist(start) <= tol;
+        let closed = current.dist(start) <= join;
         if !closed || !twice_area.is_finite() {
             return Err(DocError::Invalid("face projection has an open or invalid boundary".into()));
         }
@@ -377,6 +388,63 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A 100 mm square whose edges each end `gap` short of the next one's start.
+    fn square_with_gaps(gap: f64) -> Mesh {
+        let corners = [Vec3::new(0., 0., 0.), Vec3::new(100., 0., 0.), Vec3::new(100., 100., 0.), Vec3::new(0., 100., 0.)];
+        let mut mesh = Mesh::default();
+        mesh.positions.extend(corners);
+        for i in 0..4 {
+            let (a, b) = (corners[i], corners[(i + 1) % 4]);
+            let back = (a - b).normalized().unwrap() * gap;
+            mesh.edges.push(vec![a, b + back]);
+            mesh.edge_faces.push(vec![0]);
+        }
+        mesh
+    }
+
+    #[test]
+    fn edges_of_a_round_that_end_a_hair_short_of_their_neighbours_still_close() {
+        // A fitted round's edges end a few 1e-5 mm from the vertex they share (#8284).
+        let mesh = square_with_gaps(3e-5);
+        assert_eq!(face_edges(&mesh, 0, &Plane::XY).unwrap().len(), 4);
+        // A real gap is still an open boundary.
+        let open = square_with_gaps(1e-2);
+        assert!(face_edges(&open, 0, &Plane::XY).unwrap_err().to_string().contains("open"));
+    }
+
+    #[test]
+    fn an_edge_from_a_point_to_itself_is_not_a_branch() {
+        // Where a round dies away at a corner, the mesh keeps a zero-length edge there (#8284).
+        let mut mesh = square_with_gaps(0.);
+        for corner in mesh.positions.clone() {
+            mesh.edges.push(vec![corner, corner]);
+            mesh.edge_faces.push(vec![0, 1]);
+        }
+        assert_eq!(face_edges(&mesh, 0, &Plane::XY).unwrap().len(), 4);
+    }
+
+    #[test]
+    fn curve_ends_a_hair_apart_become_one_point_and_distant_ones_stay() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let mut geom = vec![
+            LinkGeom::Line(Vec2::new(0., 0.), Vec2::new(10., 0.)),
+            LinkGeom::Spline {
+                pts: vec![Vec2::new(10. + 3e-5, 2e-5), Vec2::new(11., 1.), Vec2::new(12., 5.)],
+                control: true,
+                degree: 3,
+                periodic: false,
+            },
+            LinkGeom::Line(Vec2::new(12., 5. - 1e-5), Vec2::new(0., 0.1)),
+        ];
+        super::super::meet_at_shared_ends(&mut geom, 1e-4);
+        assert_eq!(
+            geom[1],
+            LinkGeom::Spline { pts: vec![Vec2::new(10., 0.), Vec2::new(11., 1.), Vec2::new(12., 5.)], control: true, degree: 3, periodic: false }
+        );
+        assert_eq!(geom[2], LinkGeom::Line(Vec2::new(12., 5.), Vec2::new(0., 0.1)));
     }
 
     #[test]

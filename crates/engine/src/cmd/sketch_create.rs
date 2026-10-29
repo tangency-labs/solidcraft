@@ -13,9 +13,12 @@ macro_rules! text_style_doc {
 }
 
 use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, result, slot};
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
-use crate::{Result, Session};
+use crate::schema::sketch_create::{SplineReverseParams, SplineReverseResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session};
 
 #[cfg(test)]
 #[path = "sketch_text_move_tests.rs"]
@@ -24,6 +27,8 @@ mod text_move_tests;
 #[cfg(test)]
 #[path = "sketch_text_expr_tests.rs"]
 mod text_expr_tests;
+
+const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line)
@@ -79,6 +84,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("spline_cv")
         .enabled(in_sketch)
         .params(concat!("points: control points (2…500), degree 5", created_doc!())),
+    CommandSpec::new("sketch.spline.insert_point", "Add Spline Point", spline_insert_point)
+        .icon("spline")
+        .enabled(in_sketch)
+        .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
+    CommandSpec::new("sketch.spline.reverse", "Reverse Spline Direction", crate::checked!("sketch.spline.reverse", spline_reverse))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_REVERSE_CONTRACT)
+        .output(output_schema_for::<SplineReverseResult>)
+        .params("curve: spline id (fit point, control point or closed): its last point becomes its first and the curve runs the other way along the same path; its points and the constraints on them stay. Refused for a projected spline and for one an offset uses or makes. Returns curve"),
     CommandSpec::new("sketch.conic", "Conic Curve", conic)
         .at("SKETCH", "CREATE")
         .icon("conic")
@@ -272,20 +287,19 @@ fn text(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, AT_MUST));
     }
     let src = text_source(&s.doc, p, cmd, None)?;
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    // A text needs nothing outside its sketch (a path is one of its curves).
-    let geom = sk.text_source_geometry(&src).map_err(|e| bad(cmd, e.to_string()))?;
-    if geom.is_empty() {
-        return Err(bad(cmd, "the text makes no outline"));
-    }
-    let guide = guide(&mut sk, &src);
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let exprs = text_exprs_json(&src);
-    let l = sk.add_link(LinkKind::Text, src, &geom)?;
-    let curves = ids_of(&sk, &sk.link_curves(&l));
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
+    let (l, curves, guide) = sketch_store::update(s, id, |_, _, sk| {
+        // A text needs nothing outside its sketch (a path is one of its curves).
+        let geom = sk.text_source_geometry(&src).map_err(|e| bad(cmd, e.to_string()))?;
+        if geom.is_empty() {
+            return Err(bad(cmd, "the text makes no outline"));
+        }
+        let guide = guide(sk, &src);
+        let l = sk.add_link(LinkKind::Text, src, &geom)?;
+        let curves = ids_of(sk, &sk.link_curves(&l));
+        Ok((l, curves, guide))
+    })?;
     let mut out = json!({"link": l, "curves": curves, "guide": guide});
     if let Some(exprs) = exprs {
         out["exprs"] = exprs;
@@ -360,23 +374,20 @@ const MAX_TEXT_EDITS: usize = 1000;
 
 fn edit_text(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.edit_text";
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
-    let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
-    // The numbers its expressions give now (a parameter may have changed since the sketch was
-    // last stored); one that cannot be evaluated is left as it was, to be replaced by this edit.
-    let _ = doc.apply_text_values(&doc.param_values().0, &mut sk);
-    let out = apply_text_edits(&mut sk, &doc, p)?;
-    *doc.sketch_mut(id)? = sk;
-    *s.doc_mut() = doc;
-    Ok(out)
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    sketch_store::update(s, id, |_, doc, sk| {
+        // The numbers its expressions give now (a parameter may have changed since the sketch was
+        // last stored); one that cannot be evaluated is left as it was, to be replaced by this edit.
+        let _ = doc.apply_text_values(&doc.param_values().0, sk);
+        apply_text_edits(sk, doc, p)
+    })
 }
 
 /// One frame of an interactive resize or rotation: the sketch is solved and shown, the
 /// features after it keep their last result until `sketch.drag_end` evaluates the model.
 fn edit_text_live(s: &mut Session, p: &Value) -> Result<(Value, Option<crate::LiveEdit>)> {
     let cmd = "sketch.edit_text";
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let (out, report) = super::sketch::edit_solved(s, id, false, solidcraft_sketch::Analysis::Full, |sk, doc| {
         Ok((apply_text_edits(sk, doc, p)?, super::sketch::Left::Unsolved))
     })?;
@@ -544,7 +555,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.centerline";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list lines"));
     }
@@ -569,7 +580,7 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.infinite";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list lines"));
     }
@@ -676,6 +687,39 @@ fn spline_cv3(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn spline_cv5(s: &mut Session, p: &Value) -> Result<Value> {
     spline(s, p, "sketch.spline.control_point_5", true, 5)
+}
+
+fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.insert_point";
+    let at = req_vec2(cmd, p, "at")?;
+    let end = match p.get("end") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(e)) if e == "start" => Some(true),
+        Some(Value::String(e)) if e == "end" => Some(false),
+        Some(_) => return Err(bad(cmd, "`end` must be start or end")),
+    };
+    let (point, info) = edit(s, p, cmd, false, |sk, _| {
+        let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
+        let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let new = match end {
+            None => sk.insert_spline_point(c, at),
+            Some(at_start) => sk.extend_spline(c, at, at_start),
+        }
+        .map_err(|e| bad(cmd, e.to_string()))?;
+        sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))
+    })?;
+    Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
+}
+
+fn spline_reverse(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.reverse";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let ((), info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        sk.reverse_spline(c).map_err(|e| bad(cmd, e.to_string()))
+    })?;
+    let reply = SplineReverseResult { curve: id, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn conic(s: &mut Session, p: &Value) -> Result<Value> {
@@ -867,7 +911,7 @@ fn tangent_centre(sk: &Sketch, a: usize, b: usize, r: f64, near: Vec2) -> Option
 }
 
 fn tangent_curves(sk: &Sketch, p: &Value, cmd: &str, n: usize) -> Result<Vec<usize>> {
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.len() != n {
         return Err(bad(cmd, format!("`curves` must list {n} curves")));
     }
@@ -964,11 +1008,12 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
             c.construction = true;
             centre_arc = Some(c.id.clone());
         }
+        // Each cap is tangent to both concentric sides, so its radius is half the gap between
+        // them: the two caps are equal without an Equal, which would only be redundant (#8355).
         let mut cons = Vec::new();
         for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
             cons.push(add_c(sk, ConstraintKind::Tangent { a, b })?);
         }
-        cons.push(add_c(sk, ConstraintKind::Equal { a: cap_s, b: cap_e })?);
         Ok((ids_of(sk, &[outer, cap_e, inner, cap_s]), cons))
     })?;
     let mut out = result(out, info);

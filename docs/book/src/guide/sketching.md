@@ -3,11 +3,18 @@
 A sketch lies on a plane: an origin plane, a construction plane or a planar face. Start one with
 **Create Sketch** (`sketch.create`) and click a plane, or pick a face first. Right-clicking a
 plane, in the view or on its browser row, offers **Create Sketch** on that plane too.
+While Create Sketch waits for its plane, the origin planes are shown, and the plane under the
+pointer (in the view, or its row in the browser) lights up and takes the grid, so you see which
+plane the sketch will lie on before you click.
 **Finish Sketch** returns to the model. **Cancel Sketch** (`sketch.cancel`) returns without
 keeping what changed since the sketch was created or opened for editing: a new sketch is removed,
 an edited one goes back to how it was, as one step that Undo brings back.
 
+Opening a sketch turns the view to face it. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.
+
 In scripts, `XY`, `XZ`, `YZ` and their `Top`, `Front`, `Right` aliases name origin planes.
+Preferences › Interface › **Origin plane names** shows them as Top, Front and Right in the
+browser, dialogs and lists; scripts and saved designs keep XY, XZ and YZ.
 These names are reserved: a construction plane cannot be created with or renamed to one
 (case-insensitive). If an older design already has a construction plane with such a name, a
 string argument naming it is ambiguous and is rejected; use the other alias (`XY` for `Top`)
@@ -21,6 +28,14 @@ Profile shading follows those curves while preserving holes. Zooming changes the
 without changing sketch geometry, dimensions, or undo history.
 On short windows or enlarged displays, the Sketch Palette's options scroll while its
 constraint status and **Finish Sketch** button remain visible.
+
+Hover over a circle or arc centre, or the midpoint of a straight sketch edge, then move
+horizontally or vertically to see a dotted alignment guide. The guide connects that reference
+to the cursor's projection on the sketch axis, within the viewport; it disappears when you
+move away from the axis. This works while editing and before a drawing tool's first click.
+It adds no geometry or constraints. Esc, leaving the viewport, or ending the sketch clears
+the reference. Preferences › Sketch › **Center and midpoint alignment guides** turns it off;
+the configured snap-suppression modifier also hides it.
 
 ## Geometry
 
@@ -41,6 +56,14 @@ rectangle; the circle, arc, slot, polygon and spline variants) share one toolbar
 drop-down. The button and the family's shortcut start the variant you picked last, so a
 shortcut such as L can start a Midpoint Line; pick the variant you want from the drop-down to
 change it ([Keyboard shortcuts](shortcuts.md)).
+
+Once a shape's first point is down, value boxes (a line's length and angle, a rectangle's width
+and height, a circle's diameter…) follow the cursor. Typing goes into the first box, Tab moves to
+the next and Enter places the shape; each typed value becomes a dimension. A value is an
+expression (`25`, `1 in`, `d1 * 2`), or `width = 20` (also `#width = 20`), which also adds the
+user parameter `width` and dimensions with it, as when [placing a dimension](parameters.md). A
+box that does not become a dimension (a polygon's sides, a rounded rectangle's corner radius)
+takes a value only.
 
 The Sketch Palette's **Construction Geometries** option hides construction curves while you
 work. A hidden construction curve cannot be picked by a click or by a box. Nothing invisible
@@ -117,6 +140,7 @@ geometry right away.
 Extend finds intersections with exact ellipses, rational conics and spline spans. It keeps the
 original line or circular support and extends only beyond the selected endpoint; conflicting
 constraints or an ambiguous overlap leave the sketch unchanged.
+To extend two lines or arcs until they meet, hold Shift and click the first curve, then Shift-click the second: both grow to where they cross and are joined there, in one undo step.
 
 Closed convex chains of tangent lines and circular arcs support inward offsets that consume
 a rounded corner. When the offset passes the corner radius, the neighbouring straight
@@ -232,6 +256,20 @@ nothing picked yet, click it once: its value box opens with the value selected, 
 and the tool stays on for the next dimension. The dimension's text always takes the click; its
 lines take it only away from sketch points and curves, which still start a new dimension.
 
+To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
+Sketch (it is off by default). Each line, rectangle, circle, arc, slot or polygon you draw then
+gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its width
+and height, a circle its diameter, and so on. Values you type in the drawing boxes win, and a size
+the sketch already sets (the angle of a line that snapped horizontal) is left out. The shape and
+its dimensions are one undo step. In scripts, `sketch.draw.dimensioned` takes `"as_drawn": true`.
+
+Tick **Also place them from the origin (fully constrained)** as well, and each new shape is also
+dimensioned from the sketch origin until nothing of it is left free: a horizontal and a vertical
+distance to its centre or first point, and one more where the shape could still turn (a polygon,
+a rectangle drawn at an angle). A shape already attached to the origin or to geometry that is
+placed gets none, and a point on an axis is put on that axis rather than given a 0 distance.
+In scripts: `"locate": true`.
+
 Between two points, or on a line, that don't line up with an axis, where you place the
 dimension picks what it measures: across from them, the distance between them; above or below
 them, the horizontal distance; beside them, the vertical distance.
@@ -278,6 +316,15 @@ Under-constrained geometry is blue and fully constrained geometry turns dark, an
 shows the remaining degrees of freedom. A constraint or dimension that would over-constrain the
 sketch is refused rather than applied. Drag a point to move it; the solver keeps every
 constraint while you drag.
+
+A sketch's constraints can still come to conflict through a change elsewhere: a parameter, or an
+earlier sketch that projected geometry follows. While they do, the curves and points a failing
+constraint holds, and that constraint's glyph or dimension, are drawn in the conflict colour (red;
+the theme key `sketch_conflict`, which follows a theme's `error` colour unless the theme sets it),
+so the constraint to change or remove is easy to find. Constraints that are only redundant (implied
+by others, still holding) keep their usual look. Preferences › Sketch › **Conflicting geometry in
+the conflict colour** (on by default) turns this off: then only the glyphs and dimensions of the
+failing constraints are red, as in earlier versions.
 
 ## Profiles
 

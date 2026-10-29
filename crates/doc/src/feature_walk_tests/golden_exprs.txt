@@ -73,6 +73,13 @@ cylinder
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
   expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z
+cylinder_references
+  inputs:
+    Radius = cyl.radius (Length)
+    Height = cyl.height (Length)
+    Reference distance = cyl.reference1 (Length)
+    Reference distance = cyl.reference2 (Length)
+  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0
 sphere
   inputs:
     Radius = sph.radius (Length)
@@ -82,6 +89,12 @@ torus
     Major radius = tor.major (Length)
     Minor radius = tor.minor (Length)
   expressions: tor.major, tor.minor, tor.x, tor.y, tor.z
+cone
+  inputs:
+    Radius = cone.radius (Length)
+    Top radius = cone.top_radius (Length)
+    Height = cone.height (Length)
+  expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z
 combine
 pattern_rectangular
   inputs:

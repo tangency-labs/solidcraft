@@ -333,3 +333,57 @@ fn a_feature_started_while_the_marker_rolls_back_waits_for_it() {
     let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
     assert_eq!(items, vec![Sel::Profile { sketch, index: 0 }], "Extrude did not open once the marker was back");
 }
+
+/// The SKETCH tab kept shown (#7904): right after MODEL with no sketch open, its drawing and
+/// reference tools look enabled and start a sketch first (on the selected plane, else on the plane
+/// picked next) with the tool ready; tools that need a sketch's geometry stay disabled. Off, as by
+/// default, the tab waits for a sketch.
+#[test]
+fn the_kept_sketch_tab_sits_after_model_and_its_tools_start_a_sketch() {
+    let mut h = Harness::new();
+    assert!(!crate::workspace::visible_tabs(&h.app).contains(&"SKETCH"), "off by default");
+    h.call("ui.prefs", json!({"sketch_tab_always": true}));
+    assert_eq!(crate::workspace::visible_tabs(&h.app)[..2], ["MODEL", "SKETCH"]);
+    let info = |h: &Harness, id: &str| crate::render_workspace::interactive_command_info(&h.app, solidcraft_engine::find_command(id).unwrap());
+    assert!(info(&h, "sketch.line").enabled && info(&h, "sketch.project").enabled);
+    assert!(!info(&h, "sketch.dimension").enabled && !info(&h, "sketch.trim").enabled && !info(&h, "sketch.finish").enabled);
+
+    // A plane selected first: the sketch opens on it and the tool is out.
+    h.app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
+    h.settle();
+    h.step(&json!({"click":{"handle":"tab:SKETCH"}})).unwrap();
+    h.step(&json!({"click":{"handle":"button:sketch.line"}})).unwrap();
+    h.settle();
+    assert!(normal(&h).y.abs() > 0.999, "on XZ: {:?}", normal(&h));
+    assert_eq!(tool(&h), Some("sketch.line"));
+    assert!(h.app.dialog.is_none());
+    assert_eq!(crate::workspace::visible_tabs(&h.app)[..2], ["MODEL", "SKETCH"], "the same place while sketching");
+    h.app.start("sketch.finish");
+    h.settle();
+    assert!(h.app.session.active_sketch.is_none());
+
+    // Nothing selected, in a fresh window (the view still looks at XZ): Create Sketch asks for
+    // the plane, then the tool starts.
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"sketch_tab_always": true}));
+    h.settle();
+    h.step(&json!({"click":{"handle":"tab:SKETCH"}})).unwrap();
+    h.step(&json!({"click":{"handle":"button:sketch.circle.center"}})).unwrap();
+    h.settle();
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)));
+    assert_eq!(h.app.ui.tab, "SKETCH", "the ribbon stays where the click was");
+    h.step(&json!({"click":{"plane":"XY"}})).unwrap();
+    h.settle();
+    assert!(normal(&h).z.abs() > 0.999, "{:?}", normal(&h));
+    assert_eq!(tool(&h), Some("sketch.circle.center"));
+    h.app.start("sketch.finish");
+    h.settle();
+
+    // Off again: the tab goes, and a drawing tool outside a sketch is refused as before.
+    h.call("ui.prefs", json!({"sketch_tab_always": false}));
+    h.settle();
+    assert!(!crate::workspace::visible_tabs(&h.app).contains(&"SKETCH"));
+    assert!(!info(&h, "sketch.line").enabled);
+    h.app.start("sketch.line");
+    assert!(h.app.dialog.is_none() && tool(&h).is_none());
+}

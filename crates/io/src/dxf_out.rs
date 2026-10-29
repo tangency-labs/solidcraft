@@ -786,13 +786,11 @@ mod tests {
             "{:?}",
             back[3]
         );
-        // The reader makes an elliptical arc a spline through points of it: from (75, 40) to (50, 52).
-        let Geom2::Spline { pts, control: false, .. } = &back[4] else { panic!("{:?}", back[4]) };
-        let on_ellipse = |p: &Vec2| (((p.x - 50.0) / 25.0).powi(2) + ((p.y - 40.0) / 12.0).powi(2) - 1.0).abs() < 1e-9;
-        assert!(
-            pts.first().is_some_and(|p| p.dist(Vec2::new(75.0, 40.0)) < 1e-9) && pts.last().is_some_and(|p| p.dist(Vec2::new(50.0, 52.0)) < 1e-9)
-        );
-        assert!(pts.iter().all(on_ellipse));
+        // The quarter of the ellipse comes back as the one conic it was: from (75, 40) to (50, 52)
+        // with its apex at (75, 52) and its weight (#8155).
+        let Geom2::Conic { a, apex, b, rho } = &back[4] else { panic!("{:?}", back[4]) };
+        assert!(a.dist(Vec2::new(75.0, 40.0)) < 1e-9 && apex.dist(Vec2::new(75.0, 52.0)) < 1e-9 && b.dist(Vec2::new(50.0, 52.0)) < 1e-9);
+        assert!((rho - FRAC_1_SQRT_2 / (1.0 + FRAC_1_SQRT_2)).abs() < 1e-12, "{rho}");
         // The cubic: degree and control points.
         let Geom2::Spline { pts, control: true, degree: 3 } = &back[5] else { panic!("{:?}", back[5]) };
         assert!(pts.iter().zip(&cubic).all(|(a, b)| a.dist(*b) < 1e-9) && pts.len() == 4);

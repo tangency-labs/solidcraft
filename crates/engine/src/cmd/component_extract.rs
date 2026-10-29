@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{DesignLink, Document, FeatureKind, ModelBody, ModelState};
 use solidcraft_geom::Vec3;
 
-use super::{absolute, component_key, resolve, session_bodies, stored};
+use super::{absolute, component_key, inherit_properties, resolve, session_bodies, stored};
 use crate::params::{bad, str_};
 use crate::{EngineError, Result, Session};
 
@@ -555,8 +555,8 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let sc = scope(s, comp, CMD)?;
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(CMD, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
-        return Err(bad(CMD, "the new design must be a .solidcraft file"));
+    if !solidcraft_io::is_design_container_path(&file) {
+        return Err(bad(CMD, "the new design must be a .sc file"));
     }
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(CMD, "choose another file than this design's own"));
@@ -566,7 +566,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
-    let (_, sf, faces) = session_bodies(&part, &shown)?;
+    let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
     for b in part.world_state().bodies.iter().filter(|b| !b.body.is_mesh()) {
@@ -592,12 +592,14 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
         f.link_faces = faces;
     }
     let path = stored(s.path.as_deref(), &file);
-    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id });
+    s.doc_mut().links.insert(comp, DesignLink { path: file.to_string_lossy().into_owned(), feature: id, inherited: Vec::new() });
     s.refresh();
     rename_joint_faces(s, &state, id, &sc.own);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
+    inherit_properties(s, comp, &properties)?;
+    s.refresh();
     let mut warnings = sf.warnings;
     warnings.extend(before.check(s, CMD, &sc.name)?);
     let copies = copies_of(s, comp)?;
@@ -853,7 +855,7 @@ mod tests {
         };
         refuse(&mut s, json!({"component": 0, "path": file}), "not the design");
         refuse(&mut s, json!({"component": "Plate"}), "`path` is required");
-        refuse(&mut s, json!({"component": "Plate", "path": dir.join("plate.step")}), ".solidcraft");
+        refuse(&mut s, json!({"component": "Plate", "path": dir.join("plate.step")}), ".sc file");
 
         // A joint from Plate's subcomponent to the rest of the design
         let pin_occ = s.doc.occurrences.iter().find(|o| o.name.starts_with("Pin")).map(|o| o.id).unwrap();

@@ -1,8 +1,9 @@
-//! File formats. Designs use JSON or versioned containers (`.solidcraft`); the authoritative
+//! File formats. Designs use JSON or versioned containers (`.sc`; `.solidcraft` and `.solvecraft` still open); the authoritative
 //! document rebuilds on load and optional display caches remain provisional. Bodies export
 //! as STL (binary or ASCII), OBJ, STEP and 3MF, and assemblies as URDF ([`urdf()`]); STEP, IGES,
 //! FreeCAD and Rhino files import as a base feature (see [`step_import_feature`]), 3MF and
-//! STL files as mesh bodies (see [`mesh_import_feature`]).
+//! STL files as mesh bodies (see [`mesh_import_feature`]), PLY and XYZ files as point clouds
+//! (see [`read_point_cloud`]).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
@@ -14,15 +15,22 @@ mod dxf;
 mod dxf_out;
 pub mod formats;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, THUMBNAIL_SIZE, is_design_container, read_design_file, read_design_geometry,
-    read_design_preview, read_design_thumbnail, read_design_thumbnail_file, write_design_container, write_design_container_with_cache,
-    write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_thumbnail,
+    DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
+    read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
+    write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
+    write_design_container_with_thumbnail, write_drawing_container,
 };
 mod legacy_dir;
+pub mod limits;
 #[cfg(test)]
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+pub mod paper;
+mod ply;
+pub use ply::{ply_counts, read_ply_mesh};
+mod point_cloud;
+pub use point_cloud::{CloudFile, DEFAULT_MAX_POINTS, MAX_POINT_CLOUD_BYTES, is_ply_path, is_point_cloud_path, read_point_cloud};
 pub mod safe_write;
 mod sketch2d;
 mod svg;
@@ -32,7 +40,7 @@ pub mod vfs;
 
 pub use dxf::{read_dxf, write_dxf};
 pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_shapes, seg_shape, write_dxf_drawing};
-pub use legacy_dir::{APP_ID, LEGACY_APP_ID, adopt_legacy_dir, legacy_flatpak_path};
+pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
 pub use svg::read_svg;
@@ -40,33 +48,51 @@ mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;
 pub use obj::read_obj;
-pub use threemf::{MAX_3MF_BYTES, MeshObject, model_xml, model_xml_with, read_3mf, weld, write_3mf, write_3mf_with};
+pub use threemf::{
+    MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
+};
 pub use urdf::{UrdfOptions, UrdfPackage, urdf};
 
 use solidcraft_doc::{Document, Metadata, ModelState};
 use solidcraft_geom::{Mesh, Vec3};
 
-/// Design file extension.
-pub const DESIGN_EXT: &str = "solidcraft";
-/// The design extension of earlier releases. Compatibility shim (docs/compatibility.md): such
-/// files still open everywhere a design opens; new designs are saved as [`DESIGN_EXT`].
-pub const LEGACY_DESIGN_EXT: &str = "solvecraft";
+/// Design file extension: new designs, autosaves and recovery files are written as `.sc`.
+pub const DESIGN_EXT: &str = "sc";
+/// The design extensions of earlier releases, newest first. Compatibility shim
+/// (docs/compatibility.md): such files still open everywhere a design opens, and Save keeps
+/// writing an opened file under its own name; new designs are saved as [`DESIGN_EXT`].
+pub const LEGACY_DESIGN_EXTS: [&str; 2] = ["solidcraft", "solvecraft"];
 /// Every extension a design file may have, current first.
-pub const DESIGN_EXTS: [&str; 2] = [DESIGN_EXT, LEGACY_DESIGN_EXT];
+pub const DESIGN_EXTS: [&str; 3] = [DESIGN_EXT, LEGACY_DESIGN_EXTS[0], LEGACY_DESIGN_EXTS[1]];
 
-/// Is this a design file name (`.solidcraft`, or the legacy extension), any case?
-pub fn is_design_path(path: &str) -> bool {
-    std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| DESIGN_EXTS.iter().chain(["json"].iter()).any(|x| e.eq_ignore_ascii_case(x)))
+/// Is this extension (without the dot) one a design file may have (`sc` or a legacy one), any case?
+pub fn is_design_ext(ext: &str) -> bool {
+    DESIGN_EXTS.iter().any(|x| ext.eq_ignore_ascii_case(x))
 }
-/// Largest design file we read.
+
+/// Is this a design file name (`.sc`, a legacy extension, or plain `.json`), any case?
+pub fn is_design_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| is_design_ext(e) || e.eq_ignore_ascii_case("json"))
+}
+
+/// Is this a design container file (`.sc` or a legacy extension, not plain JSON), any case?
+pub fn is_design_container_path(path: &std::path::Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(is_design_ext)
+}
+/// Drawing file extension: a drawing is a file of its own beside the designs it draws. Short and
+/// plain, as the browsers' file pickers take only ASCII letters, digits, `+` and `.`, up to 16 long.
+pub const DRAWING_EXT: &str = "scdwg";
+
+/// Is this a drawing file name (`.scdwg`, any case)?
+pub fn is_drawing_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(DRAWING_EXT))
+}
+/// Largest design file read by default; the desktop app may raise it ([`limits`], #4086).
 pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or solidcraft)")]
+    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or sc)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -80,7 +106,7 @@ pub enum IoError {
 
 pub type Result<T> = std::result::Result<T, IoError>;
 
-/// Largest STEP file we read.
+/// Largest STEP (or import) file read by default; the desktop app may raise it ([`limits`], #4086).
 pub const MAX_STEP_BYTES: usize = 512 << 20;
 
 /// Is this a CAD file read as an Import base feature: STEP (`.step` / `.stp`), IGES
@@ -207,9 +233,7 @@ pub fn step_import_feature(bytes: &[u8], file: &str) -> Result<StepFeature> {
 
 /// [`step_import_feature`], with the bodies named after `names`.
 pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> Result<StepFeature> {
-    if bytes.len() > MAX_STEP_BYTES {
-        return Err(IoError::Invalid(format!("STEP file too large ({} MB, limit {} MB)", bytes.len() >> 20, MAX_STEP_BYTES >> 20)));
-    }
+    limits::check(limits::Kind::Step, bytes.len() as u64).map_err(IoError::Invalid)?;
     // STEP is 7-bit text with escapes; tolerate stray 8-bit bytes. IGES and the cadmpeg formats
     // are restated as STEP (the feature keeps that STEP text).
     let (text, iges_warnings) = if is_native_cad_path(file) {
@@ -260,7 +284,7 @@ pub struct MeshFeature {
     pub warnings: Vec<String>,
 }
 
-/// Read 3MF, STL, OBJ or glTF bytes (the format from `file`'s extension) into a MeshImport
+/// Read 3MF, STL, OBJ, PLY or glTF bytes (the format from `file`'s extension) into a MeshImport
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
@@ -278,6 +302,8 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     let (objects, warnings) = if ext == "obj" {
         obj::read_obj(bytes, &stem)?
+    } else if ext == "ply" {
+        ply::read_ply_mesh(bytes, &stem)?
     } else if ext == "stl" {
         let tris = read_stl(bytes)?;
         if tris.is_empty() {
@@ -346,7 +372,7 @@ impl Format {
             "3mf" => Format::ThreeMf,
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
-            "solidcraft" | "solvecraft" | "json" => Format::Design,
+            e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
     }
@@ -441,57 +467,171 @@ pub fn stl_ascii(meshes: &[Mesh], name: &str) -> String {
     s
 }
 
-/// Wavefront OBJ, one object per body. Positions and normals are each written once per
-/// distinct value, so a face's vertices are shared while the normals keep edges between
-/// faces sharp. Names are written as they are (OBJ takes the rest of the line).
+/// A body in an OBJ export: the name it is written with, its mesh and the colour it is shown
+/// in.
+pub struct ObjBody<'a> {
+    /// The body's name, written in the `o` line.
+    pub name: &'a str,
+    /// The body's mesh.
+    pub mesh: &'a Mesh,
+    /// The colour of the body, when the design gives it one. The colours of its faces and its
+    /// transparency are not carried.
+    pub color: Option<[f32; 3]>,
+}
+
+/// The files of an OBJ export: the mesh file and the material library that goes with it.
+pub struct ObjFiles {
+    /// The mesh file.
+    pub obj: String,
+    /// The material library; empty when no body has a colour.
+    pub mtl: String,
+}
+
+/// Wavefront OBJ, one object per body, without materials.
 pub fn obj(meshes: &[(String, Mesh)]) -> String {
-    use std::collections::HashMap;
-    let mut s = String::from("# SolidCraft OBJ export (mm)\n");
-    let (mut vbase, mut nbase) = (1usize, 1usize);
-    for (name, m) in meshes {
-        let name: String = name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-        s += &format!("o {name}\n");
-        // `+ 0.0` turns -0 into 0, so both merge.
-        let key = |x: f64, y: f64, z: f64| [x + 0.0, y + 0.0, z + 0.0].map(f64::to_bits);
-        let mut vmap: HashMap<[u64; 3], usize> = HashMap::new();
-        let mut nmap: HashMap<[u64; 3], usize> = HashMap::new();
-        let vi: Vec<usize> = m
-            .positions
-            .iter()
-            .map(|p| {
-                let next = vmap.len();
-                *vmap.entry(key(p.x, p.y, p.z)).or_insert_with(|| {
-                    s += &format!("v {} {} {}\n", p.x, p.y, p.z);
-                    next
-                })
-            })
-            .collect();
-        let ni: Vec<usize> = m
-            .normals
-            .iter()
-            .map(|n| {
-                let next = nmap.len();
-                *nmap.entry(key(n.x, n.y, n.z)).or_insert_with(|| {
-                    s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
-                    next
-                })
-            })
-            .collect();
-        for t in &m.triangles {
-            let (Some(a), Some(b), Some(c)) = (vi.get(t[0] as usize), vi.get(t[1] as usize), vi.get(t[2] as usize)) else { continue };
-            let (a, b, c) = (a + vbase, b + vbase, c + vbase);
-            match (ni.get(t[0] as usize), ni.get(t[1] as usize), ni.get(t[2] as usize)) {
-                (Some(na), Some(nb), Some(nc)) => {
-                    let (na, nb, nc) = (na + nbase, nb + nbase, nc + nbase);
-                    s += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
-                }
-                _ => s += &format!("f {a} {b} {c}\n"),
-            }
-        }
-        vbase += vmap.len();
-        nbase += nmap.len();
+    let bodies: Vec<ObjBody<'_>> = meshes.iter().map(|(name, mesh)| ObjBody { name: name.as_str(), mesh, color: None }).collect();
+    obj_files(&bodies, "").obj
+}
+
+/// Wavefront OBJ with the colours of the bodies: the mesh file and the material library that
+/// goes with it. `mtl_name` is the name the `mtllib` line writes (the library's file name
+/// beside the mesh file); an empty name writes no materials at all, as there is no library to
+/// name.
+///
+/// Only the colour of the body travels: the colours of single faces and the transparency of a
+/// body are left out, as a face colour needs material groups inside one object.
+///
+/// Positions and normals are each written once per distinct value, so a face's vertices are
+/// shared while the normals keep edges between faces sharp. Names are written as they are (OBJ
+/// takes the rest of the line); the material of a body takes its name with the characters a
+/// material name cannot hold replaced by an underscore.
+pub fn obj_files(bodies: &[ObjBody<'_>], mtl_name: &str) -> ObjFiles {
+    let materials = material_names(bodies);
+    let mut obj = String::from("# SolidCraft OBJ export (mm)\n");
+    let mut mtl = String::new();
+    if materials.iter().any(|m| m.is_some()) {
+        obj += &format!("mtllib {mtl_name}\n");
+        mtl = String::from("# SolidCraft material library\n");
     }
-    s
+    let (mut vbase, mut nbase) = (1usize, 1usize);
+    for (i, b) in bodies.iter().enumerate() {
+        let name: String = b.name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+        obj += &format!("o {name}\n");
+        if let (Some(material), Some(color)) = (materials.get(i).and_then(|m| m.as_deref()), b.color) {
+            obj += &format!("usemtl {material}\n");
+            mtl += &format!("newmtl {material}\nKd {}\n", kd(color));
+        }
+        let (text, vb, nb) = mesh_text(b.mesh, vbase, nbase);
+        obj += &text;
+        vbase = vb;
+        nbase = nb;
+    }
+    ObjFiles { obj, mtl }
+}
+
+/// The mesh of a body: its vertices and normals, each written once per distinct value, and the
+/// faces that use them. Returns the text and the bases the next body carries on from.
+fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) {
+    use std::collections::HashMap;
+    let mut s = String::new();
+    // `+ 0.0` turns -0 into 0, so both merge.
+    let key = |x: f64, y: f64, z: f64| [x + 0.0, y + 0.0, z + 0.0].map(f64::to_bits);
+    let mut vmap: HashMap<[u64; 3], usize> = HashMap::new();
+    let mut nmap: HashMap<[u64; 3], usize> = HashMap::new();
+    let vi: Vec<usize> = mesh
+        .positions
+        .iter()
+        .map(|p| {
+            let next = vmap.len();
+            *vmap.entry(key(p.x, p.y, p.z)).or_insert_with(|| {
+                s += &format!("v {} {} {}\n", p.x, p.y, p.z);
+                next
+            })
+        })
+        .collect();
+    let ni: Vec<usize> = mesh
+        .normals
+        .iter()
+        .map(|n| {
+            let next = nmap.len();
+            *nmap.entry(key(n.x, n.y, n.z)).or_insert_with(|| {
+                s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
+                next
+            })
+        })
+        .collect();
+    for t in &mesh.triangles {
+        let (Some(a), Some(b), Some(c)) = (vi.get(t[0] as usize), vi.get(t[1] as usize), vi.get(t[2] as usize)) else { continue };
+        let (a, b, c) = (a + vbase, b + vbase, c + vbase);
+        match (ni.get(t[0] as usize), ni.get(t[1] as usize), ni.get(t[2] as usize)) {
+            (Some(na), Some(nb), Some(nc)) => {
+                let (na, nb, nc) = (na + nbase, nb + nbase, nc + nbase);
+                s += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
+            }
+            _ => s += &format!("f {a} {b} {c}\n"),
+        }
+    }
+    (s, vbase + vmap.len(), nbase + nmap.len())
+}
+
+/// The material of each body: its name, safe to write in a material library and unique among
+/// the bodies. A body without a colour has no material.
+fn material_names(bodies: &[ObjBody<'_>]) -> Vec<Option<String>> {
+    let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<Option<String>> = Vec::with_capacity(bodies.len());
+    for b in bodies {
+        if b.color.is_none() {
+            out.push(None);
+            continue;
+        }
+        let base = safe_name(b.name);
+        let base = if base.is_empty() { String::from("body") } else { base };
+        let mut name = base.clone();
+        let mut n = 2;
+        while !taken.insert(name.clone()) {
+            name = format!("{base}_{n}");
+            n += 1;
+        }
+        out.push(Some(name));
+    }
+    out
+}
+
+/// A name a material library can hold: the body's name with every character that is not a
+/// letter, a digit or an underscore replaced by one, and the name cut short when it is longer
+/// than a material name needs to be.
+fn safe_name(name: &str) -> String {
+    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).take(64).collect()
+}
+
+/// The diffuse colour of a material: three fractions between 0 and 1, as the OBJ convention
+/// writes them.
+fn kd(color: [f32; 3]) -> String {
+    let [r, g, b] = color.map(|v| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 });
+    format!("{r:.3} {g:.3} {b:.3}")
+}
+
+/// The bodies of a model an export takes (all when `bodies` is empty).
+fn selected<'a>(state: &'a ModelState, bodies: &[String]) -> Result<Vec<&'a solidcraft_doc::ModelBody>> {
+    let sel: Vec<&solidcraft_doc::ModelBody> = state.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)).collect();
+    if sel.is_empty() {
+        return Err(IoError::Empty);
+    }
+    Ok(sel)
+}
+
+/// The OBJ export of the given bodies of a model (all when `bodies` is empty): the mesh file
+/// and the material library beside it, with the colour of each body. `mtl_name` is the name
+/// the `mtllib` line writes (the library's file name beside the mesh file).
+pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
+    obj_export(&selected(state, bodies)?, mtl_name, quality)
+}
+
+/// The OBJ export of the given bodies: the mesh file and the material library beside it.
+fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
+    let meshes: Vec<Mesh> = sel.iter().map(|b| export_mesh_at(&b.body, quality)).collect::<Result<_>>()?;
+    let bodies: Vec<ObjBody<'_>> = sel.iter().zip(&meshes).map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
+    Ok(obj_files(&bodies, mtl_name))
 }
 
 /// Export the given bodies of a model (all when `bodies` is empty) in a format.
@@ -533,6 +673,10 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
 }
 
 /// [`export_with_metadata`], meshing STL, OBJ and 3MF at `quality`.
+///
+/// The OBJ export of this function carries no materials: it writes one file, so it names no
+/// material library it could not write. [`export_obj`] returns the mesh file and the material
+/// library with the colours of the bodies.
 pub fn export_with_quality(
     state: &ModelState,
     bodies: &[String],
@@ -541,10 +685,22 @@ pub fn export_with_quality(
     meta: &Metadata,
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
-    let sel: Vec<&solidcraft_doc::ModelBody> = state.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)).collect();
-    if sel.is_empty() {
-        return Err(IoError::Empty);
-    }
+    export_with_parts(state, bodies, &[], format, name, meta, quality)
+}
+
+/// [`export_with_quality`], and in 3MF each of `parts` (a name and the names of its bodies)
+/// written as one object with those bodies as its parts ([`model_xml_parts`], #8139).
+/// Bodies of a part that are not exported are left out of it. Other formats have no parts.
+pub fn export_with_parts(
+    state: &ModelState,
+    bodies: &[String],
+    parts: &[(String, Vec<String>)],
+    format: Format,
+    name: &str,
+    meta: &Metadata,
+    quality: MeshQuality,
+) -> Result<Vec<u8>> {
+    let sel = selected(state, bodies)?;
     Ok(match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
@@ -560,6 +716,8 @@ pub fn export_with_quality(
             if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
         }
         Format::Obj => {
+            // One file, so no material library: a mesh file that names a library nobody wrote
+            // would come out in the reader's default grey.
             let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?))).collect::<Result<_>>()?;
             obj(&meshes).into_bytes()
         }
@@ -575,9 +733,11 @@ pub fn export_with_quality(
         }
         Format::ThreeMf | Format::ThreeMfTagged => {
             let objs: Vec<MeshObject> = sel.iter().map(|b| mesh_object(b, format == Format::ThreeMfTagged, quality)).collect::<Result<_>>()?;
-            write_3mf_with(&objs, &threemf_metadata(meta))?
+            let index = |n: &String| sel.iter().position(|b| &b.name == n);
+            let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
+            write_3mf_parts(&objs, &parts, &threemf_metadata(meta))?
         }
-        Format::Design => return Err(IoError::Format("solidcraft (save the document instead)".into())),
+        Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
     })
 }
@@ -652,14 +812,16 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
 
 /// Read a design file's bytes.
 pub fn read_design(bytes: &[u8]) -> Result<Document> {
-    if bytes.len() > MAX_DESIGN_BYTES {
-        return Err(IoError::Invalid("design file too large".into()));
-    }
+    limits::check(limits::Kind::Design, bytes.len() as u64).map_err(|e| IoError::Invalid(format!("design {e}")))?;
     if is_design_container(bytes) {
         return design::read(bytes);
     }
     let s = std::str::from_utf8(bytes).map_err(|_| IoError::Invalid("design file is not UTF-8 JSON".into()))?;
-    Ok(Document::from_json(s)?)
+    // Only a file that isn't a design pays for asking whether it is a drawing.
+    Document::from_json(s).map_err(|e| match file_kind(bytes) {
+        Ok(FileKind::Drawing) => IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()),
+        _ => e.into(),
+    })
 }
 
 /// Design file bytes.
@@ -851,6 +1013,23 @@ mod tests {
         assert!(ids.iter().all(|i| (1..=8).contains(i) || (1..=6).contains(i)));
     }
 
+    /// The OBJ export carries the colours of the bodies: the mesh file names the material
+    /// library beside it and every body with a colour gets a material in it.
+    #[test]
+    fn obj_export_writes_the_colours_of_the_bodies() {
+        let (_, m) = model();
+        let mut st = (*m.state()).clone();
+        st.bodies[0].body = st.bodies[0].body.clone().with_color(Some([208.0 / 255.0, 48.0 / 255.0, 48.0 / 255.0]));
+        let files = export_obj(&st, &[], "part.mtl", MeshQuality::default()).unwrap();
+        assert!(files.obj.contains("\nmtllib part.mtl\n"), "{}", files.obj);
+        assert!(files.obj.contains("\nusemtl Body1\n"), "{}", files.obj);
+        assert!(files.mtl.contains("\nnewmtl Body1\n"), "{}", files.mtl);
+        assert!(files.mtl.contains("Kd 0.816 0.188 0.188"), "{}", files.mtl);
+        // The export that writes one file names no material library it cannot write.
+        let o = String::from_utf8(export(&st, &[], Format::Obj, "part").unwrap()).unwrap();
+        assert!(!o.contains("mtllib"), "{o}");
+    }
+
     /// The design properties land in each format's own metadata (#1015): STEP and IGES headers,
     /// 3MF model metadata. Other tools' keys never leave the design file.
     #[test]
@@ -944,10 +1123,14 @@ mod tests {
         assert!(step_import_feature(b"ISO-10303-21;", "x.step").is_err());
         assert!(step_import_feature(&[0xff, 0xfe, 0x00], "x.step").is_err());
         assert!(Format::from_name("a.dwg").is_err());
-        // Compatibility shim: the legacy design extension is still a design.
+        // Compatibility shim: the legacy design extensions are still designs.
         assert_eq!(Format::from_name("old.solvecraft").unwrap(), Format::Design);
-        assert_eq!(Format::from_name("new.solidcraft").unwrap(), Format::Design);
-        assert!(is_design_path("/d/old.SOLVECRAFT") && is_design_path("new.solidcraft") && !is_design_path("a.step"));
+        assert_eq!(Format::from_name("older.solidcraft").unwrap(), Format::Design);
+        assert_eq!(Format::from_name("new.sc").unwrap(), Format::Design);
+        assert_eq!(Format::from_name("NEW.SC").unwrap(), Format::Design);
+        assert!(is_design_path("/d/old.SOLVECRAFT") && is_design_path("older.solidcraft") && is_design_path("new.sc") && !is_design_path("a.step"));
+        assert_eq!(DESIGN_EXT, "sc");
+        assert_eq!(DESIGN_EXTS, ["sc", "solidcraft", "solvecraft"], "new extension first, then every older one");
         assert!(read_stl(&[0u8; 10]).is_err());
         let mut fake = vec![0u8; 84];
         fake[80..84].copy_from_slice(&u32::MAX.to_le_bytes());
@@ -1059,6 +1242,7 @@ mod tests {
                 radius: "6".into(),
                 height: "15".into(),
                 operation: Operation::NewBody,
+                references: Vec::new(),
             },
             None,
         )

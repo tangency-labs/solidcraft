@@ -442,12 +442,56 @@ impl Camera {
             self.roll = roll;
         }
     }
+    /// Orbit by pixel deltas like [`Camera::orbit`], without its pole limit: sideways turns
+    /// about the world's up axis and up/down tilts about the screen's right, on over the top.
+    /// Upside down (past a pole) sideways turns the other way, so the model still follows the
+    /// cursor.
+    pub fn orbit_unlimited(&mut self, dx: f64, dy: f64) {
+        if !self.is_valid() || !dx.is_finite() || !dy.is_finite() {
+            return;
+        }
+        let upright = self.basis().1.dot(self.up_dir()) >= 0.0;
+        let turn = if upright { dx } else { -dx } * 0.008;
+        self.yaw = (self.yaw + turn) % std::f64::consts::TAU;
+        self.rotate_in_view(Vec3::new(-dy * 0.008, 0.0, 0.0));
+    }
     pub fn set_view(&mut self, v: StandardView) {
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         let (y, p) = v.angles();
         self.yaw = y;
         self.pitch = p.clamp(-lim, lim);
         self.roll = 0.0;
+    }
+    /// The standard axis view this camera faces, if its view direction is within `tol` radians
+    /// of one of the six axis views (Front, Back, Left, Right, Top, Bottom). Iso is never
+    /// reported. At the poles (Top/Bottom) the yaw is degenerate, so any yaw counts as aligned.
+    /// Used by the "perspective while orbiting, orthographic on faces" view mode (#2682).
+    pub fn aligned_standard_view(&self, tol: f64) -> Option<StandardView> {
+        use std::f64::consts::FRAC_PI_2;
+        if !self.yaw.is_finite() || !self.pitch.is_finite() || !(tol > 0.0) {
+            return None;
+        }
+        // Top / Bottom: aligned when the elevation reaches the pole within the tolerance
+        // (`set_view` stops a hair short of pi/2, so the slack covers the exact views too).
+        if FRAC_PI_2 - self.pitch.abs() <= tol {
+            return Some(if self.pitch >= 0.0 { StandardView::Top } else { StandardView::Bottom });
+        }
+        // The four side views sit at pitch 0 with yaw on a multiple of pi/2.
+        if self.pitch.abs() > tol {
+            return None;
+        }
+        let quarter = (self.yaw / FRAC_PI_2).round().rem_euclid(4.0);
+        let off = (self.yaw / FRAC_PI_2).rem_euclid(1.0);
+        let off = off.min(1.0 - off) * FRAC_PI_2;
+        if off > tol {
+            return None;
+        }
+        Some(match quarter as i32 {
+            0 => StandardView::Front,
+            1 => StandardView::Left,
+            2 => StandardView::Back,
+            _ => StandardView::Right,
+        })
     }
     /// Frame a bounding box.
     pub fn fit(&mut self, b: &Aabb3) {
@@ -509,6 +553,64 @@ impl Camera {
             && self.distance.is_finite()
             && self.distance > 0.0
     }
+    /// The view's orientation in degrees, as the viewport's View angles readout shows it (#6032).
+    /// These are the camera's own angles: yaw in (−180, 180], pitch in [−90, 90], roll in
+    /// (−180, 180]. A camera whose pitch passed a pole is read from its basis, as the same view
+    /// with the angles in range; there, straight up or down, yaw and roll turn the image the same
+    /// way, so roll reads 0 and yaw carries the turn. An invalid camera reads all zeros.
+    pub fn view_angles(&self) -> ViewAngles {
+        use std::f64::consts::FRAC_PI_2;
+        let angles = if !self.is_valid() {
+            (0.0, 0.0, 0.0)
+        } else if self.pitch.abs() <= FRAC_PI_2 {
+            (wrap_half_turn(self.yaw), self.pitch, wrap_half_turn(self.roll))
+        } else {
+            let (right, _, back) = self.basis();
+            let (right, back) = (self.up.to_frame(right), self.up.to_frame(back));
+            let pitch = back.z.clamp(-1.0, 1.0).asin();
+            if back.x.hypot(back.y) < 1e-9 {
+                // Straight up or down: the camera's right vector lies in the ground plane.
+                ((-right.y).atan2(right.x), pitch, 0.0)
+            } else {
+                let yaw = (-back.x).atan2(-back.y);
+                let base_right = Vec3::new(yaw.cos(), -yaw.sin(), 0.0);
+                let base_up = back.cross(base_right).normalized().unwrap_or(Vec3::Z);
+                (yaw, pitch, right.dot(base_up).atan2(right.dot(base_right)))
+            }
+        };
+        let degrees = |a: f64| if a.is_finite() { a.to_degrees() + 0.0 } else { 0.0 };
+        ViewAngles { yaw: degrees(wrap_half_turn(angles.0)), pitch: degrees(angles.1).clamp(-90.0, 90.0), roll: degrees(wrap_half_turn(angles.2)) }
+    }
+    /// The same camera turned to `angles` (degrees, as [`Camera::view_angles`] reads them):
+    /// target, distance, projection and up axis are kept. Yaw and roll may be any number of
+    /// turns; pitch is held to ±90°. `None` when an angle is not finite.
+    pub fn with_view_angles(&self, angles: ViewAngles) -> Option<Camera> {
+        let ViewAngles { yaw, pitch, roll } = angles;
+        if !(yaw.is_finite() && pitch.is_finite() && roll.is_finite()) {
+            return None;
+        }
+        let radians = |a: f64| wrap_half_turn(a.to_radians());
+        Some(Camera { yaw: radians(yaw), pitch: pitch.clamp(-90.0, 90.0).to_radians(), roll: radians(roll), ..*self })
+    }
+}
+
+/// A view's orientation in degrees about the up axis (#6032). Yaw is the heading of the line of
+/// sight: 0 looks along +Y (Front), 90 along +X (Left), 180 along −Y (Back), −90 along −X
+/// (Right). Pitch is the eye's elevation above the ground plane: 90 looks straight down (Top),
+/// −90 straight up (Bottom). Roll turns the image about the line of sight; positive turns the
+/// model clockwise on screen. With Y up the same angles turn about Y, the front view looking
+/// along −Z.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ViewAngles {
+    pub yaw: f64,
+    pub pitch: f64,
+    pub roll: f64,
+}
+
+/// An angle in radians brought into (−π, π]; any finite angle, however many turns.
+fn wrap_half_turn(a: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    if a.is_finite() { PI - (PI - a).rem_euclid(TAU) } else { 0.0 }
 }
 
 #[cfg(test)]
@@ -666,6 +768,49 @@ mod tests {
         assert!((sx - 600.0).abs() < 1e-6 && (sy - 300.0).abs() < 1e-6);
     }
 
+    /// The #2682 alignment policy: each axis view is detected, off-axis and iso are not, and
+    /// the tolerance admits near-aligned cameras (set_view's Top stops a hair short of pi/2).
+    #[test]
+    fn aligned_standard_view_detects_axis_views_within_tolerance() {
+        let tol = 1.0_f64.to_radians();
+        for v in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
+            let mut cam = Camera::default();
+            cam.set_view(v);
+            assert_eq!(cam.aligned_standard_view(tol), Some(v), "{v:?}");
+        }
+        // Iso and off-axis orientations are never aligned.
+        let iso = Camera { yaw: StandardView::Iso.angles().0, pitch: StandardView::Iso.angles().1, ..Camera::default() };
+        assert_eq!(iso.aligned_standard_view(tol), None);
+        let off = Camera { yaw: 0.5, pitch: 0.3, ..Camera::default() };
+        assert_eq!(off.aligned_standard_view(tol), None);
+        // Within tolerance of Front (yaw and pitch each a half-degree off) it still counts.
+        let near = Camera { yaw: 0.5_f64.to_radians(), pitch: 0.5_f64.to_radians(), ..Camera::default() };
+        assert_eq!(near.aligned_standard_view(tol), Some(StandardView::Front));
+        // Just outside the tolerance it does not.
+        let past = Camera { yaw: 2.0_f64.to_radians(), pitch: 0.0, ..Camera::default() };
+        assert_eq!(past.aligned_standard_view(tol), None);
+        // Yaw wraps: 3*pi/2 is Right, negative yaw works, and at the poles any yaw counts.
+        assert_eq!(
+            Camera { yaw: 3.0 * std::f64::consts::FRAC_PI_2, pitch: 0.0, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Right)
+        );
+        assert_eq!(
+            Camera { yaw: -std::f64::consts::FRAC_PI_2, pitch: 0.0, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Right)
+        );
+        assert_eq!(
+            Camera { yaw: 2.0, pitch: std::f64::consts::FRAC_PI_2 - 1e-6, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Top)
+        );
+        assert_eq!(
+            Camera { yaw: 2.0, pitch: -std::f64::consts::FRAC_PI_2 + 1e-6, ..Camera::default() }.aligned_standard_view(tol),
+            Some(StandardView::Bottom)
+        );
+        // Non-finite angles and a zero tolerance never align.
+        assert_eq!(Camera { yaw: f64::NAN, pitch: 0.0, ..Camera::default() }.aligned_standard_view(tol), None);
+        assert_eq!(Camera::default().aligned_standard_view(0.0), None);
+    }
+
     #[test]
     fn large_scene_projection_toggle_keeps_near_and_far_components_in_clip_range() {
         for scale in [1.0, 100.0] {
@@ -812,5 +957,103 @@ mod tests {
         // Frames round-trip.
         let v = Vec3::new(1.0, 2.0, 3.0);
         assert!(UpAxis::Y.from_frame(UpAxis::Y.to_frame(v)).dist(v) < 1e-12);
+    }
+
+    fn same_view(a: &Camera, b: &Camera) -> bool {
+        let ((ar, au, ab), (br, bu, bb)) = (a.basis(), b.basis());
+        ar.dist(br) < 1e-9 && au.dist(bu) < 1e-9 && ab.dist(bb) < 1e-9
+    }
+
+    /// The View angles readout (#6032): the named views read round numbers, with Front 0/0/0,
+    /// in both up frames.
+    #[test]
+    fn named_views_read_round_view_angles() {
+        let iso_pitch = (1.0_f64 / 3.0_f64.sqrt()).asin().to_degrees();
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for (view, expected) in [
+                (StandardView::Front, (0.0, 0.0, 0.0)),
+                (StandardView::Back, (180.0, 0.0, 0.0)),
+                (StandardView::Left, (90.0, 0.0, 0.0)),
+                (StandardView::Right, (-90.0, 0.0, 0.0)),
+                (StandardView::Top, (0.0, 90.0, 0.0)),
+                (StandardView::Bottom, (0.0, -90.0, 0.0)),
+                (StandardView::Iso, (-45.0, iso_pitch, 0.0)),
+            ] {
+                let mut cam = Camera { up, roll: 0.7, ..Default::default() };
+                cam.set_view(view);
+                let a = cam.view_angles();
+                assert!(
+                    (a.yaw - expected.0).abs() < 1e-3 && (a.pitch - expected.1).abs() < 1e-3 && (a.roll - expected.2).abs() < 1e-9,
+                    "{up:?} {view:?}: {a:?}"
+                );
+            }
+        }
+        // Yaw is the heading of the line of sight; positive roll turns the model clockwise.
+        let cam = Camera::default().with_view_angles(ViewAngles { yaw: 90.0, pitch: 0.0, roll: 0.0 }).unwrap();
+        assert!(cam.back().dist(-Vec3::X) < 1e-12, "yaw 90 looks along +X: {:?}", cam.back());
+        let cam = Camera::default().with_view_angles(ViewAngles { yaw: 0.0, pitch: 0.0, roll: 30.0 }).unwrap();
+        let (x, y, _) = cam.to_screen(cam.target + Vec3::X * 10.0, 800.0, 600.0, 50.0).unwrap();
+        assert!(x > 400.0 && y > 300.0, "+X turned clockwise, below the centre: {x}, {y}");
+    }
+
+    /// Angles read from a camera turn a camera to the same view, and set angles read back, for
+    /// any orientation, including straight up and down and cameras whose stored pitch passed a pole.
+    #[test]
+    fn view_angles_round_trip_without_nan_at_the_poles() {
+        use std::f64::consts::{FRAC_PI_2, TAU};
+        for up in [UpAxis::Z, UpAxis::Y] {
+            let base = Camera { up, target: Vec3::new(1.0, -2.0, 3.0), distance: 80.0, fov: 0.6, ..Default::default() };
+            for yaw in [-180.0, -135.0, -90.0, -12.5, 0.0, 45.0, 90.0, 179.0, 180.0] {
+                for pitch in [-90.0, -89.9, -35.0, 0.0, 15.0, 89.9, 90.0] {
+                    for roll in [-170.0, -90.0, 0.0, 30.0, 180.0] {
+                        let set = ViewAngles { yaw, pitch, roll };
+                        let cam = base.with_view_angles(set).unwrap();
+                        assert_eq!((cam.target, cam.distance, cam.fov, cam.up), (base.target, base.distance, base.fov, base.up));
+                        let read = cam.view_angles();
+                        let turn = |a: f64, b: f64| ((a - b + 540.0).rem_euclid(360.0) - 180.0).abs();
+                        assert!(
+                            turn(read.yaw, yaw) < 1e-9 && (read.pitch - pitch).abs() < 1e-9 && turn(read.roll, roll) < 1e-9,
+                            "{set:?} -> {read:?}"
+                        );
+                        assert!(same_view(&cam, &cam.with_view_angles(read).unwrap()));
+                    }
+                }
+            }
+            // Stored angles out of range (a pitch over a pole, many turns) read in range as the same view.
+            for (yaw, pitch, roll) in [
+                (0.3, 2.0, 0.2),
+                (-1.0, -3.0, 1.0),
+                (7.0 * TAU + 0.5, 0.4, -9.0 * TAU),
+                (0.8, FRAC_PI_2 + TAU, 0.3),
+                (-0.6, -FRAC_PI_2 - TAU, 1.1),
+                (1e6, 1e6, -1e6),
+            ] {
+                let cam = Camera { yaw, pitch, roll, ..base };
+                let a = cam.view_angles();
+                assert!(a.yaw.is_finite() && a.pitch.is_finite() && a.roll.is_finite(), "{cam:?}: {a:?}");
+                assert!((-180.0..=180.0).contains(&a.yaw) && (-90.0..=90.0).contains(&a.pitch) && (-180.0..=180.0).contains(&a.roll));
+                assert!(same_view(&cam, &cam.with_view_angles(a).unwrap()), "{cam:?}: {a:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn hostile_view_angles_are_refused_or_held_in_range() {
+        let cam = Camera::default();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for a in [
+                ViewAngles { yaw: bad, ..Default::default() },
+                ViewAngles { pitch: bad, ..Default::default() },
+                ViewAngles { roll: bad, ..Default::default() },
+            ] {
+                assert_eq!(cam.with_view_angles(a), None);
+            }
+            assert_eq!(Camera { yaw: bad, ..cam }.view_angles(), ViewAngles::default());
+            assert_eq!(Camera { pitch: bad, ..cam }.view_angles(), ViewAngles::default());
+        }
+        let huge = cam.with_view_angles(ViewAngles { yaw: f64::MAX, pitch: f64::MAX, roll: -f64::MAX }).unwrap();
+        assert!(huge.is_valid() && (huge.pitch - std::f64::consts::FRAC_PI_2).abs() < 1e-12, "{huge:?}");
+        let a = huge.view_angles();
+        assert!(a.yaw.is_finite() && a.roll.is_finite() && a.pitch == 90.0, "{a:?}");
     }
 }

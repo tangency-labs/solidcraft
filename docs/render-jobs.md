@@ -118,7 +118,7 @@ German and Korean; command IDs and scenario handles remain unchanged.
 
 ```sh
 solidcraft-cli render examples/render-studio.json --out product.png --width 800 --height 600
-solidcraft-cli render design.solidcraft --setup Studio --out product.png --transparent
+solidcraft-cli render design.sc --setup Studio --out product.png --transparent
 ```
 
 The CLI follows preflight/start/native wait/export, with a default 120-second wait

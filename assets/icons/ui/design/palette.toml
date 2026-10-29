@@ -206,3 +206,6 @@ constraint = [
 construction = [
   "centerline", "construction", "infinite",
 ]
+mesh = [
+  "mesh_body",
+]

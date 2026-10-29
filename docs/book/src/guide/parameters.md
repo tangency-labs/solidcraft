@@ -10,10 +10,31 @@ name (`d1`, `d2`, …). Click another driving dimension to use its name: when th
 just a number (such as `10` or `10 mm`) the name replaces it; otherwise it goes in at the
 cursor, replacing selected text and keeping what you typed, so typing `10 + ` and clicking
 `d1` gives `10 + d1`. Add arithmetic such as `/ 2` to build a dependent dimension. Press **Enter** to apply
-the expression or **Escape** to cancel the edit. When placing a new dimension, `width = 40` (or `#width = 40`) adds
-the user parameter `width` with that value (a bare number is in the design's units) and
-dimensions with it; a name that is already taken is refused.
+the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
+
+## Naming a value as you type it
+
+Any value input can name its value: type `width = 40` (or `#width = 40`) for a dimension, a
+value box while drawing a shape (a line's length, a rectangle's width and height, a circle's
+diameter: the shape is drawn at that size and its dimension uses the parameter), an extrude
+distance, a fillet radius, a hole diameter, a sheet metal rule, a joint's offset and so on.
+SolidCraft adds the user parameter `width` with the expression `40`, and the input uses
+`width` from then on, so editing it again shows `width`. A bare number reads as it would in that
+input (the design's units for a length, degrees for an angle), and the parameter keeps that
+unit. The right-hand side can be any expression, such as `width = depth * 2`. The command and
+its parameter are one undo step.
+
+Editing a value that already has its own parameter (a dimension's `d7`, a feature input's) with
+`height = 12` renames that parameter to `height`, references following, and sets it to 12; no
+other parameter is made. When the value is just a parameter's name (`width`), `width = 50` sets
+that parameter instead. A name that is already taken, a unit, function or constant name, or a
+value that refers to itself is refused with the reason, and nothing changes. A parameter's own
+expression and a configuration cell can't define another parameter.
+
+Scripts, the control channel and MCP tools take the same form in any expression parameter
+(`"distance": "depth = 15"`); the result names what it made in `defined` (the first name) and
+`definitions` (`[{name, expression, unit}]`).
 
 In the MANAGE tab's PARAMETERS section, click **Parameters** to open the user and model
 parameter editor. The **Configurations** button in CONFIGURATIONS opens the configuration table;
@@ -40,7 +61,10 @@ and the preview follows each step. An expression such as `width / 2` is left as 
 
 Expressions are unit-aware: `2 * width + 5 mm`, `angle / 2`, `sqrt(area)`, `1 in + 3 mm`, using
 `+ - * / ^`, parentheses, `sin cos tan asin acos atan atan2 sqrt abs min max floor ceil round mod
-trunc` and unit conversion. A decimal comma works too, outside parentheses: `2,5 mm` is
+trunc` and unit conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
+and `90 deg / 1 rad` is π/2, and a fraction of numbers before a unit is one value too (`1/2 in`
+is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, while
+`width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too, outside parentheses: `2,5 mm` is
 `2.5 mm` (inside a function's parentheses the comma separates its arguments, so write
 `max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
 `3 7/16 in` are 2.125 in and 3.4375 in (a whole number, a space, then a proper fraction of whole
@@ -69,7 +93,7 @@ suppressed features, physical materials and body appearances, switched with `con
 The table's Library picker selects material or appearance values. Choose **Follow material**
 to clear an appearance override. Custom looks retain their colour and opacity across
 activation, undo and save/reopen. See
-[configuration commands and examples](https://github.com/bherbruck/solidcraft/blob/main/docs/configurations.md).
+[configuration commands and examples](https://github.com/tangency-labs/solidcraft/blob/main/docs/configurations.md).
 
 ## Checking a design across a parameter's range
 

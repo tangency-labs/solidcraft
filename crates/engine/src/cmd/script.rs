@@ -35,13 +35,67 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         .get("feature")
         .and_then(Value::as_object)
         .ok_or_else(|| bad(cmd, "`feature` must be a feature object, as a design file or timeline.inspect has it"))?;
-    let feature = recorded_feature(cmd, raw)?;
+    let mut raw = raw.clone();
+    resolve_legacy_names(&mut raw, &s.doc);
+    let feature = recorded_feature(cmd, &raw)?;
     let params = step_params(cmd, p.get("params"))?;
     let id = s.doc_mut().insert_feature(feature, params)?;
     s.refresh();
     let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     let r = s.model.result(id);
     Ok(json!({"feature": id, "name": name, "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone())}))
+}
+
+/// timeline.add keeps accepting legacy name-keyed pattern and mirror seeds and construction
+/// plane names (#1134): a script recorded before these references were keyed by id resolves
+/// them against the design as it stands, exactly the way opening a saved design migrates them
+/// (`format::pending::feature_id_refs`) — a name that finds no feature keeps id 0, which
+/// dangles at evaluation with the same warning or error it always gave.
+fn resolve_legacy_names(raw: &mut Map<String, Value>, doc: &Document) {
+    let kind = raw.get("type").and_then(Value::as_str).unwrap_or("").to_string();
+    // A pattern's or mirror's seeds: each name becomes the feature's id.
+    if matches!(kind.as_str(), "pattern" | "mirror")
+        && let Some(Value::Array(seeds)) = raw.get_mut("features")
+    {
+        for seed in seeds.iter_mut() {
+            if let Value::String(name) = seed {
+                let name = name.clone();
+                *seed = json!(doc.seed_feature(&name).map(|f| f.id).unwrap_or(0));
+            }
+        }
+    }
+    // Construction plane references, everywhere but a revolve's axis: an
+    // `AxisRef::Construction` has the same shape but names a construction axis, which is
+    // still keyed by name.
+    let skip_axis = matches!(kind.as_str(), "revolve" | "surface_revolve");
+    for (key, v) in raw.iter_mut() {
+        if !(skip_axis && key == "axis") {
+            resolve_plane_refs(v, doc);
+        }
+    }
+}
+
+/// Rewrite every `{"type": "construction", "name": …}` plane reference in `v` to carry the
+/// feature's id, resolved by `Document::find_feature`; nothing is id 0.
+fn resolve_plane_refs(v: &mut Value, doc: &Document) {
+    match v {
+        Value::Object(o) => {
+            if o.get("type").and_then(Value::as_str) == Some("construction") {
+                if let Some(name) = o.get("name").and_then(Value::as_str) {
+                    let name = name.to_string();
+                    let id = doc.find_feature(&name).map(|f| f.id).unwrap_or(0);
+                    o.remove("name");
+                    o.insert("feature".into(), json!(id));
+                }
+                return;
+            }
+            for (_, x) in o.iter_mut() {
+                resolve_plane_refs(x, doc);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| resolve_plane_refs(x, doc)),
+        _ => {}
+    }
 }
 
 /// The feature, through the checks a design file gets when it opens (numbers, sketch sizes, 3D
@@ -143,6 +197,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         (doc.appearances.is_empty(), "appearances (colours of bodies and faces)"),
         (doc.configs.is_empty(), "configurations"),
         (doc.canvases.is_empty(), "canvases (reference images)"),
+        (doc.point_clouds.is_empty(), "point clouds"),
         (doc.named_views.is_empty(), "named views"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
@@ -163,7 +218,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
     let mut properties = solidcraft_doc::Metadata::default();
     let mut odd = Vec::new();
     for (key, value) in &doc.metadata.0 {
-        if properties.set(key, value.clone()).is_err() {
+        if properties.set(solidcraft_doc::metadata::Owner::Design, key, value.clone()).is_err() {
             odd.push(key.as_str());
         }
     }

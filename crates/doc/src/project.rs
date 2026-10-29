@@ -263,7 +263,10 @@ fn resolve_uncached(
             let pr = if Plane::named(name).is_some() {
                 PlaneRef::Origin { name: name.clone() }
             } else {
-                PlaneRef::Construction { name: name.clone().into() }
+                // Resolved to the feature's id here, once (#1134); a name that finds no feature
+                // dangles below, as it did when the reference carried the name.
+                let feature = doc.find_feature(name).map(|f| crate::FeatureId(f.id)).unwrap_or(crate::FeatureId::DANGLING);
+                PlaneRef::Construction { feature }
             };
             let other = doc.resolve_plane_in(vals, &pr, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
             plane_trace(plane, &other).into_iter().collect()
@@ -306,6 +309,41 @@ fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<O
 /// `edges` of `body` projected on `plane`: each exactly ([`exact_edges`]) or fitted to its
 /// polyline in `mesh`.
 fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Vec<LinkGeom> {
+    let mut out = projected_edges_apart(body, mesh, plane, edges);
+    meet_at_shared_ends(&mut out, order::join_tolerance(mesh));
+    out
+}
+
+/// Where curve ends lie within `gap` of each other, moves them onto the first of them. A fitted
+/// round's edges end a few 1e-5 mm short of their neighbours (#8284); the sketch only shares a
+/// point between ends 1e-7 apart, and without it the outline has no closed profile.
+fn meet_at_shared_ends(geom: &mut [LinkGeom], gap: f64) {
+    let mut seen: Vec<Vec2> = Vec::new();
+    let mut snap = |p: &mut Vec2| match seen.iter().find(|q| q.dist(*p) <= gap) {
+        Some(q) => *p = *q,
+        None => seen.push(*p),
+    };
+    for g in geom {
+        match g {
+            LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } => {
+                snap(a);
+                snap(b);
+            }
+            LinkGeom::Spline { pts, periodic: false, .. } => {
+                if let Some(first) = pts.first_mut() {
+                    snap(first);
+                }
+                if let Some(last) = pts.last_mut() {
+                    snap(last);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Each of `edges` projected on its own ([`projected_edges`] without the ends brought together).
+fn projected_edges_apart(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Vec<LinkGeom> {
     let mut out = Vec::new();
     for (e, exact) in edges.iter().zip(exact_edges(body, plane, edges)) {
         match exact {

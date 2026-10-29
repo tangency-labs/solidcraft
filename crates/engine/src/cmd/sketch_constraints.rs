@@ -6,9 +6,14 @@ use solidcraft_geom::Vec2;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, constraint_result, dof_now, edit, listed, redundancy, residual_of};
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list, vec2};
+use crate::schema::sketch_constraints::{ToggleDiameterParams, ToggleDiameterResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
+
+const TOGGLE_DIAMETER_CONTRACT: TypedContract<ToggleDiameterParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.constraint.curvature", "Curvature", c_smooth)
@@ -44,6 +49,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.toggle_driven", "Toggle Driven Dimension", toggle_driven).icon("dimension")
         .enabled(in_sketch)
         .params("constraint: dimension id, driven?: bool (default toggles); a driving dimension gets a parameter with its current value"),
+    CommandSpec::new("sketch.toggle_diameter", "Toggle Radius / Diameter", crate::checked!("sketch.toggle_diameter", toggle_diameter))
+        .icon("dimension")
+        .enabled(in_sketch)
+        .contract(&TOGGLE_DIAMETER_CONTRACT)
+        .output(output_schema_for::<ToggleDiameterResult>)
+        .params("constraint: a circle's or an arc's radius or diameter dimension id; diameter?: bool (default: the other one); sketch?: id|name (default: the one being edited). The circle stays the same size: its parameter is halved or doubled (a plain value is rewritten, an expression becomes `(e) / 2` or `2 * (e)`); refused when anything else uses that parameter"),
     CommandSpec::new("sketch.glyphs", "Constraint Glyphs", glyphs).icon("eye")
         .enabled(in_sketch)
         .noundo()
@@ -76,7 +87,7 @@ fn curve(sk: &Sketch, v: Option<&Value>, cmd: &str) -> Result<usize> {
 
 fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.polygon";
-    let ids = string_list(p, "lines");
+    let ids = string_list(cmd, p, "lines")?;
     if ids.len() < 3 || ids.len() > 200 {
         return Err(bad(cmd, "`lines` must list 3 to 200 lines of a closed chain"));
     }
@@ -126,8 +137,8 @@ fn try_add(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, k: ConstraintKin
     let saved = sk.clone();
     let param = if dim {
         let v = k.value()?;
-        let e = if k.is_angle() { format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6) } else { format!("{} mm", (v * 1e6).round() / 1e6) };
-        Some(doc.new_model_param(&e, if k.is_angle() { "deg" } else { "mm" }))
+        let (unit, e) = if k.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
+        Some(doc.new_model_param(&e, &unit))
     } else {
         None
     };
@@ -351,7 +362,7 @@ fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
 
 fn smart_constrain(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constrainer";
-    let ents = string_list(p, "entities");
+    let ents = string_list(cmd, p, "entities")?;
     let (mut before, mut residual) = (None, None);
     let mut name = "";
     let (id, info) = edit(s, p, cmd, true, |sk, _| {
@@ -383,21 +394,18 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
             slot.driven = true;
             slot.param = None;
         } else {
-            let (unit, e) = if c.kind.is_angle() {
-                ("deg", format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6))
-            } else {
-                ("mm", format!("{} mm", (v * 1e6).round() / 1e6))
-            };
+            let (unit, e) =
+                if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
             slot.driven = false;
-            slot.param = Some(doc.new_model_param(&e, unit));
+            slot.param = Some(doc.new_model_param(&e, &unit));
             before = None;
         }
         Ok(driven)
     })?;
     if !driven {
         // Making it driving must not over-constrain: compare with the sketch without it.
-        let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
-        let mut sk = s.doc.sketch(id)?.clone();
+        let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
+        let mut sk = sketch_store::read(&s.doc, id)?.clone();
         if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == cid) {
             c.driven = true;
         }
@@ -409,6 +417,60 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.doc_mut().prune_model_params();
     Ok(json!({"constraint": cid, "driven": driven, "sketch": info}))
+}
+
+fn toggle_diameter(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.toggle_diameter";
+    let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a dimension id"))?.to_string();
+    let want = crate::params::bool_(p, "diameter");
+    let sketch = sketch_store::target(s, p, cmd)?;
+    let (diameter, info) = edit(s, p, cmd, true, |sk, doc| {
+        let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
+        let round = |curve: usize| matches!(sk.curves.get(curve).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        let (curve, value, now) = match c.kind {
+            ConstraintKind::Radius { c, value } if round(c) => (c, value, false),
+            ConstraintKind::Diameter { c, value } if round(c) => (c, value, true),
+            _ => return Err(bad(cmd, format!("`{cid}` is not a circle's or an arc's radius or diameter dimension"))),
+        };
+        let diameter = want.unwrap_or(!now);
+        if diameter == now {
+            return Ok(diameter);
+        }
+        let (kind, value) = if diameter {
+            (ConstraintKind::Diameter { c: curve, value: 2.0 * value }, 2.0 * value)
+        } else {
+            (ConstraintKind::Radius { c: curve, value: value / 2.0 }, value / 2.0)
+        };
+        // Its parameter now holds the other measure, so the circle keeps its size; another user
+        // of that parameter would change size with it.
+        if let Some(name) = &c.param {
+            let others: Vec<String> = doc
+                .param_users(name)
+                .into_iter()
+                .filter(
+                    |u| !matches!(u, solidcraft_doc::ParamUser::Dimension { feature, constraint, .. } if *feature == sketch && *constraint == cid),
+                )
+                .map(|u| u.describe())
+                .collect();
+            if !others.is_empty() {
+                return Err(bad(cmd, format!("`{name}` is also used by {}; switching `{cid}` would change them", others.join(", "))));
+            }
+            let e = doc.param(name).map(|p| p.expr.clone()).ok_or_else(|| bad(cmd, format!("no parameter `{name}`")))?;
+            let e = if solidcraft_doc::expr::references(&e).is_empty() {
+                doc.design_length(value).1
+            } else if diameter {
+                format!("2 * ({e})")
+            } else {
+                format!("({e}) / 2")
+            };
+            doc.set_param(name, &e, None, None).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+        let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
+        slot.kind = kind;
+        Ok(diameter)
+    })?;
+    let reply = ToggleDiameterResult { constraint: cid, diameter, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// Where a constraint's glyph goes (sketch coordinates): beside the middle of its first curve,
@@ -459,12 +521,7 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
 }
 
 fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = match p.get("sketch") {
-        Some(Value::Number(n)) => n.as_u64(),
-        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-        _ => s.active_sketch,
-    }
-    .ok_or_else(|| bad("sketch.glyphs", "no such sketch"))?;
+    let id = sketch_store::target(s, p, "sketch.glyphs")?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let failing = &ss.report.failing;
@@ -498,7 +555,7 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
     let at = req_vec2(cmd, p, "at")?;
     let from = p.get("from").and_then(vec2);
     let r = num(p, "radius").filter(|r| *r > 0.0).unwrap_or(1.0);
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch is not evaluated".into()))?;
     let sk = &ss.sketch;

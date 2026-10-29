@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Output size — the picture size in pixels</title>
+  <path d="M9 12L55 12A5 5 0 0 1 60 17L60 47A5 5 0 0 1 55 52L9 52A5 5 0 0 1 4 47L4 17A5 5 0 0 1 9 12Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M22.08 38.79L41.92 25.21" fill="none" stroke="#236ead" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M51 19L45.33 31.97L36.86 19.59Z" fill="#236ead" stroke="#236ead" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M13 45L18.67 32.03L27.14 44.41Z" fill="#236ead" stroke="#236ead" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

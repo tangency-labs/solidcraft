@@ -856,7 +856,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     let id = joint_id(s, p.get("joint"), cmd)?;
     let kind = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.kind).ok_or_else(|| bad(cmd, "joint"))?;
     if kind == JointKind::Rigid {
-        return Err(bad(cmd, "a rigid joint does not move"));
+        return Err(bad(cmd, "a rigid joint does not move: joint.edit can make it revolute (turns), slider (slides) or cylindrical (both)"));
     }
     let mut q = values_param(s, p, kind, cmd)?;
     if p.get("values").is_none() && p.get("value").is_none() {

@@ -2,7 +2,7 @@
 
 | Format | Read | Write |
 |---|---|---|
-| `.solidcraft` (versioned container or JSON design) | yes | yes |
+| `.sc` (versioned container or JSON design; `.solidcraft` files from earlier releases still open) | yes | yes |
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
@@ -44,10 +44,58 @@ negative volumes come in as ordinary solid geometry.
 
 **File → Export STL…** and **File → Export 3MF…** (also **Save As Mesh** on the Insert tab's Files
 panel, and in the right-click menu of a body) open the same dialog with that format chosen; it saves
-the selected bodies as STL, 3MF or 3MF with face tags (below), and you can change the format there. With **Send to slicer** ticked, it writes the file to
-a temporary folder and opens it in the chosen slicer instead of asking for a file name. The slicer
-list shows the slicers found on the computer with their icons; **Custom…** adds any other program
-to the top of the list (kept between runs; hover an entry you added and press Delete to remove it).
+the selected bodies as STL, 3MF or 3MF with face tags (below) to a file you name, and you can change
+the format there.
+
+A 3MF has one object per body, so a slicer arranges the bodies of a multi-body part apart on the
+bed. Scripts and the control channel can keep each component together: `file.export` or
+`file.save_mesh` with `objects: "component"` writes every placed component that holds two or more
+bodies as one 3MF object whose parts are those bodies. PrusaSlicer, OrcaSlicer, Bambu Studio and
+Cura then load it as one object with a part per body, and each part can take its own filament. The
+design's own bodies, and a component with a single body, stay objects of their own.
+
+**File → Send to Slicer** (also on the Insert tab's Files panel, and in the right-click menu of a
+body) is the short way: it saves the selected bodies as a 3MF in millimetres, without face tags,
+and sends it to a slicer. It always asks which one and pre-selects the slicer you used last time,
+so the usual case is one click or Enter. The list shows the slicers found on the computer with their
+icons; **Custom…** adds any other program to the top of the list (kept between runs; hover an entry
+you added and press Delete to remove it). On Linux only, a program whose desktop entry says it opens
+3MF or STL files is listed even if SolidCraft doesn't know it by name. Windows and macOS list the
+known slicers only, found in the usual program folders and on `PATH`. It falls back to an STL if the
+3MF can't be written. Scripts and the control channel use `file.send_to_slicer`
+with a `slicer`, which sends without a dialog. They can start only the slicers in the
+list and programs you added under **Custom…**; any other program path is refused, and an AI agent's
+request to save a mesh or send it to a slicer asks first and names the slicer.
+
+The list also has a plain **EasyPrint (Printables, in the browser)** row, and it is the one entry
+that works in the browser build too. EasyPrint is Printables' slicer, so choosing it uploads the
+selected bodies (a 3MF, 100 MB at most) to Printables' servers and opens the model there in your
+browser. The link expires after 30 minutes, and you need to be signed in to Printables. SolidCraft
+asks once before the first upload and remembers that you agreed. Nothing is uploaded unless you pick
+this row. SolidCraft isn't affiliated with Printables. Scripts use `file.open_in_easyprint`, which refuses unless it gets `consent: true`,
+and an AI agent's request to use it asks first.
+
+Files sent to a slicer go to a folder only you can
+read: `~/.cache/solidcraft/slicer` on Linux, `~/Library/Caches/SolidCraft/slicer` on macOS and
+`%LOCALAPPDATA%\SolidCraft\slicer` on Windows. The name stays the same for the same design and
+the same bodies, so sending again **replaces the file the slicer has open**: use the slicer's
+Reload from disk to pick it up. If Windows won't let the file be replaced because the slicer holds
+it, the new copy gets a number (`name-2.3mf`) and the status line says so. Files older than seven days are
+deleted the next time SolidCraft starts.
+
+If the slicer is already running, PrusaSlicer, SuperSlicer and Cura load the file in
+the open window instead of starting another one (they are started with `--single-instance`).
+Other slicers, Bambu Studio and OrcaSlicer among them, are started as they are, so they may open a
+second window. You can turn this off in
+Preferences → General, except for PrusaSlicer 3.0, whose launcher can't hand a file to a running
+window without it. Scripts pass `single_instance: false` to `file.send_to_slicer` or `file.save_mesh`.
+
+PrusaSlicer 2 and 3 behave differently, so SolidCraft reads which one an install is from the
+version in its installed metadata (a Flatpak's own files, or the `metainfo` file of a package); it
+never runs the program to ask. PrusaSlicer 2 is sent the file with `--single-instance`. PrusaSlicer 3
+is started on its own first, SolidCraft waits up to ten seconds for it to be ready, and then sends the
+file. If the version can't be read, the command decides: the `slic3r-app-launcher` launcher is
+treated as PrusaSlicer 3, and any other entry is left as it is.
 
 Closed mechanical meshes with a constant cross-section can be rebuilt as solids with the
 `mesh.convert` command (command palette, scripts and the control channel).
@@ -56,12 +104,12 @@ Closed mechanical meshes with a constant cross-section can be rebuilt as solids 
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
 is the tessellation's own double-precision value. Meshing and analysis tools can use the tags to
 keep a model's faces (for loads, boundary conditions or feature edges); other 3MF readers ignore
-them. The format is specified in [`docs/formats/3mf-face-tags.md`](https://github.com/bherbruck/solidcraft/blob/main/docs/formats/3mf-face-tags.md).
+them. The format is specified in [`docs/formats/3mf-face-tags.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/formats/3mf-face-tags.md).
 
 **File → Export URDF…** (`file.export` with a `.urdf` path) writes the assembly for robot
 simulators and ROS: a link per component placement with its mesh, mass and inertia, and the
 assembly's joints, so the parts move in the simulator as they do in SolidCraft. The meshes are
-written as STL files next to the `.urdf`. See [`docs/urdf.md`](https://github.com/bherbruck/solidcraft/blob/main/docs/urdf.md).
+written as STL files next to the `.urdf`. See [`docs/urdf.md`](https://github.com/tangency-labs/solidcraft/blob/main/docs/urdf.md).
 
 Saves are atomic: a crash at any moment leaves either the old file or the new one, and the
 replaced version is kept as `<file>.bak`. A save keeps the file's permissions, and a design
@@ -73,10 +121,12 @@ from a newer version are refused with a message.
 
 **Save** writes a container by default; files named `.json` keep JSON on subsequent saves.
 **Save As** offers a container or plain JSON on
-desktop; **Save As JSON** is also available in the File menu on desktop and web. Choose
+desktop; **Save As JSON** is also available in the File menu on desktop and web. Both start
+from the name of the open file, or from the design's new name when it was renamed since it
+was opened or saved; a new design starts from its own name. Choose
 the `.json` extension for plain JSON. **Export Design as JSON** writes an independent,
 self-contained copy without changing the current file. Scripts can explicitly pass
-`"format": "json"` to `file.save` or `file.save_as` even with a `.solidcraft` name.
+`"format": "json"` to `file.save` or `file.save_as` even with a `.sc` name.
 Opening detects the format from the contents, so existing JSON designs keep working.
 Containers favor fast reading and saving by default. Scripts can request
 `"compression": "compact"` when file size matters more than CPU time.
@@ -112,6 +162,37 @@ their producer's coordinate-space marker without changing any saved points; deta
 retain world coordinates. A lost cross-component association refreshed by an older build may
 need an explicit relink or refresh when its source returns. Loading never guesses a numerical
 correction. Association records, coordinate arrays and placements are bounded and checked.
+
+## Large files
+
+SolidCraft opens STEP, IGES and the other CAD files it imports up to **512 MB**, and design files
+up to **256 MB**. A larger file is refused before it is read, and the message says how to raise
+the limit. In the desktop app you can raise both:
+
+- **Preferences › General › Largest file to open** sets each limit in MB, from its default up to
+  16 GB (16384 MB). It is kept between runs; Restore Defaults on the General page puts back 512 MB
+  and 256 MB.
+- **`--max-file-size SIZE`** at launch (`solidcraft --max-file-size 2GB big-assembly.step`) raises
+  both limits for that run only, over the preference, without saving anything. SIZE is a number
+  with MB or GB (`2GB`, `1.5GB`, `1500MB`; 1 GB is 1024 MB), at most 16GB. A size below a default
+  leaves that limit at its default. A size the app can't read stops it from starting, with the
+  reason. `solidcraft-cli` takes the same flag with any command.
+
+Before you raise them:
+
+- **Memory:** a file is read whole, and what is built from it is held in memory beside it. Expect
+  several times the file's size in RAM, more for finely detailed parts, and a long open and a slow
+  view for an assembly with hundreds of thousands of faces.
+- **Saving:** a design keeps the text of a STEP import, compressed, and the design limit applies
+  to the saved file. An import whose compressed text doesn't fit in a design file is refused when
+  it is imported, so it never opens and then fails to save; raise the design file limit too, or
+  open the file with `--max-file-size`, which raises both. Opening that design again needs the
+  same limits.
+- **Web app:** the browser version keeps 512 MB and 256 MB: a browser tab can't hold larger files.
+  Its Preferences show a note instead of the setting.
+
+The control channel sets the same preference with `ui.prefs {"max_step_file_mb": 2048,
+"max_design_file_mb": 1024}`.
 
 ## Design properties
 
@@ -191,7 +272,7 @@ over a file that changed on disk fails with an error until it is given `overwrit
 ## Saving in the web app
 
 In Chrome, Edge and Opera, **Save As** opens your browser's save dialog and writes the
-`.solidcraft` file to the folder you choose, and **Open** opens the browser's open dialog.
+`.sc` file to the folder you choose, and **Open** opens the browser's open dialog.
 **Save** then writes back to that same file. The browser remembers the file, so after you
 reload the page the first **Save** asks once for permission to write to it, and carries on.
 A design you open from your computer saves back to the file you opened.

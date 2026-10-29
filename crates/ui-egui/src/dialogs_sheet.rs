@@ -23,7 +23,8 @@ const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_s
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
-const FLANGE_TYPES: [&str; 3] = ["Base", "Edge", "Contour"];
+/// The flange types' messages, by the type's index (Base, Edge, Contour).
+const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
 const POSITIONS: [&str; 5] = ["inside", "outside", "middle", "material_outside", "tangent"];
 const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Outside", "Tangent to Edge"];
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
@@ -242,7 +243,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
-                ui.label(FLANGE_TYPES.get(*ty).copied().unwrap_or(""));
+                ui.label(FLANGE_TYPES.get(*ty).copied().map(crate::i18n::tr).unwrap_or(""));
             });
             match *ty {
                 1 => {
@@ -431,14 +432,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     form_row(ui, "Body", |ui| {
                         ui.label(v["body"].as_str().unwrap_or(""));
                     });
-                    form_row(ui, "Flat size", |ui| {
-                        ui.label(format!(
-                            "{} × {} × {}",
-                            crate::prefs::show_mm(app, size[0].as_f64().unwrap_or(0.0), 1),
-                            crate::prefs::show_mm(app, size[1].as_f64().unwrap_or(0.0), 1),
-                            crate::prefs::show_mm(app, size[2].as_f64().unwrap_or(0.0), 1)
-                        ));
-                    });
+                    // One number per row, X and Y as in the DXF: on one row the panel's width cut the
+                    // flat size off after its first side, and the second is the one people read most.
+                    for (label, i) in [("Flat size X", 0), ("Flat size Y", 1), ("Thickness", 2)] {
+                        form_row(ui, label, |ui| {
+                            ui.label(crate::prefs::show_mm(app, size[i].as_f64().unwrap_or(0.0), 1));
+                        });
+                    }
                     let bends = v["bends"].as_array().cloned().unwrap_or_default();
                     form_row(ui, "Bends", |ui| {
                         ui.label(format!("{}", bends.len()));

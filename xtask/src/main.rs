@@ -6,6 +6,7 @@
 mod app_icons;
 mod assets;
 mod book;
+mod external_corpus;
 mod features;
 mod i18n;
 mod icons;
@@ -14,6 +15,7 @@ mod licences;
 mod lists;
 mod pending;
 mod render_assets;
+mod skills;
 mod test;
 mod test_nextest;
 mod ui_containers;
@@ -52,6 +54,12 @@ commands:
   book [--no-build]
                   generate docs/book's command reference and screenshots, then mdbook build
                   into target/book
+  external-corpus [--bless WHY] [--only NAME] [--cli PATH]
+                  import the real-world STEP files listed in tests/external-corpus.toml and
+                  check body counts, total volumes and areas within tolerances and time and
+                  memory budgets (#1397); run nightly by the External corpus workflow, not by
+                  ci (it downloads from the internet). --bless re-records the expected values
+                  in the manifest with the reason given
   licences [--check]
                   write THIRD-PARTY-LICENSES.txt (the licences of every shipped crate, embedded
                   in the programs); --check only reports when it is out of date: pull requests
@@ -61,10 +69,15 @@ commands:
                   main; pull requests add the pending files instead of editing the shared ones)
   lists [--fix]   check that files many changes add to are sorted one item per line (the
                   message catalogs in assets/locales); --fix sorts them
+  skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
+                  that exist, that the router table lists exactly the skills there are, and that
+                  AGENTS.md and new skills stay short
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
-                  and side commands for test/ci; inherited per-test/worker overrides are unchanged
+                  and side commands for test/ci and splits each binary's test threads and action
+                  matrix workers across the binaries in flight; explicit RUST_TEST_THREADS and
+                  ACTION_MATRIX_JOBS overrides still win
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
@@ -73,7 +86,7 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  ci              fmt --check, assets, icons, licences --check, lists, layers, ui-containers, clippy -D warnings, then the tests
+  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, ui-containers, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -95,8 +108,10 @@ fn main() -> ExitCode {
             cmd_action_matrix(rest.contains(&"--bless"), arg("--results"), arg("--from"))
         }
         Some("book") => book::run(&root(), !rest.contains(&"--no-build")),
+        Some("external-corpus") => external_corpus::run(&root(), &rest),
         Some("licences") => licences::run(&root(), rest.contains(&"--check")),
         Some("fold-pending") => pending::run(&root()),
+        Some("skills") => skills::run(&root()),
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
@@ -384,6 +399,7 @@ fn cmd_ci() -> Result<(), String> {
     icons::run(&root())?;
     licences::run(&root(), true)?;
     lists::run(&root(), false)?;
+    skills::run(&root())?;
     cmd_layers()?;
     ui_containers::run(&root())?;
     let mut c = cargo();

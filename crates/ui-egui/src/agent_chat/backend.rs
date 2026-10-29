@@ -10,6 +10,22 @@ use serde_json::Value;
 
 pub use super::acp::{AuthMethod, PermissionOption, ToolStatus};
 
+/// A connection test keeps authentication failures distinct from transport or protocol errors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TestError {
+    AuthRequired,
+    Other(String),
+}
+
+impl TestError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::AuthRequired => crate::i18n::tr("ui.agent_chat_state_auth"),
+            Self::Other(message) => message,
+        }
+    }
+}
+
 /// One part of a message to the agent.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PromptPart {
@@ -40,8 +56,8 @@ pub enum Event {
     Ready { agent: String, images: bool },
     /// Text it streams (`thought`: its reasoning, shown dimmed).
     Text { thought: bool, text: String },
-    /// A new tool call, or news about one.
-    Tool { id: String, title: Option<String>, kind: Option<String>, status: Option<ToolStatus>, output: Option<String> },
+    /// A new tool call, or news about one (`input`: its arguments, when the agent says).
+    Tool { id: String, title: Option<String>, kind: Option<String>, status: Option<ToolStatus>, input: Option<Value>, output: Option<String> },
     /// Its plan, replaced whole: each entry with its status.
     Plan(Vec<(String, String)>),
     /// It asks before running something of its own; answered with [`ChatBackend::answer_permission`].

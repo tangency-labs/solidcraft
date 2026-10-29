@@ -1044,9 +1044,13 @@ fn dielectric_preflight_and_start_resolve_refraction_without_broadening_boundari
     let mut s = Session::default();
     s.set_render_job_host(Some(host.clone())).unwrap();
     s.execute("solid.box", &json!({"length":20,"width":20,"height":2,"body_name":"Glass"})).unwrap();
+    // The default view sends the single pixel's ray exactly through a box edge, which the optics reject
+    // as an ambiguous interface normal. Whether the job then ends Failed or Cancelled would depend on
+    // whether the cancel below beats the render thread, so view the glass off-axis.
+    let camera = solidcraft_render::Camera { yaw: 0.3, pitch: 0.4, ..Default::default() };
     let document = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
-    let params = json!({"integrator":"raytrace","settings":{"width":1,"height":1},"raytrace":{"dielectrics":[{
+    let params = json!({"integrator":"raytrace","settings":{"width":1,"height":1,"camera":camera},"raytrace":{"dielectrics":[{
         "body_index":0,"body_name":"Glass","boundary":"closed_box","ior":1.5,"absorption_per_mm":[0,0,0],"thickness_mm":0
     }]}});
     for command in ["render.preflight", "render.start"] {
@@ -1065,7 +1069,12 @@ fn dielectric_preflight_and_start_resolve_refraction_without_broadening_boundari
             let handle = s.render_job_handle(id).unwrap();
             s.execute("render.cancel", &json!({"job":id})).unwrap();
             let status = handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap();
-            assert!(matches!(status.progress.phase, solidcraft_render::job::Phase::Cancelled | solidcraft_render::job::Phase::Completed));
+            assert!(
+                matches!(status.progress.phase, solidcraft_render::job::Phase::Cancelled | solidcraft_render::job::Phase::Completed),
+                "phase {:?}, error {:?}",
+                status.progress.phase,
+                status.error
+            );
         }
     }
     for boundary in ["closed_mesh", "thin_sheet"] {
@@ -1187,4 +1196,23 @@ fn a_setup_saved_with_exposure_renders_and_names_the_controls_it_leaves_out() {
     finish(&host);
     let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
     assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
+}
+
+#[test]
+fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads() {
+    let (mut s, host) = session();
+    let job = start(&mut s);
+    assert!(s.execute("render.result.copy", &json!({"job":job})).is_err());
+    finish(&host);
+    let document = s.doc.clone();
+    let before = (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes());
+    let copied = s.execute("render.result.copy", &json!({"job":job})).unwrap();
+    assert_eq!(copied["frame"]["job"], json!(job));
+    assert_eq!(copied["frame"]["width"], 16);
+    assert!(copied.get("png").is_none());
+    for params in [json!({}), json!(null), json!({"job":job,"extra":true}), json!({"job":{"session":0,"serial":0,"generation":0}})] {
+        assert!(s.execute("render.result.copy", &params).is_err());
+    }
+    assert!(Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes()));
 }

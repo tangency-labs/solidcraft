@@ -162,7 +162,7 @@ pub enum Login {
 impl Login {
     pub fn id(self) -> &'static str {
         match self {
-            Login::LooksLoggedIn => "signed_in",
+            Login::LooksLoggedIn => "login_found",
             Login::KeyInEnvironment => "key",
             Login::NotLoggedIn => "signed_out",
             Login::Unknown => "unknown",

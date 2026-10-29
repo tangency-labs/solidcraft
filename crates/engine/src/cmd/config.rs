@@ -129,16 +129,16 @@ fn add_column(s: &mut Session, c: Column, cmd: &str) -> Result<()> {
 
 fn configure(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "config.configure";
-    for n in string_list(p, "params") {
+    for n in string_list(cmd, p, "params")? {
         let c = column_of(s, &json!({ "param": n }), cmd)?;
         add_column(s, c, cmd)?;
     }
-    for n in string_list(p, "features") {
+    for n in string_list(cmd, p, "features")? {
         let c = column_of(s, &json!({ "feature": n }), cmd)?;
         add_column(s, c, cmd)?;
     }
     for key in ["materials", "appearances"] {
-        for n in string_list(p, key) {
+        for n in string_list(cmd, p, key)? {
             let field = if key == "materials" { "material" } else { "appearance" };
             let c = column_of(s, &json!({ field: n }), cmd)?;
             add_column(s, c, cmd)?;

@@ -33,6 +33,11 @@ pub trait Backend {
     fn notice(&self) -> Option<String> {
         None
     }
+    /// How this side's session checks commands' typed contracts (`--param-check`), when this
+    /// process holds it. A running app checks its own (`engine.batch`), so `Remote` says off.
+    fn param_check(&self) -> solidcraft_engine::schema::ParamCheck {
+        solidcraft_engine::schema::ParamCheck::Off
+    }
 }
 
 /// Longest reply line accepted from the app.
@@ -268,6 +273,10 @@ impl Remote {
         // The app confines the files this request reaches to the agent's folders (control.rs).
         if let (Some(scope), Some(o)) = (solidcraft_engine::io::vfs::current_scope(), params.as_object_mut()) {
             o.insert("allow_paths".into(), json!(scope.roots().iter().map(|r| r.to_string_lossy()).collect::<Vec<_>>()));
+            // And the folders it opened or saved a design in, which count as its open design's.
+            if !scope.design_roots().is_empty() {
+                o.insert("design_folders".into(), json!(scope.design_roots().iter().map(|r| r.to_string_lossy()).collect::<Vec<_>>()));
+            }
         }
         let mut msg = json!({"id": id, "method": method, "params": params});
         // The token goes with every request (an app restarted mid-session has a new one).
@@ -567,6 +576,9 @@ impl Backend for Headless {
     fn in_process(&self) -> bool {
         true
     }
+    fn param_check(&self) -> solidcraft_engine::schema::ParamCheck {
+        self.session.param_check
+    }
 }
 
 /// `solidcraft-cli mcp` with no `--connect`: a headless session while no app runs, which gives
@@ -629,6 +641,12 @@ impl Backend for Auto {
     }
     fn in_process(&self) -> bool {
         self.remote.is_none()
+    }
+    fn param_check(&self) -> solidcraft_engine::schema::ParamCheck {
+        match (&self.remote, &self.headless) {
+            (None, Some(h)) => h.param_check(),
+            _ => solidcraft_engine::schema::ParamCheck::Off,
+        }
     }
     fn notice(&self) -> Option<String> {
         self.headless.as_ref().map(|_| {

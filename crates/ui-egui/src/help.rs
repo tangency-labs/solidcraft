@@ -40,9 +40,18 @@ pub fn diagnostics(app: &SolveApp) -> String {
     )
 }
 
+/// Whether a Help menu item can run now: behind an open bug report, the items that open a
+/// window would cover it (#7188). Report an Issue… shows the report.
+pub fn available(app: &SolveApp, item: &str) -> bool {
+    app.issue_report.draft.is_none() || !matches!(item, "about" | "shortcuts" | "messages" | "crashes" | "connect")
+}
+
 /// Run a Help menu item: `docs`, `about`, `shortcuts`, `messages`, `report`, `crashes`, `connect`, `install_cli` (macOS).
 pub fn run(app: &mut SolveApp, ctx: &egui::Context, item: &str) {
     app.help.menu = false;
+    if !available(app, item) {
+        return;
+    }
     match item {
         "docs" => ctx.open_url(egui::OpenUrl::new_tab(DOCS_URL)),
         "about" => app.help.about = true,
@@ -131,7 +140,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context, anchor: egui::Pos2) {
                     .into_iter()
                     .filter(|(id, ..)| *id != "install_cli" || cfg!(target_os = "macos"))
                     {
-                        if crate::context_menu::list_row(ui, &crate::context_menu::Item::action(id, label, icon)).is_some() {
+                        let item = crate::context_menu::Item::action(id, label, icon).on_if(available(app, id));
+                        if crate::context_menu::list_row(ui, &item).is_some() {
                             pick = Some(id);
                         }
                     }

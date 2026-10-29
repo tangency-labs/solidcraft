@@ -255,7 +255,7 @@ pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::
 /// asks for a float one only when whichever it picks has it.
 pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) -> bool {
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { return false };
-    let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
     desc.backends = setup.instance_descriptor.backends;
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(setup.instance_descriptor.backends));
@@ -272,6 +272,7 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
     desc.flags = eframe::wgpu::InstanceFlags::from_build_config().with_env();
+    desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
@@ -302,6 +303,14 @@ pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool
     windows && backends.contains(Backends::GL) && !backends.intersects(Backends::DX12 | Backends::VULKAN)
 }
 
+/// The `--max-file-size` value (#4086): a size such as `2GB` or `1500MB`, at most 16 GB. It raises
+/// the largest STEP/import and design file this run reads, over the saved preference, without
+/// saving anything. A missing or bad value stops the start with this error.
+pub fn max_file_size(value: Option<&str>) -> Result<u64, String> {
+    let value = value.ok_or("--max-file-size needs a size, for example --max-file-size 2GB")?;
+    solidcraft_engine::io::limits::parse_flag(value).map_err(|e| format!("--max-file-size: {e}"))
+}
+
 /// The message shown when no window could be opened at all.
 pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
     let folder = settings.map(|d| d.display().to_string()).unwrap_or_else(|| "the SolidCraft settings folder".into());
@@ -322,6 +331,16 @@ mod tests {
 
     fn cards() -> Vec<AdapterChoice> {
         ["Integrated", "Discrete small", "Discrete large"].into_iter().map(|name| AdapterChoice { name: name.into(), compatible: true }).collect()
+    }
+
+    #[test]
+    fn max_file_size_parses_sizes_and_refuses_bad_ones() {
+        assert_eq!(max_file_size(Some("2GB")), Ok(2 << 30));
+        assert_eq!(max_file_size(Some("1500MB")), Ok(1500 << 20));
+        for bad in [None, Some(""), Some("2"), Some("17GB"), Some("lots"), Some("-1GB")] {
+            let error = max_file_size(bad).unwrap_err();
+            assert!(error.contains("--max-file-size"), "{bad:?}: {error}");
+        }
     }
 
     #[test]
@@ -543,9 +562,16 @@ mod tests {
 
     #[test]
     fn probing_a_backend_alone_never_panics() {
-        // Whatever this machine has (often nothing): an answer, not a crash.
-        for b in WINDOWS_ORDER {
-            let _ = has_hardware_adapter(b);
+        // Whatever this machine has (often nothing): an answer, not a crash. On Windows the probe
+        // goes the way the app's does, stopping at the first backend with a GPU: a machine with
+        // D3D12 never loads its OpenGL driver into the test process, and AMD's (`atio6axx.dll`)
+        // aborted the process as it exited (#1156).
+        if cfg!(target_os = "windows") {
+            let _ = choose_backends(true, false, false, None, has_hardware_adapter);
+        } else {
+            for b in WINDOWS_ORDER {
+                let _ = has_hardware_adapter(b);
+            }
         }
     }
 
@@ -558,8 +584,18 @@ mod tests {
     #[test]
     fn the_software_adapter_is_preferred_and_its_absence_is_an_error_not_a_panic() {
         assert!(pick_cpu_adapter(&[], None).unwrap_err().contains("none"));
-        let instance = eframe::wgpu::Instance::new(eframe::wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapters = pollster::block_on(instance.enumerate_adapters(eframe::wgpu::Backends::all()));
+        // The adapters the software renderer chooses among: it starts D3D12 alone on Windows
+        // (WARP), not every backend, so the test doesn't load the OpenGL driver either (#1156).
+        let options = crate::wgpu_options(true, None);
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { panic!("the software renderer makes its own device") };
+        let backends = setup.instance_descriptor.backends;
+        if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
+            assert_eq!(backends, eframe::wgpu::Backends::DX12);
+        }
+        let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+        desc.backends = backends;
+        let instance = eframe::wgpu::Instance::new(desc);
+        let adapters = pollster::block_on(instance.enumerate_adapters(backends));
         if adapters.is_empty() {
             return;
         }

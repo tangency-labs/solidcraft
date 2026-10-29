@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 
 use super::acp::{self, Incoming};
-use super::backend::{ChatBackend, Event, PromptPart, StartContext};
+use super::backend::{ChatBackend, Event, PromptPart, StartContext, TestError};
 use super::process::{AgentProcess, FromAgent};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,7 +130,7 @@ impl AcpBackend {
                 }
             }
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
-            Incoming::Tool { id, title, kind, status, output } => out.push(Event::Tool { id, title, kind, status, output }),
+            Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
             Incoming::Plan(p) => out.push(Event::Plan(p)),
             Incoming::Permission { rpc, title, options } => {
                 self.next_key += 1;
@@ -231,10 +231,10 @@ impl ChatBackend for AcpBackend {
 
 /// Test connection: start the agent, say hello, open a session without tools, end it. What it
 /// answered (its name and version), or what went wrong (it isn't signed in, it didn't answer).
-pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, String> {
-    let mut p = AgentProcess::spawn(argv, cwd, ENV_REMOVE, || {})?;
+pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, TestError> {
+    let mut p = AgentProcess::spawn(argv, cwd, ENV_REMOVE, || {}).map_err(TestError::Other)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let wait_for = |p: &AgentProcess, id: u64| -> Result<Value, String> {
+    let wait_for = |p: &AgentProcess, id: u64| -> Result<Value, TestError> {
         loop {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             match p.from_agent.recv_timeout(left) {
@@ -244,17 +244,17 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Stri
                     {
                         return result.map_err(|(code, m)| {
                             if code == acp::AUTH_REQUIRED || m.to_ascii_lowercase().contains("auth") {
-                                crate::i18n::tr("ui.agent_chat_state_auth").to_string()
+                                TestError::AuthRequired
                             } else {
-                                m
+                                TestError::Other(m)
                             }
                         });
                     }
                 }
                 Ok(FromAgent::Exited(tail)) => {
-                    return Err(tail.last().cloned().unwrap_or_else(|| crate::i18n::tr("ui.agent_chat_exited").to_string()));
+                    return Err(TestError::Other(tail.last().cloned().unwrap_or_else(|| crate::i18n::tr("ui.agent_chat_exited").to_string())));
                 }
-                Err(_) => return Err(crate::i18n::tr("ui.ai_no_answer").to_string()),
+                Err(_) => return Err(TestError::Other(crate::i18n::tr("ui.ai_no_answer").to_string())),
             }
         }
     };

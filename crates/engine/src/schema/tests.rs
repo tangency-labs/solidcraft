@@ -27,6 +27,7 @@ fn expressions_accept_what_params_expr_accepts() {
     for v in [json!(5), json!(-2.5), json!("w / 2"), json!("  30 mm  "), json!(999_999_999.0)] {
         let want = crate::params::expr(&json!({ "v": v.clone() }), "v");
         assert_eq!(parse::<LengthExpr>(v.clone()).map(|e| e.0), want, "{v}");
+        assert_eq!(parse::<NumberExpr>(v.clone()).map(|e| e.0), want, "{v}");
         assert!(want.is_some(), "{v}");
     }
     let long = "x".repeat(4097);
@@ -37,6 +38,43 @@ fn expressions_accept_what_params_expr_accepts() {
         assert!(crate::params::expr(&json!({ "v": v.clone() }), "v").is_none(), "{v}");
         assert!(parse::<LengthExpr>(v.clone()).is_none(), "{v}");
         assert!(parse::<AngleExpr>(v.clone()).is_none(), "{v}");
+        assert!(parse::<NumberExpr>(v.clone()).is_none(), "{v}");
+    }
+}
+
+/// `AxisDir` accepts what `features::axis_dir_param` reads (X, Y or Z trimmed of what Rust's
+/// `trim` removes, in any case, or a non-zero vector), and its schema agrees: its string pattern
+/// allows exactly that whitespace (`conforms` doesn't read patterns), and a schema can't refuse
+/// the zero vector. `ScaleFactors` takes exactly three numbers or expressions.
+#[test]
+fn axes_and_scale_factors_match_their_readers() {
+    let root = schemars::schema_for!(AxisDir);
+    let root = root.as_value();
+    for v in [json!("X"), json!(" y "), json!("z"), json!("\u{85}Z\u{3000}"), json!([0, 0, 1]), json!([1, 2, 3]), json!({"x": 0, "y": 1, "z": 0})] {
+        assert!(crate::cmd::axis_dir_form(&v).is_ok(), "{v}");
+        assert!(parse::<AxisDir>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!("W"), json!("XY"), json!(""), json!("x\u{feff}"), json!([1, 2]), json!(null), json!(true), json!([0, 0, 0])] {
+        assert!(crate::cmd::axis_dir_form(&v).is_err(), "{v}");
+        assert!(parse::<AxisDir>(v.clone()).is_none(), "{v}");
+        if !v.is_string() {
+            assert_eq!(conforms(root, root, &v), v == json!([0, 0, 0]), "{v}");
+        }
+    }
+    // The same class as the expression schema's, whose text `the_blank_pattern_matches_trim` pins.
+    let ws = super::types::not_blank_pattern().trim_start_matches("[^").trim_end_matches(']').to_string();
+    let pattern = root.pointer("/anyOf/0/pattern").and_then(Value::as_str);
+    assert_eq!(pattern, Some(format!("^[{ws}]*[XYZxyz][{ws}]*$").as_str()));
+    let root = schemars::schema_for!(ScaleFactors);
+    let root = root.as_value();
+    for v in [json!([1, 2, 3]), json!([1, "k / 2", 2.5])] {
+        assert!(parse::<ScaleFactors>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!([1, 2]), json!([1, 2, 3, 4]), json!([1, true, 2]), json!([1, "", 2]), json!("2"), json!({})] {
+        assert!(parse::<ScaleFactors>(v.clone()).is_none(), "{v}");
+        assert!(!conforms(root, root, &v), "{v}");
     }
 }
 
@@ -126,6 +164,63 @@ fn profiles_match_features_profiles() {
     assert_eq!(issue(json!([])), vec!["`profiles` is empty"]);
     assert_eq!(issue(json!(1.5)), vec!["`profiles` must be \"all\", an index or a list"]);
     assert_eq!(issue(json!(vec![0; 10_001])), vec!["`profiles` must have at most 10000 items"]);
+}
+
+#[test]
+fn unsupported_profile_objects_offer_valid_public_examples() {
+    let contract = TypedContract::<ExtrudeParams>::new();
+    for profiles in [
+        json!({"type": "curves", "loops": [["c1"], ["c2"]]}),
+        json!({"type": "curves", "loops": [["c1"]]}),
+        json!({"type": "index", "index": 0}),
+        json!({"type": "indices", "indices": [0]}),
+        json!({"curves": ["c1"]}),
+        json!({}),
+    ] {
+        let issues = contract.check(&json!({"distance": 5, "profiles": profiles}));
+        assert_eq!(issues.len(), 1, "{profiles}: {issues:?}");
+        let issue = issues.first().unwrap();
+        assert_eq!(issue.path, "profiles");
+        assert!(!issue.message.contains("offset_boundaries"), "{profiles}: {}", issue.message);
+        // The diagnostic is useful to scripts only if its public examples actually parse.
+        let examples: Vec<Value> = issue.message.split('`').skip(1).step_by(2).filter_map(|text| serde_json::from_str(text).ok()).collect();
+        assert_eq!(examples.len(), 5, "{}", issue.message);
+        for example in examples {
+            let issues = contract.check(&json!({"distance": 5, "profiles": example}));
+            assert!(issues.is_empty(), "example {example}: {issues:?}");
+        }
+    }
+    for profiles in [
+        json!({"offset_boundaries": ["a"]}),
+        json!({"type": "offset_boundaries", "associations": ["a"]}),
+        json!({"type": "curves", "offset_boundaries": ["a"]}),
+    ] {
+        assert!(contract.check(&json!({"distance": 5, "profiles": profiles})).is_empty());
+    }
+}
+
+#[test]
+fn unsupported_profile_objects_keep_the_design_in_every_check_mode() {
+    let mut session = Session::default();
+    session.execute("sketch.create", &json!({"plane": "xy", "name": "Ring"})).unwrap();
+    session.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 10})).unwrap();
+    session.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 6})).unwrap();
+    session.execute("sketch.finish", &json!({})).unwrap();
+    let design = session.doc.to_json();
+    let undo = session.undo.len();
+    for mode in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+        session.param_check = mode;
+        for profiles in [json!({"type": "curves", "loops": [["c1"], ["c2"]]}), json!({"type": "index", "index": 0})] {
+            let error = session
+                .execute("solid.extrude", &json!({"sketch": "Ring", "distance": 3, "operation": "new", "profiles": profiles}))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("\"all\"") && error.contains("curves"), "{mode:?}: {error}");
+            assert!(!error.contains("offset_boundaries"), "{mode:?}: {error}");
+            assert_eq!(session.doc.to_json(), design);
+            assert_eq!(session.undo.len(), undo);
+        }
+    }
 }
 
 #[test]
@@ -461,10 +556,19 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
     assert_eq!(v.get("$schema").and_then(Value::as_str), Some("https://json-schema.org/draft/2020-12/schema"));
 }
 
-/// A call that already fails gets the same error in strict as with the check off, apart from
-/// the missing-key, missing-instead-of-wrong-type, non-object, profile-index, 10,000-item and
-/// over-4-KB messages the report lists, and a list of picks where one finds nothing in the
-/// design and a later one is malformed (the handler fails on the first, strict on the second).
+/// A call with one problem that already fails gets the same error in strict as with the check
+/// off, apart from messages that differ on purpose. Chiefly: a missing key; a value the handler
+/// reads as missing where its message for a missing key says something else (a wrong type, a
+/// list none of whose items is text, blank text, a number 1e9 or more in size or text over 4 KB
+/// for an optional expression, an `extent` other than through_all); a non-object, a profile
+/// index, a list over 10,000 items, a message quoting nearly 4 KB of the caller's text or more
+/// (strict caps it); and a scale `factors` item that is blank, 1e9 or more in size, over 4 KB,
+/// or not a number or an expression (see `ScaleFactors`). A call with more than one problem can
+/// get another one named: strict and the handler look at the keys in different orders
+/// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
+/// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
+/// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
+/// empty list).
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {

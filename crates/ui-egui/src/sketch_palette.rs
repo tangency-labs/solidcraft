@@ -253,9 +253,10 @@ pub fn fits_beside_a_dialog(app: &SolveApp, ctx: &egui::Context) -> bool {
 }
 
 /// Is the palette on screen? It stays for as long as a sketch is being edited, a command dialog
-/// open or not: the dialog takes the left edge of the viewport and the palette keeps the right.
+/// open or not: the dialog takes the left edge of the viewport (or the left column) and the
+/// palette keeps the right.
 pub fn visible(app: &SolveApp, ctx: &egui::Context) -> bool {
-    editing(app) && ((app.dialog.is_none() && app.tree.redefine.is_none()) || fits_beside_a_dialog(app, ctx))
+    editing(app) && ((app.dialog.is_none() && app.tree.redefine.is_none()) || fits_beside_a_dialog(app, ctx) || crate::dialog_column::holds(app))
 }
 
 /// The creation family of the tool that is running, and the exact variant it is running, when
@@ -512,6 +513,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         } else {
             set_mode(app, kind);
         }
+        // The button click would otherwise leave the shape's dimension box without the keyboard.
+        crate::sketch_dims::restore_box_focus(app, ctx);
     }
     if construction {
         toggle_construction(app);

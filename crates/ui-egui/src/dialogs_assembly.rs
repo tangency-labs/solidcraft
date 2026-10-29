@@ -59,10 +59,20 @@ const TYPE_LABELS: [&str; 13] = [
     "Point on line",
     "Line on plane",
 ];
+/// A joint type's label, as the Type box lists it ("Pin-slot", "Point on plane").
+pub(crate) fn kind_label(kind: JointKind) -> &'static str {
+    TYPES.iter().position(|t| JointKind::parse(t) == Some(kind)).and_then(|i| TYPE_LABELS.get(i)).copied().unwrap_or("")
+}
+
+/// A joint as the joint lists name it: its name, and its type in the user's language.
+pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
+    format!("{name} ({})", crate::i18n::tr_label(kind_label(kind)))
+}
+
 /// What a joint origin input accepts (snaps on faces, edges and vertices).
 pub const SNAPS: u16 = FACES | EDGES | VERTICES;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
-const MOVES: [&str; 12] = [
+const MOVES: &[&str] = &[
     "joint.create",
     "joint.as_built",
     "joint.drive",
@@ -217,10 +227,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
-            let joint = picked_joint(app);
+            let joint = picked_joint(app, true);
             (Asm::Drive { joint, values: current_values(s, joint), focus: true }, vec![])
         }
-        "motion.trace" => (Asm::Trace(Box::new(trace::form(s, picked_joint(app)))), vec![SelInput::new("Point", SNAPS, false)]),
+        "motion.trace" => (Asm::Trace(Box::new(trace::form(s, picked_joint(app, false)))), vec![SelInput::new("Point", SNAPS, false)]),
         "joint.motion_link" => {
             let b = usize::from(movable(s).len() > 1);
             (Asm::MotionLink { a: 0, b, ia: 0, ib: 0, ratio: "1".into(), offset: "0".into() }, vec![])
@@ -278,13 +288,15 @@ pub fn preset(s: &Session, k: &mut Asm, p: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The joint picked in the browser, else the first that moves (an index into the design's joints).
-fn picked_joint(app: &SolveApp) -> usize {
+/// The joint picked in the browser, else the first that moves (an index into the design's
+/// joints). With `rigid`, a picked rigid joint comes before the first that moves: Drive Joints
+/// opened on one says why it can't drive it (#6981).
+fn picked_joint(app: &SolveApp, rigid: bool) -> usize {
     let s = &app.session;
     let list = movable(s);
-    let picked =
-        app.tree.picked_joints.iter().find_map(|id| list.iter().copied().find(|i| s.doc.assembly.joints.get(*i).is_some_and(|j| j.id == *id)));
-    picked.or(list.first().copied()).unwrap_or(0)
+    let picked: Vec<usize> = app.tree.picked_joints.iter().filter_map(|id| s.doc.assembly.joints.iter().position(|j| j.id == *id)).collect();
+    let moving = picked.iter().copied().find(|i| list.contains(i));
+    moving.or(picked.first().copied().filter(|_| rigid)).or(list.first().copied()).unwrap_or(0)
 }
 
 /// Indices (into the design's joints) of joints that move (not rigid).
@@ -547,7 +559,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             // Picks that make no joint say why, under them, and offer the way out (#1239).
             if let Some((why, bodies)) = problem {
                 ui.vertical(|ui| {
-                    ui.add(egui::Label::new(RichText::new(why).color(t.warning)).wrap());
+                    crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     if !bodies.is_empty()
                         && crate::ui_kit::button(ui, crate::i18n::tr("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
                             .on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
@@ -578,8 +590,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let kind = f.joint_kind();
             if kind != JointKind::Rigid {
                 form_row(ui, "Animate", |ui| {
-                    let label = if f.animate { "■ Stop" } else { "▶ Play" };
-                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal).on_hover_text("Play the joint's motion in the view").clicked()
+                    let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+                    if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
+                        .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
+                        .clicked()
                     {
                         f.animate = !f.animate;
                     }
@@ -613,23 +627,43 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
         Asm::Drive { joint, values, focus } => {
             let s = &app.session;
             let list = movable(s);
-            if list.is_empty() {
+            // A rigid joint holds its parts still: say so, and offer Edit Joint to change its
+            // type (#6981). Nothing is driven (no preview, OK stays off) until one that moves is chosen.
+            let rigid = s.doc.assembly.joints.get(*joint).filter(|j| j.kind == JointKind::Rigid).map(|j| (j.id, j.name.clone()));
+            if let Some((id, name)) = &rigid {
+                let mut edit = false;
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(crate::i18n::tr_label("no joint that moves yet")).color(t.text_dim));
+                    let why = crate::i18n::format("drive.rigid", &[("joint", name.as_str())]);
+                    crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
+                    let r = crate::ui_kit::button(ui, crate::i18n::tr_label("Edit Joint"), crate::ui_kit::Button::Normal);
+                    crate::scenario::publish_handle("drive:edit_joint", r.rect.center());
+                    edit = r.clicked();
                 });
+                if edit && let Some(Kind::Assembly(e)) = edit_joint(app, *id).map(|d| d.kind) {
+                    *k = e;
+                    return false;
+                }
+            }
+            if list.is_empty() {
+                if rigid.is_none() {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(crate::i18n::tr_label("no joint that moves yet")).color(t.text_dim));
+                    });
+                }
                 return false;
             }
-            let labels: Vec<String> =
-                list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| format!("{} ({:?})", j.name, j.kind)).collect();
+            let labels: Vec<String> = list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| joint_choice(&j.name, j.kind)).collect();
             let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-            let mut pos = list.iter().position(|i| i == joint).unwrap_or(0);
+            // On a rigid joint the box shows none of the joints that move until one is chosen.
+            let mut pos = list.iter().position(|i| i == joint).unwrap_or(list.len());
             choice_row(ui, "Joint", "drv_joint", &mut pos, &refs);
-            let pick = list.get(pos).copied().unwrap_or(0);
-            if pick != *joint || values.is_empty() {
+            if let Some(&pick) = list.get(pos)
+                && (pick != *joint || values.is_empty())
+            {
                 *joint = pick;
                 *values = current_values(s, pick);
             }
-            let Some(j) = s.doc.assembly.joints.get(*joint).cloned() else { return false };
+            let Some(j) = s.doc.assembly.joints.get(*joint).filter(|j| j.kind != JointKind::Rigid).cloned() else { return false };
             for (i, v) in values.iter_mut().enumerate() {
                 let angle = j.kind.is_angle(i);
                 let unit_kind = if angle { ValueKind::Angle } else { ValueKind::Length };
@@ -708,9 +742,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             let s = &app.session;
             let joints = &s.doc.assembly.joints;
             if joints.len() < 2 {
-                form_row(ui, "", |ui| {
-                    ui.label(RichText::new(crate::i18n::tr_label("needs two joints")).color(t.text_dim));
-                });
+                crate::ui_kit::status_line(ui, "needs two joints", crate::ui_kit::StatusTone::Dim);
                 return false;
             }
             let labels: Vec<&str> = joints.iter().map(|j| j.name.as_str()).collect();
@@ -797,9 +829,7 @@ fn interference(app: &mut SolveApp, picked: &[Sel], clearance: &str) -> (Value, 
 fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     let t = Tokens::get();
     if let Some(e) = r.get("error").and_then(Value::as_str) {
-        form_row(ui, "", |ui| {
-            ui.label(RichText::new(e).color(t.error));
-        });
+        crate::ui_kit::status_line(ui, e, crate::ui_kit::StatusTone::Error);
         return;
     }
     let hits = r["overlaps"].as_array().cloned().unwrap_or_default();
@@ -810,9 +840,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     let near = r["near"].as_array().cloned().unwrap_or_default();
     let pair = |h: &Value| format!("{} · {}", h["a"].as_str().unwrap_or(""), h["b"].as_str().unwrap_or(""));
     if hits.is_empty() && unchecked.is_empty() {
-        form_row(ui, "Result", |ui| {
-            ui.label(RichText::new(crate::i18n::tr_label("no interference")).color(t.text_dim));
-        });
+        crate::ui_kit::status_line(ui, "no interference", crate::ui_kit::StatusTone::Dim);
     }
     // Pairs closer than the clearance, nearest first.
     if !near.is_empty() {
@@ -997,6 +1025,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         }
         Asm::Drive { joint, values, .. } => {
             let j = s.doc.assembly.joints.get(*joint).ok_or("no joint that moves yet")?;
+            // A rigid joint has nothing to drive: the dialog says why and offers Edit Joint (#6981).
+            if j.kind == JointKind::Rigid {
+                return Err(crate::i18n::format("drive.rigid", &[("joint", &j.name)]));
+            }
             cmd("joint.drive", json!({"joint": j.id, "values": values}))
         }
         Asm::MotionLink { a, b, ia, ib, ratio, offset } => {

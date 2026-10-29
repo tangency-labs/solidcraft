@@ -46,6 +46,43 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
 
+### bill of materials
+
+The list of the components placed in a design or in one component, with the quantity of each.
+
+It lists every part at any depth, or only the direct children. Each component's *bill of
+materials type* decides whether it has a row and whether what it holds is counted.
+
+- **In SolidCraft:** `assembly.bom` ("Bill of Materials") and its window on the INSPECT panel;
+  each row's `item`, `part_number` and `count`; a component's `metadata` and `properties`
+  design-file keys, which `component.metadata.set` changes.
+- **Don't use:** BOM in labels; parts list (for the bill of materials itself).
+- **Elsewhere:** bill of materials, BOM, parts list.
+- **For translators:** not a parts list on a drawing, which is one table that shows it.
+
+### bill of materials type
+
+The rule that decides whether a component has a row in a bill of materials, and whether what it
+holds is counted there.
+
+There are five:
+
+- *normal*, something you make: a row; each occurrence adds one to its quantity.
+- *phantom*, something just to group: no row; what it holds counts where it is placed.
+- *reference*, something to use as a reference: no row, and nothing inside it counts.
+- *purchased*, something you buy: one row; nothing inside it is counted or listed.
+- *inseparable*, something made as one piece (welded, glued, riveted and so on): one row; of
+  what it holds, only the purchased components are listed, and only in a list of every part.
+
+- **In SolidCraft:** the `bom_type` part property, which `component.metadata.set` changes and
+  `component.metadata` reads; the `bom_type` of each `assembly.bom` row.
+- **Don't use:** BOM structure, item type, kind; made (for *normal*: it reads as "already
+  made").
+- **Elsewhere:** BOM structure, BOM type.
+- **For translators:** *normal* here is not the sketch line type, a direction or the display
+  quality (see *Words with more than one meaning*); *reference* is not a construction plane;
+  *phantom* is not a hidden or see-through display.
+
 ### body
 
 One connected solid or surface shape that features create and change.
@@ -149,7 +186,7 @@ A design is saved as a *design file*.
 
 ### design file
 
-A file in which SolidCraft saves one design, with the `.solidcraft` extension.
+A file in which SolidCraft saves one design, with the `.sc` extension (`.solidcraft` in earlier releases; those files still open).
 
 - **In SolidCraft:** `file.save`, `file.save_as`, `doc.open`; the `solidcraft/N` format tag.
 - **Don't use:** document, project file.
@@ -204,6 +241,7 @@ features are computed.
 
 - **In SolidCraft:** `browser.group`, `browser.ungroup`, `browser.rename_group`; `timeline.group`,
   `timeline.ungroup`, `timeline.rename_group`, `timeline.move_to_group`; the `group` parameter key;
+  the `groups` parameter of `timeline.delete` and `timeline.suppress` (a group with all its features);
   the `browser_groups` and `timeline_groups` design-file keys.
 - **Don't use:** feature folder, folder (for a group).
 - **Elsewhere:** folder, group.
@@ -256,6 +294,22 @@ The first instance is the original.
 - **Don't use:** instance for an occurrence; element, item.
 - **Elsewhere:** instance, element, occurrence.
 - **For translators:** not an occurrence of a component.
+
+### reference edge
+
+A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a
+set distance from, measured in that face's plane.
+
+Up to two reference edges place one hole or cylinder. Each distance is a parameter, and the
+feature follows its edges when the part changes.
+
+- **In SolidCraft:** the `references` parameter of `solid.hole` and `solid.cylinder` (each
+  `{edge, distance}`); the windows' Reference 1, Reference 2 and Distance 1, Distance 2 rows; the
+  "Reference distance" input (`ui.reference_1`, `ui.reference_2`, `ui.reference_distance`).
+- **Don't use:** datum edge, anchor edge.
+- **Elsewhere:** reference edge, edge offset, distance from edge.
+- **For translators:** an edge of a body, not a construction axis or a reference plane; the
+  distance is a length, not a reference value for light or material.
 
 ### rollback marker
 
@@ -312,6 +366,22 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
 
+### view angles
+
+The yaw, pitch and roll, in degrees, that give the direction a view looks along and how its
+picture is turned.
+
+Yaw is the heading of the line of sight about the up axis (Front view 0°, Left 90°, Right −90°,
+Back 180°); pitch is how far the eye is above the ground plane (Top view 90°, Bottom −90°); a
+positive roll turns the picture clockwise. They are the camera's own angles, which `view.apply`
+and the MCP camera take in radians.
+
+- **In SolidCraft:** `view.angle_readout` and the View angles readout under the orientation
+  gizmo; the `yaw`, `pitch` and `roll` of `view.apply`'s `camera`.
+- **Don't use:** camera angles, view rotation.
+- **Elsewhere:** view orientation, azimuth and elevation.
+- **For translators:** the view's pitch is a tilt, not a thread's or a pattern's pitch.
+
 ### web browser
 
 A program that shows web pages, such as the one that runs SolidCraft's web build.
@@ -348,8 +418,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | Normal | a sketch entity that isn't a construction entity | normal (line type) | the sketch palette's line type |
 | | the direction perpendicular to a surface | normal (direction) | the ruled surface's Normal mode |
 | | the middle display quality | normal (quality) | `ui.display_quality_normal` |
+| | a component with a row of its own in a bill of materials | normal (bill of materials type) | `bom_type` |
 | Quantity | the number of pattern instances | count | the pattern dialogs' Quantity rows, `ui.quantity` |
 | | what the motion plot shows: value, velocity or acceleration | plotted quantity | the motion study's Quantity row, `motion.plot_quantity` |
+| Reference | an edge a hole or cylinder keeps its distance from | *reference edge* | `references` of `solid.hole` and `solid.cylinder`, `ui.reference_1` |
+| | the measured values a material is checked against | reference (material) | `material.editor.reference` |
+| | the distance a light's intensity is given for | reference distance (light) | `render.cpu_light_reference` |
 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the

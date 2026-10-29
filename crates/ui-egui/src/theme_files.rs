@@ -21,7 +21,7 @@ use crate::theme::{IconColors, Tokens};
 /// The `format` tag of a theme file.
 pub const FORMAT: &str = "solidcraft-theme/1";
 /// Hostile-input caps: file size, colours per file, name length, imported themes kept.
-const MAX_BYTES: usize = 256 * 1024;
+pub const MAX_BYTES: usize = 256 * 1024;
 pub const MAX_COLORS: usize = 512;
 const MAX_NAME: usize = 80;
 pub const MAX_CUSTOM: usize = 64;
@@ -298,6 +298,7 @@ macro_rules! theme_keys {
 
 theme_keys! {
     one: [
+        nav_hover, nav_press, nav_dim, nav_viewport, nav_tip, nav_tip_ink, nav_tip_key_border, nav_field,
         file_dim, file_recovery_well, file_background, file_surface, file_border, file_image_tint, file_rail, file_rail_ink, file_rail_hover,
         file_primary, file_primary_ink, file_primary_border, file_recovery, file_recovery_ink, file_recovery_border,
         app_bar, toolbar, panel, panel_header, border, text, text_dim, accent, accent_soft, sketch_accent, error, warning,
@@ -305,7 +306,7 @@ theme_keys! {
         sel_profile_edge, hover_profile, hover_profile_edge, sel_vertex, origin_plane, origin_plane_edge, origin_plane_hover,
         origin_point, axis_x, axis_y, axis_z, construction_plane, construction_geom, body, body_edge, manipulator,
         preview_add, preview_new, preview_sketch, preview_cut, cube_face, cube_border, cube_text, cube_hover, viewport_top,
-        viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, dimension, dimension_driven,
+        viewport_bottom, grid, grid_major, body_selected, sketch, sketch_fixed, sketch_halo, sketch_locked, sketch_conflict, dimension, dimension_driven,
         sketch_point, sketch_point_free, dialog_bg, dialog_border, chip, section_cap,
         profile_fill, glyph_bg, glyph_edge, glyph_text, overlay, rubber_band, app_bar_text, app_bar_hover, timeline_item,
         timeline_item_error, timeline_marker, field, box_window, box_crossing, sketch_projected, sketch_lost,
@@ -313,7 +314,7 @@ theme_keys! {
         sketch_ink, sketch_soft, surface_fill, surface_ink, surface_soft, mesh_fill, mesh_ink, mesh_soft, form_fill, form_tab_ink, form_soft, sheet_fill, sheet_ink, sheet_soft, render_fill, render_ink, render_soft, tab_on_fill_dark,
         app_bar_separator, surface_accent, mesh_accent, form_accent, render_accent, on_accent, agent_ok, agent_busy, app_bar_hover_subtle,
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
-        form_ink, form_dim, form_primary, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
+        form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
     ],
     many: [continuity, logo],
     icons: [highlight, agent, marker_halo],
@@ -487,6 +488,9 @@ pub fn resolve(theme: &ThemeFile) -> Tokens {
             s.copy_from_slice(&c);
         }
     }
+    if !theme.colors.contains_key("form_primary_fill") {
+        t.form_primary_fill = t.form_primary;
+    }
     for (key, value) in &theme.radii {
         if *value <= MAX_RADIUS
             && let Some(slot) = radius_slot(&mut t, key)
@@ -497,6 +501,11 @@ pub fn resolve(theme: &ThemeFile) -> Tokens {
     // Malformed hand-edited saved settings cannot introduce non-finite drawing geometry.
     t.borders = parse_borders(&theme.borders).unwrap_or_default();
     t.icon_palette = parse_icon_palette(&theme.icon_palette).unwrap_or_default();
+    // Conflicting sketch geometry is drawn in the theme's own error colour unless it sets one of
+    // its own (#7244).
+    if !theme.colors.contains_key("sketch_conflict") {
+        t.sketch_conflict = t.error;
+    }
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
         file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
@@ -610,47 +619,55 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
     json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})
 }
 
-/// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT; Okibi and Akari map the Okibi design system).
-const BUILTIN: [(&str, &str); 22] = [
-    ("gruvbox-dark", include_str!("../../../assets/styles/ui/themes/gruvbox-dark.json")),
-    ("gruvbox-dark-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-hard.json")),
-    ("gruvbox-dark-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-soft.json")),
-    ("gruvbox-light", include_str!("../../../assets/styles/ui/themes/gruvbox-light.json")),
-    ("gruvbox-light-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-light-hard.json")),
-    ("gruvbox-light-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-light-soft.json")),
-    ("solidcraft-95", include_str!("../../../assets/styles/ui/themes/solidcraft-95.json")),
-    ("platinum-9", include_str!("../../../assets/styles/ui/themes/platinum-9.json")),
-    ("cupertino", include_str!("../../../assets/styles/ui/themes/cupertino.json")),
-    ("green-phosphor", include_str!("../../../assets/styles/ui/themes/green-phosphor.json")),
-    ("amber-phosphor", include_str!("../../../assets/styles/ui/themes/amber-phosphor.json")),
-    ("blueprint", include_str!("../../../assets/styles/ui/themes/blueprint.json")),
-    ("one-dark", include_str!("../../../assets/styles/ui/themes/one-dark.json")),
-    ("tokyo-night", include_str!("../../../assets/styles/ui/themes/tokyo-night.json")),
-    ("solarized-light", include_str!("../../../assets/styles/ui/themes/solarized-light.json")),
-    ("nord", include_str!("../../../assets/styles/ui/themes/nord.json")),
-    ("high-contrast", include_str!("../../../assets/styles/ui/themes/high-contrast.json")),
-    ("graphite", include_str!("../../../assets/styles/ui/themes/graphite.json")),
-    ("nosferatu", include_str!("../../../assets/styles/ui/themes/nosferatu.json")),
-    ("catppuccin-mocha", include_str!("../../../assets/styles/ui/themes/catppuccin-mocha.json")),
-    ("okibi", include_str!("../../../assets/styles/ui/themes/okibi.json")),
-    ("akari", include_str!("../../../assets/styles/ui/themes/akari.json")),
-];
+// Theme sources are collected at build time; picker order is validated below.
+include!(concat!(env!("OUT_DIR"), "/builtin_themes.rs"));
 
-/// The built-in themes, read once (one that fails to read is left out; a test reads them all).
+/// The two-colour built-in themes (1-bit and 1-bit Dark): pure black and white, so a few looks
+/// other themes tell apart by colour are told apart by text or shape instead.
+#[cfg(test)]
+pub(crate) fn is_two_colour(id: &str) -> bool {
+    matches!(id, "1-bit" | "1-bit-dark")
+}
+
+/// The built-in themes, validated and ordered once; a test checks every shipped file.
 pub fn builtin() -> &'static [ThemeFile] {
     static THEMES: OnceLock<Vec<ThemeFile>> = OnceLock::new();
-    THEMES.get_or_init(|| {
-        BUILTIN
-            .iter()
-            .filter_map(|(id, text)| match parse(text) {
-                Ok(t) => Some(ThemeFile { id: (*id).to_string(), ..t }),
-                Err(e) => {
-                    log::error!("built-in theme {id}: {e}");
-                    None
-                }
-            })
-            .collect()
+    THEMES.get_or_init(|| match read_builtin(BUILTIN) {
+        Ok(themes) => themes,
+        Err(e) => {
+            log::error!("built-in themes: {e}");
+            Vec::new()
+        }
     })
+}
+
+fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> {
+    let mut orders = std::collections::BTreeSet::new();
+    let mut ids = std::collections::BTreeSet::new();
+    let mut themes = Vec::new();
+    for &(id, text) in sources {
+        if !ids.insert(id) || id.is_empty() {
+            return Err(format!("empty or duplicate theme id: {id}"));
+        }
+        if text.len() > MAX_BYTES {
+            return Err(format!("theme {id} exceeds the file size limit"));
+        }
+        let value: Value = serde_json::from_str(text).map_err(|e| format!("theme {id}: {e}"))?;
+        let order = value.get("order").and_then(Value::as_u64).ok_or_else(|| format!("theme {id}: order must be a nonnegative integer"))?;
+        if !orders.insert(order) {
+            return Err(format!("theme {id}: duplicate order {order}"));
+        }
+        if value.get("provenance").and_then(Value::as_str).is_none_or(|s| s.trim().is_empty()) {
+            return Err(format!("theme {id}: missing provenance"));
+        }
+        let theme = from_value(&value).map_err(|e| format!("theme {id}: {e}"))?;
+        themes.push((order, ThemeFile { id: id.into(), ..theme }));
+    }
+    if themes.is_empty() {
+        return Err("no built-in themes".into());
+    }
+    themes.sort_by_key(|(order, _)| *order);
+    Ok(themes.into_iter().map(|(_, theme)| theme).collect())
 }
 
 /// The theme a `theme` preference names: built in, or imported. `None` for dark, light, system
@@ -679,9 +696,159 @@ pub fn add(custom: &mut Vec<ThemeFile>, mut theme: ThemeFile) -> Result<String, 
     Ok(id)
 }
 
+/// Seconds between two looks at a followed file's modified time and size.
+pub const FOLLOW_INTERVAL: f64 = 1.0;
+/// Longest followed path accepted, in bytes (hostile input from the control channel).
+pub const MAX_FOLLOW_PATH: usize = 4096;
+
+/// A theme file the desktop app follows (#7573): another tool writes it, and the app reloads it
+/// when its modified time or size changes. Only a read that parses completely is applied; while
+/// the file is being written, broken, missing or too big, the last good theme stays on and
+/// [`Follow::error`] says why.
+#[derive(Clone, Debug, Default)]
+pub struct Follow {
+    /// The `--theme-file` launch flag's path: followed for this run in place of the preference,
+    /// never saved.
+    pub launch: Option<String>,
+    /// The path the state below belongs to.
+    path: String,
+    /// The file's modified time and size at the last read.
+    stamp: Option<(Option<std::time::SystemTime>, u64)>,
+    /// When (`egui` input time, seconds) the file was last looked at.
+    checked: Option<f64>,
+    /// The last theme that read completely.
+    theme: Option<ThemeFile>,
+    /// Why the last read was not applied.
+    error: Option<String>,
+    /// Whether the window had the focus last frame (gaining it re-reads the file).
+    pub focused: bool,
+}
+
+/// What a [`Follow::poll`] changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FollowChange {
+    /// Nothing new.
+    None,
+    /// The file read completely; its theme is on now.
+    Loaded(String),
+    /// A read failed for a new reason (reported once; the last good theme stays on).
+    Failed(String),
+}
+
+/// A followed path as given: trimmed, at most [`MAX_FOLLOW_PATH`] bytes, no control characters.
+pub fn follow_path(path: &str) -> Result<String, String> {
+    let path = path.trim();
+    if path.len() > MAX_FOLLOW_PATH || path.chars().any(char::is_control) {
+        return Err(format!("a followed theme file's path is at most {MAX_FOLLOW_PATH} bytes without control characters"));
+    }
+    Ok(path.to_string())
+}
+
+impl Follow {
+    /// The path followed now: the launch flag's, else the preference's (empty: none).
+    pub fn path<'a>(&'a self, preference: &'a str) -> &'a str {
+        match self.launch.as_deref().map(str::trim) {
+            Some(path) if !path.is_empty() => path,
+            _ => preference.trim(),
+        }
+    }
+
+    /// The theme the followed file gave last, if any read completely.
+    pub fn theme(&self) -> Option<&ThemeFile> {
+        self.theme.as_ref()
+    }
+
+    /// Why the followed file's last read was not applied.
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    /// Look at `path` (`now` in seconds): at most every [`FOLLOW_INTERVAL`] unless `force`, and
+    /// read it only when its modified time or size changed. An empty path stops following.
+    pub fn poll(&mut self, path: &str, now: f64, force: bool) -> FollowChange {
+        if path != self.path {
+            *self = Follow { launch: self.launch.take(), focused: self.focused, path: path.to_string(), ..Default::default() };
+        }
+        if path.is_empty() {
+            return FollowChange::None;
+        }
+        let due = self.checked.is_none_or(|t| now - t >= FOLLOW_INTERVAL || now < t);
+        if !force && !due {
+            return FollowChange::None;
+        }
+        self.checked = Some(now);
+        match self.read(force) {
+            Ok(None) => FollowChange::None,
+            Ok(Some(theme)) => {
+                let name = theme.name.clone();
+                self.theme = Some(theme);
+                self.error = None;
+                FollowChange::Loaded(name)
+            }
+            Err(e) if self.error.as_deref() == Some(e.as_str()) => FollowChange::None,
+            Err(e) => {
+                self.error = Some(e.clone());
+                FollowChange::Failed(e)
+            }
+        }
+    }
+
+    /// The file's theme when it changed since the last read (`Ok(None)`: unchanged).
+    fn read(&mut self, force: bool) -> Result<Option<ThemeFile>, String> {
+        use std::io::Read;
+        let path = std::path::Path::new(&self.path);
+        let meta = std::fs::metadata(path).map_err(|e| format!("can't read {}: {e}", self.path))?;
+        if !meta.is_file() {
+            return Err(format!("{} is not a file", self.path));
+        }
+        if meta.len() > MAX_BYTES as u64 {
+            return Err(format!("a theme file is at most {} KiB", MAX_BYTES / 1024));
+        }
+        let stamp = (meta.modified().ok(), meta.len());
+        if !force && self.stamp == Some(stamp) {
+            return Ok(None);
+        }
+        self.stamp = Some(stamp);
+        // Never more than the cap, whatever the size said a moment ago.
+        let mut text = String::new();
+        std::fs::File::open(path)
+            .and_then(|f| f.take(MAX_BYTES as u64 + 1).read_to_string(&mut text))
+            .map_err(|e| format!("can't read {}: {e}", self.path))?;
+        let theme = parse(&text)?;
+        Ok(Some(ThemeFile { id: format!("file-{}", theme.id), ..theme }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_board_colours_are_themeable_and_roundtrip_on_both_bases() {
+        for (base, tokens, colours) in [
+            ("light", Tokens::light(), ["#e9edf2", "#dce2ea", "#8895a7", "#eef1f5", "#1b2430", "#ffffff", "#ffffff"]),
+            ("dark", Tokens::dark(), ["#3a4150", "#464e60", "#7c879a", "#262b35", "#eef1f5", "#1b2430", "#2f343e"]),
+        ] {
+            for (actual, hex) in
+                [tokens.nav_hover, tokens.nav_press, tokens.nav_dim, tokens.nav_viewport, tokens.nav_tip, tokens.nav_tip_ink, tokens.nav_field]
+                    .into_iter()
+                    .zip(colours)
+            {
+                assert_eq!(actual, parse_color(hex).unwrap(), "{base}: {hex}");
+            }
+            let old = from_value(&json!({"format":FORMAT,"name":"Old","base":base})).unwrap();
+            assert_eq!(resolve(&old), tokens, "old themes retain the base's new navigation roles");
+            assert_eq!(resolve(&from_value(&export("Board", old.base, &tokens)).unwrap()), tokens);
+            let custom = from_value(&json!({"format":FORMAT,"name":"Custom","base":base,
+                "colors":{"nav_press":"#123456","nav_tip":"#abcdef","nav_tip_key_border":"#01020380"}}))
+            .unwrap();
+            let custom_tokens = resolve(&custom);
+            assert_eq!(custom_tokens.nav_press, parse_color("#123456").unwrap());
+            assert_eq!(custom_tokens.nav_tip, parse_color("#abcdef").unwrap());
+            assert_eq!(custom_tokens.nav_tip_key_border, parse_color("#01020380").unwrap());
+            assert_eq!(resolve(&from_value(&export("Custom", custom.base, &custom_tokens)).unwrap()), custom_tokens);
+        }
+    }
 
     #[test]
     fn border_roles_roundtrip_on_either_base_and_preserve_legacy_defaults() {
@@ -801,14 +968,151 @@ mod tests {
         for file in builtin() {
             let t = resolve(file);
             assert!(t.icon_palette.is_some(), "{} has no icon palette", file.id);
+            // A two-colour theme (1-bit, 1-bit Dark) can't give each workspace its own fill; it
+            // still has to keep every tab readable, below.
+            let two_colour = is_two_colour(&file.id);
             let mut fills = std::collections::HashSet::new();
             for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
                 let accent = TabAccent::for_tab(&t, tab);
-                assert!(fills.insert(accent.color), "{} repeats {tab}", file.id);
+                assert!(fills.insert(accent.color) || two_colour, "{} repeats {tab}", file.id);
                 assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {tab} soft text", file.id);
                 assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {tab} pill text", file.id);
             }
         }
+    }
+
+    #[test]
+    fn one_bit_themes_are_complete_opaque_black_and_white() {
+        for (id, name, base) in [("1-bit", "1-bit", Base::Light), ("1-bit-dark", "1-bit Dark", Base::Dark)] {
+            assert!(is_two_colour(id));
+            let file = find(id, &[]).unwrap();
+            assert_eq!(file.name, name);
+            assert_eq!(file.base, base);
+            one_bit_is_complete_opaque_black_and_white(file);
+        }
+    }
+
+    fn one_bit_is_complete_opaque_black_and_white(file: &ThemeFile) {
+        let t = resolve(file);
+        let exported = export(&file.name, file.base, &t);
+        let mut resolved = t;
+        for key in keys() {
+            for color in slot(&mut resolved, key).unwrap() {
+                let [r, g, b, _] = color.to_srgba_unmultiplied();
+                assert!(matches!([r, g, b], [0, 0, 0] | [255, 255, 255]), "{}: {key}: {color:?}", file.id);
+            }
+            assert!(file.colors.contains_key(key), "{}: missing {key}", file.id);
+        }
+        fn check(value: &Value) {
+            match value {
+                Value::String(color) if color.starts_with('#') => {
+                    assert!(matches!(color.as_str(), "#000000" | "#ffffff"), "{color}");
+                }
+                Value::Array(values) => values.iter().for_each(check),
+                Value::Object(values) => values.values().for_each(check),
+                _ => {}
+            }
+        }
+        check(&exported);
+        for role in crate::icon_svg::ROLE_NAMES.iter().filter(|role| **role != "gap") {
+            assert!(file.icon_palette.contains_key(*role), "{}: missing icon role {role}", file.id);
+        }
+        for ramp in std::iter::once("solid").chain(crate::icon_svg::ACCENT_NAMES.iter().copied()) {
+            assert!(file.icon_palette.contains_key(ramp), "{}: missing icon ramp {ramp}", file.id);
+        }
+        assert_eq!(radius_values(t), [0; 6]);
+    }
+
+    #[test]
+    fn one_bit_selection_and_viewport_tokens_have_full_contrast() {
+        for (id, paper, ink) in [("1-bit", Color32::WHITE, Color32::BLACK), ("1-bit-dark", Color32::BLACK, Color32::WHITE)] {
+            one_bit_has_full_contrast(&resolve(find(id, &[]).unwrap()), id, paper, ink);
+        }
+    }
+
+    /// `paper` is the theme's page (panels, viewport, bodies, hover); `ink` its text, and its selection.
+    fn one_bit_has_full_contrast(t: &Tokens, id: &str, paper: Color32, ink: Color32) {
+        assert_eq!((t.text, t.panel), (ink, paper), "{id}");
+        for (fg, bg) in [
+            (t.text, t.panel),
+            (t.text_dim, t.field),
+            (t.icon, t.toolbar),
+            (t.app_bar_text, t.app_bar_tab_active),
+            (t.selected_ink, t.selected_bg),
+            (t.text, t.hover),
+            (t.app_bar_text, t.app_bar_hover),
+            (t.body_edge, t.body),
+            (t.sel_edge, t.body_selected),
+            (t.dimension, t.viewport_top),
+            (t.sketch, t.viewport_bottom),
+            (t.glyph_text, t.glyph_bg),
+            (t.dialog_label, t.dialog_body),
+        ] {
+            assert_eq!(crate::theme::contrast_ratio(fg, bg), 21.0, "{id}: {fg:?} on {bg:?}");
+        }
+        assert_eq!((t.viewport_top, t.viewport_bottom, t.body), (paper, paper, paper), "{id}");
+        assert_eq!((t.selected_bg, t.body_selected), (ink, ink), "{id}");
+        // Hover fills are the paper, so a hovered row, card or tab never swallows its ink label.
+        for hover in [t.hover, t.app_bar_hover, t.app_bar_hover_subtle, t.app_bar_hover_button, t.app_bar_hover_strong] {
+            assert_eq!(hover, paper, "{id}: hover fill");
+        }
+        assert_eq!((t.body_edge, t.selected_ink), (ink, paper), "{id}");
+        // Thumbnails and other pictures keep their own pixels: the tint stays neutral white.
+        assert_eq!(t.file_image_tint, Color32::WHITE, "{id}");
+    }
+
+    #[test]
+    fn builtin_order_preserves_the_existing_picker_sequence() {
+        let original: &[&str] = &[
+            "gruvbox-dark",
+            "gruvbox-dark-hard",
+            "gruvbox-dark-soft",
+            "gruvbox-light",
+            "gruvbox-light-hard",
+            "gruvbox-light-soft",
+            "solidcraft-95",
+            "1-bit",
+            "1-bit-dark",
+            "platinum-9",
+            "cupertino",
+            "green-phosphor",
+            "amber-phosphor",
+            "blueprint",
+            "one-dark",
+            "tokyo-night",
+            "solarized-light",
+            "nord",
+            "high-contrast",
+            "graphite",
+            "nosferatu",
+            "catppuccin-mocha",
+            "okibi",
+            "akari",
+            "clay",
+            "clay-dark",
+            "cga",
+        ];
+        let themes = read_builtin(BUILTIN).unwrap();
+        let retained: Vec<_> = themes.iter().map(|t| t.id.as_str()).filter(|id| original.contains(id)).collect();
+        assert_eq!(retained, original);
+        assert!(BUILTIN.windows(2).all(|pair| pair[0].0 < pair[1].0), "source entries are sorted by id");
+    }
+
+    #[test]
+    fn builtin_metadata_rejects_missing_invalid_and_duplicate_order() {
+        let text =
+            |order: Value| json!({"format": FORMAT, "name": "Synthetic", "base": "dark", "provenance": "Original", "order": order}).to_string();
+        let good = text(json!(10));
+        assert!(read_builtin(&[("a", &good)]).is_ok());
+        let earlier = text(json!(5));
+        let ordered = read_builtin(&[("a", &good), ("b", &earlier)]).unwrap();
+        assert_eq!(ordered.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert!(read_builtin(&[("a", &good), ("a", &earlier)]).is_err());
+        assert!(read_builtin(&[("a", &good), ("b", &good)]).is_err());
+        for order in [Value::Null, json!(-1), json!(1.5), json!("10")] {
+            assert!(read_builtin(&[("a", &text(order))]).is_err());
+        }
+        assert!(read_builtin(&[]).is_err());
     }
 
     #[test]
@@ -817,10 +1121,39 @@ mod tests {
         for t in builtin() {
             let base = if t.base.is_dark() { Tokens::dark() } else { Tokens::light() };
             assert_ne!(resolve(t), base, "{}", t.id);
-            if t.id.starts_with("gruvbox-") {
+            if t.id.starts_with("gruvbox-") || is_two_colour(&t.id) {
                 assert_eq!(t.base.is_dark(), t.id.contains("dark"), "{}", t.id);
             }
         }
+    }
+
+    /// CGA uses only the 16 colours of the IBM Color Graphics Adapter (alpha only on translucent
+    /// tokens) and sets every colour, so nothing falls back to Dark's palette.
+    #[test]
+    fn cga_uses_only_the_sixteen_cga_colours() {
+        const CGA: [&str; 16] = [
+            "000000", "0000aa", "00aa00", "00aaaa", "aa0000", "aa00aa", "aa5500", "aaaaaa", "555555", "5555ff", "55ff55", "55ffff", "ff5555",
+            "ff55ff", "ffff55", "ffffff",
+        ];
+        fn colours<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
+            match v {
+                Value::String(s) if s.starts_with('#') => out.push(s),
+                Value::Array(a) => a.iter().for_each(|v| colours(v, out)),
+                Value::Object(o) => o.values().for_each(|v| colours(v, out)),
+                _ => {}
+            }
+        }
+        let text = BUILTIN.iter().find(|(id, _)| *id == "cga").map(|(_, text)| *text).unwrap();
+        let file: Value = serde_json::from_str(text).unwrap();
+        let mut found = Vec::new();
+        colours(&file, &mut found);
+        assert!(found.len() > keys().len(), "CGA sets every colour and its icon palette");
+        for c in found {
+            let rgb = c.get(1..7).unwrap_or_default().to_ascii_lowercase();
+            assert!(CGA.contains(&rgb.as_str()) && parse_color(c).is_some(), "{c} is not a CGA colour");
+        }
+        let theme = find("cga", &[]).unwrap();
+        assert_eq!((theme.name.as_str(), theme.colors.len()), ("CGA", keys().len()), "CGA sets every colour");
     }
 
     /// #4868: a theme that sets none of the File view's colours (all the built-in ones) gets them
@@ -859,6 +1192,19 @@ mod tests {
         assert_eq!(resolve(&own).file_rail, Color32::from_rgb(0x10, 0x20, 0x30));
     }
 
+    /// Okibi and Akari spend their ember on one or two marks a screen: the start page's rail is
+    /// one of their neutrals, not their accent.
+    #[test]
+    fn okibi_and_akari_rails_are_neutral() {
+        for id in ["okibi", "akari"] {
+            let t = resolve(builtin().iter().find(|t| t.id == id).unwrap());
+            for c in [t.file_rail, t.file_rail_hover] {
+                let [r, g, b, _] = c.to_array();
+                assert!(r.max(g).max(b) - r.min(g).min(b) <= 12, "{id}: {c:?} is tinted");
+            }
+        }
+    }
+
     #[test]
     fn a_short_file_sets_only_its_colours() {
         let t = parse(r##"{"format":"solidcraft-theme/1","name":"My Theme!","base":"light","colors":{"panel":"#102030","axis_z":"#0000ff80"}}"##)
@@ -868,6 +1214,27 @@ mod tests {
         assert_eq!(p.panel, Color32::from_rgb(0x10, 0x20, 0x30));
         assert_eq!(p.axis_z, Color32::from_rgba_unmultiplied(0, 0, 255, 0x80));
         assert_eq!(p.text, Tokens::light().text);
+    }
+
+    /// Conflicting sketch geometry (#7244) is the error red by default, follows a theme's own
+    /// `error` when the theme leaves `sketch_conflict` out, and takes the theme's own key when set.
+    #[test]
+    fn sketch_conflict_defaults_to_the_error_colour_and_a_theme_can_set_its_own() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            assert_eq!(t.sketch_conflict, t.error);
+        }
+        let file = |colors: &str| {
+            resolve(&parse(&format!(r#"{{"format":"solidcraft-theme/1","name":"Conflict","base":"light","colors":{{{colors}}}}}"#)).unwrap())
+        };
+        let (red, green) = (Color32::from_rgb(0xcc, 0x24, 0x1d), Color32::from_rgb(0x12, 0xab, 0x34));
+        assert_eq!(file(r##""error":"#cc241d""##).sketch_conflict, red, "the theme's error colour");
+        assert_eq!(file(r##""error":"#cc241d","sketch_conflict":"#12ab34""##).sketch_conflict, green, "the theme's own key wins");
+        assert_eq!(file(r##""panel":"#102030""##).sketch_conflict, Tokens::light().error);
+        for theme in builtin() {
+            let t = resolve(theme);
+            assert_eq!(t.sketch_conflict, t.error, "{}: conflicts in the theme's error colour", theme.id);
+        }
+        assert!(keys().contains(&"sketch_conflict"), "exported and imported by name");
     }
 
     /// A theme file written before the axes were one set (#976) still reads: its view triad and
@@ -1030,6 +1397,9 @@ mod tests {
         assert_eq!(values("solidcraft-95"), [3, 3, 4, 4, 3, 3]);
         assert_eq!(values("blueprint"), [4, 6, 8, 10, 6, 7]);
         assert_eq!(values("cupertino"), [6, 8, 12, 16, 8, 9]);
+        for id in ["clay", "clay-dark"] {
+            assert_eq!(values(id), [6, 9, 13, 18, 9, 10], "{id}");
+        }
         let defaults = radius_values(Tokens::dark());
         assert_eq!(defaults, radius_values(Tokens::light()));
         for suffix in ["", "-hard", "-soft"] {
@@ -1039,5 +1409,64 @@ mod tests {
         for file in builtin().iter().filter(|file| file.radii.is_empty()) {
             assert_eq!(radius_values(resolve(file)), defaults, "{}", file.id);
         }
+    }
+
+    #[test]
+    fn a_followed_file_reloads_when_rewritten_and_keeps_the_last_good_theme() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-theme-follow-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("live.json");
+        let path = file.to_string_lossy().to_string();
+        let write = |panel: &str, extra: &str| {
+            std::fs::write(&file, format!(r##"{{"format":"{FORMAT}","name":"Live","base":"dark","colors":{{"panel":"{panel}"{extra}}}}}"##)).unwrap();
+        };
+        let panel = |f: &Follow| f.theme().map(|t| resolve(t).panel);
+
+        // Off by default: nothing is followed or read.
+        let mut follow = Follow::default();
+        assert_eq!(follow.path(""), "");
+        assert_eq!(follow.poll("", 0.0, true), FollowChange::None);
+        assert!(follow.theme().is_none() && follow.error().is_none());
+
+        // A valid file applies; an unchanged one is not read again.
+        write("#102030", "");
+        assert_eq!(follow.poll(&path, 0.0, false), FollowChange::Loaded("Live".into()));
+        assert_eq!(panel(&follow), Some(Color32::from_rgb(0x10, 0x20, 0x30)));
+        assert_eq!(follow.poll(&path, 0.5, false), FollowChange::None, "polled at most every second");
+        assert_eq!(follow.poll(&path, 1.5, false), FollowChange::None, "unchanged");
+
+        // Rewritten (another size, so even a coarse modified time sees it): reloaded.
+        write("#405060", r##","accent":"#aa3300""##);
+        assert_eq!(follow.poll(&path, 1.6, false), FollowChange::None, "not due yet");
+        assert_eq!(follow.poll(&path, 2.6, false), FollowChange::Loaded("Live".into()));
+        assert_eq!(panel(&follow), Some(Color32::from_rgb(0x40, 0x50, 0x60)));
+
+        // Half written, broken, missing or too big: the last good theme stays, the reason once.
+        std::fs::write(&file, r#"{"format":"solidcraft-theme/1","name":"Li"#).unwrap();
+        assert!(matches!(follow.poll(&path, 4.0, false), FollowChange::Failed(e) if e.contains("not a theme file")));
+        assert_eq!(follow.poll(&path, 5.0, true), FollowChange::None, "the same reason is reported once");
+        assert_eq!(panel(&follow), Some(Color32::from_rgb(0x40, 0x50, 0x60)));
+        std::fs::write(&file, vec![b' '; MAX_BYTES + 1]).unwrap();
+        assert!(matches!(follow.poll(&path, 6.0, false), FollowChange::Failed(e) if e.contains("KiB")));
+        std::fs::remove_file(&file).unwrap();
+        assert!(matches!(follow.poll(&path, 7.0, false), FollowChange::Failed(e) if e.contains("can't read")));
+        assert_eq!(panel(&follow), Some(Color32::from_rgb(0x40, 0x50, 0x60)));
+        assert!(follow.error().is_some());
+        assert!(matches!(follow.poll(&dir.to_string_lossy(), 8.0, false), FollowChange::Failed(e) if e.contains("not a file")));
+
+        // Written again completely: back on, the error gone.
+        write("#708090", "");
+        assert_eq!(follow.poll(&path, 9.0, false), FollowChange::Loaded("Live".into()));
+        assert_eq!((panel(&follow), follow.error()), (Some(Color32::from_rgb(0x70, 0x80, 0x90)), None));
+
+        // The launch flag's path wins over the preference's; an empty path stops following.
+        follow.launch = Some(path.clone());
+        assert_eq!(follow.path("/elsewhere.json"), path);
+        follow.launch = None;
+        assert_eq!(follow.poll("", 10.0, false), FollowChange::None);
+        assert!(follow.theme().is_none());
+        assert!(follow_path(&"x".repeat(MAX_FOLLOW_PATH + 1)).is_err() && follow_path("a\nb").is_err());
+        assert!(follow_path("a\u{7}b").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

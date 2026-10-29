@@ -36,6 +36,8 @@ const MAX_STEPS: usize = 64;
 /// After a step fails, the way to it from the last solved state is halved until what is left is
 /// shorter than a step over this; at most `MAX_STEPS` such solves per drag.
 const HALVINGS: usize = 16;
+/// Steps of a drag that isn't live solved at once past a failed step (see [`drag_entity`]).
+const AHEAD: usize = 8;
 /// An arc whose sweep gets this close (radians) to 0 or a full turn has run into its start.
 const SWEEP_EPS: f64 = 1e-6;
 
@@ -173,11 +175,9 @@ pub(super) fn drag_entity(
     // undone (a failed solve leaves the step placed). Also returns whether the decomposition ran
     // out of budget.
     let mut solves = Solves::default();
-    let mut step = |sk: &mut Sketch, last: &Geometry, t: f64, solves: &mut Solves| {
+    // Whether the sketch follows step `t` (with the tangent lines' far ends held, else free).
+    let held = |sk: &mut Sketch, last: &Geometry, t: f64, budget: &mut Budget| {
         path.apply(sk, t);
-        let mut own = Budget::full();
-        let budget = frame.as_mut().unwrap_or(&mut own);
-        let spent = budget.spent();
         let kept = keep.as_ref().is_some_and(|keep| {
             let ok = counted_solve(sk, keep, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok() && !last.sweep_wrapped(sk);
             if !ok {
@@ -186,7 +186,13 @@ pub(super) fn drag_entity(
             }
             ok
         });
-        let ok = kept || counted_solve(sk, &hold, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok();
+        kept || counted_solve(sk, &hold, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok()
+    };
+    let mut step = |sk: &mut Sketch, last: &Geometry, t: f64, solves: &mut Solves| {
+        let mut own = Budget::full();
+        let budget = frame.as_mut().unwrap_or(&mut own);
+        let spent = budget.spent();
+        let ok = held(sk, last, t, budget);
         solves.count += 1;
         solves.work += budget.spent() - spent;
         solves.cut |= budget.exhausted();
@@ -209,6 +215,11 @@ pub(super) fn drag_entity(
     // The steps: `k` of `dt` from `base`; once a seed ran out of budget, the rest of the way in
     // short steps.
     let (mut base, mut dt, mut k, mut t) = (0.0, 1.0 / n as f64, 0, 0.0);
+    // The `k`-th step from `base`; the last ends exactly at the cursor.
+    let at = |base: f64, dt: f64, k: usize| {
+        let t = base + dt * k as f64;
+        if 1.0 - t < 0.5 * dt { 1.0 } else { t }
+    };
     let mut shortened = false;
     let mut wrapped = false;
     let mut out_of_frame = false;
@@ -226,12 +237,39 @@ pub(super) fn drag_entity(
             let m = steps(rest * short as f64, 1.0);
             (base, dt, k) = (t, rest / m as f64, 0);
         }
-        k += 1;
-        t = base + dt * k as f64;
-        // The last step ends exactly at the cursor.
-        if 1.0 - t < 0.5 * dt {
-            t = 1.0;
+        // Past a failed step, every next one starts from the last solved state again and a failed
+        // one leaves nothing for the one after. Unless the drag is live (its steps share the
+        // frame's budget), the next few are solved at once, on all cores, and those that fail
+        // in a row are taken as tried: the walk goes on where it would have, one by one, at the
+        // first of them that doesn't fail, without the seconds of failing solves before it.
+        #[cfg(test)]
+        let ahead = last_drag::ahead();
+        #[cfg(not(test))]
+        let ahead = true;
+        if ahead && !live && failed.is_some() && line_grab.is_none() {
+            let ahead: Vec<f64> =
+                (1..=AHEAD).map(|j| at(base, dt, k + j)).scan(false, |done, t| (!std::mem::replace(done, t >= 1.0)).then_some(t)).collect();
+            let tried = solidcraft_kernel::map_on_threads(&ahead, AHEAD, |&t| {
+                let mut sk = sk.clone();
+                let mut budget = Budget::full();
+                let ok = held(&mut sk, &last, t, &mut budget);
+                (ok, budget.spent(), budget.exhausted())
+            });
+            let failing = tried.iter().take_while(|r| matches!(r, Some((false, _, false)))).flatten().collect::<Vec<_>>();
+            if !failing.is_empty() {
+                for (_, work, _) in &failing {
+                    solves.count += 1;
+                    solves.work += work;
+                }
+                k += failing.len();
+                t = at(base, dt, k);
+                #[cfg(test)]
+                last_drag::add_skipped(failing.len());
+                continue 'walk;
+            }
         }
+        k += 1;
+        t = at(base, dt, k);
         match step(sk, &last, t, &mut solves) {
             Step::Solved => {
                 (good, failed) = (t, None);
@@ -369,6 +407,8 @@ pub(super) mod last_drag {
         static LAST: Cell<Solves> = const { Cell::new(Solves { count: 0, work: 0, cut: false, numeric: false }) };
         static FRAME: Cell<Option<usize>> = const { Cell::new(None) };
         static NUMERIC: Cell<Option<usize>> = const { Cell::new(None) };
+        static AHEAD: Cell<bool> = const { Cell::new(true) };
+        static SKIPPED: Cell<usize> = const { Cell::new(0) };
     }
 
     pub fn set(s: Solves) {
@@ -415,6 +455,34 @@ pub(super) mod last_drag {
     /// Run `f` with live frames given `work` units for their numerical solves.
     pub fn with_frame_numeric<R>(work: usize, f: impl FnOnce() -> R) -> R {
         let _restore = RestoreNumeric(NUMERIC.with(|c| c.replace(Some(work))));
+        f()
+    }
+
+    pub fn ahead() -> bool {
+        AHEAD.with(Cell::get)
+    }
+
+    /// Failed steps taken as tried from the steps solved at once, since the last call.
+    pub fn skipped() -> usize {
+        SKIPPED.with(|c| c.replace(0))
+    }
+
+    pub fn add_skipped(n: usize) {
+        SKIPPED.with(|c| c.set(c.get() + n));
+    }
+
+    /// Restores solving steps ahead when dropped, also when the test panics.
+    struct RestoreAhead(bool);
+
+    impl Drop for RestoreAhead {
+        fn drop(&mut self) {
+            AHEAD.with(|c| c.set(self.0));
+        }
+    }
+
+    /// Run `f` with every step of a drag solved one by one, as before steps were solved ahead.
+    pub fn one_by_one<R>(f: impl FnOnce() -> R) -> R {
+        let _restore = RestoreAhead(AHEAD.with(|c| c.replace(false)));
         f()
     }
 }

@@ -20,11 +20,11 @@ Every platform and package. The links point at the latest release.
 Windows releases will be code signed through the SignPath Foundation: free code signing provided by
 [SignPath.io](https://about.signpath.io/), certificate by
 [SignPath Foundation](https://signpath.org/). This is being set up; until it's live, the note
-below applies. macOS releases are being set up to be signed with an Apple Developer ID and
-notarized by Apple.
+below applies. macOS releases are signed with an Apple Developer ID and notarized by Apple (the app
+and the disk image carry the notarization ticket), so they open normally.
 
-The downloads aren't signed yet. On Windows, if SmartScreen warns you, choose **More info**, then
-**Run anyway**. On macOS, the first time, right-click SolidCraft in Applications and choose **Open**.
+The Windows downloads aren't signed yet. If SmartScreen warns you, choose **More info**, then
+**Run anyway**.
 
 **On SolidCraft 0.11 to 0.14?** Its **Update now** can't install 0.15.0 or later, because the
 releases moved to a new address. Download the new version once from the links above; after that,

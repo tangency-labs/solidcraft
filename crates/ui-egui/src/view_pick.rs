@@ -132,7 +132,7 @@ pub fn pick_command(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     let replaced: &[String] = app.preview.effective_replaced();
     let section = crate::viewport::section_plane(app);
     let wireframe = app.ui.visual_style == 2;
-    let slack = crate::viewport::scene_radius(app) * 0.02;
+    let slack = crate::viewport::scene_pick_slack(app);
     let occ = occurrence_map(app);
     let comps = component_names(app);
 
@@ -384,7 +384,9 @@ fn near_edges(
     slack: f64,
 ) -> (Option<EdgeHit>, Option<VertexHit>) {
     let reach = crate::pick_index::reach(proj, pos, edge_px.max(6.0));
-    let visible = |p: Vec3| wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack);
+    // `slack` is the body's own: what counts as lying on the face in front depends on how
+    // coarsely that body is meshed, never on where the camera stands.
+    let visible = |p: Vec3, slack: f64| wireframe || face_t.is_none_or(|t| (p - input.o).dot(input.d) <= t + slack);
     let mut best_e: Option<EdgeHit> = None;
     let mut best_v: Option<VertexHit> = None;
     for (i, b) in st.bodies.iter().enumerate() {
@@ -394,10 +396,12 @@ fn near_edges(
         if !include_ghosted && crate::viewport::body_faded(app, b, active_bodies) {
             continue;
         }
-        if let Some((_, bb)) = bounds.get(i)
-            && crate::viewport::screen_box(proj, bb, edge_px).is_some_and(|r| !r.contains(pos))
-        {
-            continue;
+        let mut body_slack = slack;
+        if let Some((_, bb)) = bounds.get(i) {
+            if crate::viewport::screen_box(proj, bb, edge_px).is_some_and(|r| !r.contains(pos)) {
+                continue;
+            }
+            body_slack = crate::viewport::pick_slack(bb.diagonal());
         }
         let (m, place) = b.mesh_in_place();
         let Some((lo, ld)) = crate::viewport::local_ray(&place, input.o, input.d) else { continue };
@@ -415,7 +419,7 @@ fn near_edges(
                 for v in [e.first(), e.last()].into_iter().flatten().map(|v| at(*v)) {
                     if let Some(sp) = proj.to_screen(v) {
                         let dd = sp.distance(pos);
-                        if dd <= edge_px + 1.0 && visible(v) && best_v.as_ref().is_none_or(|x| dd < x.dist_px) {
+                        if dd <= edge_px + 1.0 && visible(v, body_slack) && best_v.as_ref().is_none_or(|x| dd < x.dist_px) {
                             best_v = Some(VertexHit { dist_px: dd, point: v });
                         }
                     }
@@ -425,7 +429,7 @@ fn near_edges(
             let (Some(a), Some(c)) = (proj.to_screen(p0), proj.to_screen(p1)) else { continue };
             let dd = crate::viewport::seg_dist(pos, a, c);
             if dd <= edge_px
-                && visible(crate::viewport::ray_segment_closest(input.o, input.d, p0, p1))
+                && visible(crate::viewport::ray_segment_closest(input.o, input.d, p0, p1), body_slack)
                 && best_e.as_ref().is_none_or(|x| dd < x.dist_px)
             {
                 let k = seg_param(pos, a, c);

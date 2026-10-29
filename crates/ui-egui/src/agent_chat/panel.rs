@@ -634,7 +634,7 @@ fn state_color(state: State) -> Color32 {
     let t = Tokens::get();
     match state {
         State::Ready | State::Busy => t.accent,
-        State::NeedsAuth | State::Exited => t.warning,
+        State::NeedsAuth | State::Exited | State::Failed => t.warning,
         _ => t.text_dim,
     }
 }
@@ -703,7 +703,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
                             State::Ready => ui_kit::AssistantTone::Success,
                             State::Busy => ui_kit::AssistantTone::Working,
                             State::NeedsAuth => ui_kit::AssistantTone::Warning,
-                            State::Exited => ui_kit::AssistantTone::Error,
+                            State::Exited | State::Failed => ui_kit::AssistantTone::Error,
                             _ => ui_kit::AssistantTone::Neutral,
                         }
                     },
@@ -1170,7 +1170,8 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         let b = if app.agent_chat.state().running() {
             ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).on_hover_text(tr("ui.agent_chat_stop_tip"))
         } else {
-            ui_kit::button(ui, tr("ui.agent_chat_connect"), ui_kit::Button::Normal)
+            let label = if app.agent_chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
+            ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
         };
         crate::scenario::publish_handle("agent_chat:connect", b.rect.center());
         if b.clicked() {
@@ -1187,10 +1188,10 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const FLATPAK_OVERRIDE: &str = "flatpak override --user ai.storyteller.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
+const FLATPAK_OVERRIDE: &str = "flatpak override --user io.tangencylabs.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
 
 #[cfg(not(target_arch = "wasm32"))]
-fn no_agents_message() -> String {
+pub(super) fn no_agents_message() -> String {
     if std::env::var_os("FLATPAK_ID").is_some() { tr("ui.agent_chat_flatpak_none_found") } else { tr("ui.agent_chat_none_found") }.to_string()
 }
 
@@ -1333,6 +1334,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut undo: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
     let current_doc = app.session.doc.clone();
+    let units = summary::Units { units: &app.session.doc.units, decimals: app.preferences.length_decimals };
     for (n, item) in app.agent_chat.items.iter().enumerate() {
         match item {
             Item::User { text, image, pictures, context, files } => {
@@ -1366,8 +1368,17 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::assistant_tool_frame(ui, false, |ui| {
                     ui.spacing_mut().item_spacing.y = Tokens::get().space_2;
                     for (offset, next) in app.agent_chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).enumerate() {
-                        if let Item::Tool { title, kind, status, output, .. } = next {
-                            tool_card(ui, n + offset, title, kind, *status, output.as_deref());
+                        if let Item::Tool { title, kind, status, input, output, .. } = next {
+                            let words = summary::summary(title, input.as_ref(), output.as_deref(), *status == Some(ToolStatus::Completed), units);
+                            let call = ToolCall {
+                                title,
+                                summary: words.as_deref(),
+                                kind,
+                                status: *status,
+                                input: input.as_ref(),
+                                output: output.as_deref(),
+                            };
+                            tool_card(ui, n + offset, &call);
                         }
                     }
                 });
@@ -1799,16 +1810,37 @@ fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-/// A tool call as a card: its state, name and kind on one line; a click unfolds what it returned.
+/// A tool call as its card shows it.
 #[cfg(not(target_arch = "wasm32"))]
-fn tool_card(ui: &mut egui::Ui, n: usize, title: &str, kind: &str, status: Option<ToolStatus>, output: Option<&str>) {
+struct ToolCall<'a> {
+    /// The agent's title, shown when there are no words for the call.
+    title: &'a str,
+    /// What it did in words (#1457).
+    summary: Option<&'a str>,
+    kind: &'a str,
+    status: Option<ToolStatus>,
+    input: Option<&'a Value>,
+    output: Option<&'a str>,
+}
+
+/// Longest raw text shown under a card's Details (characters).
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_DETAIL: usize = 8000;
+
+/// A tool call as a card: its state and what it did in words on one line (the agent's own title
+/// when there are none); a click on the line unfolds Details, the raw arguments and what it
+/// returned.
+#[cfg(not(target_arch = "wasm32"))]
+fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
     let t = Tokens::get();
+    let status = call.status;
     let (color, mark, state) = match status {
         Some(ToolStatus::Completed) => (t.form_success, ui_kit::AssistantToolState::Done, "ui.ai_tool_done"),
         Some(ToolStatus::Failed) => (t.error, ui_kit::AssistantToolState::Failed, "ui.ai_tool_failed"),
         Some(ToolStatus::InProgress) => (t.accent, ui_kit::AssistantToolState::Running, "ui.ai_tool_running"),
         _ => (t.text_dim, ui_kit::AssistantToolState::Pending, "ui.ai_tool_waiting"),
     };
+    let details = call.input.is_some() || call.output.is_some();
     ui_kit::assistant_tool_row(ui, status == Some(ToolStatus::Failed), |ui| {
         ui.set_width(ui.available_width());
         let id = ui.make_persistent_id(("sc_agent_tool", n));
@@ -1817,37 +1849,57 @@ fn tool_card(ui: &mut egui::Ui, n: usize, title: &str, kind: &str, status: Optio
             ui.spacing_mut().item_spacing.x = t.space_8;
             ui_kit::assistant_tool_status(ui, mark);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if output.is_some() {
+                if details {
                     let (rect, _) = ui.allocate_exact_size(vec2(t.space_14, t.space_14), Sense::hover());
                     ui_kit::disclosure(ui.painter(), rect.center(), state_.is_open(), t.text_dim);
+                    ui.label(RichText::new(tr("ui.ai_tool_details")).size(t.font_small).color(t.text_dim));
                 }
                 ui.label(RichText::new(tr(state)).size(t.font_small).color(color));
-                if !kind.is_empty() && kind != "other" {
-                    ui.label(RichText::new(kind).size(t.font_small).color(t.text_dim));
+                if !call.kind.is_empty() && call.kind != "other" {
+                    ui.label(RichText::new(call.kind).size(t.font_small).color(t.text_dim));
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(egui::Label::new(RichText::new(title).monospace().size(t.font_caption).color(t.text)).truncate()).on_hover_text(title);
+                    let text = match call.summary {
+                        Some(words) => RichText::new(words).size(t.font_caption).color(t.text),
+                        None => RichText::new(summary::plain_title(call.title)).monospace().size(t.font_caption).color(t.text),
+                    };
+                    ui.add(egui::Label::new(text).truncate().selectable(false)).on_hover_text(call.title);
                 });
             });
         });
         let click = ui.interact(head.response.rect, id.with("head"), Sense::click());
         crate::scenario::publish_handle(&format!("agent_chat:tool:{n}"), head.response.rect.center());
-        if output.is_some() && click.clicked() {
+        if details && click.clicked() {
             state_.toggle(ui);
         }
-        if output.is_some() {
+        if details {
             click.on_hover_text(tr("ui.ai_tool_unfold"));
         }
         state_.show_body_unindented(ui, |ui| {
-            if let Some(o) = output {
-                ui.indent(id.with("detail"), |ui| {
-                    ui_kit::assistant_tool_detail(ui, |ui| {
-                        egui::ScrollArea::vertical().id_salt(("sc_agent_tool_out", n)).max_height(180.0).show(ui, |ui| {
-                            ui.add(egui::Label::new(RichText::new(o).monospace().size(t.font_small)).selectable(true).wrap());
-                        });
-                    });
-                });
-            }
+            ui.indent(id.with("detail"), |ui| {
+                if let Some(input) = call.input {
+                    let text = serde_json::to_string_pretty(input).unwrap_or_default();
+                    tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                }
+                if let Some(o) = call.output {
+                    tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                }
+            });
+        });
+    });
+}
+
+/// One part of a card's Details: its heading and the raw text, cut short and scrolling.
+#[cfg(not(target_arch = "wasm32"))]
+fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
+    let t = Tokens::get();
+    ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+    let shown: String =
+        if text.chars().count() > MAX_DETAIL { text.chars().take(MAX_DETAIL).chain(std::iter::once('…')).collect() } else { text.to_string() };
+    ui_kit::assistant_tool_detail(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        egui::ScrollArea::vertical().id_salt(id).max_height(180.0).show(ui, |ui| {
+            ui.add(egui::Label::new(RichText::new(shown).monospace().size(t.font_small)).selectable(true).wrap());
         });
     });
 }
@@ -1926,7 +1978,7 @@ mod tests {
             child.args(["--exact", "agent_chat::panel::tests::empty_discovery_explains_flatpak_permissions", "--nocapture"]);
             child.env(CHILD, case);
             if case == "flatpak" {
-                child.env("FLATPAK_ID", "ai.storyteller.solidcraft");
+                child.env("FLATPAK_ID", "io.tangencylabs.solidcraft");
             } else {
                 child.env_remove("FLATPAK_ID");
             }

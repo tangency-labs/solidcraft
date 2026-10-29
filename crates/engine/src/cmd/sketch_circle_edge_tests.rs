@@ -132,6 +132,55 @@ fn crossing_and_nested_circles_dimension_their_overlap_and_their_narrowest_gap()
     near(&s, "c2.center", [16.0, 10.0]);
 }
 
+/// #6764: enlarging the bore beyond the old outside radius must enlarge the outside too,
+/// keeping the selected annulus through recompute, undo/redo and reopening.
+#[test]
+fn a_tube_keeps_its_bore_when_its_inner_diameter_changes() {
+    fn check(s: &mut Session, inner: f64) {
+        {
+            let state = s.model.state();
+            let ss = state.sketch(1).unwrap();
+            let radius = |id| ss.sketch.radius(ss.sketch.curve_index(id).unwrap()).unwrap();
+            assert!((radius("outside") - inner - 10.0).abs() < 1e-6);
+            assert!((radius("bore") - inner).abs() < 1e-6);
+            let annulus = ss.profiles.iter().find(|p| p.outer_curves == ["outside"]).unwrap();
+            assert_eq!(annulus.hole_curves, [vec!["bore"]]);
+        }
+        let area = std::f64::consts::PI * ((inner + 10.0).powi(2) - inner.powi(2));
+        let m = run(s, "inspect.measure", json!({}));
+        assert_eq!(m["body_count"], 1, "{m}");
+        let volume = m["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((volume / (100.0 * area) - 1.0).abs() < 0.001, "{m}");
+        let body = &s.model.state().bodies[0].body;
+        assert!(!body.contains(solidcraft_geom::Vec3::new(0.0, 0.0, 50.0)), "the bore stays empty");
+        assert!(body.contains(solidcraft_geom::Vec3::new(inner + 5.0, 0.0, 50.0)), "the wall stays solid");
+    }
+    for dimension_first in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.circle.center", json!({"center": "origin", "radius": 20, "id": "outside"}));
+        run(&mut s, "sketch.circle.center", json!({"center": "origin", "radius": 10, "id": "bore"}));
+        let diameter = json!({"entities": ["bore"], "type": "diameter", "value": 20});
+        let wall = json!({"entities": ["bore", "outside"], "value": 10});
+        let params = if dimension_first { [diameter, wall] } else { [wall, diameter] };
+        let dimensions = params.map(|p| run(&mut s, "sketch.dimension", p));
+        let name = dimensions[usize::from(!dimension_first)]["param"].as_str().unwrap();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 100, "profiles": [{"curves": ["outside"]}]}));
+        check(&mut s, 10.0);
+        run(&mut s, "parameters.change", json!({"name": name, "expression": "50 mm"}));
+        check(&mut s, 25.0);
+        run(&mut s, "edit.undo", json!({}));
+        check(&mut s, 10.0);
+        run(&mut s, "edit.redo", json!({}));
+        check(&mut s, 25.0);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        check(&mut reopened, 25.0);
+        run(&mut reopened, "parameters.change", json!({"name": name, "expression": "6 mm"}));
+        check(&mut reopened, 3.0);
+    }
+}
+
 #[test]
 fn arcs_dimension_to_their_circles() {
     let mut s = Session::default();

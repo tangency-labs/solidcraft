@@ -114,7 +114,10 @@ completed drawings publish atomically. The browser still exports synchronously.
 - New Body extrusion and face-offset previews show completed intermediate geometry while a
   drag continues, then catch up to the exact final value. Changes to the selected geometry,
   operation or feature still discard obsolete results. Distance arrows and their value boxes
-  follow the current frame's input.
+  follow the current frame's input. When the selection changes while a preview computes (the
+  next edge picked for a fillet or chamfer), the new selection's preview starts at once: the
+  obsolete one is asked to stop and its result is dropped, with at most two left running
+  (#7167).
 - Large fine modelled threads use pitch-based helix resolution and tighter faceted
   reconstruction fallbacks, preserving thin crests and closed shells on large shafts.
 
@@ -385,6 +388,12 @@ completed drawings publish atomically. The browser still exports synchronously.
   to 26 standard and diagonal views. Pointer motion accumulates independently of a lightly
   damped spring, with a boundary margin to prevent flicker. Z-up/Y-up and the nearest square
   top/bottom heading are preserved. Diagonals include 45-degree edge and isometric corner views.
+- Navigation bar overhaul (#6585): the viewport's Fit, Home, camera tools, Spin, visual style, Grid, Ground
+  shadow and bar visibility are registered `view.*` commands, and Fit/Home follow the active canvas.
+- Navigation bar slots (#6585): stored order and appearance, command-driven controls, canvas availability and
+  single-row overflow.
+- Navigation bar customisation (#6585): approved light/dark bar and settings geometry, live position preview,
+  accessible reordering and per-menu display options.
 
 ## Known limitations
 

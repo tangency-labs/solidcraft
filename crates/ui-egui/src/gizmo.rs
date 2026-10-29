@@ -70,6 +70,9 @@ const DIRS: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
 /// Arrow length on screen (px).
 pub const LEN_PX: f64 = 110.0;
 
+/// How near a handle a press still takes it (px): the widest, the centre ball.
+pub const HIT_TOLERANCE: f32 = 9.0;
+
 thread_local! {
     /// The last triad drawn: centre and arrow length in mm (for scenarios and tests).
     static LAST: RefCell<Option<(Vec3, f64)>> = const { RefCell::new(None) };
@@ -141,7 +144,7 @@ fn in_quad(p: Pos2, q: &Ring<Pos2>) -> bool {
 }
 
 /// Where the view ray through `pos` meets the plane through `o` with normal `n`.
-fn on_plane(proj: &Proj, pos: Pos2, o: Vec3, n: Vec3) -> Option<Vec3> {
+pub(crate) fn on_plane(proj: &Proj, pos: Pos2, o: Vec3, n: Vec3) -> Option<Vec3> {
     let (ro, rd) = proj.ray(pos);
     let den = rd.dot(n);
     if den.abs() < 1e-9 {
@@ -207,7 +210,7 @@ fn shapes(proj: &Proj, t: &Triad, l: f64) -> Option<Shapes> {
 }
 
 fn hit(s: &Shapes, p: Pos2) -> Option<Handle> {
-    if s.ball.distance(p) < 9.0 {
+    if s.ball.distance(p) < HIT_TOLERANCE {
         return Some(Handle::Ball);
     }
     if let Some((i, ..)) = s.arrows.iter().find(|(_, a, b)| seg_dist(p, *a, *b) < 6.0) {
@@ -245,6 +248,36 @@ pub(crate) fn cancel(ctx: &egui::Context, id: egui::Id) {
 /// Hit-test before registering the dynamic egui drag widget or changing the camera.
 pub(crate) fn contains_pointer(proj: &Proj, t: &Triad, p: Pos2) -> bool {
     mm_per_px(proj, t.center).and_then(|scale| shapes(proj, t, scale * LEN_PX)).is_some_and(|sh| hit(&sh, p).is_some())
+}
+
+/// The region the triad's handles occupy on screen: where a press takes one of them. A value
+/// box over it takes the press before the gizmo sees it (#6608).
+pub fn handles_region(proj: &Proj, t: &Triad) -> Option<egui::Rect> {
+    let l = mm_per_px(proj, t.center)? * LEN_PX;
+    let sh = shapes(proj, t, l)?;
+    let mut pts = vec![sh.ball];
+    for (_, a, b) in &sh.arrows {
+        pts.push(*a);
+        pts.push(*b);
+    }
+    for (_, ring) in &sh.rings {
+        pts.extend(ring.iter().copied());
+    }
+    for (_, q) in &sh.planes {
+        for (&a, &b) in q.edges() {
+            pts.push(a);
+            pts.push(b);
+        }
+    }
+    let mut min = sh.ball;
+    let mut max = sh.ball;
+    for p in pts {
+        min.x = min.x.min(p.x);
+        min.y = min.y.min(p.y);
+        max.x = max.x.max(p.x);
+        max.y = max.y.max(p.y);
+    }
+    Some(egui::Rect::from_min_max(min, max).expand(HIT_TOLERANCE))
 }
 
 /// Draw the triad and run a drag on it. `step` is the distance snap step.
@@ -315,6 +348,23 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
             s
         }
     };
+    let done = r.drag_stopped() || !r.dragged() && !started;
+    // The frame's events can hold the release and further movement — the hand keeps moving as
+    // the button goes up, or input queued during a busy frame — and `p` is already past the
+    // release then. The release event itself carries where the button was let go (#8265): take
+    // the final change from there, so the drag ends where the button was released, not where
+    // the mouse has since got to.
+    let p = if done {
+        ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::PointerButton { pos, pressed: false, .. } => Some(*pos),
+                _ => None,
+            })
+        })
+        .unwrap_or(p)
+    } else {
+        p
+    };
     let change = match st.handle {
         Handle::Axis(i) => {
             let v = along(proj, p, st.center, DIRS[i]).map(|v| v - st.t0).unwrap_or(0.0);
@@ -341,7 +391,6 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
             Change::Translate(Vec3::new(snap(d.x, step, free), snap(d.y, step, free), snap(d.z, step, free)))
         }
     };
-    let done = r.drag_stopped() || !r.dragged() && !started;
     if done {
         ui.data_mut(|d| d.remove::<State>(id));
     } else {

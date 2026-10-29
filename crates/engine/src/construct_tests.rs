@@ -380,6 +380,29 @@ fn a_plane_through_three_vertices_follows_them() {
     }
 }
 
+/// A corner of one box where another box's edge runs past it, as where a wall meets the side
+/// wall it stands against (the render-studio example, #8650): the vertex stays that corner. Its
+/// edges were found by name and then picked again by a point, which took the first edge through
+/// the corner of any body, the side wall's, and so its end 3 mm away. Three such corners were
+/// "on one line".
+#[test]
+fn a_vertex_where_another_bodys_edge_runs_past_stays_its_corner() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [29, -22, 4], "length": 3, "width": 44, "height": 19, "body_name": "Side"}));
+    run(&mut s, "solid.box", json!({"corner": [-29, 19, 4], "length": 58, "width": 3, "height": 19, "body_name": "Back"}));
+    run(&mut s, "construct.point.vertex", json!({"point": {"vertex": [29, 19, 23]}, "name": "P"}));
+    assert!(near(point(&s, "P"), Vec3::new(29.0, 19.0, 23.0)), "{:?}", point(&s, "P"));
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"vertex": [29, 22, 23]}, "b": {"vertex": [29, 22, 4]}, "c": {"vertex": [29, 19, 23]}, "name": "T"}),
+    );
+    let t = plane(&s, "T");
+    for p in [Vec3::new(29.0, 22.0, 23.0), Vec3::new(29.0, 22.0, 4.0), Vec3::new(29.0, 19.0, 23.0)] {
+        assert!(on_plane(&t, p), "{p:?} is off {t:?}");
+    }
+}
+
 /// In a component moved 50 mm along X, picks given in the world land on its geometry, and the
 /// axis and point move with the occurrence.
 #[test]

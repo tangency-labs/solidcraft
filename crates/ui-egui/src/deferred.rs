@@ -73,8 +73,9 @@ pub struct DeleteCheck {
 /// What a delete does once its check is in.
 #[derive(Clone, Debug)]
 pub(crate) enum AfterCheck {
-    /// The timeline's Delete of these features (a `timeline.dependents` report for each).
-    Timeline(Vec<u64>),
+    /// The timeline's Delete of these features (a `timeline.dependents` report for each), and
+    /// of the timeline folders that go with them.
+    Timeline { features: Vec<u64>, groups: Vec<u64> },
     /// Delete with these `selection.delete` parameters (the report of its dry run).
     Selection(Value),
 }
@@ -83,9 +84,12 @@ impl AfterCheck {
     /// Check again, for the design as it is now.
     fn restart(self, app: &mut SolveApp) {
         match self {
-            AfterCheck::Timeline(ids) => {
-                let ids: Vec<u64> = ids.into_iter().filter(|id| app.session.doc.feature(*id).is_some()).collect();
-                if !ids.is_empty() {
+            AfterCheck::Timeline { features, groups } => {
+                let ids: Vec<u64> = features.into_iter().filter(|id| app.session.doc.feature(*id).is_some()).collect();
+                let groups: Vec<u64> = groups.into_iter().filter(|id| app.session.doc.timeline_groups.iter().any(|g| g.id == *id)).collect();
+                if !groups.is_empty() {
+                    crate::timeline::delete_folders(app, groups, ids);
+                } else if !ids.is_empty() {
                     crate::timeline::delete_features(app, ids);
                 }
             }
@@ -96,9 +100,9 @@ impl AfterCheck {
     /// Carry on with the check's replies.
     fn finish(self, app: &mut SolveApp, replies: Vec<Result<Value, String>>) {
         match self {
-            AfterCheck::Timeline(ids) => {
+            AfterCheck::Timeline { features, groups } => {
                 let reports: Vec<Value> = replies.into_iter().map(Result::unwrap_or_default).collect();
-                crate::timeline::delete_checked_features(app, ids, &reports);
+                crate::timeline::delete_checked_features(app, features, groups, &reports);
             }
             AfterCheck::Selection(params) => {
                 let report = replies.into_iter().next().unwrap_or_else(|| Err("the delete was not checked".into()));
@@ -119,6 +123,12 @@ impl SolveApp {
     /// a while (see the module notes). `Ok(Null)` when it is left computing or waiting its turn:
     /// its outcome then shows as any command's does (an error in the status line).
     pub fn run_heavy(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if id == "timeline.play" {
+            return self.run(id, params);
+        }
+        // A manual history action takes over from playback. Playback takes its state out
+        // while submitting its own next step, then puts it back to wait for that step.
+        crate::timeline::stop_playback(self);
         if self.deferred.is_some() {
             if replaced_by_a_later_one(id) && self.deferred_queue.last().is_some_and(|(q, _)| q == id) {
                 self.deferred_queue.pop();
@@ -155,7 +165,11 @@ impl SolveApp {
     /// Since when a command, or a delete's check, has been computing off the window thread (ms),
     /// if one is.
     pub fn computing_since(&self) -> Option<f64> {
-        let started = [self.deferred.as_ref().map(|d| d.started), self.delete_check.as_ref().map(|c| c.started)];
+        let started = [
+            self.deferred.as_ref().map(|d| d.started),
+            self.delete_check.as_ref().map(|c| c.started),
+            self.pending_feature_edit.as_ref().map(|edit| edit.started),
+        ];
         started.into_iter().flatten().reduce(f64::min)
     }
 
@@ -226,7 +240,10 @@ impl SolveApp {
                     // The design changed meanwhile: computed again for the design as it is now.
                     let _ = self.run_heavy(&id, params);
                 } else if !superseded {
+                    // This is playback's own completed step, not a manual history edit.
+                    let playback = self.timeline_playback.take();
                     let _ = self.run_evaluated(&id, params, job.evaluated.flatten().as_ref(), job.kept);
+                    self.timeline_playback = playback;
                 }
             }
         }

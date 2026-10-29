@@ -6,11 +6,22 @@ description that tell the agent when to load it, and an optional supporting refe
 
 The modelling documents are built into SolidCraft: its MCP server's `skill_reference` tool returns them, so an
 agent without file access (such as the one in SolidCraft's own chat) can still read a skill's reference.
-`solidcraft-contributing` is for repository work and is not embedded in that tool.
+The contributor skills (everything except modeling, editing, checking and mechanisms) are for repository work and are not embedded in that tool. `AGENTS.md` routes to them; `cargo xtask skills` fails when its table and this folder disagree or a file, `cargo xtask` command or skill they name is gone.
 
 | Skill | Loads when the agent |
 |---|---|
-| [`solidcraft-contributing`](solidcraft-contributing/SKILL.md) | helps someone set up a fork, choose and claim an issue, and submit a contribution for review |
+| [`solidcraft-contributing`](solidcraft-contributing/SKILL.md) | helps someone set up a fork, choose and claim an issue, and submit a contribution for review; the rules every PR follows |
+| [`solidcraft-ground-rules`](solidcraft-ground-rules/SKILL.md) | adds a dependency, asset or wording: independence, licences, attribution, the product name |
+| [`solidcraft-crash-safety`](solidcraft-crash-safety/SKILL.md) | writes non-test Rust, handles hostile input or investigates a crash report |
+| [`solidcraft-commands`](solidcraft-commands/SKILL.md) | adds a command or decides which crate code belongs in |
+| [`solidcraft-ui`](solidcraft-ui/SKILL.md) | adds a dialog, panel, camera input, icon or colour |
+| [`solidcraft-ui-text`](solidcraft-ui-text/SKILL.md) | adds a label, message or translation |
+| [`solidcraft-file-formats`](solidcraft-file-formats/SKILL.md) | changes what a design saves, or touches import and export |
+| [`solidcraft-preferences`](solidcraft-preferences/SKILL.md) | adds a setting or changes a default |
+| [`solidcraft-tests`](solidcraft-tests/SKILL.md) | places or runs tests |
+| [`solidcraft-performance`](solidcraft-performance/SKILL.md) | works on slow code, the window thread or the wasm build |
+| [`solidcraft-packaging`](solidcraft-packaging/SKILL.md) | prepares a release or changes packages |
+| [`solidcraft-agent-tools`](solidcraft-agent-tools/SKILL.md) | runs the app, drives the control channel or changes MCP tools |
 | [`solidcraft-modeling`](solidcraft-modeling/SKILL.md) | builds a new part (enclosure, bracket, plate, flange, …) |
 | [`solidcraft-editing`](solidcraft-editing/SKILL.md) | changes, fixes or extends an existing design |
 | [`solidcraft-checking`](solidcraft-checking/SKILL.md) | builds, changes or ports a design, next to the two above: parameter ranges, every allowed value, exact STEP comparison, regression tests, designs kept in git |
@@ -46,7 +57,7 @@ foreach ($s in 'modeling','editing','checking','mechanisms') { Copy-Item -Recurs
 - **One project only:** copy the folders into that project's `.claude/skills/` instead.
 - **Other agents:** for agents that read the Agent Skills format, copy the folders into the skills directory their documentation names.
 - **Updating:** copy the folders again after you update SolidCraft.
-- **Contributing:** `solidcraft-contributing` needs no install. Tell your assistant: "I want to contribute to SolidCraft. Read https://github.com/tangency-labs/solidcraft/blob/main/skills/solidcraft-contributing/SKILL.md and help me get started."
+- **Contributing:** the contributor skills need no install. Tell your assistant: "I want to contribute to SolidCraft. Read https://github.com/tangency-labs/solidcraft/blob/main/skills/solidcraft-contributing/SKILL.md and help me get started."
 
 ## Maintaining
 

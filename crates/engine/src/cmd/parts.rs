@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 /// A family: (id, name, standard).
-const FAMILIES: [(&str, &str, &str); 7] = [
+const FAMILIES: &[(&str, &str, &str)] = &[
     ("socket_head_cap_screw", "Socket head cap screw", "ISO 4762"),
     ("hex_bolt", "Hex head bolt / screw", "ISO 4014 / ISO 4017"),
     ("hex_nut", "Hex nut", "ISO 4032"),
@@ -272,10 +272,7 @@ fn revolve(s: &mut Session, pts: &[(f64, f64)], op: &str) -> Result<()> {
 /// Fix every point and curve of the sketch being drawn: a standard part's outline is its size, so
 /// its sketches are fully defined and a check of the design finds nothing left free in them.
 fn fix_all(s: &mut Session) -> Result<()> {
-    let sketch = s.active_sketch.and_then(|id| s.doc.features.iter().find(|f| f.id == id)).and_then(|f| match &f.kind {
-        solidcraft_doc::FeatureKind::Sketch { sketch, .. } => Some(sketch),
-        _ => None,
-    });
+    let sketch = super::sketch_store::active(s).and_then(|id| super::sketch_store::read(&s.doc, id).ok());
     let entities: Vec<String> =
         sketch.map(|sk| sk.points.iter().map(|p| p.id.clone()).chain(sk.curves.iter().map(|c| c.id.clone())).collect()).unwrap_or_default();
     if !entities.is_empty() {
@@ -335,7 +332,7 @@ fn build(s: &mut Session, sh: &Shape) -> Result<()> {
 
 fn library(_s: &mut Session, p: &Value) -> Result<Value> {
     let fam = |id: &str| -> Value {
-        let sizes: Vec<Value> = match id {
+        let mut sizes: Vec<Value> = match id {
             "socket_head_cap_screw" => SHCS.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "head_diameter": r.1, "head_height": r.2, "socket": r.3, "socket_depth": r.4})).collect(),
             "hex_bolt" => HEX_BOLT.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "across_flats": r.1, "head_height": r.2})).collect(),
             "hex_nut" => HEX_NUT.iter().map(|r| json!({"size": r.0, "d": metric(r.0).map(|m| m.0), "pitch": metric(r.0).map(|m| m.1), "across_flats": r.1, "height": r.2})).collect(),
@@ -347,6 +344,15 @@ fn library(_s: &mut Session, p: &Value) -> Result<Value> {
         };
         let (_, name, standard) = FAMILIES.iter().find(|f| f.0 == id).copied().unwrap_or(("", "", ""));
         let lengths = matches!(id, "socket_head_cap_screw" | "hex_bolt" | "set_screw" | "dowel_pin").then_some(LENGTHS.to_vec());
+        if lengths.is_some() {
+            for row in &mut sizes {
+                let Some(size) = row.get("size").and_then(Value::as_str).map(str::to_string) else { continue };
+                let Some(l) = shape(id, &size, None).ok().as_ref().and_then(shape_len) else { continue };
+                if let Value::Object(m) = row {
+                    m.insert("default_length".into(), json!(l));
+                }
+            }
+        }
         json!({"family": id, "name": name, "standard": standard, "sizes": sizes, "lengths": lengths})
     };
     match str_(p, "family") {
@@ -387,12 +393,12 @@ fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
 /// Give a standard part its part number and description; a field someone changed since the last
 /// size (`was`) is theirs and stays.
 fn set_identity(s: &mut Session, comp: u64, now: (String, String), was: Option<(String, String)>) {
-    use solidcraft_doc::metadata::{DESCRIPTION, PART_NUMBER};
+    use solidcraft_doc::metadata::{DESCRIPTION, Owner, PART_NUMBER};
     let Some(c) = s.doc.components.iter().find(|c| c.id == comp) else { return };
     let mut m = c.metadata.clone();
     for (k, new, old) in [(PART_NUMBER, now.0, was.as_ref().map(|w| w.0.as_str())), (DESCRIPTION, now.1, was.as_ref().map(|w| w.1.as_str()))] {
         if m.text(k).is_none_or(|cur| Some(cur) == old) {
-            let _ = m.set(k, Value::String(new));
+            let _ = m.set(Owner::Component, k, Value::String(new));
         }
     }
     if m != c.metadata
@@ -597,6 +603,34 @@ mod tests {
         let (lo, hi) = bbox(&b, "Bearing 608");
         assert!((hi.x - lo.x - 22.0).abs() < 1e-6 && (hi.z - lo.z - 7.0).abs() < 1e-6);
         assert!(b.execute("parts.insert", &json!({"family": "hex_nut", "size": "M7"})).is_err());
+    }
+
+    /// The Length list of a dialog opens on the length an insert gets when none is asked for,
+    /// so the library reports that length for every size of every family that has lengths. The
+    /// rule differs by family, so the reported value is the one the part is actually built to.
+    #[test]
+    fn the_library_reports_the_default_length_of_every_size() {
+        let all = run(&mut Session::default(), "parts.library", json!({}));
+        let families = all["families"].as_array().cloned().unwrap_or_default();
+        assert!(!families.is_empty(), "{all}");
+        for fam in families {
+            let id = fam["family"].as_str().unwrap_or_default().to_string();
+            let standard: Vec<f64> = fam["lengths"].as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+            for row in fam["sizes"].as_array().cloned().unwrap_or_default() {
+                let size = row["size"].as_str().unwrap_or_default().to_string();
+                let reported = row["default_length"].as_f64();
+                if standard.is_empty() {
+                    assert!(reported.is_none(), "{id} {size} has no lengths of its own but reports a default");
+                    continue;
+                }
+                // What an insert that asks for no length is actually built to.
+                let mut s = Session::default();
+                let out = run(&mut s, "parts.insert", json!({"family": id, "size": size}));
+                let built = s.doc.parts.get(&out["component"].as_u64().unwrap_or(0)).and_then(|p| p.length);
+                assert_eq!(reported, built, "{id} {size}: reported default is not what an insert builds");
+                assert!(standard.iter().any(|l| Some(*l) == reported), "{id} {size}: {reported:?} is not one of the standard lengths");
+            }
+        }
     }
 
     /// #2091: the second and larger ISO sizes, M2, M2.5, M14, M24 and M30, are in the screw, bolt,

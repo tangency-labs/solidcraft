@@ -60,6 +60,8 @@ fn shared_destination_refuses_without_mutating_document_or_session() {
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"}));
     let c = run(&mut s, "component.create", json!({"name":"Shared"}))["component"].as_u64().unwrap();
     run(&mut s, "occurrence.copy", json!({"component":c,"translate":[20,0,0]}));
+    // No placement of the shared target is named or active to place the body by.
+    run(&mut s, "component.activate", json!({"component":0}));
     let document = s.doc.to_json();
     let active = s.active_component;
     assert!(s.execute("component.move_bodies", &json!({"component":c,"bodies":["Block"]})).is_err());
@@ -282,9 +284,9 @@ fn edited_transfer_destination_updates_history_owner_copy_and_reopen() {
     assert_eq!(s.doc.to_json(), saved);
     assert_eq!(s.pending_moves, pending);
     let copied = run(&mut s, "component.paste_new", json!({"component":b}))["component"].as_u64().unwrap();
-    assert_eq!(s.model.state().body("Block (copy)").unwrap().component, copied);
+    assert_eq!(s.model.state().body("Block (2)").unwrap().component, copied);
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
     assert_eq!(reopened.model.state().body("Block").unwrap().component, b);
-    assert_eq!(reopened.model.state().body("Block (copy)").unwrap().component, copied);
+    assert_eq!(reopened.model.state().body("Block (2)").unwrap().component, copied);
 }

@@ -11,11 +11,13 @@
 //! runs once, on OK, and an error it finds shows then, the dialog staying open.
 
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::Value;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::ModelState;
+use solidcraft_engine::doc::progress::Progress;
 use solidcraft_engine::geom::{Aabb3, Mesh, Ring, Vec3};
 
 use crate::SolveApp;
@@ -80,11 +82,22 @@ pub struct Built {
 
 type Job = Result<Built, String>;
 
+/// How many obsolete preview jobs may still run, left behind for newer inputs (#7167). Beyond
+/// them, a new job waits for the running one as before, so a quick series of picks keeps at
+/// most this many kernel computations going beside the current one.
+const DETACHED: usize = 2;
+
 #[derive(Default)]
 pub struct PreviewState {
     /// Key of the commands whose result (or error) is shown.
     shown_key: Option<u64>,
     running: Option<(u64, Receiver<Job>)>,
+    /// Asks the running job to stop between features once it is obsolete.
+    running_progress: Option<Arc<Progress>>,
+    /// Jobs left behind for inputs that changed to another setup (#7167): asked to stop, their
+    /// results are dropped when they come. With [`DETACHED`] of them running, the next obsolete
+    /// job is waited for.
+    detached: Vec<Receiver<Job>>,
     /// The running job builds a tool alone (for a join, cut or intersect).
     running_tool: bool,
     /// Inputs of a joint or distance preview, excluding only its driven values.
@@ -137,7 +150,7 @@ impl PreviewState {
     fn clear(&mut self) {
         self.straight.clear();
         self.moving.clear();
-        self.running = None;
+        self.detach();
         self.running_tool = false;
         self.running_stream_key = None;
         self.shown_key = None;
@@ -155,8 +168,9 @@ impl PreviewState {
     /// keeps drawing the last scene it took until the slot it reads hands it another, so a fresh
     /// state (another slot, empty) would leave the old preview drawn over the next design.
     pub fn reset(&mut self) {
-        let (slot, key) = (std::mem::take(&mut self.slot), self.key);
-        *self = PreviewState { slot, key, ..PreviewState::default() };
+        self.detach();
+        let (slot, key, detached) = (std::mem::take(&mut self.slot), self.key, std::mem::take(&mut self.detached));
+        *self = PreviewState { slot, key, detached, ..PreviewState::default() };
         self.set_scene(GpuScene::default());
     }
 
@@ -224,6 +238,32 @@ impl PreviewState {
                 }
             }
         }
+        // A detached job's result is never shown: drop it once it is done.
+        self.detached.retain(|rx| matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+        // The inputs moved to another setup (another selection, for the features whose distance,
+        // radius or pose streams) while a job runs: its result could only be dropped, so stop
+        // waiting for it and let the current inputs start now (#7167). A tool, or a value
+        // streaming within one setup, still shows each finished result; inputs that don't stream
+        // wait as before. At most `DETACHED` jobs are left behind; while they run, the next
+        // obsolete one is waited for as before.
+        let other_setup = !self.running_tool && stream_key.is_some() && self.running_stream_key.is_some() && self.running_stream_key != stream_key;
+        if self.running.as_ref().is_some_and(|(k, _)| *k != key) && other_setup && self.detached.len() < DETACHED {
+            self.detach();
+        }
+    }
+
+    /// Stop waiting for the running job: ask it to stop between features, and count it among the
+    /// detached jobs until its thread ends (also when a closed dialog or another design leaves it
+    /// behind, so `DETACHED` bounds what runs).
+    fn detach(&mut self) {
+        if let Some(progress) = self.running_progress.take() {
+            progress.cancel();
+        }
+        if let Some((_, rx)) = self.running.take() {
+            self.detached.push(rx);
+        }
+        self.running_tool = false;
+        self.running_stream_key = None;
     }
 }
 
@@ -348,7 +388,7 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
             return;
         }
         let scratch = app.session.scratch();
-        spawn(&mut app.preview, key, scratch, cmds, colors, tool);
+        spawn(&mut app.preview, key, scratch, cmds, colors, tool, Arc::new(Progress::default()));
     }
     app.preview.busy = app.preview.running.is_some();
     if app.preview.busy {
@@ -368,14 +408,20 @@ fn job_key(cmds: &[(String, Value)], revision: u64, colors: Colors) -> u64 {
 
 /// Start computing the preview of `cmds`: for a tool feature (`tool`), only its tool.
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool) {
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, progress: Arc<Progress>) {
     let (tx, rx) = std::sync::mpsc::channel();
+    // Watched by `progress`, so a job left behind for other inputs skips its remaining features.
+    let watched = progress.clone();
     let spawned = std::thread::Builder::new().name("preview".into()).spawn(move || {
-        let _ = tx.send(if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) });
+        let job = solidcraft_engine::doc::progress::watch(watched, || {
+            if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) }
+        });
+        let _ = tx.send(job);
     });
     match spawned {
         Ok(_) => {
             pv.running = Some((key, rx));
+            pv.running_progress = Some(progress);
             pv.running_tool = tool;
         }
         Err(e) => pv.apply(key, Err(e.to_string())),
@@ -384,7 +430,7 @@ fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, V
 
 /// No threads on the web: compute right away.
 #[cfg(target_arch = "wasm32")]
-fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool) {
+fn spawn(pv: &mut PreviewState, key: u64, scratch: Session, cmds: Vec<(String, Value)>, colors: Colors, tool: bool, _progress: Arc<Progress>) {
     pv.apply(key, if tool { compute_tool(&scratch, &cmds, colors) } else { compute(&scratch, &cmds, colors) });
 }
 
@@ -406,6 +452,8 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.chamfer.equal_distance"
                 | "sketch.chamfer.two_distance"
                 | "sketch.chamfer.distance_angle"
+                | "sketch.insert_svg"
+                | "sketch.insert_dxf"
         ) || command == "construct.plane.along_path"
             || params.get("command").and_then(Value::as_str) == Some("construct.plane.along_path")
     }) {
@@ -518,6 +566,10 @@ fn state_bounds(st: &ModelState) -> Aabb3 {
 /// (red) and intersect.
 fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> Built {
     let mut sc = GpuScene::default();
+    let removed = sc.color(c.removed);
+    let intersect = sc.color([c.added[0], c.added[1], c.added[2], c.removed[3]]);
+    let added = sc.color(c.added);
+    let edge = if op == "cut" { sc.color([c.removed[0], c.removed[1], c.removed[2], 255]) } else { sc.color(c.edge) };
     for a in after.bodies.iter().filter(|a| before.body(&a.name).is_none()) {
         let m = a.mesh();
         for t in &m.triangles {
@@ -525,14 +577,13 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
                     match op {
-                        "cut" => sc.xray_tri(p.to_f32(), n.to_f32(), c.removed),
-                        "intersect" => sc.xray_tri(p.to_f32(), n.to_f32(), [c.added[0], c.added[1], c.added[2], c.removed[3]]),
-                        _ => sc.tri(p.to_f32(), n.to_f32(), c.added),
+                        "cut" => sc.xray_tri(p.to_f32(), n.to_f32(), removed),
+                        "intersect" => sc.xray_tri(p.to_f32(), n.to_f32(), intersect),
+                        _ => sc.tri(p.to_f32(), n.to_f32(), added),
                     }
                 }
             }
         }
-        let edge = if op == "cut" { [c.removed[0], c.removed[1], c.removed[2], 255] } else { c.edge };
         for (ei, e) in m.edges.iter().enumerate() {
             if m.shaded_edge_visible(ei) {
                 for w in e.windows(2) {
@@ -584,6 +635,12 @@ fn same(a: &Mesh, b: &Mesh) -> bool {
 /// version of changed or removed bodies.
 pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
     let mut sc = GpuScene::default();
+    let added_color = sc.color(c.added);
+    let added_plane = sc.color([c.added[0], c.added[1], c.added[2], 64]);
+    let body_color = sc.color(c.body);
+    let new_body = sc.color(c.new_body);
+    let removed = sc.color(c.removed);
+    let edge = sc.color(c.edge);
     let mut replaced = Vec::new();
     for construct in &after.construct {
         if before.construct.iter().any(|old| old == construct) {
@@ -592,14 +649,13 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         if let solidcraft_engine::doc::construct::ConstructGeom::Plane(plane) = construct.geom {
             let (o, x, y) = (plane.origin, plane.x * 10.0, plane.y * 10.0);
             let quad = [o - x - y, o + x - y, o + x + y, o - x + y];
-            let color = [c.added[0], c.added[1], c.added[2], 64];
             for triangle in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
                 for p in triangle {
-                    sc.xray_tri(p.to_f32(), plane.normal().to_f32(), color);
+                    sc.xray_tri(p.to_f32(), plane.normal().to_f32(), added_plane);
                 }
             }
             for (a, b) in Ring::from(quad).edges() {
-                sc.line(a.to_f32(), b.to_f32(), c.added, 1.3, true);
+                sc.line(a.to_f32(), b.to_f32(), added_color, 1.3, true);
             }
         }
     }
@@ -620,16 +676,16 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         for (t, f) in am.triangles.iter().zip(&am.tri_face) {
             let new = added.get(*f as usize).copied().unwrap_or(true);
             let col = match (new, old.is_some()) {
-                (false, _) => c.body,
-                (true, true) => c.added,
-                (true, false) => c.new_body,
+                (false, _) => body_color,
+                (true, true) => added_color,
+                (true, false) => new_body,
             };
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (am.positions.get(i), am.normals.get(i)) {
                     sc.tri(p.to_f32(), n.to_f32(), col);
                     if new && cut {
-                        sc.xray_tri(p.to_f32(), n.to_f32(), c.removed);
+                        sc.xray_tri(p.to_f32(), n.to_f32(), removed);
                     }
                 }
             }
@@ -639,7 +695,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                 continue;
             }
             for w in e.windows(2) {
-                sc.line(w[0].to_f32(), w[1].to_f32(), c.edge, 1.3, false);
+                sc.line(w[0].to_f32(), w[1].to_f32(), edge, 1.3, false);
             }
         }
         if old.is_some() {
@@ -656,7 +712,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             for k in t {
                 let i = *k as usize;
                 if let (Some(p), Some(n)) = (m.positions.get(i), m.normals.get(i)) {
-                    sc.ghost_tri(p.to_f32(), n.to_f32(), c.removed);
+                    sc.ghost_tri(p.to_f32(), n.to_f32(), removed);
                 }
             }
         }
@@ -820,7 +876,11 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     if app.preview.rolled_back {
         return;
     }
-    if !app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_)) && d.previews()) {
+    if !app
+        .dialog
+        .as_ref()
+        .is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_) | crate::dialogs::Kind::InsertDrawing(_)) && d.previews())
+    {
         return;
     }
     let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
@@ -1121,8 +1181,14 @@ mod tests {
         assert!((b.max.z - 18.0).abs() < 1e-6 && (b.max.y - 30.0).abs() < 1e-6, "on top, not at right angles: {b:?}");
     }
 
-    fn count(bytes: &[u8], stride: usize, col: [u8; 4]) -> usize {
-        bytes.chunks(stride).filter(|v| v.get(24..28) == Some(&col[..])).count()
+    fn count(scene: &GpuScene, bytes: &[u8], stride: usize, col: [u8; 4]) -> usize {
+        bytes
+            .chunks(stride)
+            .filter(|v| {
+                let Some(i) = v.get(24..28).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes) else { return false };
+                scene.palette.get(crate::gpu::PaletteIndex(i)) == Some(col)
+            })
+            .count()
     }
 
     #[test]
@@ -1132,10 +1198,11 @@ mod tests {
         let p = s.preview(&[("solid.hole".to_string(), json!({"position": [20, 15, 20], "diameter": 5, "depth": 10}))]).unwrap();
         let b = build(&p.before, &p.after, colors());
         // The hole's walls are drawn see-through in the cut colour (seen from any side).
-        assert!(count(&b.scene.xray, 28, colors().removed) > 0);
+        assert!(count(&b.scene, &b.scene.xray, 28, colors().removed) > 0);
         // A feature that only adds material shows no cut.
         let p = s.preview(&[("solid.box".to_string(), json!({"length": 10, "width": 10, "height": 30, "operation": "join"}))]).unwrap();
-        assert_eq!(count(&build(&p.before, &p.after, colors()).scene.xray, 28, colors().removed), 0);
+        let b = build(&p.before, &p.after, colors());
+        assert_eq!(count(&b.scene, &b.scene.xray, 28, colors().removed), 0);
     }
 
     fn plate() -> Session {
@@ -1191,17 +1258,75 @@ mod tests {
         assert!(SurfaceIndex::new(&Mesh::default()).is_none());
     }
 
-    /// Thousands of faces (a modeled thread's) are classified at once, not face by face against
-    /// every triangle: filleting beside a thread froze the app for minutes.
-    #[test]
-    fn many_faces_are_classified_quickly() {
-        let started = std::time::Instant::now();
-        let n = 120;
+    /// How long the faces of a sheet of `n × n` squares take to classify against an old sheet of
+    /// the same size. The meshes are built before the clock starts and the faces are collected
+    /// before it stops: only the classification, the work that used to freeze the app, is measured.
+    fn classify_sheet(n: usize) -> std::time::Duration {
         let (old, same, lifted) = (sheet(n, 0.0), sheet(n, 0.0), sheet(n, 5.0));
         let nf = n * n;
-        assert!(new_faces(&same, nf, &old).iter().all(|new| !new), "faces on the old surface are not new");
-        assert!(new_faces(&lifted, nf, &old).iter().all(|new| *new), "faces off the old surface are new");
-        assert!(started.elapsed().as_secs() < 10, "took {:?}", started.elapsed());
+        let started = std::time::Instant::now();
+        let on = new_faces(&same, nf, &old);
+        let off = new_faces(&lifted, nf, &old);
+        let took = started.elapsed();
+        assert!(on.iter().all(|new| !new), "faces on the old surface are not new");
+        assert!(off.iter().all(|new| *new), "faces off the old surface are new");
+        took
+    }
+
+    /// Whether a job four times the size took at most about twice linear: `pair` times the small job,
+    /// then the big one. Linear is 4x, the quadratic that the bug cost 16x or more, so eight times the
+    /// small time is the limit. The load of the other test binaries can rise between the two runs, so a
+    /// pair that misses is measured again, up to three times. Load only ever slows a run, so each size
+    /// keeps its fastest time and the ratio is taken of those: a retry cannot pass a regression on a
+    /// small run that a spike happened to slow, once an earlier small run was fast.
+    ///
+    /// `slack` is the room the noise of a busy machine gets, on top of the ratio.
+    fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration), slack: std::time::Duration) -> Result<(), String> {
+        let limit = |small: f64| 8.0 * small + slack.as_secs_f64();
+        let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
+        let mut runs = Vec::new();
+        for _ in 0..3 {
+            let (s, b) = pair();
+            small = small.min(s.as_secs_f64());
+            big = big.min(b.as_secs_f64());
+            runs.push(format!("{s:?} then {b:?}"));
+            if big < limit(small) {
+                return Ok(());
+            }
+        }
+        Err(format!("{}; fastest {small:.3} s and {big:.3} s, limit {:.3} s", runs.join(", "), limit(small)))
+    }
+
+    #[test]
+    fn scales_linearly_keeps_each_sizes_fastest_run() {
+        let pairs = |p: Vec<(u64, u64)>| {
+            let mut p = p.into_iter().map(|(s, b)| (std::time::Duration::from_millis(s), std::time::Duration::from_millis(b)));
+            move || p.next().unwrap_or((std::time::Duration::from_secs(1), std::time::Duration::from_secs(1)))
+        };
+        let slack = std::time::Duration::from_millis(0);
+        // Linear: four times the work, four times the time.
+        assert!(scales_linearly(pairs(vec![(5, 20)]), slack).is_ok());
+        // A big run slowed by load, then a quiet pair.
+        assert!(scales_linearly(pairs(vec![(5, 80), (5, 20)]), slack).is_ok());
+        // A quadratic cost (16x) whose later small runs a spike slowed: the fast first one still counts.
+        let r = scales_linearly(pairs(vec![(5, 80), (15, 80), (15, 80)]), slack);
+        assert!(r.as_ref().is_err_and(|e| e.contains("fastest 0.005 s and 0.080 s, limit 0.040 s")), "{r:?}");
+    }
+
+    /// Thousands of faces (a modeled thread's) are classified at once, not face by face against
+    /// every triangle: filleting beside a thread froze the app for minutes.
+    ///
+    /// A ratio and not a limit: a test must not depend on wall-clock timing (CONTRIBUTING.md), the
+    /// machine is busy. 900 faces are classified, then 3 600, four times as many: linear is 4x, the
+    /// face-against-triangle cost 16x or more.
+    #[test]
+    fn many_faces_are_classified_quickly() {
+        /// The room the noise of a run on a busy machine gets, on top of the ratio: the 900 faces
+        /// take a fraction of a second, so this is the noise of one run and not a change of scale.
+        const SLACK: std::time::Duration = std::time::Duration::from_millis(20);
+        if let Err(missed) = scales_linearly(|| (classify_sheet(30), classify_sheet(60)), SLACK) {
+            panic!("the faces do not scale linearly: {missed}");
+        }
     }
 
     /// A fillet preview stands in for the body: the round face is new, the rest is kept, and the
@@ -1212,8 +1337,8 @@ mod tests {
         let (rev, undo) = (s.revision, s.undo.len());
         let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[0, 0, 10]], "radius": 3}))], colors()).unwrap();
         assert_eq!(b.replaced, vec!["Body1".to_string()]);
-        let added = count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().added);
-        let kept = count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().body);
+        let added = count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().added);
+        let kept = count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().body);
         assert!(added > 0 && kept > 0, "added {added} kept {kept}");
         assert!(!b.scene.ghost.is_empty());
         assert_eq!(s.revision, rev);
@@ -1242,10 +1367,10 @@ mod tests {
         s.execute("sketch.finish", &json!({})).unwrap();
         let b = compute(&s, &[("solid.extrude".into(), json!({"distance": "15 mm"}))], colors()).unwrap();
         assert!(b.replaced.is_empty());
-        assert_eq!(count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().body), 0);
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().body), 0);
         // #1805: a new body has its own colour, not a join's.
-        assert!(count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().new_body) > 0);
-        assert_eq!(count(&b.scene.tris, crate::gpu::TRI_SIZE, colors().added), 0);
+        assert!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().new_body) > 0);
+        assert_eq!(count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().added), 0);
         assert!(b.scene.ghost.is_empty());
         assert!(compute(&s, &[("solid.extrude".into(), json!({"distance": "1 +"}))], colors()).is_err());
         assert!(s.model.state().bodies.is_empty());
@@ -1340,7 +1465,8 @@ mod tests {
     fn reset_hands_the_viewport_an_empty_scene() {
         let mut pv = PreviewState::default();
         let mut sc = GpuScene::default();
-        sc.xray_tri([0.0; 3], [0.0, 0.0, 1.0], [255; 4]);
+        let white = sc.color([255; 4]);
+        sc.xray_tri([0.0; 3], [0.0, 0.0, 1.0], white);
         pv.set_scene(sc);
         pv.active = true;
         pv.replaced = vec!["Body1".into()];

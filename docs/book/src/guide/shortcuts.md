@@ -41,6 +41,7 @@ if that happens; recording is cancelled if the app loses focus.
 | Ctrl+Z | Undo | Ctrl+Y | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
+| Ctrl+Shift+S | Save As | | |
 | Ctrl+1 | Front View | Ctrl+2 | Back View |
 | Ctrl+3 | Left View | Ctrl+4 | Right View |
 | Ctrl+5 | Top View | Ctrl+6 | Bottom View |
@@ -58,7 +59,7 @@ Keys handled by the window itself:
 | Key | Action |
 |---|---|
 | S | command search under the ribbon search field |
-| V | show or hide the selected bodies, sketches and planes |
+| V | show or hide the selected bodies, sketches and planes; with a right-click menu open, its Show/Hide (a folder, the Origin folder, an origin plane) |
 | F2 | rename the selected browser or timeline item |
 | F6 | fit the view to the model |
 | ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |

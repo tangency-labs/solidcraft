@@ -203,6 +203,40 @@ fn growing_message_field_retains_its_id_and_does_not_consume_enter() {
     assert_eq!(message, "First\nSecond\n");
 }
 
+/// The value fields on the canvas keep their width for a number and grow with an expression typed
+/// into them (parameter names, a formula), up to three times that width, also in the area they
+/// float in on the canvas, whose space is last frame's size.
+#[test]
+fn canvas_value_fields_grow_with_an_expression_up_to_three_times_their_width() {
+    for case in ["canvas", "placement"] {
+        let ctx = crate::fonts::test_context();
+        let width = |value: &str| {
+            let mut value = value.to_owned();
+            let mut rect = egui::Rect::NOTHING;
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::Area::new(egui::Id::new("grow")).fixed_pos(egui::pos2(10.0, 10.0)).show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        let id = ui.id().with(case);
+                        rect = match case {
+                            "canvas" => canvas_value_field(ui, id, &mut value, false).rect,
+                            _ => placement_field(ui, id, &mut value, "").rect,
+                        };
+                    });
+                });
+            });
+            output.textures_delta.clear();
+            rect.width()
+        };
+        let number = width("12.5 mm");
+        assert!((width("4") - number).abs() < 0.5, "{case}: a number keeps the field's width");
+        let formula = width("CellWidth * X + 2 * Wall");
+        assert!(formula > number * 1.5, "{case}: {formula} for a formula, {number} for a number");
+        let long = width("CellWidth * X + 2 * WallThickness - Clearance / 2 + LipHeight * Y");
+        assert!(long > formula && long <= number * 3.0 + 1.0, "{case}: {long} capped at three times {number}");
+        assert!((width("4") - number).abs() < 0.5, "{case}: and back to a number's width");
+    }
+}
+
 #[test]
 fn placement_field_keeps_focus_for_owner_validation_on_enter() {
     let ctx = crate::fonts::test_context();
@@ -324,8 +358,31 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         assert!(!accented(&filled), "{name}: a filled inactive input is not accented: {filled:?}");
         assert!(!accented(&empty), "{name}: an empty inactive input is not accented: {empty:?}");
         let outline = |l: &Look| l.0.last().copied().unwrap();
-        assert_ne!(outline(&filled).0, outline(&empty).0, "{name}: filled and empty fills differ");
-        assert_ne!(outline(&filled).1, outline(&empty).1, "{name}: filled and empty borders differ");
+        // Two colours can't give filled and empty their own fill and border on top of the accent;
+        // in 1-bit and 1-bit Dark the text itself tells them apart (a count against the prompt).
+        if crate::theme_files::is_two_colour(&name) {
+            // Inactive inputs are the page with an ink border: white on black in 1-bit, the
+            // reverse in 1-bit Dark.
+            let (paper, ink) = if dark { (egui::Color32::BLACK, egui::Color32::WHITE) } else { (egui::Color32::WHITE, egui::Color32::BLACK) };
+            for look in [&active_filled, &active_empty, &filled, &empty] {
+                for &(fill, border) in &look.0 {
+                    for color in [fill, border] {
+                        assert!(matches!(color, egui::Color32::BLACK | egui::Color32::WHITE), "{name}: {look:?}");
+                    }
+                }
+            }
+            for look in [&active_filled, &active_empty] {
+                assert_eq!(outline(look).0, t.selected_bg, "{name}");
+                assert_eq!(outline(look).0, ink, "{name}: the active input is inverted");
+                assert_eq!(look.1, Some(t.selected_ink), "{name}");
+            }
+            for look in [&filled, &empty] {
+                assert_eq!(outline(look), (paper, ink), "{name}");
+            }
+        } else {
+            assert_ne!(outline(&filled).0, outline(&empty).0, "{name}: filled and empty fills differ");
+            assert_ne!(outline(&filled).1, outline(&empty).1, "{name}: filled and empty borders differ");
+        }
         assert_eq!(filled.1, Some(t.form_ink), "{name}: a filled input's count is in text colour");
         assert_eq!(empty.1, Some(t.form_dim), "{name}: an empty input's prompt is dim");
     }

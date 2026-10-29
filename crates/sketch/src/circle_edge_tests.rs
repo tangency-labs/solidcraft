@@ -142,6 +142,40 @@ fn how_two_circles_lie_and_their_gap() {
     }
 }
 
+/// A diameter edit must keep the same circle outside: the unsigned wall gap also has a
+/// solution with the radii reversed, which would turn a tube's selected outer loop into a disc.
+#[test]
+fn nested_circles_keep_their_radius_order_after_diameter_edits() {
+    for swap in [false, true] {
+        for dimension_first in [false, true] {
+            for drive_inner in [false, true] {
+                let mut sk = Sketch::new();
+                let outer = sk.add_circle(Vec2::ZERO, 20.0, Some(0), None).unwrap();
+                let inner = sk.add_circle(Vec2::ZERO, 10.0, Some(0), None).unwrap();
+                let (a, b) = if swap { (inner, outer) } else { (outer, inner) };
+                let wall = ConstraintKind::CircleCircleDistance { a, b, value: 10.0, circles: TwoCircles::Nested };
+                let diameter = ConstraintKind::Diameter { c: if drive_inner { inner } else { outer }, value: if drive_inner { 20.0 } else { 40.0 } };
+                let kinds = if dimension_first { [diameter, wall] } else { [wall, diameter] };
+                for kind in kinds {
+                    sk.add_constraint(kind, None).unwrap();
+                }
+                assert!(solve(&mut sk).keeps_orientation());
+                let di = usize::from(!dimension_first);
+                let diameters = if drive_inner { [50.0, 6.0, 100.0, 20.0] } else { [24.0, 200.0, 40.0, 30.0] };
+                for diameter in diameters {
+                    let old = sk.driving_values();
+                    sk.constraints[di].kind.set_value(diameter);
+                    let rep = solve_after_value_edit(&mut sk, &old);
+                    assert!(rep.keeps_orientation(), "{swap} {dimension_first} {drive_inner} {diameter}: {rep:?}");
+                    let expected_inner = if drive_inner { diameter / 2.0 } else { diameter / 2.0 - 10.0 };
+                    assert!((sk.radius(inner).unwrap() - expected_inner).abs() < 1e-6, "{sk:?}");
+                    assert!((sk.radius(outer).unwrap() - expected_inner - 10.0).abs() < 1e-6, "{sk:?}");
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn arcs_are_measured_to_their_circles() {
     let mut sk = Sketch::new();

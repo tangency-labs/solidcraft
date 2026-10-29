@@ -887,6 +887,43 @@ fn drive_opens_on_the_picked_joint() {
     let rocker = app.session.doc.assembly.joints.iter().find(|j| j.name == "Rocker").unwrap().id;
     pick_joint(&mut app, rocker, false);
     assert_eq!(drive_on(&mut app), "Rocker");
+    // A rigid joint picked: it opens on that one, to say why it can't drive it (#6981).
+    app.run("joint.as_built", json!({"type": "rigid", "a": "Ground", "b": "Crank", "name": "Lock"})).unwrap();
+    let lock = app.session.doc.assembly.joints.iter().find(|j| j.name == "Lock").unwrap().id;
+    pick_joint(&mut app, lock, false);
+    assert_eq!(drive_on(&mut app), "Lock");
+    // Motion Trace still starts on a joint that moves.
+    app.dialog = None;
+    app.start("motion.trace");
+    match &app.dialog.as_ref().unwrap().kind {
+        Kind::Assembly(Asm::Trace(f)) => assert_eq!(app.session.doc.assembly.joints[f.joint].name, "Crank"),
+        k => panic!("{k:?}"),
+    }
+}
+
+/// Drive Joints in a design whose only joint is rigid (#6981): it opens on that joint and says it
+/// holds its parts still and how to let them move, runs no drive (no preview error, no Create
+/// Issue, OK off), and its Edit Joint button turns the dialog into Edit Joint on that joint.
+#[test]
+fn drive_on_a_rigid_joint_says_why_and_offers_edit_joint() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    let at = |o: &str| json!({"occurrence": o, "point": [25, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Glue"})).unwrap();
+    let glue = h.app.session.doc.assembly.joints[0].id;
+    h.app.start("joint.drive");
+    h.frames(4);
+    let d = h.app.dialog.clone().unwrap();
+    let e = apply_commands(&h.app, &d).unwrap_err();
+    assert!(e.contains("Glue") && e.contains("holds its parts still") && e.contains("Revolute") && e.contains("Edit Joint"), "{e}");
+    assert!(h.app.preview.error.is_none(), "no drive is previewed");
+    assert!(crate::scenario::handle_at("dialog:create_issue").is_none(), "no Create Issue for a rigid joint");
+    h.step(&json!({"click": {"handle": "drive:edit_joint"}})).unwrap();
+    h.frames(2);
+    match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Assembly(Asm::Joint(f)) => assert_eq!(f.editing, Some(glue)),
+        k => panic!("{k:?}"),
+    }
 }
 
 /// A rigid joint has nothing to drive: Drive Joints won't start on it.

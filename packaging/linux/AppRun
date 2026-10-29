@@ -3,7 +3,7 @@
 # Adapted from PhotoCraft's AppRun (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 #
 # On Wayland the compositor resolves a window's dock icon by taking the window's
-# app_id (ai.storyteller.solidcraft) and looking up an installed .desktop file.
+# app_id (io.tangencylabs.solidcraft) and looking up an installed .desktop file.
 # An AppImage installs nothing, so every AppImage run would otherwise show the
 # generic "Wayland" icon. Best-effort desktop integration: on first run
 # (and whenever the AppImage's path changes) install the .desktop entry and the
@@ -23,10 +23,11 @@
 set -u
 
 APPDIR="$(dirname "$(readlink -f "$0")")"
-DESK_ID=ai.storyteller.solidcraft
+DESK_ID=io.tangencylabs.solidcraft
 CLI_MARKER="# solidcraft-cli wrapper written by the SolidCraft AppImage"
-# Compatibility shim (docs/compatibility.md): the desktop id of releases before 0.8.
-OLD_DESK_ID=ai.storyteller.solvecraft
+# Compatibility shim (docs/compatibility.md): the desktop ids of earlier releases (0.8 until the
+# move to Tangency Labs, and before 0.8).
+OLD_DESK_IDS="ai.storyteller.solidcraft ai.storyteller.solvecraft"
 
 # The wrapper in ~/.local/bin: $1 is the AppImage's path, $2 the home folder.
 install_cli() {
@@ -117,13 +118,15 @@ integrate() {
     return 0
   fi
 
-  # An entry and icons that an AppImage before 0.8 installed under the old id would show a
-  # second menu entry; remove them (only an entry this script wrote: it points Exec at a path).
-  old="$apps/$OLD_DESK_ID.desktop"
-  if [ -f "$old" ] && grep -q "^Icon=$OLD_DESK_ID\$" "$old" && grep -q '^Exec="' "$old"; then
-    rm -f "$old" "$data"/icons/hicolor/*/apps/"$OLD_DESK_ID".png 2>/dev/null
-    command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
-  fi
+  # An entry and icons that an earlier AppImage installed under an old id would show a second
+  # menu entry; remove them (only an entry this script wrote: it points Exec at a path).
+  for old_id in $OLD_DESK_IDS; do
+    old="$apps/$old_id.desktop"
+    if [ -f "$old" ] && grep -q "^Icon=$old_id\$" "$old" && grep -q '^Exec="' "$old"; then
+      rm -f "$old" "$data"/icons/hicolor/*/apps/"$old_id".png 2>/dev/null
+      command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$apps" >/dev/null 2>&1
+    fi
+  done
 
   # Icons: per-file compare so an unchanged install costs a handful of cmp calls.
   src_icons="$APPDIR/usr/share/icons/hicolor"

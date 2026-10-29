@@ -4,6 +4,7 @@
 //! endpoint (OpenAI-compatible or Anthropic-compatible, whose key goes to the system keychain).
 
 use super::agents::{self, AgentConfig, Kind, Mode, Protocol};
+use super::backend::TestError;
 use super::*;
 use crate::ui_kit;
 
@@ -35,16 +36,31 @@ pub struct AddState {
 
 /// A connection test running or done.
 pub enum Test {
-    Running(std::sync::mpsc::Receiver<Result<String, String>>),
-    Done(Result<String, String>),
+    Running(std::sync::mpsc::Receiver<Result<String, TestError>>),
+    Done(Result<String, TestError>),
 }
 
 impl Test {
-    fn poll(&mut self) {
+    fn poll(&mut self) -> Option<bool> {
         if let Test::Running(rx) = self
             && let Ok(r) = rx.try_recv()
         {
+            let login = match &r {
+                Ok(_) => Some(true),
+                Err(TestError::AuthRequired) => Some(false),
+                Err(TestError::Other(_)) => None,
+            };
             *self = Test::Done(r);
+            return login;
+        }
+        None
+    }
+}
+
+pub(super) fn poll_tests(chat: &mut AgentChat) {
+    for (id, test) in &mut chat.settings.tests {
+        if let Some(signed_in) = test.poll() {
+            chat.login_results.insert(id.clone(), signed_in);
         }
     }
 }
@@ -180,17 +196,17 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
             });
         }
         Kind::Api => {
-            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(tr("ui.ai_no_http").to_string())) };
+            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr("ui.ai_no_http").to_string()))) };
             let (url, model) = (e.base_url.clone(), e.model.clone());
             std::thread::spawn(move || {
-                let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model));
+                let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model).map_err(TestError::Other));
             });
         }
         Kind::Anthropic => {
-            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(tr("ui.ai_no_http").to_string())) };
+            let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr("ui.ai_no_http").to_string()))) };
             let (url, model) = (e.base_url.clone(), e.model.clone());
             std::thread::spawn(move || {
-                let _ = tx.send(super::api_client::test_anthropic_endpoint(&http, &url, key.as_deref(), &model));
+                let _ = tx.send(super::api_client::test_anthropic_endpoint(&http, &url, key.as_deref(), &model).map_err(TestError::Other));
             });
         }
     }
@@ -214,7 +230,7 @@ fn test_line(ui: &mut egui::Ui, test: &Option<&Test>) {
             ui_kit::text(ui, message, ui_kit::Text::Report("test_ok", false));
         }
         Some(Test::Done(Err(error))) => {
-            ui_kit::text(ui, error, ui_kit::Text::Report("test_error", true));
+            ui_kit::text(ui, error.message(), ui_kit::Text::Report("test_error", true));
         }
         None => {}
     }
@@ -233,6 +249,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
                     .on_hover_text(tr("ui.ai_toolbar_button_note"));
                 crate::scenario::publish_handle("prefs:ai_toolbar_button", response.rect.center());
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.connect_at_start"), &mut app.preferences.agent_connect_at_start)
+                    .on_hover_text(tr("ai.prefs.connect_at_start_note"));
+                crate::scenario::publish_handle("prefs:agent_connect_at_start", response.rect.center());
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.open_at_start"), &mut app.preferences.agent_chat_open_at_start)
+                    .on_hover_text(tr("ai.prefs.open_at_start_note"));
+                crate::scenario::publish_handle("prefs:agent_chat_open_at_start", response.rect.center());
             }
             let response = ui_kit::checkbox(ui, tr("ai.prefs.background_commands"), &mut app.preferences.agent_off_thread)
                 .on_hover_text(tr("ui.agent_off_thread_note"));
@@ -251,7 +273,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !cfg!(target_arch = "wasm32") && app.preferences.ai_features {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
+            let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_AI;
+            if browsing && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
                 refresh(app, &ui.ctx().clone());
             }
             agents_section(app, ui);
@@ -376,9 +399,6 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// The agents: found and added, with Test, Default, a permission override and Remove.
 #[cfg(not(target_arch = "wasm32"))]
 fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    for test in app.agent_chat.settings.tests.values_mut() {
-        test.poll();
-    }
     let all = agents::entries(app);
     let d = &app.preferences.agent_default;
     let default = if all.iter().any(|e| &e.id == d) { Some(d.clone()) } else { all.first().map(|e| e.id.clone()) };
@@ -427,6 +447,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             remove = Some(entry.id.clone());
                         }
                         match entry.login {
+                            "login_found" => ui_kit::settings_badge(ui, tr("ui.agent_chat_login_found"), false),
                             "signed_in" => ui_kit::settings_badge(ui, tr("ui.agent_chat_signed_in"), false),
                             "key" => ui_kit::settings_badge(ui, tr("ui.agent_chat_key_in_env"), false),
                             "signed_out" => ui_kit::settings_badge(ui, tr("ui.agent_chat_not_signed_in"), true),
@@ -510,6 +531,8 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         b.set_request_timeout(secs);
     }
     if let Some(id) = remove {
+        app.agent_chat.login_results.remove(&id);
+        app.agent_chat.settings.tests.remove(&id);
         app.preferences.agents.retain(|a| a.id != id);
         app.preferences.agent_permissions.remove(&id);
         app.preferences.agent_always_allow.remove(&id);
@@ -518,6 +541,10 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if app.agent_chat.agent_id.as_deref() == Some(id.as_str()) {
             app.agent_chat.agent_id = None;
+        }
+        // A removed agent is not missed at the next start: the default connects instead.
+        if app.preferences.agent_last == id {
+            app.preferences.agent_last.clear();
         }
     }
     if app.agent_chat.settings.tests.values().any(|t| matches!(t, Test::Running(_))) {
@@ -545,7 +572,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
         .show(ctx, true, |ui| {
             let Some(s) = app.agent_chat.settings.add.as_mut() else { return };
             if let Some(test) = s.test.as_mut() {
-                test.poll();
+                let _ = test.poll();
             }
             let kinds = [(AddKind::Installed, "ui.ai_add_installed"), (AddKind::Custom, "ui.ai_add_custom"), (AddKind::Api, "ui.ai_add_endpoint")];
             ui_kit::row(ui, tr("ui.ai_kind"), |ui| {
@@ -688,7 +715,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             let key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty());
             let result = match url {
                 Ok(_) => start_test(app, &e, key),
-                Err(err) => Test::Done(Err(err)),
+                Err(err) => Test::Done(Err(TestError::Other(err))),
             };
             if let Some(s) = app.agent_chat.settings.add.as_mut() {
                 s.test = Some(result);

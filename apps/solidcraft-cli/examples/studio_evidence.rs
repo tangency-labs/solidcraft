@@ -68,7 +68,7 @@ fn run() -> Result<(), String> {
     let generation_start = Instant::now();
     let (commands, command_timings) = session.run_script_timed(&recipe, false).map_err(|e| e.to_string())?;
     let generation_seconds = generation_start.elapsed().as_secs_f64();
-    let design_path = output.with_extension("solidcraft");
+    let design_path = output.with_extension(solidcraft_engine::io::DESIGN_EXT);
     session.execute("file.save_as", &json!({"path":design_path})).map_err(|e| e.to_string())?;
     let scene = solidcraft_engine::product_scene::extract(&session).map_err(|e| e.to_string())?;
     let bodies: Vec<Value> = scene

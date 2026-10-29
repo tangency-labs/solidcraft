@@ -39,6 +39,7 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
                     title: "parameters.set".into(),
                     kind: "other".into(),
                     status: Some(ToolStatus::Completed),
+                    input: None,
                     output: Some("plate_width = 80 mm".into()),
                 },
                 Item::Tool {
@@ -46,6 +47,7 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
                     title: "solid.fillet".into(),
                     kind: "other".into(),
                     status: Some(ToolStatus::Failed),
+                    input: None,
                     output: Some("The requested radius is too large. Try a smaller radius.".into()),
                 },
                 Item::Agent {

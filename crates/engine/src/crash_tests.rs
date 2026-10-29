@@ -22,7 +22,7 @@ fn child() {
     println!("FRESH {}", serde_json::to_string(&fresh).unwrap());
     // Dying while starting up, before any command: in a graphics driver, with or without what
     // a native crash handler caught.
-    if mode == "startup" || mode == "native" {
+    if mode == "startup" || mode == "native" || mode == "signal" {
         phase("window");
         phase("adapter request");
         set_environment("Renderer: Vulkan Test GPU (driver 1.2.3)");
@@ -36,16 +36,91 @@ fn child() {
             .unwrap();
             fs::write(dump, b"MDMP fake").unwrap();
         }
+        // What the macOS signal handler writes: no minidump, a walk up the stack instead (with
+        // a frame that isn't text, one far too long, and far too many).
+        if mode == "signal" {
+            let (info, _) = native_paths().unwrap();
+            let mut frames = vec![json!("libAGXMetalG13X.dylib+0x1A2B3C"), json!(42), json!("x".repeat(5000))];
+            frames.extend((0..100).map(|i| json!(format!("solidcraft+0x{i:X} frame{i}"))));
+            let v = json!({"signal": "SIGSEGV", "number": 11, "code": "SIGSEGV", "name": "segmentation fault",
+                "detail": "read of 0x0000000000000010 (SEGV_MAPERR)", "address": "0x0000000201A2B3C0",
+                "module": "/System/Library/Extensions/AGXMetalG13X.bundle/Contents/MacOS/libAGXMetalG13X.dylib",
+                "offset": "0x1A2B3C", "thread": 4242, "thread_name": "main", "pid": 77, "frames": frames});
+            fs::write(info, v.to_string()).unwrap();
+        }
         std::process::abort();
     }
     set_environment("Renderer: test");
     let mut s = Session { crash_journal: true, ..Default::default() };
     s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    if mode == "read_only" {
+        let state = STATE.get().unwrap();
+        let before = read_live_journal(state);
+        assert_eq!(before.base, json!("new"));
+        assert_eq!(before.replay, vec![json!({"command":"solid.box","params":{"length":10,"width":20,"height":30}})]);
+        let evaluations = s.evaluations;
+        s.execute("document.inspect", &json!({})).unwrap();
+        assert_eq!(s.evaluations, evaluations, "reading the design does not evaluate it");
+        let after = read_live_journal(state);
+        assert_eq!(after.base, before.base, "a read must not rebase the recovery journal");
+        assert_eq!(after.replay, before.replay, "the command that made the box must remain replayable");
+        assert!(after.in_flight.is_none());
+        end_session();
+        println!("READ_ONLY_JOURNAL_OK");
+        return;
+    }
     // Commands that only read are not kept.
     for _ in 0..50 {
         s.execute("document.inspect", &json!({})).unwrap();
     }
     match mode.as_str() {
+        "prepared" => {
+            let original = s.scratch();
+            s.execute("timeline.roll_to", &json!({"position":0})).unwrap();
+            let source = s.scratch();
+            let state = STATE.get().unwrap();
+            let journal_before_error = read_live_journal(state).replay;
+            let invalid = vec![(
+                "timeline.redefine".into(),
+                json!({"feature":1,"command":"solid.box","params":{"length":"missing_extent","width":20,"height":30}}),
+            )];
+            assert!(s.scratch().compute_editor_commands(&invalid, &source, original.scratch()).is_err());
+            assert_eq!(read_live_journal(state).replay, journal_before_error, "failed worker work never enters recovery");
+            let evaluations = s.evaluations;
+            s.restore_editor(&source, original).unwrap();
+            assert_eq!(s.evaluations, evaluations, "Cancel restores without evaluating");
+            assert_eq!(s.doc.marker, None);
+            let original = s.scratch();
+            s.execute("timeline.roll_to", &json!({"position":0})).unwrap();
+            let source = s.scratch();
+            let commands =
+                vec![("timeline.redefine".into(), json!({"feature":1,"command":"solid.box","params":{"length":12,"width":20,"height":30}}))];
+            let before = read_live_journal(state).replay;
+            let discarded = s.scratch().compute_editor_commands(&commands, &source, original.scratch()).unwrap();
+            drop(discarded);
+            assert_eq!(read_live_journal(state).replay, before, "discarded work never enters recovery");
+            let prepared = s.scratch().compute_editor_commands(&commands, &source, original).unwrap();
+            s.accept_commands(prepared).unwrap();
+            let journal = read_live_journal(state);
+            assert_eq!(journal.base, json!("new"), "accepted steps form one continuous replay");
+            assert_eq!(journal.replay.len(), before.len() + 2, "restore marker and redefine are recorded once");
+            let mut replay = Session::default();
+            for command in &journal.replay {
+                replay.execute(command["command"].as_str().unwrap(), &command["params"]).unwrap();
+            }
+            assert_eq!(replay.doc.marker, None);
+            let volume = replay.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+            assert!((volume - 7200.0).abs() < 0.001);
+            let path = state.dir.join("prepared-source.solidcraft");
+            s.execute("file.save_as", &json!({"path":path})).unwrap();
+            // A host can adopt an opened tab before any command has rebased its journal.
+            state.journal.lock().unwrap().last_doc = 0;
+            let commands = vec![("solid.box".into(), json!({"length":1,"width":1,"height":1}))];
+            let prepared = s.scratch().compute_commands(&commands, None).unwrap();
+            s.accept_commands(prepared).unwrap();
+            assert_eq!(read_live_journal(state).base, json!({"file":path}));
+            println!("PREPARED_JOURNAL_OK");
+        }
         "render" => {
             s.execute("render.settings.set", &json!({"name":"Studio","set":{"exposure_ev":2}})).unwrap();
             s.execute("render.settings.get", &json!({"name":"Studio"})).unwrap();
@@ -88,6 +163,12 @@ fn child() {
             s.execute("solid.box", &json!({"length": 4, "width": 4, "height": 4})).unwrap();
             let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
         }
+        // A new design and commands on it before the app's next frame (a control-channel batch).
+        "new" => {
+            s.execute("file.new", &json!({})).unwrap();
+            s.execute("solid.sphere", &json!({"diameter": 8})).unwrap();
+            let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
+        }
         _ => {}
     }
     end_session();
@@ -104,6 +185,22 @@ fn run_child(dir: &Path, mode: &str) -> (String, bool) {
         .output()
         .unwrap();
     (String::from_utf8_lossy(&out.stdout).into_owned(), out.status.success())
+}
+
+#[test]
+fn accepted_prepared_commands_replay_and_discarded_work_is_not_journaled() {
+    let directory = fresh_dir("prepared");
+    let (output, ok) = run_child(&directory, "prepared");
+    assert!(ok && output.contains("PREPARED_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
+fn a_read_only_command_keeps_the_replay_after_body_names_are_pinned() {
+    let directory = fresh_dir("read-only");
+    let (output, ok) = run_child(&directory, "read_only");
+    assert!(ok && output.contains("READ_ONLY_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
 }
 
 fn only_report(dir: &Path) -> (Summary, Value) {
@@ -135,6 +232,7 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert!(!bt.iter().any(|f| f.as_str().unwrap().contains("crash::hook")), "the hook's own frames are dropped: {bt:?}");
     assert_eq!(v["recent_commands"][0]["command"], "solid.box");
     // The design from before the command, and the command: together they reproduce the crash.
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.sc"), "{v}");
     let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
     assert_eq!(design.features.len(), 1);
     let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
@@ -254,6 +352,30 @@ fn activating_a_component_is_journaled_so_the_replay_builds_in_the_same_componen
     let _ = fs::remove_dir_all(&d);
 }
 
+/// A new design is journaled at once, not from the app's next frame: commands sent right after
+/// `file.new` are in the replay, and the report names the command in flight, not `file.new`.
+#[test]
+fn commands_right_after_a_new_design_are_journaled() {
+    let d = fresh_dir("new");
+    assert!(!run_child(&d, "new").1);
+    assert!(run_child(&d, "none").1);
+    let (s, report) = only_report(&d);
+    assert!(s.message.contains("while running `diagnostics.crash_test`"), "{}", s.message);
+    let replay: Value = serde_json::from_slice(&fs::read(report["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    let commands = replay["commands"].as_array().unwrap();
+    let ids: Vec<&str> = commands.iter().map(|c| c["command"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["solid.box", "file.new", "solid.sphere", "diagnostics.crash_test"]);
+    let mut recovered = Session::default();
+    for command in commands {
+        let id = command["command"].as_str().unwrap();
+        if id != "diagnostics.crash_test" {
+            recovered.execute(id, &command["params"]).unwrap();
+        }
+    }
+    assert_eq!(recovered.doc.features.len(), 1, "the sphere, on the new design");
+    let _ = fs::remove_dir_all(&d);
+}
+
 #[test]
 fn a_crash_while_starting_up_names_the_step_and_the_renderer() {
     let d = fresh_dir("startup");
@@ -295,6 +417,29 @@ fn a_native_crash_is_reported_with_the_module_the_step_and_the_minidump() {
     let _ = run_child(&d, "none");
     let (s, _) = only_report(&d);
     assert_eq!(s.count, 2);
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_crash_signal_is_reported_with_its_thread_and_its_walk_up_the_stack() {
+    let d = fresh_dir("signal");
+    let (_, ok) = run_child(&d, "signal");
+    assert!(!ok, "the child aborted");
+    let (_, ok) = run_child(&d, "none");
+    assert!(ok);
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "unclean_exit");
+    assert!(s.message.contains("segmentation fault (SIGSEGV) in libAGXMetalG13X.dylib+0x1A2B3C during startup (device creation"), "{}", s.message);
+    assert_eq!(v["native"]["signal"], "SIGSEGV");
+    let bt: Vec<&str> = v["backtrace"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+    assert_eq!(bt[0], "SIGSEGV segmentation fault (read of 0x0000000000000010 (SEGV_MAPERR))");
+    assert_eq!(bt[2], "on thread 4242 (main)");
+    assert_eq!(bt[3], "libAGXMetalG13X.dylib+0x1A2B3C");
+    // Frames that aren't text are dropped, long ones cut, and only so many kept.
+    assert_eq!(bt[4], format!("{}… (5000 bytes)", "x".repeat(300)));
+    assert_eq!(bt[5], "solidcraft+0x0 frame0");
+    assert_eq!(bt.len(), 3 + MAX_FRAMES, "{bt:?}");
+    assert!(v.get("minidump_path").is_none(), "{v}");
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -358,6 +503,17 @@ fn fake_report(dir: &Path, secs: u64, sig: u64, kind: &str) -> String {
     let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
     File::options().write(true).open(&f).unwrap().set_modified(t).unwrap();
     id
+}
+
+/// A report folder an earlier release wrote holds `design.solidcraft`: still found.
+#[test]
+fn a_report_from_an_earlier_release_still_finds_its_design() {
+    let d = fresh_dir("legacy-design");
+    let id = fake_report(&d, 1_700_000_000, 7, "command_panic");
+    fs::write(d.join(&id).join("design.solidcraft"), solidcraft_io::write_design(&solidcraft_doc::Document::default())).unwrap();
+    let v = read(&d, &id).unwrap();
+    assert!(v["design_path"].as_str().unwrap().ends_with("design.solidcraft"), "{v}");
+    let _ = fs::remove_dir_all(&d);
 }
 
 #[test]

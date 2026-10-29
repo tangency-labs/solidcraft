@@ -26,7 +26,7 @@ fn moved_colours_keep_the_values_they_were_drawn_with() {
         // The shader's former literals, bit for bit.
         assert_eq!(t.analysis.draft, [[0.20, 0.75, 0.30], [0.95, 0.80, 0.15], [0.85, 0.22, 0.20]]);
         assert_eq!(t.analysis.access, [[0.20, 0.75, 0.30], [0.85, 0.22, 0.20]]);
-        assert_eq!(t.analysis.curvature, [[0.15, 0.35, 0.95], [0.10, 0.80, 0.25], [0.90, 0.15, 0.10]]);
+        assert_eq!(t.analysis.curvature, [[0.08, 0.12, 0.45], [0.53, 0.51, 0.425], [0.98, 0.90, 0.40]]);
         assert!(!t.analysis.hatch);
         assert_eq!(t.logo, [Color32::from_rgb(96, 158, 236), Color32::from_rgb(58, 136, 238), Color32::from_rgb(55, 108, 197)]);
         assert_eq!(t.icons.marker_halo, Color32::from_black_alpha(150));
@@ -147,6 +147,8 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
+    ("render_ui/scene.rs", 2, "Browser appearance swatches: the colours are document data"),
+    ("render_workspace_library.rs", 1, "a catalog appearance preview: the colour is authored data"),
     ("render_workspace_materials.rs", 1, "an authored material swatch: the displayed colour is the material data"),
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
@@ -286,4 +288,35 @@ fn every_engine_colour_tag_is_placed() {
     let mut placed: Vec<&str> = MAPPED.iter().chain(NEUTRAL).copied().collect();
     placed.sort_unstable();
     assert_eq!(names, placed, "an engine colour tag must be mapped to a token in `viewport::sketch_color` or listed as neutral");
+}
+
+/// Preferences › Interface › Logo: the logo in shades of the theme's accent (the accent itself in
+/// the middle, a lighter and a darker face), in a built-in theme and a theme file alike, and back
+/// to the theme's own logo colours.
+#[test]
+fn the_logo_can_take_the_themes_accent() {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            crate::theme::set_logo_accent(false);
+        }
+    }
+    let _reset = Reset;
+    let mut h = crate::scenario::Harness::new();
+    for theme in ["dark", "gruvbox-dark"] {
+        h.call("ui.prefs", serde_json::json!({"theme": theme, "logo_accent": false}));
+        h.frames(1);
+        let own = Tokens::get();
+        h.call("ui.prefs", serde_json::json!({"logo_accent": true}));
+        h.frames(1);
+        let t = Tokens::get();
+        let accent = t.accent.to_opaque();
+        assert_eq!(t.logo[1], accent, "{theme}");
+        let lum = |c: Color32| u32::from(c.r()) + u32::from(c.g()) + u32::from(c.b());
+        assert!(lum(t.logo[0]) > lum(accent) && lum(t.logo[2]) < lum(accent), "{theme}: {:?}", t.logo);
+        assert_eq!(Tokens { logo: own.logo, ..t }, own, "{theme}: only the logo changes");
+        h.call("ui.prefs", serde_json::json!({"logo_accent": false}));
+        h.frames(1);
+        assert_eq!(Tokens::get().logo, own.logo, "{theme}: the theme's own again");
+    }
 }

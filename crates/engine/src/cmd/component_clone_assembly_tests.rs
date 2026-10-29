@@ -86,7 +86,7 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
     assert_eq!((a.joints[4].a.occurrence, a.joints[4].b.occurrence), (101, 102));
     assert_eq!(a.joints[4].values, source.assembly.joints[0].values);
     assert_eq!(a.joints[4].limits, source.assembly.joints[0].limits);
-    assert_eq!(a.joints[4].name, "Joint1 (copy)");
+    assert_eq!(a.joints[4].name, "Joint1 (2)");
     assert_eq!(a.origins.len(), 4);
     // Its x reference's face is the copy's too.
     assert!(matches!(&a.origins[3].origin.snap, Snap::FaceCenter { face: Some(face), x: Some(XRef::Face { face: x, .. }), .. }
@@ -191,7 +191,7 @@ fn second_copy_has_unique_names_and_keeps_global_contact_switches_unchanged() {
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &features, &BTreeMap::new()).unwrap();
     destination.occurrences.extend([201, 202].map(occurrence));
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 201), (2, 202)]), &features, &BTreeMap::new()).unwrap();
-    assert_eq!(destination.assembly.joints[6].name, "Joint1 (copy 2)");
+    assert_eq!(destination.assembly.joints[6].name, "Joint1 (3)");
     assert!(destination.assembly.contact_enabled && destination.assembly.contact_all);
     let names: BTreeSet<&str> = destination.assembly.origins.iter().map(|x| x.name.as_str()).collect();
     assert_eq!(names.len(), destination.assembly.origins.len());
@@ -228,16 +228,16 @@ fn paste_new_internal_motion_study_drives_only_the_copied_assembly_and_reopens()
     assert_eq!(s.doc.assembly.origins.len(), 2);
     assert_eq!(s.doc.assembly.contact_sets.len(), 2);
     assert_eq!(s.doc.assembly.exploded.len(), 2);
-    let copied_joint = s.doc.assembly.joints.iter().find(|j| j.name == "Rail (copy)").unwrap().id;
+    let copied_joint = s.doc.assembly.joints.iter().find(|j| j.name == "Rail (2)").unwrap().id;
     let copied_moving = s.doc.assembly.joints.iter().find(|j| j.id == copied_joint).unwrap().b.occurrence;
     assert_ne!(copied_moving, moving);
-    run(&mut s, "motion.play", json!({"study":"Travel (copy)","step":10}));
+    run(&mut s, "motion.play", json!({"study":"Travel (2)","step":10}));
     assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == source_joint).unwrap().values, vec![0.0]);
     assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == copied_joint).unwrap().values, vec![6.0]);
     assert_eq!(s.doc.occurrences.iter().find(|o| o.id == moving).unwrap().transform, original);
     let reopened = Document::from_json(&s.doc.to_json()).unwrap();
     assert_eq!(reopened.assembly, s.doc.assembly);
-    assert!(reopened.assembly.studies.iter().any(|m| m.name == "Travel (copy)" && m.keys[0].joint == copied_joint));
+    assert!(reopened.assembly.studies.iter().any(|m| m.name == "Travel (2)" && m.keys[0].joint == copied_joint));
 }
 
 /// An edge origin's edge, face and corner edge are the copy's too.

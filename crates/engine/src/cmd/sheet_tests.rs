@@ -787,6 +787,58 @@ fn unfold_cut_refold_and_convert() {
     assert!(t.execute("sheet.convert", &json!({"body": "Block", "face": [50, 30, 2.5]})).is_err());
 }
 
+/// A pattern of a cut made in the flat is a set of cuts in the flat, kept like the cut itself: in
+/// the flat pattern and refolded, its count following a parameter. A circular pattern too, and a
+/// pattern of a cut through a folded sheet. They were refused ("this sheet machining cannot be
+/// preserved in its flat material").
+#[test]
+fn a_pattern_of_a_cut_in_the_flat_is_kept_like_the_cut() {
+    let cutouts = |s: &mut Session| flat(s)["cutouts"].as_array().map(Vec::len);
+    let slot = |s: &mut Session| {
+        rectangle_tool(s, "Slot", [10.0, 10.0], [14.0, 30.0]);
+        run(s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "operation": "cut", "direction": "symmetric", "name": "Slot_Cut"}));
+    };
+    // A 4 x 20 slot through the 2.5 mm sheet.
+    let each = 4.0 * 20.0 * 2.5;
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "N", "expression": "3", "unit": ""}));
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    slot(&mut s);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Slot_Cut"], "dir1": [1, 0, 0], "count1": "N", "spacing1": 15}));
+    assert_eq!(cutouts(&mut s), Some(3));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), folded - 3.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 3.0 * each);
+    assert_eq!(cutouts(&mut s), Some(3));
+    run(&mut s, "parameters.change", json!({"name": "N", "expression": "5"}));
+    assert_eq!(cutouts(&mut s), Some(5));
+    assert!(rel(volume(&mut s), folded - 5.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 5.0 * each);
+
+    // Half a turn about the middle of the base: the copy lands at (66, 20) to (70, 40).
+    let mut s = Session::default();
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    slot(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Slot_Cut"], "axis": {"origin": [40, 25, 0], "dir": [0, 0, 1]}, "count": 2}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert_eq!(cutouts(&mut s), Some(2));
+    assert!(rel(volume(&mut s), folded - 2.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 2.0 * each);
+
+    // Through the base of the folded sheet, never unfolded.
+    let mut s = Session::default();
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    slot(&mut s);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Slot_Cut"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 15}));
+    assert_eq!(cutouts(&mut s), Some(4));
+    assert!(rel(volume(&mut s), folded - 4.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 4.0 * each);
+}
+
 /// A plate (15, -20) (0, 0) (-100, 0) (-100, -20) with a 20 mm inside flange on its slanted edge
 /// (2 mm sheet, R 2, K 0.5: the folded sheet holds its flat area times the thickness), unfolded,
 /// and a triangle cut out with a corner on the bend line: where the line ends on the plate's
@@ -2869,7 +2921,7 @@ fn fold_accepts_a_fixed_point_on_the_top_face() {
                               [440, 229.25], [440, 239.36], [30, 239.36], [30, 229.25], [1.7, 229.25]], "closed": true}),
         );
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "sheet.flange", json!({"base": {"sketch": "Blank"}, "rule": "SGCC 0.8"}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Blank", "rule": "SGCC 0.8"}));
         let flat = volume(&mut s);
         run(&mut s, "sheet.fold", json!({"points": [[30, 230.255, 508.2], [440, 230.255, 508.2]], "fixed": [420, 120, fixed_z], "flip": true}));
         assert!(rel(volume(&mut s), flat) < 1e-3, "fixed z {fixed_z}: a fold keeps the material");

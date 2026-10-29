@@ -9,7 +9,7 @@
   Per-machine install with a setup wizard: Welcome, install folder (Program Files\SolidCraft by
   default, remembered for upgrades), Ready, progress, and a Finish page with a ticked "Launch
   SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
-  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.solidcraft` (and of the pre-rename `.solvecraft`), and offers it under
+  THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft` and pre-rename `.solvecraft`), and offers it under
   "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
   Adapted from PhotoCraft's (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 -->
@@ -84,15 +84,17 @@
               Icon="SolidcraftIcon.exe" IconIndex="0" />
         </File>
 
-        <!-- .solidcraft: SolidCraft's own format; SolidCraft is its default app. -->
+        <!-- .sc: SolidCraft's own format; SolidCraft is its default app. -->
         <ProgId Id="Solidcraft.Design" Description="SolidCraft Design" Icon="SolidcraftExe" IconIndex="0">
-          <Extension Id="solidcraft" ContentType="application/x-solidcraft">
+          <Extension Id="sc" ContentType="application/x-solidcraft">
             <Verb Id="open" Command="Open" TargetFile="SolidcraftExe" Argument="&quot;%1&quot;" />
           </Extension>
         </ProgId>
-        <!-- Compatibility shim (docs/compatibility.md): designs saved before the rename open as
-             the same ProgId. Registered by hand: a second Extension under one ProgId would write
-             its open verb twice (WIX0091). -->
+        <!-- Compatibility shim (docs/compatibility.md): designs saved as .solidcraft (before .sc)
+             and as .solvecraft (before the rename) open as the same ProgId. Registered by hand: a
+             second Extension under one ProgId would write its open verb twice (WIX0091). -->
+        <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Value="Solidcraft.Design" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.solidcraft" Name="Content Type" Value="application/x-solidcraft" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.solvecraft" Value="Solidcraft.Design" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\.solvecraft" Name="Content Type" Value="application/x-solvecraft" Type="string" />
         <!-- STEP, IGES and meshes: offered under "Open with", never forced as the default. -->
@@ -108,6 +110,7 @@
         <!-- "Open with" app list and the Run dialog (Win+R "solidcraft"). -->
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe" Name="FriendlyAppName" Value="SolidCraft" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\shell\open\command" Value="&quot;[#SolidcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".sc" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solidcraft" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".solvecraft" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\solidcraft.exe\SupportedTypes" Name=".step" Value="" Type="string" />

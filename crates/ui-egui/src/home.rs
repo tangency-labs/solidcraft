@@ -1025,11 +1025,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 app.open_path_async(&path);
             }
         }),
-        FileAction::Import => app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb"], |app, path| {
-            if let Some(path) = path {
-                app.open_path_async(&path);
-            }
-        }),
+        FileAction::Import => {
+            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
+                if let Some(path) = path {
+                    app.open_path_async(&path);
+                }
+            })
+        }
         FileAction::Save => {
             app.home.open = false;
             crate::toolbar::save(app);
@@ -1490,6 +1492,17 @@ mod tests {
         assert!(!h.app.home.open);
     }
 
+    /// The entry that opens Preferences (Cmd / Ctrl + `,`) carries the window's own name
+    /// (#8318): beside the File menu's "Preferences…" it read "Settings" for the same window.
+    #[test]
+    fn the_entry_that_opens_preferences_carries_the_windows_name() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(0);
+        assert_eq!(crate::i18n::tr("home.settings"), crate::i18n::tr("ui.preferences"), "one name for the window");
+        click_file(&mut h, "home:settings");
+        assert!(h.app.prefs_window.open, "the entry opens Preferences");
+    }
+
     #[test]
     fn file_view_narrow_navigation_and_content_stay_inside_the_window() {
         for dark in [false, true] {
@@ -1546,7 +1559,7 @@ mod tests {
         h.frames(3);
         h.settle();
         assert!(!h.app.home.open);
-        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Copy.solidcraft").to_str());
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Copy.sc").to_str());
         assert_eq!(std::fs::read(source).unwrap(), bytes);
     }
 

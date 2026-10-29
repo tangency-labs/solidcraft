@@ -69,6 +69,11 @@ pub const SKETCH_LINES: Accept = 8192;
 pub const EXTERNAL_POINTS: Accept = 16384;
 /// Named construction points.
 pub const CONSTRUCTION_POINTS: Accept = 32768;
+/// What a 3D axis input takes (Revolve, Circular Pattern, Plane at Angle, Move's Rotate): an
+/// origin or construction axis, a straight sketch line, and an edge or face of the model that
+/// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
+/// only those, `Dialog::candidate_on`).
+pub const AXIS_PICKS: Accept = AXES | EDGES | FACES;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]
@@ -100,7 +105,7 @@ impl SelInput {
         let a = self.accept;
         match h {
             Hit::Profile { sketch, index } if a & PROFILES != 0 => Some(Sel::Profile { sketch: *sketch, index: *index }),
-            Hit::Edge { body, index, mid } if a & EDGES != 0 => Some(Sel::Edge { body: body.clone(), index: *index, point: *mid }),
+            Hit::Edge { body, index, mid, .. } if a & EDGES != 0 => Some(Sel::Edge { body: body.clone(), index: *index, point: *mid }),
             Hit::Face { body, index, point } if a & FACES != 0 || (a & PLANAR_FACES != 0 && planar(body, *index)) => {
                 Some(Sel::Face { body: body.clone(), index: *index, point: *point })
             }

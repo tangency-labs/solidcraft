@@ -69,7 +69,16 @@ const SURFACE: [&str; 8] = ["repeat", "delete", "surface.extrude", "surface.loft
 const SHEET_METAL: [&str; 8] = ["repeat", "delete", "sheet.flange", "sheet.hem", "sketch.create", "sheet.fold", "undo", "sheet.flat_pattern"];
 const PLASTIC: [&str; 8] = ["repeat", "delete", "plastic.boss", "plastic.lip", "sketch.create", "plastic.snap_fit", "undo", "plastic.rest"];
 const MESH: [&str; 8] = ["repeat", "delete", "file.save_mesh", "inspect.measure", "inspect.section", "solid.move", "undo", "inspect.interference"];
-const RENDER: [&str; 8] = ["render.start", "render.scene", "ui.fit", "ui.home", "ui.workspace.design", "repeat", "undo", "ui.clear"];
+const RENDER: [&str; 8] = [
+    "render.start",
+    "appearance.assign",
+    "render.lights.add",
+    "render.settings.set",
+    "render.camera.fit",
+    "render.compare",
+    "ui.workspace.design",
+    "undo",
+];
 
 impl Studio {
     pub(crate) const ALL: [Studio; 7] =
@@ -167,6 +176,17 @@ pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
         }),
         "delete" => Some(act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty())),
         "undo" => Some(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty())),
+        _ if crate::render_workspace::active(app)
+            && matches!(id, "appearance.assign" | "render.settings.set" | "render.camera.fit" | "render.compare") =>
+        {
+            let key = match id {
+                "appearance.assign" => "render.radial_assign",
+                "render.settings.set" => "render.radial_save",
+                "render.camera.fit" => "render.radial_fit",
+                _ => "render.radial_compare",
+            };
+            Some(cmd(app, id, app.tr(key)))
+        }
         _ => match ACTIONS.iter().find(|(i, _, _)| *i == id) {
             Some((i, label, icon)) => Some(act(i, label, icon)),
             None => solidcraft_engine::find_command(id).map(|spec| cmd(app, spec.id, short(spec.label))),
@@ -663,26 +683,37 @@ fn editor(app: &mut SolveApp, ctx: &egui::Context) {
                             let shown = label_of(&list[i]).unwrap_or_default();
                             ui.scope(|ui| {
                                 ui.set_max_width(200.0);
-                                crate::ui_kit::dropdown_menu(ui, ("gesture_tool", i), &shown, |ui| {
-                                    let filter_id = ui.id().with("filter");
-                                    let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
-                                    crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
-                                    ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
-                                    let needle = filter.trim().to_lowercase();
-                                    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                                        for (id, label) in &catalog {
-                                            if !needle.is_empty() && !label.to_lowercase().contains(&needle) && !id.to_lowercase().contains(&needle) {
-                                                continue;
+                                let picker = crate::ui_kit::dropdown_menu_with_close_behavior(
+                                    ui,
+                                    ("gesture_tool", i),
+                                    &shown,
+                                    egui::PopupCloseBehavior::CloseOnClickOutside,
+                                    |ui| {
+                                        let filter_id = ui.id().with("filter");
+                                        let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id).unwrap_or_default());
+                                        crate::ui_kit::text_field(ui, &mut filter, crate::i18n::tr_label("Filter…"));
+                                        ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+                                        let needle = filter.trim().to_lowercase();
+                                        egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                                            for (id, label) in &catalog {
+                                                if !needle.is_empty()
+                                                    && !label.to_lowercase().contains(&needle)
+                                                    && !id.to_lowercase().contains(&needle)
+                                                {
+                                                    continue;
+                                                }
+                                                let taken = list.contains(id) && *id != list[i];
+                                                let r =
+                                                    ui.add_enabled_ui(!taken, |ui| crate::ui_kit::list_picker(ui, id, label, *id == list[i])).inner;
+                                                if r.clicked() {
+                                                    op = Some(Op::Set(i, id.clone()));
+                                                    ui.close();
+                                                }
                                             }
-                                            let taken = list.contains(id) && *id != list[i];
-                                            let r = ui.add_enabled_ui(!taken, |ui| crate::ui_kit::list_picker(ui, id, label, *id == list[i])).inner;
-                                            if r.clicked() {
-                                                op = Some(Op::Set(i, id.clone()));
-                                                ui.close();
-                                            }
-                                        }
-                                    });
-                                });
+                                        });
+                                    },
+                                );
+                                crate::scenario::publish_target(&format!("gestures:tool:{i}"), picker.rect);
                             });
                             if crate::ui_kit::button(ui, "↑", crate::ui_kit::Button::Enabled(i > 0)).clicked() {
                                 op = Some(Op::Up(i));
@@ -983,6 +1014,60 @@ mod tests {
     }
 
     #[test]
+    fn tool_search_keeps_focus_after_click_and_closes_only_when_finished() {
+        use crate::scenario::{Harness, handle_at};
+        use crate::test_support::{click, pointer};
+        use serde_json::json;
+
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.mouse_gestures.set_tools(Studio::Part, vec!["undo".into(), "solid.extrude".into()]);
+        h.app.gesture.editor.open = true;
+        h.app.gesture.editor.studio = Studio::Part;
+        h.frames(6);
+        click(&mut h, "gestures:tool:0");
+        let search = h
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == "Filter…" => Some(text.pos + text.galley.size() * 0.5),
+                _ => None,
+            })
+            .expect("the picker displays its search field");
+        h.frame_with(pointer(search, true));
+        h.frame_with(pointer(search, false));
+        h.frames(2);
+        assert!(egui::Popup::is_any_open(&h.ctx), "releasing a click in the search field must keep the picker open");
+
+        h.step(&json!({"text":"solid.extrude"})).unwrap();
+        h.frames(2);
+        assert!(handle_at("dialog:list:solid.extrude").is_some(), "search matches command ids");
+        assert!(handle_at("dialog:list:solid.box").is_none(), "unmatched tools are filtered out");
+        click(&mut h, "dialog:list:solid.extrude");
+        assert!(egui::Popup::is_any_open(&h.ctx), "a tool already in another slot is disabled");
+        assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part), ["undo", "solid.extrude"]);
+
+        h.frame_with(pointer(search, true));
+        h.frame_with(pointer(search, false));
+        h.step(&json!({"key":"A","cmd":true})).unwrap();
+        h.step(&json!({"text":"Box"})).unwrap();
+        h.frames(2);
+        click(&mut h, "dialog:list:solid.box");
+        assert!(!egui::Popup::is_any_open(&h.ctx), "choosing a tool closes the picker");
+        assert_eq!(h.app.preferences.mouse_gestures.tools(Studio::Part), ["solid.box", "solid.extrude"]);
+
+        click(&mut h, "gestures:tool:0");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!egui::Popup::is_any_open(&h.ctx), "Escape dismisses the picker");
+        click(&mut h, "gestures:tool:0");
+        h.frame_with(pointer(egui::pos2(20.0, 400.0), true));
+        h.frame_with(pointer(egui::pos2(20.0, 400.0), false));
+        h.frames(2);
+        assert!(!egui::Popup::is_any_open(&h.ctx), "clicking outside dismisses the picker");
+    }
+
+    #[test]
     fn the_editor_changes_how_many_tools_and_where_they_sit() {
         let mut list: Vec<String> = ["solid.extrude", "undo", "solid.hole"].iter().map(|s| s.to_string()).collect();
         assert!(apply(&mut list, Op::Down(0)));
@@ -1020,7 +1105,9 @@ mod tests {
         assert!(catalog.iter().all(|(id, label)| label_of(id).as_deref() == Some(label.as_str())));
         for studio in Studio::ALL {
             for id in studio.defaults() {
-                assert!(catalog.iter().any(|(i, _)| i == id), "{studio:?}: `{id}` is not offered in the editor");
+                // Shipped rings also contain planned actions and Render editors without toolbar destinations.
+                let offered = solidcraft_engine::find_command(id).is_none_or(|spec| spec.planned.is_none() && !spec.tab.is_empty());
+                assert_eq!(catalog.iter().any(|(i, _)| i == id), offered, "{studio:?}: `{id}` must follow the catalog's toolbar-tool policy");
             }
         }
     }

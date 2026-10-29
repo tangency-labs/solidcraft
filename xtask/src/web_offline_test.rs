@@ -199,14 +199,14 @@ const API_TEST: &str = r#"(async () => {
     const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
     await app.request('ui.click', {x, y});
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
-    await app.execute('file.save', {path: '/upload/linked-part.solidcraft'});
+    await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
-    const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.solidcraft'});
-    await app.execute('file.save', {path: '/opfs/linked-assembly.solidcraft'});
+    const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.sc'});
+    await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
     const links = await app.execute('component.links');
     check(links.links[0].found === true, 'linked part is found in browser storage');
-    check(links.links[0].path === '../upload/linked-part.solidcraft', 'assembly stores a relative link');
-    check(links.links[0].file === '/upload/linked-part.solidcraft', 'relative link resolves to a browser storage key');
+    check(links.links[0].path === '../upload/linked-part.sc', 'assembly stores a relative link');
+    check(links.links[0].file === '/upload/linked-part.sc', 'relative link resolves to a browser storage key');
     await app.request('ui.menu', {x: 200, y: 300, target: {type: 'occurrence', path: [linked.occurrence]}});
     let menu;
     for (let frame = 0; frame < 120; frame++) {

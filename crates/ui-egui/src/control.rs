@@ -223,15 +223,31 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
         return crate::view_pick::pick_command(app, &params);
     }
     let r = app.run(id, params);
+    // Update Links in a part edited in place reads the assembly around it too, as its button does.
+    if r.is_ok() && is_command(Some(id), "component.update_links") && app.edit_in_place.active.is_some() {
+        crate::edit_in_place::refresh(app);
+    }
     if r.is_ok()
         && !matches!(
             id,
-            "view.layout"
+            "view.fit"
+                | "view.home"
+                | "view.tool"
+                | "view.spin"
+                | "view.visual_style"
+                | "view.grid"
+                | "view.ground_shadow"
+                | "view.navigation_bar"
+                | "view.next_tab"
+                | "view.previous_tab"
+                | "view.layout"
                 | "view.navigate"
                 | "view.ambient_occlusion"
                 | "view.perspective"
+                | "view.angle_readout"
                 | "view.graphics_preset"
                 | "view.history_layout"
+                | "timeline.play"
                 | "browser.expand_all"
                 | "browser.collapse_all"
         )
@@ -257,11 +273,28 @@ const MAX_BATCH: usize = 10_000;
 /// Commands that load a file: through `engine.execute` they go to the app's file loader
 /// (`file_load::control`: off the window thread, with progress and Cancel), which a batch would
 /// bypass.
-const LOADS_A_FILE: [&str; 3] = ["doc.open", "file.insert_step", "file.insert_mesh"];
+const LOADS_A_FILE: [&str; 4] = ["doc.open", "file.insert_step", "file.insert_mesh", "pointcloud.insert"];
 
-/// Why `engine.batch` refuses these steps before running any: a step loads a file (send such
-/// steps one by one).
+/// Edit in Place, Finish Edit and the next or previous tab go to another design's tab: a batch's
+/// rollback, or a script's later steps, would land in the wrong design.
+const SWITCHES_DESIGN: [&str; 4] = ["component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab"];
+
+/// `command` names the command `id`, in any of the spellings the engine takes.
+fn is_command(command: Option<&str>, id: &str) -> bool {
+    command.and_then(solidcraft_engine::find_command).is_some_and(|spec| spec.id == id)
+}
+
+/// The command of `step` when it goes to another design's tab.
+fn switches_design(step: &Value) -> Option<&'static str> {
+    SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
+}
+
+/// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
+/// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
+    if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
+        return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
+    }
     let (i, c) = steps.iter().enumerate().find_map(|(i, step)| command(step).filter(|c| LOADS_A_FILE.contains(c)).map(|c| (i, c)))?;
     Some(format!("engine.batch unavailable: step {i} ({c}) loads a file"))
 }
@@ -286,6 +319,10 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     // batch: `agent_cursor::intercept`.)
     if let Some(why) = batch_refusal(steps) {
         return err(why);
+    }
+    // A step the batch would refuse at its turn refuses it now, before anything runs (#5853).
+    if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
+        return ok(refusal.reply(steps.len()));
     }
     let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let profile = p.get("profile").and_then(Value::as_bool).unwrap_or(false);
@@ -354,12 +391,21 @@ fn with_timings(mut reply: Value, timed: bool, rows: Vec<Value>, total_ms: f64) 
 /// file the request reaches must lie inside them (docs/mcp.md). `None`: it names none.
 pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathScope>, String> {
     let Some(allowed) = params.get("allow_paths") else { return Ok(None) };
-    let Some(roots) = allowed.as_array().and_then(|a| a.iter().map(|r| r.as_str().map(std::path::PathBuf::from)).collect::<Option<Vec<_>>>()) else {
+    let folders = |v: &Value| v.as_array().and_then(|a| a.iter().map(|r| r.as_str().map(std::path::PathBuf::from)).collect::<Option<Vec<_>>>());
+    let Some(roots) = folders(allowed) else {
         return Err("`allow_paths` must be a list of folders".into());
+    };
+    // The folders the agent opened or saved a design in (#7181), judged as the open design's is.
+    let designs = match params.get("design_folders") {
+        None => Vec::new(),
+        Some(v) => folders(v)
+            .filter(|d| d.len() <= vfs::MAX_DESIGN_FOLDERS)
+            .ok_or_else(|| format!("`design_folders` must be a list of at most {} folders", vfs::MAX_DESIGN_FOLDERS))?,
     };
     // Plus the app's own recovery folder and, when it is a safe one, the open design's folder.
     let roots = roots.into_iter().chain(solidcraft_engine::recovery::default_dir());
-    Ok(Some(vfs::PathScope::new(roots).with_design(app.session.path.as_deref())))
+    let scope = designs.iter().fold(vfs::PathScope::new(roots), |s, d| s.with_design_folder(d));
+    Ok(Some(scope.with_design(app.session.path.as_deref())))
 }
 
 /// What a picture of the view shows: the model as the window shows it (theme and colour vision
@@ -408,6 +454,7 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
     let mut p = req.params.clone();
     if let Some(o) = p.as_object_mut() {
         o.remove("allow_paths");
+        o.remove("design_folders");
     }
     vfs::scoped(Some(scope), || dispatch(app, ctx, &req.method, &p))
 }
@@ -418,6 +465,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
     let f = |k: &str| p.get(k).and_then(Value::as_f64).filter(|x| x.is_finite());
     let b = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
     match method {
+        "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => {
             if let Some(workspace) = s("workspace") {
                 if !matches!(workspace, "design" | "render") {
@@ -452,6 +500,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "engine.script" => {
             let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
+            if let Some(c) = steps.and_then(|steps| steps.iter().find_map(switches_design)) {
+                return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
+            }
             let mut replaced = false;
             let r = app
                 .session
@@ -464,6 +515,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             // A successful replacement still happened if a later script step failed.
             if replaced {
                 crate::documents::reset_chat(app);
+                app.edit_in_place.active = None;
             }
             app.follow_view_request(false);
             wrap(r)
@@ -574,8 +626,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                             v.hidden_folders.push(SKETCHES_FOLDER.to_string());
                         }
                     }
-                    if (u.tab == "RENDER") != crate::render_workspace::active(app)
-                        && let Err(e) = crate::render_workspace::enter(app, u.tab == "RENDER")
+                    if crate::workspace::render_tab(&u.tab) != crate::render_workspace::active(app)
+                        && let Err(e) = crate::render_workspace::enter(app, crate::workspace::render_tab(&u.tab))
                     {
                         return err(e);
                     }
@@ -726,6 +778,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
             "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),
             "dimensions": crate::dim_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
+            "shown_dimensions": crate::dim_view::model_drawn()
+                .into_iter()
+                .map(|(sketch, id, p)| json!({"sketch": sketch, "id": id, "x": p.x, "y": p.y}))
+                .collect::<Vec<_>>(),
             "dimension_selected": crate::dim_view::selected(app),
             "dimension_editing": crate::dim_view::editing(),
         })),
@@ -1136,19 +1192,31 @@ fn occurrence(s: &solidcraft_engine::Session, v: &Value) -> Result<u64, String> 
         .ok_or_else(|| format!("no occurrence `{key}`"))
 }
 
-/// Save a screenshot PNG.
+/// Save a screenshot PNG; without a `path`, in the temporary folder ([`vfs::temp_dir`], which in
+/// the browser keeps it in memory: std's would panic there).
 pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>) -> Value {
+    let [w, h] = image.size;
+    let path = path.map(str::to_string).unwrap_or_else(|| vfs::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
+    match write_screenshot(image, &path) {
+        Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
+        Err(e) => json!({"ok": false, "error": e}),
+    }
+}
+
+/// Write `image` to `path` in the format its extension names (a PNG for `.png`), through
+/// [`vfs`] like every other save: the disk natively, a download or browser storage in the web
+/// app (#7192).
+pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(), String> {
     let [w, h] = image.size;
     let mut buf = Vec::with_capacity(w * h * 4);
     for c in &image.pixels {
         buf.extend_from_slice(&c.to_array());
     }
-    let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, buf) else { return json!({"ok": false, "error": "bad image"}) };
-    let path = path.map(str::to_string).unwrap_or_else(|| std::env::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
-    match img.save(&path) {
-        Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
-        Err(e) => json!({"ok": false, "error": e.to_string()}),
-    }
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, buf).ok_or("bad image")?;
+    let format = image::ImageFormat::from_path(path).map_err(|e| e.to_string())?;
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut bytes, format).map_err(|e| e.to_string())?;
+    vfs::write(path, bytes.get_ref()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1158,6 +1226,29 @@ mod tests {
 
     use super::*;
     use crate::Services;
+
+    #[test]
+    fn viewport_status_fixture_rejects_hostile_presets_without_mutating_the_session() {
+        let mut h = crate::scenario::Harness::new();
+        let revision = h.app.session.revision;
+        for params in [Value::Null, json!([]), json!({}), json!({"preset":false}), json!({"preset":[]}), json!({"preset":"unknown"})] {
+            let reply = h.call("ui.status_fixture", params);
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.session.revision, revision);
+        }
+        let reply = h.call("ui.status_fixture", json!({"preset":"mode"}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.session.analysis.is_none());
+        for preset in ["off", "mode"] {
+            h.call("ui.status_fixture", json!({"preset":preset}));
+            h.call("ui.resize", json!({"width":200,"height":600}));
+            h.frames(4);
+            assert_eq!(h.app.session.revision, revision);
+            h.call("ui.resize", json!({"width":1400,"height":900}));
+            h.frames(4);
+        }
+    }
 
     #[test]
     fn touchpad_automation_moves_with_modifiers_and_releases_without_buttons() {
@@ -1436,17 +1527,21 @@ mod tests {
     }
 
     /// `ui.render` with extra request parameters.
-    fn render_with(app: &mut SolveApp, path: &std::path::Path, extra: serde_json::Value) -> Vec<u8> {
+    /// A `ui.render` of `app` to `path` with `extra` parameters: the PNG, and what drew it.
+    fn render_with(app: &mut SolveApp, path: &std::path::Path, extra: serde_json::Value) -> (Vec<u8>, String) {
         let mut params = json!({"path": path.to_string_lossy(), "width": 200, "height": 140});
         for (k, v) in extra.as_object().into_iter().flatten() {
             params[k.as_str()] = v.clone();
         }
         let (req, _rx) = ControlRequest::new("ui.render", params);
-        match handle(app, &crate::fonts::test_context(), &req) {
-            Outcome::Done(v) => assert_eq!(v["ok"], true, "{v}"),
+        let renderer = match handle(app, &crate::fonts::test_context(), &req) {
+            Outcome::Done(v) => {
+                assert_eq!(v["ok"], true, "{v}");
+                v["result"]["renderer"].as_str().or(v["renderer"].as_str()).unwrap_or("unknown").to_string()
+            }
             Outcome::Screenshot { .. } => panic!("ui.render took a screenshot"),
-        }
-        std::fs::read(path).unwrap()
+        };
+        (std::fs::read(path).unwrap(), renderer)
     }
 
     /// A model render draws the ground grid (it cuts through a part that straddles Z 0) and the
@@ -1464,7 +1559,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-render-guides-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("shot.png");
-        let shot = |app: &mut SolveApp, extra: serde_json::Value| render_with(app, &path, extra);
+        // Every picture is compared byte for byte, so each must come from the same renderer.
+        let drawn_by = std::cell::RefCell::new(Vec::new());
+        let shot = |app: &mut SolveApp, extra: serde_json::Value| {
+            let (png, renderer) = render_with(app, &path, extra);
+            drawn_by.borrow_mut().push(renderer);
+            png
+        };
         let all = shot(&mut app, json!({}));
         let no_grid = shot(&mut app, json!({"grid": false}));
         let no_axes = shot(&mut app, json!({"axes": false}));
@@ -1475,18 +1576,38 @@ mod tests {
                 assert!(a != b, "two of the pictures are the same");
             }
         }
+        // A picture that is not the one expected: both are kept, with how much they differ, so a
+        // failure that does not come back on a rerun still leaves its evidence.
+        let same = |step: &str, got: Vec<u8>, want: &Vec<u8>| {
+            if got == *want {
+                return;
+            }
+            let kept = std::env::temp_dir().join(format!("solidcraft-render-guides-failed-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&kept);
+            let _ = std::fs::write(kept.join(format!("{step}-got.png")), &got);
+            let _ = std::fs::write(kept.join(format!("{step}-want.png")), want);
+            let differ = match (image::load_from_memory(&got), image::load_from_memory(want)) {
+                (Ok(a), Ok(b)) if a.width() == b.width() && a.height() == b.height() => {
+                    let (a, b) = (a.to_rgba8(), b.to_rgba8());
+                    format!("{} of {} pixels differ", a.pixels().zip(b.pixels()).filter(|(x, y)| x != y).count(), a.width() * a.height())
+                }
+                (Ok(a), Ok(b)) => format!("{}×{} against {}×{}", a.width(), a.height(), b.width(), b.height()),
+                _ => "a picture does not decode".to_string(),
+            };
+            panic!("{step}: not the picture expected ({differ}; drawn by {:?}); both kept in {}", drawn_by.borrow(), kept.display());
+        };
         // With the Grid switch off the render has no grid, and `grid: true` brings it back.
         app.ui.show_grid = false;
-        assert!(shot(&mut app, json!({})) == no_grid);
-        assert!(shot(&mut app, json!({"grid": true})) == all);
+        same("grid-off", shot(&mut app, json!({})), &no_grid);
+        same("grid-off-asked-on", shot(&mut app, json!({"grid": true})), &all);
         // With the Origin off too it has neither; `axes: true` puts the axes back.
         app.set_origin_shown(false);
-        assert!(shot(&mut app, json!({})) == bare);
-        assert!(shot(&mut app, json!({"axes": true})) == no_grid);
+        same("both-off", shot(&mut app, json!({})), &bare);
+        same("both-off-axes-asked-on", shot(&mut app, json!({"axes": true})), &no_grid);
         // The Origin and the Grid back on: the first picture again.
         app.ui.show_grid = true;
         app.set_origin_shown(true);
-        assert!(shot(&mut app, json!({})) == all);
+        same("both-on-again", shot(&mut app, json!({})), &all);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1577,7 +1698,8 @@ mod tests {
         assert_eq!(rows[1]["index"], 1);
         assert!(rows[1]["profile"]["boolean_ms"].as_f64().is_some_and(|ms| ms > 0.0), "{v}");
         assert!(v["result"]["total_ms"].as_f64().is_some(), "{v}");
-        let v = batch(&mut h, json!({"timings": true, "commands": [{"command": "NoSuchCommand"}]}));
+        // A step that fails at its turn is timed too.
+        let v = batch(&mut h, json!({"timings": true, "commands": [{"command": "solid.extrude", "params": {"distance": "bogus +"}}]}));
         assert_eq!(v["result"]["timings"].as_array().map(Vec::len), Some(1), "{v}");
         assert!(v["result"]["timings"][0].get("profile").is_none(), "{v}");
         let v = batch(&mut h, json!({"commands": [{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}]}));
@@ -1614,7 +1736,8 @@ mod tests {
             &mut h,
             json!({"rollback": false, "commands": [
                 {"command": "solid.sphere", "params": {"radius": 3}},
-                {"command": "NoSuchCommand"},
+                // Fails at its turn (an unknown command would be refused before the first step, #5853).
+                {"command": "solid.extrude", "params": {"distance": "bogus +"}},
             ]}),
         );
         assert_eq!(v["result"]["failed"]["index"], 1, "{v}");
@@ -1628,6 +1751,45 @@ mod tests {
         let v = batch(&mut h, json!({"commands": [{"params": {}}]}));
         assert_eq!(v["result"]["failed"]["index"], 0, "{v}");
         assert!(v["result"]["failed"]["error"].as_str().is_some_and(|e| e.contains("missing `command`")), "{v}");
+    }
+
+    /// #5853: a step the batch would refuse at its turn (an unknown command; with strict
+    /// parameter checking, a call that breaks its command's contract) refuses the batch before
+    /// its first step runs, however late the step is.
+    #[test]
+    fn engine_batch_refuses_a_bad_step_before_the_first_runs() {
+        let mut h = crate::scenario::Harness::new();
+        let before = inspect(&mut h);
+        let v = batch(
+            &mut h,
+            json!({"commands": [
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+                {"command": "solid.sphere", "params": {"radius": 3, "center": [50, 0, 0]}},
+                {"command": "solid.extrud", "params": {"distance": 5}},
+            ]}),
+        );
+        assert_eq!(v["ok"], true, "{v}");
+        let r = &v["result"];
+        assert_eq!((r["completed"].clone(), r["failed"]["index"].clone(), r["undone"].clone()), (json!(0), json!(2), json!(0)), "{v}");
+        assert!(r["failed"]["error"].as_str().is_some_and(|e| e.starts_with("unknown command `solid.extrud`") && e.contains("solid.extrude")), "{v}");
+        assert_eq!(r["not_run"], json!([0, 1, 2]), "{v}");
+        let after = inspect(&mut h);
+        assert_eq!((after["bodies"].clone(), after["undo"].clone()), (before["bodies"].clone(), before["undo"].clone()), "nothing ran: {after}");
+        // Strict checking refuses a broken contract up front too; off, the step runs (and the
+        // box command reads what it knows).
+        h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+        let steps = json!([
+            {"command": "solid.sphere", "params": {"radius": 3}},
+            {"command": "solid.box", "params": {"lenght": 10, "width": 10, "height": 10}},
+        ]);
+        let v = batch(&mut h, json!({"commands": steps}));
+        assert_eq!((v["result"]["completed"].clone(), v["result"]["failed"]["index"].clone()), (json!(0), json!(1)), "{v}");
+        assert!(v["result"]["failed"]["error"].as_str().is_some_and(|e| e.contains("lenght")), "{v}");
+        assert_eq!(inspect(&mut h)["bodies"], before["bodies"], "nothing ran");
+        // `view.pick` is answered by the app, outside the command registry: not refused.
+        h.app.session.param_check = solidcraft_engine::schema::ParamCheck::Off;
+        let v = batch(&mut h, json!({"commands": [{"command": "view.pick", "params": {"x": 1, "y": 1}}]}));
+        assert!(!v["result"]["failed"]["error"].as_str().is_some_and(|e| e.starts_with("unknown command")), "{v}");
     }
 
     #[test]
@@ -1660,7 +1822,7 @@ mod tests {
     #[test]
     fn engine_batch_reports_whether_it_rolled_back() {
         let mut h = crate::scenario::Harness::new();
-        let steps = json!([{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}, {"command": "NoSuchCommand"}]);
+        let steps = json!([{"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}, {"command": "solid.extrude", "params": {"distance": "bogus +"}}]);
         let v = batch(&mut h, json!({"commands": steps.clone()}));
         assert_eq!((&v["result"]["rolled_back"], &v["result"]["undone"]), (&json!(true), &json!(1)), "{v}");
         let v = batch(&mut h, json!({"commands": steps, "rollback": false}));
@@ -1780,6 +1942,81 @@ mod tests {
         assert_eq!(call("engine.execute", export(at(&out, "a.step")), false)["ok"], true, "without allow_paths: unconfined");
         let bad = call("engine.execute", json!({"command": "file.new", "allow_paths": "/"}), false);
         assert!(bad["error"].as_str().is_some_and(|e| e.contains("allow_paths")), "{bad}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A screenshot is written through `vfs`, as other saves are, so the web app can hand it out
+    /// as a download (#7192). On the disk it is the same PNG with the same reply. A folder scope
+    /// active while it is written refuses a path outside it, which shows the write goes through
+    /// `vfs`. (`ui.screenshot` checks an agent's folders when the request arrives; the write comes
+    /// in a later frame, outside the request's scope, as before.)
+    #[test]
+    fn screenshots_are_written_through_vfs_with_the_same_reply() {
+        let base = vfs::temp_dir().join(format!("solidcraft-shot-scope-{}", std::process::id()));
+        let (root, out) = (base.join("root"), base.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        let image = egui::ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]);
+        let path = root.join("shot.png").to_string_lossy().to_string();
+        assert_eq!(save_screenshot(&image, Some(&path)), json!({"ok": true, "result": {"path": path, "width": 4, "height": 3}}));
+        let png = image::load_from_memory_with_format(&std::fs::read(&path).unwrap(), image::ImageFormat::Png).unwrap().into_rgba8();
+        assert_eq!((png.dimensions(), png.get_pixel(0, 0).0), ((4, 3), [0, 255, 0, 255]));
+        let outside = out.join("shot.png").to_string_lossy().to_string();
+        let v = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || save_screenshot(&image, Some(&outside)));
+        assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("outside the folders this agent may use")), "{v}");
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing written outside");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Without a `path`, a screenshot goes to `vfs::temp_dir`: in the web app a folder kept in
+    /// memory, where std's temporary folder panics (#7192).
+    #[test]
+    fn a_screenshot_without_a_path_goes_to_the_vfs_temporary_folder() {
+        let image = egui::ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]);
+        let path = vfs::temp_dir().join("solidcraft-shot.png");
+        let reply = save_screenshot(&image, None);
+        assert_eq!(reply, json!({"ok": true, "result": {"path": path.to_string_lossy(), "width": 4, "height": 3}}));
+        assert!(path.is_file());
+    }
+
+    /// A request's `design_folders` (where its MCP agent opened or saved a design, #7181) count
+    /// as the open design's folder does: their files are reachable, their hidden files and the
+    /// folders beside them are not, and a list that is not one of at most
+    /// `vfs::MAX_DESIGN_FOLDERS` folders is refused.
+    #[test]
+    fn a_requests_design_folders_count_as_the_open_designs() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let mut app = SolveApp::new(s, Services::default());
+        let base = vfs::temp_dir().join(format!("solidcraft-control-design-folders-{}", std::process::id()));
+        let (root, proj, out) = (base.join("root"), base.join("proj"), base.join("out"));
+        for d in [&root, &proj.join(".git"), &out] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let at = |d: &std::path::Path, f: &str| d.join(f).to_string_lossy().to_string();
+        let mut call = |path: String, designs: Value| {
+            let params =
+                json!({"command": "file.export", "params": {"path": path}, "allow_paths": [root.to_string_lossy()], "design_folders": designs});
+            let (req, _rx) = ControlRequest::new("engine.execute", params);
+            match handle(&mut app, &crate::fonts::test_context(), &req) {
+                Outcome::Done(v) => v,
+                Outcome::Screenshot { path } => json!({"ok": true, "screenshot": path}),
+            }
+        };
+        let designs = json!([proj.to_string_lossy()]);
+        assert_eq!(call(at(&proj, "a.step"), designs.clone())["ok"], true);
+        for p in [at(&proj, ".secret.step"), at(&proj, ".git/a.step"), at(&out, "a.step")] {
+            let v = call(p.clone(), designs.clone());
+            assert!(v["ok"] == false && v.to_string().contains("outside the folders this agent may use"), "{p}: {v}");
+        }
+        assert!(!proj.join(".secret.step").exists() && !proj.join(".git/a.step").exists());
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing written beside it");
+        let too_many = json!(vec![proj.to_string_lossy(); vfs::MAX_DESIGN_FOLDERS + 1]);
+        for bad in [json!(proj.to_string_lossy()), json!([1]), too_many] {
+            let v = call(at(&proj, "b.step"), bad);
+            assert!(v["error"].as_str().is_some_and(|e| e.contains("design_folders")), "{v}");
+        }
+        assert!(!proj.join("b.step").exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 

@@ -45,8 +45,9 @@ fn texture(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, size: [u32; 2]
 }
 
 impl Resources {
-    pub fn new(device: &wgpu::Device, uniform: &wgpu::BindGroupLayout, module: &wgpu::ShaderModule, reversed: bool) -> Self {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    /// The layout of the depth map's bind group, which the lit pipelines' layout includes.
+    pub fn layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_ao_depth"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -58,7 +59,18 @@ impl Resources {
                 },
                 count: None,
             }],
-        });
+        })
+    }
+
+    /// The prepass's pipelines and a 1 x 1 stand-in map, bound with `layout` ([`Resources::layout`]).
+    pub fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        uniform: &wgpu::BindGroupLayout,
+        module: &wgpu::ShaderModule,
+        reversed: bool,
+    ) -> Self {
+        let layout = layout.clone();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sc_ao_prepass"),
             bind_group_layouts: &[Some(uniform)],
@@ -116,7 +128,7 @@ impl Resources {
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        uniform: &wgpu::BindGroup,
+        binds: [&wgpu::BindGroup; 2],
         radius: f32,
         size_px: [f32; 2],
         reversed: bool,
@@ -152,8 +164,8 @@ impl Resources {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_bind_group(0, uniform, &[]);
-        for batch in batches {
+        for (batch, bind) in batches.into_iter().zip(binds) {
+            pass.set_bind_group(0, bind, &[]);
             pass.set_pipeline(&self.pipeline);
             if let Some(tris) = &batch.tris {
                 for (buffer, count) in &tris.parts {
@@ -161,15 +173,21 @@ impl Resources {
                     pass.draw(0..*count, 0..1);
                 }
             }
+            // The depth prepass is left out of the performance overlay's counts, as before.
+            let uncounted = super::Tally::default();
+            // The blocks' opaque triangles, for the same depth.
+            for key in &batch.block_order {
+                if let Some(block) = batch.blocks.get(key) {
+                    block.draw(&mut pass, super::TriClass::Opaque, &uncounted);
+                }
+            }
             pass.set_pipeline(&self.planned_pipeline);
-            for draw in &batch.planned {
+            for draw in batch.planned.iter().filter(|d| d.class == super::TriClass::Opaque) {
                 pass.set_vertex_buffer(0, draw.mesh.vertices.slice(..));
                 pass.set_vertex_buffer(1, draw.colors.slice(..));
                 pass.set_index_buffer(draw.mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..draw.mesh.index_count, 0, 0..1);
             }
-            // The depth prepass is left out of the performance overlay's counts, as before.
-            let uncounted = super::Tally::default();
             for draw in batch.instanced.iter().filter(|d| d.look == super::InstanceLook::Opaque) {
                 draw.draw(&mut pass, &self.instanced_pipeline, &self.instanced_flat_pipeline, &uncounted);
             }

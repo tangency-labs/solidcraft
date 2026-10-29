@@ -29,6 +29,11 @@ fn hole(x0: i16, y0: i16, x1: i16, y1: i16) -> Vec<(i16, i16)> {
 /// A TrueType font of 1000 units per em with these glyphs (and an empty `.notdef`), named `family`. It has
 /// no OS/2 table, so it has no capital height of its own.
 fn build_font(family: &str, glyphs: &[Glyph]) -> Vec<u8> {
+    build_font_with(family, glyphs, [800, -200, 0], &[])
+}
+
+/// The same font with explicit hhea ascent, descent and line gap, and format-12 characters mapped to glyph zero.
+fn build_font_with(family: &str, glyphs: &[Glyph], metrics: [i16; 3], notdef: &[char]) -> Vec<u8> {
     fn u16s(out: &mut Vec<u8>, values: &[u16]) {
         values.iter().for_each(|v| out.extend(v.to_be_bytes()));
     }
@@ -72,7 +77,8 @@ fn build_font(family: &str, glyphs: &[Glyph]) -> Vec<u8> {
     u16s(&mut head, &[0, 0, 1000, 1000, 0, 8, 2, 1, 0]); // box, style, smallest size, direction, long loca, format
     let mut hhea = Vec::new();
     u32s(&mut hhea, &[0x0001_0000]);
-    u16s(&mut hhea, &[800, (-200i16) as u16, 0, 1000, 0, 0, 1000, 1, 0, 0, 0, 0, 0, 0, 0, count]);
+    u16s(&mut hhea, &metrics.map(|value| value as u16));
+    u16s(&mut hhea, &[1000, 0, 0, 1000, 1, 0, 0, 0, 0, 0, 0, 0, count]);
     let mut maxp = Vec::new();
     u32s(&mut maxp, &[0x0001_0000]);
     u16s(&mut maxp, &[count]);
@@ -83,7 +89,9 @@ fn build_font(family: &str, glyphs: &[Glyph]) -> Vec<u8> {
     }
     // cmap: one format 12 subtable, a group per character.
     let mut chars: Vec<(u32, u32)> = glyphs.iter().enumerate().map(|(i, g)| (g.ch as u32, i as u32 + 1)).collect();
+    chars.extend(notdef.iter().map(|ch| (*ch as u32, 0)));
     chars.sort();
+    assert!(chars.windows(2).all(|pair| pair[0].0 < pair[1].0), "test cmap groups must not overlap");
     let mut cmap = Vec::new();
     u16s(&mut cmap, &[0, 1, 3, 10]);
     u32s(&mut cmap, &[12, 0x000C_0000, 16 + 12 * chars.len() as u32, 0, chars.len() as u32]);
@@ -323,6 +331,88 @@ fn a_font_file_is_measured_by_its_own_tables() {
 }
 
 #[test]
+fn a_nonpositive_font_pitch_uses_one_and_a_half_heights_for_measurement_and_outlines() {
+    let folder = Folder::new("nonpositive-pitch");
+    let glyphs = [Glyph { ch: 'H', advance: 700, contours: vec![block(0, 0, 600, 700)] }];
+    let style = TextStyle { line_spacing: 1.25, ..Default::default() };
+    // H supplies the 700-unit cap height. The hhea sums are 0, -100 and 1000 units.
+    // At 7 mm the fallback is 7 * 1.5 * 1.25 = 13.125 mm; the positive control is 1000 * 0.01 * 1.25 = 12.5 mm.
+    for (name, metrics, pitches) in
+        [("zero", [800, -200, -1000], [13.125, 26.25]), ("negative", [800, -200, -1100], [13.125, 26.25]), ("positive", [800, -200, 0], [12.5, 25.0])]
+    {
+        let path = folder.0.join(format!("{name}.ttf")).to_string_lossy().into_owned();
+        std::fs::write(&path, build_font_with("Pitch", &glyphs, metrics, &[])).unwrap();
+        let font = font_data(Some(&path)).unwrap();
+        let face = ttf_parser::Face::parse(font.bytes(), 0).unwrap();
+        assert_eq!([face.ascender(), face.descender(), face.line_gap()], metrics);
+        let m = TextMetrics::new(&font, &style).unwrap();
+        // Reuse one measure at both heights; expected placement is independent of its returned pitch.
+        for ((height, scale), expected_pitch) in [(7.0, 0.01), (14.0, 0.02)].into_iter().zip(pitches) {
+            assert!((m.scale(height).unwrap() - scale).abs() < 1e-15, "{name}: {height}");
+            assert!((m.line_pitch(height).unwrap() - expected_pitch).abs() < 1e-12, "{name}: {height}");
+            let geometry = text_geometry_styled(Some(&path), "H\nH", v(10.0, 20.0), height, 0.0, &style, None).unwrap();
+            assert_eq!(geometry.len(), 8, "{name}: {height}");
+            for (row, baseline) in [20.0, 20.0 - expected_pitch].into_iter().enumerate() {
+                let (lo, hi) = extent(&geometry[row * 4..(row + 1) * 4]);
+                assert!(lo.dist(v(10.0, baseline)) < 1e-9, "{name}: {height}: {lo:?}");
+                assert!(hi.dist(v(10.0 + 600.0 * scale, baseline + height)) < 1e-9, "{name}: {height}: {hi:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn format_twelve_missing_characters_keep_their_order_and_repetitions() {
+    let folder = Folder::new("format-twelve-missing");
+    // Explicit glyph zero in both planes, absent characters in both planes, and a present non-BMP glyph.
+    let notdef = ['\u{e000}', '\u{10000}'];
+    let text = "\u{e000}H\u{1f642}x\u{10000}\u{10ffff}\u{e000}x\u{10000}";
+    let expected = ['\u{e000}', 'x', '\u{10000}', '\u{10ffff}', '\u{e000}', 'x', '\u{10000}'];
+    for fallback in [false, true] {
+        let mut glyphs = vec![
+            Glyph { ch: 'H', advance: 700, contours: vec![block(0, 0, 600, 700)] },
+            Glyph { ch: '\u{1f642}', advance: 200, contours: vec![block(0, 0, 100, 700)] },
+        ];
+        if fallback {
+            glyphs.push(Glyph { ch: '?', advance: 300, contours: vec![block(0, 0, 200, 700)] });
+        }
+        let path = folder.0.join(format!("fallback-{fallback}.ttf")).to_string_lossy().into_owned();
+        std::fs::write(&path, build_font_with("Missing", &glyphs, [800, -200, 0], &notdef)).unwrap();
+        let font = font_data(Some(&path)).unwrap();
+        let face = ttf_parser::Face::parse(font.bytes(), 0).unwrap();
+        for ch in notdef {
+            assert_eq!(face.glyph_index(ch), Some(ttf_parser::GlyphId(0)), "{ch:?}");
+        }
+        for ch in ['x', '\u{10ffff}'] {
+            assert_eq!(face.glyph_index(ch), None, "{ch:?}");
+        }
+        assert_eq!(face.glyph_index('\u{1f642}'), Some(ttf_parser::GlyphId(2)));
+        let m = TextMetrics::new(&font, &TextStyle::default()).unwrap();
+        assert_eq!(m.missing(text), expected, "fallback: {fallback}");
+        assert!(m.missing("").is_empty());
+        assert!(m.missing("H\u{1f642}H").is_empty());
+        // H and the present non-BMP glyph advance 9 mm together. Only the three absent characters use '?',
+        // adding 3 * 3 mm when it exists. Explicit glyph zero is empty with zero advance in this original font.
+        let expected_width = if fallback { 18.0 } else { 9.0 };
+        assert!((m.line_width(text, 7.0).unwrap() - expected_width).abs() < 1e-12);
+        assert_eq!(m.line_width("\u{e000}\u{10000}", 7.0).unwrap(), 0.0);
+        let draw = |line: &str| text_geometry_in(Some(&path), line, Vec2::ZERO, 7.0, 0.0).unwrap();
+        assert!(draw("\u{e000}\u{10000}").is_empty());
+        let geometry = draw(text);
+        assert_eq!(geometry, draw(if fallback { "H\u{1f642}???" } else { "H\u{1f642}" }));
+        // Independent outline oracle: two blocks, or five with the three replacements; four lines each.
+        assert_eq!(geometry.len(), if fallback { 20 } else { 8 });
+        let boxes: &[(f64, f64)] =
+            if fallback { &[(0.0, 6.0), (7.0, 8.0), (9.0, 11.0), (12.0, 14.0), (15.0, 17.0)] } else { &[(0.0, 6.0), (7.0, 8.0)] };
+        for (&(lo_x, hi_x), glyph) in boxes.iter().zip(geometry.as_chunks::<4>().0) {
+            let (lo, hi) = extent(glyph);
+            assert!(lo.dist(v(lo_x, 0.0)) < 1e-9, "fallback: {fallback}: {lo:?}");
+            assert!(hi.dist(v(hi_x, 7.0)) < 1e-9, "fallback: {fallback}: {hi:?}");
+        }
+    }
+}
+
+#[test]
 fn a_font_is_kept_in_the_design_and_old_designs_read_without_one() {
     let source = |font: Option<&str>| LinkSource::Text {
         text: "I".into(),
@@ -363,4 +453,69 @@ fn installed_families_are_listed_by_name_once_without_the_built_in_one() {
         assert!(find_family_in(std::slice::from_ref(&folder.0), family).unwrap().is_some(), "{family}");
     }
     assert!(crate::families_in(&[folder.0.join("missing")]).is_empty());
+}
+
+/// The left and right ends of a text's outline, from every point its curves give (the same points move with the text,
+/// so a letter's ends in a word are its ends alone, moved along).
+fn reach(geometry: &[LinkGeom]) -> (f64, f64) {
+    let xs: Vec<f64> = geometry
+        .iter()
+        .flat_map(|g| match g {
+            LinkGeom::Line(a, b) => vec![a.x, b.x],
+            LinkGeom::Conic { a, apex, b, .. } => vec![a.x, apex.x, b.x],
+            LinkGeom::Spline { pts, .. } => pts.iter().map(|p| p.x).collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    (xs.iter().copied().fold(f64::INFINITY, f64::min), xs.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+}
+
+/// Checks a right-to-left word set in `font` at 10 mm: the letters stand from right to left in reading order, so the
+/// first letter is the line's right end and the last one its left end, and the line is as wide as its letters side by
+/// side.
+fn check_right_to_left(font: Option<&str>, word: &str) {
+    let data = font_data(font).unwrap();
+    let m = TextMetrics::new(&data, &TextStyle::default()).unwrap();
+    let draw = |text: &str| text_geometry_in(font, text, Vec2::ZERO, 10.0, 0.0).unwrap();
+    let (first, last) = (word.chars().next().unwrap().to_string(), word.chars().next_back().unwrap().to_string());
+    let (width, first_width) = (m.line_width(word, 10.0).unwrap(), m.line_width(&first, 10.0).unwrap());
+    let (left, right) = reach(&draw(word));
+    // The first letter's right end, moved to where it stands at the right end of the line; the last letter at the start.
+    assert!((right - (width - first_width + reach(&draw(&first)).1)).abs() < 1e-6, "right end {right}");
+    assert!((left - reach(&draw(&last)).0).abs() < 1e-6, "left end {left}");
+}
+
+#[test]
+fn hebrew_reads_right_to_left_in_the_built_in_font() {
+    // Shalom in reading order: shin first, final mem last.
+    check_right_to_left(None, "\u{5E9}\u{5DC}\u{5D5}\u{5DD}");
+    // A left-to-right word before it keeps its place; the Hebrew after it still ends at the line's right end.
+    let font = font_data(None).unwrap();
+    let m = TextMetrics::new(&font, &TextStyle::default()).unwrap();
+    let line = "ab \u{5E9}\u{5DC}\u{5D5}\u{5DD}";
+    let (_, right) = reach(&text_geometry_in(None, line, Vec2::ZERO, 10.0, 0.0).unwrap());
+    let shin = reach(&text_geometry_in(None, "\u{5E9}", Vec2::ZERO, 10.0, 0.0).unwrap()).1;
+    let shin_width = m.line_width("\u{5E9}", 10.0).unwrap();
+    assert!((right - (m.line_width(line, 10.0).unwrap() - shin_width + shin)).abs() < 1e-6);
+    let (left, _) = reach(&text_geometry_in(None, line, Vec2::ZERO, 10.0, 0.0).unwrap());
+    assert!((left - reach(&text_geometry_in(None, "a", Vec2::ZERO, 10.0, 0.0).unwrap()).0).abs() < 1e-6, "a stays first");
+    // Text without right-to-left characters keeps its width.
+    assert!(m.line_width("ab", 10.0).unwrap() > 0.0);
+    // A line break inside the line ends a paragraph of the bidirectional algorithm; the text after it still counts.
+    let after = "\u{5D1}\u{5D1}\u{5D1}\u{5D1}";
+    assert!(m.line_width(&format!("\u{5D0}\n{after}"), 10.0).unwrap() > m.line_width(after, 10.0).unwrap());
+}
+
+#[test]
+fn arabic_letters_join_in_an_arabic_font() {
+    // An installed Arabic font; a machine without one has nothing to check.
+    let Ok(font) = font_data(Some("Noto Naskh Arabic")) else { return };
+    let m = TextMetrics::new(&font, &TextStyle::default()).unwrap();
+    // "Algeria" in reading order. Set one letter at a time every letter takes its isolated form and width.
+    let word = "\u{627}\u{644}\u{62C}\u{632}\u{627}\u{626}\u{631}";
+    let isolated: f64 = word.chars().map(|c| m.line_width(&c.to_string(), 10.0).unwrap()).sum();
+    let joined = m.line_width(word, 10.0).unwrap();
+    assert!(joined > 0.0 && joined < isolated, "joined {joined} isolated {isolated}");
+    // Its first letter, an alef, never joins to the one after it: it stands at the line's right end.
+    check_right_to_left(Some("Noto Naskh Arabic"), word);
 }

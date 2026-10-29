@@ -24,6 +24,10 @@ pub struct SavedModel {
 const MAX_ITEMS: usize = 1_000_000;
 /// Bodies, sketches and sheet bodies all the states hold together, at most (a state is a list of clones).
 const MAX_HELD: usize = 50_000_000;
+/// Longest text a record holds (bytes). A feature's warning can quote every generated name of
+/// the edges it picked: 122,701 characters in one design, whose saved model was refused, so it
+/// evaluated again on every open (#8541).
+const MAX_TEXT: usize = 1 << 24;
 
 /// A feature's boolean retries as saved. The kernel leaves `rejected` out when it is empty, and
 /// the field has no default when read, so a saved model whose booleans retried was refused and
@@ -263,7 +267,7 @@ impl SavedModel {
             v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < len).ok_or_else(|| bad("saved model: index"))
         };
         let text =
-            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= 1 << 16).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
+            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= MAX_TEXT).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
         let parse = |v: Option<&Json>| v.cloned().ok_or_else(|| bad("saved model: missing"));
         let mut names = Vec::new();
         for n in list("names")? {
@@ -569,7 +573,7 @@ impl Model {
             v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < len).ok_or_else(|| bad("saved model: index"))
         };
         let text =
-            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= 1 << 16).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
+            |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= MAX_TEXT).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
         let features = records.get("features").and_then(Json::as_array).ok_or_else(|| bad("saved model: features"))?;
         if features.len() != doc.features.len() {
             return Err(bad("saved model: features"));

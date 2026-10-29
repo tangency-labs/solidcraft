@@ -39,14 +39,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("view.delete", "Delete Named View", view_delete).icon("delete").params("view: name"),
     CommandSpec::new("view.list", "List Named Views", view_list).icon("list").noundo().doc_only(),
     CommandSpec::new("view.apply", "Restore Named View", view_apply).icon("camera").noundo().params(
-        "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?, roll?} (radians, mm; roll defaults to 0, must be finite and is clamped to ±π; up is refused: the up axis comes from the design settings) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
+        "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?, roll?} (radians, mm, about the up axis; yaw: heading of the line of sight, 0 along +Y (Front), π/2 along +X (Left), π (Back), −π/2 (Right); pitch: the eye's elevation, within ±π/2, π/2 = Top; roll defaults to 0, turns the picture clockwise, must be finite and is clamped to ±π; the View angles readout shows these in degrees; up is refused: the up axis comes from the design settings) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
     ),
     CommandSpec::new("browser.order", "Order Browser Items", order).icon("reorder").params("folder, component?, order: [keys] (the folder's items in display order)"),
     CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").params(
         "visible: bool; items?: [sketch id or name | body name | construction name | joint name | O|X|Y|Z|XY|XZ|YZ]; \
          or joints?: [joint id or name] (their glyphs; they still constrain and move parts); \
+         or features?: [feature id or name] (the bodies they made; path?: [occurrence ids] for only that placement's); \
          or folder?: bodies|sketches|construction|origin|joints|all (all of it; showing also shows its browser folders and groups, and `all` takes in the occurrence hides too); \
-         or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases] (the folder or group itself: its items keep their own state); \
+         or tree_folders?: [browser folder or group key: c0/bodies, o:4/sketches, c0/g7, c0/joints, c0/canvases, c0/point_clouds] (the folder or group itself: its items keep their own state); \
          or paths?: [[occurrence ids]] (exact placements and descendants), isolate?: bool (requires paths and visible:true). Saved with the design and undone like any other change (the camera is not)",
     ),
     CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
@@ -55,7 +56,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          Display only: open/closed rows are not saved in the design and are not an undo step → open, open_by_default, closed_by_default",
     ),
     CommandSpec::new("browser.collapse_all", "Collapse All", collapse_all).icon("folder").noundo().params(
-        "path?: [occurrence ids]; component?: id; omit both for the whole tree (the design row stays open so the first level remains visible). \
+        "path?: [occurrence ids]; component?: id; omit both for the whole tree. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
          Display only; not an undo step → open, open_by_default, closed_by_default",
     ),
 ];
@@ -195,22 +196,60 @@ fn is_construction(k: &FeatureKind) -> bool {
     matches!(k, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
 }
 
+/// The item a key names, or `None` when it names none.
+///
+/// The rule, the same for showing and for hiding: an exact name wins over a name that only
+/// matches it by case, so the body called "Back Lid" is not the sketch called "Back lid"
+/// (#6967). Among the exact matches the order is the one there always was: a feature (by id
+/// or by name), then a body, then a joint. With no exact match the name is compared without
+/// regard to case, as it always was: a feature first, then an origin item.
 fn shown_item(s: &Session, key: &str) -> Option<Shown> {
-    if let Some(f) = s.doc.find_feature(key) {
-        if matches!(f.kind, FeatureKind::Sketch { .. }) {
-            return Some(Shown::Sketch(f.id));
-        }
-        if is_construction(&f.kind) {
-            return Some(Shown::Origin(f.name.clone()));
-        }
+    shown_item_exact(s, key).or_else(|| shown_item_ignore_case(s, key))
+}
+
+/// The item a key names exactly: a feature, a body or a joint whose name is the key itself.
+fn shown_item_exact(s: &Session, key: &str) -> Option<Shown> {
+    // A feature is found by id or by name, as `find_feature` does, but the name must be the
+    // key itself here.
+    let feature = match key.parse::<u64>() {
+        Ok(id) => s.doc.feature(id).or_else(|| s.doc.features.iter().find(|f| f.name == key)),
+        Err(_) => s.doc.features.iter().find(|f| f.name == key),
+    };
+    if let Some(shown) = feature.and_then(|f| shown_feature(s, f, key)) {
+        return Some(shown);
     }
     if s.world_state().bodies.iter().any(|b| b.name == key) {
         return Some(Shown::Body(key.to_string()));
     }
-    if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.name == key) {
-        return Some(Shown::Joint(j.id));
+    s.doc.assembly.joints.iter().find(|j| j.name == key).map(|j| Shown::Joint(j.id))
+}
+
+/// The item a key names when nothing matches it exactly: the name is compared without regard to
+/// case, as it always was.
+fn shown_item_ignore_case(s: &Session, key: &str) -> Option<Shown> {
+    if let Some(shown) = s.doc.find_feature(key).and_then(|f| shown_feature(s, f, key)) {
+        return Some(shown);
     }
     ORIGIN.iter().find(|o| o.eq_ignore_ascii_case(key)).map(|o| Shown::Origin(o.to_string()))
+}
+
+/// The item a feature is: a sketch, or construction geometry by name. A feature that is neither
+/// (an extrude, a fillet) is not an item of its own, and the key goes on to the next kind. A
+/// sketch that shares its name with a body is the body's (#7206).
+fn shown_feature(s: &Session, f: &solidcraft_doc::Feature, key: &str) -> Option<Shown> {
+    if matches!(f.kind, FeatureKind::Sketch { .. }) {
+        // A sketch and a body with exactly the same name, a sketch named after the body it
+        // makes (#7206): the name is the body's. The browser names a sketch by its id and a
+        // body only by its name, so the body could not be reached otherwise.
+        if f.name == key && s.world_state().bodies.iter().any(|b| b.name == key) {
+            return Some(Shown::Body(key.to_string()));
+        }
+        return Some(Shown::Sketch(f.id));
+    }
+    if is_construction(&f.kind) {
+        return Some(Shown::Origin(f.name.clone()));
+    }
+    None
 }
 
 /// A browser folder or group key (`Visibility::hidden_folders`): `c0` or `o:<ids>`, then
@@ -219,8 +258,9 @@ fn tree_folder_key(k: &str) -> bool {
     let Some((scope, last)) = k.rsplit_once('/') else { return false };
     let scope_ok =
         scope == "c0" || scope.strip_prefix("o:").is_some_and(|ids| ids.split('/').count() <= 64 && ids.split('/').all(|i| i.parse::<u64>().is_ok()));
-    let last_ok =
-        FOLDERS.contains(&last) || ["joints", "canvases"].contains(&last) || last.strip_prefix('g').is_some_and(|g| g.parse::<u64>().is_ok());
+    let last_ok = FOLDERS.contains(&last)
+        || ["joints", "canvases", "point_clouds"].contains(&last)
+        || last.strip_prefix('g').is_some_and(|g| g.parse::<u64>().is_ok());
     k.len() <= 2048 && scope_ok && last_ok
 }
 
@@ -314,6 +354,12 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"visible":visible,"changed":paths.len(),"visibility":s.visibility}));
     }
     let items: Vec<Shown> = match (str_(p, "folder"), p.get("items")) {
+        _ if p.get("features").is_some() => {
+            if ["items", "folder", "joints"].iter().any(|k| p.get(*k).is_some()) {
+                return Err(bad(cmd, "give `features`, `items`, `folder` or `joints`, not several"));
+            }
+            feature_items(s, p, cmd)?
+        }
         _ if p.get("joints").is_some() => {
             if p.get("items").is_some() || p.get("folder").is_some() {
                 return Err(bad(cmd, "give `joints`, `items` or `folder`, not several"));
@@ -367,7 +413,10 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let v = &mut s.visibility;
     match str_(p, "folder") {
-        Some("bodies" | "all") if visible => v.hidden_occurrences.clear(),
+        Some("bodies" | "all") if visible => {
+            v.hidden_bodies.clear();
+            v.hidden_occurrences.clear();
+        }
         // Showing a whole folder shows the folder too.
         Some("origin") if visible => v.origin_hidden = Some(false),
         _ => {}
@@ -508,6 +557,9 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
         if !s.doc.canvases.is_empty() {
             keys.open.insert("canvases".into());
         }
+        if !s.doc.point_clouds.is_empty() {
+            keys.open.insert("point_clouds".into());
+        }
         if !s.doc.assembly.joints.is_empty() {
             keys.open.insert("c0/joints".into());
         }
@@ -546,8 +598,14 @@ fn fold_tree(s: &mut Session, p: &Value, open: bool, cmd: &str) -> Result<Value>
         FoldScope::Tree => walk_fold(s, &[], true, &mut keys, cmd)?,
         FoldScope::Occurrence(path) => walk_fold(s, path, false, &mut keys, cmd)?,
     }
-    if !open && matches!(scope, FoldScope::Tree) {
-        keys.open.remove("c0");
+    if !open {
+        // Collapse All folds what is under the clicked row; the row itself stays open.
+        let own = match &scope {
+            FoldScope::Tree => "c0".to_string(),
+            FoldScope::Component(id) => format!("c{id}"),
+            FoldScope::Occurrence(path) => occurrence_fold_key(path),
+        };
+        keys.open.remove(&own);
     }
     if keys.open.len().saturating_add(keys.closed.len()) > MAX_FOLD_KEYS {
         return Err(bad(cmd, "expand/collapse exceeds 10000 browser rows"));
@@ -565,6 +623,44 @@ fn expand_all(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn collapse_all(s: &mut Session, p: &Value) -> Result<Value> {
     fold_tree(s, p, false, "browser.collapse_all")
+}
+
+/// `features` (and `path`) of `browser.visibility`: the bodies those features made (#5099).
+fn feature_items(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Shown>> {
+    let keys = keys(p, "features", cmd)?;
+    if keys.is_empty() {
+        return Err(bad(cmd, "`features` must list feature ids or names"));
+    }
+    let mut ids = Vec::with_capacity(keys.len());
+    let mut component = None;
+    for k in &keys {
+        let f = s.doc.find_feature(k).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?;
+        if matches!(f.kind, FeatureKind::Sketch { .. }) {
+            return Err(bad(cmd, format!("`{k}` is a sketch: give it in `items`")));
+        }
+        ids.push(f.id);
+        component = Some(f.component);
+    }
+    let path = match p.get("path") {
+        None | Some(Value::Null) => None,
+        Some(v) => {
+            let path = v
+                .as_array()
+                .filter(|a| a.len() <= 64)
+                .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+                .ok_or_else(|| bad(cmd, "`path` must list at most 64 occurrence ids"))?;
+            let placement = s.doc.placements().into_iter().find(|(_, at, _)| *at == path).ok_or_else(|| bad(cmd, "no placement at `path`"))?;
+            if ids.iter().any(|id| s.doc.feature(*id).is_some_and(|f| f.component != placement.0)) {
+                return Err(bad(cmd, "`path` must be a placement of the features' component"));
+            }
+            Some((component.unwrap_or(placement.0), path))
+        }
+    };
+    let bodies = s.feature_bodies(&ids, path.as_ref().map(|(c, at)| (*c, at.as_slice())));
+    if bodies.is_empty() {
+        return Err(bad(cmd, "those features made no bodies that are in the design now (a feature that changes bodies shows and hides with them)"));
+    }
+    Ok(bodies.into_iter().map(Shown::Body).collect())
 }
 
 fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
@@ -659,6 +755,10 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
                 None => 0.0,
             };
             let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| bad(cmd, format!("bad camera: {e}")))?;
+            // Past a pole the same view has other angles; the orbit would snap it back (#6032).
+            if !(v.pitch.abs() <= std::f64::consts::FRAC_PI_2 + 1e-9) {
+                return Err(bad(cmd, "camera `pitch` must be within ±π/2 radians (±90°)"));
+            }
             crate::render::Camera { roll: roll.clamp(-std::f64::consts::PI, std::f64::consts::PI), ..camera_of(&v) }
         }
         // Standard view names come first, as in the browser's Named Views folder.
@@ -760,6 +860,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     if name == old {
         return Ok(json!({"body": old, "name": name}));
     }
+    let previous = s.doc.clone();
     let st = s.model.state();
     let b = st.body(&old).ok_or_else(|| bad(cmd, format!("no body `{old}`")))?;
     if st.body(name).is_some() {
@@ -878,10 +979,10 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
-    let v = &mut s.visibility;
-    for b in v.hidden_bodies.iter_mut().chain(v.locked_bodies.iter_mut()).filter(|b| **b == old) {
+    for b in s.visibility.locked_bodies.iter_mut().filter(|b| **b == old) {
         *b = name.to_string();
     }
+    s.remember_body_rename(&previous, &old, name);
     Ok(json!({"body": old, "name": name}))
 }
 
@@ -932,6 +1033,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         && super::sketch::face::anchor(&plane)
             .is_none_or(|next| next.target != anchor.target || next.component != anchor.component || next.path != anchor.path)
     {
+        // design-only: Redefine Sketch Plane edits the design's sketch feature.
         let sketch = trial.doc_mut().sketch_mut(id)?;
         if let Some(mut visible) = visible_geometry {
             let constraints: std::collections::BTreeMap<_, _> =
@@ -1009,6 +1111,88 @@ mod tests {
 
     fn names(s: &Session) -> Vec<String> {
         s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
+    }
+
+    #[test]
+    fn body_rename_preserves_plastic_rules_and_current_visibility_through_history() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "plastic.manage_rules", json!({"name": "Housing", "draft": "3 deg"}));
+        run(&mut s, "plastic.assign_rule", json!({"bodies": ["Plate"], "rule": "Housing"}));
+        run(&mut s, "browser.visibility", json!({"items": ["Plate"], "visible": false}));
+        run(&mut s, "body.rename", json!({"body": "Plate", "name": "Base"}));
+        assert_eq!(run(&mut s, "plastic.rules", json!({}))["assigned"], json!({"Base": "Housing"}));
+        assert!(!s.body_visible("Base"));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(run(&mut s, "plastic.rules", json!({}))["assigned"], json!({"Plate": "Housing"}));
+        assert!(!s.body_visible("Plate"), "undo must keep the body hidden");
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Base"));
+        // Showing a body is its own undo step; the rename keeps the correct hidden name on
+        // either side of that step, and neither operation loses the assigned rule.
+        run(&mut s, "browser.visibility", json!({"items": ["Base"], "visible": true}));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(names(&s), ["Base"]);
+        assert!(!s.body_visible("Base"));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(names(&s), ["Plate"]);
+        assert!(!s.body_visible("Plate"));
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Base"));
+        run(&mut s, "edit.redo", json!({}));
+        assert!(s.body_visible("Base"));
+        run(&mut s, "browser.visibility", json!({"items": ["Base"], "visible": false}));
+        let mut saved = (*s.doc).clone();
+        saved.visibility = s.visibility.clone();
+        let reopened = Session::new(serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap());
+        assert_eq!(reopened.doc.plastic.assigned.get("Base").map(String::as_str), Some("Housing"));
+        assert!(!reopened.body_visible("Base"));
+    }
+
+    #[test]
+    fn body_rename_undo_keeps_hidden_bodies_with_downstream_users_hidden() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Peg"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Peg"], "translate": [0, 0, 5]}));
+        run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
+        run(&mut s, "body.rename", json!({"body": "Peg", "name": "Stud"}));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(!s.body_visible("Peg"));
+        assert_eq!(s.visibility.hidden_bodies, ["Peg"]);
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Stud"));
+    }
+
+    #[test]
+    fn show_all_bodies_clears_stale_hidden_names() {
+        for folder in ["bodies", "all"] {
+            let mut s = Session::default();
+            s.visibility.hidden_bodies.push("Old body name".into());
+            run(&mut s, "browser.visibility", json!({"folder": folder, "visible": true}));
+            assert!(s.visibility.hidden_bodies.is_empty(), "{folder}");
+        }
+    }
+
+    #[test]
+    fn computed_body_rename_keeps_the_latest_visibility_and_undo_mapping() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Peg"}));
+        run(&mut s, "solid.move", json!({"bodies": ["Peg"], "translate": [0, 0, 5]}));
+        let mut computed = s.scratch();
+        run(&mut computed, "body.rename", json!({"body": "Peg", "name": "Stud"}));
+        // The user hides the body while the rename is being evaluated.
+        run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
+        s.accept_computed(computed);
+        assert!(!s.body_visible("Stud"));
+        assert_eq!(s.visibility.hidden_bodies, ["Stud"]);
+        run(&mut s, "edit.undo", json!({}));
+        assert!(!s.body_visible("Peg"));
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.body_visible("Peg"), "the concurrent hide remains its own undo step");
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Peg"));
+        run(&mut s, "edit.redo", json!({}));
+        assert!(!s.body_visible("Stud"));
     }
 
     #[test]
@@ -1209,8 +1393,9 @@ mod tests {
         assert!(["Body1", "Body2", "Body3", "Body4", "Body5"].iter().all(|n| before.contains(&n.to_string())), "{before:?}");
         run(&mut s, "solid.combine", json!({"target": "Body3", "tools": ["Body5"], "operation": "join", "name": "Joined"}));
         // Renaming a body that already has a name of its own stores nothing elsewhere.
+        let stored = s.doc.find_feature("P2").unwrap().body_names.clone();
         run(&mut s, "body.rename", json!({"body": "Second", "name": "Row"}));
-        assert!(s.doc.find_feature("P2").unwrap().body_names.is_empty());
+        assert_eq!(s.doc.find_feature("P2").unwrap().body_names, stored);
         run(&mut s, "body.rename", json!({"body": "Body1", "name": "FirstCopyA"}));
         run(&mut s, "body.rename", json!({"body": "Body2", "name": "FirstCopyB"}));
         assert!(
@@ -1405,6 +1590,43 @@ mod tests {
         }
     }
 
+    /// The View angles popup (#6032) sets the view through `view.apply`: the readout's degrees are
+    /// the camera's radians, named views read round numbers, and hostile angles never leave a
+    /// camera past a pole or a NaN behind.
+    #[test]
+    fn applying_a_camera_by_view_angles_reads_back_and_refuses_hostile_pitch() {
+        use crate::render::ViewAngles;
+        let mut s = Session::default();
+        for (view, (yaw, pitch)) in
+            [("front", (0.0, 0.0)), ("left", (90.0, 0.0)), ("right", (-90.0, 0.0)), ("back", (180.0, 0.0)), ("top", (0.0, 90.0))]
+        {
+            run(&mut s, "view.apply", json!({"view": view}));
+            let a = s.camera.expect("a camera for the standard view").view_angles();
+            assert!((a.yaw - yaw).abs() < 1e-3 && (a.pitch - pitch).abs() < 1e-3 && a.roll == 0.0, "{view}: {a:?}");
+        }
+        let typed = ViewAngles { yaw: -30.0, pitch: 15.0, roll: 5.0 };
+        let cam = crate::render::Camera::default().with_view_angles(typed).expect("finite angles");
+        let p = json!({"camera": {"target": [0, 0, 0], "yaw": cam.yaw, "pitch": cam.pitch, "roll": cam.roll, "distance": 80}});
+        run(&mut s, "view.apply", p);
+        let a = s.camera.expect("the typed camera").view_angles();
+        assert!((a.yaw - typed.yaw).abs() < 1e-9 && (a.pitch - typed.pitch).abs() < 1e-9 && (a.roll - typed.roll).abs() < 1e-9, "{a:?}");
+        // Straight down is allowed (90° in radians may round a hair past π/2).
+        run(&mut s, "view.apply", json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 90.0_f64.to_radians(), "distance": 80}}));
+        // Many turns of yaw are the same heading; the readout brings it into range.
+        run(&mut s, "view.apply", json!({"camera": {"target": [0, 0, 0], "yaw": 1e300, "pitch": 0, "distance": 80}}));
+        let a = s.camera.expect("a camera").view_angles();
+        assert!(a.yaw.is_finite() && (-180.0..=180.0).contains(&a.yaw), "{a:?}");
+        let before = serde_json::to_value(s.camera).unwrap();
+        for pitch in [json!(2.0), json!(-1.6), json!(1e300), json!(-f64::MAX), json!(f64::NAN), json!("90"), json!(null)] {
+            let err = s.execute("view.apply", &json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": pitch, "distance": 80}})).unwrap_err();
+            assert!(err.to_string().contains("camera"), "{pitch}: {err}");
+            assert_eq!(serde_json::to_value(s.camera).unwrap(), before, "a refused camera leaves the view alone");
+        }
+        for yaw in [json!(f64::NAN), json!(f64::INFINITY), json!("0")] {
+            assert!(s.execute("view.apply", &json!({"camera": {"target": [0, 0, 0], "yaw": yaw, "pitch": 0, "distance": 80}})).is_err(), "{yaw}");
+        }
+    }
+
     #[test]
     fn named_views_are_saved_renamed_and_deleted() {
         let mut s = Session::default();
@@ -1455,6 +1677,58 @@ mod tests {
                 assert_eq!(s.visibility, visibility);
             }
         }
+    }
+
+    /// #7206, #7569: a sketch named after the body it makes. The name hides and shows the body,
+    /// as the body's eye in the browser asks; the sketch, which the browser names by its id,
+    /// still hides and shows by its id, and the body is left alone.
+    #[test]
+    fn a_body_hides_by_its_name_when_a_sketch_has_the_same_name() {
+        let mut s = Session::default();
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "timeline.rename", json!({"feature": sketch, "name": "Deckel"}));
+        run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 5, "body_name": "Deckel"}));
+        let r = run(&mut s, "browser.visibility", json!({"items": ["Deckel"], "visible": false}));
+        assert_eq!(r["changed"], 1);
+        assert_eq!(s.visibility.hidden_bodies, vec!["Deckel".to_string()]);
+        assert!(s.visibility.hidden_sketches.is_empty(), "the sketch is not the item that changed");
+        run(&mut s, "browser.visibility", json!({"items": ["Deckel"], "visible": true}));
+        assert!(s.visibility.hidden_bodies.is_empty());
+        // The sketch by its id: shown and hidden again, the body stays shown.
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert_eq!(s.visibility.shown_sketches, vec![sketch]);
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": false}));
+        assert_eq!(s.visibility.hidden_sketches, vec![sketch]);
+        assert!(s.visibility.hidden_bodies.is_empty());
+    }
+
+    #[test]
+    fn a_sheet_metal_flange_hides_its_sketch_as_an_extrude_does() {
+        // #6804: the base flange's sketch stayed shown; its line on the plate's bottom edge then
+        // took the Flange dialog's click and made a flat contour wall with no bend.
+        let mut s = Session::default();
+        let base = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-33.5, -37], "p1": [27.5, -7]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let wall = run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Wall"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 30]], "ids": ["l1", "l2"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        assert!(crate::view::sketch_shown(&s, base) && crate::view::sketch_shown(&s, wall));
+        run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+        assert!(!crate::view::sketch_shown(&s, base), "the base flange used its sketch");
+        run(&mut s, "sheet.flange", json!({"sketch": "Wall", "curves": ["l1", "l2"], "distance": 20}));
+        assert!(!crate::view::sketch_shown(&s, wall), "the contour flange used its sketch");
+        let d = run(&mut s, "document.inspect", json!({}));
+        assert!(d["sketches"].as_array().unwrap().iter().all(|x| x["visible"] == false), "{d}");
+        assert_eq!(s.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_doc::FeatureKind::SheetContour { .. })).count(), 1);
+        // Shown on their own, or while their flange is edited, they are drawn again.
+        s.feature_edit_sketch = Some(base);
+        assert!(crate::view::sketch_shown(&s, base));
+        s.feature_edit_sketch = None;
+        run(&mut s, "browser.visibility", json!({"items": [wall], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, wall) && !crate::view::sketch_shown(&s, base));
     }
 
     #[test]
@@ -1520,6 +1794,41 @@ mod tests {
             assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
         }
         assert_eq!(s.visibility, before);
+    }
+
+    /// #6967: a body and a sketch whose names differ only in case. The exact name is the one
+    /// asked for: "Back Lid" is the body, not the sketch called "Back lid". With no exact match
+    /// the case-insensitive one is the only match, and it is the same rule for showing and for
+    /// hiding.
+    #[test]
+    fn an_exact_body_name_wins_over_a_sketch_that_only_matches_by_case() {
+        let mut s = Session::default();
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.point", json!({"point": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "timeline.rename", json!({"feature": sketch, "name": "Back lid"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Back Lid"}));
+        assert_eq!(names(&s), vec!["Back Lid".to_string()]);
+
+        // Hiding "Back Lid" hides the body, not the sketch that only matches by case.
+        let r = run(&mut s, "browser.visibility", json!({"items": ["Back Lid"], "visible": false}));
+        assert_eq!(r["changed"], 1);
+        assert_eq!(s.visibility.hidden_bodies, vec!["Back Lid".to_string()]);
+        assert!(s.visibility.hidden_sketches.is_empty(), "the sketch is not the item that changed");
+
+        // Showing it again shows the body and leaves the sketch alone.
+        run(&mut s, "browser.visibility", json!({"items": ["Back Lid"], "visible": true}));
+        assert!(s.visibility.hidden_bodies.is_empty());
+        assert!(s.visibility.shown_sketches.is_empty(), "the sketch is not the item that changed");
+
+        // With no exact match the case-insensitive one is the only match, and it is the sketch:
+        // the same rule for showing and for hiding.
+        run(&mut s, "browser.visibility", json!({"items": ["BACK LID"], "visible": false}));
+        assert_eq!(s.visibility.hidden_sketches, vec![sketch]);
+        assert!(s.visibility.hidden_bodies.is_empty());
+        run(&mut s, "browser.visibility", json!({"items": ["BACK LID"], "visible": true}));
+        assert!(s.visibility.hidden_sketches.is_empty());
+        assert_eq!(s.visibility.shown_sketches, vec![sketch]);
     }
 
     /// #2219: hiding is a step of its own, so Ctrl+Z brings the body back instead of undoing the
@@ -1803,7 +2112,7 @@ mod tests {
 
         let below = run(&mut s, "browser.collapse_all", json!({"path": [occ]}));
         let open = strs(&below, "open_by_default");
-        assert!(open.contains(&format!("o:{occ}")), "{open:?}");
+        assert!(!open.contains(&format!("o:{occ}")), "the clicked row stays open: {open:?}");
         assert!(!open.contains(&"c0/bodies".into()), "{open:?}");
         assert!(strs(&below, "closed_by_default").iter().all(|k| !k.starts_with("c0") && k != "origin"), "{below}");
 
@@ -1834,5 +2143,39 @@ mod tests {
             assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}");
         }
         assert!(s.execute("browser.expand_all", &json!({})).is_ok());
+    }
+
+    /// #5099: a feature's bodies show and hide by the feature, in every placement or one.
+    #[test]
+    fn a_feature_shows_and_hides_the_bodies_it_made() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "solid.sphere", json!({"diameter": 4, "center": [30, 0, 0]}));
+        // A join makes no body of its own.
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 20, "operation": "join"}));
+        let hide = |s: &mut Session, p: Value| run(s, "browser.visibility", p)["visibility"]["hidden_bodies"].clone();
+        assert_eq!(hide(&mut s, json!({"visible": false, "features": ["Sphere1"]})), json!(["Body2"]));
+        assert_eq!(hide(&mut s, json!({"visible": true, "features": ["Sphere1"]})), json!([]));
+        for (p, why) in [
+            (json!({"visible": false, "features": ["Box2"]}), "made no bodies"),
+            (json!({"visible": false, "features": ["Nope"]}), "no feature"),
+            (json!({"visible": false, "features": ["Box1"], "items": ["Body2"]}), "not several"),
+        ] {
+            let e = s.execute("browser.visibility", &p).expect_err("refused").to_string();
+            assert!(e.contains(why), "{p}: {e}");
+        }
+
+        // A component placed twice: every instance's body, or one placement's.
+        let first = run(&mut s, "component.create", json!({"name": "Part", "grounded": false}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 40, 0]}));
+        let second = run(&mut s, "occurrence.copy", json!({"occurrence": first}))["occurrence"].as_u64().unwrap();
+        let all = hide(&mut s, json!({"visible": false, "features": ["Box3"]}));
+        assert_eq!(all.as_array().unwrap().len(), 2, "{all}");
+        hide(&mut s, json!({"visible": true, "features": ["Box3"]}));
+        let one = hide(&mut s, json!({"visible": false, "features": ["Box3"], "path": [second]}));
+        assert_eq!(one.as_array().unwrap().len(), 1, "{one}");
+        assert!(all.as_array().unwrap().contains(&one[0]) && one[0] != all[0], "the copy's body: {one} of {all}");
+        let e = s.execute("browser.visibility", &json!({"visible": false, "features": ["Sphere1"], "path": [first]})).expect_err("other component");
+        assert!(e.to_string().contains("component"), "{e}");
     }
 }

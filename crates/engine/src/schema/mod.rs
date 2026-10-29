@@ -54,8 +54,17 @@ mod coverage_tests;
 mod tests;
 
 // The contracts, by command file.
+pub mod component;
+pub mod edit;
 pub mod features;
 pub mod inspect;
+pub mod render;
+pub mod render_lights;
+pub mod render_ui;
+pub mod sheet;
+pub mod sketch_constraints;
+pub mod sketch_create;
+pub mod view_navigation;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, output_schema_for, run_checked, run_checked_as};
 pub use types::*;

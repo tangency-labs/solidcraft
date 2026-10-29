@@ -170,7 +170,7 @@ pub fn open(app: &mut SolveApp, component: u64) {
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
     row(ui, "Type", |ui| {
-        ui.add(egui::Label::new(format!("{} ({})", k.family.name, k.family.standard)).wrap());
+        ui.add(egui::Label::new(format!("{} ({})", crate::dialogs_parts::family_name(&k.family), k.family.standard)).wrap());
     });
     let sizes: Vec<&str> = k.family.sizes.iter().map(|s| s.0.as_str()).collect();
     choice_row(ui, "Size", "part_resize_size", &mut k.size, &sizes);

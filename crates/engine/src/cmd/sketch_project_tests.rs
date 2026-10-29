@@ -245,6 +245,65 @@ fn break_link_makes_normal_geometry() {
     assert!(s.execute("sketch.break_link", &json!({"link": "j99"})).is_err());
 }
 
+/// The sketch's curves as evaluated (after its links were refreshed): (id, construction).
+fn evaluated_curves(s: &Session, id: u64) -> Vec<(String, bool)> {
+    s.model.state().sketch(id).unwrap().sketch.curves.iter().map(|c| (c.id.clone(), c.construction)).collect()
+}
+
+#[test]
+fn deleting_part_of_an_intersection_does_not_bring_it_back() {
+    // #5098: a dome, its section on XZ (arc `a1`, line `l1`) as construction, then the arc deleted.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [0, -10], "end": [10, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -10], [0, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": 1, "axis": "Z"}));
+    let id = run(&mut s, "sketch.create", json!({"plane": "XZ"}))["sketch"].as_u64().unwrap();
+    let r = run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Body1"}]}));
+    let mut made = ids(&r["created"]["curves"]);
+    made.sort();
+    assert_eq!(made, ["a1", "l1"], "{r}");
+    run(&mut s, "sketch.construction", json!({"curves": ["a1", "l1"], "value": true}));
+    run(&mut s, "sketch.delete", json!({"entities": ["a1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Evaluated, the arc stays gone and the line stays construction: nothing was rebuilt.
+    assert_eq!(evaluated_curves(&s, id), [("l1".to_string(), true)]);
+    // The line no longer follows the body; it kept its place on the section (x from -10 to 10).
+    let sk = s.doc.sketch(id).unwrap();
+    assert!(sk.links.is_empty() && sk.curves.iter().all(|c| c.link.is_none()), "{:?}", sk.links);
+    let mut xs: Vec<f64> = sk.points.iter().filter(|p| p.id != "origin").map(|p| p.pos.x).collect();
+    xs.sort_by(f64::total_cmp);
+    assert!(xs.len() == 2 && (xs[0] + 10.0).abs() < 1e-6 && (xs[1] - 10.0).abs() < 1e-6, "{xs:?}");
+    // Reopened, the same.
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(evaluated_curves(&reopened, id), [("l1".to_string(), true)]);
+}
+
+#[test]
+fn deleting_one_edge_of_a_projected_face_keeps_the_others_as_they_were() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 20, "height": 10}));
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 15}))["sketch"].as_u64().unwrap();
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"face": [10, 10, 10]}]}));
+    let lines = ids(&r["created"]["curves"]);
+    assert_eq!(lines.len(), 4, "{r}");
+    run(&mut s, "sketch.construction", json!({"curves": lines, "value": true}));
+    run(&mut s, "sketch.delete", json!({"entities": [lines[0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let kept: Vec<(String, bool)> = lines[1..].iter().map(|l| (l.clone(), true)).collect();
+    assert_eq!(evaluated_curves(&s, id), kept);
+
+    // Deleting the whole link still just removes it.
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 15}))["sketch"].as_u64().unwrap();
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"face": [10, 10, 10]}]}));
+    run(&mut s, "sketch.delete", json!({"entities": ids(&r["created"]["curves"])}));
+    run(&mut s, "sketch.finish", json!({}));
+    assert!(evaluated_curves(&s, id).is_empty());
+    assert!(s.doc.sketch(id).unwrap().links.is_empty());
+}
+
 #[test]
 fn lost_reference_keeps_geometry_with_a_warning() {
     let mut s = Session::default();

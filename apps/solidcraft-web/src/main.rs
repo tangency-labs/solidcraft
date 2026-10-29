@@ -11,6 +11,8 @@ mod api;
 #[cfg(any(target_arch = "wasm32", test))]
 mod disk;
 #[cfg(target_arch = "wasm32")]
+mod easyprint;
+#[cfg(target_arch = "wasm32")]
 mod files;
 #[cfg(target_arch = "wasm32")]
 mod install;
@@ -59,16 +61,44 @@ impl Launch {
     fn persists(&self) -> bool {
         !self.embed
     }
+
+    fn full_app_url(&self, mut url: url::Url) -> String {
+        url.set_query(None);
+        url.set_fragment(None);
+        if let Some(open) = &self.open {
+            url.query_pairs_mut().append_pair("open", open);
+        }
+        url.to_string()
+    }
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-fn design_url(value: &str) -> Result<url::Url, String> {
+fn design_url(value: &str, page_origin: &str) -> Result<url::Url, String> {
     if value.len() > 16_384 {
         return Err("Design URL is too long".into());
     }
-    let url = url::Url::parse(value).map_err(|_| "Invalid design URL")?;
-    if url.scheme() != "https" || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() {
-        return Err("Design links must use HTTPS without credentials".into());
+    let decoded = percent_encoding::percent_decode_str(value).decode_utf8().map_err(|_| "Invalid design URL encoding")?;
+    if decoded.chars().any(|ch| ch.is_control() || ch == '\\') {
+        return Err("Design links must not contain backslashes or control characters".into());
+    }
+    // Check before URL parsing normalizes away dot segments. Decode escaped slashes too.
+    let path = value.split(['?', '#']).next().unwrap_or_default();
+    let path = percent_encoding::percent_decode_str(path).collect::<Vec<_>>();
+    if path.split(|byte| *byte == b'/').any(|segment| segment == b"..") {
+        return Err("Design links must not contain parent path segments".into());
+    }
+    let page = url::Url::parse(page_origin).map_err(|_| "Invalid page origin")?;
+    let url = if value.starts_with('/') && !value.starts_with("//") {
+        page.join(value).map_err(|_| "Invalid design path")?
+    } else {
+        url::Url::parse(value).map_err(|_| "Invalid design URL")?
+    };
+    if (url.scheme() != "https" && url.origin() != page.origin())
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err("Design links must use HTTPS or the page's own origin without credentials".into());
     }
     Ok(url)
 }
@@ -80,6 +110,13 @@ fn check_download_size(current: usize, incoming: u64) -> Result<(), String> {
         return Err(format!("Design exceeds the {} MB size limit", cap / (1024 * 1024)));
     }
     Ok(())
+}
+
+/// Ctrl+W (⌘W, without Shift or Alt) while a design is shown closes it in the app, so the
+/// browser must not close the tab (#5366). On the start page the browser closes the tab.
+#[cfg(any(target_arch = "wasm32", test))]
+fn closes_design(key: &str, command: bool, shift: bool, alt: bool, design_shown: bool) -> bool {
+    design_shown && command && !shift && !alt && key.eq_ignore_ascii_case("w")
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -133,6 +170,23 @@ mod web {
     thread_local! {
         /// An open design has unsaved changes: leaving the page asks first.
         static UNSAVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// A design is shown (not the start page): Ctrl+W closes it, not the browser tab.
+        static DESIGN_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// Ctrl+W (⌘W) closes the design shown, as on the desktop; on the start page it is left to
+    /// the browser, which closes the tab (#5366). Browsers that keep Ctrl+W to themselves still
+    /// close the tab, after asking when a design is unsaved ([`ask_before_unload`]).
+    fn keep_ctrl_w_for_the_design(window: &web_sys::Window) {
+        let on_key = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(|e: web_sys::KeyboardEvent| {
+            let command = e.ctrl_key() || e.meta_key();
+            if crate::closes_design(&e.key(), command, e.shift_key(), e.alt_key(), DESIGN_SHOWN.with(std::cell::Cell::get)) {
+                e.prevent_default();
+            }
+        });
+        let _ = window.add_event_listener_with_callback_and_bool("keydown", on_key.as_ref().unchecked_ref(), true);
+        // The listener lives as long as the page.
+        on_key.forget();
     }
 
     /// The browser's "leave site? changes you made may not be saved" prompt while a design has
@@ -241,6 +295,10 @@ mod web {
                 !companion
             });
             for (name, bytes, intent) in incoming {
+                if intent == Intent::Theme {
+                    solidcraft_ui_egui::prefs::import_theme_bytes(&mut self.app, bytes);
+                    continue;
+                }
                 let design = solidcraft_engine::io::is_design_path(&name);
                 let path = if design && intent == Intent::Open {
                     // A design from the computer is kept in the browser (a copy), so Save works.
@@ -257,7 +315,7 @@ mod web {
                 };
                 match intent {
                     Intent::Open => self.app.open_path(&path),
-                    Intent::Insert => self.app.drop_path(&path),
+                    Intent::Insert | Intent::Theme => self.app.drop_path(&path),
                 }
                 self.files.panel.set(false);
             }
@@ -323,7 +381,8 @@ mod web {
             }
             let mut act: Option<(&'static str, String)> = None;
             let closed = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_files"), "folder", "Files in this browser")
-                .cards(3.0)
+                // Room for long names; the kit still caps the window at the browser's width.
+                .cards(4.0)
                 .show_body(ctx, |ui| {
                     ui.horizontal(|ui| {
                         if ui_kit::button(ui, "Open from computer…", ui_kit::Button::Normal).clicked() {
@@ -351,61 +410,62 @@ mod web {
                         return;
                     }
                     let entries = self.files.entries.borrow().clone();
-                    if entries.is_empty() {
-                        ui.label("Designs you save appear here. They stay in this browser.");
-                    }
                     egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                        egui::Grid::new("opfs_files").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
+                        // The name takes the width the size and the actions leave (#8097).
+                        let empty = "Designs you save appear here. They stay in this browser.";
+                        ui_kit::name_list(ui, "opfs_files", &["Name", "Size", "Actions"], empty, |list| {
                             for e in &entries {
-                                match &mut self.renaming {
-                                    Some((from, to)) if *from == e.name => {
-                                        let r = ui_kit::cell_editor(ui, ui.make_persistent_id(("stored_file_name", from.as_str())), to, "", false);
-                                        if std::mem::take(&mut self.rename_focus) {
-                                            r.request_focus();
+                                list.row(&e.name, |row| {
+                                    match &mut self.renaming {
+                                        Some((from, to)) if *from == e.name => row.cell(|ui| {
+                                            let r =
+                                                ui_kit::cell_editor(ui, ui.make_persistent_id(("stored_file_name", from.as_str())), to, "", false);
+                                            if std::mem::take(&mut self.rename_focus) {
+                                                r.request_focus();
+                                            }
+                                            if r.lost_focus() {
+                                                act = Some(if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                                                    ("rename", to.clone())
+                                                } else {
+                                                    ("rename_cancel", String::new())
+                                                });
+                                            }
+                                        }),
+                                        _ => {
+                                            row.name(&e.name);
                                         }
-                                        if r.lost_focus() {
-                                            act = Some(if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                                                ("rename", to.clone())
-                                            } else {
-                                                ("rename_cancel", String::new())
-                                            });
+                                    }
+                                    row.cell(|ui| ui.label(format!("{:.1} KB", e.size as f64 / 1024.0)));
+                                    row.cell(|ui| {
+                                        if ui_kit::button(ui, "Open", ui_kit::Button::Small).clicked() {
+                                            act = Some(("open", e.name.clone()));
                                         }
-                                    }
-                                    _ => {
-                                        ui.label(&e.name);
-                                    }
-                                }
-                                ui.label(format!("{:.1} KB", e.size as f64 / 1024.0));
-                                ui.horizontal(|ui| {
-                                    if ui_kit::button(ui, "Open", ui_kit::Button::Small).clicked() {
-                                        act = Some(("open", e.name.clone()));
-                                    }
-                                    let design = solidcraft_engine::io::is_design_path(&e.name);
-                                    if !design
-                                        && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
-                                            .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                        let design = solidcraft_engine::io::is_design_path(&e.name);
+                                        if !design
+                                            && ui_kit::button(ui, "Insert", ui_kit::Button::Small)
+                                                .on_hover_text(solidcraft_ui_egui::i18n::tr("web.files.insert_stored_drawings_hint"))
+                                                .clicked()
+                                        {
+                                            act = Some(("insert", e.name.clone()));
+                                        }
+                                        if ui_kit::button(ui, "Rename", ui_kit::Button::Small).clicked() {
+                                            self.renaming = Some((e.name.clone(), e.name.clone()));
+                                            self.rename_focus = true;
+                                        }
+                                        if ui_kit::button(ui, "Save to computer…", ui_kit::Button::Small)
+                                            .on_hover_text("A copy in a file you choose; the stored design stays here")
                                             .clicked()
-                                    {
-                                        act = Some(("insert", e.name.clone()));
-                                    }
-                                    if ui_kit::button(ui, "Rename", ui_kit::Button::Small).clicked() {
-                                        self.renaming = Some((e.name.clone(), e.name.clone()));
-                                        self.rename_focus = true;
-                                    }
-                                    if ui_kit::button(ui, "Save to computer…", ui_kit::Button::Small)
-                                        .on_hover_text("A copy in a file you choose; the stored design stays here")
-                                        .clicked()
-                                    {
-                                        act = Some(("save_copy", e.name.clone()));
-                                    }
-                                    if ui_kit::button(ui, "Download", ui_kit::Button::Small).clicked() {
-                                        act = Some(("download", e.name.clone()));
-                                    }
-                                    if ui_kit::button(ui, "Delete", ui_kit::Button::Small).clicked() {
-                                        act = Some(("delete", e.name.clone()));
-                                    }
+                                        {
+                                            act = Some(("save_copy", e.name.clone()));
+                                        }
+                                        if ui_kit::button(ui, "Download", ui_kit::Button::Small).clicked() {
+                                            act = Some(("download", e.name.clone()));
+                                        }
+                                        if ui_kit::button(ui, "Delete", ui_kit::Button::Small).clicked() {
+                                            act = Some(("delete", e.name.clone()));
+                                        }
+                                    });
                                 });
-                                ui.end_row();
                             }
                         });
                     });
@@ -593,6 +653,7 @@ mod web {
             self.space_mouse.logic(&mut self.app, ctx);
             self.files_tick(ctx);
             UNSAVED.with(|u| u.set(solidcraft_ui_egui::documents::any_dirty(&self.app)));
+            DESIGN_SHOWN.with(|d| d.set(solidcraft_ui_egui::toolbar::design_shown(&self.app)));
         }
         fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
             let now = raw.time.unwrap_or_else(|| ctx.input(|i| i.time));
@@ -600,7 +661,8 @@ mod web {
                 ctx.request_repaint_after(delay);
             }
             if self.launch.persists() {
-                files::take_drops(&self.files, raw);
+                let theme = solidcraft_ui_egui::prefs::theme_drop_target(&self.app, ctx);
+                files::take_drops(&self.files, raw, theme);
             } else {
                 raw.dropped_files.clear();
             }
@@ -692,6 +754,7 @@ mod web {
                 ask_before_unload(&window);
             }
             leave_tab_switching_to_browser(&window);
+            keep_ctrl_w_for_the_design(&window);
             let Some(document) = window.document() else { return };
             let Some(canvas) = document.get_element_by_id(CANVAS_ID).and_then(|e| e.dyn_into::<web_sys::HtmlCanvasElement>().ok()) else {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
@@ -749,6 +812,7 @@ mod web {
                             })),
                             restore_file: Some(Box::new(move |path: &str| disk::restore(&restorer, path))),
                             download_design: Some(Box::new(files::download)),
+                            easyprint_upload: Some(std::sync::Arc::new(crate::easyprint::upload)),
                             browser_files: Some(Box::new(move || shown.panel.set(true))),
                             install_app: Some(crate::install::service(&cc.egui_ctx)),
                             ..Default::default()
@@ -782,14 +846,7 @@ mod web {
                         let api = Api::install(sender, cc.egui_ctx.clone()).map_err(|e| format!("SolidCraft browser API: {e:?}"))?;
                         let font_language = app.preferences.language.clone();
                         let linked = crate::linked::Download::start(launch.open.as_deref(), &cc.egui_ctx);
-                        let full_url = window.location().href().ok().and_then(|value| url::Url::parse(&value).ok()).map(|mut url| {
-                            url.set_query(None);
-                            url.set_fragment(None);
-                            if let Some(open) = &launch.open {
-                                url.query_pairs_mut().append_pair("open", open);
-                            }
-                            url.to_string()
-                        });
+                        let full_url = window.location().href().ok().and_then(|value| url::Url::parse(&value).ok()).map(|url| launch.full_app_url(url));
                         Ok(Box::new(Shell {
                             app,
                             launch,
@@ -851,24 +908,53 @@ mod tests {
         assert!(!Launch::parse("?other=embed&reopen=https://example.org").embed);
         assert!(Launch::parse("?open=https://example.org/a").persists());
         assert_eq!(Launch::parse("?open=first&open=second").open.as_deref(), Some("first"));
+        let launch = Launch::parse("?embed&open=/dutchman/jobs/abc/part.solidcraft%3Fx%3Da%2520b");
+        assert!(launch.embed);
+        assert!(!launch.persists());
+        let page = url::Url::parse("http://solidcraft.io/?embed#view").expect("synthetic page");
+        let full = url::Url::parse(&launch.full_app_url(page)).expect("full app URL");
+        let reopened = Launch::parse(full.query().unwrap_or_default());
+        assert_eq!(reopened.open, launch.open);
+        assert_eq!(reopened.open.as_deref(), Some("/dutchman/jobs/abc/part.solidcraft?x=a%20b"));
+        assert!(!reopened.embed);
+        assert!(reopened.persists());
+        assert!(full.fragment().is_none());
     }
 
     #[test]
     fn design_links_refuse_hostile_schemes_credentials_and_sizes() {
-        assert!(design_url("https://example.org/arm.solidcraft?download=1").is_ok());
+        assert!(design_url("https://example.org/arm.solidcraft?download=1", "http://solidcraft.io").is_ok());
         for value in [
             "http://example.org/a",
             "data:application/json,{}",
             "blob:https://example.org/a",
             "javascript:alert(1)",
-            "/arm.solidcraft",
             "https://user:secret@example.org/a",
+            "//evil.example/x",
+            "/../x",
+            "/%2e%2e/x",
+            "/a/%2E./x",
+            "/a%2f..%2fx",
+            "/a\\x",
+            "/a%5cx",
+            "/a\nx",
+            "/a%00x",
+            "/a%7fx",
+            "/a%C2%85x",
+            "/a%3f/../x",
+            "/a/..#view",
+            "/a/..?download=1",
+            "https://solidcraft.io/a/../x",
+            "http://user:secret@solidcraft.io/x",
+            "http://solidcraft.io.evil.example/x",
+            "http://solidcraft.io:8080/x",
+            "relative.solidcraft",
             "",
         ] {
-            assert!(design_url(value).is_err(), "{value}");
+            assert!(design_url(value, "http://solidcraft.io").is_err(), "{value}");
         }
-        assert!(design_url(&format!("https://example.org/{}", "x".repeat(16_384))).is_err());
-        assert!(design_url("http://redirect.example.org/a").is_err());
+        assert!(design_url(&format!("https://example.org/{}", "x".repeat(16_384)), "http://solidcraft.io").is_err());
+        assert!(design_url("http://redirect.example.org/a", "http://solidcraft.io").is_err());
 
         let cap = solidcraft_engine::io::MAX_DESIGN_BYTES;
         assert!(check_download_size(0, cap as u64).is_ok());
@@ -881,11 +967,38 @@ mod tests {
     }
 
     #[test]
+    fn design_links_allow_same_origin_paths_and_redirects() {
+        for origin in ["http://solidcraft.io", "https://solidcraft.io", "http://solidcraft.io:8080"] {
+            assert_eq!(design_url("/a/b.solidcraft", origin).map(|url| url.to_string()), Ok(format!("{origin}/a/b.solidcraft")));
+            assert!(design_url(&format!("{origin}/x"), origin).is_ok());
+            // Final response URLs follow the same origin and scheme rules as the request.
+            assert!(design_url("https://docs.solidcraft.io/x", origin).is_ok());
+            assert!(design_url("http://other/x", origin).is_err());
+        }
+        assert!(design_url("http://solidcraft.io/x", "https://solidcraft.io").is_err());
+        assert!(design_url("http://SOLIDCRAFT.io:80/x", "http://solidcraft.io").is_ok());
+    }
+
+    #[test]
     fn only_ctrl_tab_is_left_to_the_browser() {
         // Ctrl+Tab and Ctrl+Shift+Tab (the event's key is "Tab" either way) switch browser tabs.
         assert!(browser_switches_tabs("Tab", true));
         // Tab and Shift+Tab move between the app's fields; Ctrl with other keys stays the app's.
         assert!(!browser_switches_tabs("Tab", false));
         assert!(!browser_switches_tabs("s", true));
+    }
+
+    #[test]
+    fn ctrl_w_closes_the_design_not_the_tab() {
+        // Ctrl+W and ⌘W (either case of the key) close the design shown.
+        assert!(closes_design("w", true, false, false, true));
+        assert!(closes_design("W", true, false, false, true));
+        // On the start page the browser closes the tab.
+        assert!(!closes_design("w", true, false, false, false));
+        // Ctrl+Shift+W (close the window), plain W and other keys stay the browser's or the app's.
+        assert!(!closes_design("W", true, true, false, true));
+        assert!(!closes_design("w", true, false, true, true));
+        assert!(!closes_design("w", false, false, false, true));
+        assert!(!closes_design("s", true, false, false, true));
     }
 }

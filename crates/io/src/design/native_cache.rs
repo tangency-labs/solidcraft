@@ -50,7 +50,7 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
         .iter()
         .map(|(s, placed)| std::iter::once(s).chain(placed.as_ref().and_then(|(part, _)| encoded.parts.get(*part))).map(|s| (*s, size(s))).collect())
         .collect();
-    let mut budget = space.min(MAX_DESIGN_BYTES);
+    let mut budget = space.min(max_design());
     for _ in 0..16 {
         let Some((thin, kept, counted)) = model.thinned(&pieces, budget) else { break };
         // Only the final state, which is kept whatever it costs: nothing smaller is left to try. What
@@ -101,6 +101,12 @@ struct Encoded {
     parts: Vec<usize>,
 }
 
+/// What a decoded body must share with the one encoded: its faces, edges, vertices and shells.
+fn same_topology(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
+    let counts = |x: &solidcraft_kernel::Body| (x.face_count(), x.edge_count(), x.vertex_count(), x.shell_count());
+    counts(a) == counts(b)
+}
+
 impl Encoded {
     fn of(model: &SavedModel) -> Result<Self> {
         // What to encode: every body, and the part every placed copy shows.
@@ -117,7 +123,14 @@ impl Encoded {
             }));
         }
         let bodies: Vec<&solidcraft_kernel::Body> = model.bodies.iter().chain(shares.iter().map(|s| s.original())).collect();
-        let encoded = solidcraft_kernel::map_on_threads(&bodies, 16, |b| solidcraft_kernel::encode_native_body(b).ok());
+        // A body is kept only when it decodes to itself: one the codec gave back with other
+        // topology (two loose vertices more on a pattern copy cut by an extrude) would open as
+        // another body. Then the model isn't kept, and opening the design evaluates it.
+        let encoded = solidcraft_kernel::map_on_threads(&bodies, 16, |b| {
+            let bytes = solidcraft_kernel::encode_native_body(b).ok()?;
+            let back = solidcraft_kernel::decode_native_body(&bytes).ok()?;
+            same_topology(b, &back).then_some(bytes)
+        });
         let mut slices = Vec::new();
         let mut by_digest = std::collections::HashMap::new();
         let mut index = Vec::with_capacity(encoded.len());
@@ -171,7 +184,7 @@ impl Encoded {
         let shares = parts.iter().map(|p| slice(*self.parts.get(*p).ok_or_else(|| invalid("display share"))?)).collect::<Result<Vec<_>>>()?;
         let stored = order.iter().map(|s| self.slices.get(*s).ok_or_else(|| invalid("cached body"))).collect::<Result<Vec<_>>>()?;
         let length = stored.iter().fold(0usize, |n, bytes| n.saturating_add(bytes.len()));
-        if length > MAX_DESIGN_BYTES || stored.len() > MAX_UNIQUE {
+        if length > max_design() || stored.len() > MAX_UNIQUE {
             return Err(invalid("model cache size"));
         }
         let mut data = Vec::with_capacity(length);
@@ -193,7 +206,7 @@ impl Encoded {
 /// The final state of the model a design keeps, when this build computed it for exactly this
 /// document. Any failure is a miss, never a document error.
 pub fn read_design_geometry(bytes: &[u8]) -> Option<std::sync::Arc<ModelState>> {
-    if bytes.len() > MAX_DESIGN_BYTES || !is_design_container(bytes) {
+    if bytes.len() > max_design() || !is_design_container(bytes) {
         return None;
     }
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.geometry()?.final_state().ok()
@@ -228,7 +241,7 @@ pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, 
     }
     // Validate the small parametric metadata before decoding any geometry.
     Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
-    let data = reader.limited_part(PAYLOAD, MAX_DESIGN_BYTES)?;
+    let data = reader.limited_part(PAYLOAD, max_design())?;
     if manifest.get("payload").and_then(Value::as_str) != Some(digest(&data).as_str()) {
         return Err(invalid("model cache payload key"));
     }

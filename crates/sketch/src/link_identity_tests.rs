@@ -360,3 +360,17 @@ fn edge_on_face_lays_out_as_one_silhouette_line_and_stays_current() {
     assert_eq!(sk.link_curves(&link).len(), 4);
     assert!(!sk.link(&link).unwrap().lost);
 }
+
+/// A conic that comes with a link (projected geometry) takes the curve prefix `n` like a drawn
+/// one, not the constraints' `k` (#6173).
+#[test]
+fn linked_conic_curves_take_the_n_prefix_not_the_constraints_k() {
+    let mut sk = Sketch::new();
+    let geom = vec![
+        LinkGeom::Line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0)),
+        LinkGeom::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(15.0, 4.0), b: Vec2::new(20.0, 0.0), rho: 0.5 },
+    ];
+    let link = sk.add_link(LinkKind::Project, LinkSource::Origin, &geom).unwrap();
+    let ids: Vec<String> = sk.link_curves(&link).iter().map(|c| sk.curves[*c].id.clone()).collect();
+    assert_eq!(ids, vec!["l1".to_string(), "n1".to_string()], "linked curve ids");
+}

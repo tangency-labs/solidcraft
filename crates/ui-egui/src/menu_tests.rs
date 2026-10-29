@@ -72,10 +72,10 @@ fn linked_component_opens_its_part_in_a_tab_and_reports_a_missing_source() {
     assert!(!context_menu::items(&h.app, &Target::Component { id: 0 }).iter().any(|item| item.label == "Open Linked Design"));
 
     act(&mut h.app, &linked, "Open Linked Design");
-    for _ in 0..600 {
-        if h.app.session.path.as_deref() == part.to_str() {
-            break;
-        }
+    // The part opens in the background. A count of frames is no bound for that: frames are quick
+    // while a loaded machine is slow to read the file. Wait as `Harness::settle` waits for a load.
+    let began = std::time::Instant::now();
+    while h.app.session.path.as_deref() != part.to_str() && began.elapsed() < std::time::Duration::from_secs(120) {
         h.frame();
     }
     assert_eq!(h.app.session.path.as_deref(), part.to_str());
@@ -223,7 +223,7 @@ fn right_click_on_a_face_of_a_selected_body_keeps_the_bodies() {
     assert_eq!(app.session.selection, both, "the right-click keeps the bodies it is about");
     assert!(!context_menu::items(&app, &Target::Viewport).iter().any(|i| i.label == "Create Sketch"), "the bodies' menu, not the face menu");
     // An edge and a vertex of a selected body count the same way.
-    app.viewport.hover = Some(Hit::Edge { body: first.clone(), index: 0, mid: Vec3::new(9.0, 9.0, 9.0) });
+    app.viewport.hover = Some(Hit::Edge { body: first.clone(), index: 0, mid: Vec3::new(9.0, 9.0, 9.0), point: Vec3::new(9.0, 9.0, 9.0) });
     context_menu::open(&mut app, pos2(400.0, 300.0), Default::default());
     assert_eq!(app.session.selection, both, "an edge of a selected body keeps the bodies");
     // A face of a body outside the selection is still picked, so the menu is about that face.
@@ -327,6 +327,36 @@ fn sketch_menu_hides_and_moves_to_another_plane() {
 }
 
 #[test]
+fn a_selected_arc_offers_an_arc_length_dimension() {
+    // #6039: the arc length dimension existed as a command, but nothing in the UI led to it.
+    let mut app = sample_app();
+    app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    app.run("sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [40, 0], "radius": 5})).unwrap();
+    let ids: Vec<String> = {
+        let st = app.session.model.state();
+        let ss = st.sketch(app.session.active_sketch.unwrap()).unwrap();
+        ss.sketch.curves.iter().map(|c| c.id.clone()).collect()
+    };
+    let select = |app: &mut SolveApp, id: &str| app.run("select.set", json!({"items": [{"type": "sketch_curve", "id": id}]})).unwrap();
+    select(&mut app, &ids[1]);
+    assert!(!context_menu::items(&app, &Target::Viewport).iter().any(|i| i.label == "Arc Length Dimension"), "a circle has no arc length");
+    select(&mut app, &ids[0]);
+    let item = find(&context_menu::items(&app, &Target::Viewport), "Arc Length Dimension");
+    assert!(item.enabled);
+    context_menu::run_item(&mut app, &item, pos2(0.0, 0.0));
+    let st = app.session.model.state();
+    let ss = st.sketch(app.session.active_sketch.unwrap()).unwrap();
+    let len = ss.sketch.constraints.iter().find_map(|c| match c.kind {
+        solidcraft_engine::sketch::ConstraintKind::ArcLength { value, .. } => Some(value),
+        _ => None,
+    });
+    // A quarter of a circle of radius 10.
+    assert!(len.is_some_and(|l| (l - 5.0 * std::f64::consts::PI).abs() < 1e-5), "{:?}", ss.sketch.constraints);
+    assert!(ss.report.ok());
+}
+
+#[test]
 fn sketch_entities_offer_the_constraints_that_fit() {
     let mut app = sample_app();
     app.run("sketch.create", json!({"plane": "XY"})).unwrap();
@@ -348,6 +378,88 @@ fn sketch_entities_offer_the_constraints_that_fit() {
 }
 
 #[test]
+fn sketch_dimension_menu_deletes_only_the_dimension_and_supports_undo() {
+    for (driven, preselected) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let line = h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let horizontal = h.app.run("sketch.constrainer", json!({"entities":[line]})).unwrap()["constraint"].as_str().unwrap().to_owned();
+        let dimension = h.app.run("sketch.dimension", json!({"entities":[line],"value":30})).unwrap();
+        let id = dimension["created"]["dimensions"][0].as_str().unwrap();
+        if driven {
+            h.app.run("sketch.toggle_driven", json!({"constraint":id})).unwrap();
+        }
+        let saved = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        if preselected {
+            h.step(&json!({"click":{"dimension":id}})).unwrap();
+        }
+        h.step(&json!({"click":{"dimension":id},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::SketchConstraint { id: id.to_owned() }]);
+        let menu = h.call("ui.menu", json!({}));
+        assert!(menu["result"]["items"].as_array().unwrap().iter().any(|i| i["id"] == "ui.delete" && i["enabled"] == true), "{menu}");
+        assert_eq!(h.call("ui.menuPick", json!({"item":"ui.delete"}))["ok"], true);
+        let after = h.app.run("sketch.inspect", json!({})).unwrap();
+        assert_eq!(after["curves"].as_array().unwrap().len(), 1);
+        assert_eq!(after["curves"][0]["id"], line);
+        assert_eq!(after["constraints"].as_array().unwrap().len(), 1);
+        assert_eq!(after["constraints"][0]["id"], horizontal);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), saved);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.run("sketch.inspect", json!({})).unwrap(), after);
+    }
+}
+
+#[test]
+fn sketch_constraint_menu_keeps_the_selection_and_respects_pick_filters() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let line =
+        h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    let horizontal = h.app.run("sketch.constrainer", json!({"entities":[line]})).unwrap()["constraint"].as_str().unwrap().to_owned();
+    let dimension = h.app.run("sketch.dimension", json!({"entities":[line],"value":30})).unwrap();
+    let id = dimension["created"]["dimensions"][0].as_str().unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+
+    // An empty selection, including a dimension whose picking is disabled, has no Delete.
+    assert!(!context_menu::items(&h.app, &Target::Viewport).iter().any(|i| i.id == "ui.delete"));
+    h.app.ui.pick_off.push("dimensions".into());
+    h.step(&json!({"click":{"dimension":id},"button":"right"})).unwrap();
+    assert!(h.app.session.selection.is_empty());
+    assert!(!context_menu::items(&h.app, &Target::Viewport).iter().any(|i| i.id == "ui.delete"));
+    h.call("ui.menu", json!({"close":true}));
+    h.app.ui.pick_off.clear();
+
+    // A non-dimensional constraint can be deleted too. Right-clicking a dimension already
+    // in a multi-selection retains all the selected constraints for the same Delete action.
+    for ids in [vec![horizontal.clone()], vec![horizontal.clone(), id.to_owned()]] {
+        let selection: Vec<_> = ids.iter().map(|id| solidcraft_engine::Sel::SketchConstraint { id: id.clone() }).collect();
+        h.app.session.selection = selection.clone();
+        if ids.len() > 1 {
+            h.step(&json!({"click":{"dimension":id},"button":"right"})).unwrap();
+            assert_eq!(h.app.session.selection, selection);
+        }
+        let item = find(&context_menu::items(&h.app, &Target::Viewport), "Delete");
+        assert!(item.enabled);
+        context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
+        let after = h.app.run("sketch.inspect", json!({})).unwrap();
+        assert_eq!(after["curves"].as_array().unwrap().len(), 1);
+        assert_eq!(after["constraints"].as_array().unwrap().len(), 2 - ids.len());
+        h.app.run("edit.undo", json!({})).unwrap();
+    }
+}
+
+#[test]
 fn component_menu_activates_grounds_and_pastes() {
     let mut app = sample_app();
     let b = body(&app);
@@ -364,7 +476,15 @@ fn component_menu_activates_grounds_and_pastes() {
     act(&mut app, &t, "Ground");
     assert!(app.session.doc.occurrence_of(c).unwrap().grounded);
     assert!(!find(&context_menu::items(&app, &t), "Move/Copy").enabled, "grounded");
-    act(&mut app, &t, "Paste New");
+    // Paste New pastes an independent copy of the copied component into another one (here the
+    // design): it is off until a component is copied, and never into itself.
+    let placement = Target::Occurrence { path: app.session.doc.first_path(c) };
+    app.session.selection = vec![solidcraft_engine::Sel::Occurrence { path: app.session.doc.first_path(c) }];
+    act(&mut app, &placement, "Copy");
+    assert_eq!(app.copied_placements.len(), 1, "{:?}", app.status);
+    let design = Target::Component { id: 0 };
+    assert!(find(&context_menu::items(&app, &design), "Paste New").enabled);
+    act(&mut app, &design, "Paste New");
     assert_eq!(app.session.doc.components.len(), 2);
 }
 
@@ -504,12 +624,14 @@ fn expand_and_collapse_all_open_the_browser_tree_from_the_design_menu() {
 
     let created = app.run("component.create", json!({"name": "Part"})).unwrap();
     let occ = created["occurrence"].as_u64().unwrap();
+    let child = app.run("component.create", json!({"name": "Inner", "parent_path": [occ]})).unwrap()["occurrence"].as_u64().unwrap();
     let path = vec![occ];
     act(&mut app, &Target::Occurrence { path: path.clone() }, "Collapse All");
-    assert!(app.tree.collapsed.contains(&format!("o:{occ}")), "{:?}", app.tree.collapsed);
+    assert!(app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "its children fold: {:?}", app.tree.collapsed);
+    assert!(!app.tree.collapsed.contains(&format!("o:{occ}")), "the clicked row stays open: {:?}", app.tree.collapsed);
     assert!(!app.tree.collapsed.contains("c0/bodies"), "a placement's collapse leaves the rest of the tree: {:?}", app.tree.collapsed);
     act(&mut app, &Target::Occurrence { path }, "Expand All");
-    assert!(!app.tree.collapsed.contains(&format!("o:{occ}")), "{:?}", app.tree.collapsed);
+    assert!(!app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.collapsed);
 }
 
 #[test]
@@ -790,6 +912,50 @@ fn v_toggles_what_is_selected() {
     context_menu::toggle_visibility(&mut app);
     assert_eq!(app.session.visibility.hidden_bodies, vec![b]);
     assert_eq!(find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Show/Hide").shortcut, "V");
+}
+
+/// V pressed with a browser menu open runs that menu's Show/Hide, as its row says, on the row
+/// the menu was opened for: a folder, the Origin folder or an origin plane is not selected by
+/// the right-click, so V used to act on the selection instead (nothing, or another body).
+#[test]
+fn v_with_a_menu_open_shows_or_hides_what_the_menu_is_for() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    let b = body(&h.app);
+    let press_v = |h: &mut crate::scenario::Harness| {
+        for pressed in [true, false] {
+            h.app.synthetic.push(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed, repeat: false, modifiers: Default::default() });
+        }
+        while !h.app.synthetic.is_empty() {
+            h.frame();
+        }
+        h.frames(2);
+    };
+    let open = |h: &mut crate::scenario::Harness, target: Target| {
+        context_menu::open_for(&mut h.app, pos2(300.0, 200.0), target);
+        h.frames(2);
+    };
+    // A body selected elsewhere is not what the folder's menu is for.
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
+    let bodies = Target::Folder { component: 0, folder: "bodies".into(), scope: "c0".into() };
+    for hidden in [true, false] {
+        open(&mut h, bodies.clone());
+        press_v(&mut h);
+        assert_eq!(h.app.session.folder_hidden("c0/bodies"), hidden, "V on the Bodies folder's menu");
+        assert!(h.app.viewport.context_menu.is_none(), "the menu closes as after a click");
+        assert!(!h.app.session.visibility.hidden_bodies.contains(&b), "the selected body is left alone");
+    }
+    let shown = h.app.origin_shown();
+    open(&mut h, Target::Origin);
+    press_v(&mut h);
+    assert_eq!(h.app.origin_shown(), !shown, "V on the Origin folder's menu");
+    open(&mut h, Target::OriginPlane { name: "XY".into() });
+    press_v(&mut h);
+    assert!(h.app.session.visibility.hidden_origin.iter().any(|o| o == "XY"), "V on an origin plane's menu");
+    assert!(!h.app.session.visibility.hidden_bodies.contains(&b));
+    // With no menu open, V still flips the selection.
+    press_v(&mut h);
+    assert!(h.app.session.visibility.hidden_bodies.contains(&b), "V without a menu acts on the selection");
 }
 
 #[test]
@@ -1277,6 +1443,7 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::Units,
         Target::ToolbarCommand { id: "solid.extrude".into() },
         Target::Toolbar,
+        Target::HistoryControls,
         Target::Workspace,
         Target::NamedViews,
         Target::NamedView { name: "Top".into() },
@@ -1311,6 +1478,116 @@ fn appearance_submenu_swatches_apply_to_the_clicked_body_and_keep_library_action
     let swatch = appearance.children.iter().find(|row| row.swatch.is_some()).unwrap();
     context_menu::run_item(&mut app, swatch, pos2(0.0, 0.0));
     assert_eq!(app.session.doc.appearances.bodies[&name].color, swatch.swatch.unwrap());
+}
+
+fn appearance_selection_app() -> SolveApp {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (name, x) in [("One", 0), ("Two", 20), ("Other", 40)] {
+        app.run("solid.box", json!({"body_name":name,"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new"})).unwrap();
+    }
+    app.run("appearance.assign", json!({"bodies":["One","Two","Other"],"color":"#245cb4"})).unwrap();
+    app.run("select.set", json!({"items":[{"type":"body","name":"One"},{"type":"body","name":"Two"}]})).unwrap();
+    app
+}
+
+/// #7935: a selected browser row's swatches and Remove override act on the selected bodies;
+/// a row outside the selection still acts only on that row. Each action is one undo step.
+#[test]
+fn appearance_browser_selection_assigns_and_removes_overrides_together() {
+    for (clicked, expected) in [("One", vec!["One", "Two"]), ("Two", vec!["One", "Two"]), ("Other", vec!["Other"])] {
+        let mut app = appearance_selection_app();
+        let target = Target::Body { name: clicked.into() };
+        let appearance = find(&context_menu::items(&app, &target), "Appearance");
+        let swatch = find(&appearance.children, "Paint - Red");
+        let original = app.session.doc.clone();
+        let undo = app.session.undo.len();
+        context_menu::run_item(&mut app, &swatch, pos2(0.0, 0.0));
+        assert_eq!(app.session.undo.len(), undo + 1);
+        for name in ["One", "Two", "Other"] {
+            let color = if expected.contains(&name) { [196, 40, 36] } else { [36, 92, 180] };
+            assert_eq!(app.session.doc.appearances.bodies[name].color, color, "clicked {clicked}, body {name}");
+        }
+        let assigned = app.session.doc.clone();
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.session.doc, original);
+        app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(app.session.doc, assigned);
+
+        let remove = find(&appearance.children, "Remove override");
+        context_menu::run_item(&mut app, &remove, pos2(0.0, 0.0));
+        assert_eq!(app.session.undo.len(), undo + 2);
+        for name in ["One", "Two", "Other"] {
+            assert_eq!(app.session.doc.appearances.bodies.contains_key(name), !expected.contains(&name), "clicked {clicked}, body {name}");
+        }
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.session.doc, assigned);
+    }
+}
+
+#[test]
+fn appearance_browser_selection_reaches_the_editor_without_other_bodies() {
+    for (clicked, expected) in [("Two", vec!["One", "Two"]), ("Other", vec!["Other"])] {
+        let mut app = appearance_selection_app();
+        // A face in the selection must not turn its whole body into another appearance target.
+        app.session.selection.push(solidcraft_engine::Sel::Face { body: "Other".into(), index: 0, point: Vec3::ZERO });
+        let appearance = find(&context_menu::items(&app, &Target::Body { name: clicked.into() }), "Appearance");
+        assert_eq!(appearance.children[0].params, appearance.params, "the library entry and parent use the same targets");
+        context_menu::run_item(&mut app, &appearance, pos2(0.0, 0.0));
+        let mut dialog = app.dialog.clone().expect("the Appearance editor opens");
+        let crate::dialogs::Kind::Appearance(state) = &mut dialog.kind else { panic!("Appearance editor expected") };
+        state.color = [196, 40, 36];
+        let targets: Vec<_> = expected.iter().map(|name| solidcraft_engine::Sel::Body { name: (*name).into() }).collect();
+        assert_eq!(dialog.inputs[0].items, targets);
+        for (command, params) in crate::dialogs::apply_commands(&app, &dialog).unwrap() {
+            app.run(&command, params).unwrap();
+        }
+        for name in ["One", "Two", "Other"] {
+            let color = if expected.contains(&name) { [196, 40, 36] } else { [36, 92, 180] };
+            assert_eq!(app.session.doc.appearances.bodies[name].color, color, "clicked {clicked}, body {name}");
+        }
+    }
+}
+
+#[test]
+fn appearance_parent_click_opens_editor_after_hovering_quick_choices() {
+    use crate::scenario::{Harness, rect_of};
+    let mut h = Harness::new();
+    h.app = sample_app();
+    let name = body(&h.app);
+    h.frames(3);
+    context_menu::open_for(&mut h.app, pos2(400.0, 180.0), Target::Body { name: name.clone() });
+    h.frames(2);
+    h.step(&json!({"move":[10, 10]})).unwrap();
+    h.step(&json!({"move":{"handle":"menu:ui.appearance"}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "hover opens quick choices");
+    assert!(h.app.dialog.is_none(), "hover must not open the editor");
+    h.step(&json!({"click":{"handle":"menu:ui.appearance"}})).unwrap();
+    assert!(h.app.viewport.context_menu.is_none(), "activation closes the context menu");
+    let dialog = h.app.dialog.as_ref().expect("parent click opens the full editor");
+    assert!(matches!(dialog.kind, crate::dialogs::Kind::Appearance(_)));
+    assert_eq!(dialog.inputs[0].items, vec![solidcraft_engine::Sel::Body { name }]);
+}
+
+#[test]
+fn appearance_hovered_quick_choice_applies_without_opening_editor() {
+    use crate::scenario::Harness;
+    let mut h = Harness::new();
+    h.app = sample_app();
+    let name = body(&h.app);
+    let rows = context_menu::items(&h.app, &Target::Body { name: name.clone() });
+    let appearance = find(&rows, "Appearance");
+    let swatch = appearance.children.iter().find(|row| row.swatch.is_some()).unwrap();
+    h.frames(3);
+    context_menu::open_for(&mut h.app, pos2(400.0, 180.0), Target::Body { name: name.clone() });
+    h.frames(2);
+    h.step(&json!({"move":[10, 10]})).unwrap();
+    h.step(&json!({"move":{"handle":"menu:ui.appearance"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":format!("menu:{}:{}", swatch.id, swatch.label)}})).unwrap();
+    assert_eq!(h.app.session.doc.appearances.bodies[&name].color, swatch.swatch.unwrap());
+    assert!(h.app.dialog.is_none(), "quick choice applies directly");
+    assert!(h.app.viewport.context_menu.is_none());
 }
 
 #[test]
@@ -1367,6 +1644,46 @@ fn appearance_submenu_closes_when_the_pointer_moves_to_another_row() {
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.viewport.context_menu.is_none());
     assert!(h.app.dialog.is_none(), "closing the flyout runs nothing");
+}
+
+#[test]
+fn only_one_row_is_lit_while_a_flyout_is_closing() {
+    use crate::scenario::{Harness, rect_of};
+    fn lit_rows(h: &Harness, rows: &[Item]) -> Vec<String> {
+        fn filled(shape: &egui::Shape, r: egui::Rect, found: &mut bool) {
+            match shape {
+                egui::Shape::Rect(rect) => *found |= rect.rect == r && rect.fill == crate::theme::Tokens::get().accent_soft,
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| filled(s, r, found)),
+                _ => {}
+            }
+        }
+        rows.iter()
+            .filter(|i| {
+                rect_of(&format!("menu:{}", i.id)).is_some_and(|r| {
+                    let mut found = false;
+                    h.shapes.iter().for_each(|s| filled(&s.shape, r, &mut found));
+                    found
+                })
+            })
+            .map(|i| i.label.clone())
+            .collect()
+    }
+    let mut h = Harness::new();
+    h.app = sample_app();
+    h.frames(3);
+    let target = Target::Body { name: body(&h.app) };
+    let rows = context_menu::items(&h.app, &target);
+    context_menu::open_for(&mut h.app, pos2(400.0, 180.0), target);
+    h.frames(2);
+    h.step(&json!({"move":[10, 10]})).unwrap();
+    h.step(&json!({"move":{"handle":"menu:ui.appearance"}})).unwrap();
+    h.frames(2);
+    assert_eq!(lit_rows(&h, &rows), vec!["Appearance".to_string()], "the hovered parent of the open flyout is lit");
+    let other = rows.iter().find(|i| i.enabled && i.children.is_empty()).unwrap();
+    h.step(&json!({"move":{"handle":format!("menu:{}", other.id)}})).unwrap();
+    h.frames(2);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "the flyout is still closing");
+    assert_eq!(lit_rows(&h, &rows), vec![other.label.clone()], "the parent gives up its highlight as soon as the pointer leaves it");
 }
 
 #[test]

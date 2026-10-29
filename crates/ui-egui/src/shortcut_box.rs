@@ -140,18 +140,21 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
         .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
         .filter_map(|c| {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
-            let (label, tab, panel) = (crate::i18n::tr_label(c.label), crate::i18n::tr_label(home_tab), crate::i18n::tr_label(home_panel));
+            let info = crate::render_workspace::interactive_command_info(app, c);
+            let (label, tab, panel) =
+                (crate::i18n::tr_label(info.label), crate::i18n::tr_label(crate::workspace::tab_label(home_tab)), crate::i18n::tr_label(home_panel));
             let place = (!home_tab.is_empty()).then_some((tab, panel));
             let s = score(&q, label)
                 .max(score(&q, c.label))
+                .max(score(&q, info.label))
                 .max(score(&q, c.id) * 9 / 10)
                 .max(keyword_score(&q, keywords(c.id)))
                 .max(score(&q, tab).max(score(&q, home_tab)) / 3)
                 .max(score(&q, panel).max(score(&q, home_panel)) / 3);
             let recent = app.sbox.recent.iter().position(|r| r == c.id).map_or(0, |i| 2000u32.saturating_sub(i.min(2000) as u32));
             // Commands that can run now come before those that can't.
-            let usable = if crate::render_workspace::interactive_command_info(app, c).enabled { 150 } else { 0 };
-            (s > 0).then_some((s + usable + if q.is_empty() { recent } else { recent / 20 }, (c.id, label, c.icon, place)))
+            let usable = if info.enabled { 150 } else { 0 };
+            (s > 0).then_some((s + usable + if q.is_empty() { recent } else { recent / 20 }, (c.id, label, info.icon, place)))
         })
         .collect();
     v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.1.cmp(b.1.1)));

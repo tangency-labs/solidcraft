@@ -293,3 +293,36 @@ fn a_replayed_feature_keeps_a_name_another_feature_has() {
     );
     assert_eq!(r["name"], "Box1");
 }
+
+/// #1134: a script recorded before pattern and mirror seeds and construction planes were
+/// keyed by id names them by name; timeline.add resolves the names to ids exactly the way
+/// opening a saved design migrates them, and a name that finds no feature keeps id 0, which
+/// dangles at evaluation with the same error it always gave.
+#[test]
+fn add_resolves_legacy_seed_and_plane_names() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": "5", "width": "5", "height": "5", "name": "Base"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Shelf"}));
+    let base = s.doc.find_feature("Base").unwrap().id;
+    let shelf = s.doc.find_feature("Shelf").unwrap().id;
+    let r = run(
+        &mut s,
+        "timeline.add",
+        json!({"feature": {"type": "mirror", "name": "Copied", "features": ["Base"], "plane": {"type": "construction", "name": "Shelf"}}}),
+    );
+    assert!(r["error"].is_null(), "{r}");
+    let kind = serde_json::to_value(&s.doc.find_feature("Copied").unwrap().kind).unwrap();
+    assert_eq!(kind["features"], json!([base]), "{kind}");
+    assert_eq!(kind["plane"], json!({"type": "construction", "feature": shelf}), "{kind}");
+    // A name that finds no feature keeps id 0: the mirror fails at evaluation, as a design
+    // migrated with a dangling seed does.
+    let r = run(
+        &mut s,
+        "timeline.add",
+        json!({"feature": {"type": "mirror", "name": "Lost", "features": ["Nope"], "plane": {"type": "construction", "name": "Gone"}}}),
+    );
+    assert!(!r["error"].is_null(), "a dangling seed fails at evaluation: {r}");
+    let kind = serde_json::to_value(&s.doc.find_feature("Lost").unwrap().kind).unwrap();
+    assert_eq!(kind["features"], json!([0]), "{kind}");
+    assert_eq!(kind["plane"], json!({"type": "construction", "feature": 0}), "{kind}");
+}

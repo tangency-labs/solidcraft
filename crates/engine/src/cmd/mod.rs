@@ -35,10 +35,13 @@ mod edit;
 mod face;
 mod features;
 mod features_more;
+mod join_pieces;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
-pub(crate) use features::{EdgeRefForm, edge_ref_form, sketch_key};
-pub use features::{auto_operation, extrude_reach};
+pub(crate) use features::{EdgeRefForm, axis_dir_form, edge_ref_form, sketch_key};
+pub use features::{auto_operation, extrude_reach, shown_scope};
+pub use join_pieces::{Addition, addition};
+pub use sketch::dimension_roles;
 pub use sketch_import::drawing_import_command;
 pub use sketch_modify::{extend_arc_preview, extend_preview, trim_piece};
 pub use view_dxf::sketch::exportable as view_dxf_exportable;
@@ -46,6 +49,7 @@ pub use view_navigation::standard_view;
 mod component_link;
 pub use component_link::resolve_design_links;
 mod config;
+mod design_link;
 mod file;
 mod frame;
 pub(crate) mod inspect;
@@ -60,6 +64,7 @@ mod mesh;
 mod metadata;
 pub(crate) mod motion;
 mod parts;
+mod point_cloud;
 mod script;
 mod section;
 pub(crate) use measure_sel::{measure_items, shape_of};
@@ -70,13 +75,19 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod render;
+mod render_ui;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
+pub(crate) use sheet::{
+    FlangeType, ThenStep, flange_edge, flange_edge_list, flange_position, flange_type, fold_points, fold_position, perforation_pattern, sheet_points,
+    then_list,
+};
 mod silhouette;
 mod sketch;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::created as sketch_created;
+mod canvas_sketch;
 mod sketch_3d;
 mod sketch_canvas;
 pub mod sketch_clipboard;
@@ -88,6 +99,7 @@ mod sketch_import;
 mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
+mod sketch_store;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -212,7 +224,12 @@ impl CommandSpec {
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
         (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
-        (self.run)(s, p)
+        let r = (self.run)(s, p);
+        // A parameter error that did not name the command names it here (see `Session::execute`).
+        match r {
+            Err(crate::EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(crate::EngineError::BadParams { cmd: self.id.to_string(), msg }),
+            other => other,
+        }
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
@@ -274,6 +291,8 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_inspect::COMMANDS.iter());
     v.extend(sketch_ends::COMMANDS.iter());
     v.extend(sketch_canvas::COMMANDS.iter());
+    v.extend(canvas_sketch::COMMANDS.iter());
+    v.extend(point_cloud::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
     v.extend(surface_boundary::COMMANDS.iter());
@@ -317,6 +336,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
+    v.extend(render_ui::COMMANDS.iter());
     v
 }
 

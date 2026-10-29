@@ -8,22 +8,22 @@ use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
 use super::CommandSpec;
-use crate::params::{bad, string_list, vec3};
+use crate::params::{bad, name_or_id_list, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("timeline.copy", "Copy Features", copy).icon("copy").noundo().params("features: [ids or names] (in timeline order on paste)"),
-    CommandSpec::new("timeline.paste", "Paste Features", paste)
-        .icon("paste")
-        .params("translate?: [x,y,z] (moves the copies' geometry); the copies go at the marker"),
+    CommandSpec::new("timeline.paste", "Paste Features", paste).icon("paste").params(
+        "translate?: [x,y,z] (moves the copies' geometry); component?: where the copies go (default: the active one), \
+         component_path?: its placement (default: the active one, else its only one); the copies go at the marker, each where \
+         its original is in the world (copies into their own component keep its coordinates); body transfers are left out",
+    ),
 ];
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.copy";
-    let mut keys = string_list(p, "features");
-    if let Some(Value::Array(a)) = p.get("features") {
-        keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
-    }
+    // The features are named or numbered, and both kinds can sit in one list.
+    let keys = name_or_id_list(cmd, p, "features")?;
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }
@@ -62,27 +62,86 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(vec3(v).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z]"))?),
         None => None,
     };
-    let feats = s.clipboard.clone();
-    let comp = s.active_component;
+    // A body transfer records which component bodies moved to, but the copies go into the
+    // component they are pasted into: a copy of the transfer would move nothing that is there, and
+    // it would belong to its destination rather than to the target. It is left out.
+    let (transfers, feats): (Vec<_>, Vec<_>) = s.clipboard.iter().cloned().partition(|f| matches!(f.kind, FeatureKind::BodyTransfer { .. }));
+    if feats.is_empty() {
+        return Err(bad(cmd, "body transfers are not pasted: the copies go into the component they are pasted into"));
+    }
+    let comp = match p.get("component") {
+        None => s.active_component,
+        Some(v) => {
+            let key = match v {
+                Value::Number(n) => n.to_string(),
+                Value::String(name) => name.clone(),
+                _ => return Err(bad(cmd, "`component` must be a component id or name")),
+            };
+            s.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?
+        }
+    };
+    let given_path = match p.get("component_path") {
+        None => None,
+        Some(v) => Some(
+            v.as_array()
+                .filter(|a| a.len() <= 64)
+                .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+                .ok_or_else(|| bad(cmd, "`component_path` must list 0..64 occurrence ids"))?,
+        ),
+    };
     let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
     let mut bodies: BTreeMap<String, String> = BTreeMap::new();
     let mut used: std::collections::BTreeSet<String> = s.model.state().bodies.iter().map(|body| body.name.clone()).collect();
-    let mut notices = Vec::new();
-    let author_path = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(comp));
+    let mut notices: Vec<String> = transfers.iter().map(|f| format!("{} is a body transfer and was not pasted", f.name)).collect();
+    // The placement the copies are authored in: the one named, the active one (into the active
+    // component, as before), else the target's only (or active) placement.
+    let author_path = match given_path {
+        Some(path) => path,
+        None if comp == s.active_component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(comp)),
+        None => super::component::placing::placement_of(s, &s.placed_document(), comp, None, "component_path", cmd)?.0,
+    };
     solidcraft_doc::EmbossFace::component_frame(&s.placed_document(), comp, &author_path)?;
+    // A copy from another component goes where its original is in the world: its geometry moves
+    // from its component's frame (its first placement, where its bodies have their own names)
+    // into the target's.
+    let placed = s.placed_document();
+    let target_frame = placed.path_transform(comp, &author_path).ok_or_else(|| bad(cmd, "that path is not a placement of the target"))?;
+    let to_target = solidcraft_doc::mat_inverse(&target_frame).ok_or_else(|| bad(cmd, "the target's frame is not invertible"))?;
+    let frame_change: BTreeMap<u64, solidcraft_doc::Mat> = feats
+        .iter()
+        .map(|f| f.component)
+        .filter(|from| *from != comp)
+        .map(|from| {
+            let source = placed.path_transform(from, &placed.first_path(from)).unwrap_or(solidcraft_doc::IDENTITY);
+            (from, solidcraft_doc::mat_mul(&to_target, &source))
+        })
+        .collect();
+    drop(placed);
+    let mut shift = solidcraft_doc::IDENTITY;
+    if let Some(t) = translate {
+        shift[3][0] = t.x;
+        shift[3][1] = t.y;
+        shift[3][2] = t.z;
+    }
     let mut names: BTreeMap<String, String> = BTreeMap::new();
     let mut made = Vec::new();
     for f in feats {
         let mut kind = f.kind.clone();
         kind.remap_refs(&sketches, &names);
+        let m = solidcraft_doc::mat_mul(&shift, frame_change.get(&f.component).unwrap_or(&solidcraft_doc::IDENTITY));
+        let moved = m.iter().enumerate().any(|(i, row)| row.iter().enumerate().any(|(j, v)| (v - if i == j { 1.0 } else { 0.0 }).abs() > 1e-12));
         // A body made by an earlier copy is the one this copy acts on (#613).
         kind.remap_bodies(&bodies);
         if let FeatureKind::Sketch { plane, .. } = &mut kind
             && let Some(anchor) = super::sketch::face::anchor_mut(plane)
         {
             let internal = bodies.contains_key(&anchor.target.body);
-            if !internal && translate.is_some_and(|translate| translate.len() > 1e-12) {
-                return Err(bad(cmd, "translated paste retains an external exact face attachment; explicitly convert it to a fixed plane first"));
+            if !internal && moved {
+                return Err(bad(
+                    cmd,
+                    "a moved paste (translated, or into a component placed elsewhere) retains an external exact face attachment; \
+                     explicitly convert it to a fixed plane first",
+                ));
             }
             if !internal {
                 notices.push(format!("pasted sketch retains external exact face attachment to {}", anchor.target.body));
@@ -118,17 +177,12 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         // `X (2)`, `X (3)`, and a second import of a file shows `Aa (2)` for the stored `Aa`. The
         // copies are found by the shown names; the stored ones only name the copies.
         let shown = if built.len() == outputs.len() { built } else { outputs.clone() };
-        let copied_names: Vec<_> = outputs
+        // Each copy is named after the body as shown, numbered: `Aa` → `Aa (2)`, `Aa (2)` → `Aa (2)(2)`.
+        let copied_names: Vec<_> = shown
             .iter()
-            .zip(&shown)
-            .map(|(original, shown)| {
-                let base = format!("{original} (copy)");
-                let mut name = base.clone();
-                let mut suffix = 2usize;
-                while !used.insert(name.clone()) {
-                    name = format!("{base} {suffix}");
-                    suffix += 1;
-                }
+            .map(|shown| {
+                let name = solidcraft_doc::copy_name(shown, |n| used.contains(n));
+                used.insert(name.clone());
                 bodies.insert(shown.clone(), name.clone());
                 name
             })
@@ -143,14 +197,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         }
-        if let Some(t) = translate {
+        if moved {
             if let FeatureKind::Sketch { plane, .. } | FeatureKind::ConstructionPlane { plane } = &mut kind {
                 explicit_planes(plane);
             }
-            let mut m = solidcraft_doc::IDENTITY;
-            m[3][0] = t.x;
-            m[3][1] = t.y;
-            m[3][2] = t.z;
             kind.transform_geometry(&m);
         }
         // A cylinder Emboss finds its face only by the persistent name recorded when it was made
@@ -160,7 +210,9 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         } else {
             Vec::new()
         };
-        let id = doc.add_feature(kind, None)?;
+        // A copy keeps its original's name, numbered: `Sketch1` → `Sketch1 (2)`.
+        let name = solidcraft_doc::copy_name(&f.name, |n| doc.features.iter().any(|x| x.name == n));
+        let id = doc.add_feature(kind, Some(&name))?;
         if let Some(nf) = doc.feature_mut(id) {
             nf.component = comp;
             nf.body_names = copied_names;
@@ -195,6 +247,50 @@ mod tests {
 
     fn volume(s: &mut Session) -> f64 {
         run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN)
+    }
+
+    /// Features pasted into a component placed elsewhere (offset and turned) are carried into its
+    /// frame: the pasted body sits where the original is in the world, in that component, and the
+    /// pasted sketch is named after the original.
+    #[test]
+    fn features_pasted_into_a_component_placed_elsewhere_stay_where_they_were() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 5, "body_name": "Block"}));
+        let made = run(&mut s, "component.create", json!({"name": "A", "activate": false}));
+        let (a, at) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+        run(&mut s, "occurrence.ground", json!({"occurrence": at, "grounded": false}));
+        run(&mut s, "occurrence.move", json!({"occurrence": at, "translate": [100, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}));
+        run(&mut s, "timeline.copy", json!({"features": ["S", "Extrude1"]}));
+        let r = run(&mut s, "timeline.paste", json!({"component": a, "component_path": [at]}));
+        assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
+        assert_eq!(r["pasted"][0]["name"], "S (2)");
+        let world = s.world_state();
+        let (original, copy) = (world.body("Block").unwrap().mesh().bounds(), world.body("Block (2)").unwrap().mesh().bounds());
+        assert!(copy.min.dist(original.min) < 1e-6 && copy.max.dist(original.max) < 1e-6, "{original:?} vs {copy:?}");
+        let state = s.model.state();
+        assert_eq!(s.doc.model_body_component(state.body("Block (2)").unwrap()), a);
+    }
+
+    /// A sketch attached to a face of a body that isn't copied with it can't be carried into a
+    /// component placed elsewhere: the paste is refused, saying to make its plane fixed first.
+    #[test]
+    fn a_face_attached_sketch_is_not_moved_into_a_component_placed_elsewhere() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 20]}, "name": "OnTop"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [6, 6]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let made = run(&mut s, "component.create", json!({"name": "A", "activate": false}));
+        let (a, at) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+        run(&mut s, "occurrence.ground", json!({"occurrence": at, "grounded": false}));
+        run(&mut s, "occurrence.move", json!({"occurrence": at, "translate": [100, 0, 0]}));
+        run(&mut s, "timeline.copy", json!({"features": ["OnTop"]}));
+        let err = s.execute("timeline.paste", &json!({"component": a, "component_path": [at]})).unwrap_err().to_string();
+        assert!(err.contains("fixed plane"), "{err}");
+        assert!(s.doc.find_feature("OnTop (2)").is_none(), "nothing was pasted");
     }
 
     #[test]
@@ -327,7 +423,7 @@ mod tests {
         let import = run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}))["feature"].clone();
         assert_eq!(body_names(&s), ["Aa", "Bb", "Cc"]);
         paste_import_with_two_lifts(&mut s, &import, ["Aa", "Bb", "Cc"]);
-        assert_eq!(body_names(&s), ["Aa", "Bb", "Cc", "Aa (copy)", "Bb (copy)", "Cc (copy)"]);
+        assert_eq!(body_names(&s), ["Aa", "Bb", "Cc", "Aa (2)", "Bb (2)", "Cc (2)"]);
         let at: Vec<Vec<f64>> = LIFTED.iter().chain(&LIFTED).map(|c| c.to_vec()).collect();
         assert_eq!(corners(&mut s), at);
     }
@@ -384,7 +480,7 @@ mod tests {
         assert_eq!(corners(&mut s), at, "{:?}", body_names(&s));
         let m = run(&mut s, "inspect.measure", json!({}));
         let names: Vec<&str> = m["bodies"].as_array().unwrap().iter().filter_map(|b| b["name"].as_str()).collect();
-        assert_eq!(names, ["Aa (copy)", "Bb (copy)", "Cc (copy)", "Aa", "Bb", "Cc", "Aa (2)", "Bb (2)", "Cc (2)"]);
+        assert_eq!(names, ["Aa (2)(2)", "Bb (2)(2)", "Cc (2)(2)", "Aa", "Bb", "Cc", "Aa (2)", "Bb (2)", "Cc (2)"]);
     }
 
     /// A cylinder Emboss finds its face by the persistent name it recorded when it was made. The
@@ -411,7 +507,7 @@ mod tests {
             assert!(mark.face_names.first().is_some_and(|n| n.starts_with(&format!("F{tube}:"))), "{:?}", mark.face_names);
             assert!((volume(&mut s) - 2.0 * one).abs() < 1e-6, "{translate:?}: both cylinders carry a badge");
             if translate.is_some() {
-                let m = run(&mut s, "inspect.measure", json!({"bodies": ["Sleeve (copy)"]}));
+                let m = run(&mut s, "inspect.measure", json!({"bodies": ["Sleeve (2)"]}));
                 let body = &m["bodies"][0];
                 let x = body["center_of_mass"][0].as_f64().unwrap_or(f64::NAN);
                 let y = body["bbox"]["max"][1].as_f64().unwrap_or(f64::NAN);
@@ -435,7 +531,7 @@ mod tests {
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
         let round = r["pasted"][2]["name"].as_str().unwrap_or_default().to_string();
         let def = run(&mut s, "timeline.inspect", json!({"feature": round}));
-        assert_eq!(def["definition"]["body"], "Block (copy)", "{def}");
+        assert_eq!(def["definition"]["body"], "Block (2)", "{def}");
         let m = run(&mut s, "inspect.measure", json!({}));
         assert_eq!(m["body_count"], 2, "{m}");
         assert!((volume(&mut s) - 2.0 * one).abs() < 1e-6, "both blocks are rounded: {m}");
@@ -468,10 +564,10 @@ mod tests {
         run(&mut s, "timeline.copy", json!({"features": ["Roof", "Shelf", "S", "Up", "T", "On"]}));
         let r = run(&mut s, "timeline.paste", json!({"translate": [100, 0, 10]}));
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
-        let up = measures(&mut s, "Up (copy)");
+        let up = measures(&mut s, "Up (2)");
         assert!((up["bbox"]["min"][2].as_f64().unwrap_or(0.0) - 10.0).abs() < 1e-6, "{up}");
         assert!((up["bbox"]["max"][2].as_f64().unwrap_or(0.0) - 30.0).abs() < 1e-6, "it ends on the pasted roof: {up}");
-        let on = measures(&mut s, "On (copy)");
+        let on = measures(&mut s, "On (2)");
         assert!((on["bbox"]["min"][2].as_f64().unwrap_or(0.0) - 22.0).abs() < 1e-6, "it starts on the pasted shelf: {on}");
         assert!((on["bbox"]["max"][2].as_f64().unwrap_or(0.0) - 27.0).abs() < 1e-6, "{on}");
     }
@@ -486,7 +582,7 @@ mod tests {
         run(&mut s, "timeline.copy", json!({"features": ["Block", "Drill"]}));
         let r = run(&mut s, "timeline.paste", json!({"translate": [60, 0, -6]}));
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
-        let (block, copy) = (measures(&mut s, "Block"), measures(&mut s, "Block (copy)"));
+        let (block, copy) = (measures(&mut s, "Block"), measures(&mut s, "Block (2)"));
         let v = |m: &serde_json::Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
         assert!((v(&block) - (16000.0 - std::f64::consts::PI * 25.0 * 10.0)).abs() < 1.0, "a through hole: {block}");
         assert!((v(&copy) - v(&block)).abs() < 1e-6, "the pasted hole goes through too: {copy}");
@@ -504,7 +600,7 @@ mod tests {
         run(&mut s, "timeline.copy", json!({"features": ["S", "Turn"]}));
         let r = run(&mut s, "timeline.paste", json!({"translate": [50, 0, 0]}));
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
-        let (arc, copy) = (measures(&mut s, "Arc"), measures(&mut s, "Arc (copy)"));
+        let (arc, copy) = (measures(&mut s, "Arc"), measures(&mut s, "Arc (2)"));
         let v = |m: &serde_json::Value| m["volume_mm3"].as_f64().unwrap_or(f64::NAN);
         // A quarter turn of a 5 × 5 section whose centre is 12.5 from the axis.
         let quarter = 25.0 * std::f64::consts::FRAC_PI_2 * 12.5;
@@ -527,12 +623,38 @@ mod tests {
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
         let spring = r["pasted"][1]["name"].as_str().unwrap_or_default().to_string();
         let def = run(&mut s, "timeline.inspect", json!({"feature": spring}));
-        assert_eq!(def["definition"]["targets"], json!(["Plate (copy)"]), "{def}");
+        assert_eq!(def["definition"]["targets"], json!(["Plate (2)"]), "{def}");
         let st = s.world_state();
         let v = |name: &str| solidcraft_kernel::measure(&st.body(name).unwrap().body).unwrap().volume;
         // A spring on the wrong plate is hundreds of mm³ off. The two plates are measured apart
         // (one moved 50 mm), which the boolean and the measure each round in their own way:
         // a few 1e-6 mm³ on 5000.
-        assert!((v("Plate") - v("Plate (copy)")).abs() < 1e-8 * v("Plate"), "each plate carries one spring: {} vs {}", v("Plate"), v("Plate (copy)"));
+        assert!((v("Plate") - v("Plate (2)")).abs() < 1e-8 * v("Plate"), "each plate carries one spring: {} vs {}", v("Plate"), v("Plate (2)"));
+    }
+
+    /// A copied body transfer is left out of a paste: the copies go into the component they are
+    /// pasted into. A pasted transfer belonged to that component and not to its destination, and
+    /// the saved design no longer loaded.
+    #[test]
+    fn a_copied_body_transfer_is_left_out_of_the_paste() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base", "body_name": "Block"}));
+        let a = run(&mut s, "component.create", json!({"name": "A", "activate": false}))["component"].as_u64().unwrap_or_default();
+        run(&mut s, "component.move_bodies", json!({"bodies": ["Block"], "component": "A"}));
+        let transfer = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::BodyTransfer { .. })).map(|f| f.name.clone());
+        let transfer = transfer.unwrap_or_default();
+        run(&mut s, "timeline.copy", json!({"features": ["Base", transfer]}));
+        let r = run(&mut s, "timeline.paste", json!({"translate": [20, 0, 0]}));
+        assert_eq!(r["pasted"].as_array().map(Vec::len), Some(1), "{r}");
+        assert_eq!(r["notices"], json!([format!("{transfer} is a body transfer and was not pasted")]), "{r}");
+        let state = s.model.state();
+        assert_eq!(state.body("Block").map(|b| s.doc.model_body_component(b)), Some(a));
+        assert_eq!(state.body("Block (2)").map(|b| s.doc.model_body_component(b)), Some(0), "the copy is in the root, where it was pasted");
+        if let Err(e) = solidcraft_doc::Document::from_json(&s.doc.to_json()) {
+            panic!("the design loads back: {e}");
+        }
+        run(&mut s, "timeline.copy", json!({"features": [transfer]}));
+        let err = s.execute("timeline.paste", &json!({})).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
+        assert!(err.contains("body transfers are not pasted"), "{err}");
     }
 }

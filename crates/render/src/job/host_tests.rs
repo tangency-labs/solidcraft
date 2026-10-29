@@ -144,6 +144,7 @@ mod progressive_checkpoints {
 
 fn request() -> ImageRequest {
     ImageRequest {
+        studio_weights: None,
         integrator: Default::default(),
         raytrace: None,
         textures: None,

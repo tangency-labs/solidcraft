@@ -1,5 +1,7 @@
 # Contributing to SolidCraft
 
+Agents: start from the router in [AGENTS.md](AGENTS.md), which points to a short skill in [`skills/`](skills/README.md) for each kind of work. This page stays the full human guide.
+
 SolidCraft is an open-source parametric 3D CAD app written in pure Rust.
 You sketch on a plane, constrain the sketch, turn profiles into solids, and
 change a parameter to watch the timeline rebuild. It runs as a desktop app (Windows, macOS, Linux), in
@@ -134,6 +136,7 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
    [Adding a command](docs/book/src/dev/commands.md#adding-a-command); a test warns about a
    command without them, and will fail it once required), engine tests that measure the result (volume, area,
    face/edge/vertex counts against a value you can derive), and for UI work a scenario (below).
+   A command on the toolbar also ships with its help tooltip (step 6 of Adding a command).
 6. **One set of camera controls.** Every page or canvas that shows a view (the modelling
    viewport, the Render preview, and any new page such as a flat pattern or drawing) calls
    `navigation::handle` (`crates/ui-egui/src/navigation.rs`) for its camera input, with
@@ -192,9 +195,11 @@ in the PR. `cargo xtask test` builds the tests with it and then runs every test 
 shared bound on top-level test/side commands for `cargo xtask test` and `cargo xtask ci`.
 For example, `SOLIDCRAFT_TEST_JOBS=2` allows two commands at once; the sequential wasm/doc
 worker consumes one of those slots. Every binary and side check still runs after failures.
-Without the variable the existing concurrency is unchanged. `RUST_TEST_THREADS`,
-`ACTION_MATRIX_JOBS` and Cargo's build-job setting remain independent caller overrides;
-this limit does not choose their values or change test filters, timeouts or baselines.
+Without the variable the existing concurrency is unchanged. With it set, each test binary
+inherits `RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / jobs)` — the machine's
+parallelism shared between the binaries in flight — unless you set either one explicitly;
+explicit caller overrides always win. Cargo's build-job setting remains an independent caller
+override; this limit does not change test filters, timeouts or baselines.
 Tests run beside each other on a busy machine, so a test must not depend on wall-clock timing.
 
 **Ready pull requests test what they touch.** CI maps changed files to workspace packages and
@@ -263,7 +268,9 @@ a conflict. `crates/doc/src/format/pending/README.md` has an example.
 
 **At release time** the maintainer runs `scripts/fold-format-pending.sh`, which moves the pending
 files into `crates/doc/src/format/v<N>/` and fixes that number for good (see
-[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards.
+[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards. Drawings
+follow the same rules with their own numbers, from 1, in `crates/doc/src/drawing/format/` (see its
+`pending/README.md`), and the same script folds them.
 
 ## Lists many changes add to
 
@@ -271,6 +278,11 @@ Some files gain an item in many pull requests at once. They are kept so that two
 each add an item only meet when their items are neighbours, which spares everyone a conflict
 and a fresh CI run:
 
+- **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
+  length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
+  of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
+  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
   and the Lists workflow) fails on an unsorted catalog or an id that appears twice.
@@ -279,6 +291,12 @@ and a fresh CI run:
 - **Commands without schemas** (`crates/engine/src/schema/unconverted.txt`): sorted, one id per
   line, and it only shrinks. Converting a command removes its line; a new command is never added
   to it.
+- **Toolbar commands without help** (`BACKLOG` in `crates/ui-egui/src/command_help.rs`): sorted,
+  one id per line, and it only shrinks. Writing a command's help removes its line; a new command
+  is never added to it.
+- **`ui.prefs` settings** (`docs/control-protocol.md`): one line per setting, sorted by name, in
+  the list under the protocol table; add a new setting on its own line rather than editing a shared
+  row.
 - **Languages** (`crates/ui-egui/src/i18n.rs`): one per line, English first, then by id (a test
   checks it).
 - **Generated files**: `THIRD-PARTY-LICENSES.txt` and `docs/features.md` are rewritten on `main`
@@ -287,7 +305,9 @@ and a fresh CI run:
 - **Design format**: one file per change, never an edit to a shared number (above).
 - **New UI strings and attribution rows**: one new file per change, `assets/locales/pending/<slug>.json`
   and `attribution/pending/<slug>.md`, instead of editing the catalogs or the ATTRIBUTION.md table;
-  `cargo xtask fold-pending` folds them on `main` (see the README in each folder).
+  `cargo xtask fold-pending` folds them on `main` (see the README in each folder). A new English
+  message also needs every catalog delivered complete (`COMPLETE` in `crates/ui-egui/src/i18n.rs`:
+  today ar, he, ja, vi, and zh) in the same pending file; `cargo xtask i18n --check` reports any gap.
 
 ## Sending a change
 

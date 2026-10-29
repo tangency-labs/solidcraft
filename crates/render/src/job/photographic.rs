@@ -369,8 +369,7 @@ impl PhotographicState {
             let grain = (random(index as u32 ^ self.options.seed) - 0.5) * self.options.grain * (luminance + 0.03).sqrt();
             for channel in 0..3 {
                 let linear = (rgb[channel] + flare[channel] + grain).max(0.0);
-                let encoded = if linear <= 0.0031308 { linear * 12.92 } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
-                self.output.push((encoded.clamp(0.0, 1.0) * 255.0).round() as u8);
+                self.output.push(solidcraft_geom::srgb::encode8(linear));
             }
             self.output.push(255);
         }

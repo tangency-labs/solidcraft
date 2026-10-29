@@ -8,6 +8,28 @@ fn run(s: &mut Session, id: &str, params: Value) -> Value {
     s.execute(id, &params).unwrap_or_else(|e| panic!("{id} {params}: {e}"))
 }
 
+#[test]
+fn history_playback_is_a_typed_display_request_without_history_edits() {
+    let mut s = Session::default();
+    let revision = s.revision;
+    let undo = s.undo.len();
+    for action in ["toggle", "play", "stop"] {
+        assert_eq!(run(&mut s, "timeline.play", json!({"action": action})), json!({"action": action}));
+    }
+    assert_eq!(run(&mut s, "timeline.play", json!({})), json!({"action": "toggle"}));
+    for action in [json!("pause"), json!(true), json!(1), json!([])] {
+        assert!(s.execute("timeline.play", &json!({"action": action})).is_err());
+    }
+    assert_eq!(s.revision, revision);
+    assert_eq!(s.undo.len(), undo);
+    assert!(s.doc.marker.is_none());
+    let description = run(&mut s, "engine.describe", json!({"command": "timeline.play"}));
+    assert!(description["input"].is_object());
+    assert!(description["output"].is_object());
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    assert!(s.execute("timeline.play", &json!({})).is_err());
+}
+
 /// `timeline.roll_to` takes a number of features or "end"; any other value is refused instead of
 /// silently moving the marker to the end.
 #[test]
@@ -38,6 +60,45 @@ fn roll_to_takes_a_number_or_end_and_refuses_anything_else() {
         let e = s.execute(cmd, &json!({"position": "start"})).unwrap_err().to_string();
         assert!(e.contains(&format!("`{cmd}`")), "named as asked: {e}");
     }
+}
+
+/// #7077: Repeat Last Command is a command (its key can change, command search finds it), but
+/// only the app has a tool to start, so a script's call is refused and changes nothing.
+#[test]
+fn repeat_is_refused_outside_the_app_and_changes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let (doc, undo) = (s.doc.to_json(), s.undo.len());
+    let e = s.execute("edit.repeat", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("in the app"), "{e}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo));
+    let spec = crate::find_command("edit.repeat").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Shift+R"), "", false));
+}
+
+#[test]
+fn creating_after_deleting_future_features_keeps_the_new_feature_active() {
+    let mut s = Session::default();
+    for (name, corner, size) in [("Base", [0, 0, 0], 10), ("Later1", [20, 0, 0], 2), ("Later2", [40, 0, 0], 3)] {
+        run(&mut s, "solid.box", json!({"name": name, "corner": corner, "length": size, "width": size, "height": size, "operation": "new"}));
+    }
+
+    run(&mut s, "timeline.roll_to", json!({"position": 1}));
+    run(&mut s, "solid.box", json!({"name": "Inserted", "corner": [60, 0, 0], "length": 4, "width": 4, "height": 4, "operation": "new"}));
+    assert_eq!(s.doc.features.iter().map(|feature| feature.name.as_str()).collect::<Vec<_>>(), ["Base", "Inserted", "Later1", "Later2"]);
+    assert_eq!(s.doc.marker, Some(2), "with later features, the new feature is inserted at the cursor");
+
+    run(&mut s, "timeline.delete", json!({"features": ["Later1", "Later2"]}));
+    assert_eq!(s.doc.features.len(), 2);
+    assert_eq!(s.doc.marker, Some(2), "the cursor is at the end after deleting all later features");
+
+    run(&mut s, "solid.box", json!({"name": "Appended", "corner": [80, 0, 0], "length": 5, "width": 5, "height": 5, "operation": "new"}));
+
+    assert_eq!(s.doc.features.iter().map(|feature| feature.name.as_str()).collect::<Vec<_>>(), ["Base", "Inserted", "Appended"]);
+    assert_eq!(s.doc.marker, Some(3), "the new feature advances the cursor to the end");
+    assert_eq!(s.model.state().bodies.len(), 3, "the appended feature is evaluated, not left in the future");
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 1189.0).abs() < 1e-6, "{volume}");
 }
 
 #[test]
@@ -142,6 +203,43 @@ fn redefining_a_blend_replaces_persistent_edge_selection_and_survives_resize() {
     let expected = 60.0 * 30.0 * 25.0 - (4.0 - std::f64::consts::PI) * 30.0;
     assert!((volume - expected).abs() < expected * 1e-4, "{volume} != {expected}");
     assert!(s.model.result(old.id).unwrap().warning.is_none());
+}
+
+/// A redefine computes the features after the edited one once: its trial's results are kept
+/// for the session's own evaluation, though the cache holds only the last state (a large
+/// design's). The reply reports that one rebuild (#5694): a session that had to compute the
+/// features again would count them twice.
+#[test]
+fn redefining_computes_the_later_features_once() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "name": "Base"}));
+    for x in [30, 40, 50] {
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [x, 0, 0]}));
+    }
+    *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+    let reply =
+        run(&mut s, "timeline.redefine", json!({"feature": "Base", "command": "solid.box", "params": {"length": 25, "width": 10, "height": 5}}));
+    assert_eq!((reply["recomputed"].as_u64(), reply["restored"].as_u64()), (Some(4), Some(0)), "{reply}");
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - (25.0 * 10.0 * 5.0 + 3.0 * 125.0)).abs() < 1e-6, "{volume}");
+}
+
+/// #5694: the reply reports what the redefine rebuilt — the edited feature and the features
+/// after it — not the session's reuse of the trial's own results, which read as "nothing was
+/// rebuilt" and did not match what the same change reports through `timeline.edit`.
+#[test]
+fn redefining_reports_the_features_it_rebuilt() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "center": [0, 0, 10], "name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 20], "diameter": 6, "depth": 12, "name": "H"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "center": [30, 0, 2.5], "operation": "new", "name": "Other"}));
+    let reply = run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "H", "command": "solid.hole",
+               "params": {"position": [0, 0, 20], "type": "counterbore", "diameter": 6, "depth": 12, "cb_diameter": 10, "cb_depth": 4}}),
+    );
+    assert_eq!((reply["recomputed"].as_u64(), reply["restored"].as_u64()), (Some(2), Some(0)), "{reply}");
 }
 
 #[test]
@@ -662,6 +760,108 @@ fn timeline_folders_can_nest_and_reject_cycles() {
     assert_eq!(s.doc.timeline_groups.iter().find(|group| group.id == child).unwrap().parent, None, "deleting a folder promotes its children");
 }
 
+/// Four separate boxes, `First`…`Fourth`, for the timeline folder tests.
+fn four_boxes() -> Session {
+    let mut s = Session::default();
+    for (i, name) in ["First", "Second", "Third", "Fourth"].into_iter().enumerate() {
+        let corner = [20 * i, 0, 0];
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body", "name": name}));
+    }
+    s
+}
+
+fn feature_names(s: &Session) -> Vec<String> {
+    s.doc.features.iter().map(|feature| feature.name.clone()).collect()
+}
+
+/// `timeline.delete {groups}` deletes a folder with its features and nested folders in one undo
+/// step; other folders and features stay, and `timeline.ungroup` still keeps the features (#7219).
+#[test]
+fn timeline_delete_takes_a_folder_with_its_features_and_nested_folders() {
+    let mut s = four_boxes();
+    let outer = run(&mut s, "timeline.group", json!({"name": "Outer", "features": ["Second"]}))["group"].as_u64().unwrap();
+    let inner = run(&mut s, "timeline.group", json!({"name": "Inner", "features": ["Third"], "parent": outer}))["group"].as_u64().unwrap();
+    let keep = run(&mut s, "timeline.group", json!({"name": "Keep", "features": ["Fourth"]}))["group"].as_u64().unwrap();
+    let before = s.doc.clone();
+
+    let out = run(&mut s, "timeline.delete", json!({"groups": [outer]}));
+    assert_eq!(feature_names(&s), ["First", "Fourth"]);
+    assert_eq!(out["groups"], json!([outer, inner]), "{out}");
+    assert_eq!(s.doc.timeline_groups.iter().map(|group| group.id).collect::<Vec<_>>(), [keep], "the nested folder goes too");
+    assert_eq!(s.model.state().bodies.len(), 2);
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.timeline_groups, s.doc.timeline_groups);
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features, before.features, "one undo step brings the features back");
+    assert_eq!(s.doc.timeline_groups, before.timeline_groups, "and the folders, nested as they were");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(feature_names(&s), ["First", "Fourth"]);
+    run(&mut s, "edit.undo", json!({}));
+
+    // A folder and a feature outside it in one delete; an empty folder goes on its own.
+    run(&mut s, "timeline.delete", json!({"groups": [inner], "features": ["First"]}));
+    assert_eq!(feature_names(&s), ["Second", "Fourth"]);
+    assert_eq!(s.doc.timeline_groups.iter().map(|group| group.name.as_str()).collect::<Vec<_>>(), ["Outer", "Keep"]);
+    let empty = run(&mut s, "timeline.group", json!({"name": "Empty"}))["group"].as_u64().unwrap();
+    assert_eq!(run(&mut s, "timeline.delete", json!({"groups": [empty]}))["deleted"], json!([]));
+    assert!(!s.doc.timeline_groups.iter().any(|group| group.id == empty));
+
+    let before = s.doc.clone();
+    for bad in [json!({"groups": [999_999]}), json!({"groups": ["Outer"]}), json!({"groups": 3}), json!({"groups": []})] {
+        assert!(s.execute("timeline.delete", &bad).is_err(), "{bad}");
+        assert_eq!(s.doc, before, "{bad}: a refused delete changes nothing");
+    }
+}
+
+/// `timeline.suppress {groups}` suppresses every feature of a folder and its nested folders in
+/// one undo step, toggles like several features do, and works with the marker inside the
+/// folder (#7219).
+#[test]
+fn timeline_suppress_takes_a_folder_with_its_nested_folders() {
+    let mut s = four_boxes();
+    let outer = run(&mut s, "timeline.group", json!({"name": "Outer", "features": ["Second"]}))["group"].as_u64().unwrap();
+    run(&mut s, "timeline.group", json!({"name": "Inner", "features": ["Third"], "parent": outer}));
+    let suppressed = |s: &Session| s.doc.features.iter().filter(|feature| feature.suppressed).map(|feature| feature.name.clone()).collect::<Vec<_>>();
+
+    let out = run(&mut s, "timeline.suppress", json!({"groups": [outer]}));
+    assert_eq!(out["suppressed"], true);
+    assert_eq!(out["groups"], json!([outer]));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+    assert_eq!(s.model.state().bodies.len(), 2);
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.features, s.doc.features);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(suppressed(&s).is_empty(), "one undo step");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+
+    // Toggle: all suppressed, so all come back; with one of them active, all are suppressed.
+    run(&mut s, "timeline.suppress", json!({"groups": [outer]}));
+    assert!(suppressed(&s).is_empty());
+    run(&mut s, "timeline.suppress", json!({"feature": "Third"}));
+    run(&mut s, "timeline.suppress", json!({"groups": [outer]}));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+    run(&mut s, "timeline.suppress", json!({"groups": [outer], "suppressed": false, "features": ["Fourth"]}));
+    assert!(suppressed(&s).is_empty(), "an explicit state, with a feature outside the folder as well");
+
+    // The marker between the folder's features: the folder is suppressed all the same, and the
+    // marker stays where it was.
+    run(&mut s, "timeline.roll_to", json!({"feature": "Second"}));
+    assert_eq!(s.doc.marker, Some(2));
+    run(&mut s, "timeline.suppress", json!({"groups": [outer], "suppressed": true}));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+    assert_eq!(s.doc.marker, Some(2));
+    assert_eq!(s.model.state().bodies.len(), 1, "only First is before the marker and not suppressed");
+
+    let empty = run(&mut s, "timeline.group", json!({"name": "Empty"}))["group"].as_u64().unwrap();
+    let before = s.doc.clone();
+    for bad in [json!({"groups": [empty]}), json!({"groups": [999_999]}), json!({"groups": [outer], "suppressed": "yes"})] {
+        assert!(s.execute("timeline.suppress", &bad).is_err(), "{bad}");
+        assert_eq!(s.doc, before, "{bad}: a refused suppress changes nothing");
+    }
+}
+
 /// A field the feature's definition doesn't have is refused with the fields it does have,
 /// instead of reporting success and changing nothing (#1491).
 #[test]
@@ -822,6 +1022,53 @@ fn suppressing_a_feature_keeps_later_counted_body_names() {
     assert!(works(&s));
 }
 
+/// Counted body names are pinned when the body is made, as if the user had renamed it: deleting,
+/// reordering or rolling back another feature leaves the other bodies' names alone, and a number
+/// a deleted feature held is not handed to the next body.
+#[test]
+fn counted_body_names_stay_when_the_timeline_changes() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "name": name}));
+    }
+    run(&mut s, "solid.move", json!({"bodies": ["Body2"], "translate": [0, 30, 0], "name": "Move"}));
+    let bodies = |s: &Session| -> Vec<(String, String)> {
+        let st = s.model.state();
+        st.bodies.iter().map(|b| (b.name.clone(), s.doc.feature(b.feature).map(|f| f.name.clone()).unwrap_or_default())).collect()
+    };
+    let named = |pairs: &[(&str, &str)]| pairs.iter().map(|(b, f)| (b.to_string(), f.to_string())).collect::<Vec<_>>();
+    let works = |s: &Session| s.doc.features.iter().all(|f| s.model.result(f.id).is_some_and(|r| r.error.is_none()));
+    // The names are stored on the features as soon as the bodies exist.
+    assert_eq!(s.doc.find_feature("B").map(|f| f.body_names.clone()), Some(vec!["Body2".to_string()]));
+    assert!(["Body1", "Body2", "Body3"].iter().all(|n| s.doc.reserved_body_names.contains(*n)));
+
+    // Reordering A behind B: every body keeps its number, wherever it comes in the list.
+    run(&mut s, "timeline.reorder", json!({"feature": "A", "position": 2, "active": true}));
+    let mut reordered = bodies(&s);
+    reordered.sort();
+    assert_eq!(reordered, named(&[("Body1", "A"), ("Body2", "B"), ("Body3", "C")]));
+    assert!(works(&s));
+    run(&mut s, "edit.undo", json!({}));
+
+    // Rolled back to before B and forward again.
+    run(&mut s, "timeline.roll_to", json!({"position": 1}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    assert_eq!(bodies(&s), named(&[("Body1", "A"), ("Body2", "B"), ("Body3", "C")]));
+
+    // Deleting A: B and C keep their names, so the Move still finds Body2.
+    run(&mut s, "timeline.delete", json!({"feature": "A"}));
+    assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C")]));
+    assert!(works(&s), "the Move still finds Body2");
+
+    // The number A held is not handed out again.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "name": "D"}));
+    assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "D")]));
+    // Undo takes the box away, and the number back with it.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "name": "E"}));
+    assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
+}
+
 /// The value at a dotted path of a definition.
 fn dotted<'a>(def: &'a Value, path: &str) -> &'a Value {
     path.split('.').fold(def, |v, k| &v[k])
@@ -929,19 +1176,22 @@ fn renaming_a_feature_evaluates_nothing() {
     run(&mut s, "edit.redo", json!({}));
     assert_eq!(labels(&s), renamed);
     assert_eq!(s.evaluations, 0, "undo and redo of a rename evaluate nothing");
-    // A sketch on the plane names it: renaming the plane renames it there too, which is evaluated.
+    // A sketch on the plane names it by id (#1134): renaming the plane changes no reference,
+    // so it now evaluates nothing — the name follows everywhere without a rebuild.
     run(&mut s, "sketch.create", json!({"plane": "Shelf", "name": "Top"}));
     run(&mut s, "sketch.finish", json!({}));
     s.evaluations = 0;
     run(&mut s, "timeline.rename", json!({"feature": "Shelf", "name": "Ledge"}));
-    assert!(s.evaluations > 0);
+    assert_eq!(s.evaluations, 0, "renaming a plane a sketch is built on evaluates nothing");
     assert!(labels(&s).2.contains(&"Ledge".to_string()));
-    // A failed pattern's error quotes its source's name: renaming the source is evaluated, so
-    // the error names it as an evaluation does.
+    // A failed pattern's error quotes its source's name (the seed is keyed by id, #1134, and
+    // the error is rendered from the source feature at evaluation): renaming the source is
+    // evaluated, so the error names it as an evaluation does.
     run(&mut s, "solid.pattern.rectangular", json!({"features": ["Base plate"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 10, "name": "Copies"}));
     let copies = s.doc.find_feature("Copies").unwrap().id;
+    let top = s.doc.find_feature("Top").unwrap().id;
     if let Some(solidcraft_doc::FeatureKind::Pattern { features, .. }) = s.doc_mut().feature_mut(copies).map(|f| &mut f.kind) {
-        *features = vec!["Top".into()];
+        *features = vec![top.into()];
     }
     s.refresh();
     let failed = |s: &Session| s.model.results.iter().filter_map(|r| r.error.clone()).collect::<Vec<_>>();
@@ -983,11 +1233,13 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
         r["points"].as_array().unwrap().iter().find(|p| p["link"] == "j1").unwrap()["world"][2].as_f64().unwrap()
     };
     let warnings = |s: &Session| s.model.results.iter().filter_map(|r| r.warning.clone()).collect::<Vec<_>>();
+    // The canvas keeps its plane by id (#1134): the rename leaves the reference alone.
+    let shelf = s.doc.find_feature("Shelf").unwrap().id;
     run(&mut s, "select.set", json!({"items": [{"type": "plane", "name": "Shelf"}]}));
     run(&mut s, "timeline.rename", json!({"feature": "Shelf", "name": "Ledge"}));
     run(&mut s, "timeline.rename", json!({"feature": "Guide", "name": "Rail"}));
     assert_eq!(plane_link(&s), "Ledge");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { name: "Ledge".into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
     assert_eq!(s.visibility.hidden_origin, ["Rail"]);
     assert_eq!(s.selection, [Sel::Plane { name: "Ledge".into() }]);
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
@@ -1000,7 +1252,7 @@ fn renaming_a_plane_keeps_its_projections_canvases_and_hidden_state() {
         run(&mut s, "edit.undo", json!({}));
     }
     assert_eq!(plane_link(&s), "Shelf");
-    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { name: "Shelf".into() });
+    assert_eq!(canvas_plane(&s), solidcraft_doc::PlaneRef::Construction { feature: shelf.into() });
     assert_eq!(s.visibility.hidden_origin, ["Guide"], "the hidden plane stays hidden");
     assert!(warnings(&s).is_empty(), "{:?}", warnings(&s));
     assert!((projected_z(&mut s) - 20.0).abs() < 1e-9);
@@ -1032,4 +1284,73 @@ fn a_reorder_keeps_the_model_it_was_checked_on() {
     let mut fresh = solidcraft_doc::Model::new();
     fresh.evaluate(&s.doc);
     assert_eq!(fresh.state().bodies.len(), bodies(&s));
+}
+
+#[test]
+fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refuses_hostile_input() {
+    let mut s = Session::default();
+    for (name, x) in [("A", 0), ("B", 20), ("C", 40)] {
+        run(&mut s, "solid.box", json!({"corner":[x,0,0],"length":10,"width":10,"height":10,"body_name":name}));
+    }
+    run(&mut s, "appearance.assign", json!({"bodies":["A","B"],"appearance":"ABS - Red"}));
+    run(&mut s, "appearance.assign", json!({"bodies":["C"],"appearance":"ABS - Blue"}));
+    run(&mut s, "appearance.assign", json!({"body":"C","faces":[[40,5,5]],"appearance":"ABS - Red"}));
+    let doc = s.doc.clone();
+    let history = (s.undo.len(), s.redo.len(), s.evaluations);
+    run(&mut s, "select.same_look", json!({"body":"A"}));
+    assert_eq!(s.selection.len(), 3);
+    let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
+    let face = solidcraft_doc::appearance::face_index_at(s.world_state().body("C").unwrap(), point).unwrap();
+    run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
+    run(&mut s, "select.same_look", json!({}));
+    assert_eq!(s.selection.len(), 3);
+    run(&mut s, "select.same_look", json!({"body":"C"}));
+    assert_eq!(s.selection, [Sel::Body { name: "C".into() }]);
+    let selected = s.selection.clone();
+    // Session treats null parameters as the command's empty/default object.
+    run(&mut s, "select.same_look", Value::Null);
+    for params in [
+        json!([]),
+        json!({"body":"missing"}),
+        json!({"body":"A","face":u64::MAX}),
+        json!({"body":"A","face":-1}),
+        json!({"body":1}),
+        json!({"body":"A","extra":true}),
+    ] {
+        assert!(s.execute("select.same_look", &params).is_err(), "{params}");
+        assert_eq!(s.selection, selected);
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(history, (s.undo.len(), s.redo.len(), s.evaluations));
+}
+
+/// A body changed by a few hundred features in a row whose names nothing asks for, then
+/// filleted: reordering or moving an earlier feature evaluates them all again, and the fillet
+/// finds its edge by the names of the body before it, which are worked out from the body before
+/// that, and so on back to the start. That walk recursed once per feature and overflowed the
+/// window thread's stack (1 MB on Windows), ending the app (#7587, #7926). On a thread with that
+/// stack, both moves are made.
+#[test]
+fn a_move_before_a_long_history_of_one_body_fits_a_window_threads_stack() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Peg"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "body_name": "Other"}));
+    for i in 0..300 {
+        run(&mut s, "solid.move", json!({"bodies": ["Peg"], "translate": [0, 0, if i % 2 == 0 { 1 } else { -1 }]}));
+    }
+    run(&mut s, "solid.fillet", json!({"body": "Peg", "radius": 1, "edges": [[5, 0, 10]]}));
+    let other = s.doc.features.get(1).map(|f| f.id).unwrap();
+    let fillet = s.doc.features.last().map(|f| f.id).unwrap();
+    let moved = std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(move || {
+            run(&mut s, "timeline.reorder", json!({"feature": other, "position": 0}));
+            assert!(s.model.result(fillet).is_some_and(|r| r.error.is_none()), "the fillet is made after the reorder");
+            run(&mut s, "timeline.move_many", json!({"features": [other], "position": 2}));
+            assert_eq!(s.doc.features.get(1).map(|f| f.id), Some(other));
+            assert!(s.model.result(fillet).is_some_and(|r| r.error.is_none()), "the fillet is made after the move");
+        })
+        .unwrap()
+        .join();
+    assert!(moved.is_ok());
 }

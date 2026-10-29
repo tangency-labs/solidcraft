@@ -6,7 +6,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use egui::{Align2, FontId, Shape, Stroke};
+use egui::{Align2, FontId, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::Vec2;
 use solidcraft_engine::sketch::{CurveKind, Sketch};
@@ -223,7 +223,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let tk = Tokens::get();
     for (a, b) in &s.guides {
         if let (Some(a), Some(b)) = (to(*a), to(*b)) {
-            painter.add(Shape::dashed_line(&[a, b], Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+            painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
         }
     }
     let Some(sp) = to(s.at) else { return };

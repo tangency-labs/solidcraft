@@ -8,7 +8,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
             ui_kit::row(ui, app.tr("ui.units_of_new_designs"), |ui| {
                 let mut selected = UNITS.iter().position(|u| *u == app.preferences.default_units).unwrap_or(0);
-                ui_kit::segmented(ui, &mut selected, &UNITS, ui_kit::Segments { intrinsic: true, ..Default::default() });
+                ui_kit::segmented(ui, &mut selected, UNITS, ui_kit::Segments { intrinsic: true, ..Default::default() });
                 if let Some(unit) = UNITS.get(selected)
                     && app.preferences.default_units != *unit
                 {
@@ -54,7 +54,32 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         setting::offer_stand_up(app, ui);
         ui_kit::text(ui, app.tr("prefs.stand_up_note"), ui_kit::Text::Hint("stand_up"));
+        // How a file from a program not known to save Y up is offered (#7717).
+        let offered = app.preferences.offer_stand_up;
+        ui_kit::settings_block_hint(
+            ui,
+            app.tr("prefs.stand_up_unknown"),
+            app.tr("prefs.stand_up_unknown_note"),
+            t.space_24 * 8.0 + t.space_8,
+            |ui| {
+                ui.add_enabled_ui(offered, |ui| {
+                    let unknown = &mut app.preferences.stand_up_unknown;
+                    ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
+                        ui_kit::dropdown_menu(ui, "pref_stand_up_unknown", crate::i18n::tr(unknown.label_id()), |ui| {
+                            for choice in StandUpUnknown::ALL {
+                                if ui_kit::list_picker(ui, choice.label_id(), crate::i18n::tr(choice.label_id()), *unknown == choice).clicked() {
+                                    *unknown = choice;
+                                }
+                            }
+                        });
+                    });
+                });
+            },
+        );
         setting::extrude_auto_to_object(app, ui);
+        let auto = setting::auto_operation(app, ui);
+        crate::scenario::publish_handle("prefs:auto_operation", auto.rect.center());
+        ui_kit::text(ui, app.tr("prefs.auto_operation_note"), ui_kit::Text::Hint("auto_operation"));
         setting::hide_origin(app, ui);
         ui_kit::text(ui, app.tr("ui.hide_origin_note"), ui_kit::Text::Hint("hide_origin"));
     });
@@ -74,5 +99,29 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ),
             ui_kit::Text::Hint("hole_moves"),
         );
+    });
+    ui_kit::settings_section(ui, "placement", app.tr("prefs.placement"), |ui| {
+        setting::placement_handles(app, ui);
+    });
+    ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
+        setting::update_changed_links(app, ui);
+        setting::double_click_components(app, ui);
+    });
+    // Where the files a design names may be: never a network location the user hasn't allowed.
+    ui_kit::settings_section(ui, "network_locations", app.tr("prefs.network_locations_section"), |ui| {
+        setting::network_locations(app, ui);
+        ui_kit::text(ui, app.tr("prefs.network_locations_note"), ui_kit::Text::Hint("network_locations"));
+        let mut remove = None;
+        for (i, host) in app.preferences.network_hosts.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui_kit::text(ui, &format!("\\\\{host}"), ui_kit::Text::Hint("network_host"));
+                if ui_kit::button(ui, app.tr("prefs.network_host_remove"), ui_kit::Button::Small).clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove.filter(|i| *i < app.preferences.network_hosts.len()) {
+            app.preferences.network_hosts.remove(i);
+        }
     });
 }

@@ -8,6 +8,8 @@ use solidcraft_engine::doc::{
     construct::{AxisDef, PointDef},
 };
 
+use solidcraft_engine::schema::edit::PlaybackAction;
+
 use crate::SolveApp;
 use crate::theme::Tokens;
 
@@ -19,11 +21,73 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     let position = match control {
         crate::ui_kit::HistoryTransport::First => 0,
         crate::ui_kit::HistoryTransport::Back => marker.saturating_sub(1),
+        crate::ui_kit::HistoryTransport::Play => {
+            app.start("timeline.play");
+            return;
+        }
         crate::ui_kit::HistoryTransport::Forward => marker.saturating_add(1).min(n),
         crate::ui_kit::HistoryTransport::Last => n,
     };
     let params = if position < n { json!({"position":position}) } else { json!({}) };
     let _ = app.run_heavy("timeline.roll_to", params);
+}
+
+/// A click runs a History control; a right-click offers to show or hide the Play button.
+pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
+    if response.clicked() {
+        run_transport(app, control);
+    }
+    if response.secondary_clicked() {
+        let at = response.interact_pointer_pos().unwrap_or(response.rect.left_bottom());
+        crate::context_menu::open_for(app, at, crate::context_menu::Target::HistoryControls);
+    }
+}
+
+/// The History controls' menu: shows or hides the Play button.
+pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> {
+    let show = !app.preferences.history_play_button;
+    let label = crate::i18n::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
+    vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))]
+}
+
+/// The feature that made a face, edge or vertex of `body` (its world name): a face's own creator,
+/// as Edit Feature on a face finds it (the hole, not the plate it was cut into), else the feature
+/// that made the body.
+fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
+    face.and_then(|index| crate::context_menu::face_feature(app, body, index))
+        .or_else(|| app.session.world_state().body(body).map(|b| b.feature))
+        .filter(|id| app.session.doc.feature(*id).is_some())
+}
+
+/// The feature of the face, edge or vertex under the pointer in the view.
+pub(crate) fn hovered_feature(app: &SolveApp) -> Option<u64> {
+    match &app.viewport.hover {
+        Some(crate::viewport::Hit::Face { body, index, .. }) => geometry_feature(app, body, Some(*index)),
+        Some(crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. }) => geometry_feature(app, body, None),
+        _ => None,
+    }
+}
+
+/// The feature of the first face or edge picked in the view.
+pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
+    app.session.selection.iter().find_map(|selection| match selection {
+        solidcraft_engine::Sel::Face { body, index, .. } => geometry_feature(app, body, Some(*index)),
+        solidcraft_engine::Sel::Edge { body, .. } => geometry_feature(app, body, None),
+        _ => None,
+    })
+}
+
+/// A new face or edge picked in the view scrolls the history shown to the feature that made it,
+/// once per pick; the history stays where it is while the pick does not change.
+pub(crate) fn follow_view_pick(app: &mut SolveApp) {
+    let picked = picked_feature(app);
+    if picked == app.tree.view_pick {
+        return;
+    }
+    app.tree.view_pick = picked;
+    if picked.is_some() && app.ui.show_timeline {
+        app.tree.timeline_reveal = picked;
+    }
 }
 
 // Snapshot only the data used by timeline interactions. Cloning FeatureKind here would
@@ -76,6 +140,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Cylinder { .. } => "cylinder",
         FeatureKind::Sphere { .. } => "sphere",
         FeatureKind::Torus { .. } => "torus",
+        FeatureKind::Cone { .. } => "cone",
         FeatureKind::Combine { .. } => "combine",
         FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Rectangular { .. }, .. } => "pattern_rect",
         FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Path { .. }, .. } => "pattern_path",
@@ -201,11 +266,19 @@ pub(crate) fn delete_feature(app: &mut SolveApp, id: u64) {
 /// while, #2678), then delete them or ask first.
 pub(crate) fn delete_features(app: &mut SolveApp, ids: Vec<u64>) {
     let checks = ids.iter().map(|id| ("timeline.dependents".to_string(), json!({ "feature": id }))).collect();
-    app.check_delete(checks, crate::deferred::AfterCheck::Timeline(ids));
+    app.check_delete(checks, crate::deferred::AfterCheck::Timeline { features: ids, groups: Vec::new() });
 }
 
-/// [`delete_features`] once each feature's `timeline.dependents` report is in.
-pub(crate) fn delete_checked_features(app: &mut SolveApp, ids: Vec<u64>, reports: &[Value]) {
+/// Delete timeline folders with their features (`contents`, nested folders' included) after the
+/// same check as [`delete_features`] (#7219).
+pub(crate) fn delete_folders(app: &mut SolveApp, groups: Vec<u64>, contents: Vec<u64>) {
+    let checks = contents.iter().map(|id| ("timeline.dependents".to_string(), json!({ "feature": id }))).collect();
+    app.check_delete(checks, crate::deferred::AfterCheck::Timeline { features: contents, groups });
+}
+
+/// [`delete_features`] once each feature's `timeline.dependents` report is in; `groups` are
+/// timeline folders deleted with them.
+pub(crate) fn delete_checked_features(app: &mut SolveApp, ids: Vec<u64>, groups: Vec<u64>, reports: &[Value]) {
     // Each report is about one feature alone, so it names the others being deleted too: those
     // go anyway and are left out of the confirmation.
     let deleting: Vec<&str> = ids.iter().filter_map(|id| app.session.doc.feature(*id)).map(|f| f.name.as_str()).collect();
@@ -225,10 +298,15 @@ pub(crate) fn delete_checked_features(app: &mut SolveApp, ids: Vec<u64>, reports
         }
     }
     if with.is_empty() && fail.is_empty() {
-        let _ = app.run_heavy("timeline.delete", json!({ "features": ids }));
+        let _ = app.run_heavy("timeline.delete", delete_params(&ids, &groups));
     } else {
-        app.dialog = Some(crate::dialogs::Dialog::confirm_delete_many(ids, with.into_iter().collect(), fail.into_iter().collect()));
+        app.dialog = Some(crate::dialogs::Dialog::confirm_delete_many(ids, groups, with.into_iter().collect(), fail.into_iter().collect()));
     }
+}
+
+/// `timeline.delete`'s parameters for these features and timeline folders.
+pub(crate) fn delete_params(features: &[u64], groups: &[u64]) -> Value {
+    if groups.is_empty() { json!({ "features": features }) } else { json!({ "features": features, "groups": groups }) }
 }
 
 /// The selected timeline features, in timeline order.
@@ -328,6 +406,23 @@ pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
     }
 }
 
+/// Reuse the Browser action so both History layouts edit the same sketch attachment.
+pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
+    if !matches!(app.session.doc.feature(id).map(|feature| &feature.kind), Some(FeatureKind::Sketch { .. })) {
+        return;
+    }
+    let Some(item) =
+        crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().find(|item| item.id == "ui.redefineSketch")
+    else {
+        return;
+    };
+    let response = crate::context_menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
+    if response.clicked() {
+        crate::context_menu::run_item(app, &item, response.rect.center());
+        ui.close();
+    }
+}
+
 /// Shift+click on a feature: select the features from the anchor (the last feature clicked, or
 /// the last selected one) to this one. `order` is the timeline as drawn this frame, taken before
 /// drawing so the range never mixes two orders. Ctrl as well adds the range to the selection.
@@ -377,6 +472,125 @@ fn toggle_feature(app: &mut SolveApp, id: u64) {
     }
 }
 
+/// One history step at a time. The delay starts when the computed step is displayed, so a
+/// slow rebuild cannot consume the pause or make queued marker moves skip intermediate steps.
+pub(crate) struct Playback {
+    revision: u64,
+    position: usize,
+    waiting: bool,
+    next_at: f64,
+}
+
+const PLAYBACK_STEP_SECONDS: f64 = 0.5;
+
+pub(crate) fn stop_playback(app: &mut SolveApp) {
+    if app.timeline_playback.take().is_some_and(|p| p.waiting) {
+        // The worker only fills the evaluation cache. Dropping its reply prevents an
+        // interrupted playback step from later moving the marker in an edited/new design.
+        app.deferred = None;
+    }
+}
+
+pub(crate) fn playback_command_info(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> solidcraft_engine::CommandInfo {
+    let mut info = command.info(&app.session);
+    if app.timeline_playback.is_some() {
+        info.label = "Stop History";
+        info.icon = "timeline_stop";
+    } else if let Err(why) = playback_ready(app) {
+        info.enabled = false;
+        info.disabled_reason = Some(why);
+    }
+    info
+}
+
+/// What playback can't run alongside: starting refuses on these, and a running playback stops on them.
+fn playback_blocked(app: &SolveApp) -> bool {
+    app.home.open
+        || crate::render_workspace::active(app)
+        || app.session.active_sketch.is_some()
+        || app.dialog.is_some()
+        || app.tool.is_some()
+        || app.file_load.busy()
+        || app.file_picker.is_some()
+        || app.saving.is_some()
+        || app.applying.is_some()
+        || app.delete_check.is_some()
+        || !app.deferred_queue.is_empty()
+}
+
+fn playback_ready(app: &SolveApp) -> Result<(), String> {
+    if app.computing_since().is_some() || playback_blocked(app) {
+        return Err(crate::i18n::tr("ui.history_play_finish_action").into());
+    }
+    let n = app.session.doc.features.len();
+    if app.session.doc.marker.unwrap_or(n) >= n {
+        return Err(crate::i18n::tr("ui.history_play_roll_back").into());
+    }
+    Ok(())
+}
+
+pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Result<(), String> {
+    if matches!(action, PlaybackAction::Stop) || (matches!(action, PlaybackAction::Toggle) && app.timeline_playback.is_some()) {
+        stop_playback(app);
+        return Ok(());
+    }
+    if app.timeline_playback.is_some() {
+        return Ok(());
+    }
+    playback_ready(app)?;
+    let n = app.session.doc.features.len();
+    let position = app.session.doc.marker.unwrap_or(n);
+    app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0 });
+    Ok(())
+}
+
+pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
+    if app.timeline_playback.is_none() {
+        return;
+    }
+    if playback_blocked(app) || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        stop_playback(app);
+        return;
+    }
+    let Some(mut playback) = app.timeline_playback.take() else { return };
+    let now = ctx.input(|i| i.time);
+    let n = app.session.doc.features.len();
+    let position = app.session.doc.marker.unwrap_or(n);
+    if playback.waiting {
+        if app.deferred.is_some() {
+            if app.session.revision == playback.revision {
+                app.timeline_playback = Some(playback);
+            } else {
+                app.deferred = None;
+            }
+            return;
+        }
+        // A failed step, another edit, or a different marker move stops the sequence.
+        if app.session.revision != playback.revision.saturating_add(1) || position != playback.position {
+            return;
+        }
+        playback.waiting = false;
+        playback.revision = app.session.revision;
+        playback.next_at = now + PLAYBACK_STEP_SECONDS;
+    } else if app.session.revision != playback.revision || position != playback.position || app.deferred.is_some() {
+        return;
+    }
+    if position >= n {
+        return;
+    }
+    if now >= playback.next_at {
+        playback.position = position.saturating_add(1).min(n);
+        if app.run_heavy("timeline.roll_to", json!({"position": playback.position})).is_err() {
+            return;
+        }
+        // Observe completion on the next frame even for a synchronous rebuild (the web).
+        // This frame's input time predates that work and cannot time the visible pause.
+        playback.waiting = true;
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    app.timeline_playback = Some(playback);
+}
+
 pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
@@ -410,9 +624,7 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 pub(crate) fn floating_rect(available: Rect) -> Rect {
-    let gap = crate::shell::SHELL_GAP;
-    let inset = available.shrink(gap);
-    Rect::from_min_max(pos2(inset.left(), (inset.bottom() - 40.0).max(inset.top())), inset.max)
+    Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
 }
 
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
@@ -430,21 +642,20 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     let grip = crate::ui_kit::panel_grip(&mut grip_ui).rect;
     x += t.space_10 + t.space_8;
     let mut drag_rect = grip;
-    let label = p.layout_no_wrap(crate::i18n::tr("ui.history_title").to_string(), crate::fonts::semibold(t.font_heading), t.text);
-    if x + label.size().x + t.space_12 + crate::ui_kit::history_transport_width() <= r.right() {
-        let title_rect = Rect::from_min_size(pos2(x, r.center().y - label.size().y / 2.0), label.size());
-        p.galley(title_rect.min, label.clone(), t.text);
+    let heading = crate::ui_kit::StripHeading::new(&p, crate::i18n::tr("ui.history_title"));
+    if x + heading.width() + crate::ui_kit::history_transport_width() <= r.right() {
+        let title_rect = heading.paint(&p, Rect::from_min_max(pos2(x, r.top()), r.right_bottom()));
         drag_rect = drag_rect.union(title_rect);
-        x += label.size().x + t.space_12;
+        x += heading.width();
     }
     let response = ui.interact(drag_rect, egui::Id::new("sc_history_dock_grip"), Sense::drag());
     crate::scenario::publish_handle("history:grip", drag_rect.center());
     crate::timeline_left::dock_drag(app, ui, &response);
-    for control in crate::ui_kit::HistoryTransport::ALL {
+    let controls = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button);
+    for &control in controls {
         let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, r.center().y), vec2(t.space_24, t.space_24));
-        if control.show(ui, br).clicked() {
-            run_transport(app, control);
-        }
+        let response = control.show(ui, br, app.timeline_playback.is_some());
+        transport_response(app, control, &response);
         x += t.space_24 + t.space_2;
     }
     x += 14.0;
@@ -496,14 +707,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
             // Find in Timeline: scroll the found feature into the strip on this frame (#5850).
             let reveal = app.tree.timeline_reveal.take();
-            // The feature whose body is under the cursor in the viewport.
-            let st = app.session.world_state();
-            let from_view = match &app.viewport.hover {
-                Some(
-                    crate::viewport::Hit::Face { body, .. } | crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. },
-                ) => st.body(body).map(|b| b.feature),
-                _ => None,
-            };
+            // The feature that made what is under the cursor or picked in the viewport.
+            let from_view = [hovered_feature(app), picked_feature(app)];
             let drag_id = ui.id().with("tl_drag");
             let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
             let pointer = ui.input(|i| i.pointer.hover_pos());
@@ -511,7 +716,10 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let mut hovered: Option<u64> = None;
             let mut edit: Option<u64> = None;
             let mut marker_rect: Option<Rect> = None;
+            // Each sketch's solve state, read once for the strip (#7245).
+            let sketch_states = crate::sketch_state::SketchStates::of(app);
             for (i, (id, name, icon, suppressed, ty, kind)) in feats.iter().enumerate() {
+                let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
                 if i == marker {
                     marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
                     x += t.space_16;
@@ -537,11 +745,13 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     name,
                     kind: ty,
                     selected: sel,
-                    hovered: resp.hovered() || from_view == Some(*id),
+                    hovered: resp.hovered() || from_view.contains(&Some(*id)),
                     dim: rolled,
                     suppressed: *suppressed,
                     error: err.is_some(),
                     warning: warn.is_some(),
+                    reference: false,
+                    ink: sketch_state.and_then(|state| state.ink(&t)),
                     // A dragged feature takes the colour of its drop bar.
                     accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
                 }
@@ -550,6 +760,10 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
                 }
                 let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                if let Some(state) = sketch_state {
+                    tip.push('\n');
+                    tip.push_str(&state.text());
+                }
                 if let Some(r) = res {
                     tip += &format!("\n{:.1} ms", r.ms);
                 }
@@ -578,6 +792,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                         edit = Some(*id);
                         ui.close();
                     }
+                    sketch_plane_button(app, ui, *id);
                     if let Some(sk) = sketch_of
                         && crate::context_menu::button(ui, crate::i18n::tr_label("Edit Profile Sketch"), "sketch").clicked()
                     {
@@ -588,7 +803,10 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                         app.dialog = Some(crate::dialogs::Dialog::rename(*id, name));
                         ui.close();
                     }
-                    if crate::context_menu::button(ui, if *suppressed { "Unsuppress Features" } else { "Suppress Features" }, "suppress").clicked() {
+                    // Its own message, not a literal: no catalog held the literal, so the item
+                    // stayed English in every language (#8301).
+                    let suppress = if *suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
+                    if crate::context_menu::button(ui, crate::i18n::tr(suppress), "suppress").clicked() {
                         let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
                         ui.close();
                     }
@@ -718,6 +936,7 @@ fn find_in_browser(app: &mut SolveApp, id: u64) {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_engine::doc::{FeatureKind, PlaneRef};
 
     use crate::scenario::Harness;
 
@@ -758,6 +977,41 @@ mod tests {
             let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|t| t.galley.text()).collect();
             assert!(texts.contains(&expected), "left={left}: {texts:?}");
         }
+    }
+
+    /// #8301: the feature menu's suppress item is drawn from the catalog, so it follows the
+    /// reader's language. The literals it used were in no catalog and stayed English in every
+    /// language, the Japanese UI included.
+    #[test]
+    fn the_feature_menu_suppress_item_follows_the_language() {
+        let mut h = two_boxes(false);
+        h.app.preferences.language = "ja".into();
+        h.frames(2);
+        let painted = |h: &Harness| -> Vec<String> {
+            let output = egui::FullOutput { shapes: h.shapes.clone(), ..Default::default() };
+            crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_string()).collect()
+        };
+        // No English on screen: the item shows the reader's language.
+        h.step(&json!({"click": {"handle": "timeline:First"}, "button": "right"})).unwrap();
+        let texts = painted(&h);
+        assert!(!texts.iter().any(|t| t == "Suppress Features"), "the English literal is painted in the Japanese UI: {texts:?}");
+        let ja = crate::i18n::Locale::for_language("ja").text("timeline.suppress_features").to_string();
+        let ja_unsuppress = crate::i18n::Locale::for_language("ja").text("timeline.unsuppress_features").to_string();
+        assert!(texts.contains(&ja), "the item must read {ja}: {texts:?}");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        // A suppressed feature offers the other way round.
+        let first = h.app.session.doc.find_feature("First").map(|f| f.id).unwrap();
+        h.app.run("timeline.suppress", json!({"feature": first, "suppressed": true})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "timeline:First"}, "button": "right"})).unwrap();
+        let texts = painted(&h);
+        assert!(!texts.iter().any(|t| t == "Unsuppress Features"), "the English literal is painted in the Japanese UI: {texts:?}");
+        assert!(texts.contains(&ja_unsuppress), "the item must read {ja_unsuppress}: {texts:?}");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        // The English wording is the one the menu always showed: the change adds messages, it
+        // does not reword the item.
+        assert_eq!(crate::i18n::Locale::for_language("en").text("timeline.suppress_features"), "Suppress Features");
+        assert_eq!(crate::i18n::Locale::for_language("en").text("timeline.unsuppress_features"), "Unsuppress Features");
     }
 
     #[test]
@@ -863,6 +1117,270 @@ mod tests {
         h
     }
 
+    #[test]
+    fn playback_command_runs_from_ribbon_palette_shortcut_and_json() {
+        let mut h = two_boxes(false);
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.app.ui.tab = "INSPECT".into();
+        h.frames(3);
+        assert!(crate::scenario::handle_at("history:play").is_some(), "Play sits in the History controls by default");
+        let command = solidcraft_engine::find_command("timeline.play").unwrap();
+        let info = crate::render_workspace::interactive_command_info(&h.app, command);
+        assert!(info.enabled);
+        assert_eq!((info.label, info.icon), ("Play History", "timeline_play"));
+        h.step(&json!({"click": {"handle": "toolbar:timeline.play"}})).unwrap();
+        assert!(h.app.timeline_playback.is_some());
+        let info = crate::render_workspace::interactive_command_info(&h.app, command);
+        assert_eq!((info.label, info.icon), ("Stop History", "timeline_stop"));
+        // Opening search must leave playback running so Stop is available there too.
+        h.app.start("ui.palette");
+        h.call("ui.palette", json!({"text": "timeline.play"}));
+        h.frames(2);
+        assert!(h.app.timeline_playback.is_some());
+        let row = crate::shortcut_box::search(&h.app, "stop history").into_iter().find(|r| r.0 == "timeline.play").unwrap();
+        assert_eq!((row.1, row.2), ("Stop History", "timeline_stop"));
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(h.app.timeline_playback.is_none());
+        h.frames(3);
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        crate::keymap::bind(&mut h.app, "timeline.play", "Shift+P", true).unwrap();
+        h.step(&json!({"key": "P", "shift": true})).unwrap();
+        assert!(h.app.timeline_playback.is_some(), "marker {:?}, status {:?}", h.app.session.doc.marker, h.app.status);
+        h.step(&json!({"key": "P", "shift": true})).unwrap();
+        assert!(h.app.timeline_playback.is_none());
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.app.ui.show_timeline = false;
+        let camera = serde_json::to_value(h.app.cam).unwrap();
+        assert_eq!(h.call("engine.execute", json!({"command": "timeline.play", "params": {"action": "play"}}))["ok"], true);
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        h.app.run("timeline.play", json!({"action": "play"})).unwrap();
+        assert!(h.app.timeline_playback.is_some(), "explicit Play is idempotent");
+        assert_eq!(h.call("engine.execute", json!({"command": "timeline.play", "params": {"action": "stop"}}))["ok"], true);
+        assert_eq!(serde_json::to_value(h.app.cam).unwrap(), camera, "playback never refits the view");
+        h.app.run("timeline.play", json!({"action": "stop"})).unwrap();
+        assert!(h.app.timeline_playback.is_none());
+    }
+
+    #[test]
+    fn playback_shows_each_feature_in_every_history_layout() {
+        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            for (dock, width) in
+                [("bottom", 130.0), ("left", 56.0), ("left", crate::ui_kit::history_width(true)), ("left", 320.0), ("under_browser", 170.0)]
+            {
+                let mut h = two_boxes(dock != "bottom");
+                h.app.ui.layout = layout;
+                h.app.preferences.browser_width = 170.0;
+                h.app.run("view.history_layout", json!({"dock":dock,"width":width})).unwrap();
+                h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+                h.frames(2);
+                h.app.start("timeline.play");
+                h.frames(2);
+                assert_eq!(h.app.session.doc.marker, Some(1), "the first feature must be shown before the end; {layout:?} {dock} {width}");
+                assert_eq!(h.app.session.model.state().bodies.len(), 1);
+                h.frames(10);
+                assert_eq!(h.app.session.doc.marker, Some(1), "leave time to see each step");
+                h.frames(60);
+                assert_eq!(h.app.session.doc.marker, None);
+                assert_eq!(h.app.session.model.state().bodies.len(), 2);
+            }
+        }
+    }
+
+    #[test]
+    fn playback_advances_in_an_embed_without_application_chrome() {
+        let mut h = two_boxes(false);
+        h.app.embedded = true;
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.frames(2);
+        h.app.start("timeline.play");
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        assert!(crate::scenario::rect_of("toolbar").is_none());
+        h.frames(60);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        assert!(crate::scenario::rect_of("toolbar").is_none());
+    }
+
+    #[test]
+    fn playback_can_be_stopped_or_interrupted() {
+        for action in ["stop", "back", "last", "escape", "edit", "tool", "anchored_tool", "pinned_tool", "new"] {
+            let mut h = two_boxes(false);
+            h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+            h.frames(2);
+            h.app.start("timeline.play");
+            h.frames(2);
+            assert_eq!(h.app.session.doc.marker, Some(1));
+            match action {
+                "stop" => h.app.start("timeline.play"),
+                "back" => h.step(&json!({"click": {"handle": "history:back"}})).unwrap(),
+                "last" => {
+                    h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+                    assert_eq!(h.app.session.doc.marker, None, "Go to end jumps immediately, even during playback");
+                    assert_eq!(h.app.session.model.state().bodies.len(), 2);
+                }
+                "escape" => h.step(&json!({"key": "Escape"})).unwrap(),
+                "edit" => {
+                    h.app.run("timeline.rename", json!({"feature": "First", "name": "Renamed"})).unwrap();
+                }
+                "tool" => h.app.start("solid.box"),
+                "anchored_tool" => h.app.start_at("solid.box", Some(egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(28.0, 28.0)))),
+                "pinned_tool" => h.app.start_pinned("solid.box", None),
+                _ => {
+                    h.call("ui.documents", json!({"action": "new"}));
+                }
+            }
+            h.frames(1);
+            let marker = h.app.session.doc.marker;
+            h.frames(90);
+            assert!(h.app.timeline_playback.is_none(), "{action}");
+            assert_eq!(h.app.session.doc.marker, marker, "no later step after {action}");
+        }
+    }
+
+    #[test]
+    fn playback_keeps_a_visible_pause_after_a_synchronous_rebuild() {
+        let mut h = two_boxes(false);
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.app.run("timeline.play", json!({})).unwrap();
+        super::tick_playback(&mut h.app, &h.ctx);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        // Model a rebuild that held the window thread for ten seconds. Its first visible
+        // frame must still show the first feature; elapsed compute time is not playback.
+        let time = h.ctx.input(|i| i.time) + 10.0;
+        let _ = h.ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+            super::tick_playback(&mut h.app, ui.ctx());
+        });
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+    }
+
+    #[test]
+    fn playback_at_the_end_or_in_an_empty_design_leaves_history_unchanged() {
+        for mut h in [Harness::new(), two_boxes(false)] {
+            h.frames(2);
+            let revision = h.app.session.revision;
+            h.app.start("timeline.play");
+            h.frames(2);
+            h.frames(60);
+            assert_eq!(h.app.session.revision, revision);
+            assert!(h.app.timeline_playback.is_none());
+        }
+    }
+
+    #[test]
+    fn playback_refuses_to_start_while_other_history_work_waits() {
+        let mut h = two_boxes(false);
+        h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+        h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 1})));
+        assert!(h.app.run("timeline.play", json!({"action": "play"})).is_err(), "refused up front, not stopped a frame later");
+        assert!(h.app.timeline_playback.is_none());
+        h.app.deferred_queue.clear();
+        h.app.run("timeline.play", json!({"action": "play"})).unwrap();
+        assert!(h.app.timeline_playback.is_some());
+    }
+
+    fn right_click(h: &mut Harness, handle: &str) {
+        let at = crate::scenario::handle_at(handle).unwrap();
+        let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Default::default() };
+        h.frame_with(vec![egui::Event::PointerMoved(at)]);
+        h.frame_with(vec![button(true)]);
+        h.frame_with(vec![button(false)]);
+    }
+
+    /// History shows Play between Previous and Next (#3688); turning it off gives back the four
+    /// controls it had before.
+    #[test]
+    fn the_play_button_plays_and_stops_and_the_controls_menu_hides_it() {
+        use crate::context_menu::Target;
+        for (dock, width) in [("bottom", 130.0), ("left", 56.0), ("left", 320.0)] {
+            let mut h = two_boxes(dock != "bottom");
+            h.app.run("view.history_layout", json!({"dock": dock, "width": width})).unwrap();
+            h.frames(2);
+            assert!(h.app.preferences.history_play_button, "on by default");
+
+            let at = |name: &str| crate::scenario::handle_at(name).unwrap();
+            let (back, play, forward) = (at("history:back"), at("history:play"), at("history:forward"));
+            let across = dock == "bottom" || width > 56.0;
+            if across {
+                assert!(back.x < play.x && play.x < forward.x, "Play sits between Previous and Next; {dock} {width}");
+            } else {
+                assert!(back.y < play.y && play.y < forward.y, "Play sits between Previous and Next; {dock} {width}");
+            }
+
+            h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
+            assert!(h.app.timeline_playback.is_some(), "the button plays; {dock} {width}");
+            h.step(&json!({"click": {"handle": "history:play"}})).unwrap();
+            assert!(h.app.timeline_playback.is_none(), "and stops; {dock} {width}");
+
+            right_click(&mut h, "history:back");
+            assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::HistoryControls, "{dock} {width}");
+            let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
+            assert_eq!(items[0].label, crate::i18n::tr("ui.history_play_button_hide"));
+            crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
+            assert!(!h.app.preferences.history_play_button);
+            h.frames(2);
+            assert!(crate::scenario::handle_at("history:play").is_none(), "the four controls again; {dock} {width}");
+
+            let items = crate::context_menu::items(&h.app, &Target::HistoryControls);
+            assert_eq!(items[0].label, crate::i18n::tr("ui.history_play_button_show"));
+            crate::context_menu::run_item(&mut h.app, &items[0], egui::Pos2::ZERO);
+            h.frames(2);
+            assert!(crate::scenario::handle_at("history:play").is_some(), "and Play back; {dock} {width}");
+        }
+    }
+
+    #[test]
+    fn sketch_context_menu_redefines_the_plane_in_both_timelines() {
+        for left in [false, true] {
+            let mut h = two_boxes(left);
+            let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap()["sketch"].as_u64().unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[1,1],"p1":[8,6]})).unwrap();
+            h.app.finish_sketch();
+            h.settle();
+            let before = h.app.session.doc.to_json();
+            let raw = serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap();
+            let marker = h.app.session.doc.marker;
+            let undo = h.app.session.undo.len();
+            let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Sketch { id: sketch })
+                .into_iter()
+                .find(|item| item.id == "ui.redefineSketch")
+                .unwrap();
+            h.step(&json!({"click":{"handle":"timeline:First"},"button":"right"})).unwrap();
+            assert!(h.widget(&item.label).is_none(), "a body feature has no sketch plane");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            for apply in [false, true] {
+                h.step(&json!({"click":{"handle":"timeline:Profile"},"button":"right"})).unwrap();
+                h.step(&json!({"widget":item.label})).unwrap();
+                assert_eq!(h.app.tree.redefine, Some(sketch));
+                assert_eq!(h.app.session.doc.to_json(), before, "opening the menu changes no geometry");
+                h.step(&json!({"widget":"Use XZ plane"})).unwrap();
+                h.settle();
+                h.step(&json!({"click":{"handle":if apply { "dialog:ok" } else { "dialog:cancel" }}})).unwrap();
+                assert!(h.app.tree.redefine.is_none());
+                assert_eq!(h.app.session.doc.marker, marker);
+                assert_eq!(serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap(), raw);
+                if apply {
+                    assert!(matches!(&h.app.session.doc.feature(sketch).unwrap().kind,
+                        FeatureKind::Sketch { plane: PlaneRef::Origin { name }, .. } if name == "XZ"));
+                    assert_eq!(h.app.session.undo.len(), undo + 1);
+                    let after = h.app.session.doc.to_json();
+                    h.app.run("edit.undo", json!({})).unwrap();
+                    assert_eq!(h.app.session.doc.to_json(), before);
+                    h.app.run("edit.redo", json!({})).unwrap();
+                    assert_eq!(h.app.session.doc.to_json(), after);
+                } else {
+                    assert_eq!(h.app.session.doc.to_json(), before);
+                    assert_eq!(h.app.session.undo.len(), undo);
+                }
+            }
+        }
+    }
+
     /// A timeline wider than the window scrolls with a plain mouse wheel (#3356).
     #[test]
     fn the_mouse_wheel_scrolls_a_long_timeline() {
@@ -911,6 +1429,52 @@ mod tests {
             assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Feature { id: last }], "left={left}");
             assert!(shown(&h), "left={left}: Find in Timeline scrolled the found feature into the timeline");
             assert!(h.app.tree.timeline_reveal.is_none(), "left={left}: the request is done once drawn");
+        }
+    }
+
+    /// A face picked in the view lights the feature that made it, the hole rather than the block
+    /// it was cut into, and scrolls both timelines to it once; hovering finds the same feature.
+    #[test]
+    fn a_face_picked_in_the_view_scrolls_both_timelines_to_the_feature_that_made_it() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = left;
+            let block =
+                h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap()["feature"]
+                    .as_u64()
+                    .unwrap();
+            for i in 0..80 {
+                h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+            }
+            let hole = h
+                .app
+                .run("solid.cylinder", json!({"base": [10, 10, -1], "radius": 3, "height": 12, "operation": "cut", "name": "Hole"}))
+                .unwrap()["feature"]
+                .as_u64()
+                .unwrap();
+            h.app.run("select.clear", json!({})).unwrap();
+            h.frames(4);
+            let shown = |h: &Harness| h.app.shell.history.unwrap().contains(crate::scenario::handle_at("timeline:Hole").unwrap());
+            assert!(!shown(&h), "left={left}: the hole starts outside the timeline");
+
+            let state = h.app.session.world_state();
+            let body = state.bodies.first().unwrap();
+            let names = solidcraft_engine::doc::naming::face_names(body);
+            let index = names.iter().position(|name| solidcraft_engine::doc::persistent_name::made_by(name) == Some(hole)).unwrap();
+            let plate = body.name.clone();
+            h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: plate.clone(), index, point: solidcraft_engine::geom::Vec3::ZERO });
+            assert_eq!(crate::timeline::hovered_feature(&h.app), Some(hole), "left={left}: hovering the hole's face finds the hole");
+            h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: plate.clone(), point: solidcraft_engine::geom::Vec3::ZERO });
+            assert_eq!(crate::timeline::hovered_feature(&h.app), Some(block), "left={left}: a vertex finds the feature that made its body");
+            h.app.viewport.hover = None;
+
+            h.app.run("select.set", json!({"items": [{"type": "face", "body": plate, "index": index, "point": [0, 0, 0]}]})).unwrap();
+            h.frames(30);
+            assert_eq!(crate::timeline::picked_feature(&h.app), Some(hole), "left={left}");
+            assert_eq!(h.app.tree.view_pick, Some(hole), "left={left}");
+            assert!(shown(&h), "left={left}: the pick scrolled the hole into the timeline");
+            assert!(h.app.tree.timeline_reveal.is_none(), "left={left}: once, not on every frame");
         }
     }
 
@@ -998,7 +1562,7 @@ mod tests {
             h.step(&json!({"widget": "Paste"})).unwrap();
             assert_eq!(h.app.session.doc.features.len(), 4, "left: {left}");
             let bodies: Vec<String> = h.app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
-            assert_eq!(bodies, ["One", "Two", "One (copy)", "Two (copy)"], "left: {left}");
+            assert_eq!(bodies, ["One", "Two", "One (2)", "Two (2)"], "left: {left}");
         }
     }
 

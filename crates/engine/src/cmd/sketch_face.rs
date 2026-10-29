@@ -123,10 +123,14 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             }
             let faces = body.body.faces(tolerance)?;
             let mesh = body.body.tessellate(tolerance)?;
-            work = work.saturating_add(mesh.triangles.len().saturating_mul(if requested_index.is_some() { 1 } else { faces.len() }));
+            // The triangles are grouped by face once, and a face's test reads only its own: the
+            // work is the mesh plus one plane test per face, not the mesh once per face (a
+            // modelled thread leaves thousands of faces, #6720).
+            work = work.saturating_add(mesh.triangles.len()).saturating_add(faces.len());
             if work > 2_000_000 {
                 return Err(bad(cmd, "face capture work limit exceeded; use an exact body and face index"));
             }
+            let by_face = super::face_triangles(&mesh, faces.iter().map(|face| face.index.saturating_add(1)).max().unwrap_or(0));
             for face in faces {
                 if requested_index.is_some_and(|index| index != face.index) {
                     continue;
@@ -140,7 +144,7 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 };
                 let normal = exact_plane.normal();
                 if (local_point - face.centroid).dot(normal).abs() > tolerance * 10.0
-                    || !super::face_contains(&mesh, face.index, local_point, tolerance * 10.0)
+                    || !super::face_contains(&mesh, by_face.get(face.index).map_or(&[][..], Vec::as_slice), local_point, tolerance * 10.0)
                 {
                     continue;
                 }

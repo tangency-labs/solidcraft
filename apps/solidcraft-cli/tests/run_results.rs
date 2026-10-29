@@ -145,7 +145,7 @@ fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting(
 #[test]
 fn cli_loads_both_design_encodings_by_contents() {
     let dir = Scratch::new();
-    for extension in ["solidcraft", "solvecraft", "json"] {
+    for extension in ["sc", "solidcraft", "solvecraft", "json"] {
         let saved = dir.0.join(format!("box.{extension}"));
         json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&saved).output().unwrap());
         let bytes = std::fs::read(&saved).unwrap();
@@ -267,6 +267,110 @@ fn results_with_base_design_and_quiet_still_report_and_save() {
     assert_eq!(body_count(&base), 1);
 }
 
+/// `eval` and its alias must measure the script applied to the input design, rather than
+/// silently reporting the input alone (#6861).
+#[test]
+fn eval_runs_its_script_on_the_in_design() {
+    let dir = Scratch::new();
+    let base = dir.0.join("base.solidcraft");
+    let script = dir.0.join("add.json");
+    json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&base).output().unwrap());
+    let original = std::fs::read(&base).unwrap();
+    std::fs::write(
+        &script,
+        json!({"commands": [{"command": "solid.box", "params": {"length": 5, "width": 3, "height": 4, "corner": [10, 0, 0]}}]}).to_string(),
+    )
+    .unwrap();
+    for command in ["eval", "inspect"] {
+        // Both existing one-input forms still measure just the original body.
+        for input in [&base, &dir.script()] {
+            for named_input in [false, true] {
+                let mut c = cli();
+                c.arg(command);
+                if named_input {
+                    c.arg("--in");
+                }
+                let measured = json_output(c.arg(input).output().unwrap());
+                assert_eq!(measured["body_count"], 1);
+                assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - 24.0).abs() < 1e-6);
+            }
+        }
+        for input_first in [false, true] {
+            for to_file in [false, true] {
+                let mut c = cli();
+                c.arg(command);
+                if input_first {
+                    c.arg("--in").arg(&base).arg(&script);
+                } else {
+                    c.arg(&script).arg("--in").arg(&base);
+                }
+                let report = dir.0.join("measurement.json");
+                if to_file {
+                    c.arg("--json-out").arg(&report);
+                }
+                let output = c.output().unwrap();
+                let measured = if to_file {
+                    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                    assert!(output.stdout.is_empty());
+                    serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap()
+                } else {
+                    json_output(output)
+                };
+                assert_eq!(measured["body_count"], 2, "{command}, input_first={input_first}, to_file={to_file}");
+                assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - 84.0).abs() < 1e-6);
+                assert_eq!(measured["timeline"].as_array().unwrap().len(), 2, "the script runs exactly once");
+                assert_eq!(std::fs::read(&base).unwrap(), original, "evaluation never saves its changes to the input");
+            }
+        }
+    }
+}
+
+#[test]
+fn eval_propagates_script_errors_before_writing_a_report() {
+    let dir = Scratch::new();
+    let base = dir.script();
+    let script = dir.0.join("bad.json");
+    for command in ["eval", "inspect"] {
+        for contents in ["{", r#"{"commands":[{"command":"missing.command","params":{}}]}"#] {
+            std::fs::write(&script, contents).unwrap();
+            let report = dir.0.join("report.json");
+            let output = cli().arg(command).arg(&script).arg("--in").arg(&base).arg("--json-out").arg(&report).output().unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert!(!output.stderr.is_empty());
+            assert!(output.stdout.is_empty());
+            assert!(!report.exists());
+        }
+    }
+}
+
+#[test]
+fn eval_rejects_unknown_options_and_missing_input_values_before_writing_a_report() {
+    let dir = Scratch::new();
+    let script = dir.script();
+    let report = dir.0.join("report.json");
+    for command in ["eval", "inspect"] {
+        for (options, message) in [(&["--frobnicate", "1"][..], "doesn't take --frobnicate"), (&["--in"][..], "--in needs a value")] {
+            for options_first in [false, true] {
+                std::fs::write(&report, b"previous report").unwrap();
+                let mut c = cli();
+                c.arg(command);
+                if options_first {
+                    c.args(options).arg("--json-out").arg(&report).arg(&script);
+                } else {
+                    c.arg(&script).args(options).arg("--json-out").arg(&report);
+                }
+                // A following option also proves that --in cannot consume a flag as its value.
+                let output = c.output().unwrap();
+                assert_eq!(output.status.code(), Some(1), "{command}, {options:?}");
+                let error = String::from_utf8_lossy(&output.stderr);
+                assert!(error.contains(message), "{command}: {error}");
+                assert!(output.stdout.is_empty());
+                assert_eq!(std::fs::read(&report).unwrap(), b"previous report");
+            }
+        }
+    }
+}
+
 #[test]
 fn results_propagate_output_errors() {
     let dir = Scratch::new();
@@ -308,6 +412,11 @@ fn legacy_extension_and_format_tag_still_open() {
     assert_eq!(body_count(&resaved), 2);
     let reopened = solidcraft_engine::io::read_design(&std::fs::read(&resaved).unwrap()).unwrap();
     assert!(reopened.to_json().contains("\"solidcraft/"));
+    // `.solidcraft` (before `.sc`) opens as `--in` and as the design to evaluate; `.sc` too.
+    let current = dir.0.join("current.sc");
+    json_output(cli().args(["run", "--in"]).arg(&resaved).arg(dir.script()).arg("--save").arg(&current).output().unwrap());
+    assert_eq!(body_count(&current), 3);
+    assert!(solidcraft_engine::io::is_design_container(&std::fs::read(&current).unwrap()), "a .sc file is a design container");
 }
 
 /// `snapshot` starts from `--in` as `run` does (its script runs on that design), and refuses an

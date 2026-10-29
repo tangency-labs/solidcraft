@@ -32,6 +32,12 @@ pub(crate) fn defaults(doc: &Document, mut kind: crate::dialogs::Kind) -> crate:
 /// Keep named and dimensional expressions intact so they remain driving expressions.
 pub(crate) fn expression(doc: &Document, text: &str, kind: Kind) -> String {
     let text = text.trim();
+    // A definition's value is frozen the same way; the name stays (#4071).
+    if let Some((name, rhs)) = solidcraft_engine::doc::expr::definition(text)
+        && !rhs.is_empty()
+    {
+        return format!("{name} = {}", expression(doc, rhs, kind));
+    }
     let normalized = doc.with_design_unit(text, kind);
     if kind == Kind::Length && unit(doc) != "mm" && normalized == text && doc.eval(text, Kind::Unitless).is_ok() {
         // A decimal comma is numeric only outside parentheses. Preserve function-argument
@@ -55,6 +61,15 @@ pub(crate) fn expression(doc: &Document, text: &str, kind: Kind) -> String {
         format!("({grouped}) * 1 {}", unit(doc))
     } else {
         normalized
+    }
+}
+
+/// For a field whose command takes only a number, which keeps no expression to name: a typed
+/// `name = value` is refused with the way to name it, rather than defining nothing (#4071).
+pub(crate) fn no_definition(text: &str, label: &str) -> Result<(), String> {
+    match solidcraft_engine::doc::expr::definition(text) {
+        Some((name, _)) => Err(format!("{label} keeps no expression, so it cannot define `{name}`: add `{name}` in Parameters, then type `{name}`")),
+        None => Ok(()),
     }
 }
 

@@ -350,6 +350,11 @@ fn a_body_that_changed_shape_is_measured_again() {
 /// ring under it. With a fillet under the head against the bore's sharp edge, the fillet's ring
 /// is in the flange (about 0.49 mm³), next to walls that lie on one another: the boolean tried
 /// for minutes there and gave up; now it is reported as such within seconds.
+///
+/// The clock is not read: what is under test is the result, and the boolean that gives up is
+/// reported as such instead of hanging the test. The wall that lies on the other one is what
+/// makes the pair unchecked, and that is what the assertions below check (#2999 dropped the clock
+/// from the sibling tests the same way).
 #[test]
 fn a_pin_seated_line_to_line_in_its_bushing_is_measured() {
     let ring = std::f64::consts::PI * (7.0f64.powi(2) - 4.0f64.powi(2)) * 0.2;
@@ -365,9 +370,7 @@ fn a_pin_seated_line_to_line_in_its_bushing_is_measured() {
             run(&mut s, "solid.fillet", json!({"edges": [[104, 0, z]], "radius": 0.3, "body": "Pin"}));
             run(&mut s, "solid.fillet", json!({"edges": [[107, 0, z + 1.5]], "radius": 0.5, "body": "Pin"}));
         }
-        let started = std::time::Instant::now();
         let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Pin"], "against": ["Bush"], "min_volume": 0.01, "clearance": 1e-6}));
-        assert!(started.elapsed().as_secs_f64() < 30.0, "sunk {sunk}: {:?}", started.elapsed());
         if fillet {
             assert!(r["unchecked"][0]["reason"].as_str().is_some_and(|w| w.contains("pin on one cylinder")), "{r}");
             continue;

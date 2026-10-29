@@ -128,6 +128,28 @@ fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
     }
 }
 
+/// Interface › Dialog buttons › Top (#6708): Apply sits between Cancel and OK in the header row
+/// and still commits once, keeping the dialog open.
+#[test]
+fn apply_in_the_header_row_commits_once_and_keeps_the_dialog() {
+    let mut h = fixture();
+    h.call("ui.prefs", json!({"dialog_buttons":"top"}));
+    h.app.dialog = Some(picked(&h, "sketch.offset"));
+    h.settle();
+    let header = scenario::rect_of("dialog:header").unwrap();
+    assert!(scenario::rect_of("dialog:footer").is_none());
+    let (cancel, apply, ok) =
+        (scenario::rect_of("dialog:cancel").unwrap(), scenario::rect_of("dialog:apply").unwrap(), scenario::rect_of("dialog:ok").unwrap());
+    assert!(header.contains_rect(cancel) && header.contains_rect(apply) && header.contains_rect(ok));
+    assert!(cancel.right() < apply.left() && apply.right() < ok.left());
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":{"handle":"dialog:apply"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one Apply, one undo");
+    assert!(h.app.dialog.is_some(), "Apply keeps the dialog");
+    assert_eq!(scenario::rect_of("dialog:apply"), Some(apply), "the buttons stay where they were");
+}
+
 #[test]
 fn picked_list_removes_one_item_and_field_still_activates_input() {
     let mut h = fixture();
@@ -192,14 +214,16 @@ fn apply_keeps_the_panel_open_after_asynchronous_evaluation() {
     let mut h = fixture();
     let mut d = picked(&h, "sketch.pattern.rectangular");
     let cmds = apply_commands(&h.app, &d).unwrap();
+    let prepared = h.app.session.scratch().compute_commands(&cmds, None).unwrap();
     d.repeat_after_apply = true;
     h.app.dialog = Some(d);
     let (finish, done) = std::sync::mpsc::channel();
-    h.app.applying = Some(Applying::computing(done, cmds));
+    h.app.applying =
+        Some(Applying { done, ready: None, started: crate::now_ms(), cmds, seen: true, progress: Default::default(), quality: Default::default() });
     let undo = h.app.session.undo.len();
     h.frames(2);
     assert_eq!(h.app.session.undo.len(), undo);
-    finish.send(None).unwrap();
+    finish.send(Ok(prepared)).ok().unwrap();
     h.frames(3);
     assert!(h.app.applying.is_none());
     let d = h.app.dialog.as_ref().unwrap();
@@ -320,4 +344,51 @@ fn sketch_pattern_dialog_preserves_expression_text_when_applying_and_editing() {
             _ => panic!("expected a sketch pattern dialog"),
         }
     }
+}
+
+/// Transform scales, turns and moves what is picked as one, by handles on its box or by the
+/// window's numbers, and OK applies it in a single step.
+#[test]
+fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
+    let mut h = fixture();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    let ids: Vec<String> = {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        sk.curves.iter().map(|c| c.id.clone()).collect()
+    };
+    let mut d = Dialog::for_command(&h.app, "sketch.transform").unwrap();
+    d.inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    h.app.dialog = Some(d);
+    h.frames(4);
+    let state = |h: &Harness| match h.app.dialog.as_ref().map(|d| d.kind.clone()) {
+        Some(Kind::SketchModify(Mod::Transform { x, y, factor, angle, frame })) => (x, y, factor, angle, frame),
+        other => panic!("no transform window: {other:?}"),
+    };
+    // The box is the rectangle's: 30 x 20 around (25, 20).
+    assert_eq!(state(&h).4, Some(([25.0, 20.0], [30.0, 20.0])));
+    // The corner at (40, 30) dragged to (55, 40): one and a half times the size about the corner at (10, 10).
+    h.step(&json!({"drag": [{"handle": "transform:handle:3"}, {"world": [55, 40, 0]}]})).unwrap();
+    h.frames(3);
+    let (x, y, factor, _, _) = state(&h);
+    assert!((factor.parse::<f64>().unwrap() - 1.5).abs() < 0.05, "scaled: {factor}");
+    assert!(x.starts_with("7.5") && y.starts_with("5"), "the middle moved to (32.5, 25): {x}, {y}");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
+        lo = (lo.0.min(p.x), lo.1.min(p.y));
+        hi = (hi.0.max(p.x), hi.1.max(p.y));
+    }
+    assert!((lo.0 - 10.0).abs() < 0.5 && (lo.1 - 10.0).abs() < 0.5, "the fixed corner stayed: {lo:?}");
+    assert!((hi.0 - 55.0).abs() < 1.5 && (hi.1 - 40.0).abs() < 1.5, "the far corner went to (55, 40): {hi:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
+    assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");
 }

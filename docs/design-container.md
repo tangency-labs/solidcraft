@@ -1,6 +1,6 @@
 # Design containers, version 1
 
-New designs use `.solidcraft`; `.solvecraft` remains a supported legacy extension. Opening detects the ZIP
+New designs use `.sc`; `.solidcraft` and `.solvecraft` remain supported legacy extensions. Opening detects the ZIP
 local-header signature (`50 4b 03 04`) independently of the name; otherwise it uses
 the existing JSON design reader and migrations. Plain JSON remains a fully supported,
 self-contained input/output format. `io::write_design` keeps its JSON contract;

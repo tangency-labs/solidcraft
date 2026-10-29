@@ -103,6 +103,40 @@ fn set_back_reports_restored_features() {
     assert_eq!((m.last_recomputed, m.last_restored), (0, 0));
 }
 
+/// Setting a parameter back restores every feature on a design whose states are large next to
+/// the cache's budget: each cached state shares the bodies it did not change with the states
+/// before it, so it is charged only for what it made, not for the whole model again.
+#[test]
+fn set_back_restores_everything_when_states_share_bodies() {
+    let mut doc = Document::new("blocks");
+    doc.set_param("h", "10 mm", Some("mm"), None).unwrap();
+    for i in 0..30 {
+        let height = if i == 0 { "h" } else { "10" };
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(20.0 * i as f64, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: height.into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    // Room for a few whole models: enough for both timelines' new bodies, not for every state
+    // charged as a whole model.
+    m.cache.lock().unwrap().budget = 3 * m.state().retained_bytes();
+    doc.set_param("h", "12 mm", None, None).unwrap();
+    m.evaluate(&doc);
+    assert_eq!(m.last_recomputed, 30);
+    doc.set_param("h", "10 mm", None, None).unwrap();
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (0, 30));
+}
+
 /// #1989: what an evaluation ahead on a copy of the model computed is kept for the run that
 /// follows on the model itself, which finds it there even once the evaluation cache has dropped
 /// it (the cache keeps only a few states of a design with large bodies). Copies keep nothing.
@@ -123,6 +157,22 @@ fn results_kept_ahead_outlive_the_cache() {
     m.evaluate(&doc);
     assert_eq!((m.last_recomputed, m.last_restored), (0, 2), "nothing computed again");
     assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 30000.0) < 1e-9);
+}
+
+/// A saved model whose feature warning is longer than 65,536 characters is still taken on open
+/// (#8541): Save writes it, so Open reads it.
+#[test]
+fn a_saved_model_with_a_long_warning_is_adopted() {
+    let (doc, _) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let mut saved = m.saved(&doc).unwrap();
+    let last = doc.features.last().unwrap().id;
+    let warning = "w".repeat(122_701);
+    let features = saved.records["features"].as_array_mut().unwrap();
+    features.last_mut().unwrap()["warning"] = warning.clone().into();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
 }
 
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
@@ -402,6 +452,7 @@ fn primitives_and_combine() {
             radius: "2".into(),
             height: "20".into(),
             operation: Operation::NewBody,
+            references: Vec::new(),
         },
         None,
     )
@@ -528,25 +579,41 @@ fn feature_inserted_at_a_marker_inside_a_timeline_folder_joins_it() {
     assert!(Document::from_json(&doc.to_json()).is_ok(), "the inserted feature must leave a reopenable design");
 }
 
+/// A marker after the last feature leaves every feature active, as no marker does, so a feature
+/// added then is active too, not added rolled back (#7741: editing the last feature from the
+/// History runs its command with the marker there).
+#[test]
+fn feature_added_with_the_marker_at_the_end_is_active() {
+    let mut doc = Document::new("marker at the end");
+    let first = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("First")).unwrap();
+    doc.marker = Some(1);
+
+    let added = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("Added")).unwrap();
+
+    assert_eq!(doc.features.iter().map(|feature| feature.id).collect::<Vec<_>>(), vec![first, added]);
+    assert_eq!(doc.marker, Some(2), "the marker stays after the last feature");
+}
+
 /// A construction plane that is its own side resolves through the model and back into the
 /// document. The depth count has to survive that hop, or the recursion overflows the stack and
 /// aborts the process, which no panic guard can intercept.
 #[test]
 fn self_referencing_construction_planes_are_errors() {
-    let selfref = |name: &str| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { name: name.into() } });
+    // Feature ids are assigned from 1, so each design below knows its own feature's id.
+    let selfref = |id: u64| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: id.into() } });
     let xz = || Box::new(construct::GeoRef::Plane { plane: PlaneRef::Origin { name: "XZ".into() } });
 
     // Directly its own first side.
     let mut doc = Document::new("selfplane");
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref("P1"), b: xz() } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz() } }, Some("P1")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a plane that is its own side must report an error: {:?}", m.results);
 
     // Two planes that are each other's side.
     let mut doc = Document::new("twoplanes");
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref("P2"), b: xz() } }, Some("P1")).unwrap();
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref("P1"), b: xz() } }, Some("P2")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(2), b: xz() } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz() } }, Some("P2")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a two-plane cycle must report an error: {:?}", m.results);
@@ -554,8 +621,8 @@ fn self_referencing_construction_planes_are_errors() {
     // A perpendicular plane whose base is itself, and a sketch placed on it.
     let mut doc = Document::new("perpplane");
     let line = Box::new(construct::GeoRef::World { axis: "X".into() });
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Perpendicular { plane: selfref("P1"), line } }, Some("P1")).unwrap();
-    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { name: "P1".into() }, sketch: Sketch::new() }, Some("Sketch1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Perpendicular { plane: selfref(1), line } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { feature: 1.into() }, sketch: Sketch::new() }, Some("Sketch1")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a cyclic perpendicular plane must report an error: {:?}", m.results);

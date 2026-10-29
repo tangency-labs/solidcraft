@@ -5,6 +5,30 @@ mod four_bar;
 use serde_json::json;
 use solidcraft_geom::Vec2;
 
+#[test]
+fn angular_drag_keeps_the_horizontal_construction_line() {
+    for live in [false, true] {
+        let mut s = solidcraft_engine::Session::default();
+        for (id, params) in [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["reference"],"construction":true})),
+            ("sketch.constraint.horizontal_vertical", json!({"line":"reference"})),
+            ("sketch.line", json!({"points":["reference.start",[10,10]],"ids":["arm"],"infer":false})),
+            ("sketch.dimension", json!({"entities":["reference","arm"],"value":45})),
+            ("sketch.drag", json!({"entity":"arm.end","from":[10,10],"to":[10,10.5],"live":live})),
+        ] {
+            s.execute(id, &params).unwrap();
+        }
+        if live {
+            s.execute("sketch.drag_end", &json!({})).unwrap();
+        }
+        let point = |id| four_bar::point(&s, id).unwrap();
+        assert!(point("reference.start").dist(point("reference.end")) > 1.0, "the construction reference must remain visible");
+        let end = point("arm.end");
+        assert!((end.x - end.y).abs() < 1e-5, "the arm must retain its 45 degree angle: {end:?}");
+    }
+}
+
 fn drag(s: &mut solidcraft_engine::Session, target: Vec2) {
     let from = four_bar::point(s, "crank.end").unwrap();
     s.execute("sketch.drag", &json!({"entity":"crank.end","from":[from.x,from.y],"to":[target.x,target.y],"live":true})).unwrap();

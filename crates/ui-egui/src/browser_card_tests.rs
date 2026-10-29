@@ -3,6 +3,27 @@ use crate::scenario::{Harness, handle_at, rect_of};
 use crate::shell::{LayoutMode, SHELL_GAP};
 
 #[test]
+fn save_mesh_add_all_and_add_visible_bodies_fill_the_bodies_input() {
+    let mut h = Harness::new();
+    for (name, x) in [("One", 0), ("Two", 20), ("Three", 40)] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+    }
+    h.app.run("browser.visibility", json!({"items":["Two"],"visible":false})).unwrap();
+    h.app.start("file.save_mesh");
+    h.settle();
+    for (button, expected) in [("Add all bodies", vec!["One", "Two", "Three"]), ("Add visible bodies", vec!["One", "Three"])] {
+        let handle = crate::scenario::handles("dialog:button:").into_iter().find(|(n, _)| n.ends_with(&format!(":{button}")));
+        let (handle, _) = handle.unwrap_or_else(|| panic!("{button} is shown"));
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        let crate::dialogs::Kind::SaveMesh(k) = &d.kind else { panic!("Save as Mesh is open") };
+        let commands = crate::dialogs_save_mesh::commands(k, &d.inputs).unwrap();
+        assert_eq!(commands[0].1["bodies"], json!(expected), "{button}");
+        assert!(h.app.session.selection.is_empty(), "the buttons do not change the global selection");
+    }
+}
+
+#[test]
 fn browser_body_clicks_fill_and_toggle_save_mesh_inputs() {
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         let mut h = Harness::new();
@@ -421,4 +442,42 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
         }
     }
     crate::theme::set_dark(previous);
+}
+
+/// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.
+#[test]
+fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    use solidcraft_engine::geom::Vec3;
+    let solid = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
+    let mesh = solid.tessellate(0.01).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+            }],
+        },
+        Some("Imported mesh"),
+    )
+    .unwrap();
+    let mut h = Harness::new();
+    h.app.session = solidcraft_engine::Session::new(doc);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"operation":"new_body","body_name":"Solid"})).unwrap();
+    h.settle();
+    let rows = entries(&h.app, 0, "bodies");
+    let row = |name: &str| rows.iter().find(|e| e.key == name).unwrap_or_else(|| panic!("no {name} row in {:?}", body_rows(&h.app)));
+    assert_eq!((row("Mesh").icon, row("Mesh").tip), ("mesh_body", Some("ui.body_kind_mesh")));
+    assert_eq!((row("Solid").icon, row("Solid").tip), ("body", Some("ui.body_kind_solid")));
+    assert_eq!(crate::i18n::tr("ui.body_kind_mesh"), "Mesh body");
+    assert_eq!(crate::i18n::tr("ui.body_kind_solid"), "Solid body");
+    // Its own drawing in the mesh colours, not the solid body's grey cube.
+    let icon = crate::icon_svg::resolve("mesh_body");
+    assert!(!icon.placeholder);
+    assert_ne!(icon.master, crate::icon_svg::resolve("body").master);
+    assert_eq!(icon.accent, crate::icon_svg::accent_index("mesh"));
 }

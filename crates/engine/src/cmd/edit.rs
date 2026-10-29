@@ -6,12 +6,20 @@ use serde_json::{Value, json};
 use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, num, str_, string_list};
+use crate::params::{bad, bool_, name_or_id_list, num, str_};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
+    CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
+        .icon("redo")
+        .key("Shift+R")
+        .noundo()
+        .doc_only()
+        .contract(&REPEAT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
+        .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
         .noundo()
         .doc_only()
@@ -21,11 +29,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included"),
     CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
+    CommandSpec::new("timeline.play", "Play History", crate::checked!("timeline.play", play))
+        .at("INSPECT", "HISTORY")
+        .icon("timeline_play")
+        .noundo()
+        .doc_only()
+        .enabled(super::not_in_sketch)
+        .contract(&PLAY_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::TimelinePlayResult>)
+        .params("action?: toggle|play|stop (default toggle) → action: validated display request; the connected UI plays from the marker to the end with a half-second pause per rebuilt step. Headless callers only validate the request; no dialog, document edit or animation clock is created"),
     CommandSpec::new("timeline.delete", "Delete", delete)
         .at("SOLID", "MODIFY")
         .icon("delete")
         .key("Delete")
-        .params("feature: id|name | features: [id|name] (one undo step; a sketch takes its dependent features with it) → deleted: [ids]; failing?: [{feature, error}] (later features that worked and now fail)"),
+        .params("feature: id|name | features: [id|name] | groups: [timeline folder ids] (a folder goes with all its features and nested folders; one undo step; a sketch takes its dependent features with it) → deleted: [ids]; groups?: [folder ids deleted]; failing?: [{feature, error}] (later features that worked and now fail)"),
     CommandSpec::new("timeline.rename", "Rename", rename).icon("rename").params("feature: id|name, name (references to it follow)"),
     CommandSpec::new("timeline.group", "New Feature Folder", group)
         .icon("folder")
@@ -55,8 +72,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
     CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).icon("suppress").params(
-        "feature: id|name | features: [id|name] (one undo step), suppressed?: bool (default toggles: several features are all \
-         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]), suppressed",
+        "feature: id|name | features: [id|name] | groups: [timeline folder ids] (every feature in those folders and their nested \
+         folders; one undo step), suppressed?: bool (default toggles: several features are all \
+         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]; groups: [ids] when given), suppressed",
     ),
     CommandSpec::new("timeline.edit", "Edit Feature", edit_feature).icon("edit").params(
         "feature: id|name, set: {fields to change, merged into the feature's definition as timeline.inspect returns it, \
@@ -71,8 +89,19 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("select.set", "Select", select_set).icon("select")
         .noundo()
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
+    CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
+        .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
+    CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
+        .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
 ];
+
+const PLAY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::TimelinePlayParams> = crate::schema::TypedContract::new();
+
+fn play(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::edit::TimelinePlayParams = serde_json::from_value(p.clone()).map_err(|e| bad("timeline.play", e.to_string()))?;
+    serde_json::to_value(crate::schema::edit::TimelinePlayResult { action: request.action }).map_err(|e| EngineError::Other(e.to_string()))
+}
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {
     let Some(prev) = s.undo.pop() else { return Err(EngineError::Other("nothing to undo".into())) };
@@ -88,6 +117,16 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let label = now.label.clone();
     s.undo.push(now);
     Ok(json!({"redone": label}))
+}
+
+const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
+
+/// Repeat Last Command (#7077) starts a tool, which only the app has: it starts the last one in
+/// `SolveApp::start` and never reaches this. A script runs the command it wants itself.
+fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other(
+        "edit.repeat starts the last tool or dialog again in the app (its key, the canvas menu or command search); there is no tool to start here: run that command itself".into(),
+    ))
 }
 
 /// Put the session at `snap`; returns where it was, under the same label.
@@ -151,10 +190,8 @@ fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.delete";
-    let mut keys = string_list(p, "features");
-    if let Some(Value::Array(a)) = p.get("features") {
-        keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
-    }
+    // The features are named or numbered, and both kinds can sit in one list.
+    let mut keys = name_or_id_list(cmd, p, "features")?;
     if let Some(f) = p.get("feature") {
         keys.push(match f {
             Value::Number(n) => n.to_string(),
@@ -162,9 +199,13 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             _ => String::new(),
         });
     }
-    if keys.is_empty() {
-        return Err(bad(cmd, "`features` must list features"));
+    let groups = group_ids(s, p, false, cmd)?;
+    if keys.is_empty() && groups.is_empty() {
+        return Err(bad(cmd, "`features` must list features, or `groups` timeline folders"));
     }
+    // A folder goes with its features and nested folders, its features in timeline order.
+    let (folders, contents) = group_tree(&s.doc, &groups);
+    keys.extend(s.doc.features.iter().filter(|f| contents.contains(&f.id)).map(|f| f.id.to_string()));
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
@@ -177,6 +218,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         };
         gone.extend(s.doc_mut().delete_feature(id)?);
+    }
+    if !folders.is_empty() {
+        s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
     }
     if s.active_sketch.is_some_and(|a| gone.contains(&a)) {
         s.active_sketch = None;
@@ -194,10 +238,14 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         .filter(|r| worked.contains(&r.id))
         .filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e})))
         .collect();
-    if failing.is_empty() {
-        return Ok(json!({"deleted": gone}));
+    let mut out = json!({"deleted": gone});
+    if !folders.is_empty() {
+        out["groups"] = json!(folders);
     }
-    Ok(json!({"deleted": gone, "failing": failing}))
+    if !failing.is_empty() {
+        out["failing"] = json!(failing);
+    }
+    Ok(out)
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
@@ -312,6 +360,11 @@ fn group_move_would_cycle(s: &Session, target: u64, sources: &[u64]) -> bool {
 }
 
 fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::collections::BTreeSet<u64> {
+    group_tree(doc, roots).1
+}
+
+/// The timeline folders `roots` and every folder nested in them, and the features they hold.
+fn group_tree(doc: &solidcraft_doc::Document, roots: &[u64]) -> (std::collections::BTreeSet<u64>, std::collections::BTreeSet<u64>) {
     let by_id: std::collections::BTreeMap<u64, &solidcraft_doc::TimelineGroup> = doc.timeline_groups.iter().map(|group| (group.id, group)).collect();
     let mut children = std::collections::BTreeMap::<u64, Vec<u64>>::new();
     for group in &doc.timeline_groups {
@@ -331,7 +384,7 @@ fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::coll
             pending.extend(children.get(&id).into_iter().flatten().copied());
         }
     }
-    features
+    (visited, features)
 }
 
 fn sort_group_features(doc: &mut solidcraft_doc::Document) {
@@ -620,7 +673,15 @@ fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.suppress";
-    let ids = feature_ids(s, p, cmd)?;
+    let groups = group_ids(s, p, false, cmd)?;
+    let named = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
+    let mut ids = if groups.is_empty() || named("feature") || named("features") { feature_ids(s, p, cmd)? } else { Vec::new() };
+    let contents = group_feature_ids(&s.doc, &groups);
+    let more: Vec<u64> = s.doc.features.iter().map(|f| f.id).filter(|id| contents.contains(id) && !ids.contains(id)).collect();
+    ids.extend(more);
+    if ids.is_empty() {
+        return Err(bad(cmd, "the timeline folders hold no features"));
+    }
     let want = match bool_(p, "suppressed") {
         Some(b) => b,
         None if p.get("suppressed").is_some_and(|v| !v.is_null()) => return Err(bad(cmd, "`suppressed` must be true or false")),
@@ -640,8 +701,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
         f.suppressed = want;
     }
     match ids.as_slice() {
-        [id] if p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
-        _ => Ok(json!({"features": ids, "suppressed": want})),
+        [id] if groups.is_empty() && p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
+        _ if groups.is_empty() => Ok(json!({"features": ids, "suppressed": want})),
+        _ => Ok(json!({"features": ids, "groups": groups, "suppressed": want})),
     }
 }
 
@@ -952,6 +1014,42 @@ fn command_profiles(set: &Value, cmd: &str) -> Result<Value> {
 /// the name and suppression, which timeline.rename and timeline.suppress change.
 const NOT_EDITABLE: &[&str] = &["id", "type", "name", "suppressed", "param_names", "edge_refs", "edge_names", "face_names"];
 
+/// timeline.edit keeps accepting names for pattern and mirror seeds and for construction planes
+/// (#1134): each name in the merged definition resolves to the feature's id, refused when it
+/// finds no feature, as the commands that take names refuse it.
+fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, cmd: &str) -> Result<()> {
+    match v {
+        Value::Object(o) => {
+            if o.get("type").and_then(Value::as_str) == Some("construction") {
+                // Only a construction plane's name becomes an id: a revolve axis with the same
+                // shape names a construction axis, which is still keyed by name.
+                if let Some(name) = o.get("name").and_then(Value::as_str)
+                    && let Some(f) = doc.find_feature(name).filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))
+                {
+                    o.remove("name");
+                    o.insert("feature".into(), json!(f.id));
+                }
+                return Ok(());
+            }
+            for (_, x) in o.iter_mut() {
+                resolve_feature_names(x, doc, cmd)?;
+            }
+            if let Some(Value::Array(seeds)) = o.get_mut("features") {
+                for s in seeds.iter_mut() {
+                    if let Value::String(name) = s {
+                        let name = name.clone();
+                        let id = doc.seed_feature(&name).ok_or_else(|| bad(cmd, format!("no feature `{name}`")))?;
+                        *s = json!(id.id);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Value::Array(a) => a.iter_mut().try_for_each(|x| resolve_feature_names(x, doc, cmd)),
+        _ => Ok(()),
+    }
+}
+
 /// Large payloads that timeline.edit cannot change, left out of a feature's definition: (field,
 /// what it holds).
 fn heavy_fields(kind: &FeatureKind) -> &'static [(&'static str, &'static str)] {
@@ -1009,6 +1107,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
     let mut v = before.clone();
     merge(&mut v, set, 0);
+    resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
     if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
@@ -1062,6 +1161,13 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
             nf.edge_names = solidcraft_doc::hole_reference::reference_edge_names(&s.model.state_before(id), position.0, &edges(a));
         }
     }
+    // New reference edges for a cylinder (#6380): likewise.
+    if let (FeatureKind::Cylinder { references: a, base, .. }, FeatureKind::Cylinder { references: b, .. }) = (&nf.kind, &f.kind) {
+        let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
+        if edges(a) != edges(b) {
+            nf.edge_names = solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state_before(id), base, a);
+        }
+    }
     // New bend edges for a conversion: the names of the body's edges there now.
     if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was)
@@ -1070,7 +1176,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
-        super::features::stable_profiles(s, &mut nf.kind)?;
+        super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
     // New face points: their faces' names now.
     if nf.kind.face_points() != f.kind.face_points() {
@@ -1111,6 +1217,57 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"selected": s.selection.len()}))
 }
 
+fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        mode: String,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.filter", e.to_string()))?;
+    if !matches!(request.mode.as_str(), "body" | "face" | "component") {
+        return Err(bad("select.filter", "mode must be body, face or component"));
+    }
+    Ok(json!({"mode": request.mode}))
+}
+
+fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        body: Option<String>,
+        face: Option<usize>,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.same_look", e.to_string()))?;
+    let selected = s.selection.last();
+    let name = request
+        .body
+        .as_deref()
+        .or(match selected {
+            Some(Sel::Body { name }) => Some(name.as_str()),
+            Some(Sel::Face { body, .. }) => Some(body.as_str()),
+            _ => None,
+        })
+        .ok_or_else(|| bad("select.same_look", "select an object or face"))?;
+    let state = s.world_state();
+    let body = state.body(name).ok_or_else(|| bad("select.same_look", "unknown object"))?;
+    let face = request.face.or(match selected {
+        Some(Sel::Face { body, index, .. }) if request.body.is_none() && body == name => Some(*index),
+        _ => None,
+    });
+    if let Some(face) = face
+        && face >= body.body.face_count()
+    {
+        return Err(bad("select.same_look", "unknown face"));
+    }
+    let look = face.map_or_else(|| s.doc.model_display_look(body), |face| s.doc.model_face_look(body, face));
+    let items: Vec<_> =
+        state.bodies.iter().filter(|b| s.doc.model_used_looks(b).contains(&look)).take(10_001).map(|b| Sel::Body { name: b.name.clone() }).collect();
+    if items.len() > 10_000 {
+        return Err(bad("select.same_look", "too many objects"));
+    }
+    select_set(s, &json!({"items":items}))
+}
+
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.revision += 1;
@@ -1134,14 +1291,15 @@ fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model) -
 /// (the model of `after_doc`). With the history rolled back, the features after the marker are
 /// evaluated too, on copies of the models (which share their cache): a delete made in the
 /// rolled-back history that breaks them says so before it is made, rather than leaving error marks
-/// that only show at the end of the timeline (#3471).
+/// that only show at the end of the timeline (#3471). A change that leaves them the same inputs
+/// needs no such evaluation ([`only_constraints_changed`]).
 pub(super) fn newly_broken_in_history(
     before_doc: &solidcraft_doc::Document,
     before: &solidcraft_doc::Model,
     after_doc: &solidcraft_doc::Document,
     after: &solidcraft_doc::Model,
 ) -> Vec<(String, String)> {
-    if before_doc.marker.is_none() && after_doc.marker.is_none() {
+    if (before_doc.marker.is_none() && after_doc.marker.is_none()) || only_constraints_changed(before_doc, before, after_doc, after) {
         return newly_broken(before, after);
     }
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
@@ -1152,6 +1310,50 @@ pub(super) fn newly_broken_in_history(
         model
     };
     newly_broken(&whole(before_doc, before), &whole(after_doc, after))
+}
+
+/// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
+/// model parameters nothing uses any more), every sketch whose constraints changed solving to
+/// the same geometry, profiles and ends as before. The features after the marker are then built
+/// from the same inputs, so evaluating the whole history twice would find nothing new (#7253):
+/// deleting one dimension of a sketch with a long rolled-back history after it took minutes.
+fn only_constraints_changed(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+) -> bool {
+    let without_constraints = |doc: &solidcraft_doc::Document| {
+        let mut doc = doc.clone();
+        for f in &mut doc.features {
+            if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+                sketch.constraints.clear();
+            }
+        }
+        doc
+    };
+    let (mut b, a) = (without_constraints(before_doc), without_constraints(after_doc));
+    if b.params.iter().any(|p| !a.params.contains(p) && (!p.model || !after_doc.param_users(&p.name).is_empty())) {
+        return false;
+    }
+    b.params.retain(|p| a.params.contains(p));
+    if b != a {
+        return false;
+    }
+    // What a later feature reads of a sketch: the solved geometry, its plane, profiles and ends.
+    let solved = |model: &solidcraft_doc::Model, id: u64| {
+        let r = model.result(id).filter(|r| !r.skipped && r.error.is_none())?;
+        let s = r.state.sketch(id)?;
+        let mut sketch = s.sketch.clone();
+        sketch.constraints.clear();
+        Some((s.plane, sketch, serde_json::to_value(&s.profiles).ok()?, s.ends.clone(), s.report.ok()))
+    };
+    before_doc.features.iter().zip(&after_doc.features).all(|(fb, fa)| match (&fb.kind, &fa.kind) {
+        (FeatureKind::Sketch { sketch: sb, .. }, FeatureKind::Sketch { sketch: sa, .. }) if sb.constraints != sa.constraints => {
+            solved(before, fb.id).is_some_and(|x| solved(after, fa.id).is_some_and(|y| x == y))
+        }
+        _ => true,
+    })
 }
 
 fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1403,6 +1605,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
+    // What the trial computes is kept for the session's own evaluation at the end: the cache may
+    // hold only the last few states of a large design, which would be computed twice.
+    let kept = s.model.kept();
+    let shared = kept.clone().unwrap_or_default();
+    trial.model.keep(Some(shared.clone()));
     trial.active_component = old.component;
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
@@ -1436,7 +1643,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The trial still holds the old feature, so a plane offset from its own name was made there,
     // and once swapped in it would be built on itself (#3567).
-    if new.kind.names_feature(&old.name) {
+    if new.kind.names_feature(old.id, &old.name) {
         return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
@@ -1477,6 +1684,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(e) = trial.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
+    // What this edit rebuilt: the trial computed the edited feature and the features after it. The
+    // session's evaluation below only takes those results from what the trial kept, so its own
+    // counters read as "nothing was rebuilt" (#5694).
+    let rebuilt = trial.model.last_recomputed;
+    let reused = trial.model.last_restored;
     let original_ids: std::collections::BTreeSet<u64> = s.doc.features.iter().map(|feature| feature.id).collect();
     let added_ids: std::collections::BTreeSet<u64> =
         trial.doc.features.iter().filter(|feature| !original_ids.contains(&feature.id)).map(|feature| feature.id).collect();
@@ -1512,11 +1724,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.pending_moves = trial.pending_moves;
     s.doc = trial.doc;
+    s.model.keep(Some(shared));
     s.refresh();
+    s.model.keep(kept);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
-    Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
+    // Report the trial's rebuild, plus anything the session still had to compute itself (a kept
+    // result its budget dropped); `s.model`'s own counters would only report the reuse (#5694).
+    Ok(json!({"feature": id, "recomputed": rebuilt + s.model.last_recomputed, "restored": reused}))
 }
 
 fn dependents(s: &mut Session, p: &Value) -> Result<Value> {

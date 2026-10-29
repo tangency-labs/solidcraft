@@ -40,11 +40,11 @@ dimension parameters. Repeated child instances remain shared within the new copy
 appearances and wholly internal joints/motion records receive copied references. Design-wide
 user parameters remain shared; retained external links and omitted cross-boundary motion
 records are reported. Unsupported destructive links refuse the entire copy. See
-[individual-instance and copy details](https://github.com/bherbruck/solidcraft/blob/main/docs/occurrence-workflows.md).
+[individual-instance and copy details](https://github.com/tangency-labs/solidcraft/blob/main/docs/occurrence-workflows.md).
 
 **Extract to File** (`component.extract`, in a component's right-click menu) moves a component
 into a design of its own: its sketches, features, bodies, subcomponents and the joints among them
-go to the new `.solidcraft` file at its origin, with the parameters they use, and the component
+go to the new `.sc` file at its origin, with the parameters they use, and the component
 becomes linked to that file, as **Insert Design** makes it. Its placements and the joints to the
 rest of the assembly stay. Components whose own history builds the same bodies are offered to
 become placements of the new link too (`component.copies`, `component.replace_with_link`).
@@ -56,7 +56,9 @@ joined to the rest of the design.
 circles and vertices: rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with
 offsets, flip and limits. **As-built Joint** keeps the current position, **Rigid Group** locks
 components together, **Drive Joints** moves a joint through its values, and **Motion Link**
-couples two joints. Links can be chained (one joint drives a second, which drives a
+couples two joints. A rigid joint holds its parts still, so Drive Joints has nothing to drive on
+it: it says so and offers **Edit Joint**, where the joint's type changes to Revolute (rotate),
+Slider (slide) or Cylindrical (both). Links can be chained (one joint drives a second, which drives a
 third), and a value is carried through a chain of up to 64 links in whatever order they were
 made. Contact sets stop motion where bodies would pass through each other,
 **Motion Study** keys joint values along a timeline, and **Interference** shows overlapping
@@ -321,7 +323,7 @@ stop it), each sample from the one before, on a copy: the design is not changed.
 accelerations are finite differences between samples, central inside and one-sided at the ends,
 so they are as smooth as the samples are dense (up to 1000, one per step by default). Angles are
 unwrapped, so a joint that turns on past half a turn keeps counting.
-`motion.interference {study, occurrences?, against?, contact_sets?, samples?}` answers each
+`motion.interference {study, occurrences?, against?, contact_sets?, samples?, budget_s?}` answers each
 colliding pair with its `first_step`, `last_step`, the `steps` ranges where they overlap, how
 far into each other (`depth_mm`, the most at `deepest_step`) and their shared `volume_mm3`
 there (null when it is not cheap to work out). It plays the study as `motion.play` does, but
@@ -330,7 +332,10 @@ through another between two samples is missed. Parts are told apart by occurrenc
 sets tell them apart: an occurrence inside a sub-assembly placed twice is one part, so its two
 copies are not checked against each other. A check takes at most 256 bodies; on a large design,
 list the `occurrences` to check (an arm, with `against` the parts it must miss). When the work
-runs out it says `truncated` and the step it `checked_to`.
+runs out it says `truncated` and the step it `checked_to`, and it is not `clear`, even when nothing
+collided in the steps it checked. A mechanism with detailed parts, such as a gear train, can need
+more than that fixed work budget: give it `budget_s` (seconds, at most 86400) and the check runs
+until that time instead, looked at between samples.
 `joint.sweep {joint, from, to, index?, step?, refine?, occurrences?, against?, contact_sets?,
 report_gaps?, apply?}` drives one joint value from `from` toward `to` and answers how far it gets
 before parts touch: `stopped_at` (the last value clear of contact), `stopped_by` (the two parts
@@ -352,6 +357,11 @@ Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.
 After the part file changes, **Update Links** (`component.update_links`) reads it again.
+An assembly whose tab comes back to the front does that by itself for the parts whose files
+changed since it last read them, whether the part was saved in another tab, another window or by
+a checkout. A part that cannot be read is tried again the next time, and holds up no other.
+**Update changed linked designs when a tab comes back** (Preferences, Design,
+`update_changed_links`) turns this off.
 To edit the source, right-click a linked component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
@@ -359,8 +369,21 @@ To edit the source, right-click a linked component or occurrence in the Browser 
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
+To edit a linked part where it sits, double-click it, in the Browser or on one of its faces in
+the view, or choose **Edit in Place** from its menu. Its design opens in a tab of its own with the
+rest of the assembly drawn faded around it, at the placement you picked, and the part's own
+history, Browser and commands work as usual. **Update Links** there also reads the assembly's
+links again and redraws it. **Finish Edit** (`component.finish_edit`), at the right end of the
+**MODEL** tab, or the mouse's back button, saves the part and goes back to the assembly, which
+takes up the change; the part's tab closes again when the edit opened it. Run as a command (by
+an agent, for example), it does not save: the part must be saved first. **Activate** still makes
+a linked component the active one without opening it, and a double-click on a component that
+is not linked activates it. **Double-click a component to activate it, or to edit a linked one in
+place** (Preferences, Design, `double_click_components`) turns this off: a double-click in the
+Browser then activates every component, and one in the view does nothing.
+
 If a source file moves or is renamed, right-click its linked component or occurrence in the
-Browser and choose **Relink Source (All Instances)…**. Choose the saved `.solidcraft` design
+Browser and choose **Relink Source (All Instances)…**. Choose the saved `.sc` design
 to use. Relinking updates that component's stored path and solid bodies for **all its
 instances**, keeping their identities and placements. Cancelling or choosing a missing,
 invalid, empty or self-referencing design leaves the assembly unchanged. The operation is
@@ -384,7 +407,7 @@ uses its first placement; `occurrence.properties` selects a specific instance. R
 measures the complete assembly. Volumes are summed, including overlapping bodies, rather than
 measuring their union. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
-[placement and measurement details](https://github.com/bherbruck/solidcraft/blob/main/docs/assembly-properties.md).
+[placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
 
 ## Part properties and the bill of materials
 
@@ -393,7 +416,7 @@ revision, other tools' data under a reverse-DNS key (the same rules as the desig
 properties), and free text properties such as a material grade or a finish. Every occurrence of
 the component shares them, Paste New copies them, and they are saved with the component.
 `component.metadata {component}` reads them and
-`component.metadata.set {component, part_number?, description?, revision?, values?, properties?}`
+`component.metadata.set {component, part_number?, description?, revision?, bom_type?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
 design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
 part number from their standard and size (`ISO 4762 M6x20`, or a bearing's designation) and a
@@ -415,8 +438,23 @@ description; **Change Part Size** renumbers them, keeping a field you changed yo
   rows. `total_occurrences` counts the children too, so it is the same either way.
 - `component` lists one subassembly's parts instead of the design's.
 
+A component's **bill of materials type** (`bom_type`, a part property set with
+`component.metadata.set {component, bom_type}`) decides how it counts in the assemblies it is
+placed in. Without one it is `normal`.
+
+| Type | For | In the assembly it is placed in |
+|---|---|---|
+| `normal` | Something you make | A row of its own; every occurrence adds to its quantity |
+| `phantom` | Something just to group (a fastener set) | No row: what it holds counts as if it were placed there directly, in the same rows as the same parts placed there |
+| `reference` | Something to use as a reference (a fixture shown for context) | Counted nowhere, and nothing inside it is counted either |
+| `purchased` | Something you buy (a gearbox) | One row; nothing inside it is counted or listed |
+| `inseparable` | Something made as one piece: welded, glued, riveted and so on (a welded frame) | One row; in parts only, the purchased parts inside it are listed too, and the rest of what it holds is listed in its own bill of materials |
+
+Two components with the same part number share a row only when their types agree. A
+component's own bill of materials (`component`) lists what it holds whatever its type.
+
 Rows are sorted by part number (rows without one come last) and hold `item`, `part_number`,
-`description`, `revision`, `count`, `definition` (the component names), `components` (their ids)
+`description`, `revision`, `bom_type`, `count`, `definition` (the component names), `components` (their ids)
 and `properties`, with `total_occurrences` beside them. `path` writes them to a `.csv` file
 (the columns item, part_number, description, revision, count and definition, every field
 quoted; children follow their row) or a `.json` file. The window lists the same rows, switches
