@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "011's modelled Tr20x4 thread with chamfered ends at its own angle and depth: 30 deg to the axis, 2.5 mm in from the major diameter",
+ "source": "analytic",
+ "method": "ISO 2904 Tr20x4 (011): crest flat 0.366 P, minor d3 = 15.5. Averaged over the turn every meridian half-plane holds the same sections (a screw motion), so V = 2 pi int int r m(r) dr dz over the stock's section, m = 1 - w(r)/P the tooth's share of a pitch (1 below the root r 7.75). Both ends are free: the chamfer, axisymmetric and cut after the groove, lowers the stock's radius to 7.5 + y tan30 at y mm from each end (the cone at 30 deg to the axis through d_f = d - 2 x 2.5 = 15, below the root, so a whole ring is left on the end), reaching the major 4.330 mm in",
+ "body_count": 1,
+ "volume_mm3": 5769.125597583,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

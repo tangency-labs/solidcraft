@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled G 1/2 parallel pipe thread (ISO 228-1, 55 deg) on a d20.955 shaft, six turns",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. the space between the teeth is a groove of straight flanks, its tooth (H - h) tan(half angle) wide at the crest and its groove as wide at the root (the truncations split equally); the standard's crest and root rounds are flats here. ISO 228-1 G 1/2: d = 20.955, 14 threads per inch, H = 0.960491 P, h = 0.640327 P, so the crest flat (H - h) tan27.5 = 0.16667 P and the minor d1 = d - 2h = 18.631",
+ "body_count": 1,
+ "volume_mm3": 3355.923237102,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

@@ -120,7 +120,18 @@
         "ladder/06-threads/002-external-m10x1-fine",
         "ladder/06-threads/017-external-m10-chamfered-tip",
         "ladder/06-threads/008-multi-start-thread",
-        "ladder/06-threads/018-external-m10-both-hands"
+        "ladder/06-threads/018-external-m10-both-hands",
+        "ladder/06-threads/020-external-g-1-2",
+        "ladder/06-threads/021-internal-rp-1-2",
+        "ladder/06-threads/022-external-r-1-2-taper",
+        "ladder/06-threads/023-external-1-2-npt",
+        "ladder/06-threads/024-internal-rc-1-2-taper",
+        "ladder/06-threads/025-external-s20x4-steep-flank-end-to-shoulder",
+        "ladder/06-threads/026-external-s20x4-steep-flank-start-to-shoulder",
+        "ladder/06-threads/027-external-m10-chamfered-start",
+        "ladder/06-threads/028-external-tr20x4-chamfer-30-deg-2.5-deep",
+        "ladder/06-threads/029-external-tr20x4-chamfer-needs-depth",
+        "ladder/06-threads/030-square-thread-refused"
       ],
       "tier": "06-threads",
       "what": "modelled threads"
