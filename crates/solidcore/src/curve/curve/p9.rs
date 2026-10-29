@@ -2051,6 +2051,62 @@ mod tests {
     }
 
     #[test]
+    fn tight_box_over_a_sub_interval_holds_the_knots_inside() {
+        // Regression for #1054: `CalculateTightBoundingBox` used to add a B-spline's last
+        // (and any tangent-discontinuous) knot whatever the queried interval was, so an
+        // edge on part of a NURBS arc pulled its box out to the arc's far end. Only the
+        // knots strictly inside the interval may be added; the interval's ends are already
+        // in the box. The correction is opt-in; default behavior matches pinned C++.
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_curve::NurbCircleParam;
+
+        let mut k = Kernel::default();
+        k.fixes.curve_tight_box_interval_knots = true;
+        let frame = Axis2Placement::new(
+            Vec3::from_array([0.0, 0.0, 0.0]),
+            Vec3::from_array([1.0, 0.0, 0.0]),
+            Vec3::from_array([0.0, 1.0, 0.0]),
+        );
+        let arc = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &frame,
+                50.0,
+                0.0,
+                90.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let ivl = arc.natural_interval();
+        // Half the arc: from its start to the midpoint of its interval (0 deg to 45 deg).
+        let half = Extent1d::from_min_max(ivl.min(), 0.5 * (ivl.max() - ivl.min()) + ivl.min());
+        let pinned = arc
+            .calculate_tight_bounding_box(&Kernel::default(), &half)
+            .expect("upstream tight box over a sub-interval");
+        assert!(pinned.u_min().abs() < 1e-6);
+        assert!((pinned.v_max() - 50.0).abs() < 1e-6);
+        let bx = arc
+            .calculate_tight_bounding_box(&k, &half)
+            .expect("tight box over a sub-interval");
+        // The arc's own point at 45 deg is (50 cos45, 50 sin45) = (35.355, 35.355); the
+        // buggy box reached the 90 deg endpoint (0, 50), so its u_min was 0 and v_max 50.
+        let r = 50.0 / sqrt(2.0);
+        assert!(
+            (bx.u_min() - r).abs() < 1e-6,
+            "u_min {} should be {}",
+            bx.u_min(),
+            r
+        );
+        assert!(
+            (bx.v_max() - r).abs() < 1e-6,
+            "v_max {} should be {}",
+            bx.v_max(),
+            r
+        );
+    }
+
+    #[test]
     fn planar_segment_is_on_its_plane() {
         let k = Kernel::default();
         let a = segment([1.0, -2.0, 0.5], [4.0, 3.0, 0.5]);
