@@ -369,12 +369,12 @@ impl<'a> Lexer<'a> {
         if matches!(self.peek_byte(), Some(b'+' | b'-')) {
             self.pos += 1;
         }
-        self.take_while(|b| b.is_ascii_digit());
+        let mut digits = !self.take_while(|b| b.is_ascii_digit()).is_empty();
         let mut real = false;
         if self.peek_byte() == Some(b'.') {
             real = true;
             self.pos += 1;
-            self.take_while(|b| b.is_ascii_digit());
+            digits |= !self.take_while(|b| b.is_ascii_digit()).is_empty();
         }
         if matches!(self.peek_byte(), Some(b'E' | b'e')) {
             real = true;
@@ -389,6 +389,10 @@ impl<'a> Lexer<'a> {
             .get(start..self.pos)
             .and_then(|b| std::str::from_utf8(b).ok())
             .unwrap_or("");
+        if real && !digits {
+            // `.`, `-.`, `-.E3`: no mantissa digit, not a number (would parse as 0).
+            return self.err(format!("bad real '{text}'"));
+        }
         if real {
             // Rust's parser rejects "1." followed by an exponent only in some forms;
             // normalise "1.E5" / "1." to "1.0E5" / "1.0".
@@ -747,6 +751,28 @@ mod tests {
         };
         let v: Vec<f64> = r.params.iter().map(|p| p.as_f64().unwrap()).collect();
         assert_eq!(v, vec![1.0, 100.0, -0.5, 3.0, 1.5e-3]);
+    }
+
+    #[test]
+    fn rejects_numbers_without_digits() {
+        // A real needs at least one mantissa digit; these read as 0 before.
+        let accepted: Vec<String> = [".", "-.", "+.", ".E5", "-.e-3", "(1.,.,3.)"]
+            .into_iter()
+            .filter_map(|bad| {
+                let src = format!("ISO-10303-21;DATA;#1=A({bad});ENDSEC;END-ISO-10303-21;");
+                let f = parse(src.as_bytes(), &Limits::default()).ok()?;
+                Some(format!("`{bad}` -> {:?}", f.entities[&1]))
+            })
+            .collect();
+        assert!(accepted.is_empty(), "accepted: {accepted:#?}");
+        // The error names the token and its line.
+        let e = parse(
+            b"ISO-10303-21;\nDATA;\n#1=A(.);\nENDSEC;END-ISO-10303-21;",
+            &Limits::default(),
+        )
+        .unwrap_err();
+        assert_eq!(e.line, 3);
+        assert!(e.message.contains("bad real '.'"), "{e}");
     }
 
     #[test]
