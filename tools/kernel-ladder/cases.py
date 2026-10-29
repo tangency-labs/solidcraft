@@ -1282,14 +1282,151 @@ case(T11, "004-housing", "the running part with every tier: back wall, boss, slo
      "10/008 less the M16 groove on the boss: its cylinder runs from the r1 root round (z 21, a shoulder: the groove stops w = %.6f clear of it) to the 1 mm top chamfer "
      "(z 29, run out through it, a free end); the groove's root r 6.917 stays outside the boss's 1.5 wall's inside (r 6.5), so it cuts the wall only. Bbox: the part's" % w16, base=C10)
 
+# ---------------------------------------------------------------- 12 sheet metal
+# A sheet body is its flat pattern (crates/doc/src/sheet.rs): the base, and per flange a bend zone
+# BA = theta (R + K T) wide and its panel. Folded, a panel moves rigidly and a bend zone of
+# thickness T becomes an annular sector, theta/2 ((R + T)^2 - R^2) per mm = theta T (R + T/2): with
+# K = 0.5 that is T x BA, so the folded part holds exactly the flat area x T. Rule: T = 2, R = 1,
+# K = 0.5, corner gap g = 0.5. An edge flange at the default position has its outer virtual sharp on
+# the picked edge: the base is cut back s0 = (R + T) tan(theta/2) and the bend starts there; its
+# height H runs from that sharp along the outer face, so the panel past the bend is H - s0 long.
+T12 = "12-sheet-metal"
+TS, RS, KS, GS = 2.0, 1.0, 0.5, 0.5
+WS, DS, HS = 100.0, 60.0, 20.0
+SQ2 = math.sqrt(2)
+RULE = C("sheet.manage_rules", name="Sheet 2 mm", thickness="2 mm", active=True, bend_radius="1 mm", k_factor=KS, gap="0.5 mm")
+def sm_ba(deg):
+    return math.radians(deg) * (RS + KS * TS)
+def sm_s0(deg):
+    return (RS + TS) * math.tan(math.radians(deg) / 2)
+SMETH = ("T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm "
+         "of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut "
+         "back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). ")
+case(T12, "001-base-flange", "a 100 x 60 base flange, 2 mm sheet", [RULE] + sketch("XY", C("sketch.rectangle.two_point", p0=[0, 0], p1=[WS, DS]), name="Base") +
+     [C("sheet.flange", type="base", sketch="Base")],
+     {"body_count": 1, "volume_mm3": WS * DS * TS, "area_mm2": 2 * (WS * DS + WS * TS + DS * TS), "faces": 6, "edges": 12, "vertices": 8,
+      "bbox": {"min": [0, 0, 0], "max": [WS, DS, TS]}},
+     "the sketch's rectangle extruded the rule's 2 mm up: V = 100 60 2, A = 2 (100 60 + 100 2 + 60 2); a box's 6 faces, 12 edges, 8 vertices")
+S1 = up(T12, "001-base-flange")
+ba90, s90 = sm_ba(90), sm_s0(90)
+A2 = WS * (DS - s90) + WS * ba90 + WS * (HS - s90)
+case(T12, "002-edge-flange-90", "a 20 mm 90 deg edge flange along the base's front edge",
+     [C("sheet.flange", type="edge", edges=[[WS / 2, 0, TS]], height=HS, angle=90)],
+     {"body_count": 1, "volume_mm3": TS * A2, "faces": 10, "bbox": {"min": [0, 0, 0], "max": [WS, DS, HS]}},
+     SMETH + "At 90 deg s0 = 3 and BA = pi: the base keeps 100 x 57, the bend pi x 100, the panel 17 x 100; V = 2 (5700 + 100 pi + 1700). The flange's outer face is flush "
+     "with the edge (y = 0) and reaches z = 20. Faces: base top and bottom, its three free ends, the bend's two cylinders, the flange's inner and outer faces and its top: 10, "
+     "each end of the L (x = 0, x = 100) one plane", base=S1)
+S2 = up(T12, "002-edge-flange-90")
+FOUR = [[WS / 2, 0, TS], [WS, DS / 2, TS], [WS / 2, DS, TS], [0, DS / 2, TS]]
+def tray_area(deg):
+    """The flat area of 001 with flanges H high at `deg` on all four edges, closed at the corners: each
+    panel end runs on (or is cut back) on the mitre plane halving the two inner faces, g/2 clear of it."""
+    th = math.radians(deg)
+    s0, ba, leg = sm_s0(deg), sm_ba(deg), HS - sm_s0(deg)
+    ext = RS * math.sin(th) - GS / SQ2
+    lens = [WS - 2 * s0, DS - 2 * s0] * 2
+    base = (WS - 2 * s0) * (DS - 2 * s0)
+    return base + sum(ba * L + leg * (L + 2 * ext + leg * math.cos(th)) for L in lens), ext, s0, ba, leg
+CORNER = ("Closing a corner (sheet.rs close_corner): every point of a panel's end keeps g/2 from the plane halving the two flanges' inner faces. For the flange on y = 0, "
+          "its bend along x from the corner (s0, s0), a point s up its panel (rigid, turned theta about the bend axis T + R up) on the face z of the sheet keeps that distance from "
+          "x = s0 - R sin(theta) - s cos(theta) + g/sqrt2 + (T - z) sin(theta) on; the inner face z = T needs least, so the end is the line x = s0 - e - s cos(theta), "
+          "e = R sin(theta) - g/sqrt2: the panel runs on e past its bend's end at its foot and a further cos(theta) per mm up it (outward below 90 deg, cut back above). "
+          "Each panel is the trapezoid leg x (L + 2e + leg cos(theta)), its bend BA x L, L the base's edge less 2 s0 (the bend ends square at the corner). ")
+a3, e3, *_ = tray_area(90)
+case(T12, "003-four-flanges-90-closed-corners", "20 mm 90 deg flanges on all four edges, made together: the corners close with the rule's gap, notch relief",
+     [C("sheet.flange", type="edge", edges=FOUR, height=HS, angle=90, corner_relief_shape="notch")],
+     {"body_count": 1, "volume_mm3": TS * a3, "bbox": {"min": [0, 0, 0], "max": [WS, DS, HS]}},
+     SMETH + CORNER + "At 90 deg: s0 = 3, BA = pi, leg 17, e = 1 - g/sqrt2 = 0.646447 (the panel ends T + g/sqrt2 short of the other's outer face line, gap g between the "
+     "inner edges), no slant. Base 94 x 54, bends pi (2 94 + 2 54), panels 17 (2 (94 + 2e) + 2 (54 + 2e)); V = 2 x that = %.6f. The walls' outer faces stand on the "
+     "edges: bbox 100 x 60 x 20. The notch relief cuts nothing: the bends end square at the corners" % (TS * a3), base=S1)
+S3 = up(T12, "003-four-flanges-90-closed-corners")
+for name, deg, what in [("004-four-flanges-72-leaning-out", 72, "leaning out: the panel ends run on along a slant"),
+                        ("005-four-flanges-108-leaning-in", 108, "leaning in over the base: the panel ends are cut back along a slant where they would overlap")]:
+    th = math.radians(deg)
+    a, e, s0, ba, leg = tray_area(deg)
+    if deg < 90:
+        lo, zmax = -HS * math.cos(th), HS * math.sin(th) + TS * math.cos(th)
+        bb = "the walls lean out: the outer face's far edge is H cos(theta) = %.6f outside each edge, and the inner face's far edge is highest, H sin(theta) + T cos(theta)" % -lo
+    else:
+        lo, zmax = s0 - (RS + TS), HS * math.sin(th)
+        bb = ("the walls lean in: what reaches furthest out is each bend's outer face a quarter turn in, s0 - (R + T) = %.6f inside the edge, and the outer face's far edge "
+              "is highest, H sin(theta)" % lo)
+    case(T12, name, "20 mm flanges at %d deg on all four edges, made together and closed at the corners, " % deg + what,
+         [C("sheet.flange", type="edge", edges=FOUR, height=HS, angle=deg)],
+         {"body_count": 1, "volume_mm3": TS * a, "bbox": {"min": [lo, lo, 0], "max": [WS - lo, DS - lo, zmax]}},
+         SMETH + CORNER + "At %d deg: s0 = 3 tan%g = %.6f, BA = %.6f, leg %.6f, e = %.6f, the slant cos(theta) = %.6f a mm up. V = 2 x the flat area = %.6f. Bbox: %s" %
+         (deg, deg / 2, s0, ba, leg, e, math.cos(th), TS * a, bb), base=S1)
+RELIEF = ("A corner relief (sheet.rs plan_relief) is cut from the base at the corner of the bends, size/2 = r along both edges: a quarter disc (round) or an r x r square "
+          "(rectangular) at a square corner; both bends then start r from the corner, and the panels keep the ends the closing gave them. ")
+for name, shape, take, how in [("006-corner-relief-round", "round", PI * 4 / 4, "pi r^2/4 = pi"), ("007-corner-relief-rectangular", "rectangular", 4.0, "r^2 = 4")]:
+    case(T12, name, "003's tray with a %s corner relief 4 mm across at each corner" % shape,
+         [C("sheet.flange", type="edge", edges=FOUR, height=HS, angle=90, corner_relief_shape=shape, corner_relief="4 mm")],
+         {"body_count": 1, "volume_mm3": TS * (a3 - 4 * take - 8 * 2 * ba90), "bbox": {"min": [0, 0, 0], "max": [WS, DS, HS]}},
+         SMETH + RELIEF + "r = 2: each corner takes %s of the base and 2 mm of each of its two bends (2 BA = 2 pi); V = 2 (003's flat area - 4 x that - 8 x 2 pi)" % how, base=S1)
+case(T12, "008-corner-relief-tear", "003's tray with torn corners: the bends run to the corner and each end is cut straight, in the flat, to where its panel's end starts",
+     [C("sheet.flange", type="edge", edges=FOUR, height=HS, angle=90, corner_relief_shape="tear")],
+     {"body_count": 1, "volume_mm3": TS * (a3 + 4 * ba90 * e3), "bbox": {"min": [0, 0, 0], "max": [WS, DS, HS]}},
+     SMETH + "A torn corner (sheet.rs tear_corner) cuts nothing from the base: each bend zone's end runs straight from the corner, on its start line, to the panel's end at its "
+     "far edge, e = %.6f further along (003's closing), so each torn end adds the triangle BA e / 2 to the bend zone; folded, the end is a helix and the column of sheet under each "
+     "flat point still holds T of material (K = 0.5). V = 2 (003's flat area + 8 pi e / 2)" % e3, base=S1)
+hem_len, hem_gap = 8.0, 1.0
+hem_leg = hem_len - (hem_gap + TS)
+case(T12, "009-hem-on-the-back-edge", "002's L with an 8 mm hem on the base's back edge, folded under it with a 1 mm inner radius",
+     [C("sheet.hem", edges=[[WS / 2, DS, TS]], length=hem_len, gap=hem_gap)],
+     {"body_count": 1, "volume_mm3": TS * (A2 + WS * (PI * (hem_gap + KS * TS) + hem_leg)), "bbox": {"min": [0, 0, -(2 * hem_gap + TS)], "max": [WS, DS + hem_gap + TS, HS]}},
+     SMETH + "A hem (sheet.rs add_hem) is a 180 deg bend starting at the edge, its inner radius the gap, folded under the face it is picked on (the top here, so down), "
+     "its length to the outer face: the leg is 8 - (1 + 2) = 5 and BA = pi (1 + 1) = 2 pi. V = 2 (002's flat area + 100 (2 pi + 5)). Bbox: the bend's outer face reaches "
+     "R + T = 3 past the edge (y 63) and, a half turn round its axis 1 mm under the base, down to z = -(2 R + T) = -4", base=S2)
+FL = [C("sheet.fold", points=[[70, 0, TS], [70, DS, TS]], angle=90)]
+fleg = WS - 70 - ba90 / 2
+FOLDB = {"min": [0, 0, 0], "max": [70 - ba90 / 2 + RS + TS, DS, RS + TS + fleg]}
+FMETH12 = ("A fold (sheet.rs add_fold) takes its bend zone out of the sheet, so the flat stays 100 x 60 and V = 2 x 6000 = 12000. Centred on the line x = 70 the zone runs "
+           "from 70 - pi/2; the larger side stays, the 30 mm side folds up 90 deg about the axis at x = 70 - pi/2, z = T + R: its outer face (the flat bottom) stands at "
+           "x = 70 - pi/2 + R + T = %.6f and its panel, 30 - pi/2 long, rises from z = R + T to %.6f. " % (FOLDB["max"][0], FOLDB["max"][2]))
+case(T12, "010-fold-90", "001's base folded 90 deg up along a sketch line across it at x = 70", FL,
+     {"body_count": 1, "volume_mm3": WS * DS * TS, "faces": 10, "bbox": FOLDB},
+     SMETH + FMETH12 + "Faces as 002's L: 10", base=S1)
+case(T12, "011-fold-unfolded", "010's fold unfolded: the flat 100 x 60 plate again", [C("sheet.unfold")],
+     {"body_count": 1, "volume_mm3": WS * DS * TS, "bbox": {"min": [0, 0, 0], "max": [WS, DS, TS]}},
+     SMETH + FMETH12 + "Unfolded every panel lies in the base's plane where it was cut from: the 100 x 60 x 2 plate, the base in its place", base=up(T12, "010-fold-90"))
+case(T12, "012-fold-refolded", "011's flat refolded: 010's part again", [C("sheet.refold")],
+     {"body_count": 1, "volume_mm3": WS * DS * TS, "faces": 10, "bbox": FOLDB},
+     SMETH + FMETH12 + "Refolding gives the folded part back: 010's numbers", base=up(T12, "011-fold-unfolded"))
+# The flat pattern of 003's tray: its outline (the size and the area) and its four bend lines, the
+# centre lines of the bend zones, half BA out from the base's cut-back edges.
+reach = HS - s90 + ba90 - s90
+cl = s90 - ba90 / 2
+case(T12, "013-flat-pattern", "the flat pattern of 003's tray: its outline's size and area, and its four bend lines", [C("sheet.flat_pattern")],
+     {"body_count": 1, "volume_mm3": TS * a3,
+      "flat_pattern": {"size_mm": [WS + 2 * reach, DS + 2 * reach], "area_mm2": a3,
+                       "bend_lines": [[[s90, cl], [WS - s90, cl]], [[WS - cl, s90], [WS - cl, DS - s90]], [[s90, DS - cl], [WS - s90, DS - cl]], [[cl, s90], [cl, DS - s90]]]}},
+     SMETH + "The flat pattern is drawn in the base's frame (the base in its place). Each flange lies flat past its edge: s0 back from it, then BA and the leg, so it reaches "
+     "H - s0 + BA - s0 = 20 - BD = %.6f past the edge (BD = 2 (R + T) tan45 - BA = 6 - pi): the outline is (100 + 2 x that) x (60 + 2 x that), its area 003's flat area "
+     "(%.6f, the notched corners open). The bend lines are the bend zones' centre lines, BA/2 out from the cut-back edges: y = 3 - pi/2 and 57 + pi/2 from x = 3 to 97, "
+     "x = 3 - pi/2 and 97 + pi/2 from y = 3 to 57" % (reach, a3), base=S3)
+# A bracket: a flange, a lip on that flange's far edge, and a hole through the base.
+H1, H2 = 30.0, 10.0
+leg1 = H1 - s90 - s90
+leg2 = H2 - s90
+A14 = WS * (DS - s90) + WS * ba90 + WS * leg1 + WS * ba90 + WS * leg2 - PI * 25
+case(T12, "014-bracket", "a bracket: a 30 mm flange on the front edge, a 10 mm lip turned out on its far edge, a d10 hole through the base",
+     [C("sheet.flange", type="edge", edges=[[WS / 2, 0, TS]], height=H1, angle=90),
+      C("sheet.flange", type="edge", edges=[[WS / 2, 0, H1]], height=H2, angle=90),
+      H(position=[WS / 2, 35, TS], diameter=10)],
+     {"body_count": 1, "volume_mm3": TS * A14, "bbox": {"min": [0, -(H2 - TS), 0], "max": [WS, DS, H1]}},
+     SMETH + "The flange (as 002, H 30) stands on y = 0 up to z = 30. The lip is picked on that flange's far edge on its outer face (y = 0), the panel's bottom face, so it "
+     "bends down there, turning out over y < 0; its outer virtual sharp is on the edge (z = 30, y = 2, the flange's top-face plane), so the flange's panel is cut back s0 = 3 "
+     "more (30 - 3 - 3 = 24) and the lip's outer face is the plane z = 30, its panel 10 - 3 = 7, reaching y = 2 - 10 = -8. The hole (d10 at (50, 35)) is a cut-out of the "
+     "flat. V = 2 (100 57 + 100 pi + 100 24 + 100 pi + 100 7 - 25 pi). Bbox: x 0..100, y -8..60, z 0..30", base=S1)
+
 # manifest: tiers in order, cases in authoring order until --record sorts them by time
 WHAT = {
     T1: "primitives with closed-form volumes", T2: "booleans in the degeneracy classes, and cuts that end in a single line",
     T3: "extrudes and revolves of line-and-arc profiles", T4: "spline profiles, sweeps and lofts", T5: "holes and tapped holes",
     T6: "modelled threads", T7: "constant, variable and corner fillets", T8: "chamfers", T9: "shells and offsets",
-    T10: "patterns and mirrors", T11: "parts combining every tier"}
+    T10: "patterns and mirrors", T11: "parts combining every tier", T12: "sheet metal: flanges, closed corners, reliefs, hems, folds and the flat pattern"}
 mpath = os.path.join(ROOT, "ladder.json")
-order = [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11]
+order = [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12]
 try:
     with open(mpath) as f:
         listed = {t["tier"]: t["cases"] for t in json.load(f)["tiers"]}

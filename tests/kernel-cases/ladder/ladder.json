@@ -219,6 +219,26 @@
       ],
       "tier": "11-cumulative-parts",
       "what": "parts combining every tier"
+    },
+    {
+      "cases": [
+        "ladder/12-sheet-metal/001-base-flange",
+        "ladder/12-sheet-metal/002-edge-flange-90",
+        "ladder/12-sheet-metal/003-four-flanges-90-closed-corners",
+        "ladder/12-sheet-metal/004-four-flanges-72-leaning-out",
+        "ladder/12-sheet-metal/005-four-flanges-108-leaning-in",
+        "ladder/12-sheet-metal/006-corner-relief-round",
+        "ladder/12-sheet-metal/007-corner-relief-rectangular",
+        "ladder/12-sheet-metal/008-corner-relief-tear",
+        "ladder/12-sheet-metal/009-hem-on-the-back-edge",
+        "ladder/12-sheet-metal/010-fold-90",
+        "ladder/12-sheet-metal/011-fold-unfolded",
+        "ladder/12-sheet-metal/012-fold-refolded",
+        "ladder/12-sheet-metal/013-flat-pattern",
+        "ladder/12-sheet-metal/014-bracket"
+      ],
+      "tier": "12-sheet-metal",
+      "what": "sheet metal: flanges, closed corners, reliefs, hems, folds and the flat pattern"
     }
   ],
   "what": "the kernel complexity ladder: tiers in order of complexity, each building on the shapes before it; cases within a tier in order of measured time (cargo xtask kernel-cases --ladder --record)"

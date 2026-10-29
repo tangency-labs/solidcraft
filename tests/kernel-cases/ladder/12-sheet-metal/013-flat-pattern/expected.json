@@ -1,0 +1,57 @@
+{
+ "sources": [],
+ "what": "the flat pattern of 003's tray: its outline's size and area, and its four bend lines",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). The flat pattern is drawn in the base's frame (the base in its place). Each flange lies flat past its edge: s0 back from it, then BA and the leg, so it reaches H - s0 + BA - s0 = 20 - BD = 17.141593 past the edge (BD = 2 (R + T) tan45 - BA = 6 - pi): the outline is (100 + 2 x that) x (60 + 2 x that), its area 003's flat area (11125.828164, the notched corners open). The bend lines are the bend zones' centre lines, BA/2 out from the cut-back edges: y = 3 - pi/2 and 57 + pi/2 from x = 3 to 97, x = 3 - pi/2 and 97 + pi/2 from y = 3 to 57",
+ "body_count": 1,
+ "volume_mm3": 22251.656328684,
+ "flat_pattern": {
+  "size_mm": [
+   134.2831853071796,
+   94.2831853071796
+  ],
+  "area_mm2": 11125.828164341892,
+  "bend_lines": [
+   [
+    [
+     2.9999999999999996,
+     1.429203673205103
+    ],
+    [
+     97.0,
+     1.429203673205103
+    ]
+   ],
+   [
+    [
+     98.57079632679489,
+     2.9999999999999996
+    ],
+    [
+     98.57079632679489,
+     57.0
+    ]
+   ],
+   [
+    [
+     2.9999999999999996,
+     58.5707963267949
+    ],
+    [
+     97.0,
+     58.5707963267949
+    ]
+   ],
+   [
+    [
+     1.429203673205103,
+     2.9999999999999996
+    ],
+    [
+     1.429203673205103,
+     57.0
+    ]
+   ]
+  ]
+ }
+}

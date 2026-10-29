@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "a 20 mm 90 deg edge flange along the base's front edge",
+ "source": "analytic",
+ "method": "T = 2, R = 1, K = 0.5, the corner gap g = 0.5. A bend zone is BA = theta (R + K T) wide in the flat; folded it is an annular sector holding theta T (R + T/2) a mm of bend, T BA with K = 0.5, and every panel moves rigidly, so V = T x the flat area. An edge flange's outer virtual sharp is on the picked edge: the base is cut back s0 = (R + T) tan(theta/2), the bend starts there, and its panel is H - s0 long (H from the sharp along the outer face). At 90 deg s0 = 3 and BA = pi: the base keeps 100 x 57, the bend pi x 100, the panel 17 x 100; V = 2 (5700 + 100 pi + 1700). The flange's outer face is flush with the edge (y = 0) and reaches z = 20. Faces: base top and bottom, its three free ends, the bend's two cylinders, the flange's inner and outer faces and its top: 10, each end of the L (x = 0, x = 100) one plane",
+ "body_count": 1,
+ "volume_mm3": 15428.318530718,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100.0,
+   60.0,
+   20.0
+  ]
+ }
+}
