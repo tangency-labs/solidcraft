@@ -598,7 +598,9 @@ fn index(v: i64) -> Result<usize> {
 /// `SmBSplineSurface::HasInternalPole`: some interior knot line has a patch boundary
 /// span whose control points all lie within `tol` (`<= 0`: `SM_ZONE_TOL_3D`) of one
 /// another (for the u lines, also a singularity, `IsSingularity` of `s`).
-/// `false` without NURB.
+/// `false` without NURB. The row tested at each interior knot is upstream's unless
+/// [`UpstreamFixes::internal_pole_row_through_knot`](crate::kernel::UpstreamFixes::internal_pole_row_through_knot)
+/// (WR-505, #1515) is on.
 ///
 /// # Errors
 ///
@@ -638,7 +640,13 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
 
         // one additional basis function becomes zero for each multiplicity at sMults[ii]
         let row_cnt_u = degree_u - (mult(&mults_u, ii)? - 1);
-        let cp_index_u = knt_cnt_u - row_cnt_u - 1;
+        // upstream moves one row further for each repeated copy of the knot; with the opt-in
+        // the row through the knot (WR-505, #1515; tangency-labs/smlib#41)
+        let cp_index_u = if k.fixes.internal_pole_row_through_knot {
+            knt_cnt_u - 1 - degree_u
+        } else {
+            knt_cnt_u - row_cnt_u - 1
+        };
 
         // for every V direction knot span - seek patch arrays of coincident control points
         let mut knt_cnt_v = 0;
@@ -691,7 +699,12 @@ pub fn has_internal_pole(k: &Kernel, s: &Surface, b: &BSplineSurface, tol: f64) 
         knt_cnt_v += mult(&mults_v, ii)?;
 
         let row_cnt_v = degree_v - (mult(&mults_v, ii)? - 1);
-        let cp_index_v = knt_cnt_v - row_cnt_v - 1;
+        // as the U walk: the row through the knot with the opt-in (WR-505, #1515)
+        let cp_index_v = if k.fixes.internal_pole_row_through_knot {
+            knt_cnt_v - 1 - degree_v
+        } else {
+            knt_cnt_v - row_cnt_v - 1
+        };
 
         // for every U direction knot span - seek patch arrays of coincident control points
         let mut knt_cnt_u = 0;
@@ -1970,6 +1983,68 @@ mod tests {
                 ),
             ],
         );
+    }
+
+    /// tangency-labs/solidcore#1515 (WR-505): a horn torus (major radius = minor radius)
+    /// touches its axis, where the corner rows of its NURB coincide. Upstream's
+    /// `HasInternalPole` tests one row one step too far at each repeated knot and reports
+    /// a pole there; with `internal_pole_row_through_knot` it finds none.
+    #[test]
+    fn issue_1515_horn_torus_has_no_internal_pole() {
+        use crate::geom::axis2_placement::Axis2Placement;
+
+        // the tube runs from the inner pole (-180 degrees) once round, so the pole is the
+        // NURB's boundary and its corner rows are the ones on the axis
+        let d = Extent2d::from_bounds(0.0, -180.0, 360.0, 180.0);
+        let horn = |k: &Kernel| {
+            let opts = TorusOptions {
+                swap_uv: false,
+                inside_out: false,
+                circle_nurb: None,
+            };
+            let t =
+                Torus::create_canonical(k, &Axis2Placement::default(), 5.0, 5.0, opts, Some(&d))
+                    .unwrap();
+            let s = Surface::from(t);
+            let part = make_nurb(k, &s).unwrap().unwrap();
+            has_internal_pole(k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
+        };
+
+        let mut k = Kernel::default();
+        assert!(horn(&k), "upstream reports a pole on the horn torus");
+        k.fixes.internal_pole_row_through_knot = true;
+        assert!(!horn(&k), "no internal pole on the horn torus");
+    }
+
+    /// A real pole at a double knot (row 2 of a 5 x 3 net, collapsed to one point at the
+    /// knot 0.5) is found with the opt-in. Upstream tests the corner row one step further
+    /// (row 3) at that knot, so it misses the pole (WR-505, #1515).
+    #[test]
+    fn issue_1515_real_pole_at_a_double_knot_is_found() {
+        let mut pts = Vec::new();
+        for i in 0..5 {
+            for j in 0..3 {
+                pts.push([f64::from(i), f64::from(j), 0.0]);
+            }
+        }
+        for p in pts.iter_mut().skip(6).take(3) {
+            *p = [2.0, 1.0, 1.0];
+        }
+        let s = bspline(
+            2,
+            2,
+            &[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            &pts,
+        );
+        let pole = |flag: bool| {
+            let mut k = Kernel::default();
+            k.fixes.internal_pole_row_through_knot = flag;
+            let part = make_nurb(&k, &s).unwrap().unwrap();
+            has_internal_pole(&k, &s, &part, ZONE_TOL_3D / 10.0).unwrap()
+        };
+        assert!(!pole(false), "upstream misses the pole at the double knot");
+        assert!(pole(true), "the opt-in finds the pole at the double knot");
     }
 
     #[test]
