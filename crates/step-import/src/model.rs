@@ -307,6 +307,9 @@ pub struct Skipped {
     pub reason: String,
 }
 
+/// A 2D pcurve keyed by `(face step id, loop index, oriented-edge index)`.
+pub type PcurveKey = (u64, usize, usize);
+
 /// Everything imported from one file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Model {
@@ -326,4 +329,7 @@ pub struct Model {
     /// instancing), which are not applied: each body is imported once, in the
     /// coordinates of the representation that defines it.
     pub assembly_instances: usize,
+    /// Surface-space trim curves, keyed by face/loop/edge use. Importers that carry
+    /// pcurves populate this; exporters that do not need them leave it empty.
+    pub pcurves: std::collections::BTreeMap<PcurveKey, Vec<Vec<[f64; 2]>>>,
 }

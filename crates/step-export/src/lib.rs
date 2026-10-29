@@ -39,7 +39,7 @@
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 
-use step_import::model::{Body, BodyKind, Bound, Curve, Frame, Model, Surface};
+use step_import::model::{Body, BodyKind, Bound, Curve, Frame, Model, PcurveKey, Surface};
 
 /// Default distance, in millimetres, within which faceted vertices are welded.
 pub const WELD_TOLERANCE_MM: f64 = 1e-6;
@@ -359,7 +359,350 @@ fn frame_placement(
     )))
 }
 
-fn shell(entities: &mut Entities, body: &Body) -> Result<u64, ExportError> {
+fn write_surface(
+    entities: &mut Entities,
+    points: &mut PointIds,
+    surface: &Surface,
+) -> Result<u64, ExportError> {
+    let placement = |entities: &mut Entities,
+                     points: &mut PointIds,
+                     frame: &Frame|
+     -> Result<u64, ExportError> { frame_placement(entities, points, frame) };
+    match surface {
+        Surface::Plane { frame } => {
+            let p = placement(entities, points, frame)?;
+            Ok(entities.add(format!("PLANE('',#{p})")))
+        }
+        Surface::Cylinder { frame, radius } => {
+            let p = placement(entities, points, frame)?;
+            Ok(entities.add(format!("CYLINDRICAL_SURFACE('',#{p},{})", number(*radius)?)))
+        }
+        Surface::Cone {
+            frame,
+            radius,
+            semi_angle_deg,
+        } => {
+            let p = placement(entities, points, frame)?;
+            if semi_angle_deg.abs() < 1.0e-12 {
+                Ok(entities.add(format!("CYLINDRICAL_SURFACE('',#{p},{})", number(*radius)?)))
+            } else {
+                Ok(entities.add(format!(
+                    "CONICAL_SURFACE('',#{p},{},{})",
+                    number(*radius)?,
+                    number(semi_angle_deg.to_radians())?
+                )))
+            }
+        }
+        Surface::Sphere { frame, radius } => {
+            let p = placement(entities, points, frame)?;
+            Ok(entities.add(format!("SPHERICAL_SURFACE('',#{p},{})", number(*radius)?)))
+        }
+        Surface::Torus {
+            frame,
+            major,
+            minor,
+        } => {
+            let p = placement(entities, points, frame)?;
+            Ok(entities.add(format!(
+                "TOROIDAL_SURFACE('',#{p},{},{})",
+                number(*major)?,
+                number(*minor)?
+            )))
+        }
+        Surface::Revolution {
+            curve,
+            axis_origin,
+            axis_dir,
+        } => {
+            let curve = write_curve(entities, points, curve)?;
+            let origin = points.shared(entities, *axis_origin)?;
+            let axis = entities.add(direction(*axis_dir)?);
+            let axis = entities.add(format!("AXIS1_PLACEMENT('',#{origin},#{axis})"));
+            Ok(entities.add(format!("SURFACE_OF_REVOLUTION('',#{curve},#{axis})")))
+        }
+        Surface::Extrusion {
+            curve,
+            dir,
+            magnitude,
+        } => {
+            let curve = write_curve(entities, points, curve)?;
+            let direction_id = entities.add(direction(*dir)?);
+            let vector = entities.add(format!(
+                "VECTOR('',#{direction_id},{})",
+                number(*magnitude)?
+            ));
+            Ok(entities.add(format!(
+                "SURFACE_OF_LINEAR_EXTRUSION('',#{curve},#{vector})"
+            )))
+        }
+        Surface::BSpline(surface) => write_bspline_surface(entities, points, surface),
+    }
+}
+
+fn write_bspline_surface(
+    entities: &mut Entities,
+    points: &mut PointIds,
+    surface: &step_import::model::BSplineSurface,
+) -> Result<u64, ExportError> {
+    let mut ids = Vec::with_capacity(surface.points.len());
+    for row in &surface.points {
+        let mut row_ids = Vec::with_capacity(row.len());
+        for &point in row {
+            row_ids.push(points.shared(entities, point)?);
+        }
+        ids.push(row_ids);
+    }
+    let list = ids
+        .iter()
+        .map(|row| {
+            format!(
+                "({})",
+                row.iter()
+                    .map(|id| format!("#{id}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let umults = surface
+        .u_mults
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let vmults = surface
+        .v_mults
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let uknots = surface
+        .u_knots
+        .iter()
+        .map(|v| number(*v))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(",");
+    let vknots = surface
+        .v_knots
+        .iter()
+        .map(|v| number(*v))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(",");
+    let text = if let Some(weights) = &surface.weights {
+        let weights = weights
+            .iter()
+            .map(|row| {
+                format!(
+                    "({})",
+                    row.iter()
+                        .map(|v| number(*v))
+                        .collect::<Result<Vec<_>, _>>()
+                        .unwrap_or_default()
+                        .join(",")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "(\n BOUNDED_SURFACE()\n B_SPLINE_SURFACE({},{},({list}),.UNSPECIFIED.,.U.,.U.,.U.)\n B_SPLINE_SURFACE_WITH_KNOTS(({umults}),({vmults}),({uknots}),({vknots}),.UNSPECIFIED.)\n GEOMETRIC_REPRESENTATION_ITEM()\n RATIONAL_B_SPLINE_SURFACE(({weights}))\n REPRESENTATION_ITEM('')\n SURFACE()\n)",
+            surface.u_degree, surface.v_degree
+        )
+    } else {
+        format!(
+            "B_SPLINE_SURFACE_WITH_KNOTS('',{},{},({list}),.UNSPECIFIED.,.U.,.U.,.U.,({umults}),({vmults}),({uknots}),({vknots}),.UNSPECIFIED.)",
+            surface.u_degree, surface.v_degree
+        )
+    };
+    Ok(entities.add(text))
+}
+
+fn write_curve(
+    entities: &mut Entities,
+    points: &mut PointIds,
+    curve: &Curve,
+) -> Result<u64, ExportError> {
+    match curve {
+        Curve::Line {
+            origin,
+            dir,
+            magnitude,
+        } => {
+            let origin = points.shared(entities, *origin)?;
+            let direction_id = entities.add(direction(*dir)?);
+            let vector = entities.add(format!(
+                "VECTOR('',#{direction_id},{})",
+                number(*magnitude)?
+            ));
+            Ok(entities.add(format!("LINE('',#{origin},#{vector})")))
+        }
+        Curve::Circle { frame, radius } => {
+            let placement = frame_placement(entities, points, frame)?;
+            Ok(entities.add(format!("CIRCLE('',#{placement},{})", number(*radius)?)))
+        }
+        Curve::Ellipse {
+            frame,
+            semi1,
+            semi2,
+        } => {
+            let placement = frame_placement(entities, points, frame)?;
+            Ok(entities.add(format!(
+                "ELLIPSE('',#{placement},{},{})",
+                number(*semi1)?,
+                number(*semi2)?
+            )))
+        }
+        Curve::BSpline(curve) => write_bspline_curve(entities, points, curve),
+    }
+}
+
+fn write_bspline_curve(
+    entities: &mut Entities,
+    points: &mut PointIds,
+    curve: &step_import::model::BSplineCurve,
+) -> Result<u64, ExportError> {
+    let ids = curve
+        .points
+        .iter()
+        .map(|&point| points.shared(entities, point))
+        .collect::<Result<Vec<_>, _>>()?;
+    let list = ids
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mults = curve
+        .mults
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let knots = curve
+        .knots
+        .iter()
+        .map(|v| number(*v))
+        .collect::<Result<Vec<_>, _>>()?
+        .join(",");
+    let text = if let Some(weights) = &curve.weights {
+        let weights = weights
+            .iter()
+            .map(|v| number(*v))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(",");
+        format!(
+            "(\n BOUNDED_CURVE()\n B_SPLINE_CURVE({},({list}),.UNSPECIFIED.,.U.,.U.)\n B_SPLINE_CURVE_WITH_KNOTS(({mults}),({knots}),.UNSPECIFIED.)\n CURVE()\n GEOMETRIC_REPRESENTATION_ITEM()\n RATIONAL_B_SPLINE_CURVE(({weights}))\n REPRESENTATION_ITEM('')\n)",
+            curve.degree
+        )
+    } else {
+        format!(
+            "B_SPLINE_CURVE_WITH_KNOTS('',{},({list}),.UNSPECIFIED.,.U.,.U.,({mults}),({knots}),.UNSPECIFIED.)",
+            curve.degree
+        )
+    };
+    Ok(entities.add(text))
+}
+
+fn point2(entities: &mut Entities, uv: [f64; 2]) -> Result<u64, ExportError> {
+    Ok(entities.add(format!(
+        "CARTESIAN_POINT('',({},{}))",
+        number(uv[0])?,
+        number(uv[1])?
+    )))
+}
+
+fn write_pcurve_edge(
+    entities: &mut Entities,
+    points: &mut PointIds,
+    body: &Body,
+    index: usize,
+    vertex_ids: &[u64],
+    context_2d: u64,
+    pcurves: &[(u64, Vec<[f64; 2]>)],
+) -> Result<u64, ExportError> {
+    let edge = body.edges.get(index).ok_or_else(|| {
+        ExportError::new(format!(
+            "body #{} references missing edge {index}",
+            body.step_id
+        ))
+    })?;
+    let start = *vertex_ids.get(edge.start).ok_or_else(|| {
+        ExportError::new(format!(
+            "body #{} edge #{index} has a missing start vertex",
+            body.step_id
+        ))
+    })?;
+    let end = *vertex_ids.get(edge.end).ok_or_else(|| {
+        ExportError::new(format!(
+            "body #{} edge #{index} has a missing end vertex",
+            body.step_id
+        ))
+    })?;
+    let curve_3d = write_curve(entities, points, &edge.curve)?;
+    let mut pcurve_ids = Vec::with_capacity(pcurves.len());
+    for (surface_id, uv) in pcurves {
+        let mut uv_ids = Vec::with_capacity(uv.len());
+        for point in uv {
+            uv_ids.push(point2(entities, *point)?);
+        }
+        let count = uv.len();
+        let point_refs = uv_ids
+            .iter()
+            .map(|id| format!("#{id}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut knots: Vec<f64> = vec![0.0];
+        for index in 1..count.saturating_sub(1) {
+            knots.push(index as f64);
+        }
+        knots.push((count.saturating_sub(1)) as f64);
+        let mut multi = vec![2u32];
+        let interior = count.saturating_sub(2);
+        multi.resize(multi.len() + interior, 1);
+        multi.push(2);
+        let knots_text = knots
+            .iter()
+            .map(|v| number(*v))
+            .collect::<Result<Vec<_>, _>>()?
+            .join(",");
+        let multi_text = multi
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let pcurve_curve = entities.add(format!(
+            "B_SPLINE_CURVE_WITH_KNOTS('',1,({point_refs}),.UNSPECIFIED.,.U.,.U.,({multi_text}),({knots_text}),.UNSPECIFIED.)"
+        ));
+        let representation = entities.add(format!(
+            "DEFINITIONAL_REPRESENTATION('',(#{pcurve_curve}),#{context_2d})"
+        ));
+        pcurve_ids.push(entities.add(format!("PCURVE('',#{surface_id},#{representation})")));
+    }
+    let refs = pcurve_ids
+        .iter()
+        .map(|id| format!("#{id}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let surfaces: std::collections::BTreeSet<u64> =
+        pcurves.iter().map(|(surface, _)| *surface).collect();
+    let kind = if pcurve_ids.len() > 1 && surfaces.len() == 1 {
+        "SEAM_CURVE"
+    } else {
+        "SURFACE_CURVE"
+    };
+    let surface_curve = entities.add(format!("{kind}('',#{curve_3d},({refs}),.PCURVE_S1.)"));
+    let sense = if edge.same_sense { ".T." } else { ".F." };
+    Ok(entities.add(format!(
+        "EDGE_CURVE('',#{start},#{end},#{surface_curve},{sense})"
+    )))
+}
+
+type EdgePcurves = BTreeMap<usize, Vec<(u64, Vec<[f64; 2]>)>>;
+
+fn shell(
+    entities: &mut Entities,
+    body: &Body,
+    pcurves: &BTreeMap<PcurveKey, Vec<Vec<[f64; 2]>>>,
+) -> Result<u64, ExportError> {
     if body.shells.len() != 1 {
         return Err(ExportError::new(format!(
             "body #{} has {} shells; step-export supports one closed shell",
@@ -386,7 +729,56 @@ fn shell(entities: &mut Entities, body: &Body) -> Result<u64, ExportError> {
             Ok(entities.add(format!("VERTEX_POINT('',#{point_id})")))
         })
         .collect::<Result<Vec<_>, ExportError>>()?;
+    let context_2d = entities.add("PARAMETRIC_REPRESENTATION_CONTEXT('','2')".to_string());
+    // Emit every surface first so edge pcurves can reference their basis surfaces.
+    let mut face_surfaces = Vec::with_capacity(body.faces.len());
+    for face in &body.faces {
+        face_surfaces.push(write_surface(entities, &mut points, &face.surface)?);
+    }
+    let surface_by_step = body
+        .faces
+        .iter()
+        .zip(&face_surfaces)
+        .map(|(face, surface)| (face.step_id, *surface))
+        .collect::<BTreeMap<_, _>>();
+    // Group pcurves by BRep edge, not by edge use.
+    let mut edge_pcurves: EdgePcurves = BTreeMap::new();
+    for face in &body.faces {
+        let Some(surface) = surface_by_step.get(&face.step_id).copied() else {
+            continue;
+        };
+        for (loop_index, loop_) in face.loops.iter().enumerate() {
+            let Bound::Edges(edges) = &loop_.bound else {
+                continue;
+            };
+            for (use_index, oriented_edge) in edges.iter().enumerate() {
+                if let Some(curves) = pcurves.get(&(face.step_id, loop_index, use_index)) {
+                    for uv in curves {
+                        edge_pcurves
+                            .entry(oriented_edge.edge)
+                            .or_default()
+                            .push((surface, uv.clone()));
+                    }
+                }
+            }
+        }
+    }
     let mut edge_ids = vec![None; body.edges.len()];
+    for (index, slot) in edge_ids.iter_mut().enumerate() {
+        if let Some(curves) = edge_pcurves.get(&index) {
+            *slot = Some(write_pcurve_edge(
+                entities,
+                &mut points,
+                body,
+                index,
+                &vertex_ids,
+                context_2d,
+                curves,
+            )?);
+        } else {
+            *slot = Some(write_edge(entities, &mut points, body, index, &vertex_ids)?);
+        }
+    }
     let mut face_ids = Vec::with_capacity(step_shell.faces.len());
     for &face_index in &step_shell.faces {
         let face = body.faces.get(face_index).ok_or_else(|| {
@@ -395,17 +787,14 @@ fn shell(entities: &mut Entities, body: &Body) -> Result<u64, ExportError> {
                 body.step_id
             ))
         })?;
-        let plane = match &face.surface {
-            Surface::Plane { frame } => frame,
-            other => {
-                return Err(ExportError::new(format!(
-                    "face #{} uses unsupported surface {other:?}",
-                    face.step_id
-                )));
-            }
-        };
-        let placement = frame_placement(entities, &mut points, plane)?;
-        let plane_id = entities.add(format!("PLANE('',#{placement})"));
+        let surface_id = *face_surfaces
+            .get(
+                body.faces
+                    .iter()
+                    .position(|item| item.step_id == face.step_id)
+                    .unwrap_or(0),
+            )
+            .ok_or_else(|| ExportError::new("missing face surface"))?;
         let mut bounds = Vec::with_capacity(face.loops.len());
         for loop_ in &face.loops {
             let Bound::Edges(edges) = &loop_.bound else {
@@ -416,17 +805,12 @@ fn shell(entities: &mut Entities, body: &Body) -> Result<u64, ExportError> {
             };
             let mut oriented = Vec::with_capacity(edges.len());
             for oriented_edge in edges {
-                let cached_id = edge_ids.get_mut(oriented_edge.edge).ok_or_else(|| {
-                    ExportError::new(format!("missing edge index {}", oriented_edge.edge))
-                })?;
-                let edge_id = if let Some(id) = *cached_id {
-                    id
-                } else {
-                    let id =
-                        write_edge(entities, &mut points, body, oriented_edge.edge, &vertex_ids)?;
-                    *cached_id = Some(id);
-                    id
-                };
+                let edge_id = edge_ids
+                    .get(oriented_edge.edge)
+                    .and_then(|id| *id)
+                    .ok_or_else(|| {
+                        ExportError::new(format!("missing edge index {}", oriented_edge.edge))
+                    })?;
                 let orientation = if oriented_edge.forward { ".T." } else { ".F." };
                 oriented
                     .push(entities.add(format!("ORIENTED_EDGE('',*,*,#{edge_id},{orientation})")));
@@ -454,7 +838,7 @@ fn shell(entities: &mut Entities, body: &Body) -> Result<u64, ExportError> {
             .join(",");
         let sense = if face.same_sense { ".T." } else { ".F." };
         face_ids.push(entities.add(format!(
-            "ADVANCED_FACE('',({bound_refs}),#{plane_id},{sense})"
+            "ADVANCED_FACE('',({bound_refs}),#{surface_id},{sense})"
         )));
     }
     let refs = face_ids
@@ -478,17 +862,6 @@ fn write_edge(
             body.step_id
         ))
     })?;
-    let Curve::Line {
-        origin,
-        dir,
-        magnitude,
-    } = &edge.curve
-    else {
-        return Err(ExportError::new(format!(
-            "edge #{} uses unsupported curve {:?}",
-            edge.step_id, edge.curve
-        )));
-    };
     let start = *vertex_ids.get(edge.start).ok_or_else(|| {
         ExportError::new(format!(
             "body #{} edge #{index} has a missing start vertex",
@@ -501,15 +874,11 @@ fn write_edge(
             body.step_id
         ))
     })?;
-    let origin_id = points.shared(entities, *origin)?;
-    let direction_id = entities.add(direction(*dir)?);
-    let vector_id = entities.add(format!(
-        "VECTOR('',#{direction_id},{})",
-        number(*magnitude)?
-    ));
-    let line_id = entities.add(format!("LINE('',#{origin_id},#{vector_id})"));
+    let curve_id = write_curve(entities, points, &edge.curve)?;
     let sense = if edge.same_sense { ".T." } else { ".F." };
-    Ok(entities.add(format!("EDGE_CURVE('',#{start},#{end},#{line_id},{sense})")))
+    Ok(entities.add(format!(
+        "EDGE_CURVE('',#{start},#{end},#{curve_id},{sense})"
+    )))
 }
 
 /// A welded faceted vertex set: the unique points and the old-to-new remap.
@@ -903,7 +1272,7 @@ fn write_inner(
         match mode {
             WriteMode::Auto => match body.kind {
                 BodyKind::ManifoldSolid => {
-                    let shell_id = shell(&mut entities, body)?;
+                    let shell_id = shell(&mut entities, body, &model.pcurves)?;
                     let name = body.name.as_deref().unwrap_or("");
                     manifold_ids.push(
                         entities.add(format!("MANIFOLD_SOLID_BREP({},#{shell_id})", quoted(name))),
@@ -1146,6 +1515,7 @@ mod tests {
             skipped: Vec::new(),
             diagnostics: Vec::new(),
             assembly_instances: 0,
+            pcurves: BTreeMap::new(),
         }
     }
 
@@ -1274,6 +1644,7 @@ mod tests {
             skipped: Vec::new(),
             diagnostics: Vec::new(),
             assembly_instances: 0,
+            pcurves: BTreeMap::new(),
         }
     }
 
@@ -1619,7 +1990,149 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_planar_geometry() {
+    fn writes_analytic_and_nurbs_geometry() {
+        let unit = || Frame {
+            origin: [0.0; 3],
+            x: [1.0, 0.0, 0.0],
+            y: [0.0, 1.0, 0.0],
+            z: [0.0, 0.0, 1.0],
+        };
+        let mut surfaces = vec![
+            Surface::Cylinder {
+                frame: unit(),
+                radius: 2.0,
+            },
+            Surface::Cone {
+                frame: unit(),
+                radius: 2.0,
+                semi_angle_deg: 30.0,
+            },
+            Surface::Sphere {
+                frame: unit(),
+                radius: 2.0,
+            },
+            Surface::Torus {
+                frame: unit(),
+                major: 4.0,
+                minor: 1.0,
+            },
+            Surface::Revolution {
+                curve: Box::new(Curve::Line {
+                    origin: [1.0, 0.0, 0.0],
+                    dir: [0.0, 0.0, 1.0],
+                    magnitude: 1.0,
+                }),
+                axis_origin: [0.0; 3],
+                axis_dir: [0.0, 0.0, 1.0],
+            },
+            Surface::Extrusion {
+                curve: Box::new(Curve::Line {
+                    origin: [0.0, 0.0, 0.0],
+                    dir: [1.0, 0.0, 0.0],
+                    magnitude: 1.0,
+                }),
+                dir: [0.0, 1.0, 0.0],
+                magnitude: 3.0,
+            },
+        ];
+        let bspline = step_import::model::BSplineSurface {
+            u_degree: 1,
+            v_degree: 1,
+            points: vec![
+                vec![[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                vec![[1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            ],
+            weights: None,
+            u_knots: vec![0.0, 1.0],
+            u_mults: vec![2, 2],
+            v_knots: vec![0.0, 1.0],
+            v_mults: vec![2, 2],
+        };
+        surfaces.push(Surface::BSpline(bspline));
+        for surface in surfaces {
+            let mut model = triangle();
+            model.bodies[0].faces[0].surface = surface;
+            let text = write(&model).expect("surface write");
+            assert!(text.contains("SURFACE"), "{text}");
+        }
+        let curves = vec![
+            Curve::Circle {
+                frame: unit(),
+                radius: 2.0,
+            },
+            Curve::Ellipse {
+                frame: unit(),
+                semi1: 2.0,
+                semi2: 1.0,
+            },
+            Curve::BSpline(step_import::model::BSplineCurve {
+                degree: 1,
+                points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+                weights: None,
+                knots: vec![0.0, 1.0],
+                mults: vec![2, 2],
+            }),
+        ];
+        for curve in curves {
+            let mut model = triangle();
+            model.bodies[0].edges[0].curve = curve;
+            let text = write(&model).expect("curve write");
+            assert!(
+                text.contains("CURVE(") || text.contains("CIRCLE(") || text.contains("ELLIPSE("),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn writes_zero_angle_cones_as_cylinders() {
+        let mut model = triangle();
+        model.bodies[0].faces[0].surface = Surface::Cone {
+            frame: Frame {
+                origin: [0.0; 3],
+                x: [1.0, 0.0, 0.0],
+                y: [0.0, 1.0, 0.0],
+                z: [0.0, 0.0, 1.0],
+            },
+            radius: 2.0,
+            semi_angle_deg: 0.0,
+        };
+        let text = write(&model).expect("cylinder write");
+        assert!(text.contains("CYLINDRICAL_SURFACE('',"), "{text}");
+        assert!(!text.contains("CONICAL_SURFACE('',"), "{text}");
+    }
+
+    #[test]
+    fn writes_pcurves_when_the_model_carries_them() {
+        let mut model = triangle();
+        let face = model.bodies[0].faces[0].step_id;
+        model
+            .pcurves
+            .insert((face, 0, 0), vec![vec![[0.0, 0.0], [0.5, 0.5], [1.0, 1.0]]]);
+        let text = write(&model).expect("pcurve write");
+        assert!(text.contains("PCURVE('',"), "{text}");
+        assert!(text.contains("SURFACE_CURVE("), "{text}");
+        assert!(text.contains("DEFINITIONAL_REPRESENTATION("), "{text}");
+    }
+
+    #[test]
+    fn writes_seam_curves_when_an_edge_has_two_pcurves() {
+        let mut model = triangle();
+        let face = model.bodies[0].faces[0].step_id;
+        model.pcurves.insert(
+            (face, 0, 0),
+            vec![
+                vec![[0.0, 0.0], [1.0, 1.0]],
+                vec![[360.0, 0.0], [361.0, 1.0]],
+            ],
+        );
+        let text = write(&model).expect("seam write");
+        assert!(text.contains("SEAM_CURVE("), "{text}");
+        assert!(text.matches("PCURVE('',").count() >= 2, "{text}");
+    }
+
+    #[test]
+    fn writes_analytic_surfaces() {
         let mut model = triangle();
         model.bodies[0].faces[0].surface = Surface::Cylinder {
             frame: Frame {
@@ -1630,7 +2143,10 @@ mod tests {
             },
             radius: 1.0,
         };
-        assert!(write(&model).is_err());
+        let text = write(&model).expect("analytic surface write");
+        assert!(text.contains("CYLINDRICAL_SURFACE('',"), "{text}");
+        let imported = reimport(&text);
+        assert_eq!(imported.bodies.len(), 1);
     }
 
     #[test]
