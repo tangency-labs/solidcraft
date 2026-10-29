@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "sheet.hem on the far edge of a 20 mm edge flange (its outer face's edge), 8 long: the hem turns in over the flange's inner face",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.5: the flange's 90 degree bend sets the base back R + T = 4 (100 x 56), its bend (pi/2)((R+T)^2 - R^2)/2*100 = 942.477796, its panel 20 - 4 = 16 high to z 20 (its outer face y = 0). The hem's 180 degree bend (inner radius 0.01) starts at z 20 and reaches z 20 + 2.01; its leg, 8 - 2.01 = 5.99, hangs inside the wall. V = 100*56*2 + 942.477796 + 16*100*2 + (pi/2)(2.01^2 - 0.01^2)*100 + 5.99*100*2 = 17175.079512",
+ "body_count": 1,
+ "volume_mm3": 17175.07951210208,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100,
+   60,
+   22.01
+  ]
+ }
+}
