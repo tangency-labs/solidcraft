@@ -2817,6 +2817,21 @@ fn entities(sk: &Sketch, p: &Value, cmd: &str) -> Result<(Vec<usize>, Vec<usize>
     Ok((cs, ps))
 }
 
+/// `cs` with the axis lines of every ellipse in it: an ellipse moved, turned or scaled takes
+/// its axes along, as a drag does, instead of leaving them behind its centre.
+fn with_ellipse_axes(sk: &Sketch, cs: &mut Vec<usize>) {
+    let axes: Vec<usize> = cs
+        .iter()
+        .filter_map(|&e| sk.ellipse_axis_lines(e))
+        .flat_map(|(major, minor)| major.map(|(l, _)| l).into_iter().chain(minor.map(|(l, ..)| l)))
+        .collect();
+    for l in axes {
+        if !cs.contains(&l) {
+            cs.push(l);
+        }
+    }
+}
+
 /// Points used by curves plus lone points, in a stable order.
 fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
     let mut v: Vec<usize> = Vec::new();
@@ -3144,6 +3159,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             }
             return Ok(ids);
         }
+        with_ellipse_axes(sk, &mut cs);
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         if rotate_constraints {
             let moved = involved_points(sk, &cs, &ps);
@@ -3170,7 +3186,8 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        let (cs, ps) = entities(sk, p, cmd)?;
+        let (mut cs, ps) = entities(sk, p, cmd)?;
+        with_ellipse_axes(sk, &mut cs);
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
         let rot = rotate(c, ang);
         let f = move |q: Vec2| rot(c + (q - c) * k) + t;
@@ -3184,7 +3201,8 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.scale";
     let k = num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| bad(cmd, "`factor` must be a positive number"))?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
-        let (cs, ps) = entities(sk, p, cmd)?;
+        let (mut cs, ps) = entities(sk, p, cmd)?;
+        with_ellipse_axes(sk, &mut cs);
         let b = if p.get("base").is_some() { point_or_ref(sk, p, "base", cmd)? } else { Vec2::ZERO };
         let f = move |q: Vec2| b + (q - b) * k;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
