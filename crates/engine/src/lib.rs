@@ -992,8 +992,9 @@ impl Session {
         self.model.forget_fingerprints();
     }
 
-    /// Prepared placements only: optional save caches must not compute a cold world.
-    pub(crate) fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
+    /// Prepared placements only: optional save caches must not compute a cold world, and a
+    /// joint drag's frame drawn in layers checks it placed nothing.
+    pub fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
         let state = self.model.state();
         if self.doc.occurrences.is_empty() {
             return Some(state);

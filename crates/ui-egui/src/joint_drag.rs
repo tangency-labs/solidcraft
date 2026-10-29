@@ -339,6 +339,10 @@ mod tests {
         h.frames(1);
         let shown = crate::open_meshing::shown_world(&h.app);
         assert!(std::sync::Arc::ptr_eq(&before, &shown), "the world shown is the one the drag began on");
+        // Nothing in the frame placed the design at the drag's frame: the sketch tracking guides
+        // asked for the world every frame, outside a sketch too (#6325).
+        h.frames(1);
+        assert!(h.app.session.cached_world_state().is_none(), "a frame drawn in layers places nothing");
         let layers = crate::viewport::layers::frame(&mut h.app);
         assert_eq!(layers.len(), 2, "the arm's layer and the ground shadow's");
         let m = layers[0].transform;

@@ -464,12 +464,12 @@ pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: 
     if tracking.sketch != active || !tracking.document.ptr_eq(&document) {
         *tracking = Tracking { sketch: active, document, ..Default::default() };
     }
-    let state = app.session.world_state();
-    let Some((ss, cursor)) = active
-        .and_then(|id| state.sketch(id))
-        .zip(cursor)
-        .filter(|_| app.preferences.sketch_tracking_guides && !crate::drag_snap::suppressed() && app.viewport.point_drag.is_none())
-    else {
+    // The world is asked for only with a sketch to track in: outside a sketch, placing it every
+    // frame placed every moved body again in each frame of a joint drag (#6325).
+    let wanted =
+        active.zip(cursor).filter(|_| app.preferences.sketch_tracking_guides && !crate::drag_snap::suppressed() && app.viewport.point_drag.is_none());
+    let state = wanted.map(|_| app.session.world_state());
+    let Some((ss, cursor)) = wanted.zip(state.as_deref()).and_then(|((id, cursor), state)| state.sketch(id).map(|ss| (ss, cursor))) else {
         *tracking = Tracking::default();
         return;
     };
