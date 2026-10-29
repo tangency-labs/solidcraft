@@ -6705,7 +6705,13 @@ fn count_copy_misses(
             && tools.iter().any(|t| {
                 solid_probe_mesh(&t.body, 2e-4).is_some_and(|(m, tol)| {
                     let tool = SolidProbe::new(&m, tol);
-                    targets_inside.iter().any(|target| target.shares_material(&tool, lines))
+                    // Besides a hole's axis, the lines along the axes through the middle of each
+                    // face's box: the axis of each of the tool's cylinders, the middle of a slot.
+                    let mut lines = lines.to_vec();
+                    for c in face_box_centres(&m, MAX_PROBED_FACES) {
+                        lines.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
+                    }
+                    targets_inside.iter().any(|target| target.shares_material(&tool, &lines))
                 })
             });
         if !takes && copy_misses(st, f, targets, tools) {
@@ -6781,6 +6787,25 @@ impl<'a> SolidProbe<'a> {
 
 /// Points tried on each line by [`SolidProbe::shares_material`].
 const SAMPLES_PER_LINE: usize = 16;
+/// Most faces of a tool whose boxes [`count_copy_misses`] looks through.
+const MAX_PROBED_FACES: usize = 32;
+
+/// The middle of the box around each of the first `max` faces of `mesh`.
+fn face_box_centres(mesh: &Mesh, max: usize) -> Vec<Vec3> {
+    let mut boxes: BTreeMap<u32, solidcraft_geom::Aabb3> = BTreeMap::new();
+    for (t, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if boxes.len() == max && !boxes.contains_key(face) {
+            continue;
+        }
+        if let Some(corners) = mesh.tri(t) {
+            let b = boxes.entry(*face).or_insert(solidcraft_geom::Aabb3::EMPTY);
+            for p in corners {
+                b.add(p);
+            }
+        }
+    }
+    boxes.values().filter(|b| !b.is_empty()).map(solidcraft_geom::Aabb3::center).collect()
+}
 
 /// The stretch of the line `o + t d` inside `b`, as the range of `t`; `None` when it misses.
 fn line_in_box(b: &solidcraft_geom::Aabb3, o: Vec3, d: Vec3) -> Option<(f64, f64)> {
