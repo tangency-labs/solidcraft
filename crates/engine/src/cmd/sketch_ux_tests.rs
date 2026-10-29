@@ -1601,6 +1601,21 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
     let (_, major, minor) = ellipse_with_axes(&mut s, true);
     assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [major]}))["measured"], json!(40.0));
     assert_eq!(run(&mut s, "sketch.dimension", json!({"entities": [minor]}))["measured"], json!(16.0));
+    // With one axis deleted the half-axis is still chosen by where the text is, as if the axis
+    // were there: the major half-axis to the major end, the minor one to what is left of its axis
+    // or, with that gone, as the minor radius.
+    for gone in ["major", "minor"] {
+        for ((x, y), expected) in [((3.0, 16.0), "major"), ((-4.0, -14.0), "major"), ((30.0, 3.0), "minor"), ((-28.0, -2.0), "minor")] {
+            let mut s = new_sketch();
+            let (e, major, minor) = ellipse_with_axes(&mut s, true);
+            run(&mut s, "sketch.delete", json!({"entities": [if gone == "major" { major } else { minor }]}));
+            let at = [std::f64::consts::FRAC_1_SQRT_2 * (x - y), std::f64::consts::FRAC_1_SQRT_2 * (x + y)];
+            let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": at}));
+            assert_eq!(r["axis"], json!(expected), "{gone} axis deleted, text at ({x}, {y}): {r}");
+            let want = if expected == "major" { 20.0 } else { 8.0 };
+            assert!(r["measured"].as_f64().is_some_and(|v| (v - want).abs() < 1e-6), "{gone} axis deleted, text at ({x}, {y}): {r}");
+        }
+    }
     // Without its axes (an older design), the ellipse keeps today's minor radius.
     let mut s = new_sketch();
     let (e, major, minor) = ellipse_with_axes(&mut s, false);

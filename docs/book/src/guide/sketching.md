@@ -323,7 +323,8 @@ An ellipse is drawn with its major and minor axes as construction lines through 
 As with a Center Rectangle's diagonals, trim, extend and break stop at them, and they stay when the
 ellipse is deleted.
 Click the ellipse and pull the value across its major axis for the major half-axis, or out past an
-end of the major axis for the minor half-axis; click an axis line for the whole axis. Each is a parameter
+end of the major axis for the minor half-axis, which still works after one axis line is deleted;
+click an axis line for the whole axis. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
 Press D, click what you want to measure and type the value: as soon as the click settles the

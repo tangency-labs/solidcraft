@@ -1283,6 +1283,17 @@ impl Sketch {
     /// line drag ask it for every ellipse: microseconds at everyday sizes, though a sketch near
     /// the curve and constraint limits would want an index from centre points to their lines.
     pub fn ellipse_axes(&self, e: usize) -> Option<EllipseAxes> {
+        let Some(CurveKind::Ellipse { m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };
+        let (Some((major, m2)), Some((minor, n1, n2))) = self.ellipse_axis_lines(e)? else { return None };
+        Some(EllipseAxes { major, minor, ends: [*m, m2, n1, n2] })
+    }
+
+    /// What is left of an ellipse's axes (read as [`Sketch::ellipse_axes`] reads them) when one
+    /// of them may have been deleted: the major axis line with the point opposite the major end,
+    /// and the minor axis line with its end held on the ellipse, then the one opposite. None for
+    /// an ellipse with neither.
+    #[allow(clippy::type_complexity)]
+    pub fn ellipse_axis_lines(&self, e: usize) -> Option<(Option<(usize, usize)>, Option<(usize, usize, usize)>)> {
         let Some(CurveKind::Ellipse { c, m, .. }) = self.curves.get(e).map(|x| &x.kind) else { return None };
         let line = |l: usize| match self.curves.get(l).map(|x| &x.kind) {
             Some(CurveKind::Line { a, b }) => Some((*a, *b)),
@@ -1292,11 +1303,11 @@ impl Sketch {
             |l: usize| self.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::Midpoint { p, l: on } if p == *c && on == l));
         let on =
             |q: usize| self.constraints.iter().any(|k| !k.driven && matches!(k.kind, ConstraintKind::PointOnCurve { p, c: on } if p == q && on == e));
-        let (major, m2) = (0..self.curves.len()).find_map(|l| match line(l) {
+        let major = (0..self.curves.len()).find_map(|l| match line(l) {
             Some((a, b)) if held(l) && (a == *m || b == *m) => Some((l, if a == *m { b } else { a })),
             _ => None,
-        })?;
-        let (minor, n1, n2) = (0..self.curves.len()).filter(|l| *l != major && held(*l)).find_map(|l| {
+        });
+        let minor = (0..self.curves.len()).filter(|l| major.is_none_or(|(major, _)| *l != major) && held(*l)).find_map(|l| {
             let (a, b) = line(l)?;
             if on(a) {
                 Some((l, a, b))
@@ -1305,8 +1316,8 @@ impl Sketch {
             } else {
                 None
             }
-        })?;
-        Some(EllipseAxes { major, minor, ends: [*m, m2, n1, n2] })
+        });
+        (major.is_some() || minor.is_some()).then_some((major, minor))
     }
 
     /// The curves joined end to end with curve `ci` (through shared or coincident end points),
