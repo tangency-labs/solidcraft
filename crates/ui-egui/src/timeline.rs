@@ -1028,23 +1028,20 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 }
                 // The tip is written only while it shows (as `on_hover_text` would lay it out).
                 let resp = resp.on_hover_ui(|ui| {
-                    let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                    ui.set_max_width(ui.spacing().tooltip_width);
+                    // The error in the error colour, as the other History layouts show it.
+                    status_tip(format!("{name}  ({ty})"), err.as_deref(), warn.as_deref()).show(ui);
+                    let mut more = Vec::new();
                     // Greyed out says only "not shown": say why (#8100).
                     if rolled {
-                        tip.push('\n');
-                        tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
+                        more.push(crate::i18n::tr("timeline.feature_rolled_back").to_string());
                     }
-                    if let Some(state) = sketch_state {
-                        tip.push('\n');
-                        tip.push_str(&state.text());
-                    }
+                    more.extend(sketch_state.map(|state| state.text()));
                     if let Some(ms) = ms {
-                        tip += &format!("\n{ms:.1} ms");
+                        more.push(format!("{ms:.1} ms"));
                     }
-                    tip.push('\n');
-                    tip.push_str(crate::i18n::tr("timeline.feature_hint"));
-                    ui.set_max_width(ui.spacing().tooltip_width);
-                    ui.add(egui::Label::new(tip));
+                    more.push(crate::i18n::tr("timeline.feature_hint").to_string());
+                    crate::ui_kit::text(ui, &more.join("\n"), crate::ui_kit::Text::Report("timeline_feature", false));
                 });
                 if resp.clicked() && !pick_feature_into_dialog(app, *id, ui.input(|i| i.modifiers)) {
                     let modifiers = ui.input(|i| i.modifiers);
@@ -1332,6 +1329,22 @@ mod tests {
         );
         let _english = crate::i18n::scope("en");
         assert_eq!(super::status_text("Box", "BoxFeature", Some("error"), Some("warning")), "Box  (BoxFeature)\nError: error\nWarning: warning");
+    }
+
+    /// The bottom History's tooltip puts a feature's error on a line of its own, in the error
+    /// colour, as the other History layouts do.
+    #[test]
+    fn bottom_history_tooltip_shows_the_error_on_its_own_line() {
+        let mut h = Harness::new();
+        let id = h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Broken"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(4);
+        let result = h.app.session.model.results.iter_mut().find(|r| r.id == id).unwrap();
+        result.error = Some("the blend is larger than the neighbouring faces".into());
+        h.frames(2);
+        let chip = crate::scenario::handle_at("timeline:Broken").unwrap();
+        h.app.synthetic.push(egui::Event::PointerMoved(chip));
+        h.frames(90);
+        assert!(crate::scenario::handle_at("dialog:report:status_error").is_some(), "the error has its own line");
     }
 
     #[test]
