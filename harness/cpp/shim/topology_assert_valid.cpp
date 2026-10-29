@@ -3,6 +3,7 @@
 // (ValidatePointers, then AssertValid when it reported no failure).
 #include "sc_edgeuse_graph.h"
 #include <SmApiPrimitives.h>
+#include <SmApiQueries.h>
 #include <SmAssertArray.h>
 #include <SmEllipse.h>
 #include <SmPlane.h>
@@ -158,10 +159,13 @@ SmBrep* primitive(const double* in, int64_t n, SmStatus& status) {
 // the walk; op 2: the level-2 tests one by one, as SmFace/SmEdge/SmVertex::AssertValid
 // call them: per face sm_AssertTestFace32, 33 and 38 (-1 without surface), then per
 // edge sm_AssertTestEdge13 (passed, max gap), then per vertex sm_AssertTestVertex1
-// (passed, max gap 3d, max gap face index or -1), after the three counts. args: level, walk, mutation kind, index, value.
+// (passed, max gap 3d, max gap face index or -1), after the three counts; op 3: the capi
+// sequence of op 1 on the body's SmApiBrepCopy (no mutation), as a caller checks a copy
+// (#1584). args: level, walk, mutation kind, index, value.
 SC_EXPORT int32_t sc_topology_assert_valid_eval(int32_t op, const char* path, const double* input, int64_t n,
                                                const double* args, int64_t na, double* out, int64_t cap, int64_t* len) {
-    if (op < 0 || op > 2 || !input || n < 1 || !args || na != 5) return SC_ERR_ARG;
+    if (op < 0 || op > 3 || !input || n < 1 || !args || na != 5) return SC_ERR_ARG;
+    if (op == 3 && args[2] != 0) return SC_ERR_ARG;
     SC_TRY
     Rd rd{input, 0};
     SmStatus status = SM_SUCCESS;
@@ -169,6 +173,13 @@ SC_EXPORT int32_t sc_topology_assert_valid_eval(int32_t op, const char* path, co
     const bool prim = input[0] >= 200.0 && input[0] <= 203.0;
     built.brep = prim ? primitive(input, n, status) : build(rd, path, status);
     std::vector<double> values;
+    if (built.brep && op == 3) {
+        SmBrep* copy = nullptr;
+        status = (SmStatus)SmApiBrepCopy(built.brep, copy);
+        delete built.brep;
+        built.brep = status == SM_SUCCESS ? copy : nullptr;
+        if (!built.brep) delete copy;
+    }
     if (!built.brep) {
         values = {-1, (double)status};
         return sc_copy_out(values.data(), (int64_t)values.size(), out, cap, len);

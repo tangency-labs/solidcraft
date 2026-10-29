@@ -683,9 +683,10 @@ pub enum NamingScheme {
     /// The Euler operators' notification identities
     /// (`topology::loopuse::notify_ref`).
     Notify,
-    /// A caller's own identities (a `TopologyEnv` / `NotifyEnv` `key_of`): such routines
-    /// leave the new geometry without owner, and the operation that holds the
-    /// caller's naming names it.
+    /// A caller's own identities (a `TopologyEnv` / `NotifyEnv` `key_of`), recorded per
+    /// edge, face and edge use where the B-rep was built (`Brep::geometry_owner_keys`):
+    /// such routines name the new geometry by the recorded key, and leave it without
+    /// owner when none is recorded.
     Caller,
     /// The arena identities the crate's imported B-reps use
     /// ([`brep_cache::arena_identity`](crate::topology::brep_cache::arena_identity):
@@ -765,8 +766,9 @@ pub struct Brep {
     /// (not upstream) Names this B-rep value for the notify records' seeding progress
     /// (`topology::brep::p3`); a clone is another value without one.
     progress_tag: topology::ProgressTag,
-    /// Edge/face identities supplied when their geometry was bound. These record
-    /// producer provenance; they are never inferred from an opaque geometry owner.
+    /// Edge/face/edge-use identities supplied when their geometry was bound. These
+    /// record producer provenance; they are never inferred from an opaque geometry
+    /// owner.
     geometry_owner_keys: std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef>,
 }
 
@@ -1537,9 +1539,12 @@ impl Brep {
 
     /// Deletes an edge use record (upstream `delete`; no unlinking).
     pub fn remove_edgeuse_record(&mut self, id: EdgeuseId) -> Result<Edgeuse> {
-        self.edgeuses
+        let record = self
+            .edgeuses
             .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_edgeuse_record", id))
+            .ok_or_else(|| not_found("topology::Brep::remove_edgeuse_record", id))?;
+        self.geometry_owner_keys.remove(&EntityRef::Edgeuse(id));
+        Ok(record)
     }
 
     /// Deletes a vertex use record (upstream `delete`; no unlinking).

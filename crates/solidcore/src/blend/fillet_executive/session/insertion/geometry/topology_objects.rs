@@ -97,7 +97,7 @@ impl InsertionGeometry<'_> {
                 for (eu, record) in body.edgeuses().iter() {
                     let canonical = topology_ref(serial, EntityRef::Edgeuse(eu)) == link;
                     let named = *scope == Some(role)
-                        && crate::topology::edgeuse::p1::owner_ref(body.naming(), eu) == Some(link);
+                        && crate::topology::edgeuse::p1::owner_ref_in(body, eu) == Some(link);
                     if (canonical || named)
                         && !take(
                             Some(role),

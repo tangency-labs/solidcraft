@@ -664,6 +664,9 @@ pub fn copy_brep(
     let _ = copy_attributes;
     let mut b = Brep::new();
     b.set_key((env.key_of)(brep_entity()).key);
+    // (not upstream) the copy's geometry is owned by `env.key_of`'s identities
+    // (`SetOwner(pNewE)` etc. in `MergeBrep`), recorded per entity
+    b.set_naming(crate::topology::NamingScheme::Caller);
     b.set_editing_enabled(src.editing_enabled());
     b.set_validate_only(src.validate_only());
 
@@ -1903,8 +1906,14 @@ fn merge_brep_in(
                 orientation,
                 ..crate::topology::Edgeuse::default()
             })?;
-            // (UV trim curve owners are not represented, as `SetUVTrimCurve`)
-            if let Some(c) = uv {
+            // pNewEU->m_pUVTrimCurve = pNewCurve; pNewCurve->SetOwner(pNewEU): the copy's
+            // edge use is named by the caller's key, recorded so trims made later
+            // (`SetUVTrimCurve`) are named alike
+            let eu_owner = (env.key_of)(EntityRef::Edgeuse(new_eu));
+            b.geometry_owner_keys
+                .insert(EntityRef::Edgeuse(new_eu), eu_owner);
+            if let Some(mut c) = uv {
+                let _ = c.set_owner(Some(eu_owner), None);
                 b.edgeuse_mut(new_eu)?.uv_trim_curve = Some(c);
             }
 

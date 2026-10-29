@@ -42,6 +42,7 @@ enum Src {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)] // independent serde case flags
 struct Inputs {
     brep: Src,
     #[serde(default)]
@@ -54,6 +55,12 @@ struct Inputs {
     /// Run the level-2 tests one by one (shim op 2) instead of `AssertValid`.
     #[serde(default)]
     tests: bool,
+    /// Run the capi sequence on the body's `SmApiBrepCopy` (shim op 3; Rust
+    /// `api_brep_copy` under caller keys, then `check_brep` by the copy's naming),
+    /// without mutation (#1584). Only the check's outcome is compared
+    /// ([`copy_summary`]): the copy's report identities are its caller keys.
+    #[serde(default)]
+    copy: bool,
     #[serde(default)]
     mutation: u8,
     #[serde(default)]
@@ -526,6 +533,84 @@ fn level2_tests(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Vec<f64>> {
 
 /// Why op 2 refuses mutations 8-10 (null face surface, edge curve, edge use link): the
 /// level-2 tests dereference them unguarded in C++.
+/// The capi check level of a case (levels 0 to 2).
+fn capi_level(i: &Inputs) -> Result<validation::CheckLevel, HarnessError> {
+    Ok(match i.level {
+        0 => validation::CheckLevel::Level0,
+        1 => validation::CheckLevel::Level1,
+        2 => validation::CheckLevel::Level2,
+        _ => return Err(herr("the capi check takes levels 0 to 2")),
+    })
+}
+/// The shim's capi protocol of a Rust `check_brep` result, decoded as [`output`].
+fn capi_output(check: solidcore::Result<validation::BrepCheck>) -> Result<Output, HarnessError> {
+    let check = match check {
+        Ok(c) => c,
+        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+    };
+    let mut out = vec![0.0];
+    out.push(f64::from(check.pointers_status));
+    put_reports(&mut out, &check.pointer_reports);
+    out.push(match check.assert_valid {
+        None => -1.0,
+        Some(v) => f64::from(v),
+    });
+    put_reports(&mut out, &check.reports);
+    let o = output(&out, true)?;
+    // the API's own lines must be the capi lines decoded above
+    let lines = check.lines().join("\n");
+    if o.ints.get("lines").map(Vec::as_slice) != Some(bytes(&lines).as_slice()) {
+        return Ok(o.int("api_lines_differ", 1));
+    }
+    Ok(o)
+}
+/// The outcome of a copy case's capi check: statuses, the failure lines and the report
+/// counts, without the reports' identities (the copy's are its caller keys).
+fn copy_summary(o: Output) -> Output {
+    let mut s = Output::new();
+    s.error = o.error;
+    s.deferred = o.deferred;
+    s.rejected = o.rejected;
+    for name in ["pointers_status", "assert_valid", "failure_count", "lines", "api_lines_differ"] {
+        if let Some(v) = o.ints.get(name) {
+            s = s.ints(name, v.clone());
+        }
+    }
+    for name in ["pointer_reports", "reports"] {
+        if let Some(&n) = o.ints.get(name).and_then(|v| v.first()) {
+            s = s.int(&format!("{name}_count"), n);
+        }
+    }
+    s
+}
+/// A copy case on the Rust side: `api_brep_copy` of `src` (named by the shim's [`key`])
+/// under caller keys, then [`validation::check_brep`] by the copy's naming.
+fn copy_check(k: &mut Kernel, src: &Brep, i: &Inputs) -> Result<Output, HarnessError> {
+    if i.mutation != 0 || i.tests {
+        return Err(herr("a copy case takes no mutation or level-2 test run"));
+    }
+    let level = capi_level(i)?;
+    let copy_key = |e: EntityRef| {
+        let r = key(e);
+        ObjectRef {
+            type_code: r.type_code,
+            key: ObjectKey(r.key.0 | (1 << 40)),
+        }
+    };
+    let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&Brep::new());
+    let mut env = state.env(None);
+    env.key_of = &copy_key;
+    let mut copy =
+        match solidcore::topology::brep::p3::api_brep_copy(k, &mut env, Some(src), &key) {
+            Ok(c) => c,
+            Err(e) => {
+                return Ok(copy_summary(
+                    Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+                ))
+            }
+        };
+    capi_output(validation::check_brep(k, &mut copy, level)).map(copy_summary)
+}
 const NULL_LINK_TESTS: &str = "the level-2 tests dereference the nulled link (crash in C++)";
 
 impl UnitDiff for Runner {
@@ -538,10 +623,19 @@ impl UnitDiff for Runner {
             return Ok(Output::rejected(NULL_LINK_TESTS));
         }
         let (path, block) = block(&i.brep)?;
-        let op = if i.tests { 2 } else { u8::from(i.capi) };
+        let op = if i.tests {
+            2
+        } else if i.copy {
+            3
+        } else {
+            u8::from(i.capi)
+        };
         let out = ffi::eval(op, &path, &block, args(&i)).map_err(|e| herr(e.to_string()))?;
         if i.tests {
             return tests_output(&out);
+        }
+        if i.copy {
+            return output(&out, true).map(copy_summary);
         }
         output(&out, i.capi)
     }
@@ -552,6 +646,9 @@ impl UnitDiff for Runner {
             Ok(b) => b,
             Err(o) => return Ok(o),
         };
+        if i.copy {
+            return copy_check(&mut k, &b, &i);
+        }
         mutate(&mut b, &i)?;
         if i.tests {
             return match level2_tests(&mut k, &mut b) {
@@ -559,35 +656,11 @@ impl UnitDiff for Runner {
                 Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
             };
         }
-        let mut out = vec![0.0];
         if i.capi {
-            let level = match i.level {
-                0 => validation::CheckLevel::Level0,
-                1 => validation::CheckLevel::Level1,
-                2 => validation::CheckLevel::Level2,
-                _ => return Err(herr("the capi check takes levels 0 to 2")),
-            };
-            let check = match validation::check_brep_with_keys(&mut k, &mut b, level, &key) {
-                Ok(c) => c,
-                Err(e) => {
-                    return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
-                }
-            };
-            out.push(f64::from(check.pointers_status));
-            put_reports(&mut out, &check.pointer_reports);
-            out.push(match check.assert_valid {
-                None => -1.0,
-                Some(v) => f64::from(v),
-            });
-            put_reports(&mut out, &check.reports);
-            let o = output(&out, true)?;
-            // the API's own lines must be the capi lines decoded above
-            let lines = check.lines().join("\n");
-            if o.ints.get("lines").map(Vec::as_slice) != Some(bytes(&lines).as_slice()) {
-                return Ok(o.int("api_lines_differ", 1));
-            }
-            return Ok(o);
+            let level = capi_level(&i)?;
+            return capi_output(validation::check_brep_with_keys(&mut k, &mut b, level, &key));
         }
+        let mut out = vec![0.0];
         let mut reports = AssertArray::new();
         let rtn = match validation::assert_valid(
             &mut k,
@@ -669,6 +742,7 @@ impl UnitDiff for Runner {
             walk: rng.below(4) != 0,
             capi,
             tests: false,
+            copy: false,
             mutation,
             index: rng.below(100) as usize,
             value,

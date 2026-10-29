@@ -801,7 +801,7 @@ pub fn set_uv_trim_curve(
         };
         // pUVTrimCurve->SetOwner(holder), under the B-rep's naming (a UV trim curve
         // notifies nothing)
-        if let Some(owner) = owner_ref(b.naming(), holder) {
+        if let Some(owner) = owner_ref_in(b, holder) {
             let _ = c.set_owner(Some(owner), None);
         }
         let r = b.edgeuse_mut(holder)?;
@@ -830,8 +830,20 @@ pub fn set_uv_trim_curve(
     Ok(detached)
 }
 
+/// The identity edge use `eu` of `b` owns geometry under: for a
+/// [`NamingScheme::Caller`] B-rep the caller's key recorded for it where the B-rep was
+/// built (`Brep::geometry_owner_key`; `None` when none is recorded), else
+/// [`owner_ref`] of `b`'s naming.
+pub(crate) fn owner_ref_in(b: &Brep, eu: EdgeuseId) -> Option<ObjectRef> {
+    match b.naming() {
+        NamingScheme::Caller => b.geometry_owner_key(EntityRef::Edgeuse(eu)),
+        naming => owner_ref(naming, eu),
+    }
+}
+
 /// The identity edge use `eu` owns geometry under in a B-rep with naming `naming`
-/// ([`NamingScheme`]); `None` when the B-rep records no scheme.
+/// ([`NamingScheme`]); `None` when the B-rep records no scheme, or names its owners by
+/// a caller's keys (see [`owner_ref_in`]).
 pub(crate) fn owner_ref(naming: NamingScheme, eu: EdgeuseId) -> Option<ObjectRef> {
     match naming {
         NamingScheme::Unknown | NamingScheme::Caller => None,
