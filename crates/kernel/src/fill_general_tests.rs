@@ -164,8 +164,21 @@ fn check_face(name: &str, open: &Body, fill: &Body) -> f64 {
     assert!(fill.is_surface());
     assert!(fill.face_count() >= 1, "{name}: a face");
     let (own, made) = (open.record(), fill.record());
+    // The same kind of curve on the same curve it is parameterised on, to rounding (SMLib makes a
+    // conic's frame and NURBS form again on a round trip, the last bit of a coordinate apart).
+    let close = |p: &[f64], q: &[f64]| p.len() == q.len() && p.iter().zip(q).all(|(x, y)| (x - y).abs() <= 1e-12 * (1.0 + x.abs().max(y.abs())));
+    let same = |c: &b::Curve, d: &b::Curve| match (c, d) {
+        (b::Curve::Spline { knots: k, points: p }, b::Curve::Spline { knots: l, points: q }) => {
+            k == l && p.len() == q.len() && p.iter().zip(q).all(|(x, y)| close(x, y))
+        }
+        (b::Curve::RationalSpline { knots: k, homogeneous: p }, b::Curve::RationalSpline { knots: l, homogeneous: q }) => {
+            k == l && p.len() == q.len() && p.iter().zip(q).all(|(x, y)| close(x, y))
+        }
+        _ => c == d,
+    };
+    let kind = |e: &b::Edge| std::mem::discriminant(&e.curve);
     for e in made.edges.iter().filter(|e| e.uses.len() == 1) {
-        assert!(own.edges.iter().any(|o| o.curve == e.curve), "{name}: an edge that is not the body's");
+        assert!(own.edges.iter().any(|o| kind(o) == kind(e) && same(o.parameters(), e.parameters())), "{name}: an edge that is not the body's");
     }
     let faces = Faces::of(fill);
     let tol = face_tolerance(open);

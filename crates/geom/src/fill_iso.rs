@@ -71,7 +71,8 @@
 //!   has too few rows for the conditions from opposite sides to stay apart, the spans that way are
 //!   halved (both ways where a point is missed, a patch folds, or the patches share one space),
 //!   up to [`MAX_ISO_SPANS`] and the free points one solve takes ([`MAX_BANDED_POINTS`] for one
-//!   patch, whose system is banded, [`MAX_UNKNOWN_POINTS`] about a centre, whose is dense). A
+//!   patch, whose system is banded, and about a centre, whose patches' banded interiors are
+//!   eliminated onto the unknowns they share, at most [`MAX_SHARED_UNKNOWNS`]). A
 //!   fill that then still misses the angle tolerance or a point, or folds, is refused; one that
 //!   misses only an order above G1 is the closest the finest space holds, its jumps reported
 //!   ([`Achieved::jumps`]).
@@ -91,11 +92,14 @@ use crate::spline_space::{Cond, Interpolant, Space};
 pub const MAX_ISO_SPANS: usize = 64;
 /// Most edges of a loop.
 pub const MAX_ISO_EDGES: usize = 16;
-/// Most free control points of patches about a centre (their system is solved dense: the
-/// spokes and the centre couple every patch).
-const MAX_UNKNOWN_POINTS: usize = 500;
-/// Most free control points of one patch (its system is banded: see [`Quilt::new`]).
+/// Most free control points of one solve: of one patch (its system is banded: see
+/// [`Quilt::new`]), or of the patches about a centre (each patch's interior banded, eliminated
+/// onto the unknowns the patches share: [`BlockNormal`]).
 const MAX_BANDED_POINTS: usize = 6000;
+/// Most unknowns (coordinates) the patches about a centre share once their interiors are
+/// eliminated: the spokes, the centre and the points beside the spokes that rows across them
+/// couple. Their system is dense: 4000² values, 128 MB.
+const MAX_SHARED_UNKNOWNS: usize = 4000;
 /// Stations per span of a side where conditions are asked and checked.
 const STATIONS_PER_SPAN: usize = 6;
 /// Stations per control point of a row.
@@ -698,10 +702,10 @@ impl Quilt {
         Ok(Quilt { patches, slots, unknowns, pieces, spokes })
     }
 
-    /// Most free control points one solve takes: about a centre (`shared` spaces) the system is
-    /// dense, for one patch banded.
+    /// Most free control points one solve takes, one patch or several about a centre.
     fn most_unknowns(shared: bool) -> usize {
-        if shared { MAX_UNKNOWN_POINTS } else { MAX_BANDED_POINTS }
+        let _ = shared;
+        MAX_BANDED_POINTS
     }
 
     /// Write the unknowns' values into every patch that holds them.
@@ -1410,7 +1414,7 @@ fn gram(s: &Space, m: usize) -> SplineResult<Vec<Vec<Vec<f64>>>> {
 fn least_squares(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>]) -> SplineResult<Vec<Vec3>> {
     let dim = 3 * quilt.unknowns;
     let slot = |p: usize, flat: usize| quilt.slots.get(p).and_then(|s| s.get(flat)).copied().flatten();
-    let mut a = Normal::new(dim, bandwidth(quilt, rows, energy));
+    let mut a = if quilt.spokes.is_empty() { Normal::new(dim, bandwidth(quilt, rows, energy)) } else { Normal::Blocks(BlockNormal::new(quilt)) };
     let mut b = vec![0.0; dim];
     let value = |p: usize, flat: usize| quilt.patches.get(p).and_then(|x| x.net.get(flat)).copied().unwrap_or(Vec3::ZERO);
     let mut condition_trace = 0.0;
@@ -1499,6 +1503,7 @@ fn bandwidth(quilt: &Quilt, rows: &[Row], energy: &[Vec<(usize, usize, f64)>]) -
 enum Normal {
     Band(crate::fill::Band),
     Dense(Vec<f64>, usize),
+    Blocks(BlockNormal),
 }
 
 impl Normal {
@@ -1515,6 +1520,7 @@ impl Normal {
                     *x += v;
                 }
             }
+            Normal::Blocks(m) => m.add(r, s, v),
         }
     }
 
@@ -1522,7 +1528,186 @@ impl Normal {
         match self {
             Normal::Band(m) => m.factor_rows()?.substitute(b),
             Normal::Dense(a, n) => cholesky(a, b, n),
+            Normal::Blocks(m) => m.solve(b),
         }
+    }
+}
+
+/// The normal equations of patches about a centre, solved by blocks: each patch's interior
+/// unknowns (coordinates of control points only that patch holds, coupled to no other patch's)
+/// form a banded block, eliminated exactly onto the shared unknowns (the spokes', the centre's,
+/// and any a row couples across patches) by their Schur complement, which is solved dense; the
+/// interiors then follow by back substitution. Entries are kept sparse until the blocks are
+/// known (callers add both halves of the symmetric matrix).
+struct BlockNormal {
+    /// Each coordinate's patch when only one patch holds its point, else `None`.
+    owner: Vec<Option<usize>>,
+    entries: std::collections::HashMap<(usize, usize), f64>,
+}
+
+impl BlockNormal {
+    fn new(quilt: &Quilt) -> BlockNormal {
+        let mut holders: Vec<Vec<usize>> = vec![Vec::new(); quilt.unknowns];
+        for (p, slots) in quilt.slots.iter().enumerate() {
+            for id in slots.iter().flatten() {
+                if let Some(h) = holders.get_mut(*id)
+                    && !h.contains(&p)
+                {
+                    h.push(p);
+                }
+            }
+        }
+        let owner = holders.iter().flat_map(|h| {
+            let o = if let [p] = h.as_slice() { Some(*p) } else { None };
+            [o; 3]
+        });
+        BlockNormal { owner: owner.collect(), entries: std::collections::HashMap::new() }
+    }
+
+    fn add(&mut self, r: usize, s: usize, v: f64) {
+        if v != 0.0 {
+            *self.entries.entry((r, s)).or_insert(0.0) += v;
+        }
+    }
+
+    fn solve(mut self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
+        let n = b.len();
+        // A coordinate coupled to another patch's interior is shared too.
+        let coupled: Vec<usize> = self
+            .entries
+            .keys()
+            .filter(|(r, c)| matches!((self.owner.get(*r).copied().flatten(), self.owner.get(*c).copied().flatten()), (Some(a), Some(b)) if a != b))
+            .flat_map(|(r, c)| [*r, *c])
+            .collect();
+        for x in coupled {
+            if let Some(o) = self.owner.get_mut(x) {
+                *o = None;
+            }
+        }
+        let shared: Vec<usize> = (0..n).filter(|x| self.owner.get(*x).copied().flatten().is_none()).collect();
+        if shared.len() > MAX_SHARED_UNKNOWNS {
+            return Err(SplineError::TooLarge(format!(
+                "{} unknowns shared by the patches about the centre (at most {MAX_SHARED_UNKNOWNS})",
+                shared.len()
+            )));
+        }
+        let mut place = vec![usize::MAX; n];
+        for (i, x) in shared.iter().enumerate() {
+            if let Some(slot) = place.get_mut(*x) {
+                *slot = i;
+            }
+        }
+        let patches = self.owner.iter().flatten().copied().max().map_or(0, |m| m + 1);
+        let mut interior: Vec<Vec<usize>> = vec![Vec::new(); patches];
+        for (x, o) in self.owner.iter().enumerate() {
+            if let Some(p) = o
+                && let Some(list) = interior.get_mut(*p)
+            {
+                if let Some(slot) = place.get_mut(x) {
+                    *slot = list.len();
+                }
+                list.push(x);
+            }
+        }
+        let m = shared.len();
+        // The shared block, and per patch its block, its coupling to the shared unknowns.
+        let mut s_mat = vec![0.0; m * m];
+        let mut blocks: Vec<std::collections::HashMap<(usize, usize), f64>> = vec![std::collections::HashMap::new(); patches];
+        let mut couple: Vec<std::collections::HashMap<(usize, usize), f64>> = vec![std::collections::HashMap::new(); patches];
+        for ((r, c), v) in std::mem::take(&mut self.entries) {
+            let (or, oc) = (self.owner.get(r).copied().flatten(), self.owner.get(c).copied().flatten());
+            let (pr, pc) = (place.get(r).copied().unwrap_or(0), place.get(c).copied().unwrap_or(0));
+            match (or, oc) {
+                (None, None) => {
+                    if let Some(x) = s_mat.get_mut(pr * m + pc) {
+                        *x += v;
+                    }
+                }
+                (Some(p), Some(_)) => {
+                    if let Some(blk) = blocks.get_mut(p) {
+                        *blk.entry((pr, pc)).or_insert(0.0) += v;
+                    }
+                }
+                // Interior row, shared column (the transposed entry is its mirror).
+                (Some(p), None) => {
+                    if let Some(cp) = couple.get_mut(p) {
+                        *cp.entry((pr, pc)).or_insert(0.0) += v;
+                    }
+                }
+                (None, Some(_)) => {}
+            }
+        }
+        let mut rhs: Vec<f64> = shared.iter().map(|x| b.get(*x).copied().unwrap_or(0.0)).collect();
+        let mut solved_parts: Vec<(crate::fill::Band, Vec<f64>, Vec<(usize, Vec<f64>)>)> = Vec::with_capacity(patches);
+        for p in 0..patches {
+            let ids = interior.get(p).map(Vec::as_slice).unwrap_or(&[]);
+            let k = ids.len();
+            let blk = blocks.get(p).cloned().unwrap_or_default();
+            let bw = blk.keys().map(|(r, c)| r.abs_diff(*c)).max().unwrap_or(0);
+            let mut band = crate::fill::Band::new(k.max(1), bw);
+            for (&(r, c), &v) in &blk {
+                band.add(r, c, v);
+            }
+            if k == 0 {
+                solved_parts.push((band, Vec::new(), Vec::new()));
+                continue;
+            }
+            let band = band.factor_rows()?;
+            // g = A_kk⁻¹ b_k; per shared column j coupled to this patch, z_j = A_kk⁻¹ A_k,j.
+            let bk: Vec<f64> = ids.iter().map(|x| b.get(*x).copied().unwrap_or(0.0)).collect();
+            let g = band.substitute(bk)?;
+            let mut columns: std::collections::BTreeMap<usize, Vec<f64>> = std::collections::BTreeMap::new();
+            for (&(r, j), &v) in couple.get(p).into_iter().flatten() {
+                if let Some(cell) = columns.entry(j).or_insert_with(|| vec![0.0; k]).get_mut(r) {
+                    *cell += v;
+                }
+            }
+            let mut z: Vec<(usize, Vec<f64>)> = Vec::with_capacity(columns.len());
+            for (j, col) in columns {
+                z.push((j, band.substitute(col)?));
+            }
+            // S −= A_Bk·Z, rhs −= A_Bk·g, A_Bk the transpose of the coupling.
+            let coupling = couple.get(p).cloned().unwrap_or_default();
+            let mut by_column: std::collections::BTreeMap<usize, Vec<(usize, f64)>> = std::collections::BTreeMap::new();
+            for (&(r, j), &v) in &coupling {
+                by_column.entry(j).or_default().push((r, v));
+            }
+            for (i, entries) in &by_column {
+                let dot = |w: &[f64]| entries.iter().map(|(r, v)| v * w.get(*r).copied().unwrap_or(0.0)).sum::<f64>();
+                if let Some(x) = rhs.get_mut(*i) {
+                    *x -= dot(&g);
+                }
+                for (j, zj) in &z {
+                    if let Some(x) = s_mat.get_mut(i * m + j) {
+                        *x -= dot(zj);
+                    }
+                }
+            }
+            solved_parts.push((band, g, z));
+        }
+        let xs = if m > 0 { cholesky(s_mat, rhs, m)? } else { Vec::new() };
+        let mut x = vec![0.0; n];
+        for (i, id) in shared.iter().enumerate() {
+            if let Some(slot) = x.get_mut(*id) {
+                *slot = xs.get(i).copied().unwrap_or(0.0);
+            }
+        }
+        for (p, (_, g, z)) in solved_parts.iter().enumerate() {
+            let ids = interior.get(p).map(Vec::as_slice).unwrap_or(&[]);
+            for (r, id) in ids.iter().enumerate() {
+                let mut v = g.get(r).copied().unwrap_or(0.0);
+                for (j, zj) in z {
+                    v -= zj.get(r).copied().unwrap_or(0.0) * xs.get(*j).copied().unwrap_or(0.0);
+                }
+                if let Some(slot) = x.get_mut(*id) {
+                    *slot = v;
+                }
+            }
+        }
+        if x.iter().any(|v| !v.is_finite()) {
+            return invalid("the patches' equations have no finite solution");
+        }
+        Ok(x)
     }
 }
 
