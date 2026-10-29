@@ -568,6 +568,30 @@ case(T5, "013-part-holes", "the running part: an M6 tapped through hole, an M5 t
      {"body_count": 1, "volume_mm3": V5, "faces": 20},
      "removed pi 2.5^2 20 (M6, tap drill 5) + pi 2.1^2 8 (M5, tap drill 4.2, flat) + pi 1.65^2 35; faces +1 +2 +1", base=C4)
 C5 = up(T5, "013-part-holes")
+# Tapped holes of the other catalogued families: cosmetic threads in a hole drilled to the tap
+# maker's drill (crates/doc/src/thread_catalog.rs), so a drilled cylinder is all the geometry.
+case(T5, "014-tapped-1-4-20-unc-through", "a 1/4-20 UNC tapped hole through the stock: drilled #7 (0.201 in), cosmetic thread",
+     [H(position=top, thread="1/4-20 UNC")],
+     {"body_count": 1, "volume_mm3": VB - PI * (0.201 * 25.4 / 2) ** 2 * 20, "faces": 7},
+     "ASME B1.1 1/4-20 UNC: D = 0.25 in, P = 1/20 in, basic minor D1 = D - 1.082532 P = 0.1959 in; the tap drill is #7, 0.201 in = 5.1054 mm "
+     "(the cutting-tap drill for about 75% thread, Guhring's table in thread_catalog.rs); removed pi 2.5527^2 20; the cosmetic thread adds no geometry: + one cylinder face", base=B1)
+case(T5, "015-tapped-1-4-28-unf-blind", "a 1/4-28 UNF tapped blind hole 10 deep, flat bottom: drilled 5.45 mm, cosmetic thread",
+     [H(position=top, thread="1/4-28 UNF", depth=10)],
+     {"body_count": 1, "volume_mm3": VB - PI * 2.725 ** 2 * 10, "faces": 8},
+     "ASME B1.1 1/4-28 UNF: D = 0.25 in, P = 1/28 in, basic minor D1 = D - 1.082532 P = 5.368 mm; the tap maker's drill 5.45 mm (Guhring, thread_catalog.rs), "
+     "above D1 as a drill must be; removed pi 2.725^2 10; + wall and floor", base=B1)
+case(T5, "016-tapped-rc-1-2-through", "an Rc 1/2 tapped hole through the stock (ISO 7-1 internal taper): a straight hole at the tap maker's 17.6 mm, cosmetic thread",
+     [H(position=top, thread="Rc 1/2")],
+     {"body_count": 1, "volume_mm3": VB - PI * 8.8 ** 2 * 20, "faces": 7},
+     "ISO 7-1 Rc 1/2: gauge diameter d = 20.955 at the face, 14 threads per inch, h = 0.640327 P, minor d1 = d - 2h = 18.631 there and 1/16 smaller per mm deeper "
+     "(18.631 - 13.2/16 = 17.806 at the end of the 13.2 mm useful thread); a straight (not reamed) hole takes the tap maker's 17.6 (Yamawa YEU23 p.709, the largest for "
+     "non-full threads): removed pi 8.8^2 20; + one cylinder face", base=B1)
+case(T5, "017-tapped-1-4-npt-through", "a 1/4-18 NPT tapped hole through the stock (ASME B1.20.1): a straight hole at the tap maker's 10.85 mm, cosmetic thread",
+     [H(position=top, thread="1/4-18 NPT")],
+     {"body_count": 1, "volume_mm3": VB - PI * 5.425 ** 2 * 20, "faces": 7},
+     "ASME B1.20.1 1/4-18 NPT: E0 = 0.47739 in, L1 = 0.2278 in, h = 0.8 P; at the face the minor E1 - h = 0.48163 - 0.04444 in = 11.105 mm, 1/16 smaller per mm deeper; "
+     "a straight hole takes the tap maker's 10.85 (Yamawa YEU23 p.710): removed pi 5.425^2 20; + one cylinder face", base=B1)
+
 # ---------------------------------------------------------------- 06 threads
 def thr(face, **p):
     return C("solid.thread", face=face, modeled=True, **p)
