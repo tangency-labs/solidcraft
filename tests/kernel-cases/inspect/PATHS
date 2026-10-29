@@ -1,0 +1,20 @@
+# Source files whose change must rerun the inspect area: one git pathspec glob a line.
+# The commands: center of mass, minimum radius, curvature comb and isocurve; continuity and the
+# draw-only analyses; interference (registered in joints.rs), clearance and compare.
+crates/engine/src/cmd/sketch_inspect.rs
+crates/engine/src/cmd/surface_analysis.rs
+crates/engine/src/cmd/interference.rs
+crates/engine/src/cmd/joints.rs
+crates/engine/src/cmd/clearance.rs
+crates/engine/src/cmd/compare.rs
+crates/engine/src/cmd/inspect.rs
+# What they measure with: the comparison of two surfaces, a face's isocurves, seam continuity,
+# body distance and mass properties.
+crates/geom/src/compare.rs
+crates/doc/src/eval.rs
+crates/kernel/src/iso.rs
+crates/kernel/src/continuity.rs
+crates/kernel/src/continuity_order.rs
+crates/kernel/src/distance.rs
+crates/kernel/src/measure.rs
+tests/kernel-cases/inspect/**
