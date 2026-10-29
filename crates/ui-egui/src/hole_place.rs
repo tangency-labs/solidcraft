@@ -261,7 +261,7 @@ pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
     if was.dist(*point) <= radius {
         return false;
     }
-    match crate::hole_refs::freedom(d) {
+    match crate::hole_refs::freedom(d, i) {
         crate::place_gizmo::Freedom::Plane => move_place(d, s, i, sel.clone()),
         crate::place_gizmo::Freedom::Line(_) => {
             crate::hole_refs::drag_to(s, d, i, *point);
