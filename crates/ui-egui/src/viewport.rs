@@ -2099,7 +2099,8 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
                 if let Some((a, b)) = solidcraft_engine::view::spline_handle_display_line(&ss.sketch, index) {
                     let a = ss.plane.to_world(a).to_f32();
                     let b = ss.plane.to_world(b).to_f32();
-                    sc.line(a, b, sketch_color(&tk, colors::SKETCH_CONSTRUCTION), 2.0, true);
+                    let color = sc.color(sketch_color(&tk, colors::SKETCH_CONSTRUCTION));
+                    sc.line(a, b, color, 2.0, true);
                 }
             }
         }
