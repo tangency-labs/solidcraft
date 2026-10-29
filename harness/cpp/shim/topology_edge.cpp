@@ -850,6 +850,7 @@ enum Op : int32_t
     OP_BLEND = 23,
     OP_ODE = 24,
     OP_SET_INTERVAL = 25,
+    OP_EDGE_FORM = 26,
 };
 
 // The type codes `IsKindOf` is asked about.
@@ -1619,6 +1620,41 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back(st(ode_edge_length_evaluate(*e->GetCurve(), origin, radius, t, dydx)));
         for (ULONG k = 0; k < dydx.GetSize(); k++)
             o.push_back(dydx[k]);
+        break;
+    }
+    case OP_EDGE_FORM:
+    {
+        // `dx dy dz`: translate the edge curve first (`SmCurve::Transform`, skipped for
+        // a zero move), then `IsOnFaceEdgeForm(&dMaxGap3d)` (Edge AssertValid test 13)
+        SmVector3d d;
+        d.x = rd.num();
+        d.y = rd.num();
+        d.z = rd.num();
+        SmTArray<SmFace*> fs;
+        e->GetFaces(fs);
+        // GetMaxEdgeFaceGap's gap calculation dereferences the edge curve and the face
+        // surface
+        bool ok = fs.GetSize() == 0 || e->GetCurve() != nullptr;
+        for (ULONG k = 0; k < fs.GetSize(); k++)
+            if (fs[k] == nullptr || fs[k]->GetSurface() == nullptr)
+                ok = false;
+        if (!ok)
+        {
+            o.push_back(ST_NULL_DEREF);
+            break;
+        }
+        double moved = 0.0;
+        if ((d.x != 0.0 || d.y != 0.0 || d.z != 0.0) && e->GetCurve() != nullptr)
+        {
+            SmAxis2Placement place;
+            place.Translate(d);
+            moved = e->GetCurve()->Transform(place) == SM_SUCCESS ? 0.0 : 1.0;
+        }
+        o.push_back(moved);
+        double gap = -7.0;
+        SmBoolean r = e->IsOnFaceEdgeForm(&gap);
+        o.push_back(flg(r));
+        o.push_back(gap);
         break;
     }
     case OP_SET_INTERVAL:

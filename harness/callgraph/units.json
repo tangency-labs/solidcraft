@@ -39706,6 +39706,20 @@
     "lines": 4,
     "name": "SmEdge::IsKindOf",
     "usr": "c:@S@SmEdge@F@IsKindOf#L#1"
+   },
+   {
+    "file": "source/SMLib/src/SmEdge.cpp",
+    "line": 5460,
+    "lines": 51,
+    "name": "SmEdge::IsOnFaceEdgeForm",
+    "usr": "c:@S@SmEdge@F@IsOnFaceEdgeForm#*d#1"
+   },
+   {
+    "file": "source/SMLib/src/SmEdge.cpp",
+    "line": 7046,
+    "lines": 11,
+    "name": "sm_AssertTestEdge13",
+    "usr": "c:@F@sm_AssertTestEdge13#*1$@S@SmEdge#*d#"
    }
   ],
   "module": "topology",
@@ -40778,17 +40792,52 @@
    },
    {
     "file": "source/SMLib/src/SmFace.cpp",
-    "line": 20175,
-    "lines": 25,
-    "name": "sm_GetLoopSampleUVPoint",
-    "usr": "c:SmFace.cpp@F@sm_GetLoopSampleUVPoint#*1$@S@SmLoop#&$@S@SmVector2d#"
+    "line": 16646,
+    "lines": 83,
+    "name": "SmFace::HasCoincidentVertices",
+    "usr": "c:@S@SmFace@F@HasCoincidentVertices#*$@S@SmTArray>#*$@S@SmVertex#S0_#1"
    },
    {
     "file": "source/SMLib/src/SmFace.cpp",
-    "line": 20226,
-    "lines": 55,
-    "name": "sm_AssertTestFace37",
-    "usr": "c:@F@sm_AssertTestFace37#*1$@S@SmFace#"
+    "line": 16756,
+    "lines": 40,
+    "name": "sm_FindCoincidentVerts",
+    "usr": "c:@F@sm_FindCoincidentVerts#*$@S@SmVertex#&$@S@SmTArray>#S0_#S1_#S1_#"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 16807,
+    "lines": 103,
+    "name": "SmFace::HasCoincidentEdges",
+    "usr": "c:@S@SmFace@F@HasCoincidentEdges#*$@S@SmTArray>#*$@S@SmEdge#S0_#*$@S@SmTArray>#*$@S@SmVertex#S2_#1"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20046,
+    "lines": 51,
+    "name": "sm_DoLoopsIntersectInUV",
+    "usr": "c:SmFace.cpp@F@sm_DoLoopsIntersectInUV#*1$@S@SmLoop#S0_#&1$@S@SmSurface#"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20128,
+    "lines": 36,
+    "name": "sm_AssertTestFace38",
+    "usr": "c:@F@sm_AssertTestFace38#*1$@S@SmFace#"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20341,
+    "lines": 16,
+    "name": "sm_AssertTestFace33",
+    "usr": "c:@F@sm_AssertTestFace33#*1$@S@SmFace#*$@S@SmTArray>#*$@S@SmEdge#S1_#*$@S@SmTArray>#*$@S@SmVertex#S3_#"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20501,
+    "lines": 14,
+    "name": "sm_AssertTestFace32",
+    "usr": "c:@F@sm_AssertTestFace32#*1$@S@SmFace#*$@S@SmTArray>#*$@S@SmVertex#S1_#"
    }
   ],
   "module": "topology",
@@ -43883,10 +43932,38 @@
    },
    {
     "file": "source/SMLib/src/SmVertex.cpp",
-    "line": 1446,
-    "lines": 262,
-    "name": "SmVertex::CheckPointers",
-    "usr": "c:@S@SmVertex@F@CheckPointers#1"
+    "line": 1223,
+    "lines": 142,
+    "name": "SmVertex::HasParallelFaces",
+    "usr": "c:@S@SmVertex@F@HasParallelFaces#1"
+   },
+   {
+    "file": "source/SMLib/src/SmVertex.cpp",
+    "line": 1720,
+    "lines": 82,
+    "name": "SmVertex::IsWithinXSectTol3dOfFaces",
+    "usr": "c:@S@SmVertex@F@IsWithinXSectTol3dOfFaces#*d#**$@S@SmFace#I#1"
+   },
+   {
+    "file": "source/SMLib/src/SmVertex.cpp",
+    "line": 1904,
+    "lines": 53,
+    "name": "SmVertex::IsOnFaceCorner",
+    "usr": "c:@S@SmVertex@F@IsOnFaceCorner#*I#*d#*$@S@SmPoint3d#1"
+   },
+   {
+    "file": "source/SMLib/src/SmVertex.cpp",
+    "line": 1973,
+    "lines": 330,
+    "name": "SmVertex::CalcCornerFromFaces",
+    "usr": "c:@S@SmVertex@F@CalcCornerFromFaces#&I#&d#&*$@S@SmFace#&$@S@SmPoint3d#1"
+   },
+   {
+    "file": "source/SMLib/src/SmVertex.cpp",
+    "line": 2551,
+    "lines": 29,
+    "name": "sm_AssertTestVertex1",
+    "usr": "c:@F@sm_AssertTestVertex1#*1$@S@SmVertex#*d#**$@S@SmFace#*I#S1_#*$@S@SmPoint3d#"
    }
   ],
   "module": "topology",

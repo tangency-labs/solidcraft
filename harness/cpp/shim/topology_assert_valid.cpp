@@ -13,6 +13,14 @@
 
 // Defined (not declared) in SmAssertArray.cpp.
 TCHAR const* SM_GetObjTypeString(SM_TYPE lExeClassType);
+// The level-2 AssertValid tests, defined (not declared) in SmFace.cpp, SmEdge.cpp and
+// SmVertex.cpp (their default arguments are NULL).
+SmBoolean sm_AssertTestFace32(const SmFace*, SmTArray<SmVertex*>*, SmTArray<SmVertex*>*);
+SmBoolean sm_AssertTestFace33(const SmFace*, SmTArray<SmEdge*>*, SmTArray<SmEdge*>*, SmTArray<SmVertex*>*,
+                              SmTArray<SmVertex*>*);
+SmBoolean sm_AssertTestFace38(const SmFace*);
+SmBoolean sm_AssertTestEdge13(const SmEdge*, double*);
+SmBoolean sm_AssertTestVertex1(const SmVertex*, double*, SmFace**, SmBoolean*, double*, SmPoint3d*);
 
 namespace {
 using Id = std::array<int64_t, 2>;
@@ -147,10 +155,13 @@ SmBrep* primitive(const double* in, int64_t n, SmStatus& status) {
 } // namespace
 
 // op 0: AssertValid(&reports, level, walk); op 1: the capi sequence at `level` with
-// the walk. args: level, walk, mutation kind, index, value.
+// the walk; op 2: the level-2 tests one by one, as SmFace/SmEdge/SmVertex::AssertValid
+// call them: per face sm_AssertTestFace32, 33 and 38 (-1 without surface), then per
+// edge sm_AssertTestEdge13 (passed, max gap), then per vertex sm_AssertTestVertex1
+// (passed, max gap 3d, max gap face index or -1), after the three counts. args: level, walk, mutation kind, index, value.
 SC_EXPORT int32_t sc_topology_assert_valid_eval(int32_t op, const char* path, const double* input, int64_t n,
                                                const double* args, int64_t na, double* out, int64_t cap, int64_t* len) {
-    if (op < 0 || op > 1 || !input || n < 1 || !args || na != 5) return SC_ERR_ARG;
+    if (op < 0 || op > 2 || !input || n < 1 || !args || na != 5) return SC_ERR_ARG;
     SC_TRY
     Rd rd{input, 0};
     SmStatus status = SM_SUCCESS;
@@ -168,7 +179,29 @@ SC_EXPORT int32_t sc_topology_assert_valid_eval(int32_t op, const char* path, co
     {
         Mutation mutation(g, (int)args[2], (size_t)args[3], args[4]);
         const SmAssertTestLevel level = (SmAssertTestLevel)(int)args[0];
-        if (op == 0) {
+        if (op == 2) {
+            values.insert(values.end(), {(double)g.faces.size(), (double)g.edges.size(), (double)g.vertices.size()});
+            for (SmFace* f : g.faces) {
+                values.push_back(flg(sm_AssertTestFace32(f, NULL, NULL)));
+                values.push_back(flg(sm_AssertTestFace33(f, NULL, NULL, NULL, NULL)));
+                values.push_back(f->GetSurface() ? flg(sm_AssertTestFace38(f)) : -1.0);
+            }
+            for (SmEdge* e : g.edges) {
+                double gap = 0.0;
+                values.push_back(flg(sm_AssertTestEdge13(e, &gap)));
+                values.push_back(gap);
+            }
+            for (SmVertex* v : g.vertices) {
+                double gap = 0.0;
+                SmFace* face = NULL;
+                values.push_back(flg(sm_AssertTestVertex1(v, &gap, &face, NULL, NULL, NULL)));
+                values.push_back(gap);
+                double at = -1;
+                for (size_t i = 0; i < g.faces.size(); i++)
+                    if (g.faces[i] == face) at = (double)i;
+                values.push_back(at);
+            }
+        } else if (op == 0) {
             SmAssertArray reports;
             values.push_back(flg(built.brep->AssertValid(&reports, level, args[1] != 0 ? SM_WALK : SM_NO_WALK)));
             put_reports(values, g, built.brep, reports);

@@ -30,6 +30,7 @@
 //! | [`check_pointers`]                          | `SmVertex::CheckPointers`                        |
 //! | [`edge_start_vertex`], [`edge_vertex_pair`], [`edge_vertices`], [`edge_end_tangent`] | `SmEdge::GetStartVertex`, `GetVertices(SmVertex*&, SmVertex*&)`, `GetVertices(SmTArray&)`, `GetEndTangent` (CO-PORTED, `topology.edge`) |
 //! | [`loopuse_vertices`], [`loop_vertices`]     | `SmLoopuse::GetVertices`, `SmLoop::GetVertices` (CO-PORTED, `topology.loopuse`) |
+//! | [`corner`]                                  | `SmVertex::IsWithinXSectTol3dOfFaces`, `HasParallelFaces`, `CalcCornerFromFaces`, `IsOnFaceCorner`, `sm_AssertTestVertex1` |
 //!
 //! Deviations:
 //! - **Object model.** A vertex is a record in the [`Brep`]'s arenas; the methods are
@@ -78,13 +79,15 @@
 //!   loop use walk stops with [`SolidError::InvalidInput`] after visiting more edge uses
 //!   than the B-rep holds (upstream loops forever on a CCW chain that does not return to
 //!   its start). They have no attribute filter (callers here pass none).
-//! - `CalcCornerFromFaces`, `IsZoneTol3dConsistent`, `GetLoopOfFace`,
+//! - `IsZoneTol3dConsistent`, `GetLoopOfFace`,
 //!   `GetVertexuseOfEdge`, `GetVertexNumberInBrep`, the `Has*` / `IsEdgeVertex` /
 //!   `IsOnSeam` / `IsConnectedToEdge` / `IsConnectedToFace` predicates,
-//!   `IsWithinXSectTol3dOf*`, `IsOnFaceCorner`, `HasParallelFaces`,
+//!   `IsWithinXSectTol3dOfEdges`, `CheckPointers`,
 //!   `IsComplexCornerMember`, `RefineGeometry`, `FindAndRemoveVertexuseByEdge`,
 //!   `GetMemoryUsed`, `AssertValid`, the graphics and the `Dump`s are not part of this
 //!   unit.
+
+pub mod corner;
 
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{AttributeStore, ObjectKey};

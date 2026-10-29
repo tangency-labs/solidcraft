@@ -30,13 +30,18 @@ fn primitive_len(kind: f64) -> Option<usize> {
     }
 }
 
-/// `AssertValid` (op 0) or the capi sequence (op 1) of the B-rep built from `block`
-/// (a `sc_edgeuse_graph.h` source or a primitive), after mutation `args[2]` (kinds
-/// 1-10 of `topology_brep_validation`). Arguments: level (0-4), walk, mutation kind,
-/// index, value.
+/// `AssertValid` (op 0), the capi sequence (op 1) or the level-2 tests one by one (op
+/// 2: `sm_AssertTestFace32/33/38` per face, `sm_AssertTestEdge13` per edge,
+/// `sm_AssertTestVertex1` per vertex) of the B-rep built from `block` (a
+/// `sc_edgeuse_graph.h` source or a primitive), after mutation `args[2]` (kinds 1-10 of
+/// `topology_brep_validation`). Arguments: level (0-4), walk, mutation kind, index,
+/// value. Op 2 refuses the null-pointer mutations 8-10: the tests dereference the face
+/// surface, edge curve and edge use links without the `ValidatePointers` guard
+/// `AssertValid` runs first.
 pub fn eval(op: u8, path: &str, block: &[f64], args: [f64; 5]) -> Result<Vec<f64>, FfiError> {
     let bad = || FfiError::InvalidArgument("invalid AssertValid arguments".into());
-    if op > 1
+    if op > 2
+        || (op == 2 && args[2] >= 8.0)
         || !args.iter().all(|x| x.is_finite())
         || args[0].fract() != 0.0
         || !(0.0..=4.0).contains(&args[0])

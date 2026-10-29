@@ -48,6 +48,7 @@
 //! | `SetTolerance`      | `v tol only_if_larger cascade` | `tolerance` |
 //! | `RefreshTolerance`  | `v nested`                 | `status tolerance edge_tolerances...` |
 //! | `Exact`             | `v exact poly`             | `is_exact has_poly_vertex` |
+//! | `Corner`            | `v has_move dx dy dz`      | `0 within max_gap max_gap_face [on found gap best[3]] passed`, `on found gap best[3]`, `parallel min_ang max_gap face1 face2` (or `-1` without faces), `within max_gap face` (forced), then the gap states; `-2` alone where upstream dereferences null |
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: existing
 //! `.smb` files, well-formed clamped B-splines, planes with a non-zero normal, indices
@@ -86,6 +87,7 @@ pub enum Op {
     SetTolerance = 14,
     RefreshTolerance = 15,
     Exact = 16,
+    Corner = 17,
 }
 
 impl Op {
@@ -432,6 +434,10 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
         Op::Exact => {
             rd.flag()?;
             rd.flag()?;
+        }
+        Op::Corner => {
+            rd.flag()?;
+            rd.vec3()?;
         }
     }
     Ok(())

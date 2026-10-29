@@ -193,37 +193,29 @@ pub(super) fn crv_in_volume_assert_valid(
 
 /// `sm_AssertTestFace32(this)` (`== TRUE`): no coincident vertices
 /// (`HasCoincidentVertices`). Face test 32, evaluated only at `SM_LEVEL_2` and above.
-pub(super) fn assert_test_face32(_k: &mut Kernel, _b: &mut Brep, _f: FaceId) -> Result<bool> {
-    // UNPORTED(topology.face_p4): sm_AssertTestFace32
-    Err(unported("sm_AssertTestFace32", "topology.face_p4"))
+pub(super) fn assert_test_face32(_k: &mut Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
+    crate::topology::face::assert_tests::assert_test_face32(b, f)
 }
 
 /// `sm_AssertTestFace33(this)` (`== TRUE`): no coincident edges (`HasCoincidentEdges`).
 /// Face test 33, evaluated only at `SM_LEVEL_2` and above.
-pub(super) fn assert_test_face33(_k: &mut Kernel, _b: &mut Brep, _f: FaceId) -> Result<bool> {
-    // UNPORTED(topology.face_p4): sm_AssertTestFace33
-    Err(unported("sm_AssertTestFace33", "topology.face_p4"))
+pub(super) fn assert_test_face33(k: &mut Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
+    crate::topology::face::assert_tests::assert_test_face33(k, b, f)
 }
 
 /// `sm_AssertTestFace38(this)` (`== TRUE`): the face loops are disjoint in UV
 /// (`sm_DoLoopsIntersectInUV`). Face test 38, evaluated only at `SM_LEVEL_2` and above
 /// and only for a face with a surface.
-pub(super) fn assert_test_face38(_k: &mut Kernel, _b: &mut Brep, _f: FaceId) -> Result<bool> {
-    // UNPORTED(topology.face_p4): sm_AssertTestFace38
-    Err(unported("sm_AssertTestFace38", "topology.face_p4"))
+pub(super) fn assert_test_face38(k: &mut Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
+    crate::topology::face::assert_tests::assert_test_face38(k, b, f)
 }
 
 /// `sm_AssertTestEdge13(this, &dMaxGap)`: `(passed, max_gap)`, the edge curve within
 /// `SmTol::GetXSectTol3d(this, this)` of every face surface (`IsOnFaceEdgeForm`).
 /// Edge test 13, evaluated only at `SM_LEVEL_2` and above; `max_gap` is the report
 /// value (upstream initialises it to `0.0`).
-pub(super) fn assert_test_edge13(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _e: EdgeId,
-) -> Result<(bool, f64)> {
-    // UNPORTED(topology.edge): sm_AssertTestEdge13
-    Err(unported("sm_AssertTestEdge13", "topology.edge"))
+pub(super) fn assert_test_edge13(k: &mut Kernel, b: &mut Brep, e: EdgeId) -> Result<(bool, f64)> {
+    crate::topology::edge::edge_form::assert_test_edge13(k, b, e)
 }
 
 /// `sm_AssertTestVertex1(this, &dMaxGap3d, &pMaxGapFace)`: `(passed, max_gap_3d)`, the
@@ -231,10 +223,10 @@ pub(super) fn assert_test_edge13(
 /// (`IsWithinXSectTol3dOfFaces`, `IsOnFaceCorner`). Called at every level; its report
 /// (Vertex test 1) is level 2.
 pub(super) fn assert_test_vertex1(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _v: VertexId,
+    k: &mut Kernel,
+    b: &mut Brep,
+    v: VertexId,
 ) -> Result<(bool, f64)> {
-    // UNPORTED(topology.vertex): sm_AssertTestVertex1
-    Err(unported("sm_AssertTestVertex1", "topology.vertex"))
+    let (passed, max_gap_3d, _) = crate::topology::vertex::corner::assert_test_vertex1(k, b, v)?;
+    Ok((passed, max_gap_3d))
 }

@@ -72,6 +72,7 @@
 //! | `Blend`        | `e`                        | `eu` |
 //! | `Ode`          | `e ox oy oz radius t n`    | `status dydx*n` |
 //! | `SetInterval`  | `e a b`                    | `min max` |
+//! | `EdgeForm`     | `e dx dy dz`               | `moved ok max_gap` (`moved`: 0 = translated or not moved, 1 = `Transform` failed) |
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: existing
 //! `.smb` files, well-formed clamped B-splines, planes with a non-zero normal, indices
@@ -119,6 +120,7 @@ pub enum Op {
     Blend = 23,
     Ode = 24,
     SetInterval = 25,
+    EdgeForm = 26,
 }
 
 impl Op {
@@ -552,6 +554,14 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
         Op::SetInterval => {
             rd.finite()?;
             rd.finite()?;
+        }
+        Op::EdgeForm => {
+            for _ in 0..3 {
+                let d = rd.finite()?;
+                if d.abs() > MAX_COORD {
+                    return Err(bad("bad translation"));
+                }
+            }
         }
     }
     Ok(())

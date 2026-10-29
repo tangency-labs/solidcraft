@@ -51,6 +51,9 @@ struct Inputs {
     /// Run the capi sequence instead of `AssertValid` alone.
     #[serde(default)]
     capi: bool,
+    /// Run the level-2 tests one by one (shim op 2) instead of `AssertValid`.
+    #[serde(default)]
+    tests: bool,
     #[serde(default)]
     mutation: u8,
     #[serde(default)]
@@ -446,15 +449,86 @@ fn output(protocol: &[f64], capi: bool) -> Result<Output, HarnessError> {
     }
     Ok(o)
 }
+/// The level-2 test results (shim op 2): per face tests 32, 33, 38 (`-1` without
+/// surface), per edge test 13 and its max gap, per vertex test 1, its max gap and the
+/// face of that gap (index, `-1` for none).
+fn tests_output(protocol: &[f64]) -> Result<Output, HarnessError> {
+    let mut rd = Reader {
+        data: protocol,
+        pos: 0,
+    };
+    if rd.num()? != 0.0 {
+        return Ok(Output::rejected("native fixture construction failed"));
+    }
+    let (nf, ne, nv) = (rd.count()?, rd.count()?, rd.count()?);
+    let faces: Vec<i64> = rd.slice(3 * nf)?.iter().map(|&x| x as i64).collect();
+    let edges = rd.slice(2 * ne)?.to_vec();
+    let vertices = rd.slice(3 * nv)?.to_vec();
+    if rd.pos != protocol.len() {
+        return Err(herr("trailing level-2 test output"));
+    }
+    let flags = |v: &[f64]| v.iter().step_by(2).map(|&x| x as i64).collect::<Vec<_>>();
+    let gaps = |v: &[f64]| v.iter().skip(1).step_by(2).copied().collect::<Vec<_>>();
+    Ok(Output::new()
+        .ints("face_tests_32_33_38", faces)
+        .ints("edge_test13", flags(&edges))
+        .values("edge_test13_max_gap", gaps(&edges))
+        .ints("vertex_test1", vertices.iter().step_by(3).map(|&x| x as i64).collect::<Vec<_>>())
+        .values("vertex_test1_max_gap_3d", vertices.iter().skip(1).step_by(3).copied().collect::<Vec<_>>())
+        .ints("vertex_test1_max_gap_face", vertices.iter().skip(2).step_by(3).map(|&x| x as i64).collect::<Vec<_>>()))
+}
+
+/// The Rust side of shim op 2, in its order (faces, then edges, then vertices: the UV
+/// trim curves test 38 builds stay for the later tests on both sides).
+fn level2_tests(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Vec<f64>> {
+    use solidcore::topology::face::assert_tests as fa;
+    let faces: Vec<FaceId> = b.faces().ids().collect();
+    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    let vertices: Vec<VertexId> = b.vertices().ids().collect();
+    let mut out = vec![0.0, faces.len() as f64, edges.len() as f64, vertices.len() as f64];
+    let flag = |v: bool| if v { 1.0 } else { 0.0 };
+    for f in faces {
+        out.push(flag(fa::assert_test_face32(b, f)?));
+        out.push(flag(fa::assert_test_face33(k, b, f)?));
+        out.push(if b.face(f)?.surface.is_some() {
+            flag(fa::assert_test_face38(k, b, f)?)
+        } else {
+            -1.0
+        });
+    }
+    for e in edges {
+        let (ok, gap) = solidcore::topology::edge::edge_form::assert_test_edge13(k, b, e)?;
+        out.push(flag(ok));
+        out.push(gap);
+    }
+    for v in vertices {
+        let (ok, gap, face) = solidcore::topology::vertex::corner::assert_test_vertex1(k, b, v)?;
+        out.push(flag(ok));
+        out.push(gap);
+        out.push(face.map_or(-1.0, |f| f64::from(f.index())));
+    }
+    Ok(out)
+}
+
+/// Why op 2 refuses mutations 8-10 (null face surface, edge curve, edge use link): the
+/// level-2 tests dereference them unguarded in C++.
+const NULL_LINK_TESTS: &str = "the level-2 tests dereference the nulled link (crash in C++)";
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "topology.assert_valid"
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
+        if i.tests && i.mutation >= 8 {
+            return Ok(Output::rejected(NULL_LINK_TESTS));
+        }
         let (path, block) = block(&i.brep)?;
-        let out = ffi::eval(u8::from(i.capi), &path, &block, args(&i))
-            .map_err(|e| herr(e.to_string()))?;
+        let op = if i.tests { 2 } else { u8::from(i.capi) };
+        let out = ffi::eval(op, &path, &block, args(&i)).map_err(|e| herr(e.to_string()))?;
+        if i.tests {
+            return tests_output(&out);
+        }
         output(&out, i.capi)
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -465,6 +539,12 @@ impl UnitDiff for Runner {
             Err(o) => return Ok(o),
         };
         mutate(&mut b, &i)?;
+        if i.tests {
+            return match level2_tests(&mut k, &mut b) {
+                Ok(out) => tests_output(&out),
+                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            };
+        }
         let mut out = vec![0.0];
         if i.capi {
             let level = match i.level {
@@ -574,6 +654,7 @@ impl UnitDiff for Runner {
             },
             walk: rng.below(4) != 0,
             capi,
+            tests: false,
             mutation,
             index: rng.below(100) as usize,
             value,

@@ -83,6 +83,7 @@ enum Op : int32_t
     OP_SET_TOLERANCE = 14,
     OP_REFRESH_TOLERANCE = 15,
     OP_EXACT = 16,
+    OP_CORNER = 17,
 };
 
 // Status of an op the shim refuses because upstream would dereference null.
@@ -1177,6 +1178,35 @@ void put_gap(std::vector<double>& o, Graph& g, const SmGap* p)
     o.push_back(-3.0);
 }
 
+
+// sm_AssertTestVertex1 and its callees: GetBrep()->GetTolerance() (IsWithinXSectTol3dOfFaces),
+// the face gaps (CalcVertexFaceGap / ComputeUVPoint), GetFaceuse()->GetFace()->GetSurface()
+// (HasParallelFaces, CalcCornerFromFaces) are dereferenced.
+bool ok_corner(SmVertex* v)
+{
+    if (v->GetBrep() == nullptr)
+        return false;
+    for (SmVertexuse* p : uses_of(v))
+    {
+        if (!ok_faceuse(p) || !ok_face_gap(p))
+            return false;
+        SmFaceuse* fu = p->GetFaceuse();
+        if (fu != nullptr && (fu->GetFace() == nullptr || fu->GetFace()->GetSurface() == nullptr))
+            return false;
+    }
+    return true;
+}
+
+void put_corner(std::vector<double>& o, Graph& g, SmBoolean on, SmBoolean found, double gap, const SmPoint3d& best)
+{
+    o.push_back(flg(on));
+    o.push_back(flg(found));
+    o.push_back(gap);
+    put_vec(o, best);
+}
+
+void put_gap_states(std::vector<double>& o, Graph& g);
+
 void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 {
     SmStatus bst;
@@ -1489,6 +1519,70 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back(flg(v->IsExact()));
         o.push_back(v->GetPolyVertex() != NULL ? 1.0 : 0.0);
         v->SetPolyVertex(NULL);
+        break;
+    }
+    case OP_CORNER:
+    {
+        bool has_move = rd.flag();
+        SmPoint3d d = rd.vec();
+        if (has_move)
+            v->SetPoint(v->GetPoint() + d);
+        if (!ok_corner(v))
+        {
+            o.push_back(ST_NULL_DEREF);
+            break;
+        }
+        o.push_back(0.0);
+        // sm_AssertTestVertex1(v, &dMaxGap3d, &pMaxGapFace) as SmVertex::AssertValid calls it
+        double max_gap = -7.0;
+        SmFace* max_face = (SmFace*)0x1;
+        SmBoolean within = v->IsWithinXSectTol3dOfFaces(&max_gap, &max_face);
+        SmBoolean passed = within;
+        o.push_back(flg(within));
+        o.push_back(max_gap);
+        o.push_back((double)g.find(3, max_face));
+        if (within)
+        {
+            SmBoolean found = FALSE;
+            double gap = -7.0;
+            SmPoint3d best;
+            SmBoolean on = v->IsOnFaceCorner(&found, &gap, &best);
+            passed &= on;
+            put_corner(o, g, on, found, gap, best);
+        }
+        o.push_back(flg(passed));
+        // then IsOnFaceCorner on its own
+        {
+            SmBoolean found = FALSE;
+            double gap = -7.0;
+            SmPoint3d best;
+            SmBoolean on = v->IsOnFaceCorner(&found, &gap, &best);
+            put_corner(o, g, on, found, gap, best);
+        }
+        // then HasParallelFaces (an empty face list is read past upstream)
+        SmTArray<SmFace*> fs;
+        v->GetFaces(fs);
+        if (fs.GetSize() == 0)
+            o.push_back(-1.0);
+        else
+        {
+            double tol = SM_ANG_TOL_DEG, min_ang = -7.0, max_par = -7.0;
+            SmFace *f1 = (SmFace*)0x1, *f2 = (SmFace*)0x1;
+            SmPoint2d uv1, uv2;
+            SmBoolean par = v->HasParallelFaces(&tol, &min_ang, &max_par, &f1, &f2, &uv1, &uv2);
+            o.push_back(flg(par));
+            o.push_back(min_ang);
+            o.push_back(max_par);
+            o.push_back((double)g.find(3, f1));
+            o.push_back((double)g.find(3, f2));
+        }
+        // and IsWithinXSectTol3dOfFaces forcing every gap
+        double fgap = -7.0;
+        SmFace* fface = (SmFace*)0x1;
+        o.push_back(flg(v->IsWithinXSectTol3dOfFaces(&fgap, &fface, TRUE)));
+        o.push_back(fgap);
+        o.push_back((double)g.find(3, fface));
+        put_gap_states(o, g);
         break;
     }
     default:

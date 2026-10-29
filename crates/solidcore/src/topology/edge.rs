@@ -29,6 +29,7 @@
 //! | [`vertices`], [`vertexuses`], [`edgeuses`], [`AttributeFilter`] | `SmEdge::GetVertices(SmTArray&, ULONG*)`, `GetVertexuses`, `GetEdgeuses` |
 //! | [`max_gap_3d`], [`max_up_dim_gap_3d`], [`max_down_dim_gap_3d`], [`EdgeGap`], [`MaxGap`] | `SmEdge::GetMaxGap3d`, `GetMaxUpDimGap3d`, `GetMaxDownDimGap3d` |
 //! | [`number_face_occurances`]              | `SmEdge::GetNumberFaceOccurances`                 |
+//! | [`edge_form`] (submodule)               | `SmEdge::IsOnFaceEdgeForm`, `sm_AssertTestEdge13` |
 //! | [`add_oriented_eu_pair`]                | `SmEdge::AddOrientedEUPair`                       |
 //! | [`vertex`], [`start_vertex`], [`end_vertex`], [`other_vertex`], [`start_end_vertices`] | `SmEdge::GetVertex`, `GetStartVertex`, `GetEndVertex`, `GetOtherVertex`, `GetVertices(SmVertex*&, SmVertex*&)` |
 //! | [`insert_manifold_edge_end`]            | `SmEdge::InsertManifoldEdgeEnd`                   |
@@ -107,6 +108,8 @@
 //!   `surface.surface_p5` (and its `CoverCoincidentSurface` to `surface.surface_p3`); the
 //!   two face surfaces are moved out of their faces for the call and back, so the
 //!   covering surface keeps any expansion, as upstream.
+
+pub mod edge_form;
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, EntityRef, Result, SolidError};

@@ -35,6 +35,7 @@ use solidcore::curve::curve::p2::{
 };
 use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::curve::line::Line;
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
@@ -1159,6 +1160,13 @@ enum OpIn {
         a: f64,
         b: f64,
     },
+    /// `IsOnFaceEdgeForm(&dMaxGap3d)` (`SmEdge::AssertValid` test 13) after translating the
+    /// edge curve by `d` (`SmCurve::Transform`; no move for zero).
+    EdgeForm {
+        e: i64,
+        #[serde(default)]
+        d: [f64; 3],
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1384,6 +1392,7 @@ fn resolve(op: &OpIn, c: [usize; 10], b: &Brep) -> Option<OpIn> {
             n: n.clamp(28, ffi::MAX_ODE as u64),
         },
         OpIn::SetInterval { e, a, b } => OpIn::SetInterval { e: es(e), a, b },
+        OpIn::EdgeForm { e, d } => OpIn::EdgeForm { e: es(e), d },
     })
 }
 
@@ -1503,6 +1512,7 @@ fn op_args(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
             (Op::Ode, v)
         }
         OpIn::SetInterval { e, a, b } => (Op::SetInterval, vec![f(*e), *a, *b]),
+        OpIn::EdgeForm { e, d } => (Op::EdgeForm, vec![f(*e), d[0], d[1], d[2]]),
     })
 }
 
@@ -1533,7 +1543,8 @@ fn inexact(op: &OpIn, im: &Imported) -> bool {
         | OpIn::Topological { e, .. }
         | OpIn::Tangent { e, .. }
         | OpIn::Radial { e, .. }
-        | OpIn::Blend { e } => faces_inexact(*e) || curve_inexact(*e),
+        | OpIn::Blend { e }
+        | OpIn::EdgeForm { e, .. } => faces_inexact(*e) || curve_inexact(*e),
         _ => false,
     }
 }
@@ -2354,6 +2365,36 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             ed::set_interval(b, eid(*e), &Extent1d::from_min_max(*a, *hi))?;
             let ivl = ed::interval(b, eid(*e))?;
             out.extend([ivl.min(), ivl.max()]);
+        }
+        OpIn::EdgeForm { e, d } => {
+            let e = eid(*e);
+            let faces = ed::faces(b, e, None)?;
+            // the shim's guard: the gap calculation dereferences the curve and surfaces
+            let mut ok = faces.is_empty() || b.edge(e)?.curve.is_some();
+            for fc in &faces {
+                if b.face(*fc)?.surface.is_none() {
+                    ok = false;
+                }
+            }
+            if !ok {
+                out.push(NULL_DEREF);
+                return Ok(Output::new().values("state", out));
+            }
+            let mut moved = 0.0;
+            if d.iter().any(|&x| x != 0.0) {
+                if let Some(curve) = b.edge_mut(e)?.curve.as_mut() {
+                    let mut place = Axis2Placement::default();
+                    place.translate(Vec3::new(d[0], d[1], d[2]));
+                    match curve.transform(&k, &place, None) {
+                        Ok(()) => {}
+                        Err(err) if err.is_unported() => return Err(err.into()),
+                        Err(_) => moved = 1.0,
+                    }
+                }
+            }
+            out.push(moved);
+            let (ok, gap) = ed::edge_form::is_on_face_edge_form(&k, b, e)?;
+            out.extend([flag(ok), gap]);
         }
     }
     Ok(Output::new().values("state", out))

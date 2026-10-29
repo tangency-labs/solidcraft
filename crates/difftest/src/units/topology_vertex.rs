@@ -47,7 +47,7 @@ use solidcore::query::poly::PolyVertexId;
 use solidcore::surface::surface::p2::DropCurveFail;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::topology::Topology;
-use solidcore::topology::vertex::{self as vx, VertexGap};
+use solidcore::topology::vertex::{self as vx, corner, VertexGap};
 use solidcore::topology::{
     Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
     LoopId, Loopuse, LoopuseId, LoopuseStart, ObjectHandle, Region, RegionId, Shell, ShellId,
@@ -239,6 +239,14 @@ enum OpIn {
         v: i64,
         exact: bool,
         poly: bool,
+    },
+    /// `sm_AssertTestVertex1` (as `SmVertex::AssertValid` calls it), then
+    /// `IsOnFaceCorner`, `HasParallelFaces` and a forced `IsWithinXSectTol3dOfFaces`,
+    /// after moving the vertex by `d` (`SetPoint`) when given.
+    Corner {
+        v: i64,
+        #[serde(default)]
+        d: Option<[f64; 3]>,
     },
 }
 
@@ -1349,6 +1357,7 @@ fn resolve(op: &OpIn, c: [usize; 10], b: &Brep) -> Result<OpIn, Box<Output>> {
             operation,
         },
         OpIn::SetPoint { v, p } => OpIn::SetPoint { v: vs(v), p },
+        OpIn::Corner { v, d } => OpIn::Corner { v: vs(v), d },
         OpIn::SetTolerance {
             v,
             tol,
@@ -1411,6 +1420,13 @@ fn op_args(op: &OpIn) -> (Op, Vec<f64>) {
         ),
         OpIn::RefreshTolerance { v, nested } => (Op::RefreshTolerance, vec![f(*v), flag(*nested)]),
         OpIn::Exact { v, exact, poly } => (Op::Exact, vec![f(*v), flag(*exact), flag(*poly)]),
+        OpIn::Corner { v, d } => {
+            let m = d.unwrap_or([0.0; 3]);
+            (
+                Op::Corner,
+                vec![f(*v), flag(d.is_some()), m[0], m[1], m[2]],
+            )
+        }
     }
 }
 
@@ -1500,6 +1516,50 @@ fn put_list<T>(
 fn put_flag(q: &mut Vec<i64>, r: Result<bool, SolidError>) -> Result<(), SolidError> {
     q.push(or_null(r)?.map_or(NULL_DEREF, i64::from));
     Ok(())
+}
+
+/// A face as the shim's `g.find(3, face)`.
+fn face_index(f: Option<FaceId>) -> f64 {
+    f.map_or(-1.0, |f| f64::from(f.index()))
+}
+
+/// The corner outputs as the shim's `put_corner`.
+fn put_corner(out: &mut Vec<f64>, on: bool, c: &corner::FaceCorner) {
+    out.extend([flag(on), flag(c.found_point), c.max_gap_3d]);
+    out.extend([c.best_point.x, c.best_point.y, c.best_point.z]);
+}
+
+/// The `Corner` op after the move, as the shim's `OP_CORNER`.
+fn corner_op(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<Vec<f64>, SolidError> {
+    let mut out = vec![0.0];
+    // sm_AssertTestVertex1, spelled out as the shim does
+    let (within, max_gap, max_face) = corner::is_within_xsect_tol_3d_of_faces(k, b, v, false)?;
+    let mut passed = within;
+    out.extend([flag(within), max_gap, face_index(max_face)]);
+    if within {
+        let (on, c) = corner::is_on_face_corner(k, b, v)?;
+        passed &= on;
+        put_corner(&mut out, on, &c);
+    }
+    out.push(flag(passed));
+    let (on, c) = corner::is_on_face_corner(k, b, v)?;
+    put_corner(&mut out, on, &c);
+    if vx::faces(b, v)?.is_empty() {
+        out.push(-1.0);
+    } else {
+        let p = corner::has_parallel_faces(k, b, v, Some(solidcore::geom::tol::ANG_TOL_DEG))?;
+        out.extend([
+            flag(p.parallel),
+            p.min_dihedral_ang_deg,
+            p.max_parallel_face_gap,
+            face_index(p.face1),
+            face_index(p.face2),
+        ]);
+    }
+    let (within, gap, face) = corner::is_within_xsect_tol_3d_of_faces(k, b, v, true)?;
+    out.extend([flag(within), gap, face_index(face)]);
+    gap_states(b, &mut out);
+    Ok(out)
 }
 
 /// The cached gap states of every vertex use, as the shim's `put_gap_states`.
@@ -1699,7 +1759,10 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     // The gap, topological-vertex and pole queries solve against the face surfaces: a face
     // surface the export holds only as its B-spline part (a cone, sphere, torus, revolution
     // or extrusion subclass) is a stand-in whose solves differ from the analytic ones.
-    if let (Some(ty), OpIn::Gaps { .. } | OpIn::Topological { .. } | OpIn::OnPole { .. }) =
+    if let (
+        Some(ty),
+        OpIn::Gaps { .. } | OpIn::Topological { .. } | OpIn::OnPole { .. } | OpIn::Corner { .. },
+    ) =
         (inexact, &op)
     {
         let (unit, symbol) = match ty {
@@ -1914,6 +1977,27 @@ fn run_rust_op(b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             let mut out = Vec::new();
             gap_states(b, &mut out);
             out
+        }
+        OpIn::Corner { v, d } => {
+            let v = vid(*v);
+            if let Some(d) = d {
+                let mut env = NotifyEnv::new(b);
+                let p = vx::point(b, v)? + Vec3::new(d[0], d[1], d[2]);
+                vx::set_point(
+                    b,
+                    v,
+                    p,
+                    &mut env.records,
+                    &mut env.attributes,
+                    None,
+                    env.this,
+                    &vertexuse_ref,
+                )?;
+            }
+            match or_null(corner_op(&k, b, v))? {
+                Some(out) => out,
+                None => vec![NULL_DEREF as f64],
+            }
         }
         OpIn::SetPoint { v, p } => {
             let mut env = NotifyEnv::new(b);

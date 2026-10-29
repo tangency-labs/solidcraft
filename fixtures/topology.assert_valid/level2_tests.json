@@ -1,0 +1,3786 @@
+{
+ "cases": [
+  {
+   "name": "l2_box_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_box_far_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      1000.0,
+      -2000.0,
+      500.0
+     ],
+     "size": [
+      0.001,
+      0.002,
+      0.004
+     ]
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_box_big_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      100,
+      200,
+      300
+     ]
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_sphere_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_cylinder_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_cone_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_cone_apex_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius_base": 1,
+     "radius_top": 0,
+     "height": 2
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_torus_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_network_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_thin_face_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        0,
+        0,
+        0
+       ],
+       "n": [
+        0,
+        0,
+        1
+       ]
+      }
+     },
+     "dom": [
+      0,
+      0,
+      1e-13,
+      1
+     ]
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_thin_face2_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "plane": {
+       "o": [
+        1,
+        2,
+        3
+       ],
+       "n": [
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "dom": [
+      -1,
+      -1,
+      -0.9999999999995,
+      1
+     ]
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face0_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.001
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face1_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.001
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face2_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2.0,
+      -3.0,
+      1.0
+     ],
+     "axis": 2,
+     "radii": [
+      3.0,
+      1.0
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face3_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2.0,
+      -3.0,
+      1.0
+     ],
+     "axis": 2,
+     "radii": [
+      3.0,
+      1.0
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face4_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2000.0,
+      -3000.0,
+      1000.0
+     ],
+     "axis": 2,
+     "radii": [
+      3000.0,
+      1000.0
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face5_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": false,
+     "origin": [
+      2000.0,
+      -3000.0,
+      1000.0
+     ],
+     "axis": 2,
+     "radii": [
+      3000.0,
+      1000.0
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face6_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": true,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.003
+     ],
+     "angles": [
+      0.0,
+      360.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_face7_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "ellipse_face",
+     "circle": true,
+     "origin": [
+      0.002,
+      -0.003,
+      0.001
+     ],
+     "axis": 2,
+     "radii": [
+      0.003,
+      0.003
+     ],
+     "angles": [
+      30.0,
+      210.0
+     ],
+     "natural": [
+      -4.0,
+      3.0
+     ],
+     "inside_out": false,
+     "oob": false
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_box_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/box.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_cylinder_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/cylinder.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_extrusion_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/extrusion.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_fillet_cut_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/fillet_cut.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_revolution_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/revolution.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_revolution_360_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/revolution_360.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_sphere_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/sphere.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_pyramid_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/pyramid.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_nurb_fillet_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/nurb_fillet.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_OffsetBoxCylOnCorner_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/OffsetBoxCylOnCorner.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_OffsetBoxWithBoss_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/OffsetBoxWithBoss.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_InsetCone_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/InsetCone.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_off_extrusion_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/off_extrusion.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Solids_mouse_1_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/mouse_1.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Endcap_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_Mouse_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_box_with_large_fillet_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_cone_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_disk_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_ellips_ts2_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_plane_square_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_file_sphere_tests",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "tests": true
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v-1_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": -1.0,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v0.001_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_box_tests_m6_v1e-13_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 1e-13,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_box_tests_m1_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m1_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m1_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m1_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m2_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m2_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m2_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m2_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m3_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m3_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m3_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m3_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m6_v0.001_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m1_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m1_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m1_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m1_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m2_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m2_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m2_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m2_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m3_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m3_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m3_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cylinder_tests_m3_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cylinder",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1,
+     "height": 2
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m6_v0.001_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m1_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m1_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m1_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m1_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m2_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m2_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m2_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m2_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m3_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m3_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m3_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_sphere_tests_m3_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "sphere",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_cone_tests_m6_v0.001_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_cone_tests_m1_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cone_tests_m1_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cone_tests_m1_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cone_tests_m1_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cone_tests_m2_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cone_tests_m2_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cone_tests_m2_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cone_tests_m2_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cone_tests_m3_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cone_tests_m3_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_cone_tests_m3_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_cone_tests_m3_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "cone",
+     "origin": [
+      1,
+      1,
+      1
+     ],
+     "radius_base": 2,
+     "radius_top": 0.5,
+     "height": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_torus_tests_m6_v0.001_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_torus_tests_m1_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_torus_tests_m1_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_torus_tests_m1_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_torus_tests_m1_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_torus_tests_m2_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_torus_tests_m2_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_torus_tests_m2_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_torus_tests_m2_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_torus_tests_m3_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_torus_tests_m3_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_torus_tests_m3_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_torus_tests_m3_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "torus",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "major": 3,
+     "minor": 1
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m6_v0.001_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m1_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m1_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m1_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m1_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m2_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m2_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m2_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m2_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m3_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m3_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m3_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_Solids_l_shape_with_boss_tests_m3_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Solids/l_shape_with_boss.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i1",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 1
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i2",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 2
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i4",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 4
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i5",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 5
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i6",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 6
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m6_v0.001_i7",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 6,
+    "value": 0.001,
+    "index": 7
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m1_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m1_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m1_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m1_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 1,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m2_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m2_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m2_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m2_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 2,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m3_v1e-12_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m3_v1e-12_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 1e-12,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m3_v0.1_i0",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_file_plane_circ_tests_m3_v0.1_i3",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "tests": true,
+    "mutation": 3,
+    "value": 0.1,
+    "index": 3
+   }
+  },
+  {
+   "name": "l2_box_tests_m8_rejected",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 8,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m9_rejected",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 9,
+    "index": 0
+   }
+  },
+  {
+   "name": "l2_box_tests_m10_rejected",
+   "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
+   "inputs": {
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      1,
+      2,
+      3
+     ]
+    },
+    "tests": true,
+    "mutation": 10,
+    "index": 0
+   }
+  }
+ ]
+}
