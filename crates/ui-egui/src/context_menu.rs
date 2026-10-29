@@ -249,6 +249,9 @@ pub struct MenuState {
     pub over_geometry: bool,
     /// The plane under the cursor when the viewport menu opened: it offers a sketch on it.
     pub plane: Option<String>,
+    /// The section plane whose cut face was under the cursor when the viewport menu opened: it
+    /// offers to turn it off.
+    pub section_plane: Option<u64>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -638,6 +641,11 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.selectOther", "Select Other…", "select").key("Hold click"));
         v.push(Item::sep());
     }
+    // A section's cut face: turn its plane off (the whole section when it has only that one).
+    if let Some(plane) = app.menu.section_plane.filter(|id| app.session.section.iter().any(|c| c.id == *id)) {
+        v.push(act("ui.sectionViewOff", "Turn Off Section View", "section").with(json!({ "plane": plane })));
+        v.push(Item::sep());
+    }
     if app.session.active_sketch.is_some() {
         v.extend(sketch_entity_items(app));
         v.push(Item::sep());
@@ -683,6 +691,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
         let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
+        // A planar face's plane starts a section, or joins the one on show.
+        if let Some(face @ Sel::Face { body, index, .. }) = sel.iter().find(|s| matches!(s, Sel::Face { .. }))
+            && crate::dialogs::planar_face(&app.session, body, *index).is_some()
+        {
+            v.push(act("ui.sectionView", "Section View", "section").with(json!({ "face": face })));
+        }
         v.push(Item::sep());
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
@@ -1597,6 +1611,20 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             app.tree.hidden_section.clear();
             drop(app.run("inspect.section", json!({"clear": true})));
         }
+        "ui.sectionView" => {
+            if let Some(face) = p.get("face").and_then(|f| serde_json::from_value::<Sel>(f.clone()).ok()) {
+                section_view(app, face);
+            }
+        }
+        "ui.sectionViewOff" => {
+            let id = p.get("plane").and_then(Value::as_u64);
+            if app.session.section.len() > 1 && id.is_some_and(|id| app.session.section.iter().any(|c| c.id == id)) {
+                drop(app.run("inspect.section", json!({ "remove": id })));
+            } else {
+                app.tree.hidden_section.clear();
+                drop(app.run("inspect.section", json!({"clear": true})));
+            }
+        }
         "ui.editSection" => crate::dialogs::edit_section(app),
         "ui.sectionVisible" => crate::browser::set_section_shown(app, p.get("visible").and_then(Value::as_bool).unwrap_or(true)),
         "ui.fit" => app.animate_view("fit"),
@@ -1878,6 +1906,21 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
     app.set_status(message, false);
 }
 
+/// Section View on a face: the Section Analysis dialog on the face's plane (its outward normal,
+/// so the arrow dragged inward cuts into the part), adding the plane to a section on show.
+fn section_view(app: &mut SolveApp, face: Sel) {
+    let adding = !app.session.section.is_empty();
+    app.start_section_edit();
+    if let Some(d) = app.dialog.as_mut()
+        && let crate::dialogs::Kind::Section { add, .. } = &mut d.kind
+    {
+        *add = adding;
+        if let Some(plane) = d.inputs.first_mut() {
+            plane.items = vec![face];
+        }
+    }
+}
+
 /// Delete what is selected: sketch entities, features, and bodies (a Remove feature).
 pub fn delete(app: &mut SolveApp) {
     crate::delete::delete_selection(app);
@@ -2088,6 +2131,7 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     app.menu.picked = None;
     let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
+    app.menu.section_plane = crate::view_pick::section_plane_at(app, at).map(|c| c.id);
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
     app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
         Sel::Plane { name } => Some(name),

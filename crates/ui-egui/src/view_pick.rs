@@ -337,6 +337,27 @@ fn section_cap(
     Some(CapHit { t, body, plane: *planes.get(i)? })
 }
 
+/// The section plane whose cut face lies under the viewport point `pos` (window points), nearer
+/// than any face the section keeps.
+pub(crate) fn section_plane_at(app: &SolveApp, pos: Pos2) -> Option<SectionPlane> {
+    let section = crate::viewport::section_planes(app);
+    if section.is_empty() {
+        return None;
+    }
+    let proj = crate::viewport::projection(app, app.viewport.rect?);
+    let (o, d) = proj.ray(pos);
+    let raw = Value::Null;
+    let input = Input { raw: &raw, pixel: Some(pos), o, d };
+    let st = crate::open_meshing::shown_world(app);
+    let bounds = crate::viewport::body_bounds(app, &st);
+    let active_bodies = app.session.active_occurrence_path.as_ref().and_then(|q| app.session.occurrence_bodies(q, true).ok());
+    let replaced = app.preview.effective_replaced();
+    let mut cands = face_candidates(app, &st, &bounds, &input, &active_bodies, replaced, false);
+    cands.sort_by(|a, b| a.t.total_cmp(&b.t));
+    let first_kept = cands.iter().find(|c| section_keeps(&section, c.point)).map(|c| c.t);
+    section_cap(app, &st, &bounds, &input, &section, first_kept, false, replaced, &active_bodies).map(|c| c.plane)
+}
+
 /// The body the ray `o + d·t` is inside of at `t_cap` (where it crosses the section plane): an
 /// odd number of mesh crossings before it. The walk re-raycasts each body past every crossing
 /// it finds, bounded per body. The viewport's picker asks the same, so a cut cap hides what lies

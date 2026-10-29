@@ -1,5 +1,6 @@
 //! Section Analysis in the browser (#822): an Analysis folder lists it with an eye to hide and
-//! show it, and its menu edits or deletes it.
+//! show it, and its menu edits or deletes it. In the viewport, a planar face's menu starts a
+//! section on it (or adds its plane), and a cut face's menu turns its plane off.
 
 use egui::pos2;
 use serde_json::json;
@@ -266,4 +267,130 @@ fn section_ribbon_toggle_and_setting_edit_have_separate_intent_and_compatibility
     h.app.start("inspect.section");
     assert!(h.app.dialog.is_some());
     assert_eq!(h.app.session.section, cut);
+}
+
+/// A box seen from the home view, the window drawn.
+fn box_in_view() -> Harness {
+    let mut h = harness();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.cam = solidcraft_engine::view::home_camera(&h.app.session);
+    h.frames(3);
+    h
+}
+
+/// Right-click the world point `at` and read the menu's labels.
+fn menu_at(h: &mut Harness, at: [f64; 3]) -> Vec<String> {
+    crate::context_menu::close(&mut h.app);
+    h.frames(1);
+    let p = h.at(&json!({"world": at})).unwrap();
+    h.call("ui.menu", json!({"x": p[0], "y": p[1]}));
+    h.frames(2);
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    menu["items"].as_array().map(|items| items.iter().filter_map(|i| i["label"].as_str().map(str::to_owned)).collect()).unwrap_or_default()
+}
+
+fn pick(h: &mut Harness, label: &str) {
+    assert_eq!(h.call("ui.menuPick", json!({"item": label}))["ok"], true, "{label}");
+    h.frames(3);
+}
+
+/// Sets the open Section Analysis dialog's distance.
+fn set_offset(h: &mut Harness, value: &str) {
+    if let Some(crate::dialogs::Kind::Section { offset, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *offset = value.into();
+    }
+}
+
+/// Section View on a planar face starts the Section Analysis dialog on the face's plane, with
+/// its outward normal: at distance 0 it cuts nothing, and a distance into the part cuts it.
+#[test]
+fn section_view_on_a_face_starts_a_section_on_its_plane() {
+    let mut h = box_in_view();
+    let labels = menu_at(&mut h, [20.0, 15.0, 20.0]);
+    assert!(labels.iter().any(|l| l == "Section View"), "{labels:?}");
+    assert!(!labels.iter().any(|l| l == "Turn Off Section View"), "no section yet: {labels:?}");
+    pick(&mut h, "Section View");
+    let (offset, flip, plane) = section_dialog(&h);
+    assert_eq!((offset.as_str(), flip), ("0 mm", false));
+    assert!(matches!(plane[..], [solidcraft_engine::Sel::Face { .. }]), "{plane:?}");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Section { add: false, .. })));
+    let preview = crate::viewport::section_planes(&h.app);
+    let [cut] = preview[..] else { panic!("one plane: {preview:?}") };
+    assert!(
+        (cut.normal - solidcraft_engine::geom::Vec3::Z).len() < 1e-9 && (cut.origin.z - 20.0).abs() < 1e-9,
+        "the top face's outward plane: {cut:?}"
+    );
+    set_offset(&mut h, "-5 mm");
+    ok(&mut h);
+    let (origin, normal) = only_cut(&h);
+    assert!((normal - solidcraft_engine::geom::Vec3::Z).len() < 1e-9 && (origin.z - 15.0).abs() < 1e-9, "{origin:?} {normal:?}");
+}
+
+/// With a section on, Section View on another face adds that face's plane to it: the dialog
+/// says so, the preview keeps the planes on show, and OK leaves both.
+#[test]
+fn section_view_adds_a_face_plane_to_the_section_on_show() {
+    let mut h = box_in_view();
+    h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    h.frames(3);
+    let labels = menu_at(&mut h, [40.0, 22.0, 10.0]);
+    assert!(labels.iter().any(|l| l == "Section View"), "{labels:?}");
+    pick(&mut h, "Section View");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Section { add: true, .. })));
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:hint:section_add").is_some(), "the dialog says the plane joins the section");
+    assert_eq!(crate::viewport::section_planes(&h.app).len(), 2, "the preview keeps the section's plane");
+    set_offset(&mut h, "-20 mm");
+    ok(&mut h);
+    let planes: Vec<_> = h.app.session.section.iter().map(|c| (c.id, c.normal)).collect();
+    assert_eq!(planes.len(), 2, "{planes:?}");
+    assert!((planes[1].1 - solidcraft_engine::geom::Vec3::X).len() < 1e-9 && (h.app.session.section[1].origin.x - 20.0).abs() < 1e-9, "{planes:?}");
+}
+
+/// A curved face has no plane: its menu offers no Section View.
+#[test]
+fn section_view_is_not_offered_on_a_curved_face() {
+    let mut h = harness();
+    h.app.run("solid.cylinder", json!({"base": [0, 0, 0], "radius": 10, "height": 20})).unwrap();
+    h.app.cam = solidcraft_engine::view::home_camera(&h.app.session);
+    h.frames(3);
+    let side = menu_at(&mut h, [10.0 * 0.6, -10.0 * 0.8, 10.0]);
+    assert!(side.iter().any(|l| l == "Look At") && !side.iter().any(|l| l == "Section View"), "{side:?}");
+    let top = menu_at(&mut h, [0.0, 0.0, 20.0]);
+    assert!(top.iter().any(|l| l == "Section View"), "the flat end is planar: {top:?}");
+}
+
+/// Turn Off Section View on a cut face: with one plane it turns the section off; with two it
+/// takes out the plane whose cut face was clicked and leaves the other.
+#[test]
+fn turn_off_section_view_removes_the_clicked_plane() {
+    let mut h = box_in_view();
+    h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    h.frames(3);
+    let labels = menu_at(&mut h, [20.0, 15.0, 10.0]);
+    assert!(labels.iter().any(|l| l == "Turn Off Section View"), "the cut face's menu: {labels:?}");
+    pick(&mut h, "Turn Off Section View");
+    assert!(h.app.session.section.is_empty(), "one plane: the section is off");
+
+    // Two planes cut a quarter away (x > 20, y < 15): each cut face is its own plane's.
+    let two = |h: &mut Harness| {
+        h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+        h.app.run("inspect.section", json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+        h.frames(3);
+    };
+    two(&mut h);
+    let labels = menu_at(&mut h, [20.0, 7.0, 10.0]);
+    assert!(labels.iter().any(|l| l == "Turn Off Section View"), "the second plane's cut face: {labels:?}");
+    pick(&mut h, "Turn Off Section View");
+    let left: Vec<u64> = h.app.session.section.iter().map(|c| c.id).collect();
+    assert_eq!(left, [1], "the clicked plane goes, the other stays");
+    two(&mut h);
+    menu_at(&mut h, [30.0, 15.0, 10.0]);
+    pick(&mut h, "Turn Off Section View");
+    let left: Vec<(u64, f64)> = h.app.session.section.iter().map(|c| (c.id, c.normal.x)).collect();
+    assert_eq!(left, [(2, 1.0)], "the first plane's cut face takes out the first plane");
+
+    // On a face the section keeps, the menu has no such item.
+    let labels = menu_at(&mut h, [10.0, 25.0, 20.0]);
+    assert!(labels.iter().any(|l| l == "Section View") && !labels.iter().any(|l| l == "Turn Off Section View"), "{labels:?}");
 }
