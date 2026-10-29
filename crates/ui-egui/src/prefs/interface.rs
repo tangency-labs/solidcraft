@@ -351,6 +351,11 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let check = setting::status_bar(app, ui).on_hover_text(app.tr("prefs.status_bar_note"));
                         crate::scenario::publish_target("prefs:status_bar", check.rect);
                     });
+                    // The operations under way, with their Cancel, in the view's corner.
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::operations_panel(app, ui).on_hover_text(app.tr("prefs.operations_panel_note"));
+                        crate::scenario::publish_target("prefs:operations_panel", check.rect);
+                    });
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));
                     ui_kit::text(ui, app.tr("prefs.history_sketches_note"), ui_kit::Text::Hint("history_sketches"));
                     ui_kit::LayoutPreview {
