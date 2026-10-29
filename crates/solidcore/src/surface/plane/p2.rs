@@ -1476,7 +1476,8 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
         // SmCone::IntersectWithPlane, which hides the surface of revolution's; the
         // orders and the UV curves are swapped
         SurfaceKind::Cone(cone) => {
-            // the plane's boxes take its face's tolerance
+            // the plane's boxes take its face's tolerance; the zone tolerances of the
+            // cone's face (`other`) and the plane's (`this`) are for WR-510 only
             let (need, mut x) = cone.intersect_with_plane_owned(
                 k,
                 other_uv_domain,
@@ -1484,6 +1485,7 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
                 PlaneOwner::of(this)?,
                 uv_domain,
                 approx_tol_3d,
+                [other.owner_zone_tol_3d(), this.owner_zone_tol_3d()],
             )?;
             core::mem::swap(&mut x.surface1_uv_curves, &mut x.surface2_uv_curves);
             (need_nurb_intersection, *out) = (need, x);

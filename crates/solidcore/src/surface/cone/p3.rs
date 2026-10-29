@@ -34,6 +34,10 @@
 //! parallel-cylinder spans use both requested domains converted to STEP, instead of
 //! the full cylinders' axial extents. Conversion errors propagate; the original
 //! tolerance branches are kept. This works independently of the midpoint option.
+//! Opt-in ([`UpstreamFixes::cylinder_plane_tangent_within_tolerance`](crate::kernel::UpstreamFixes::cylinder_plane_tangent_within_tolerance), WR-510 / #1525):
+//! a plane parallel to a cylinder's axis is also tangent when it lies within the zone
+//! tolerance of a bounded face's wall along a line (the larger of the cone's and the
+//! plane's face tolerances, 0 without a face); bare surfaces keep upstream's test.
 //! No input-driven recursion is introduced.
 
 use super::{Cone, ConeStepInversion};
@@ -323,12 +327,15 @@ impl Cone {
             PlaneOwner::NoFace,
             other_domain,
             approx_tol,
+            [None, None],
         )
     }
 
     /// [`Cone::intersect_with_plane`] with the plane's owner: its box is expanded by the
     /// tolerance of the plane's face (`GetFace()->GetTolerance()`), else by
-    /// `SM_ZONE_TOL_3D`.
+    /// `SM_ZONE_TOL_3D`. `zone_tols` are the zone tolerances of the cone's face and of
+    /// the plane's face (`None`: no face, 0), read only by the opt-in
+    /// `cylinder_plane_tangent_within_tolerance` test.
     ///
     /// # Errors
     ///
@@ -342,6 +349,7 @@ impl Cone {
         plane_owner: PlaneOwner,
         other_domain: &Extent2d,
         approx_tol: Option<f64>,
+        zone_tols: [Option<f64>; 2],
     ) -> Result<(bool, SurfaceIntersection)> {
         let mut out = SurfaceIntersection::default();
         let tol = approx_tol.map_or(EFF_ZERO_SQRT, |t| approx_tol3d(k, t));
@@ -378,10 +386,19 @@ impl Cone {
                 if distance.abs() > bot_radius + tol {
                     return Ok((false, out));
                 }
-                if distance.abs() >= bot_radius
+                // Upstream: tangent, or the two crossing lines are within tolerance of each
+                // other. WR-510 (#1525; tangency-labs/smlib#55, merged as bd20f6e): with the
+                // opt-in fix, also tangent within the zone tolerance of a face either surface
+                // bounds, so a plane a hair off a face's wall is one line; bare surfaces
+                // (zone tolerance 0) keep their two lines.
+                let mut tangent = distance.abs() >= bot_radius
                     || (distance.abs() > bot_radius - tol
-                        && bot_radius * bot_radius - distance * distance < tol * tol)
-                {
+                        && bot_radius * bot_radius - distance * distance < tol * tol);
+                if k.fixes.cylinder_plane_tangent_within_tolerance {
+                    let zone_tol = zone_tols[0].unwrap_or(0.0).max(zone_tols[1].unwrap_or(0.0));
+                    tangent = tangent || distance.abs() > bot_radius - zone_tol;
+                }
+                if tangent {
                     let dir = if distance > 0.0 { -normal } else { normal };
                     if angle_in_sweep(self, axis, dir, ang_tol)? {
                         let start = bottom + bot_radius * dir;
@@ -1114,8 +1131,19 @@ impl Cone {
         };
         let needs_more = match target {
             IntersectTarget::Plane(p) => {
-                let (more, found) =
-                    self.intersect_with_plane(k, domain, p, other_domain, approx_tol_3d)?;
+                // the zone tolerances of this cone's face and of the plane's (WR-510)
+                let (more, found) = self.intersect_with_plane_owned(
+                    k,
+                    domain,
+                    p,
+                    PlaneOwner::NoFace,
+                    other_domain,
+                    approx_tol_3d,
+                    [
+                        this.and_then(Surface::owner_zone_tol_3d),
+                        other_surface.and_then(Surface::owner_zone_tol_3d),
+                    ],
+                )?;
                 *out = found;
                 more
             }
@@ -1374,6 +1402,95 @@ mod tests {
         let (more, out) = a.intersect_with_cone(&k, &da, &b, &db, Some(1e-7)).unwrap();
         assert!(!more);
         assert_axial_lines(&out, 2, 4.0, 9.0);
+    }
+
+    /// Section of the radius-3 cylinder along z by the plane `x = d`, parallel to its axis,
+    /// the plane owned as `owner` and the zone tolerances `zone_tols` (cone, plane).
+    fn wall_section(
+        k: &Kernel,
+        c: &Cone,
+        d: f64,
+        owner: PlaneOwner,
+        zone_tols: [Option<f64>; 2],
+    ) -> SurfaceIntersection {
+        let plane = Plane::from_normal(Vec3::new(d, 0.0, 0.0), Vec3::X);
+        let plane_domain = Extent2d::from_bounds(-20.0, -20.0, 20.0, 20.0);
+        let (more, out) = c
+            .intersect_with_plane_owned(
+                k,
+                &axial_domain(k, c, 0.0, 12.0),
+                &plane,
+                owner,
+                &plane_domain,
+                None,
+                zone_tols,
+            )
+            .unwrap();
+        assert!(!more);
+        out
+    }
+
+    /// WR-510 (#1525): a plane parallel to a cylinder's axis, turned a hair off its wall,
+    /// dips in by 1e-11, far below `tol` = 1e-6, but its two crossing lines each lie
+    /// `sqrt(2 R depth)` = 7.7e-6 from the foot, 1.5e-5 apart, so upstream cuts the wall
+    /// in two lines. Within a face's zone tolerance (1e-5) it is one tangent line.
+    #[test]
+    fn issue1525_plane_within_tolerance_of_wall_is_tangent() {
+        let mut k = Kernel::default();
+        let mut c = Cone::new_cylinder_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            3.0,
+            0.0,
+            360.0,
+            12.0,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(&k).unwrap();
+        let hair = 3.0 - 1e-11;
+        let bare = [None, None];
+        let zone = Some(1e-5);
+
+        // Bare surfaces keep their two crossing lines, with the flag on as well.
+        let out = wall_section(&k, &c, hair, PlaneOwner::NoFace, bare);
+        assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+        k.fixes.cylinder_plane_tangent_within_tolerance = true;
+        let out = wall_section(&k, &c, hair, PlaneOwner::NoFace, bare);
+        assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+
+        // A face's zone tolerance, on the plane's face or on the cone's, makes the
+        // plane one tangent line on the wall with the flag on; the flag off keeps two.
+        for (owner, zone_tols) in [
+            (PlaneOwner::Face(zone), [None, zone]),
+            (PlaneOwner::NoFace, [zone, None]),
+        ] {
+            k.fixes.cylinder_plane_tangent_within_tolerance = false;
+            let out = wall_section(&k, &c, hair, owner, zone_tols);
+            assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+
+            k.fixes.cylinder_plane_tangent_within_tolerance = true;
+            let out = wall_section(&k, &c, hair, owner, zone_tols);
+            assert_eq!(
+                out.curve_types,
+                vec![TsectCurveType::Tangent],
+                "{owner:?} {zone_tols:?}"
+            );
+            let CurveKind::Line(line) = out.curves_3d[0].kind() else {
+                panic!("expected an analytic line");
+            };
+            let p = line.evaluate_point(line.natural_interval().min());
+            assert!((p.x - 3.0).abs() < 1e-9 && p.y.abs() < 1e-9, "{p:?}");
+        }
+
+        // Clearly cutting the cylinder: two crossing lines; clearly outside: nothing.
+        let out = wall_section(&k, &c, 2.0, PlaneOwner::NoFace, bare);
+        assert_eq!(out.curve_types, vec![TsectCurveType::Crossing; 2]);
+        assert!(wall_section(&k, &c, 4.0, PlaneOwner::NoFace, bare)
+            .curves_3d
+            .is_empty());
     }
 
     #[test]

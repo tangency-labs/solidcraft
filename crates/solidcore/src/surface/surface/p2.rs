@@ -2612,9 +2612,16 @@ impl Surface {
                     crate::surface::plane::p2::PlaneOwner::NoFace,
                 ],
             ),
-            SurfaceKind::Cone(s) => {
-                s.intersect_with_plane(k, uv_domain, plane, other_uv_domain, approx_tol_3d)
-            }
+            // the plane is taken as without owner; this cone's face tolerance is for WR-510
+            SurfaceKind::Cone(s) => s.intersect_with_plane_owned(
+                k,
+                uv_domain,
+                plane,
+                crate::surface::plane::p2::PlaneOwner::NoFace,
+                other_uv_domain,
+                approx_tol_3d,
+                [self.owner_zone_tol_3d(), None],
+            ),
             SurfaceKind::Sphere(s) => {
                 s.intersect_with_plane(k, uv_domain, plane, other_uv_domain, approx_tol_3d)
             }
