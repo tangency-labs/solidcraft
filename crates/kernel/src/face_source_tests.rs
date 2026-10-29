@@ -27,6 +27,9 @@ fn box_certificates_are_six_construction_roles_with_dimension_stable_axes() {
         (Vec3::new(2., 3., 4.), Vec3::new(12., 23., 34.)),
         (Vec3::new(12., 23., 34.), Vec3::new(2., 3., 4.)),
         (Vec3::new(2., -8., 4.), Vec3::new(22., 43., 54.)),
+        // A side far shorter than the body (a 0.3 mm label of a metre): its walls' edges lie
+        // closer together than the sweep's body-sized nearness, and each keeps its own role.
+        (Vec3::new(500., -0.3, 1400.), Vec3::new(1500., 0., 1800.)),
     ] {
         let body = crate::box_solid(a, b).unwrap().with_box_certificate(42).unwrap();
         let mut roles = std::collections::HashSet::new();

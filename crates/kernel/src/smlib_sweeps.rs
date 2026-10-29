@@ -289,12 +289,22 @@ mod imp {
         let end_cap: Vec<bool> = (0..n).map(|f| end.is_some_and(|e| flat(f, e))).collect();
         let cap = |f: usize| start_cap.get(f).copied().unwrap_or(false) || end_cap.get(f).copied().unwrap_or(false);
         let mut swept: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
-        for (poly, fs) in m.edges.iter().zip(&m.edge_faces) {
-            if poly.len() < 2 || !poly.iter().all(|q| start.height(*q).abs() <= flat_tol) {
-                continue;
-            }
-            for s in edges {
-                if poly.windows(2).any(|w| s.at.dist_to_segment(w[0], w[1]) <= near) {
+        // Each seed lies on its own piece's edge (within the mesh's sag on a curve); `near` is
+        // sized to the body, so on a side shorter than it (a 0.3 mm wall of a 1 m label) the
+        // neighbours' edges are near too. The seed marks only the edges nearest it: the one it
+        // lies on, or both pieces of an edge split at its middle.
+        let start_edges: Vec<(&Vec<Vec3>, &Vec<u32>)> = m
+            .edges
+            .iter()
+            .zip(&m.edge_faces)
+            .filter(|(poly, _)| poly.len() >= 2 && poly.iter().all(|q| start.height(*q).abs() <= flat_tol))
+            .collect();
+        for s in edges {
+            let dist = |poly: &[Vec3]| poly.windows(2).map(|w| s.at.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+            let ds: Vec<f64> = start_edges.iter().map(|(poly, _)| dist(poly)).collect();
+            let nearest = ds.iter().copied().fold(f64::INFINITY, f64::min);
+            for ((_, fs), d) in start_edges.iter().zip(&ds) {
+                if *d <= near && *d <= nearest + flat_tol {
                     for f in fs.iter().map(|f| *f as usize).filter(|f| !cap(*f)) {
                         if let Some(set) = swept.get_mut(f) {
                             set.insert(s.piece);
