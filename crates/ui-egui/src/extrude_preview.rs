@@ -310,7 +310,7 @@ mod tests {
         harness.app.session.selection = vec![Sel::Face { body: "Stock".into(), index: face.index, point: face.centroid }];
         harness.app.start("solid.extrude");
         let original = harness.app.session.doc.clone();
-        let undo = harness.app.session.undo.len();
+        let undo = harness.app.session.history.len();
         let mut preview = StraightPreview::default();
         let colors = Colors::from_tokens(&crate::theme::Tokens::get());
         let mut pointer = None;
@@ -331,7 +331,7 @@ mod tests {
             }
         }
         assert!(Arc::ptr_eq(&original, &harness.app.session.doc));
-        assert_eq!(harness.app.session.undo.len(), undo);
+        assert_eq!(harness.app.session.history.len(), undo);
         harness.app.run("solid.box", json!({"length":1,"width":1,"height":1,"corner":[30,0,0]})).unwrap();
         let commands = crate::dialogs::apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
         preview.compute(&harness.app, &commands, colors).unwrap().unwrap();

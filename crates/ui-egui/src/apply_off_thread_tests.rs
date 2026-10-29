@@ -115,14 +115,14 @@ fn removing_the_edited_feature_discards_its_pending_result() {
     let progress = h.app.applying.as_ref().unwrap().progress.clone();
     h.app.run("edit.undo", json!({})).unwrap();
     let document = h.app.session.doc.clone();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     h.frames(2);
     assert!(h.app.dialog.is_none() && h.app.applying.is_none() && h.app.editing_state.is_none());
     assert!(progress.is_cancelled());
     assert!(finish.send(prepared).is_err(), "the removed editor cannot adopt a late result");
     h.frames(2);
     assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
-    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
 }
 
 #[test]
@@ -252,7 +252,7 @@ fn hole_ok_adopts_real_cut_without_window_evaluation() {
     h.call("ui.view", json!({"view":"top"}));
     h.app.fit_view();
     h.settle();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"solid.hole"})).unwrap();
     h.step(&json!({"click":{"world":[12,9,20]}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:Diameter"}})).unwrap();
@@ -265,7 +265,7 @@ fn hole_ok_adopts_real_cut_without_window_evaluation() {
     });
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     assert_eq!(window.features(), (0, 0));
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let volume = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
     assert!(volume < 23990.0 && volume > 23000.0, "the hole removed actual material: {volume}");
     h.app.run("edit.undo", json!({})).unwrap();
@@ -301,7 +301,7 @@ fn cut_chain() -> (Harness, u64) {
 fn changed_first_cut_adopts_its_entire_suffix_without_window_evaluation() {
     let (mut h, target) = cut_chain();
     let before = h.app.run("inspect.measure", json!({})).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.call("ui.editFeature", json!({"feature":target}));
     h.frames(3);
     assert!(h.app.session.feature_edit_sketch.is_some(), "the edited Extrude keeps its input sketch visible");
@@ -326,7 +326,7 @@ fn changed_first_cut_adopts_its_entire_suffix_without_window_evaluation() {
     let before_volume = before["total"]["volume_mm3"].as_f64().unwrap();
     let after_volume = after["total"]["volume_mm3"].as_f64().unwrap();
     assert!(before_volume - after_volume > 30.0, "the edit must change actual geometry: {before_volume} -> {after_volume}");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.session.doc.marker, None);
     h.app.run("edit.undo", json!({})).unwrap();
     let restored = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
@@ -342,7 +342,7 @@ fn cancelling_an_edit_restores_pinned_geometry_without_evaluating_an_evicted_suf
     h.app.run("solid.box", json!({"corner":[100,0,0],"length":2,"width":2,"height":2})).unwrap();
     h.app.run("edit.undo", json!({})).unwrap();
     let before = h.app.session.world_state();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     let visibility = h.app.session.visibility.clone();
     h.call("ui.editFeature", json!({"feature":target}));
     crate::dialogs::sync_feature_edit(&mut h.app);
@@ -363,7 +363,7 @@ fn cancelling_an_edit_restores_pinned_geometry_without_evaluating_an_evicted_suf
     assert_eq!(h.app.session.feature_edit_sketch, None, "Cancel clears the temporary sketch override");
     assert_eq!(h.app.session.visibility, visibility, "temporary sketch display does not change stored visibility");
     assert_eq!(h.app.session.doc.marker, None);
-    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
     assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.world_state()));
     assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "X".into() }]);
 }
@@ -444,7 +444,7 @@ fn a_worker_error_then_cancel_preserves_original_world_history_redo_and_selectio
     h.app.run("edit.undo", json!({})).unwrap();
     let world = h.app.session.world_state();
     let document = h.app.session.doc.clone();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     h.app.session.selection = vec![solidcraft_engine::Sel::Feature { id: target }];
     let selection = h.app.session.selection.clone();
     h.call("ui.editFeature", json!({"feature":target}));
@@ -468,7 +468,7 @@ fn a_worker_error_then_cancel_preserves_original_world_history_redo_and_selectio
     assert_eq!(window.features(), (0, 0));
     assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
     assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state()));
-    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
     assert_eq!(h.app.session.selection, selection);
 }
 

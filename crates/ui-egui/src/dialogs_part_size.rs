@@ -265,7 +265,7 @@ mod tests {
         let occurrences = app.session.doc.occurrences.clone();
         let joints = app.session.doc.assembly.joints.clone();
         let before = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         let mut h = crate::scenario::Harness::new();
         h.app = app;
         h.app.home.open = false;
@@ -279,7 +279,7 @@ mod tests {
         h.call("ui.click", json!({"x":at[0],"y":at[1],"double":true}));
         assert_eq!(editor(&h.app).component, component);
         assert_eq!(h.app.session.doc, before, "opening configuration is not a model edit");
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         crate::dialogs::cancel(&mut h.app);
         h.frames(2);
         let at = h.call("ui.at", json!({"handle":format!("activate:occurrence:{second}")}));
@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(crate::browser::drawn_rows().iter().filter(|(label, _, _, _)| label.ends_with("[M8×25]")).count(), 2);
         assert_eq!(h.app.session.doc.occurrences, occurrences);
         assert_eq!(h.app.session.doc.assembly.joints, joints);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert_eq!(h.app.session.active_occurrence_path, Some(vec![second]));
         h.app.run("edit.undo", json!({})).unwrap();
         h.frames(3);
@@ -333,20 +333,20 @@ mod tests {
         let (mut app, id) = part("socket_head_cap_screw", "M5", Some(20.5));
         app.run("occurrence.copy", json!({"component":id,"translate":[40,0,0]})).unwrap();
         let before = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         let occurrences = before.occurrences.clone();
         menu(&mut app, Target::Component { id });
         let k = editor(&app);
         assert_eq!(k.family.sizes[k.size].0, "M5");
         assert_eq!(k.length, Some(20.5));
         assert!(k.lengths().unwrap().contains(&20.5), "keep non-catalogue lengths on opening");
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
         change(&mut app, "M6", Some(30.0));
         apply(&mut app);
         assert_eq!(app.session.doc.occurrences, occurrences);
         assert_eq!(app.session.doc.parts[&id].size, "M6");
         assert_eq!(app.session.doc.parts[&id].length, Some(30.0));
-        assert_eq!(app.session.undo.len(), undo + 1);
+        assert_eq!(app.session.history.len(), undo + 1);
         let after = app.session.doc.clone();
         app.run("edit.undo", json!({})).unwrap();
         assert_eq!(app.session.doc, before);
@@ -407,7 +407,7 @@ mod tests {
         for selection in [vec![], vec![Sel::Body { name: body }]] {
             app.session.selection = selection;
             app.status = None;
-            let (doc, undo) = (app.session.doc.clone(), app.session.undo.len());
+            let (doc, undo) = (app.session.doc.clone(), app.session.history.len());
             app.start("parts.resize");
             assert!(app.dialog.is_none());
             let (text, _, error) = app.status.clone().expect("a status message");
@@ -416,7 +416,7 @@ mod tests {
             // Nothing ran: the design and its history are as they were, and no message carries
             // the command's own error.
             assert_eq!(app.session.doc, doc);
-            assert_eq!(app.session.undo.len(), undo);
+            assert_eq!(app.session.history.len(), undo);
             assert!(app.messages.iter().all(|m| !m.text.contains("must be an id or a name")));
         }
         app.session.selection.clear();
@@ -437,7 +437,7 @@ mod tests {
     fn part_size_cancel_and_preview_do_not_change_the_design_or_history() {
         let (mut app, id) = part("hex_bolt", "M6", Some(20.0));
         let before = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         menu(&mut app, Target::Component { id });
         change(&mut app, "M8", Some(30.0));
         let commands = crate::dialogs::apply_commands(&app, app.dialog.as_ref().unwrap()).unwrap();
@@ -446,7 +446,7 @@ mod tests {
         assert_eq!(scratch.doc.parts[&id].size, "M8");
         crate::dialogs::cancel(&mut app);
         assert_eq!(app.session.doc, before);
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
     }
 
     #[test]
@@ -495,11 +495,11 @@ mod tests {
         app.run("component.activate", json!({"component":id})).unwrap();
         app.run("solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Added lug"})).unwrap();
         let before = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         menu(&mut app, Target::Component { id });
         apply(&mut app);
         assert_eq!(app.session.doc, before);
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
     }
 
     #[test]
@@ -512,14 +512,14 @@ mod tests {
         ] {
             let (mut app, id) = part(family, size, length);
             let before = app.session.doc.clone();
-            let undo = app.session.undo.len();
+            let undo = app.session.history.len();
             menu(&mut app, Target::Component { id });
             let k = editor(&app);
             assert_eq!(k.family.sizes[k.size].0, canonical);
             assert!(commands(&app, k).unwrap().is_empty());
             apply(&mut app);
             assert_eq!(app.session.doc, before);
-            assert_eq!(app.session.undo.len(), undo);
+            assert_eq!(app.session.history.len(), undo);
             assert_eq!(app.session.doc.parts[&id].size, size);
         }
     }
@@ -548,7 +548,7 @@ mod tests {
         h.app = app;
         h.app.home.open = false;
         h.frames(3);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         menu(&mut h.app, Target::Component { id });
         h.frames(3);
         h.step(&json!({"widget":"M5","near":"Size"})).unwrap();
@@ -569,6 +569,6 @@ mod tests {
         assert!(h.app.dialog.is_none(), "the operation completed: {:?}", h.app.status);
         assert_eq!(h.app.session.doc.parts[&id].size, "M6");
         assert_eq!(h.app.session.doc.parts[&id].length, Some(10.0));
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
     }
 }

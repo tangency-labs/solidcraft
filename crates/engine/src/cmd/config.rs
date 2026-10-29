@@ -686,7 +686,7 @@ mod tests {
         run(&mut s, "parameters.add", json!({"name":"L", "expression":"10 mm"}));
         run(&mut s, "config.configure", json!({"params":["L"]}));
         let before = s.doc.clone();
-        let undo_len = s.undo.len();
+        let undo_len = s.history.len();
         for expression in ["abc", "1/", "1/0"] {
             for params in [
                 json!({"name":"Bad", "values":{"param:L":expression}}),
@@ -696,7 +696,7 @@ mod tests {
                 let error = s.execute("config.row", &params).expect_err("invalid expressions must be rejected when saving a row");
                 assert!(error.to_string().contains("parameter `L`"), "{params}: {error}");
                 assert_eq!(s.doc, before, "{params}");
-                assert_eq!(s.undo.len(), undo_len, "{params}");
+                assert_eq!(s.history.len(), undo_len, "{params}");
             }
         }
     }
@@ -713,10 +713,10 @@ mod tests {
         assert_eq!(s.doc.params, before.params);
         assert_eq!(s.doc.configs.active, before.configs.active);
         let saved = s.doc.clone();
-        let undo_len = s.undo.len();
+        let undo_len = s.history.len();
         assert!(s.execute("config.row", &json!({"name":"Cycle", "from":"Reordered", "values":{"W":"L"}})).is_err());
         assert_eq!(s.doc, saved);
-        assert_eq!(s.undo.len(), undo_len);
+        assert_eq!(s.history.len(), undo_len);
         run(&mut s, "config.activate", json!({"row":"Reordered"}));
         let (values, errors) = s.doc.param_values();
         assert!(errors.is_empty(), "{errors:?}");

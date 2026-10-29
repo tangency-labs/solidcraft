@@ -1704,7 +1704,7 @@ mod tests {
             let before = h.app.session.doc.to_json();
             let raw = serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap();
             let marker = h.app.session.doc.marker;
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Sketch { id: sketch })
                 .into_iter()
                 .find(|item| item.id == "ui.redefineSketch")
@@ -1726,7 +1726,7 @@ mod tests {
                 if apply {
                     assert!(matches!(&h.app.session.doc.feature(sketch).unwrap().kind,
                         FeatureKind::Sketch { plane: PlaneRef::Origin { name }, .. } if name == "XZ"));
-                    assert_eq!(h.app.session.undo.len(), undo + 1);
+                    assert_eq!(h.app.session.history.len(), undo + 1);
                     let after = h.app.session.doc.to_json();
                     h.app.run("edit.undo", json!({})).unwrap();
                     assert_eq!(h.app.session.doc.to_json(), before);
@@ -1734,7 +1734,7 @@ mod tests {
                     assert_eq!(h.app.session.doc.to_json(), after);
                 } else {
                     assert_eq!(h.app.session.doc.to_json(), before);
-                    assert_eq!(h.app.session.undo.len(), undo);
+                    assert_eq!(h.app.session.history.len(), undo);
                 }
             }
         }
@@ -2293,11 +2293,11 @@ mod tests {
             let second = handle_at("timeline:Second").unwrap();
             let marker = rect_of("history:marker").unwrap();
             let behind = if left { [second.x, marker.bottom() + 3.0] } else { [marker.right() + 4.0, second.y] };
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.step(&json!({"drag":[[second.x,second.y],behind]})).unwrap();
             h.settle();
             assert_eq!(h.app.session.doc.marker, Some(1), "left={left}: dropped behind the marker, Second is rolled back");
-            assert_eq!(h.app.session.undo.len(), undo + 1, "left={left}: crossing the marker is one undo step");
+            assert_eq!(h.app.session.history.len(), undo + 1, "left={left}: crossing the marker is one undo step");
             let second = handle_at("timeline:Second").unwrap();
             let marker = rect_of("history:marker").unwrap();
             let before = if left { [second.x, marker.top() - 2.0] } else { [marker.left() - 3.0, second.y] };

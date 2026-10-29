@@ -175,7 +175,7 @@ pub(crate) fn item(app: &SolveApp, id: &str) -> Option<Item> {
             None => act("ui.repeat", "Repeat", "redo").on(false),
         }),
         "delete" => Some(act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty())),
-        "undo" => Some(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty())),
+        "undo" => Some(cmd(app, "edit.undo", "Undo").on(!app.session.history.is_empty())),
         _ if crate::render_workspace::active(app)
             && matches!(id, "appearance.assign" | "render.settings.set" | "render.camera.fit" | "render.compare") =>
         {

@@ -859,7 +859,7 @@ mod tests {
             run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [80, 0, 0]}));
             run(&mut s, "edit.undo", json!({}));
             let before = s.doc.clone();
-            let undo_before = s.undo.last().unwrap().doc.clone();
+            let undo_before = s.history.last().unwrap().doc.clone();
             let missing = dir.join("missing/case.solidcraft");
             assert!(s.execute("file.save_as", &json!({"path": missing})).is_err());
             assert_eq!(s.path.as_deref(), case.to_str());
@@ -881,7 +881,7 @@ mod tests {
                 }
             }
             assert!(std::sync::Arc::ptr_eq(&s.doc, &before), "saving does not rewrite the live document");
-            assert!(std::sync::Arc::ptr_eq(&s.undo.last().unwrap().doc, &undo_before), "saving does not copy the edit history");
+            assert!(std::sync::Arc::ptr_eq(&s.history.last().unwrap().doc, &undo_before), "saving does not copy the edit history");
             s.restore_checkpoint(checkpoint).unwrap();
             assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["found"], true);
             let path = s.path.clone().unwrap();

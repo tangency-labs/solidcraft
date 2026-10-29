@@ -76,9 +76,9 @@ fn a_two_link_arm_reaches_its_closed_form_pose() {
     assert!((value(&mut s, "Shoulder") - t1).abs() < 1e-6 && (value(&mut s, "Elbow") - t2).abs() < 1e-6, "{r}");
     assert_eq!(r["values"].as_array().map(Vec::len), Some(2), "{r}");
     // Already there, a reach moves nothing and adds no undo step.
-    let steps = s.undo.len();
+    let steps = s.history.len();
     let r = reach(&mut s, "Fore", tip, json!({"point": pt(to)}));
-    assert_eq!((&r["reached"], &r["moved"], s.undo.len()), (&json!(true), &json!(false), steps), "{r}");
+    assert_eq!((&r["reached"], &r["moved"], s.history.len()), (&json!(true), &json!(false), steps), "{r}");
     // One undo step puts it back.
     run(&mut s, "edit.undo", json!({}));
     assert!((value(&mut s, "Elbow") - 30.0).abs() < 1e-9 && value(&mut s, "Shoulder").abs() < 1e-9);
@@ -370,9 +370,9 @@ fn quarter_turn_reaches_keep_the_four_bar_closed_and_diagnostics_current() {
         for part in ["Crank", "Coupler", "Rocker"] {
             assert_eq!(full.dof.get(&occ(&s, part)), Some(&1));
         }
-        let steps = s.undo.len();
+        let steps = s.history.len();
         let again = reach(&mut s, "Crank", p0, json!({"point":pt(point), "continuous":true, "quiet":true}));
-        assert_eq!((&again["reached"], &again["moved"], s.undo.len()), (&json!(true), &json!(false), steps), "{again}");
+        assert_eq!((&again["reached"], &again["moved"], s.history.len()), (&json!(true), &json!(false), steps), "{again}");
     }
     for (command, point) in [("edit.undo", Vec3::new(20.0, 0.0, 0.0)), ("edit.redo", p0)] {
         run(&mut s, command, json!({}));

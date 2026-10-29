@@ -49,7 +49,7 @@ fn selected_lines_apply_constraints_with_one_undo_step() {
         let mut h = lines();
         select_lines(&mut h);
         let before = h.app.session.doc.clone();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.run(&json!([{"start":format!("sketch.constraint.{command}")}])).unwrap();
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{command}");
         let sk = &h.app.session.model.state().sketches[0].sketch;
@@ -64,7 +64,7 @@ fn selected_lines_apply_constraints_with_one_undo_step() {
         );
         assert_line_geometry(&h, command);
         let after = h.app.session.doc.clone();
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert!(h.app.session.selection.is_empty());
         assert!(h.app.tool.is_none());
         h.app.session.execute("edit.undo", &json!({})).unwrap();
@@ -89,10 +89,10 @@ fn selected_circles_apply_constraints() {
         ]))
         .unwrap();
         assert_eq!(h.app.session.selection.len(), 2);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.run(&json!([{"start":format!("sketch.constraint.{command}")}])).unwrap();
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{command}");
-        assert_eq!(h.app.session.undo.len(), undo + 1, "{command}");
+        assert_eq!(h.app.session.history.len(), undo + 1, "{command}");
         let sk = &h.app.session.model.state().sketches[0].sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "tangent" => matches!(c.kind, ConstraintKind::Tangent { .. }),
@@ -123,10 +123,10 @@ fn selected_circles_all_become_equal() {
     };
     let r1 = radius(&h, "c1");
     h.app.session.selection = ["c4", "c3", "c2", "c1"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.run(&json!([{"start":"sketch.constraint.equal"}])).unwrap();
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
     assert!(h.app.tool.is_none(), "applied at once, no pick tool");
     assert!(h.app.session.selection.is_empty());
     let sk = &h.app.session.model.state().sketches[0].sketch;
@@ -149,12 +149,12 @@ fn ambiguous_selection_preserves_tool_first_workflow() {
     ] {
         let mut h = lines();
         h.app.session.selection = selection;
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.run(&json!([{"start":"sketch.constraint.parallel"}])).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert!(h.app.tool.as_ref().unwrap().picks.is_empty());
         h.run(&json!([{"click":{"sketch":[25,10]}}, {"click":{"sketch":[25,32.5]}}])).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     }
 }
@@ -165,12 +165,12 @@ fn rejected_preselection_preserves_document_and_error() {
     h.app.session.execute("sketch.constraint.fix", &json!({"entities":["l1","l2"]})).unwrap();
     select_lines(&mut h);
     let before = serde_json::to_value(&h.app.session.doc).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let selection = h.app.session.selection.clone();
     h.run(&json!([{"start":"sketch.constraint.parallel"}])).unwrap();
     assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     assert_eq!(serde_json::to_value(&h.app.session.doc).unwrap(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.session.selection, selection);
     // Correct the conflict and retry without reselecting; the old error must disappear.
     h.app.session.execute("sketch.constraint.fix", &json!({"entities":["l1","l2"]})).unwrap();
@@ -209,12 +209,12 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         }
         assert_eq!(h.app.session.selection.len(), picks.len(), "{command}: {:?}", h.app.session.selection);
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{command}: {:?}", h.app.status);
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         let st = h.app.session.world_state();
         let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
@@ -261,23 +261,23 @@ fn remaining_constraints_preserve_mixed_selections_and_rejected_geometry() {
     for command in ["fix", "curvature", "polygon"] {
         let mut h = lines();
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let mixed = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::Body { name: "missing".into() }];
         h.app.session.selection = mixed.clone();
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
         assert!(h.app.tool.is_some());
         assert_eq!(h.app.session.selection, mixed);
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
     let mut h = lines();
     let selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::SketchCurve { id: "missing".into(), sketch: None }];
     h.app.session.selection = selection.clone();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.constraint.curvature"})).unwrap();
     assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     assert_eq!(h.app.session.selection, selection);
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }

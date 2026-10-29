@@ -1668,14 +1668,14 @@ mod tests {
                 }
                 assert_eq!(names(&s), ["Plate"]);
                 let before = serde_json::to_value(&*s.doc).unwrap();
-                let undo = s.undo.len();
+                let undo = s.history.len();
                 let revision = s.revision;
                 let result = s.execute("body.rename", &json!({"body": "Plate", "name": removed_name}));
                 assert!(result.is_err(), "rename must not steal {removed_name} from RemoveCube: {result:?}; bodies: {:?}", names(&s));
                 let error = result.unwrap_err().to_string();
                 assert!(error.contains(removed_name) && error.contains("RemoveCube"), "{error}");
                 assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
-                assert_eq!(s.undo.len(), undo, "a refused rename adds no undo entry");
+                assert_eq!(s.history.len(), undo, "a refused rename adds no undo entry");
                 assert_eq!(s.revision, revision);
                 assert_eq!(names(&s), ["Plate"]);
                 let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
@@ -2039,7 +2039,7 @@ mod tests {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
         run(&mut s, "view.save", json!({"name": "Photo", "camera": {"target": [1, 2, 3], "yaw": 0.5, "pitch": -0.6, "distance": 150}}));
-        let undo = s.undo.len();
+        let undo = s.history.len();
         assert!(s.camera.is_none());
         let r = run(&mut s, "view.apply", json!({"view": "Photo"}));
         let c = s.camera.expect("a camera for the view");
@@ -2057,7 +2057,7 @@ mod tests {
             assert_eq!(r["camera"]["roll"], expected);
             assert_eq!(s.camera.map(|c| c.roll), Some(expected));
         }
-        assert_eq!(s.undo.len(), undo, "view state, not an undo step");
+        assert_eq!(s.history.len(), undo, "view state, not an undo step");
         for p in [
             json!({}),
             json!({"view": "Nope"}),
@@ -2308,7 +2308,7 @@ mod tests {
             let d = run(s, "document.inspect", json!({}));
             d["sketches"].as_array().unwrap().iter().filter(|x| x["visible"] == true).count()
         };
-        let (n0, undo0, doc0) = (lines(&s), s.undo.len(), s.doc.clone());
+        let (n0, undo0, doc0) = (lines(&s), s.history.len(), s.doc.clone());
         assert_eq!(shown(&mut s), 2);
         // By id and by name; the view loses their lines, the design still doesn't change: hiding
         // is an undo step of its own (#2219), and the step carries no document change.
@@ -2317,7 +2317,7 @@ mod tests {
         assert_eq!(shown(&mut s), 0);
         assert!(lines(&s) < n0);
         assert!(std::sync::Arc::ptr_eq(&s.doc, &doc0), "view state, not a design change");
-        assert_eq!(s.undo.len(), undo0 + 1, "hiding is one undo step");
+        assert_eq!(s.history.len(), undo0 + 1, "hiding is one undo step");
         run(&mut s, "browser.visibility", json!({"folder": "sketches", "visible": true}));
         assert_eq!(lines(&s), n0);
         // The browser's Sketches folder hidden: sketches shown one by one aren't drawn either,
@@ -2401,12 +2401,12 @@ mod tests {
         let drawn = |s: &Session| crate::view::scene(s, &cam).meshes.len();
         assert!(drawn(&s) > 0, "the box is drawn");
         assert!(!s.is_dirty());
-        let steps = s.undo.len();
+        let steps = s.history.len();
 
         // Hide: one step, no document change, the view loses the body, the design has changes.
         let doc = s.doc.clone();
         run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": false}));
-        assert_eq!(s.undo.len(), steps + 1, "hiding is one undo step");
+        assert_eq!(s.history.len(), steps + 1, "hiding is one undo step");
         assert!(std::sync::Arc::ptr_eq(&s.doc, &doc), "hiding leaves the document alone");
         assert!(!s.body_visible("Box") && drawn(&s) == 0);
         assert!(s.is_dirty(), "hiding is a change to save");
@@ -2432,16 +2432,16 @@ mod tests {
 
         // Hiding or showing what is already so changes nothing: no step, and the lists are not
         // even reordered, so the design is not left with unsaved changes either.
-        let steps = s.undo.len();
+        let steps = s.history.len();
         run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": true}));
-        assert_eq!(s.undo.len(), steps, "showing a body that is already shown is no change");
+        assert_eq!(s.history.len(), steps, "showing a body that is already shown is no change");
         run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": false}));
         run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": false}));
-        assert_eq!(s.undo.len(), steps + 1, "the first hide is one step, hiding it again is none");
+        assert_eq!(s.history.len(), steps + 1, "the first hide is one step, hiding it again is none");
         assert_eq!(s.visibility.hidden_bodies, vec!["Box".to_string()], "no duplicate, no reordering");
         assert!(s.is_dirty(), "the first hide is still a change to save");
         run(&mut s, "browser.visibility", json!({"items": ["Box"], "visible": true}));
-        assert_eq!(s.undo.len(), steps + 2, "showing it again is one step");
+        assert_eq!(s.history.len(), steps + 2, "showing it again is one step");
         assert!(s.visibility.hidden_bodies.is_empty() && !s.is_dirty());
 
         // `all` shows everything (folders and occurrence hides included) as one step.
@@ -2450,10 +2450,10 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
         assert_eq!(s.visibility.hidden_bodies.len(), 2);
         assert_eq!(s.visibility.hidden_folders, vec!["c0/bodies".to_string()]);
-        let steps = s.undo.len();
+        let steps = s.history.len();
         run(&mut s, "browser.visibility", json!({"folder": "all", "visible": true}));
         assert!(s.visibility.is_empty(), "all shows everything: {:?}", s.visibility);
-        assert_eq!(s.undo.len(), steps + 1, "one step for all of it");
+        assert_eq!(s.history.len(), steps + 1, "one step for all of it");
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.visibility.hidden_bodies.len(), 2, "and one undo puts it back");
         assert_eq!(s.visibility.hidden_folders, vec!["c0/bodies".to_string()]);
@@ -2507,7 +2507,7 @@ mod tests {
         run(&mut s, "sketch.finish", json!({}));
         let body = names(&s)[0].clone();
         s.mark_saved();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         assert!(crate::view::sketch_shown(&s, sketch));
         // The folders' eyes, a sketch's profiles and dimensions and a lock: view state to save.
         let v = &mut s.visibility;
@@ -2516,7 +2516,7 @@ mod tests {
         v.hidden_profiles.push(sketch);
         v.shown_dimensions.push(sketch);
         v.locked_bodies.push(body.clone());
-        assert!(s.is_dirty() && s.undo.len() == undo, "a change to save, not an undo step");
+        assert!(s.is_dirty() && s.history.len() == undo, "a change to save, not an undo step");
         assert!(!crate::view::sketch_shown(&s, sketch), "the hidden Sketches folder hides an unused sketch");
         run(&mut s, "body.rename", json!({"body": body, "name": "Locked"}));
         assert_eq!(s.visibility.locked_bodies, vec!["Locked".to_string()]);
@@ -2648,7 +2648,7 @@ mod tests {
         let g = run(&mut s, "browser.group", json!({"folder": "bodies"}))["group"].as_u64().unwrap();
         let created = run(&mut s, "component.create", json!({"name": "Part"}));
         let occ = created["occurrence"].as_u64().unwrap();
-        let n = s.undo.len();
+        let n = s.history.len();
 
         let expanded = run(&mut s, "browser.expand_all", json!({}));
         assert_eq!(expanded["open"], true);
@@ -2661,7 +2661,7 @@ mod tests {
         assert!(open.contains(&format!("o:{occ}")), "{open:?}");
         assert!(closed.contains(&"origin".into()) && closed.contains(&"namedviews".into()) && closed.contains(&"docsettings".into()), "{closed:?}");
         assert!(closed.contains(&"c0/features".into()), "{closed:?}");
-        assert_eq!(s.undo.len(), n, "display-only: no undo step");
+        assert_eq!(s.history.len(), n, "display-only: no undo step");
 
         let collapsed = run(&mut s, "browser.collapse_all", json!({}));
         assert_eq!(collapsed["open"], false);

@@ -167,11 +167,11 @@ fn raw_call(h: &mut Harness, method: &str, params: serde_json::Value) -> serde_j
 #[test]
 fn picking_changes_nothing() {
     let mut h = top_view();
-    let (cam, undo, revision) = (h.app.cam, h.app.session.undo.len(), h.app.session.revision);
+    let (cam, undo, revision) = (h.app.cam, h.app.session.history.len(), h.app.session.revision);
     let r = pick(&mut h, json!({"pixels": [[480, 300], [40, 40]], "rays": [{"origin": [5.0, 5.0, 50.0], "dir": [0.0, 0.0, -1.0]}]}));
     assert_eq!(r["hits"].as_array().map(Vec::len), Some(3));
     assert_eq!((h.app.cam.distance, h.app.cam.target.z), (cam.distance, cam.target.z));
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.session.revision, revision);
 }
 

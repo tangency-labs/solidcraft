@@ -407,7 +407,7 @@ fn a_plain_move_takes_the_geometry_with_it() {
 fn escape_leaves_the_sketch_exactly_as_it_was() {
     let mut h = line_and_circle();
     let sid = h.app.session.active_sketch.unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let before = curve_ids(&h);
     let constraints = h.app.session.model.state().sketch(sid).unwrap().sketch.constraints.len();
     h.step(&json!({"start": "sketch.mirror"})).unwrap();
@@ -421,7 +421,7 @@ fn escape_leaves_the_sketch_exactly_as_it_was() {
     h.settle();
     assert!(h.app.dialog.is_none());
     assert_eq!(curve_ids(&h), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch.constraints.len(), constraints);
 }
 

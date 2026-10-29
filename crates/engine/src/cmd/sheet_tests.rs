@@ -218,11 +218,11 @@ fn pockets_survive_forming_away_from_bends_and_refuse_bend_overlap_atomically() 
     rectangle_tool(&mut cross, "Pocket", [45.0, 20.0], [55.0, 30.0]);
     run(&mut cross, "solid.extrude", json!({"sketch":"Pocket","distance":1,"operation":"cut"}));
     let before = cross.doc.to_json();
-    let undo = cross.undo.len();
+    let undo = cross.history.len();
     let error = cross.execute("sheet.fold", &json!({"points":[[50,0,2.5],[50,60,2.5]]})).unwrap_err().to_string();
     assert!(error.contains("pocket") && error.contains("bend"), "{error}");
     assert_eq!(cross.doc.to_json(), before);
-    assert_eq!(cross.undo.len(), undo);
+    assert_eq!(cross.history.len(), undo);
     assert!((volume(&mut cross) - 14900.0).abs() < 1e-6);
 }
 
@@ -232,11 +232,11 @@ fn unsupported_sheet_machining_is_atomic_but_true_no_change_is_allowed() {
     base(&mut s, 100.0, 60.0);
     rectangle_tool(&mut s, "Taper", [20.0, 20.0], [30.0, 30.0]);
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let error = s.execute("solid.extrude", &json!({"sketch":"Taper","distance":1,"operation":"cut","taper":"5 deg"})).unwrap_err().to_string();
     assert!(error.contains("sheet") && error.contains("preserv"), "{error}");
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     rectangle_tool(&mut s, "Outside", [120.0, 20.0], [130.0, 30.0]);
     run(&mut s, "solid.extrude", json!({"sketch":"Outside","distance":1,"operation":"cut","taper":"5 deg"}));
     assert!((volume(&mut s) - 15000.0).abs() < 1e-6);
@@ -1857,7 +1857,7 @@ fn bend_table_exports_shop_dimensions_and_tracks_parameter_changes() {
     run(&mut s, "sheet.manage_rules", json!({"name": "Shop, \"steel\"", "thickness": 2, "bend_radius": 3, "k_factor": 0.4}));
     base(&mut s, 100.0, 60.0);
     run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let csv = run(&mut s, "sheet.export_bend_table", json!({}));
     let text = csv["text"].as_str().unwrap();
     assert!(text.starts_with("body,rule,thickness_mm,k_factor,bend,angle_deg,direction,"));
@@ -1871,7 +1871,7 @@ fn bend_table_exports_shop_dimensions_and_tracks_parameter_changes() {
     assert_eq!(table["thickness"], 2.0);
     assert_eq!(table["bends"][0]["direction"], "up");
     assert!((table["bends"][0]["allowance"].as_f64().unwrap() - FRAC_PI_2 * 3.8).abs() < 1e-9);
-    assert_eq!(s.undo.len(), undo, "export does not create an undo step");
+    assert_eq!(s.history.len(), undo, "export does not create an undo step");
     run(&mut s, "sheet.manage_rules", json!({"name": "Shop, \"steel\"", "k_factor": 0.5}));
     let updated = run(&mut s, "sheet.export_bend_table", json!({"format": "json"}));
     let table: Value = serde_json::from_str(updated["text"].as_str().unwrap()).unwrap();
@@ -1952,7 +1952,7 @@ fn the_angle_display_is_a_rule_setting_checked_saved_and_undone() {
             assert_eq!(s.doc.to_json(), before, "{name}: {wrong}");
         }
     }
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let r = run(&mut s, "sheet.manage_rules", json!({"name": "Shop", "angle_display": " Included "}));
     assert_eq!((&r["rule"]["angle_display"], &r["values"]["angle_display"]), (&json!("included"), &json!("included")));
     assert_eq!(bend_notes(&mut s), ["B1 UP 122%%d R1"]);
@@ -1972,7 +1972,7 @@ fn the_angle_display_is_a_rule_setting_checked_saved_and_undone() {
     assert_eq!(display(&mut older), (json!("bend"), json!("bend")));
     assert_eq!(bend_notes(&mut older), ["B1 UP 58%%d R1"]);
     // Undone like the rule's other changes.
-    assert_eq!(s.undo.len(), undo + 2);
+    assert_eq!(s.history.len(), undo + 2);
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(display(&mut s).0, "bend");
@@ -4822,12 +4822,12 @@ fn fold_refuses_a_new_fixed_point_off_the_sheet_but_warns_on_recompute() {
     rectangle_tool(&mut s, "Window", [10.0, 15.0], [30.0, 45.0]);
     run(&mut s, "solid.extrude", json!({"sketch": "Window", "through_all": true, "direction": "symmetric", "operation": "cut"}));
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for fixed in [json!([20, 30, 2.5]), json!([150, 30, 2.5])] {
         let e = s.execute("sheet.fold", &json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "fixed": fixed})).unwrap_err().to_string();
         assert!(e.contains("fixed") && e.contains("not on the sheet"), "{fixed}: {e}");
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
     run(&mut s, "sheet.fold", json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "fixed": [90, 30, 2.5], "name": "Fold1"}));
     assert!(run(&mut s, "timeline.inspect", json!({"feature": "Fold1"}))["warning"].is_null());
@@ -4844,12 +4844,12 @@ fn fold_fixed_point_must_touch_the_sheet_but_any_face_will_do() {
     let mut s = Session::default();
     base(&mut s, 100.0, 60.0);
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for fixed in [json!([90, 30, 20]), json!([90, 30, -10])] {
         let e = s.execute("sheet.fold", &json!({"points": [[40, 0, 2.5], [40, 60, 2.5]], "fixed": fixed})).unwrap_err().to_string();
         assert!(e.contains("fixed") && e.contains("not on the sheet"), "{fixed}: {e}");
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
     // The left (smaller) side stays: the right part stands up.
     for fixed in [json!([10, 30, 2.5]), json!([10, 30, 0]), json!([0, 30, 1.25]), json!([10, 30, 2.500001])] {

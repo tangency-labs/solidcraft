@@ -81,8 +81,8 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     assert!(h.app.session.active_sketch.is_none());
     h.app.run("browser.visibility", json!({"items":["ControlBox"],"visible":true})).unwrap();
     // After the setup's two hide/show commands: each is an undo step of its own now (#2219).
-    let undo = h.app.session.undo.len();
-    let redo = h.app.session.redo.len();
+    let undo = h.app.session.history.len();
+    let redo = h.app.session.history.redo_steps().len();
     h.frames(4);
     h.step(&json!({"click":{"world":[3,4,30]}})).unwrap();
     assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Face { body, .. }) if body=="ControlBox"));
@@ -98,8 +98,8 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     assert_eq!(h.app.session.doc.to_json(), before, "preview is scratch only");
     h.step(&json!({"widget":"Cancel"})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
-    assert_eq!(h.app.session.redo.len(), redo);
+    assert_eq!(h.app.session.history.len(), undo);
+    assert_eq!(h.app.session.history.redo_steps().len(), redo);
     assert!(crate::sketch_attachment_ui::guide_lines(&h.app).is_empty());
 
     crate::browser::redefine_sketch(&mut h.app, sketch);
@@ -109,7 +109,7 @@ fn lost_attachment_ghost_rebind_preview_cancel_apply_and_undo_preserve_sketch() 
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.tree.redefine.is_none(), "{:?}", h.app.tree.redefine_draft);
     assert_eq!(raw_sketch(&h, sketch), raw, "curves, dimensions and expressions remain exact");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(h.app.session.model.result(sketch).unwrap().error.is_none());
     let boss = h.app.session.world_state().body("Boss").unwrap().mesh().bounds();
     assert!((boss.min.z - 30.0).abs() < 1e-7 && (boss.max.z - 32.0).abs() < 1e-7);
@@ -153,7 +153,7 @@ fn unsupported_modified_face_offers_explicit_fixed_plane_without_live_links() {
     // strict attachment cannot claim the original whole-face certificate.
     h.app.run("solid.split_face", json!({"body":"Modified","faces":[[5,5,10]],"plane":{"origin":[5,0,0],"normal":[1,0,0]}})).unwrap();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.call("ui.view", json!({"view":"top"}));
     h.call("ui.view", json!({"view":"fit"}));
     h.settle();
@@ -162,7 +162,7 @@ fn unsupported_modified_face_offers_explicit_fixed_plane_without_live_links() {
     assert!(h.app.session.active_sketch.is_none());
     assert!(h.app.dialog.as_ref().unwrap().error.is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.frames(4);
     assert!(h.widget("Use fixed plane").is_some());
     h.step(&json!({"widget":"Use fixed plane"})).unwrap();
@@ -172,7 +172,7 @@ fn unsupported_modified_face_offers_explicit_fixed_plane_without_live_links() {
     };
     assert!((plane.origin.z - 10.0).abs() < 1e-7);
     assert!(geometry.links.is_empty(), "a fixed snapshot cannot carry live source projections");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 
 fn occurrence_click(h: &mut Harness, path: &[u64], control: &str) {
@@ -297,7 +297,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
     h.app.session = solidcraft_engine::Session::new(document);
     let raw = h.app.session.doc.sketch(id).unwrap().clone();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let FaceAttachmentStatus::Healthy { plane: expected, .. } = h.app.session.placed_document().sketch_face_attachment(id, &h.app.session.model)
     else {
         panic!("wrapped anchor must resolve");
@@ -326,7 +326,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.tree.redefine.is_none());
     assert_eq!(h.app.session.doc.sketch(id).unwrap(), &raw);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let shown = selected_plane(h.app.session.model.state().sketch(id).unwrap().plane);
     assert!(shown.origin.dist(expected.origin) < 1e-7);
     assert!(shown.x.dist(expected.x) < 1e-7 && shown.y.dist(expected.y) < 1e-7);

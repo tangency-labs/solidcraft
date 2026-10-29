@@ -367,14 +367,15 @@ pub(crate) fn place(app: &mut SolveApp, at: solidcraft_engine::geom::Vec2, heigh
 /// Run one of the dialog's changes: the undo history keeps one step for the whole dialog (the
 /// first change's, which goes back to the design from before it).
 fn folded<T>(app: &mut SolveApp, k: &mut Tx, run: impl FnOnce(&mut SolveApp) -> T) -> T {
-    let mut undo = std::mem::take(&mut app.session.undo);
-    let out = run(app);
-    let pushed = std::mem::take(&mut app.session.undo);
-    if !k.folded && !pushed.is_empty() {
-        undo.extend(pushed);
-        k.folded = true;
+    if k.folded {
+        let history = std::mem::take(&mut app.session.history);
+        let out = run(app);
+        app.session.history = history;
+        return out;
     }
-    app.session.undo = undo;
+    let mark = app.session.history.mark();
+    let out = run(app);
+    k.folded = app.session.history.steps_since(mark) > 0;
     out
 }
 
@@ -792,7 +793,7 @@ mod tests {
         assert!(before.len() > 4 && before.iter().all(|(_, l)| l.as_deref() == Some(link.as_str())));
         let profiles = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
         h.app.session.selection = vec![Sel::SketchCurve { id: before[0].0.clone(), sketch: None }];
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport)
             .into_iter()
             .find(|item| item.label == "Explode Text")
@@ -806,7 +807,7 @@ mod tests {
         let sk = h.app.session.doc.sketch(sid).unwrap();
         assert!(sk.link(&link).is_none(), "the text is gone");
         assert_eq!(h.app.session.world_state().sketch(sid).unwrap().profiles.len(), profiles, "the letters still make the same profiles");
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         // No longer text: nothing to edit or explode.
         assert!(selected_entity(&h.app).is_none());
         assert!(!crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport).iter().any(|item| item.label == "Explode Text"));
@@ -871,7 +872,7 @@ mod tests {
     fn selected_text_menu_edits_source_position_and_size_with_one_undo_and_reopen() {
         let (mut h, link, _) = setup();
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport)
             .into_iter()
             .find(|item| item.id == "sketch.edit_text")
@@ -886,10 +887,10 @@ mod tests {
         let sid = h.app.session.active_sketch.unwrap();
         let shown = |h: &Harness| h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source.clone();
         assert!(matches!(shown(&h), LinkSource::Text { text, height, .. } if text == "O" && (height - 20.0).abs() < 1e-12));
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         ok(&mut h);
         assert!(!editing(&h.app));
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         let sid = h.app.session.active_sketch.unwrap();
         let sk = h.app.session.doc.sketch(sid).unwrap();
         let expected = LinkSource::Text {
@@ -932,7 +933,7 @@ mod tests {
         h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone(), sketch: None }];
         h.app.start("sketch.edit_text");
         h.frames(3);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         replace(&mut h, "dialog:X", "1.2345");
         replace(&mut h, "dialog:Height", "0.25");
         ok(&mut h);
@@ -944,7 +945,7 @@ mod tests {
         assert_eq!(updated.y, at.y);
         assert!((size - 6.35).abs() < 1e-12);
         assert_eq!(rotation, angle);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
     }
 
     #[test]
@@ -981,16 +982,16 @@ mod tests {
         };
         // A font that is not there shows nothing new, reports the reason before OK, and keeps the design
         // as it was.
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len());
         let missing = concat!(env!("CARGO_MANIFEST_DIR"), "/no-such-font-12345.ttf");
         choose_file(&mut h, missing);
         assert_eq!(tx(&h.app).font, missing);
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().is_some_and(|error| error.contains("font file")));
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len()), before);
         ok(&mut h);
         assert!(editing(&h.app));
         assert!(h.app.dialog.as_ref().unwrap().error.as_ref().is_some_and(|e| e.contains("font file")), "{:?}", h.app.dialog.as_ref().unwrap().error);
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len()), before);
         // A font file: other outlines on the canvas at once, one undo step, and the dialog shows the font when it is
         // opened again.
         choose_file(&mut h, font);
@@ -998,7 +999,7 @@ mod tests {
         assert!((area(&h) - 17.6385).abs() < 2e-3, "the canvas follows the font");
         ok(&mut h);
         assert!(!editing(&h.app));
-        assert_eq!(h.app.session.undo.len(), before.1 + 1);
+        assert_eq!(h.app.session.history.len(), before.1 + 1);
         let sid = h.app.session.active_sketch.unwrap();
         let font_of = |h: &Harness| match &h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source {
             LinkSource::Text { font, .. } => font.clone(),
@@ -1028,18 +1029,18 @@ mod tests {
     #[test]
     fn invalid_text_values_and_cancel_leave_document_and_history_unchanged() {
         let (mut h, _, _) = setup();
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len());
         h.app.start("sketch.edit_text");
         h.frames(3);
         for value in ["NaN", "inf", "-5", "0"] {
             replace(&mut h, "dialog:Height", value);
             ok(&mut h);
             assert!(h.app.dialog.as_ref().unwrap().error.is_some());
-            assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+            assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len()), before);
         }
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(!editing(&h.app));
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len()), before);
     }
 
     #[test]
@@ -1084,7 +1085,7 @@ mod tests {
         h.app.start("sketch.edit_text");
         h.frames(3);
         replace(&mut h, "dialog:Text", "Pending text");
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len());
         h.app.help.menu = true;
         h.frames(2);
         h.step(&json!({"click":{"handle":"menu:report"}})).unwrap();
@@ -1099,12 +1100,12 @@ mod tests {
         h.step(&json!({"text":"report-only-marker"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
         assert_eq!(tx(&h.app).text, "Pending text");
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len()), before);
         h.step(&json!({"widget":"Close draft"})).unwrap();
         ok(&mut h);
         assert!(!editing(&h.app));
         // The pending text was already on the canvas, in the dialog's one undo step.
-        assert_eq!(h.app.session.undo.len(), before.1);
+        assert_eq!(h.app.session.history.len(), before.1);
         let sid = h.app.session.active_sketch.unwrap();
         let sk = h.app.session.doc.sketch(sid).unwrap();
         assert!(sk.links.iter().any(|l| matches!(&l.source, LinkSource::Text { text, .. } if text == "Pending text")));
@@ -1301,7 +1302,7 @@ mod tests {
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 60.0;
         h.frames(3);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":"sketch.text"})).unwrap();
         (h, undo)
     }
@@ -1328,7 +1329,7 @@ mod tests {
         h.frames(2);
         assert!(!editing(&h.app));
         assert!(matches!(texts(&h).as_slice(), [LinkSource::Text { text, .. }] if text == "Hi!"));
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert!(!h.app.session.model.is_stale());
         h.app.run("edit.undo", json!({})).unwrap();
         assert!(texts(&h).is_empty());
@@ -1346,24 +1347,24 @@ mod tests {
         h.frames(2);
         assert!(!editing(&h.app));
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 
     #[test]
     fn edit_text_shows_changes_live_and_cancel_puts_the_text_back() {
         let (mut h, link, _) = setup();
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len());
         h.app.start("sketch.edit_text");
         h.frames(3);
         // Opening changes nothing.
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len()), before);
         replace(&mut h, "dialog:Text", "OK");
         replace(&mut h, "dialog:Height", "20");
         h.frames(2);
         let sid = h.app.session.active_sketch.unwrap();
         let source = |h: &Harness| h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source.clone();
         assert!(matches!(source(&h), LinkSource::Text { text, height, .. } if text == "OK" && height == 20.0));
-        assert_eq!(h.app.session.undo.len(), before.1 + 1, "every change folds into one step");
+        assert_eq!(h.app.session.history.len(), before.1 + 1, "every change folds into one step");
         // The fields stay as typed while the canvas follows them.
         assert_eq!(tx(&h.app).text, "OK");
         // A value that is not one yet keeps the last good preview.
@@ -1373,7 +1374,7 @@ mod tests {
         h.step(&json!({"widget":"Cancel"})).unwrap();
         h.frames(2);
         assert!(!editing(&h.app));
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len()), before);
     }
 
     #[test]
@@ -1514,7 +1515,7 @@ mod tests {
     #[test]
     fn style_alignment_and_spacing_show_live_and_apply_in_one_step() {
         let (mut h, link, _) = setup();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.app.start("sketch.edit_text");
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Italic"}})).unwrap();
@@ -1529,7 +1530,7 @@ mod tests {
         ok(&mut h);
         assert!(!editing(&h.app));
         assert_eq!(style_of(&h, &link), live);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         // Reopened, the dialog shows them.
         let sid = h.app.session.active_sketch.unwrap();
         h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone(), sketch: None }];
@@ -1545,7 +1546,7 @@ mod tests {
     #[test]
     fn bold_in_a_font_without_a_bold_face_is_disabled() {
         let (mut h, link, _) = setup();
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len());
         h.app.start("sketch.edit_text");
         h.frames(3);
         assert!(!font_has_bold_face(&tx(&h.app).font));
@@ -1563,7 +1564,7 @@ mod tests {
         ok(&mut h);
         assert!(!editing(&h.app));
         assert_eq!(style_of(&h, &link).align, TextAlign::Center);
-        assert_eq!(h.app.session.undo.len(), before.1 + 1);
+        assert_eq!(h.app.session.history.len(), before.1 + 1);
     }
 
     #[test]

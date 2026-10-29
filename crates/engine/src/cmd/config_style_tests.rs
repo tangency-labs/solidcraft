@@ -52,11 +52,11 @@ fn strict_face_rows_resize_rename_preview_suppress_and_roundtrip() {
     run(&mut s, "config.row", json!({"name":"Tall","values":{key:"ABS - Red",height:"20 mm"}}));
     let before = s.doc.clone();
     let revision = s.revision;
-    let history = s.undo.len();
+    let history = s.history.len();
     let preview = run(&mut s, "config.preview", json!({"row":"Tall"}));
     assert_eq!(s.doc, before);
     assert_eq!(s.revision, revision);
-    assert_eq!(s.undo.len(), history);
+    assert_eq!(s.history.len(), history);
     assert_eq!(preview["styles"][0]["dormant"], false);
     run(&mut s, "config.activate", json!({"row":"Tall"}));
     let state = s.model.state();
@@ -121,12 +121,12 @@ fn strict_face_missing_lineage_never_retargets_and_rolls_back() {
     target.name = format!("F{other}:+z");
     let before = s.doc.clone();
     let revision = s.revision;
-    let history = s.undo.len();
+    let history = s.history.len();
     assert!(s.execute("config.activate", &json!({"row":"Paint"})).is_err());
     assert!(s.execute("config.preview", &json!({"row":"Paint"})).is_err());
     assert_eq!(s.doc, before);
     assert_eq!(s.revision, revision);
-    assert_eq!(s.undo.len(), history);
+    assert_eq!(s.history.len(), history);
     let look = solidcraft_doc::appearance::library("ABS - Red").unwrap();
     s.doc_mut().appearances.faces.push(solidcraft_doc::appearance::FaceLook {
         body: body.clone(),

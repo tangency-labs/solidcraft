@@ -293,13 +293,13 @@ mod tests {
         let doc = s.doc.clone();
         let before = (s.is_dirty(), s.revision, s.evaluations, s.model.is_stale());
         let camera = s.camera;
-        let undo = s.undo.clone();
-        let redo = s.redo.clone();
+        let undo = s.history.steps().to_vec();
+        let redo = s.history.redo_steps().to_vec();
         let result = s.execute("render.backends", &params);
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert_eq!(before, (s.is_dirty(), s.revision, s.evaluations, s.model.is_stale()));
         assert_eq!(camera, s.camera);
-        for (before, after) in [(&undo, &s.undo), (&redo, &s.redo)] {
+        for (before, after) in [(&undo[..], s.history.steps()), (&redo[..], s.history.redo_steps())] {
             assert_eq!(before.len(), after.len());
             for (a, b) in before.iter().zip(after.iter()) {
                 assert!(Arc::ptr_eq(&a.doc, &b.doc));
@@ -323,7 +323,7 @@ mod tests {
         assert!(s.is_dirty());
         assert_unchanged(&mut s, json!({})).unwrap();
         s.execute("edit.undo", &json!({})).unwrap();
-        assert!(!s.redo.is_empty());
+        assert!(!s.history.redo_steps().is_empty());
         assert_unchanged(&mut s, json!({})).unwrap();
         for p in [json!([]), json!(3), json!({"backend": "missing"}), json!({"width": "bad"})] {
             assert!(assert_unchanged(&mut s, p).is_err());
@@ -362,7 +362,7 @@ mod tests {
         let reply = assert_unchanged(&mut s, json!({})).unwrap();
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert!(!s.is_dirty());
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
         let backend: solidcraft_render::BackendDescriptor = serde_json::from_value(reply["backends"][0].clone()).unwrap();
         let descriptors: Vec<_> = backend.executors.iter().filter(|d| d.id.as_str() == "cpu-raytrace").collect();
         assert_eq!(descriptors.len(), usize::from(raytrace));
@@ -392,7 +392,7 @@ mod tests {
         assert_unchanged(&mut s, json!({})).unwrap();
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert!(!s.is_dirty());
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 
     #[test]

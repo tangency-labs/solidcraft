@@ -19,8 +19,8 @@ pub struct Drag {
     /// The plane the pointer moves the point in: through where it was grabbed, facing the view.
     origin: Vec3,
     normal: Vec3,
-    /// The drag's undo step is on top of the history (it went in with the first frame that moved).
-    pushed: bool,
+    /// The undo history's mark when the drag began: its frames fold into one step.
+    mark: solidcraft_engine::Mark,
 }
 
 /// Begin a drag on the part under `p` when joints place it and leave it free to move (it is
@@ -48,7 +48,7 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     }
     let Some(local) = mat_inverse(&joints::occurrence_world(&s.doc, occurrence)).map(|inv| apply_point(&inv, at)) else { return false };
     let normal = proj.ray(p).1;
-    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, pushed: false });
+    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, mark: app.session.history.mark() });
     true
 }
 
@@ -71,26 +71,9 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let at = apply_point(&joints::occurrence_world(&app.session.doc, d.occurrence), d.local);
     let params =
         json!({"occurrence": d.occurrence, "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z], "quiet": true, "continuous": true});
-    // One undo step for the whole drag: the first frame's, kept on top while the others run (not
-    // truncated by depth, which a full history would make lose its oldest steps frame by frame).
-    let own = if d.pushed { app.session.undo.pop() } else { None };
-    // A frame that changes the design adds an undo step (a full history drops its oldest for it,
-    // so its length says nothing).
-    let before = app.session.doc.clone();
-    let pushed = app.run("joint.reach", params).is_ok() && !std::sync::Arc::ptr_eq(&before, &app.session.doc);
-    match own {
-        Some(step) => {
-            if pushed {
-                app.session.undo.pop();
-            }
-            app.session.undo.push(step);
-        }
-        None if pushed => {
-            if let Some(d) = app.viewport.joint_drag.as_mut() {
-                d.pushed = true;
-            }
-        }
-        None => {}
+    // One undo step for the whole drag (a full history loses one old step for it, not one a frame).
+    if app.run("joint.reach", params).is_ok() {
+        app.session.history.fold_since(d.mark);
     }
 }
 
@@ -175,13 +158,13 @@ mod tests {
     #[test]
     fn dragging_a_jointed_part_turns_it_about_its_hinge() {
         let (mut h, end, a, b) = hinged_arm();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         press_and_move(&mut h, a, b);
         assert!(h.app.viewport.joint_drag.is_some() && h.app.viewport.boxsel.is_none(), "the drag moves the arm, not a selection box");
         release(&mut h, b);
         assert!(h.app.viewport.joint_drag.is_none());
         assert!(arm_at(&h, end).dist(Vec3::new(0.0, 55.0, 10.0)) < 0.5, "{:?}", arm_at(&h, end));
-        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the drag");
+        assert_eq!(h.app.session.history.len(), undo + 1, "one undo step for the drag");
         assert!(!h.app.session.log.iter().any(|l| l.contains("Reach")), "frames are not echoed: {:?}", h.app.session.log);
         run(&mut h, "edit.undo", json!({}));
         assert!(arm_at(&h, end).dist(end) < 1e-9, "{:?}", arm_at(&h, end));
@@ -210,17 +193,20 @@ mod tests {
     #[test]
     fn a_drag_on_a_full_undo_history_drops_one_step() {
         let (mut h, _, a, b) = hinged_arm();
-        let step = h.app.session.undo.last().cloned().expect("an undo step");
-        while h.app.session.undo.len() < 200 {
-            let mut older = step.clone();
-            older.label = format!("step {}", h.app.session.undo.len());
-            h.app.session.undo.insert(0, older);
+        let step = h.app.session.history.last().cloned().expect("an undo step");
+        let existing = h.app.session.history.steps().to_vec();
+        h.app.session.history.clear();
+        for i in 0..200 - existing.len() {
+            h.app.session.history.push(solidcraft_engine::Snapshot { label: format!("step {i}"), ..step.clone() });
         }
-        let second = h.app.session.undo.get(1).map(|s| s.label.clone());
+        for step in existing {
+            h.app.session.history.push(step);
+        }
+        let second = h.app.session.history.steps().get(1).map(|s| s.label.clone());
         press_and_move(&mut h, a, b);
         release(&mut h, b);
-        assert_eq!(h.app.session.undo.len(), 200);
-        assert_eq!(h.app.session.undo.first().map(|s| s.label.clone()), second, "only the oldest step went");
-        assert_eq!(h.app.session.undo.last().map(|s| s.label.as_str()), Some("Reach Point"), "the drag's step is on top");
+        assert_eq!(h.app.session.history.len(), 200);
+        assert_eq!(h.app.session.history.steps().first().map(|s| s.label.clone()), second, "only the oldest step went");
+        assert_eq!(h.app.session.history.last().map(|s| s.label.as_str()), Some("Reach Point"), "the drag's step is on top");
     }
 }

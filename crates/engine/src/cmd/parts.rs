@@ -522,7 +522,7 @@ fn length_param(p: &Value, cmd: &str) -> Result<Option<f64>> {
 fn insert_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     let mut computed = s.scratch();
     let result = insert(&mut computed, p)?;
-    computed.undo.clear();
+    computed.history.clear();
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
@@ -657,7 +657,7 @@ fn shape_len(sh: &Shape) -> Option<f64> {
 fn resize_atomic(s: &mut Session, p: &Value) -> Result<Value> {
     let mut computed = s.scratch();
     let result = resize(&mut computed, p)?;
-    computed.undo.clear();
+    computed.history.clear();
     computed.active_component = s.active_component;
     computed.active_occurrence_path = s.active_occurrence_path.clone();
     computed.active_sketch = s.active_sketch.filter(|id| computed.doc.feature(*id).is_some());
@@ -868,7 +868,7 @@ mod tests {
             run(&mut s, "solid.hole", json!({"position":[19.6,33.948,10],"diameter":8.4}));
             let washer = run(&mut s, "parts.insert", json!({"family":"washer","size":"M8","at":[23.8,33.948,10]}));
             let before = s.doc.clone();
-            let undo = s.undo.len();
+            let undo = s.history.len();
             // Both the top bore rim and the wall are world picks on the seated washer (#9648).
             let screw = run(&mut s, "parts.fastener", json!({"family":"socket_head_cap_screw","size":"M8","length":20,"at":[23.8,33.948,z]}));
             let joint = s.doc.assembly.joints.iter().find(|j| Some(j.id) == screw["joint"].as_u64()).unwrap();
@@ -876,7 +876,7 @@ mod tests {
             let (lo, hi) = bbox(&s, "SHCS M8x20");
             assert!((lo.z + 8.4).abs() < 1e-6 && (hi.z - 19.6).abs() < 1e-6, "{lo:?} {hi:?}");
             assert!(((lo.x + hi.x) / 2.0 - 19.6).abs() < 1e-6 && ((lo.y + hi.y) / 2.0 - 33.948).abs() < 1e-6, "{lo:?} {hi:?}");
-            assert_eq!(s.undo.len(), undo + 1);
+            assert_eq!(s.history.len(), undo + 1);
             run(&mut s, "edit.undo", json!({}));
             assert_eq!(s.doc, before);
         }
@@ -907,7 +907,7 @@ mod tests {
         for (x, y) in centres {
             run(&mut s, "solid.hole", json!({"position": [x, y, 10], "diameter": 3.4}));
         }
-        let (comps, occs, undo) = (s.doc.components.len(), s.doc.occurrences.len(), s.undo.len());
+        let (comps, occs, undo) = (s.doc.components.len(), s.doc.occurrences.len(), s.history.len());
         // A hole off the plate fails the insert, and nothing is made.
         let off = json!({"family": "socket_head_cap_screw", "size": "M3", "length": 8, "at": [[9.7, 8, 10], [100, 100, 100]]});
         assert!(s.execute("parts.insert", &off).is_err());
@@ -939,7 +939,7 @@ mod tests {
             assert!(seated.iter().any(|c| (c.0 - x).abs() < 1e-6 && (c.1 - y).abs() < 1e-6), "no screw at ({x}, {y}): {seated:?}");
         }
         // One undo takes them all away.
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         run(&mut s, "edit.undo", json!({}));
         assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (comps, occs));
     }
@@ -1012,18 +1012,18 @@ mod tests {
         let path = vec![copied["occurrence"].as_u64().unwrap_or(0)];
         run(&mut s, "component.activate", json!({"component":id,"occurrence":copied["occurrence"],"path":path}));
         let before = s.doc.clone();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         run(&mut s, "parts.resize", json!({"component":id,"size":"M8","length":25}));
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         assert_eq!(s.active_component, id);
         assert_eq!(s.active_occurrence_path, Some(path.clone()));
         let after = s.doc.clone();
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc, before);
-        let redo = s.redo.len();
+        let redo = s.history.redo_steps().len();
         assert!(s.execute("parts.resize", &json!({"component":id,"length":0})).is_err());
         assert_eq!(s.doc, before);
-        assert_eq!(s.redo.len(), redo);
+        assert_eq!(s.history.redo_steps().len(), redo);
         assert_eq!(s.active_occurrence_path, Some(path));
         run(&mut s, "edit.redo", json!({}));
         assert_eq!(s.doc, after);
@@ -1033,17 +1033,14 @@ mod tests {
     fn resizing_a_part_at_the_history_limit_drops_only_one_old_step() {
         let mut s = Session::default();
         let part = run(&mut s, "parts.insert", json!({"family":"washer","size":"M6"}));
-        let Some(snapshot) = s.undo.last().cloned() else { panic!("insert did not record history") };
-        s.undo = (0..crate::MAX_UNDO)
-            .map(|index| {
-                let mut old = snapshot.clone();
-                old.label = format!("Earlier step {index}");
-                old
-            })
-            .collect();
+        let Some(snapshot) = s.history.last().cloned() else { panic!("insert did not record history") };
+        s.history.clear();
+        for index in 0..crate::MAX_UNDO {
+            s.history.push(crate::Snapshot { label: format!("Earlier step {index}"), ..snapshot.clone() });
+        }
         run(&mut s, "parts.resize", json!({"component":part["component"],"size":"M8"}));
-        assert_eq!(s.undo.len(), crate::MAX_UNDO);
-        assert_eq!(s.undo.first().map(|step| step.label.as_str()), Some("Earlier step 1"));
-        assert_eq!(s.undo.last().map(|step| step.label.as_str()), Some("Change Part Size"));
+        assert_eq!(s.history.len(), crate::MAX_UNDO);
+        assert_eq!(s.history.steps().first().map(|step| step.label.as_str()), Some("Earlier step 1"));
+        assert_eq!(s.history.last().map(|step| step.label.as_str()), Some("Change Part Size"));
     }
 }

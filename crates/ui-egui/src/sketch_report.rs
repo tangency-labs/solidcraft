@@ -143,13 +143,13 @@ mod tests {
         let v = h.app.sketch_report.as_ref().unwrap().result.as_ref().unwrap();
         assert_eq!(v["curves"].as_array().map(Vec::len), Some(2), "the report follows edits");
         // Closing it changes nothing in the design.
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.frames(4);
         assert!(crate::scenario::handle_at("dialog:cancel").is_some(), "the window is drawn");
         h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
         h.frames(2);
         assert!(h.app.sketch_report.is_none());
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 
     #[test]

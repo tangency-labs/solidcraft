@@ -1334,7 +1334,7 @@ mod tests {
     #[test]
     fn fillet_preview_scene() {
         let s = plate();
-        let (rev, undo) = (s.revision, s.undo.len());
+        let (rev, undo) = (s.revision, s.history.len());
         let b = compute(&s, &[("solid.fillet".into(), json!({"edges": [[0, 0, 10]], "radius": 3}))], colors()).unwrap();
         assert_eq!(b.replaced, vec!["Body1".to_string()]);
         let added = count(&b.scene, &b.scene.tris, crate::gpu::TRI_SIZE, colors().added);
@@ -1342,7 +1342,7 @@ mod tests {
         assert!(added > 0 && kept > 0, "added {added} kept {kept}");
         assert!(!b.scene.ghost.is_empty());
         assert_eq!(s.revision, rev);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 
     /// A cut shows its tool see-through and replaces nothing.

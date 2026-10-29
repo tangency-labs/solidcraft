@@ -212,9 +212,9 @@ pub struct ViewportState {
     pub context_menu: Option<Pos2>,
     /// Select Other: its list, a press being held, and click cycling.
     pub select_other: crate::select_other::State,
-    /// A sketch point or curve being dragged (its id, the undo depth when the drag began: the
-    /// whole drag is one undo step, and for a curve where it was last under the cursor).
-    pub point_drag: Option<(String, usize, Option<Vec2>)>,
+    /// A sketch point or curve being dragged (its id, the undo history's mark when the drag
+    /// began: the whole drag is one undo step, and for a curve where it was last under the cursor).
+    pub point_drag: Option<(String, solidcraft_engine::Mark, Option<Vec2>)>,
     /// Checkpoint and source for a cancellable whole-text drag.
     pub(crate) text_drag: Option<(u64, String)>,
     /// A part that joints place, being dragged.
@@ -4815,10 +4815,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // A point dragged with the rest of a selection slides with it, from where it
                     // was grabbed, rather than going to the cursor.
                     let grab = if dragged_with(app, &id).is_empty() { None } else { on_plane(app, a) };
-                    app.viewport.point_drag = Some((id, app.session.undo.len(), grab))
+                    app.viewport.point_drag = Some((id, app.session.history.mark(), grab))
                 }
                 Some(Hit::SketchCurve { sketch, id, .. } | Hit::SketchMidpoint { sketch, id, .. }) if Some(sketch) == active => {
-                    app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.undo.len(), Some(q)));
+                    app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.history.mark(), Some(q)));
                 }
                 _ => {}
             }
@@ -4845,7 +4845,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        if let Some((id, depth, grab)) = app.viewport.point_drag.clone()
+        if let Some((id, mark, grab)) = app.viewport.point_drag.clone()
             && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped())
             && let Some(mut q) = hover.and_then(|p| on_plane(app, p))
         {
@@ -4876,7 +4876,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let params = json!({"entity": id, "with": with, "from": [from.x, from.y], "to": [q.x, q.y], "live": true});
             let at = match app.session.execute("sketch.drag", &params) {
                 Ok(r) => {
-                    app.session.undo.truncate(depth + 1);
+                    app.session.history.fold_since(mark);
                     // Budget-limited progress continues even when the mouse stops. A stalled
                     // search asks for no more frames; release gets one bounded final attempt.
                     if r.get("retry").and_then(serde_json::Value::as_bool) == Some(true) && !resp.drag_stopped() {
@@ -4889,16 +4889,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // The grab stays on the geometry: what it could not follow this frame it catches up
             // with on the next one instead of lagging the cursor for the rest of the drag.
             if grab.is_some() {
-                app.viewport.point_drag = Some((id, depth, Some(at)));
+                app.viewport.point_drag = Some((id, mark, Some(at)));
             }
         }
         if resp.drag_stopped() {
             crate::sketch_text_handles::drag_end(app);
-            if let Some((_, depth, _)) = app.viewport.point_drag.clone() {
+            if let Some((_, mark, _)) = app.viewport.point_drag.clone() {
                 // Letting go on a point, midpoint or curve adds the matching constraint, then the
                 // whole model follows the drag, all in the drag's undo step.
                 let _ = app.session.execute("sketch.drag_end", &json!({ "constraint": crate::drag_snap::release() }));
-                app.session.undo.truncate(depth + 1);
+                app.session.history.fold_since(mark);
             }
             crate::drag_snap::clear();
             app.viewport.point_drag = None;
@@ -7753,7 +7753,7 @@ mod tests {
         let cam = solidcraft_engine::view::home_camera(&h.app.session);
         let whole = pixels(&mut h, cam);
         let before = h.app.session.doc.clone();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
         h.app.start("inspect.section");
         let Some(crate::dialogs::Kind::Section { offset, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("section dialog") };
@@ -7762,7 +7762,7 @@ mod tests {
         let preview = pixels(&mut h, cam);
         assert!(whole.iter().zip(&preview).filter(|(a, b)| a != b).count() > 100, "the picture ignored the uncommitted section preview");
         assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         h.app.run("inspect.section", json!({"plane":"XZ","offset":15})).unwrap();
         h.app.dialog = None;
         assert_eq!(preview, pixels(&mut h, cam), "preview and committed section must draw identically");
@@ -8672,7 +8672,7 @@ mod tests {
             hover_frame(&mut app, &ctx, vec![]);
             let point = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
             let before = app.cam;
-            let undo = app.session.undo.len();
+            let undo = app.session.history.len();
             let press = |pressed: bool, at: Pos2| egui::Event::PointerButton {
                 pos: at,
                 button: egui::PointerButton::Primary,
@@ -8683,7 +8683,7 @@ mod tests {
             hover_frame(&mut app, &ctx, vec![space(true), egui::Event::PointerMoved(point), press(true, point)]);
             hover_frame(&mut app, &ctx, vec![space(true), egui::Event::PointerMoved(point + vec2(40.0, 25.0))]);
             assert_ne!(app.cam, before, "{preset}: holding Space must pan the view");
-            assert_eq!(app.session.undo.len(), undo, "{preset}: holding Space must not edit the design");
+            assert_eq!(app.session.history.len(), undo, "{preset}: holding Space must not edit the design");
             assert!(app.viewport.point_drag.is_none(), "{preset}: holding Space must not drag geometry");
             hover_frame(&mut app, &ctx, vec![press(false, point + vec2(40.0, 25.0)), space(false)]);
         }
@@ -8708,7 +8708,7 @@ mod tests {
                     app.start("sketch.line");
                 }
                 let before = app.cam;
-                let undo = app.session.undo.len();
+                let undo = app.session.history.len();
                 let modifiers = egui::Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), ..Default::default() };
                 let frame = |app: &mut SolveApp, mut events: Vec<egui::Event>| {
                     events.insert(0, egui::Event::ModifiersChanged(modifiers));
@@ -8738,7 +8738,7 @@ mod tests {
                 frame(&mut app, vec![]);
                 match action {
                     "click" => assert!(!app.session.selection.is_empty(), "{preset}: Ctrl+click still selects"),
-                    "tool" => assert_eq!(app.session.undo.len(), undo, "{preset}: the orbit drag adds no geometry"),
+                    "tool" => assert_eq!(app.session.history.len(), undo, "{preset}: the orbit drag adds no geometry"),
                     "orbit" => assert!(app.session.selection.is_empty(), "{preset}: the end of the orbit selects nothing"),
                     _ => {}
                 }
@@ -8762,7 +8762,7 @@ mod tests {
                 assert!(app.tool.is_some());
             }
             let before = app.cam;
-            let undo = app.session.undo.len();
+            let undo = app.session.history.len();
             let modifiers = egui::Modifiers { shift: action == "box", ..Default::default() };
             let frame = |app: &mut SolveApp, mut events: Vec<egui::Event>| {
                 events.insert(0, egui::Event::ModifiersChanged(modifiers));
@@ -8784,7 +8784,7 @@ mod tests {
             assert_eq!(app.cam, before, "{action} drag must not orbit");
             if action == "point" {
                 assert!(app.viewport.point_drag.is_some());
-                assert_eq!(app.session.undo.len(), undo + 1);
+                assert_eq!(app.session.history.len(), undo + 1);
             } else if action == "box" {
                 assert!(app.viewport.boxsel.is_some());
             } else {
@@ -8859,7 +8859,7 @@ mod tests {
             let point = projection(&app, app.viewport.rect.unwrap()).to_screen(Vec3::ZERO).unwrap();
             let p = if button == egui::PointerButton::Primary { point + vec2(80.0, 80.0) } else { point };
             let before = app.cam;
-            let undo = app.session.undo.len();
+            let undo = app.session.history.len();
             let modifiers = egui::Modifiers { shift, ..Default::default() };
             let frame = |app: &mut SolveApp, mut events: Vec<egui::Event>| {
                 events.insert(0, egui::Event::ModifiersChanged(modifiers));
@@ -8877,7 +8877,7 @@ mod tests {
             assert!(app.viewport.hover.is_none());
             assert!(app.viewport.boxsel.is_none() && app.viewport.point_drag.is_none());
             frame(&mut app, vec![egui::Event::PointerButton { pos: end, button, pressed: false, modifiers }]);
-            assert_eq!(app.session.undo.len(), undo);
+            assert_eq!(app.session.history.len(), undo);
             assert!(app.session.selection.is_empty());
             assert!(app.viewport.context_menu.is_none());
             if button == egui::PointerButton::Primary {
@@ -8906,7 +8906,7 @@ mod tests {
             hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
             let before = app.cam;
             let doc = app.session.doc.to_json();
-            let undo = app.session.undo.len();
+            let undo = app.session.history.len();
             let log = app.session.log.len();
             let mods = egui::Modifiers { shift: !alt, alt, ..Default::default() };
             hover_frame(&mut app, &ctx, vec![egui::Event::ModifiersChanged(mods)]);
@@ -8929,7 +8929,7 @@ mod tests {
             hover_frame(&mut app, &ctx, vec![egui::Event::ModifiersChanged(egui::Modifiers::NONE), egui::Event::PointerMoved(p)]);
             assert_eq!(app.cam, after, "release ends modifier-only navigation");
             assert_eq!(app.session.doc.to_json(), doc);
-            assert_eq!(app.session.undo.len(), undo);
+            assert_eq!(app.session.history.len(), undo);
             assert_eq!(app.session.log.len(), log, "continuous motion must not flood the command log");
             assert!(app.session.selection.is_empty());
             assert!(app.viewport.boxsel.is_none() && app.viewport.point_drag.is_none());
@@ -8959,7 +8959,7 @@ mod tests {
                     let focus = h.ctx.memory(|m| m.focused()).expect("the tool's value field has focus");
                     assert!(h.ctx.egui_wants_keyboard_input());
                     let doc = h.app.session.doc.to_json();
-                    let undo = h.app.session.undo.len();
+                    let undo = h.app.session.history.len();
                     let values = format!("{:?}", h.app.dialog.as_ref().unwrap().kind);
                     h.call("ui.move", json!({"x":600,"y":350}));
                     let before = h.app.cam;
@@ -8992,7 +8992,7 @@ mod tests {
                     assert_eq!(h.app.cam, resumed, "releasing the modifier ends navigation");
                     assert_eq!(format!("{:?}", h.app.dialog.as_ref().unwrap().kind), values);
                     assert_eq!(h.app.session.doc.to_json(), doc);
-                    assert_eq!(h.app.session.undo.len(), undo);
+                    assert_eq!(h.app.session.history.len(), undo);
                     assert_eq!(h.ctx.memory(|m| m.focused()), Some(focus));
 
                     h.call("ui.key", json!({"key":"A","cmd":true}));
@@ -10981,7 +10981,7 @@ mod tests {
         h.call("ui.prefs", json!({"navigator_style":"axes", "look_at_anim":false}));
         h.app.run("solid.box", json!({"corner":[100,0,0],"length":20,"width":20,"height":20})).unwrap();
         h.settle();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let away = |h: &mut crate::scenario::Harness| {
             h.call("ui.view", json!({"view":"iso"}));
             h.app.cam.pan(300.0, 200.0, 500.0);
@@ -11020,7 +11020,7 @@ mod tests {
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert!(!h.app.preferences.navigator_fit, "Navigation defaults restore the in-place turn");
         h.call("ui.prefs", json!({"button":"cancel"}));
-        assert_eq!(h.app.session.undo.len(), undo, "a view change edits nothing");
+        assert_eq!(h.app.session.history.len(), undo, "a view change edits nothing");
     }
 
     #[test]

@@ -7,13 +7,13 @@ fn details_descriptions_are_pure_and_live_edits_preserve_custom_companions() {
     let mut h = Harness::new();
     h.app.run("inspect.draft", json!({"pull":[-2,3,-4],"angle":14.5})).unwrap();
     let effect = h.app.session.status_items().remove(0);
-    let before = (h.app.session.revision, h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.status_items());
+    let before = (h.app.session.revision, h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.status_items());
     let details = crate::viewport_details::description(&h.app, &effect);
     assert_eq!(details.settings.len(), 2);
     assert_eq!(details.key.len(), 3);
     assert!(details.caption.as_ref().is_some_and(|caption| !caption.contains("Draft")));
     assert!(matches!(details.settings[0].value,V::Axis{value,..} if value[0]<0.0 && value[1]>0.0 && value[2]<0.0));
-    assert_eq!((h.app.session.revision, h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.status_items()), before);
+    assert_eq!((h.app.session.revision, h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.status_items()), before);
     let params = crate::viewport_details::edit_params(&h.app, &effect, "angle", &V::Angle(8.25)).unwrap();
     let original = h.app.session.analysis.unwrap();
     h.app.run(&effect.command, params).unwrap();
@@ -178,7 +178,7 @@ fn details_native_value_edits_run_real_commands_without_design_history() {
         h.app.session.doc_mut().units = "in".into();
         h.app.run(command, params).unwrap();
         h.frames(3);
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len());
         let effect = h.app.session.status_items().remove(0);
         let owner = crate::viewport_status::identity(&effect);
         h.step(&json!({"click":{"handle":format!("viewport_status:{owner}:setting")}})).unwrap();
@@ -197,7 +197,7 @@ fn details_native_value_edits_run_real_commands_without_design_history() {
             _ => panic!("real edited setting expected"),
         };
         assert!((value - expected).abs() < 1e-9, "native {field}: {value} instead of {expected}");
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len()), before);
         assert!(h.app.dialog.is_none());
     }
 }
@@ -1300,7 +1300,7 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
         assert!(!h.app.preferences.show_view_angles);
         assert!(crate::scenario::rect_of("view_angles:readout").is_none());
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 }
 
@@ -1358,7 +1358,7 @@ fn view_angles_card_zero_buttons_and_axis_locks() {
     h.call("ui.click", json!({"x": zero.x, "y": zero.y}));
     h.settle();
     assert!(h.app.cam.view_angles().yaw.abs() < 1e-6);
-    assert!(h.app.session.undo.is_empty(), "view angles never touch the design");
+    assert!(h.app.session.history.is_empty(), "view angles never touch the design");
 }
 
 /// In the corner (#7893) the buttons sit as in the dialogs: right-aligned, dismissals first and the
@@ -1662,7 +1662,7 @@ fn live_analysis_status_uses_session_settings_and_declared_clear_without_history
     h.app.preferences.viewport_status_details = false;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
     h.app.session.mark_saved();
-    let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
+    let before = (h.app.session.doc.to_json(), h.app.session.history.len());
     for (command, params, expected, key) in [
         ("inspect.zebra", json!({"stripes":14.5}), "14.5 stripes", false),
         ("inspect.draft", json!({"pull":[0,0,1],"angle":7.5}), "Z · 7.5°", true),
@@ -1693,7 +1693,7 @@ fn live_analysis_status_uses_session_settings_and_declared_clear_without_history
         }
         h.step(&json!({"click":{"handle":format!("viewport_status:{}:close",item.id)}})).unwrap();
         assert!(h.app.session.status_items().is_empty());
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len()), before);
         assert!(!h.app.session.is_dirty());
     }
 }

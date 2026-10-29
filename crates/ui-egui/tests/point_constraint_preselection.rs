@@ -30,12 +30,12 @@ fn clicked_point_constraint_preselection_applies_and_undoes_once() {
         }
         assert_eq!(h.app.session.selection.len(), picks.len(), "{command}");
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
         assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{command}: {:?}", h.app.status);
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         let state = h.app.session.world_state();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
@@ -73,12 +73,12 @@ fn rejected_and_ambiguous_preselection_preserve_document_and_selection() {
     h.app.session.selection = vec![Sel::SketchPoint { id: "a".into() }, Sel::SketchPoint { id: "b".into() }];
     let selection = h.app.session.selection.clone();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.constraint.coincident"})).unwrap();
     assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
     assert_eq!(h.app.session.selection, selection);
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     for command in ["coincident", "midpoint", "symmetry"] {
         h.app.session.selection = vec![Sel::SketchPoint { id: "a".into() }];
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
@@ -107,7 +107,7 @@ fn line_ends(h: &Harness, id: &str) -> (Vec2, Vec2) {
 
 fn assert_centred(h: &Harness, undo: usize) {
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let (a, b) = line_ends(h, "l1");
     assert_eq!((a, b), (Vec2::new(0.0, 0.0), Vec2::new(60.0, 0.0)), "the first line stays");
     let (c, d) = line_ends(h, "l2");
@@ -118,7 +118,7 @@ fn assert_centred(h: &Harness, undo: usize) {
 #[test]
 fn midpoint_tool_clicking_two_lines_centres_them() {
     let mut h = two_lines();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.constraint.midpoint"})).unwrap();
     h.step(&json!({"click":{"sketch":[45,0]}})).unwrap();
     h.step(&json!({"click":{"sketch":[10,-10]}})).unwrap();
@@ -131,7 +131,7 @@ fn midpoint_tool_takes_two_preselected_lines() {
     h.step(&json!({"click":{"sketch":[45,0]}})).unwrap();
     h.step(&json!({"click":{"sketch":[10,-10]},"shift":true})).unwrap();
     assert_eq!(h.app.session.selection.len(), 2);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.constraint.midpoint"})).unwrap();
     assert!(h.app.tool.is_none());
     assert_centred(&h, undo);

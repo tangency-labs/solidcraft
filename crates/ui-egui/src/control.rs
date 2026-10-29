@@ -267,7 +267,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
         && !id.starts_with("settings.")
         && app.session.active_sketch.is_none()
         && app.session.world_state().bodies.len() == 1
-        && app.session.undo.len() <= 2
+        && app.session.history.len() <= 2
     {
         app.fit_view();
     }

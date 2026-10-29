@@ -121,13 +121,13 @@ mod tests {
         let camera = Camera { up: UpAxis::Y, roll: 0.25, ..Default::default() };
         s.execute("render.settings.set", &json!({"name":"Photo","set":{"camera":camera}})).unwrap();
         let doc = s.doc.clone();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         s.execute("render.settings.apply", &json!({"name":"Photo"})).unwrap();
         assert_eq!(s.camera, Some(camera));
         assert!(s.model.is_stale());
         assert_eq!(s.evaluations, 0);
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
         let metadata = s.execute("render.scene", &json!({})).unwrap();
         assert!(!s.model.is_stale());
         assert!(s.evaluations > 0);

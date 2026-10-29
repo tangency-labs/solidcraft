@@ -11,21 +11,21 @@ fn environment_editor_rotation_wraps_and_each_edit_is_one_undo() {
     save(&mut s, json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky"}}}}));
     for (degrees, expected) in [(215.0, -145.0), (540.0, -180.0), (-541.0, 179.0), (1e6, -80.0), (-1e6, 80.0)] {
         let before = s.doc.clone();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let result = s.execute("render.environment.set", &json!({"name":"Studio","rotation_deg":degrees})).unwrap();
         let angle = result["setup"]["job"]["options"]["environment"]["rotation_rad"].as_f64().unwrap().to_degrees();
         assert!((-180.0..180.0).contains(&angle));
         assert!((angle - expected).abs() < 1e-9);
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc, before);
         s.execute("edit.redo", &json!({})).unwrap();
     }
-    let undo = s.undo.len();
+    let undo = s.history.len();
     s.execute("render.environment.set", &json!({"name":"Studio","intensity":2.5})).unwrap();
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     s.execute("render.environment.set", &json!({"name":"Studio","intensity":2.5})).unwrap();
-    assert_eq!(s.undo.len(), undo + 1, "unchanged values do not add history");
+    assert_eq!(s.history.len(), undo + 1, "unchanged values do not add history");
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn environment_editor_hostile_inputs_refuse_atomically() {
     let mut s = Session::default();
     save(&mut s, json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky"}}}}));
     let before = s.doc.clone();
-    let history = (s.revision, s.undo.len(), s.redo.len());
+    let history = (s.revision, s.history.len(), s.history.redo_steps().len());
     for extra in [
         json!({"rotation_deg":1e6+1.0}),
         json!({"rotation_deg":-1e6-1.0}),
@@ -52,7 +52,7 @@ fn environment_editor_hostile_inputs_refuse_atomically() {
         request.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         assert!(s.execute("render.environment.set", &request).is_err(), "{request}");
         assert!(Arc::ptr_eq(&before, &s.doc));
-        assert_eq!(history, (s.revision, s.undo.len(), s.redo.len()));
+        assert_eq!(history, (s.revision, s.history.len(), s.history.redo_steps().len()));
     }
 }
 
@@ -100,18 +100,18 @@ fn shot_frame_edits_are_bounded_atomic_and_one_undo_per_edit() {
         json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":1e9,"fov":0}}),
     ] {
         let before = s.doc.clone();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let evaluations = s.evaluations;
         save(&mut s, patch.clone());
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         assert_eq!(s.evaluations, evaluations);
         save(&mut s, patch);
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(s.doc, before);
     }
     let before = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for patch in [
         json!({"width":0}),
         json!({"height":0}),
@@ -125,7 +125,7 @@ fn shot_frame_edits_are_bounded_atomic_and_one_undo_per_edit() {
     ] {
         assert!(s.execute("render.settings.set", &json!({"name":"Studio","set":patch})).is_err());
         assert!(Arc::ptr_eq(&s.doc, &before));
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 }
 
@@ -137,7 +137,7 @@ fn render_lights_visibility_commands_validate_and_echo_without_document_or_histo
     s.execute("edit.undo", &json!({})).unwrap();
     s.mark_saved();
     let document = s.doc.clone();
-    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty());
     for (command, input) in [
         ("render.lights.solo", json!({"id":"directional:0","solo":true})),
         ("render.lights.solo", json!({"solo":false})),
@@ -168,7 +168,7 @@ fn render_lights_visibility_commands_validate_and_echo_without_document_or_histo
         assert!(s.execute(command, &input).is_err(), "{command}: {input}");
     }
     assert!(Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty()));
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(s.doc.render.setups["Studio"].width, 900);
 }
@@ -226,9 +226,9 @@ fn render_lights_edit_commands_publish_one_undo_and_preserve_other_settings() {
         ("render.lights.remove", json!({"name":"Studio","id":"point:0"})),
     ] {
         let before = s.doc.clone();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let reply = s.execute(command, &params).unwrap();
-        assert_eq!(s.undo.len(), undo + 1, "{command}");
+        assert_eq!(s.history.len(), undo + 1, "{command}");
         assert_eq!(reply["setup"]["width"], 1024);
         let changed = s.doc.clone();
         s.execute("edit.undo", &json!({})).unwrap();
@@ -261,10 +261,10 @@ fn render_lights_edit_refusals_are_atomic_for_hostile_numbers_ids_stale_reviews_
         json!({"name":"Studio","id":"point:0","set":{"save":true}}),
     ] {
         let document = s.doc.clone();
-        let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations);
+        let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations);
         assert!(s.execute("render.lights.set", &input).is_err(), "{input}");
         assert!(Arc::ptr_eq(&document, &s.doc));
-        assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations));
+        assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations));
     }
     for (kind, cap) in [("directional", 8), ("point", 8), ("area", 4)] {
         light_fixture(&mut s, "cpu_raytrace");
@@ -272,11 +272,11 @@ fn render_lights_edit_refusals_are_atomic_for_hostile_numbers_ids_stale_reviews_
             s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":kind}})).unwrap();
         }
         let document = s.doc.clone();
-        let before = (s.undo.len(), s.revision);
+        let before = (s.history.len(), s.revision);
         assert!(s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":kind}})).is_err());
         assert!(s.execute("render.lights.duplicate", &json!({"name":"Studio","id":format!("{kind}:0")})).is_err());
         assert!(Arc::ptr_eq(&document, &s.doc));
-        assert_eq!(before, (s.undo.len(), s.revision));
+        assert_eq!(before, (s.history.len(), s.revision));
     }
     light_fixture(&mut s, "gpu_path");
     s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional"}})).unwrap();
@@ -458,7 +458,7 @@ fn render_lights_list_hostile_calls_and_reads_preserve_document_history_and_dirt
     s.execute("edit.undo", &json!({})).unwrap();
     s.mark_saved();
     let document = s.doc.clone();
-    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty());
     for params in [
         json!([]),
         json!([null, null]),
@@ -477,13 +477,13 @@ fn render_lights_list_hostile_calls_and_reads_preserve_document_history_and_dirt
     ] {
         assert!(s.execute("render.lights.list", &params).is_err(), "{params}");
         assert!(Arc::ptr_eq(&document, &s.doc));
-        assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+        assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty()));
     }
     // Session::execute normalizes a top-level null to the empty parameter object.
     for params in [Value::Null, json!({}), json!({"setup":"Studio"}), json!({"settings":{"job":{"method":"cpu_raytrace"}}})] {
         s.execute("render.lights.list", &params).unwrap();
         assert!(Arc::ptr_eq(&document, &s.doc));
-        assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+        assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty()));
     }
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(s.doc.render.setups["Studio"].width, 900);
@@ -521,12 +521,12 @@ fn render_lights_list_does_not_settle_a_stale_model() {
     assert!(s.model.is_stale());
     let document = s.doc.clone();
     let model = s.model.state();
-    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations);
+    let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations);
     s.execute("render.lights.list", &json!({"settings":{"job":{"method":"cpu_raytrace"}}})).unwrap();
     assert!(s.model.is_stale());
     assert!(Arc::ptr_eq(&document, &s.doc));
     assert!(Arc::ptr_eq(&model, &s.model.state()));
-    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations));
+    assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -546,12 +546,12 @@ fn embedded_hdr_capture_is_offline_atomic_deduplicated_and_undoable_after_source
     s.evaluations = 0;
     let original = s.doc.clone();
     let model = s.model.state();
-    let before = (s.revision, s.undo.len(), s.redo.len());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len());
     let info = s.execute("render.hdr.inspect", &json!({"path":path})).unwrap();
     assert_eq!(info["sha256"], json!(HdrId::of(&bytes)));
     assert!(info.get("data").is_none());
     assert!(Arc::ptr_eq(&original, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len()));
     let params = json!({"name":"HDR","path":path,"expected_sha256":info["sha256"],"rotation_rad":0.75,"intensity":2.0,
         "set":{"width":16,"height":12,"exposure_ev":1.5,"job":{"method":"gpu_path","options":{
             "samples":37,"max_depth":9,"seed":u32::MAX,"denoise":true,"tone_map":"aces_fitted",
@@ -559,25 +559,25 @@ fn embedded_hdr_capture_is_offline_atomic_deduplicated_and_undoable_after_source
     let saved = s.execute("render.settings.capture_hdr", &params).unwrap();
     let id: HdrId = serde_json::from_value(saved["resource"]["sha256"].clone()).unwrap();
     assert!(s.render_job_host().is_none());
-    assert_eq!(s.undo.len(), before.1 + 1);
+    assert_eq!(s.history.len(), before.1 + 1);
     assert_eq!(s.doc.render.resources.len(), 1);
     assert_eq!(saved["setup"]["job"]["options"]["hdr"]["resource"], info["sha256"]);
     assert_eq!(saved["setup"]["job"]["options"]["lighting"]["environment"], json!([0.2, 0.4, 0.7]));
     let captured = s.doc.clone();
-    let state = (s.revision, s.undo.len(), s.redo.len());
+    let state = (s.revision, s.history.len(), s.history.redo_steps().len());
     assert_eq!(saved, s.execute("render.settings.capture_hdr", &params).unwrap());
     assert!(Arc::ptr_eq(&captured, &s.doc));
-    assert_eq!(state, (s.revision, s.undo.len(), s.redo.len()));
+    assert_eq!(state, (s.revision, s.history.len(), s.history.redo_steps().len()));
     let mut changed = bytes.clone();
     *changed.last_mut().unwrap() = 130;
     std::fs::write(&path, changed).unwrap();
     assert!(s.execute("render.settings.capture_hdr", &params).unwrap_err().to_string().contains("changed since selection"));
     assert!(Arc::ptr_eq(&captured, &s.doc));
-    assert_eq!(state, (s.revision, s.undo.len(), s.redo.len()));
+    assert_eq!(state, (s.revision, s.history.len(), s.history.redo_steps().len()));
     std::fs::remove_file(&path).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.doc, original);
-    assert_eq!(s.redo.len(), 1);
+    assert_eq!(s.history.redo_steps().len(), 1);
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(s.doc, captured);
     assert!(std::ptr::eq(
@@ -603,7 +603,7 @@ fn embedded_hdr_capture_is_offline_atomic_deduplicated_and_undoable_after_source
 fn embedded_hdr_capture_rejects_parameters_scope_and_cpu_primaries_without_mutation() {
     let mut s = Session::default();
     let before = s.doc.clone();
-    let state = (s.revision, s.undo.len(), s.redo.len());
+    let state = (s.revision, s.history.len(), s.history.redo_steps().len());
     for (patch, extra, expected) in [
         (json!({"job":{"method":"raster"}}), json!({}), "typed cpu_raytrace or gpu_path"),
         (json!({"job":{"method":"cpu_raytrace","options":{"primary_samples":3}}}), json!({}), "primary"),
@@ -622,7 +622,7 @@ fn embedded_hdr_capture_rejects_parameters_scope_and_cpu_primaries_without_mutat
         let error = s.execute("render.settings.capture_hdr", &params).unwrap_err().to_string();
         assert!(error.contains(expected), "{error}");
         assert!(Arc::ptr_eq(&before, &s.doc));
-        assert_eq!(state, (s.revision, s.undo.len(), s.redo.len()));
+        assert_eq!(state, (s.revision, s.history.len(), s.history.redo_steps().len()));
     }
     let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
     let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-hdr-scope-{}-{nonce}", std::process::id()));
@@ -645,7 +645,7 @@ fn embedded_hdr_capture_rejects_parameters_scope_and_cpu_primaries_without_mutat
     capture["set"]["job"]["method"] = json!("gpu_path");
     assert!(s.execute("render.settings.capture_hdr", &capture).unwrap_err().to_string().contains("primaries"));
     assert!(Arc::ptr_eq(&before, &s.doc));
-    assert_eq!(state, (s.revision, s.undo.len(), s.redo.len()));
+    assert_eq!(state, (s.revision, s.history.len(), s.history.redo_steps().len()));
     let info = s.execute("render.hdr.inspect", &json!({"path":path})).unwrap();
     capture["expected_sha256"] = info["sha256"].clone();
     capture["assume_linear_srgb"] = json!(true);
@@ -667,7 +667,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     let original = s.doc.clone();
     let model = s.model.state();
     let world = s.world_state();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     s.evaluations = 0;
     let setup: RenderSetup = serde_json::from_value(json!({
         "width":640,"height":480,"exposure_ev":2.5,"backend":"future-backend",
@@ -681,7 +681,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     assert_eq!(full.as_object().unwrap().len(), 11);
     save(&mut s, full.clone());
     assert!(s.is_dirty());
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!(s.doc.render.setups["Studio"], setup);
     assert!(s.doc.differs_only_in_render(&original));
     let saved = s.doc.clone();
@@ -698,7 +698,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     let revision = s.revision;
     save(&mut s, json!({"job":setup.job}));
     assert_eq!(s.revision, revision);
-    assert_eq!(s.redo.len(), 1, "an identical job preserves redo");
+    assert_eq!(s.history.redo_steps().len(), 1, "an identical job preserves redo");
     s.execute("edit.redo", &json!({})).unwrap();
     save(&mut s, json!({"job":null}));
     assert!(s.doc.render.setups["Studio"].job.is_none());
@@ -730,10 +730,10 @@ fn invalid_saved_jobs_never_partially_replace_a_setup() {
         json!({"job":{"options":{"samples":4}}}),
     ] {
         let doc = s.doc.clone();
-        let state = (s.revision, s.undo.len(), s.redo.len(), s.evaluations);
+        let state = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations);
         assert!(s.execute("render.settings.set", &json!({"name":"Studio","set":patch})).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(state, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+        assert_eq!(state, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations));
     }
 }
 
@@ -749,30 +749,30 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
     let world = s.world_state();
     assert!(!Arc::ptr_eq(&model, &world), "exercise the prepared occurrence cache");
     let mesh = model.bodies[0].mesh();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     s.evaluations = 0;
     save(&mut s, json!({"exposure_ev":2,"backend":"future-backend"}));
     assert!(s.is_dirty());
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     let doc = s.doc.clone();
     let revision = s.revision;
     save(&mut s, json!({"exposure_ev":2}));
     assert!(Arc::ptr_eq(&doc, &s.doc));
     assert_eq!(s.revision, revision);
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     let restored = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     assert_eq!(restored.render, s.doc.render);
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(!s.is_dirty());
     s.execute("render.settings.get", &json!({})).unwrap();
-    assert_eq!(s.redo.len(), 1);
+    assert_eq!(s.history.redo_steps().len(), 1);
     s.execute("edit.redo", &json!({})).unwrap();
     let checkpoint = s.checkpoint();
     save(&mut s, json!({"width":800}));
     s.execute("edit.undo", &json!({})).unwrap();
     let revision = s.revision;
     save(&mut s, json!({"exposure_ev":2}));
-    assert_eq!(s.redo.len(), 1, "a no-op edit preserves redo");
+    assert_eq!(s.history.redo_steps().len(), 1, "a no-op edit preserves redo");
     assert_eq!(s.revision, revision);
     s.execute("edit.redo", &json!({})).unwrap();
     s.restore_checkpoint(checkpoint).unwrap();
@@ -815,10 +815,10 @@ fn invalid_settings_and_limit_are_atomic() {
         json!({"environment_intensity":101}),
     ] {
         let doc = s.doc.clone();
-        let state = (s.revision, s.undo.len(), s.redo.len(), s.evaluations);
+        let state = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations);
         assert!(s.execute("render.settings.set", &json!({"name":"Studio","set":patch})).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(state, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+        assert_eq!(state, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations));
     }
     for i in 0..32 {
         s.execute("render.settings.set", &json!({"name":i.to_string(),"set":{}})).unwrap();
@@ -939,10 +939,10 @@ fn render_lights_new_numeric_fields_refuse_hostile_and_inapplicable_patches_atom
         ("directional:0", json!({"direction":[1e300,0,0]})),
     ] {
         let before = s.doc.clone();
-        let history = (s.undo.len(), s.revision);
+        let history = (s.history.len(), s.revision);
         assert!(s.execute("render.lights.set", &json!({"name":"Studio","id":id,"set":set})).is_err());
         assert!(Arc::ptr_eq(&before, &s.doc));
-        assert_eq!((s.undo.len(), s.revision), history);
+        assert_eq!((s.history.len(), s.revision), history);
     }
     for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         for edit in [

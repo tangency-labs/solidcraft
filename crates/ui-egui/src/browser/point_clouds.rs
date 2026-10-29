@@ -25,12 +25,13 @@ use range_track::{Part, Track, range_track};
 /// Filters the GPU applies; the others are kept but not drawn.
 pub const DRAWN_FILTERS: usize = solidcraft_gpu::view::FILTERS;
 
-/// The Edit Point Cloud card: the cloud, the undo depth when it opened, what it worked out once
-/// for the cloud's data (the automatic height range), its tracks' bars, and a filter playing.
+/// The Edit Point Cloud card: the cloud, where the undo history stood when it opened, what it
+/// worked out once for the cloud's data (the automatic height range), its tracks' bars, and a
+/// filter playing.
 #[derive(Clone, Debug)]
 pub struct CloudPanel {
     pub cloud: u64,
-    pub(crate) depth: usize,
+    pub(crate) mark: solidcraft_engine::Mark,
     auto: Option<(usize, [u64; 16], Option<[f64; 2]>)>,
     tracks: Tracks,
     pub play: Option<Play>,
@@ -94,7 +95,7 @@ impl Play {
 
 impl CloudPanel {
     pub fn new(app: &SolveApp, cloud: u64) -> Self {
-        CloudPanel { cloud, depth: app.session.undo.len(), auto: None, tracks: Tracks::default(), play: None }
+        CloudPanel { cloud, mark: app.session.history.mark(), auto: None, tracks: Tracks::default(), play: None }
     }
     /// The cloud's automatic height range, worked out again only when its points or placement
     /// change.
@@ -517,11 +518,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         && app.run("pointcloud.edit", p).is_ok()
     {
         // One undo step for the whole edit.
-        if app.session.undo.len() > m.depth + 1 {
-            let keep = app.session.undo.get(m.depth).cloned();
-            app.session.undo.truncate(m.depth);
-            app.session.undo.extend(keep);
-        }
+        app.session.history.fold_since(m.mark);
     }
     app.tree.cloud_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
 }

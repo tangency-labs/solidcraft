@@ -14,7 +14,7 @@ fn select_geometry_resolves_points_and_indices_without_changing_history() {
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name":"Block", "corner":[20,30,40], "length":10, "width":10, "height":10}));
-    let before = (s.doc.to_json(), s.undo.len());
+    let before = (s.doc.to_json(), s.history.len());
     for (kind, point) in [("face", Vec3::new(25.0, 35.0, 50.0)), ("edge", Vec3::new(25.0, 30.0, 50.0))] {
         assert_eq!(run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Block","point":point}]}))["selected"], 1);
         let index = match &s.selection[0] {
@@ -35,7 +35,7 @@ fn select_geometry_resolves_points_and_indices_without_changing_history() {
         run(&mut s, "select.set", json!({"items":[point_only]}));
         assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), complete);
     }
-    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    assert_eq!((s.doc.to_json(), s.history.len()), before);
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn select_geometry_invalid_partial_picks_leave_selection_and_revision_unchanged(
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"body_name":"Block", "length":10, "width":10, "height":10}));
     run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
-    let before = (s.selection.clone(), s.revision, s.undo.len());
+    let before = (s.selection.clone(), s.revision, s.history.len());
     for kind in ["face", "edge"] {
         for fields in [
             json!({}),
@@ -101,19 +101,19 @@ fn select_geometry_invalid_partial_picks_leave_selection_and_revision_unchanged(
             for add in [false, true] {
                 let result = s.execute("select.set", &json!({"items":[{"type":"face","body":"Block","point":[5,5,10]},item],"add":add}));
                 assert!(result.is_err(), "accepted {item}");
-                assert_eq!((s.selection.clone(), s.revision, s.undo.len()), before, "{item}");
+                assert_eq!((s.selection.clone(), s.revision, s.history.len()), before, "{item}");
             }
         }
     }
     assert!(s.execute("select.set", &json!({"items":[{"type":"face","body":"Missing","point":[5,5,10]}]})).is_err());
-    assert_eq!((s.selection, s.revision, s.undo.len()), before);
+    assert_eq!((s.selection, s.revision, s.history.len()), before);
 }
 
 #[test]
 fn history_playback_is_a_typed_display_request_without_history_edits() {
     let mut s = Session::default();
     let revision = s.revision;
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for action in ["toggle", "play", "stop"] {
         assert_eq!(run(&mut s, "timeline.play", json!({"action": action})), json!({"action": action}));
     }
@@ -122,7 +122,7 @@ fn history_playback_is_a_typed_display_request_without_history_edits() {
         assert!(s.execute("timeline.play", &json!({"action": action})).is_err());
     }
     assert_eq!(s.revision, revision);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     assert!(s.doc.marker.is_none());
     let description = run(&mut s, "engine.describe", json!({"command": "timeline.play"}));
     assert!(description["input"].is_object());
@@ -169,10 +169,10 @@ fn roll_to_takes_a_number_or_end_and_refuses_anything_else() {
 fn repeat_is_refused_outside_the_app_and_changes_nothing() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
-    let (doc, undo) = (s.doc.to_json(), s.undo.len());
+    let (doc, undo) = (s.doc.to_json(), s.history.len());
     let e = s.execute("edit.repeat", &json!({})).unwrap_err().to_string();
     assert!(e.contains("in the app"), "{e}");
-    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo));
+    assert_eq!((s.doc.to_json(), s.history.len()), (doc, undo));
     let spec = crate::find_command("edit.repeat").unwrap();
     assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Shift+R"), "", false));
 }
@@ -371,7 +371,7 @@ fn failed_or_non_feature_redefinitions_leave_session_and_history_intact() {
     let doc = s.doc.clone();
     let sketch = s.active_sketch;
     let selection = s.selection.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for (command, params) in [
         ("solid.cylinder", json!({"radius": 5, "height": 10})),
         ("solid.box", json!({"length": "unknown_parameter", "width": 10, "height": 5})),
@@ -382,7 +382,7 @@ fn failed_or_non_feature_redefinitions_leave_session_and_history_intact() {
         assert_eq!(*s.doc, *doc, "{command}");
         assert_eq!(s.active_sketch, sketch, "{command}");
         assert_eq!(s.selection, selection, "{command}");
-        assert_eq!(s.undo.len(), undo, "{command}");
+        assert_eq!(s.history.len(), undo, "{command}");
     }
 }
 
@@ -782,10 +782,10 @@ fn timeline_moves_across_the_marker_are_one_undo_step() {
     run(&mut s, "timeline.reorder", json!({"feature": "D", "position": 3, "active": true}));
     assert_eq!(s.doc.marker, None, "every feature active again");
 
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let error = s.execute("timeline.reorder", &json!({"feature": "A", "position": 0, "active": false})).unwrap_err().to_string();
     assert!(error.contains("behind the history marker"), "{error}");
-    assert_eq!(s.undo.len(), undo, "a refused move adds no undo step");
+    assert_eq!(s.history.len(), undo, "a refused move adds no undo step");
 }
 
 /// #5962: a reorder that breaks a feature is refused unless `allow_errors`; with it the move is
@@ -832,11 +832,11 @@ fn failed_timeline_move_many_keeps_folder_membership_and_order() {
     run(&mut s, "solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1, "name": "Round"}));
     let group = run(&mut s, "timeline.group", json!({"name": "Destination"}))["group"].as_u64().unwrap();
     let before = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let error = s.execute("timeline.move_many", &json!({"features": ["Base"], "group": group, "position": 2})).unwrap_err().to_string();
     assert!(error.contains("breaks"), "{error}");
     assert_eq!(s.doc, before);
-    assert_eq!(s.undo.len(), undo, "a refused atomic move adds no undo step");
+    assert_eq!(s.history.len(), undo, "a refused atomic move adds no undo step");
 }
 
 #[test]
@@ -1065,12 +1065,12 @@ fn suppress_takes_a_list_of_features_as_one_undo_step() {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "name": "B"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "name": "C"}));
     let id = |s: &Session, name: &str| s.doc.find_feature(name).unwrap().id;
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let a = id(&s, "A");
     let r = run(&mut s, "timeline.suppress", json!({"features": [a, "B"], "suppressed": true}));
     assert_eq!(r, json!({"features": [id(&s, "A"), id(&s, "B")], "suppressed": true}));
     assert!(suppressed(&s, "A") && suppressed(&s, "B") && !suppressed(&s, "C"));
-    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    assert_eq!(s.history.len(), undo + 1, "one undo step");
     assert_eq!(s.model.state().bodies.len(), 1);
     run(&mut s, "edit.undo", json!({}));
     assert!(!suppressed(&s, "A") && !suppressed(&s, "B"));
@@ -1092,7 +1092,7 @@ fn suppress_takes_a_list_of_features_as_one_undo_step() {
 
     // An unknown feature in the list refuses the whole command, as do no features at all.
     let before = (*s.doc).clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for bad in [
         json!({"features": ["A", "Nope"], "suppressed": true}),
         json!({"features": []}),
@@ -1103,7 +1103,7 @@ fn suppress_takes_a_list_of_features_as_one_undo_step() {
         assert!(s.execute("timeline.suppress", &bad).is_err(), "{bad}");
     }
     assert_eq!(*s.doc, before);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     // timeline.delete takes either.
     run(&mut s, "timeline.delete", json!({"feature": "C"}));
     run(&mut s, "timeline.delete", json!({"features": ["B"]}));
@@ -1487,7 +1487,7 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     run(&mut s, "appearance.assign", json!({"bodies":["C"],"appearance":"ABS - Blue"}));
     run(&mut s, "appearance.assign", json!({"body":"C","faces":[[40,5,5]],"appearance":"ABS - Red"}));
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.evaluations);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.evaluations);
     run(&mut s, "select.same_look", json!({"body":"A"}));
     assert_eq!(s.selection.len(), 3);
     let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
@@ -1512,7 +1512,7 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
         assert_eq!(s.selection, selected);
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(history, (s.undo.len(), s.redo.len(), s.evaluations));
+    assert_eq!(history, (s.history.len(), s.history.redo_steps().len(), s.evaluations));
 }
 
 /// A body changed by a few hundred features in a row whose names nothing asks for, then
@@ -1642,7 +1642,7 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
         run(&mut s, "parameters.add", json!({"name": format!("p{i}"), "expression": "10 mm"}));
     }
     let image = s.doc.canvases[0].data.as_ptr();
-    let copies = s.undo.iter().filter_map(|u| u.doc.canvases.first()).filter(|c| c.data.as_ptr() != image).count();
+    let copies = s.history.steps().iter().filter_map(|u| u.doc.canvases.first()).filter(|c| c.data.as_ptr() != image).count();
     assert_eq!(copies, 0, "undo states holding their own copy of the image");
     for _ in 0..20 {
         run(&mut s, "edit.undo", json!({}));

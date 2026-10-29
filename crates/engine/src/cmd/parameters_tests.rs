@@ -994,7 +994,7 @@ fn a_hostile_parameter_in_an_inch_design_is_refused() {
 fn a_refused_definition_changes_nothing() {
     let mut s = Session::default();
     block(&mut s);
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let features = s.doc.features.len();
     let refused = [
         (json!({"distance": "len = 5"}), "there is already a parameter `len`: type `len` to use it"),
@@ -1014,7 +1014,7 @@ fn a_refused_definition_changes_nothing() {
         }
         let e = err(&mut s, "solid.extrude", q.clone());
         assert!(e.contains(message), "{q}: {e}");
-        assert_eq!((s.undo.len(), s.doc.features.len()), (undo, features), "{q}: a refused definition changed the design");
+        assert_eq!((s.history.len(), s.doc.features.len()), (undo, features), "{q}: a refused definition changed the design");
         assert!(s.doc.param("w").is_none(), "{q}");
     }
     // The same definition twice is one parameter.

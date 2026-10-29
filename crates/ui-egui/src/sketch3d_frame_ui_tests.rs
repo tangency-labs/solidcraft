@@ -181,7 +181,7 @@ fn second_occurrence_drawn_wire_fit_picks_and_world_triad_drag_stay_aligned() {
     let [x0, y0] = h.at(&json!({"handle":"triad_x"})).unwrap();
     let before = h.at(&json!({"world":[17,32,45]})).unwrap();
     let after = h.at(&json!({"world":[21,32,45]})).unwrap();
-    let history = h.app.session.undo.len();
+    let history = h.app.session.history.len();
     h.call("ui.drag", json!({"x0":x0,"y0":y0,"x1":x0+after[0]-before[0],"y1":y0+after[1]-before[1],"steps":8}));
     let moved = h.app.session.model.state();
     let fit = &moved.sketch(sketch).unwrap().sketch.wires[0].fit;
@@ -189,7 +189,7 @@ fn second_occurrence_drawn_wire_fit_picks_and_world_triad_drag_stay_aligned() {
     assert!(fit[1].dist(Vec3::new(2.0, 3.0, 15.0)) < 1e-6);
     let placed = h.app.session.world_state();
     assert!(placed.sketch(sketch).unwrap().sketch.wires[0].fit[0].dist(Vec3::new(21.0, 32.0, 45.0)) < 1e-5);
-    assert_eq!(h.app.session.undo.len(), history + 1);
+    assert_eq!(h.app.session.history.len(), history + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     let restored = h.app.session.model.state();
     assert!(restored.sketch(sketch).unwrap().sketch.wires[0].fit[0].dist(Vec3::new(2.0, 3.0, 5.0)) < 1e-6);

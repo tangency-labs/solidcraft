@@ -1163,7 +1163,7 @@ fn midpoint_line_keeps_curve_and_midpoint_snaps() {
         run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":20}));
         run(&mut s, "sketch.line", json!({"points":[[10,-10],[30,-10]],"ids":["base"]}));
         let before = s.doc.to_json();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let out = run(&mut s, "sketch.line.midpoint", json!({"mid":mid,"end":[at.x,at.y + 15.0]}));
         let line = ids(&out["curves"])[0].clone();
         let check = |s: &Session| {
@@ -1193,7 +1193,7 @@ fn midpoint_line_keeps_curve_and_midpoint_snaps() {
             );
         };
         check(&s);
-        assert_eq!(s.undo.len(), undo + 1, "the snap and line are one edit");
+        assert_eq!(s.history.len(), undo + 1, "the snap and line are one edit");
         let after = s.doc.to_json();
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.to_json(), before);
@@ -1211,12 +1211,12 @@ fn midpoint_line_rejects_bad_snaps_and_degenerate_lines_atomically() {
     run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":20}));
     s.mark_saved();
     let before = s.doc.to_json();
-    let history = (s.undo.len(), s.redo.len());
+    let history = (s.history.len(), s.history.redo_steps().len());
     for mid in ["on:missing:20,0", "on:c1:NaN,0", "mid:c1", "on:c1:20,0"] {
         // The last snap creates a point before the zero-length line is refused.
         assert!(s.execute("sketch.line.midpoint", &json!({"mid":mid,"end":[20,0]})).is_err(), "{mid}");
         assert_eq!(s.doc.to_json(), before, "failed midpoint {mid} changed the sketch");
-        assert_eq!((s.undo.len(), s.redo.len()), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
         assert!(!s.is_dirty());
     }
 }
@@ -2094,10 +2094,10 @@ fn certified_offset_delete_output_undo_reopen_and_refuse_dependent_source() {
     let out = run(&mut s, "sketch.offset", json!({"curves":["e1"],"distance":-1,"chain":false}));
     let id = out["curves"][0].as_str().unwrap().to_string();
     let attached = s.doc.to_json();
-    let history = s.undo.len();
+    let history = s.history.len();
     assert!(s.execute("sketch.delete", &json!({"entities":["e1"]})).is_err());
     assert_eq!(s.doc.to_json(), attached);
-    assert_eq!(s.undo.len(), history);
+    assert_eq!(s.history.len(), history);
     run(&mut s, "sketch.delete", json!({"entities":[id]}));
     let sk = sketch(&s);
     assert!(sk.freeform_offsets.is_empty());
@@ -2209,7 +2209,7 @@ fn periodic_fit_creator_keeps_legacy_and_refuses_hostile_intent_atomically() {
     sk.validate_periodic_splines().unwrap();
     assert_eq!(solidcraft_sketch::find_profiles(&sk).len(), 1);
     let before = s.doc.to_json();
-    let history = s.undo.len();
+    let history = s.history.len();
     for (cmd, p) in [
         ("sketch.spline.control_point", p),
         ("sketch.spline.fit_point", json!({"points":[[0,0],[1,0],[0,0],[1,0]],"periodic":true})),
@@ -2217,16 +2217,16 @@ fn periodic_fit_creator_keeps_legacy_and_refuses_hostile_intent_atomically() {
     ] {
         assert!(s.execute(cmd, &p).is_err());
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), history);
+        assert_eq!(s.history.len(), history);
     }
     let indices = sk.curves[i].kind.point_ids();
     let point = sk.points[indices[1]].id.clone();
     let target = sk.points[indices[0]].pos;
-    let redo = s.redo.len();
+    let redo = s.history.redo_steps().len();
     assert!(s.execute("sketch.drag", &json!({"entity":point,"from":sk.points[indices[1]].pos,"to":target})).is_err());
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!(s.undo.len(), history);
-    assert_eq!(s.redo.len(), redo);
+    assert_eq!(s.history.len(), history);
+    assert_eq!(s.history.redo_steps().len(), redo);
     let legacy =
         run(&mut s, "sketch.spline.fit_point", json!({"points":[[0,0],[4,0],[3,2],[-1,1],[0,0]]}))["curves"][0].as_str().unwrap().to_string();
     assert!(matches!(sketch(&s).curves[sketch(&s).curve_index(&legacy).unwrap()].kind, CurveKind::Spline { periodic: false, .. }));
@@ -2744,10 +2744,10 @@ fn a_tangent_cap_follows_its_offset_when_the_source_length_changes() {
 fn an_offset_cap_fixed_at_the_old_height_still_refuses_a_length_change() {
     let mut s = capped_line_offset(true);
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     assert!(s.execute("parameters.change", &json!({"name":"height","expression":"60"})).is_err());
     assert_eq!(s.doc.to_json(), before);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
 }
 
 #[test]
@@ -2836,11 +2836,11 @@ fn offset_driver_covers_disconnected_selections_and_refuses_bad_values_atomicall
     run(&mut s, "parameters.change", json!({"name":param,"expression":"3 mm"}));
     assert!(sketch(&s).offsets.iter().all(|offset| (offset.distance.abs() - 3.0).abs() < 1e-8));
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for value in [json!(0), json!("0 mm"), json!("1 deg"), json!("1e20 mm")] {
         assert!(s.execute("sketch.offset", &json!({"curves":["l1"],"distance":value})).is_err());
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
     assert!(s.execute("sketch.offset", &json!({"curves":["l1","missing"],"distance":1})).is_err());
     assert_eq!(s.doc.to_json(), before);
@@ -3018,10 +3018,10 @@ fn several_texts_edit_in_one_rebuild() {
     let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
     let v0 = volume(&mut s);
     run(&mut s, "sketch.edit", json!({"sketch": "Labels"}));
-    let (before, steps) = (s.evaluations, s.undo.len());
+    let (before, steps) = (s.evaluations, s.history.len());
     let r = run(&mut s, "sketch.edit_text", json!({"edits": [{"link": a, "text": "II"}, {"link": b, "text": "II"}]}));
     assert_eq!(s.evaluations, before + 1, "one rebuild for both texts");
-    assert_eq!(s.undo.len(), steps + 1, "one undo step for both texts");
+    assert_eq!(s.history.len(), steps + 1, "one undo step for both texts");
     assert_eq!(r["edits"][1]["link"], json!(b), "{r}");
     // All or nothing: a bad second edit leaves the first text as it was.
     assert!(s.execute("sketch.edit_text", &json!({"edits": [{"link": a, "text": "III"}, {"link": "nope", "text": "I"}]})).is_err());
@@ -4222,7 +4222,7 @@ fn move_copy_drawn_wire_failures_leave_the_design_and_history_unchanged() {
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
     let wire = ids(&run(&mut s, "sketch.arc3d", json!({"start":[10,0,0],"through":[0,10,0],"end":[-10,0,0]}))["curves"])[0].clone();
     let original = s.doc.to_json();
-    let history = (s.undo.len(), s.redo.len());
+    let history = (s.history.len(), s.history.redo_steps().len());
     for params in [
         json!({"entities":[wire],"copy":true,"translate":[1e9,0]}),
         json!({"entities":[wire,"missing"],"copy":true,"translate":[1,0]}),
@@ -4230,7 +4230,7 @@ fn move_copy_drawn_wire_failures_leave_the_design_and_history_unchanged() {
     ] {
         assert!(s.execute("sketch.move", &params).is_err());
         assert_eq!(s.doc.to_json(), original);
-        assert_eq!((s.undo.len(), s.redo.len()), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
     }
     // An unlinked reference wire has no editable fit points: Copy must not convert its
     // samples to a fitted spline and silently change the curve's shape.
@@ -4242,5 +4242,5 @@ fn move_copy_drawn_wire_failures_leave_the_design_and_history_unchanged() {
     let error = s.execute("sketch.move", &json!({"entities":[wire],"copy":true})).unwrap_err().to_string();
     assert!(error.contains("drawn 3D"), "{error}");
     assert_eq!(s.doc.to_json(), original);
-    assert_eq!((s.undo.len(), s.redo.len()), history);
+    assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
 }

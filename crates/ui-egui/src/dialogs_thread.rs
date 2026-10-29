@@ -323,18 +323,18 @@ mod contribution_tests {
     fn an_invalid_custom_pitch_blocks_the_old_valid_size_and_cancel_keeps_the_model() {
         let mut h = custom_hole_widget();
         let before = h.app.session.doc.to_json();
-        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
         replace_field(&mut h, "Pitch", "5 mm");
         assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
         assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(0.0));
         h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
         assert!(h.app.dialog.is_some(), "an invalid custom draft must keep the dialog open");
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(h.app.dialog.is_none());
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
     }
 
     #[test]

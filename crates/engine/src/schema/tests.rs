@@ -207,7 +207,7 @@ fn unsupported_profile_objects_keep_the_design_in_every_check_mode() {
     session.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 6})).unwrap();
     session.execute("sketch.finish", &json!({})).unwrap();
     let design = session.doc.to_json();
-    let undo = session.undo.len();
+    let undo = session.history.len();
     for mode in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
         session.param_check = mode;
         for profiles in [json!({"type": "curves", "loops": [["c1"], ["c2"]]}), json!({"type": "index", "index": 0})] {
@@ -218,7 +218,7 @@ fn unsupported_profile_objects_keep_the_design_in_every_check_mode() {
             assert!(error.contains("\"all\"") && error.contains("curves"), "{mode:?}: {error}");
             assert!(!error.contains("offset_boundaries"), "{mode:?}: {error}");
             assert_eq!(session.doc.to_json(), design);
-            assert_eq!(session.undo.len(), undo);
+            assert_eq!(session.history.len(), undo);
         }
     }
 }

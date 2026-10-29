@@ -69,11 +69,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         && app.run("canvas.edit", p).is_ok()
     {
         // One undo step for the whole edit.
-        if app.session.undo.len() > m.depth + 1 {
-            let keep = app.session.undo.get(m.depth).cloned();
-            app.session.undo.truncate(m.depth);
-            app.session.undo.extend(keep);
-        }
+        app.session.history.fold_since(m.mark);
     }
     if action == ui_kit::Action::Ok {
         if app.run("canvas.calibrate", json!({ "canvas": c.id, "a": m.a, "b": m.b, "distance": m.distance })).is_ok() {

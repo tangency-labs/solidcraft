@@ -438,7 +438,7 @@ pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec
         let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) else { return };
         ss.sketch.points.iter().filter(|p| !before.contains(&p.id)).map(|p| (p.id.clone(), p.pos)).collect()
     };
-    let history = std::mem::take(&mut app.session.undo);
+    let history = std::mem::take(&mut app.session.history);
     for (at, targets) in lined.iter().filter(|(at, _)| placed.iter().any(|p| p.dist(*at) < 1e-9)) {
         let Some((point, _)) = new.iter().find(|(_, p)| p.dist(*at) < 1e-6) else { continue };
         for target in targets {
@@ -448,7 +448,7 @@ pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec
             let _ = app.session.execute("sketch.constraint.horizontal_vertical", &params);
         }
     }
-    app.session.undo = history;
+    app.session.history = history;
 }
 
 /// The point of `poly` nearest `p`; None for fewer than two points.

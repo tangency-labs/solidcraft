@@ -306,7 +306,7 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
         h.app.edit_sketch(sketches[0]);
         h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
         h.app.edit_feature(feature);
-        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
         let changed = h.app.session.doc.sketch(sketches[0]).unwrap().clone();
         until_settled(&mut h);
         assert!(h.app.dialog.is_some());
@@ -318,7 +318,7 @@ fn switching_from_a_sketch_to_a_feature_restores_partial_markers_and_sketch_chan
         assert_eq!(marker(&h), original_marker);
         assert_eq!(h.app.session.model.state().bodies.len(), bodies);
         assert_eq!(h.app.session.doc.sketch(sketches[0]).unwrap(), &changed);
-        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
         assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Axis { name: "X".into() }]);
     }
 }
@@ -356,7 +356,7 @@ fn switching_from_a_sketch_to_a_feature_applies_with_one_undo_and_redo() {
     let before = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
     h.app.edit_sketch(sketches[0]);
     h.app.edit_feature(feature);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     until_settled(&mut h);
     h.frames(2);
     h.step(&json!({"click":{"handle":"dialog:ui.length"}})).unwrap();
@@ -372,7 +372,7 @@ fn switching_from_a_sketch_to_a_feature_applies_with_one_undo_and_redo() {
     }
     assert!(h.app.dialog.is_none(), "the edit must finish");
     assert_eq!(marker(&h), None);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let after = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
     assert!((after - before - 200.0).abs() < 0.001);
     h.app.run("edit.undo", json!({})).unwrap();
@@ -434,7 +434,7 @@ fn switching_from_a_sketch_to_a_feature_defers_a_new_command_until_restoration()
     until_settled(&mut h);
     assert_eq!(marker(&h), None);
     assert_eq!(h.app.dialog.as_ref().unwrap().editing, None);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.frames(2);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     for _ in 0..500 {
@@ -447,7 +447,7 @@ fn switching_from_a_sketch_to_a_feature_defers_a_new_command_until_restoration()
     assert!(h.app.dialog.is_none());
     assert_eq!(marker(&h), None);
     assert_eq!(h.app.session.doc.features.len(), count + 1);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 
 #[test]
@@ -535,7 +535,7 @@ fn a_computing_batch_says_its_step() {
 fn an_agent_design_change_computes_off_the_window_thread() {
     let (mut h, tx) = agent_harness();
     let features = h.app.session.doc.features.len();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let hole = ask(&tx, "engine.execute", second_hole());
     let view = ask(&tx, "ui.inspect", json!({}));
     let inspect = ask(&tx, "document.inspect", json!({}));
@@ -557,7 +557,7 @@ fn an_agent_design_change_computes_off_the_window_thread() {
     let r = reply_to(&mut h, &boss);
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(h.app.session.doc.features.len(), features + 2);
-    assert_eq!(h.app.session.undo.len(), undo + 2, "one undo step each");
+    assert_eq!(h.app.session.history.len(), undo + 2, "one undo step each");
     assert!(h.app.agent_computing().is_none());
     // In the order they were asked for: undo takes the boss, the hole stays.
     h.app.run("edit.undo", json!({})).unwrap();

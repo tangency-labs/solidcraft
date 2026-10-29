@@ -913,13 +913,13 @@ fn eye_drag_sets_every_eye_it_passes_in_one_undo_step() {
             h.call("ui.prefs", json!({"browser_eye_left": true}));
             h.settle();
         }
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"drag":[{"handle":"eye:One"},{"handle":"eye:Three"}],"steps":40})).unwrap();
         h.settle();
         for name in ["One", "Two", "Three"] {
             assert!(body_hidden(&h, name), "eye_left {eye_left}: {name} is hidden by the drag");
         }
-        assert_eq!(h.app.session.undo.len(), undo + 1, "eye_left {eye_left}: the drag is one undo step");
+        assert_eq!(h.app.session.history.len(), undo + 1, "eye_left {eye_left}: the drag is one undo step");
         h.app.run("edit.undo", json!({})).unwrap();
         for name in ["One", "Two", "Three"] {
             assert!(!body_hidden(&h, name), "eye_left {eye_left}: one undo shows {name} again");
@@ -947,16 +947,41 @@ fn eye_drag_leaves_an_eye_already_in_the_target_state_alone() {
     assert!(!body_hidden(&h, "Two"), "the hide before the drag is its own undo step");
 }
 
+/// #9680: on a full history the drag is one undo step too, and one undo takes it all back. The cap
+/// drops an old step for each step the drag pushes, and the fold gives back all but the first's.
+#[test]
+fn eye_drag_on_a_full_history_is_one_undo_step() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    for i in 0..solidcraft_engine::MAX_UNDO {
+        h.app.run("browser.visibility", json!({"items":["One"],"visible":i % 2 == 1})).unwrap();
+    }
+    h.settle();
+    assert_eq!(h.app.session.history.len(), solidcraft_engine::MAX_UNDO);
+    h.step(&json!({"drag":[{"handle":"eye:One"},{"handle":"eye:Three"}],"steps":40})).unwrap();
+    h.settle();
+    for name in ["One", "Two", "Three"] {
+        assert!(body_hidden(&h, name), "{name} is hidden by the drag");
+    }
+    assert_eq!(h.app.session.history.len(), solidcraft_engine::MAX_UNDO, "the drag is one step on the full history");
+    h.app.run("edit.undo", json!({})).unwrap();
+    for name in ["One", "Two", "Three"] {
+        assert!(!body_hidden(&h, name), "one undo shows {name} again");
+    }
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(body_hidden(&h, "One"), "the next undo is the last step before the drag");
+}
+
 /// #9680: a plain click on an eye still toggles that one row, as one undo step.
 #[test]
 fn a_plain_eye_click_still_toggles_one_row_as_one_undo_step() {
     let mut h = Harness::new();
     three_bodies(&mut h);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":"eye:Two"}})).unwrap();
     h.settle();
     assert!(body_hidden(&h, "Two") && !body_hidden(&h, "One") && !body_hidden(&h, "Three"), "only Two is hidden");
-    assert_eq!(h.app.session.undo.len(), undo + 1, "the click is one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "the click is one undo step");
 }
 
 /// #9680: a drag over the eyes that rests near the rows' bottom edge scrolls them, and the eyes
@@ -990,12 +1015,12 @@ fn eye_drag_from_the_origin_is_its_own_undo_step_and_leaves_an_earlier_show_alon
     h.app.run("browser.visibility", json!({"items":["One"],"visible":true})).unwrap();
     h.app.run("browser.expand_all", json!({})).unwrap();
     h.settle();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"drag":[{"handle":"eye:Origin"},{"handle":"eye:YZ"}],"steps":40})).unwrap();
     h.settle();
     let origin_hidden = |h: &Harness| h.app.session.visibility.origin_hidden == Some(true);
     assert!(origin_hidden(&h) && h.app.session.visibility.hidden_origin.iter().any(|k| k == "YZ"), "the drag hid the Origin and its planes");
-    assert_eq!(h.app.session.undo.len(), undo + 1, "the drag is one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "the drag is one undo step");
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(!body_hidden(&h, "One"), "one undo takes back only the drag: the show before it stays");
     assert!(h.app.session.visibility.hidden_origin.is_empty(), "the planes the drag hid are shown again");

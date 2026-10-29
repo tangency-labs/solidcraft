@@ -360,7 +360,7 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
             cmd(app, "sketch.rectangle.two_point", "Rectangle"),
             act("ui.finishSketch", "Finish Sketch", "finish"),
             cmd(app, "sketch.circle.center", "Circle"),
-            cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
+            cmd(app, "edit.undo", "Undo").on(!app.session.history.is_empty()),
             cmd(app, "sketch.dimension", "Sketch Dimension"),
         ];
     }
@@ -371,7 +371,7 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
         cmd(app, "solid.hole", "Hole"),
         cmd(app, "sketch.create", "Create Sketch"),
         cmd(app, "solid.extrude", "Extrude"),
-        cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
+        cmd(app, "edit.undo", "Undo").on(!app.session.history.is_empty()),
         cmd(app, "solid.move", "Move/Copy"),
     ]
 }
@@ -647,8 +647,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.finishSketch", "Finish Sketch", "finish"));
         v.push(act("ui.cancelSketch", "Cancel Sketch", "sketch_cancel"));
         v.push(Item::sep());
-        v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
-        v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
+        v.push(cmd(app, "edit.undo", "Undo").on(!app.session.history.is_empty()));
+        v.push(cmd(app, "edit.redo", "Redo").on(!app.session.history.redo_steps().is_empty()));
         return v;
     }
     // A sketch curve or point in the viewport gets the sketch's own menu, the one its browser row
@@ -743,8 +743,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "solid.extrude", "Extrude"));
         v.push(cmd(app, "solid.fillet", "Fillet"));
         v.push(Item::sep());
-        v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
-        v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
+        v.push(cmd(app, "edit.undo", "Undo").on(!app.session.history.is_empty()));
+        v.push(cmd(app, "edit.redo", "Redo").on(!app.session.history.redo_steps().is_empty()));
         v.push(Item::sep());
         if app.session.section.is_some() {
             v.push(act("ui.unsection", "Remove Section", "section"));
@@ -2691,11 +2691,11 @@ mod tests {
         let choices = menu["items"].as_array().unwrap();
         assert_eq!(choices.iter().map(|item| item["label"].as_str().unwrap()).collect::<Vec<_>>(), crate::prefs::UNITS);
         assert!(choices.iter().all(|item| item["enabled"] == true));
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
         h.call("ui.menuPick", json!({"item":"in"}));
         assert_eq!(h.app.session.doc.units, "in");
         assert!(h.app.viewport.context_menu.is_none());
-        assert_eq!(h.app.session.undo.len(), 1);
+        assert_eq!(h.app.session.history.len(), 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.units, "mm");
         h.app.run("edit.redo", json!({})).unwrap();
@@ -2744,7 +2744,7 @@ mod tests {
         assert_eq!(h.app.ui.visual_style, 2);
         assert!(h.app.viewport.context_menu.is_none());
         assert!(!error(&h));
-        assert!(h.app.session.undo.is_empty(), "a display style is not a design edit");
+        assert!(h.app.session.history.is_empty(), "a display style is not a design edit");
         // The real ribbon path: the VIEW tab's panel drop-down, then the Visual style row.
         h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
         h.step(&json!({"click":{"handle":"panel:VIEW:VIEWS"}})).unwrap();

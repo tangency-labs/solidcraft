@@ -257,9 +257,9 @@ pub enum Item {
 struct Turn {
     /// Deferred requests stop being valid when this turn ends or its tab is left.
     active: Arc<std::sync::atomic::AtomicBool>,
-    /// The design and the undo depth before it.
+    /// The design and the undo history's mark before it.
     start_doc: Arc<solidcraft_engine::doc::Document>,
-    start_undo: usize,
+    start: solidcraft_engine::Mark,
     /// Requests that ran commands, and requests of any kind.
     changes: u32,
     requests: u32,
@@ -1069,17 +1069,17 @@ pub(crate) fn with_tool_request<T>(
     });
     // A batch may replace the design and then roll back to its checkpoint. Keep the turn's
     // original undo boundary when that happens, including edits made before the batch.
-    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (app.session.doc.clone(), t.start_doc.clone(), t.start_undo));
+    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (app.session.doc.clone(), t.start_doc.clone(), t.start));
     let previous = std::mem::replace(&mut app.agent_chat.following_document, own);
     let result = run(app);
     app.agent_chat.following_document = previous;
-    if let Some((doc, start_doc, start_undo)) = before
+    if let Some((doc, start_doc, start)) = before
         && Arc::ptr_eq(&doc, &app.session.doc)
         && let Some(turn) = app.agent_chat.turn.as_mut()
         && active.is_some_and(|active| Arc::ptr_eq(active, &turn.active))
     {
         turn.start_doc = start_doc;
-        turn.start_undo = start_undo;
+        turn.start = start;
     }
     result
 }
@@ -1089,7 +1089,7 @@ pub(crate) fn with_tool_request<T>(
 pub(crate) fn continue_in_document(app: &mut SolveApp) {
     if let Some(turn) = app.agent_chat.turn.as_mut() {
         turn.start_doc = app.session.doc.clone();
-        turn.start_undo = app.session.undo.len();
+        turn.start = app.session.history.mark();
     }
     app.agent_chat.picked.clear();
     app.agent_chat.picked_context = Context::default();
@@ -1104,8 +1104,7 @@ pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveA
         return;
     }
     if let Some(turn) = app.agent_chat.turn.as_ref() {
-        let steps =
-            merge_undo(&mut app.session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+        let steps = fold_turn(&mut app.session, turn);
         if steps > 0 {
             app.agent_chat.push(Item::Changes { steps, doc: app.session.doc.clone(), undone: false });
         }
@@ -1426,7 +1425,7 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     app.agent_chat.turn = Some(Turn {
         active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         start_doc: app.session.doc.clone(),
-        start_undo: app.session.undo.len(),
+        start: app.session.history.mark(),
         changes: 0,
         requests: 0,
         limit_told: false,
@@ -1672,10 +1671,19 @@ fn end_turn(app: &mut SolveApp) {
     finish_turn(&mut app.agent_chat, &mut app.session);
 }
 
+/// Folds the changes of `turn` into one undo step, named for its message; how many there were.
+fn fold_turn(session: &mut solidcraft_engine::Session, turn: &Turn) -> usize {
+    let steps = session.history.fold_since(turn.start);
+    if steps > 0 {
+        session.history.name_last(&trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    }
+    steps
+}
+
 fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     let Some(turn) = chat.turn.take() else { return };
     turn.active.store(false, std::sync::atomic::Ordering::Relaxed);
-    let steps = merge_undo(&mut session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    let steps = fold_turn(session, &turn);
     if chat.ended.as_deref() == Some("")
         && !chat.stopped
         && turn.tools_available
@@ -1694,27 +1702,6 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         let doc = session.doc.clone();
         chat.push(Item::Changes { steps, doc, undone: false });
     }
-}
-
-/// Merge the undo steps made since `start_doc` (at depth `start_undo`) into one, labelled `label`;
-/// how many steps it took in (0: none were made, or the history no longer reaches that far).
-fn merge_undo(
-    undo: &mut Vec<solidcraft_engine::Snapshot>,
-    start_doc: &Arc<solidcraft_engine::doc::Document>,
-    start_undo: usize,
-    label: &str,
-) -> usize {
-    // The first change of the turn saved the design as it was when the turn began. When the
-    // history is full its oldest steps go, so look for it at or below where it was put.
-    let Some(first) = (0..undo.len().min(start_undo + 1)).rev().find(|&i| undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc))) else {
-        return 0;
-    };
-    let steps = undo.len() - first;
-    undo.truncate(first + 1);
-    if let Some(s) = undo.get_mut(first) {
-        s.label = label.to_string();
-    }
-    steps
 }
 
 /// Undo a message's changes from the conversation (only while they are the last thing done).
@@ -1739,7 +1726,6 @@ fn pump_tools(app: &mut SolveApp) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
         };
-        let undo_len = app.session.undo.len();
         let Some(turn) = app.agent_chat.turn.as_mut() else {
             refuse(req, "the agent chat has no message in progress".into());
             continue;
@@ -1752,7 +1738,7 @@ fn pump_tools(app: &mut SolveApp) {
         {
             o.insert("allow_paths".into(), json!([working_dir().to_string_lossy()]));
         }
-        let undo_left = undo_len.saturating_sub(turn.start_undo);
+        let undo_left = app.session.history.steps_since(turn.start);
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
         let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
         let tool = gate::tool_key(&req.method, &req.params);

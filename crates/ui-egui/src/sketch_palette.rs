@@ -143,7 +143,7 @@ pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
     };
     let rest: Vec<String> = curves.iter().filter(|c| !lines.contains(c)).cloned().collect();
     // Part of the drawing's own undo step.
-    let depth = app.session.undo.len();
+    let mark = app.session.history.mark();
     if !lines.is_empty() {
         let line_type = if m == 3 { "sketch.infinite" } else { "sketch.centerline" };
         let _ = app.session.execute(line_type, &json!({ "curves": lines, "value": true }));
@@ -151,7 +151,7 @@ pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
     if !rest.is_empty() {
         let _ = app.session.execute("sketch.construction", &json!({ "curves": rest, "value": true }));
     }
-    app.session.undo.truncate(depth);
+    app.session.history.drop_since(mark);
 }
 
 /// Selected curves of the active sketch.
@@ -570,11 +570,11 @@ mod tests {
         let active = h.app.session.active_sketch.unwrap();
         for (key, _) in TOGGLES {
             let before = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             let at = crate::scenario::handle_at(&format!("sketch_palette:toggle:{key}")).unwrap();
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             assert_ne!(h.app.session.doc.to_json(), before, "{key}");
-            assert_eq!(h.app.session.undo.len(), undo + 1, "{key}");
+            assert_eq!(h.app.session.history.len(), undo + 1, "{key}");
             assert_eq!(h.app.session.active_sketch, Some(active));
             h.app.run("edit.undo", json!({})).unwrap();
             h.settle();
@@ -649,7 +649,7 @@ mod tests {
             h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
             h.step(&json!({"move":{"sketch":[20,10]}})).unwrap();
             let before = h.app.tool.clone().unwrap();
-            let history = h.app.session.undo.len();
+            let history = h.app.session.history.len();
             // The toolbar takes the same start path, even while a dimension box has focus.
             h.app.start("sketch.construction");
             h.app.start("sketch.construction");
@@ -658,7 +658,7 @@ mod tests {
             assert_eq!(after.pts, before.pts);
             assert_eq!(after.dims_stage, before.dims_stage);
             assert_eq!(after.dims.iter().map(|d| &d.value).collect::<Vec<_>>(), before.dims.iter().map(|d| &d.value).collect::<Vec<_>>());
-            assert_eq!(h.app.session.undo.len(), history);
+            assert_eq!(h.app.session.history.len(), history);
             h.step(&json!({"click":{"sketch":[20,10]}})).unwrap();
             let state = h.app.session.world_state();
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
@@ -691,7 +691,7 @@ mod tests {
             h.app.run("sketch.finish", json!({})).unwrap();
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
             set_mode(&mut h.app, m);
-            let history = h.app.session.undo.len();
+            let history = h.app.session.history.len();
             let r = h.app.run("sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"},{"sketch":1,"curve":"c1"}]})).unwrap();
             assert_eq!(r["links"].as_array().map(Vec::len), Some(2), "mode {m}: {r}");
             let state = h.app.session.world_state();
@@ -706,7 +706,7 @@ mod tests {
             };
             assert_eq!(kind(true), line, "mode {m}: the line");
             assert_eq!(kind(false), circle, "mode {m}: the circle");
-            assert_eq!(h.app.session.undo.len(), history + 1, "mode {m}: one undo step");
+            assert_eq!(h.app.session.history.len(), history + 1, "mode {m}: one undo step");
             h.app.run("edit.undo", json!({})).unwrap();
             assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(), "mode {m}");
             set_mode(&mut h.app, 0);
@@ -725,7 +725,7 @@ mod tests {
             let at = crate::scenario::handle_at("sketch_palette:options_fold").unwrap();
             h.call("ui.click", json!({"x":at.x,"y":at.y}));
             let baseline = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             let vp = h.app.viewport.rect.unwrap();
             let footer = crate::scenario::rect_of("sketch_palette:look_at").unwrap();
             assert!(vp.contains_rect(footer), "scale{scale} height{height}: {footer:?} outside {vp:?}");
@@ -734,13 +734,13 @@ mod tests {
             h.call("ui.scroll", json!({"x":options.center().x,"y":options.center().y,"delta":-1000}));
             h.settle();
             assert_eq!(h.app.session.doc.to_json(), baseline);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
             let [x, y] = h.widget("3D Sketch").unwrap();
             assert!(options.contains(egui::pos2(x as f32, y as f32)), "lower option must be visible after scrolling");
             h.call("ui.click", json!({"x":x,"y":y}));
             h.settle();
             assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(h.app.session.doc.to_json(), baseline);
             h.settle();
@@ -975,7 +975,7 @@ mod tests {
         h.settle();
         assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(1), "one corner is placed");
         let baseline = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let at = crate::scenario::handle_at("sketch_palette:feature:sketch.rectangle.two_point").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
         h.settle();
@@ -983,7 +983,7 @@ mod tests {
         assert_eq!(tool.cmd, "sketch.rectangle.two_point");
         assert!(tool.pts.is_empty(), "the half-drawn rectangle is dropped, not carried into the new mode");
         assert_eq!(h.app.session.doc.to_json(), baseline, "switching modes never changes the design");
-        assert_eq!(h.app.session.undo.len(), undo, "switching modes adds no undo step");
+        assert_eq!(h.app.session.history.len(), undo, "switching modes adds no undo step");
     }
 
     #[test]
@@ -1109,7 +1109,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.view", json!({"view": "iso"}));
         h.frames(3);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":"sketch.create"})).unwrap();
         h.step(&json!({"click": {"plane": "XY"}})).unwrap();
         h.settle();
@@ -1122,7 +1122,7 @@ mod tests {
         assert!(h.app.session.doc.features.is_empty(), "the blank sketch is gone");
         assert!(crate::scenario::handles("timeline:").iter().all(|(n, _)| !n.contains("Sketch")));
         assert!(crate::scenario::handle_at("row:Sketch1").is_none());
-        assert!(h.app.session.undo.len() <= undo + 2, "creating and discarding are at most two steps");
+        assert!(h.app.session.history.len() <= undo + 2, "creating and discarding are at most two steps");
 
         h.step(&json!({"start":"sketch.create"})).unwrap();
         h.step(&json!({"click": {"plane": "XY"}})).unwrap();

@@ -24,17 +24,17 @@ fn native_studios_resolve_without_mutation_and_apply_one_complete_undo() {
         assert!(!id.is_empty() && ids.insert(id));
         let mut s = subject();
         let before = s.doc.to_json();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let old = s.doc.render.setups["Shot"].clone();
         let revision = s.revision;
         let plan = s.execute("render.preset.resolve", &json!({"id":id,"name":"Shot","expected_revision":revision})).unwrap();
         assert_eq!(plan["document_changed"], false);
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
         let request = json!({"id":id,"name":"Shot","expected_revision":revision,"replace_lighting_and_environment":true});
         let applied = s.execute("render.preset.apply", &request).unwrap();
         assert_eq!(applied["document_changed"], true);
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         let saved = &s.doc.render.setups["Shot"];
         assert_eq!((saved.width, saved.height, saved.camera), (old.width, old.height, old.camera));
         let Some(RenderJob::GpuPath { options, .. }) = &saved.job else { panic!("explicit GPU intent lost") };
@@ -159,7 +159,7 @@ fn physical_backgrounds_preserve_geometry_lights_camera_and_one_undo() {
     for kind in ["floor_wall", "cyclorama"] {
         let mut s = subject();
         let before = s.doc.to_json();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let setup = s.doc.render.setups["Shot"].clone();
         let p = json!({"name":"Shot","kind":kind,"expected_revision":s.revision,"reflectance_linear":[0.31,0.29,0.25]});
         let result = s.execute("render.stage.backdrop", &p).unwrap();
@@ -170,7 +170,7 @@ fn physical_backgrounds_preserve_geometry_lights_camera_and_one_undo() {
         assert_eq!(after.surfaces, setup.surfaces);
         assert_eq!(after.stage.iter().count(), if kind == "cyclorama" { 26 } else { 2 });
         assert_eq!(s.doc.features.len(), 1);
-        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.history.len(), undo + 1);
         let mut scene = crate::product_scene::extract(&s).unwrap();
         let first = scene.meshes[0].mesh.clone();
         super::super::staging::apply(&mut scene, after, "test").unwrap();

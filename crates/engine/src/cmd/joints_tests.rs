@@ -1230,11 +1230,11 @@ fn hidden_joints_still_drive_and_are_saved_with_the_design() {
     let mut s = hinged();
     let (hinge, glue) = (joint(&s, "Hinge"), joint(&s, "Glue"));
     run(&mut s, "file.save", json!({"path": path}));
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let r = run(&mut s, "browser.visibility", json!({"joints": ["Hinge"], "visible": false}));
     assert_eq!(r["changed"], 1, "{r}");
     assert!(!s.joint_visible(hinge) && s.joint_visible(glue));
-    assert_eq!(s.undo.len(), undo + 1, "hiding is one undo step");
+    assert_eq!(s.history.len(), undo + 1, "hiding is one undo step");
     assert!(s.is_dirty(), "hiding leaves unsaved changes");
     let l = run(&mut s, "joint.list", json!({}));
     assert_eq!(l["joints"].as_array().unwrap().iter().map(|j| j["visible"].clone()).collect::<Vec<_>>(), [json!(false), json!(true)]);
@@ -1491,12 +1491,12 @@ fn quiet_joint_answers_and_a_drive_to_where_it_is() {
     assert!(r["dof"].is_array() && r["moved"] == false && r.get("reason").is_none(), "{r}");
     // A suppressed joint with no motion link moves nothing, and says why.
     run(&mut s, "joint.edit", json!({"joint": "Rail", "suppressed": true}));
-    let (doc, undo) = (s.doc.clone(), s.undo.len());
+    let (doc, undo) = (s.doc.clone(), s.history.len());
     let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 8}));
     assert!(r["moved"] == false && r["reason"] == "Rail is suppressed" && r.get("unconnected").is_none(), "{r}");
     // Nor does it store the value, as it did with an undo step: unsuppressed, the part jumped to
     // it (#9742). The reply keeps what was asked apart from what the joint holds.
-    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.undo.len() == undo, "a drive of a suppressed joint changed the design");
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.history.len() == undo, "a drive of a suppressed joint changed the design");
     assert_eq!((&r["requested"][0]["value"], &r["values"][0]["value"]), (&json!(8.0), &json!(5.0)), "{r}");
     assert!(r.get("held").is_none(), "{r}");
 }

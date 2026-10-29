@@ -3190,11 +3190,11 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
         if let Some(state) = app.editing_state.take() {
             // Undo can save the editor's temporary rollback in Redo (deletion saves it in
             // Undo). Those exact snapshots belong to the complete design, with its old marker.
-            for snapshot in app.session.undo.iter_mut().chain(&mut app.session.redo) {
+            app.session.history.for_each_step(|snapshot| {
                 if std::sync::Arc::ptr_eq(&snapshot.doc, &state.source.doc) {
                     snapshot.doc = state.original.doc.clone();
                 }
-            }
+            });
         }
         app.preview.reset();
         app.op_check.abandon();
@@ -3725,12 +3725,10 @@ pub(crate) fn restore_editing(app: &mut SolveApp, marker: Option<usize>) {
 /// Temporary rollback used by an editor is view state. Preserve both history stacks,
 /// including redo and a history already at the undo limit.
 pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(), String> {
-    let undo = std::mem::take(&mut app.session.undo);
-    let redo = std::mem::take(&mut app.session.redo);
+    let history = std::mem::take(&mut app.session.history);
     let selection = std::mem::take(&mut app.session.selection);
     let result = app.run("timeline.roll_to", marker.map(|m| json!({"position":m})).unwrap_or_else(|| json!({})));
-    app.session.undo = undo;
-    app.session.redo = redo;
+    app.session.history = history;
     app.session.selection = selection;
     result.map(|_| ())
 }

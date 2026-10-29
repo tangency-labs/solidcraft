@@ -97,7 +97,7 @@ fn body(app: &SolveApp) -> String {
 #[test]
 fn empty_space_offers_view_items_and_greys_out_undo() {
     let mut app = sample_app();
-    app.session.undo.clear();
+    app.session.history.clear();
     let items = context_menu::items(&app, &Target::Viewport);
     assert!(!find(&items, "Undo").enabled, "nothing to undo");
     assert!(find(&items, "Fit").enabled);
@@ -394,7 +394,7 @@ fn sketch_dimension_menu_deletes_only_the_dimension_and_supports_undo() {
             h.app.run("sketch.toggle_driven", json!({"constraint":id})).unwrap();
         }
         let saved = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.call("ui.view", json!({"view":"top"}));
         h.call("ui.view", json!({"view":"fit"}));
         if preselected {
@@ -410,7 +410,7 @@ fn sketch_dimension_menu_deletes_only_the_dimension_and_supports_undo() {
         assert_eq!(after["curves"][0]["id"], line);
         assert_eq!(after["constraints"].as_array().unwrap().len(), 1);
         assert_eq!(after["constraints"][0]["id"], horizontal);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), saved);
         h.app.run("edit.redo", json!({})).unwrap();
@@ -559,7 +559,7 @@ fn pick_runs_an_item_of_the_open_menu() {
     assert!(context_menu::pick(&mut app, "Fit").is_err(), "no menu open");
     context_menu::open_for(&mut app, pos2(500.0, 400.0), Target::Viewport);
     assert!(context_menu::pick(&mut app, "Nope").is_err());
-    app.session.undo.clear();
+    app.session.history.clear();
     assert!(context_menu::pick(&mut app, "Undo").is_err(), "disabled");
     assert!(context_menu::pick(&mut app, "ui.origin").is_ok());
     assert!(app.viewport.context_menu.is_none(), "a pick closes the menu");
@@ -610,17 +610,17 @@ fn browser_folds_are_kept_in_the_preferences() {
 #[test]
 fn expand_and_collapse_all_open_the_browser_tree_from_the_design_menu() {
     let mut app = sample_app();
-    let n = app.session.undo.len();
+    let n = app.session.history.len();
     let root = Target::Component { id: 0 };
     assert!(context_menu::items(&app, &root).iter().any(|i| i.label == "Expand All" && i.id == "browser.expand_all"));
     act(&mut app, &root, "Collapse All");
     assert!(app.tree.collapsed.contains("c0/bodies"), "{:?}", app.tree.collapsed);
     assert!(!app.tree.collapsed.contains("c0"), "the design row stays open: {:?}", app.tree.collapsed);
-    assert_eq!(app.session.undo.len(), n);
+    assert_eq!(app.session.history.len(), n);
     act(&mut app, &root, "Expand All");
     assert!(!app.tree.collapsed.contains("c0/bodies"), "{:?}", app.tree.collapsed);
     assert!(app.tree.expanded.contains("origin") && app.tree.expanded.contains("c0/features"), "{:?}", app.tree.expanded);
-    assert_eq!(app.session.undo.len(), n);
+    assert_eq!(app.session.history.len(), n);
 
     let created = app.run("component.create", json!({"name": "Part"})).unwrap();
     let occ = created["occurrence"].as_u64().unwrap();
@@ -704,12 +704,12 @@ fn browser_feature_menu_deletes_its_target_and_supports_undo() {
     // A Browser context menu acts on its row, even when another feature is selected.
     app.session.selection = vec![solidcraft_engine::Sel::Feature { id: keep }];
     let saved = app.session.doc.to_json();
-    let undo = app.session.undo.len();
+    let undo = app.session.history.len();
     act(&mut app, &Target::Feature { id: target }, "Delete");
     assert!(app.menu.confirm.is_none());
     assert!(app.session.doc.feature(keep).is_some());
     assert!(app.session.doc.feature(target).is_none());
-    assert_eq!(app.session.undo.len(), undo + 1);
+    assert_eq!(app.session.history.len(), undo + 1);
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.to_json(), saved);
     app.run("edit.redo", json!({})).unwrap();
@@ -731,18 +731,18 @@ fn browser_feature_menu_renames_its_target_and_supports_undo() {
     let target_name = app.session.doc.feature(target).unwrap().name.clone();
     app.session.selection = vec![solidcraft_engine::Sel::Feature { id: keep }];
     let saved = app.session.doc.to_json();
-    let undo = app.session.undo.len();
+    let undo = app.session.history.len();
     act(&mut app, &Target::Feature { id: target }, "Rename");
     assert_eq!(app.menu.rename.as_ref().unwrap().text, target_name);
     assert!(context_menu::finish_rename(&mut app, Some("Cancelled"), false));
     assert_eq!(app.session.doc.to_json(), saved);
-    assert_eq!(app.session.undo.len(), undo);
+    assert_eq!(app.session.history.len(), undo);
     act(&mut app, &Target::Feature { id: target }, "Rename");
     assert!(context_menu::finish_rename(&mut app, Some("Renamed feature"), true));
     assert!(app.menu.rename.is_none());
     assert_eq!(app.session.doc.feature(target).unwrap().name, "Renamed feature");
     assert_eq!(app.session.doc.feature(keep).unwrap().name, keep_name);
-    assert_eq!(app.session.undo.len(), undo + 1);
+    assert_eq!(app.session.history.len(), undo + 1);
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.to_json(), saved);
     app.run("edit.redo", json!({})).unwrap();
@@ -754,17 +754,17 @@ fn browser_feature_menu_confirms_dependent_changes_before_deleting() {
     let mut app = sample_app();
     let target = app.session.doc.features[1].id;
     let saved = app.session.doc.to_json();
-    let undo = app.session.undo.len();
+    let undo = app.session.history.len();
     act(&mut app, &Target::Feature { id: target }, "Delete");
     assert!(app.menu.confirm.is_some(), "later features depend on the plate's extrusion");
     assert_eq!(app.session.doc.to_json(), saved);
-    assert_eq!(app.session.undo.len(), undo);
+    assert_eq!(app.session.history.len(), undo);
     assert!(crate::delete::confirm(&mut app, false));
     assert_eq!(app.session.doc.to_json(), saved);
     act(&mut app, &Target::Feature { id: target }, "Delete");
     assert!(crate::delete::confirm(&mut app, true));
     assert!(app.session.doc.feature(target).is_none());
-    assert_eq!(app.session.undo.len(), undo + 1);
+    assert_eq!(app.session.history.len(), undo + 1);
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.to_json(), saved);
 }
@@ -1629,9 +1629,9 @@ fn appearance_browser_selection_assigns_and_removes_overrides_together() {
         let appearance = find(&context_menu::items(&app, &target), "Appearance");
         let swatch = find(&appearance.children, "Paint - Red");
         let original = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         context_menu::run_item(&mut app, &swatch, pos2(0.0, 0.0));
-        assert_eq!(app.session.undo.len(), undo + 1);
+        assert_eq!(app.session.history.len(), undo + 1);
         for name in ["One", "Two", "Other"] {
             let color = if expected.contains(&name) { [196, 40, 36] } else { [36, 92, 180] };
             assert_eq!(app.session.doc.appearances.bodies[name].color, color, "clicked {clicked}, body {name}");
@@ -1644,7 +1644,7 @@ fn appearance_browser_selection_assigns_and_removes_overrides_together() {
 
         let remove = find(&appearance.children, "Remove override");
         context_menu::run_item(&mut app, &remove, pos2(0.0, 0.0));
-        assert_eq!(app.session.undo.len(), undo + 2);
+        assert_eq!(app.session.history.len(), undo + 2);
         for name in ["One", "Two", "Other"] {
             assert_eq!(app.session.doc.appearances.bodies.contains_key(name), !expected.contains(&name), "clicked {clicked}, body {name}");
         }
