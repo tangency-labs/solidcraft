@@ -1139,7 +1139,7 @@ fn vertical_group_row(
         crate::scenario::publish_handle(&format!("timeline-folder-status:{}:{}", status.icon(), group.name), mark.center());
     }
     let response = match tip {
-        Some(tip) => response.on_hover_text(tip),
+        Some(tip) => response.on_hover_ui(|ui| tip.show(ui)),
         None => response,
     };
     let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
@@ -1629,17 +1629,10 @@ fn feature_row_body(
         let kind = crate::i18n::tr_label(ty.strip_suffix("Feature").unwrap_or(ty));
         crate::ui_kit::text(ui, &format!("{name} · {kind} · {summary}"), crate::ui_kit::Text::Value("history", false));
         // A value row is one line: the error, the warning and the sketch's state wrap below it.
-        if let Some(error) = &error {
-            let text = crate::i18n::format("timeline.feature_error", &[("message", &crate::i18n::tr_diagnostic(error))]);
-            crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Report("history_error", true));
-        }
-        if let Some(warning) = &warning {
-            let text = crate::i18n::format("timeline.feature_warning", &[("message", &crate::i18n::tr_diagnostic(warning))]);
-            crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Report("history_warning", false));
-        }
+        crate::timeline::status_tip(String::new(), error.as_deref(), warning.as_deref()).messages(ui);
         // Greyed out says only "not shown": say why (#8100).
         if rolled {
-            tip.push_str(&format!("\n{}", crate::i18n::tr("timeline.feature_rolled_back")));
+            crate::ui_kit::text(ui, crate::i18n::tr("timeline.feature_rolled_back"), crate::ui_kit::Text::Report("history_rolled_back", false));
         }
         if let Some(state) = sketch_state {
             crate::ui_kit::text(ui, &state.text(), crate::ui_kit::Text::Report("history_sketch_state", false));
@@ -2720,7 +2713,7 @@ mod tests {
         let chip = crate::scenario::handle_at("timeline:Warned").unwrap();
         harness.app.synthetic.push(egui::Event::PointerMoved(chip));
         harness.frames(90);
-        assert!(crate::scenario::handle_at("dialog:report:history_warning").is_some(), "the warning has its own line");
+        assert!(crate::scenario::handle_at("dialog:report:status_warning").is_some(), "the warning has its own line");
         harness.app.synthetic.push(egui::Event::PointerGone);
         harness.frames(2);
 
