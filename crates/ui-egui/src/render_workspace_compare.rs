@@ -273,7 +273,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             texture.id(),
                             destination,
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
+                            Tokens::get().file_image_tint,
                         );
                     }
                     Err(error) => {
