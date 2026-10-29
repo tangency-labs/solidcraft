@@ -583,6 +583,61 @@ fn case_name(dir: &str) -> (String, String) {
     (name(p.parent()), name(Some(p)))
 }
 
+/// The area a polygon of `[x, y]` points encloses (shoelace), unsigned.
+fn polygon_area(points: &Value) -> f64 {
+    let pts: Vec<(f64, f64)> = points.as_array().into_iter().flatten().filter_map(|p| Some((p.get(0)?.as_f64()?, p.get(1)?.as_f64()?))).collect();
+    pts.iter().zip(pts.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum::<f64>().abs() / 2.0
+}
+
+/// The `flat_pattern` check, against the script's last `sheet.flat_pattern` result: `size_mm`
+/// ([w, h] of the outline), `area_mm2` (the outline loops' area less the cut-outs') and
+/// `bend_lines` ([[x, y], [x, y]] each, the bends' centre lines in flat coordinates, every one
+/// matched to its own one of the result's, either way round, and as many of them).
+fn flat_pattern_checks(c: &mut Checks, want: &Value, results: &[Value], rel: f64, abs: f64) {
+    let Some(got) = results.iter().rev().find(|r| r.get("flat_size_mm").is_some()) else {
+        c.push("flat_pattern", json!("no sheet.flat_pattern result"), want.clone(), false);
+        return;
+    };
+    if let Some(w) = want.get("size_mm").and_then(Value::as_array) {
+        let g = &got["flat_size_mm"];
+        let ok = w.len() == 2
+            && (0..2).all(|k| match (g.get(k).and_then(Value::as_f64), w.get(k).and_then(Value::as_f64)) {
+                (Some(g), Some(w)) => (g - w).abs() <= abs,
+                _ => false,
+            });
+        c.push("flat_pattern.size_mm", json!([g.get(0), g.get(1)]), json!(w), ok);
+    }
+    if let Some(w) = want.get("area_mm2").and_then(Value::as_f64) {
+        let loops = |k: &str| got[k].as_array().into_iter().flatten().map(polygon_area).sum::<f64>();
+        c.rel("flat_pattern.area_mm2", loops("outline") - loops("cutouts"), Some(w), rel);
+    }
+    if let Some(w) = want.get("bend_lines").and_then(Value::as_array) {
+        let line = |v: &Value| -> Option<[f64; 4]> {
+            let (a, b) = (v.get(0)?, v.get(1)?);
+            Some([a.get(0)?.as_f64()?, a.get(1)?.as_f64()?, b.get(0)?.as_f64()?, b.get(1)?.as_f64()?])
+        };
+        let mut left: Vec<[f64; 4]> = got["bends"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|b| line(&json!([b["start"], b["end"]])))
+            .collect();
+        let got_lines = json!(left.iter().map(|l| [[l[0], l[1]], [l[2], l[3]]]).collect::<Vec<_>>());
+        let near = |p: [f64; 4], q: [f64; 4]| (0..4).all(|k| (p[k] - q[k]).abs() <= abs);
+        let mut ok = left.len() == w.len();
+        for l in w.iter().map(line) {
+            let found = l.and_then(|l| left.iter().position(|g| near(*g, l) || near(*g, [l[2], l[3], l[0], l[1]])));
+            match found {
+                Some(i) => {
+                    left.swap_remove(i);
+                }
+                None => ok = false,
+            }
+        }
+        c.push("flat_pattern.bend_lines", got_lines, json!(w), ok);
+    }
+}
+
 fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
     let (area, name) = case_name(dir);
     let mut out = json!({"case": name, "area": area, "kernel": kernel()});
@@ -852,6 +907,9 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
     if has("construction") {
         check_construction(&s, &want["construction"], pos_tol, &mut c);
     }
+    if has("flat_pattern") {
+        flat_pattern_checks(&mut c, &want["flat_pattern"], &answers, rel, abs);
+    }
     out["status"] = json!(if c.pass { "pass" } else { "fail" });
     out["checks"] = json!(c.list);
     out
@@ -1110,5 +1168,28 @@ mod tests {
         let r = read_json(&format!("{a}/recipe.json")).unwrap();
         assert!(script(&a, "/scratch", &r).unwrap_err().contains("deeper than"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The flat pattern is graded on the last `sheet.flat_pattern` result: its size, its outline's
+    /// area less the cut-outs', and its bend lines matched either way round, one for one.
+    #[test]
+    fn flat_pattern_grades_size_area_and_bend_lines() {
+        let flat = json!({"flat_size_mm": [10.0, 4.0, 2.0],
+            "outline": [[[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]], "cutouts": [[[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]]],
+            "bends": [{"start": [5.0, 0.0], "end": [5.0, 4.0]}]});
+        let results = [json!({"volume_mm3": 1.0}), flat];
+        let grade = |want: Value| {
+            let mut c = Checks { list: Vec::new(), pass: true };
+            flat_pattern_checks(&mut c, &want, &results, 1e-3, 1e-3);
+            c.pass
+        };
+        assert!(grade(json!({"size_mm": [10.0, 4.0], "area_mm2": 39.0, "bend_lines": [[[5.0, 4.0], [5.0, 0.0]]]})));
+        assert!(!grade(json!({"area_mm2": 40.0})), "the cut-out is not material");
+        assert!(!grade(json!({"size_mm": [10.0, 5.0]})));
+        assert!(!grade(json!({"bend_lines": [[[5.0, 0.0], [5.0, 4.0]], [[5.0, 0.0], [5.0, 4.0]]]})), "one bend line matches one only");
+        assert!(!grade(json!({"bend_lines": [[[6.0, 0.0], [6.0, 4.0]]]})));
+        let mut c = Checks { list: Vec::new(), pass: true };
+        flat_pattern_checks(&mut c, &json!({"area_mm2": 1.0}), &results[..1], 1e-3, 1e-3);
+        assert!(!c.pass, "no flat pattern was made");
     }
 }

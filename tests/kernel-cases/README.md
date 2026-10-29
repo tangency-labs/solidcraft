@@ -105,6 +105,7 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `surface_types` | The set of kinds the faces' surfaces are, over every body, as the records hold them: `plane`, `cylinder`, `cone`, `sphere`, `torus`, `bspline` (a B-spline or NURBS surface) or `revolution` (a revolved curve). Exact: none missing, none extra. |
 | `splines` | `[{degree: [p, q], spans?: [m, n]}, …]`: one entry per B-spline face, each matching one face (directions in either order); `spans`, the distinct knot intervals each way, only where the construction fixes them. |
 | `boundary_edges` | The edges only one face uses (a sheet's free boundary), over every body, as the records hold them; exact or `[min, max]`. |
+| `flat_pattern` | A sheet metal case's flat pattern, from the script's last `sheet.flat_pattern` result: `size_mm` ([w, h] of the outline), `area_mm2` (the outline's area less the cut-outs', relative tolerance as volume) and `bend_lines` (each `[[x, y], [x, y]]`, a bend's centre line in flat coordinates, matched one for one, either way round, and as many as the result has), positions within the box-diagonal tolerance. |
 | `watertight` | `true`: each body's display mesh (chord tolerance `tolerance.mesh_mm`, default 0.01 mm) has no open and no over-shared edges, with vertices closer than `tolerance.weld_mm` (default 1e-4 mm) taken as one. |
 | `timeout_s` | A longer timeout for this case than the run's (at most 1800 s), for cases that are slow by nature. A case that only needs it on a loaded machine shouldn't set it. |
 | `tolerance` | Optional overrides: `rel`, `abs_mm`, `mesh_mm`, `weld_mm`. |
@@ -188,7 +189,7 @@ check on any change to `crates/engine/src/cmd/`, a recipe or `EXEMPT`, even when
 
 `ladder/` orders kernel operations by complexity instead of by where they went wrong: tiers from
 primitives through degenerate booleans, analytic and spline profiles, holes and taps, threads,
-fillets, chamfers, shells, patterns, to whole parts. Later tiers build on earlier tiers' shapes (a
+fillets, chamfers, shells, patterns, whole parts, and sheet metal. Later tiers build on earlier tiers' shapes (a
 running part grows one tier at a time through `base`), so the last case carries everything.
 
 - `ladder/<NN-tier>/<NNN-name>/`: cases in the format above, each a test with its own answer.
