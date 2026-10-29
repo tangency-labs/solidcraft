@@ -4,11 +4,11 @@
 use crate::ui_kit::{Container, Surface};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
 use serde_json::json;
-use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Plane, Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
 use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines, grid_plane, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::{SectionPlane, Sel};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -567,8 +567,10 @@ fn scene_key(app: &SolveApp) -> u64 {
     // How bodies are drawn: from their plans on the GPU, or built here (until the evaluation
     // shader has compiled, #4860).
     app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
-    // The section plane (its cut outlines are part of the model scene).
-    section_plane(app).map(|(o, n)| [o.x, o.y, o.z, n.x, n.y, n.z].map(f64::to_bits)).hash(&mut h);
+    // The section's planes (their cut outlines are part of the model scene).
+    for c in section_planes(app) {
+        [c.origin.x, c.origin.y, c.origin.z, c.normal.x, c.normal.y, c.normal.z].map(f64::to_bits).hash(&mut h);
+    }
     app.cam.up.hash(&mut h);
     (app.cam.pitch > 0.0).hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
@@ -1629,23 +1631,36 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
         ground_shadow(&mut sc, app, &st);
     }
-    // Section: the outline of each body where the plane cuts it, in the view's text colour (#4146).
-    if let Some((o, n)) = section_plane(app) {
+    // Section: the outline of each body where each plane cuts what the section hides, in the
+    // view's text colour (#4146).
+    let planes = section_planes(app);
+    if !planes.is_empty() {
         let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
         let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
-        let mut made = std::collections::HashMap::with_capacity(kept.len());
-        let normal = [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()];
-        for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
-            let mesh = b.mesh();
-            let key = (std::sync::Arc::as_ptr(&mesh) as usize, normal);
-            let index = match kept.remove(&key).filter(|(m, i)| std::sync::Arc::ptr_eq(m, &mesh) && i.normal() == n) {
-                Some((_, index)) => index,
-                None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh, n)),
-            };
-            for (a, c) in index.segments(&mesh, o) {
-                sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+        let mut made: std::collections::HashMap<
+            _,
+            (std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<solidcraft_engine::view::SectionIndex>),
+        > = std::collections::HashMap::with_capacity(kept.len());
+        for (i, cut) in planes.iter().enumerate() {
+            let (o, n) = (cut.origin, cut.normal);
+            let normal = [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()];
+            for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+                let mesh = b.mesh();
+                let key = (std::sync::Arc::as_ptr(&mesh) as usize, normal);
+                let fits = |(m, i): &(std::sync::Arc<solidcraft_engine::geom::Mesh>, std::sync::Arc<solidcraft_engine::view::SectionIndex>)| {
+                    std::sync::Arc::ptr_eq(m, &mesh) && i.normal() == n
+                };
+                let index = match made.get(&key).filter(|e| fits(e)).cloned().or_else(|| kept.remove(&key).filter(|e| fits(e))) {
+                    Some((_, index)) => index,
+                    None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh, n)),
+                };
+                for (a, c) in index.segments(&mesh, o) {
+                    if let Some((a, c)) = solidcraft_engine::view::outline_part(a, c, &planes, i) {
+                        sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+                    }
+                }
+                made.insert(key, (mesh, index));
             }
-            made.insert(key, (mesh, index));
         }
         if let Ok(mut k) = app.viewport.section_index.lock() {
             *k = made;
@@ -2537,10 +2552,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     {
         hits.push(far);
     }
-    // A section hides the material its normal points at: nothing there is picked, and where the
-    // plane crosses a body its cap hides what lies behind it (#6328), as `view.pick` answers.
-    let section = section_plane(app);
-    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + crate::view_pick::SECTION_EPS);
+    // A section hides the material on the side every plane's normal points at: nothing there is
+    // picked, and where the cut crosses a body its cap hides what lies behind it (#6328), as
+    // `view.pick` answers.
+    let section = section_planes(app);
+    let kept = |p: Vec3| crate::view_pick::section_keeps(&section, p);
     let walk_eps = 1e-6 * (1.0 + scene_radius(app));
     // Nearest face along the ray (hides what is behind it); with `all`, every body's nearest.
     let mut bestf: Option<(f64, Hit)> = None;
@@ -2593,10 +2609,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     }
     // The cut cap, where the plane crosses a body nearer than any kept face: it hides that face
     // and everything behind it, and is no face itself.
-    let cap = section.and_then(|(so, sn)| {
-        let den = sn.dot(d);
-        let t_cap = (sn.dot(so) - sn.dot(o)) / den;
-        let nearer = den.abs() > 1e-12 && t_cap > 0.0 && bestf.as_ref().is_none_or(|(t, _)| t_cap < *t);
+    let cap = crate::view_pick::section_exit(&section, o, d).and_then(|(t_cap, _)| {
+        let nearer = bestf.as_ref().is_none_or(|(t, _)| t_cap < *t);
         let replaced = app.preview.effective_replaced();
         let shown_bodies = &None;
         (nearer && crate::view_pick::body_cut_at(app, &st, &bounds, o, d, t_cap, true, replaced, shown_bodies).is_some()).then_some(t_cap)
@@ -2751,29 +2765,37 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     hits
 }
 
-/// The section cut shown now: the open Section Analysis dialog's plane, else the session's.
 /// The active sketch's display options (defaults when not sketching).
 pub fn active_view(app: &SolveApp) -> solidcraft_engine::sketch::SketchView {
     let st = crate::open_meshing::shown_world(app);
     app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.sketch.view.clone()).unwrap_or_default()
 }
 
-pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
+/// The section cut shown now, its planes: the open Section Analysis dialog's preview, else the
+/// session's (or a sketch's Slice).
+pub fn section_planes(app: &SolveApp) -> Vec<SectionPlane> {
     if let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, crate::dialogs::Kind::Section { .. })) {
-        let cmds = crate::dialogs::apply_commands(app, d).ok()?;
-        let (_, p) = cmds.into_iter().next()?;
+        // Adding a plane shows the section as it is until the plane is picked.
+        let adding = matches!(d.kind, crate::dialogs::Kind::Section { add: true, .. });
+        let Some((_, p)) = crate::dialogs::apply_commands(app, d).ok().and_then(|cmds| cmds.into_iter().next()) else {
+            return if adding { app.session.section.clone() } else { Vec::new() };
+        };
         let mut scratch = app.session.scratch();
-        scratch.execute("inspect.section", &p).ok()?;
-        return scratch.section;
+        scratch.section = app.session.section.clone();
+        return match scratch.execute("inspect.section", &p) {
+            Ok(_) => scratch.section,
+            Err(_) if adding => app.session.section.clone(),
+            Err(_) => Vec::new(),
+        };
     }
     // Slice (Sketch Palette): cut the model at the plane of the sketch being edited.
-    if app.session.section.is_none() {
+    if app.session.section.is_empty() {
         let st = crate::open_meshing::shown_world(app);
         if let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)).filter(|ss| ss.sketch.view.slice) {
-            return Some((ss.plane.origin, ss.plane.normal()));
+            return vec![SectionPlane { id: 0, origin: ss.plane.origin, normal: ss.plane.normal() }];
         }
     }
-    app.session.section
+    app.session.section.clone()
 }
 
 /// Whether the section [`section_plane`] shows has hatched cut faces: an open Section Analysis
@@ -3070,11 +3092,9 @@ pub(crate) fn analysis_legend_data(app: &SolveApp) -> Option<AnalysisLegend> {
     Some((title, along, rows))
 }
 
-fn section_clip(app: &SolveApp) -> [f32; 4] {
-    match section_plane(app) {
-        Some((o, n)) => [n.x as f32, n.y as f32, n.z as f32, n.dot(o) as f32],
-        None => [0.0; 4],
-    }
+fn section_clip(app: &SolveApp) -> [[f32; 4]; solidcraft_gpu::view::MAX_SECTION_PLANES] {
+    let planes: Vec<(Vec3, f64)> = section_planes(app).iter().map(SectionPlane::clip).collect();
+    solidcraft_gpu::view::clip_planes(&planes)
 }
 
 /// Space kept free at the top right of the viewport for the axis view (docked dialogs start below).
@@ -6124,10 +6144,10 @@ fn origin_hidden_by_body(app: &SolveApp, proj: &Proj) -> bool {
     let t_origin = -o.dot(d);
     let st = crate::open_meshing::shown_world(app);
     let bounds = body_bounds(app, &st);
-    // A section hides the material its normal points at: removed material does not hide the
+    // A section hides the material its planes point at: removed material does not hide the
     // point, as when picking a vertex behind a section (#6328).
-    let section = section_plane(app);
-    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + crate::view_pick::SECTION_EPS);
+    let section = section_planes(app);
+    let kept = |p: Vec3| crate::view_pick::section_keeps(&section, p);
     let walk_eps = 1e-6 * (1.0 + scene_radius(app));
     let slack = scene_pick_slack(app);
     for (i, b) in st.bodies.iter().enumerate() {
@@ -7762,7 +7782,7 @@ mod tests {
         h.app.start("inspect.section");
         let Some(crate::dialogs::Kind::Section { offset, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else { panic!("section dialog") };
         *offset = "15 mm".into();
-        assert!(h.app.session.section.is_none());
+        assert!(h.app.session.section.is_empty());
         let preview = pixels(&mut h, cam);
         assert!(whole.iter().zip(&preview).filter(|(a, b)| a != b).count() > 100, "the picture ignored the uncommitted section preview");
         assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
@@ -7771,11 +7791,11 @@ mod tests {
         h.app.dialog = None;
         assert_eq!(preview, pixels(&mut h, cam), "preview and committed section must draw identically");
 
-        h.app.session.section = None;
+        h.app.session.section.clear();
         h.app.run("sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]}})).unwrap();
         let whole = pixels(&mut h, cam);
         h.app.run("sketch.options", json!({"slice":true})).unwrap();
-        assert!(h.app.session.section.is_none());
+        assert!(h.app.session.section.is_empty());
         let sliced = pixels(&mut h, cam);
         assert!(whole.iter().zip(&sliced).filter(|(a, b)| a != b).count() > 100, "the picture ignored the active Sketch Slice");
         h.app.run("sketch.options", json!({"slice":false})).unwrap();
@@ -8213,7 +8233,7 @@ mod tests {
                     view_proj: proj.vp.to_f32(),
                     back: proj.cam.back().to_f32(),
                     size_px: [w as f32, h as f32],
-                    clip: [0.0; 4],
+                    clip: [[0.0; 4]; solidcraft_gpu::view::MAX_SECTION_PLANES],
                     cap: [0.0; 4],
                     images: Vec::new(),
                     clouds: Vec::new(),
@@ -9938,7 +9958,7 @@ mod tests {
         h.app.run("inspect.section", json!({"plane": "XZ", "offset": 0})).unwrap();
         h.app.set_origin_shown(true);
         h.frames(2);
-        assert!(section_plane(&h.app).is_some());
+        assert!(!section_planes(&h.app).is_empty());
         let sc = build_highlight(&h.app).merged();
         let planes = origin_planes(&h.app).len();
         assert!(planes > 0);

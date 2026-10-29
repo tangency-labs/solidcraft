@@ -71,7 +71,7 @@ fn opengl_viewport_pipelines_render_a_model() {
     let c = Capturer::new(&adapter, device, queue).unwrap();
     let s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]);
     let cam = view::home_camera(&s);
-    let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }), &cam, 160, 100).unwrap();
+    let img = c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid: false, axes: false }), &cam, 160, 100).unwrap();
     let empty = c.rgba(&Default::default(), &cam, 160, 100).unwrap();
     let changed = pixels(&img).zip(pixels(&empty)).filter(|(a, b)| a != b).count();
     assert!(changed > 500, "the model covers only {changed} pixels");
@@ -103,7 +103,7 @@ fn the_renderer_counts_what_it_draws() {
     let Some(c) = capturer() else { return };
     let drawn = |s: &Session| {
         let cam = view::home_camera(s);
-        let scene = view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false });
+        let scene = view::scene_with_guides(s, &cam, &[], Guides { grid: false, axes: false });
         let triangles: usize = scene.meshes.iter().map(|m| m.mesh.triangles.len()).sum();
         let (_, stats) = c.rgba_with_stats(&scene, &cam, 160, 100).unwrap();
         (stats, triangles as u64)
@@ -130,7 +130,7 @@ fn pictures_drawn_at_once_each_count_their_own() {
     let Some(c) = capturer() else { return };
     let scene = |s: &Session| {
         let cam = view::home_camera(s);
-        (view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }), cam)
+        (view::scene_with_guides(s, &cam, &[], Guides { grid: false, axes: false }), cam)
     };
     let empty = scene(&Session::default());
     let solid = scene(&session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]));
@@ -153,7 +153,7 @@ fn guides_change_the_picture() {
     let Some(c) = capturer() else { return };
     let s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [10, -15, -10]}))]);
     let cam = view::home_camera(&s);
-    let picture = |grid, axes| c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid, axes }), &cam, 160, 100).unwrap();
+    let picture = |grid, axes| c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid, axes }), &cam, 160, 100).unwrap();
     let (all, no_grid, no_axes, bare) = (picture(true, true), picture(false, true), picture(true, false), picture(false, false));
     assert!(all != no_grid && all != no_axes && no_grid != bare && no_axes != bare);
 }
@@ -164,7 +164,7 @@ fn pictures_draw_silhouettes_on_curved_surfaces() {
     let Some(c) = capturer() else { return };
     let s = session(&[("solid.sphere", json!({"diameter": 20}))]);
     let cam = view::home_camera(&s);
-    let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }), &cam, 400, 400).unwrap();
+    let img = c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid: false, axes: false }), &cam, 400, 400).unwrap();
     let dark = pixels(&img).filter(|p| p[0] < 90 && p[1] < 90 && p[2] < 95).count();
     assert!(dark > 40, "silhouette pixels: {dark}");
 }
@@ -201,6 +201,42 @@ fn pictures_show_the_section_and_its_cap() {
         // The cap: warm (red over blue), unlike the grey-blue body and background.
         let cap = pixels(&img).filter(|p| i32::from(p[0]) - i32::from(p[2]) > 20).count();
         assert!(cap > 500, "fov {fov}: cap pixels {cap}");
+    }
+}
+
+/// Two planes cut a quarter of the box away (what both hide): the cut faces in the cap colour
+/// hide what lies inside the rest, and the picture is the CPU rasterizer's, near enough.
+#[test]
+fn pictures_cut_with_two_planes() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]);
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    let cam = view::home_camera(&s);
+    let one = c.rgba(&view::scene(&s, &cam), &cam, 200, 140).unwrap();
+    s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+    let two = c.rgba(&view::scene(&s, &cam), &cam, 200, 140).unwrap();
+    let changed = pixels(&one).zip(pixels(&two)).filter(|(a, b)| a != b).count();
+    assert!(changed > 300, "the second plane changes the cut: {changed} pixels changed");
+    let warm = |img: &[u8]| pixels(img).filter(|p| i32::from(p[0]) - i32::from(p[2]) > 20).count();
+    for fov in [0.0, 0.6] {
+        let mut cam = view::home_camera(&s);
+        cam.fov = fov;
+        let mut sc = view::scene(&s, &cam);
+        // A marker inside the material, behind the first plane's cut face.
+        sc.lines.push(SceneLine {
+            points: vec![Vec3::new(25.0, 25.0, 10.0), Vec3::new(35.0, 25.0, 10.0)],
+            color: Rgb(255, 0, 0),
+            alpha: 1.0,
+            width: 3.0,
+            on_top: false,
+        });
+        let img = c.rgba(&sc, &cam, 300, 220).unwrap();
+        let marker = pixels(&img).filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60).count();
+        assert_eq!(marker, 0, "fov {fov}: the inside shows through a cut face");
+        let cpu = solidcraft_engine::render::render(&sc, &cam, 300, 220).rgba;
+        let (gpu_cap, cpu_cap) = (warm(&img), warm(&cpu));
+        assert!(gpu_cap > 500, "fov {fov}: cap pixels {gpu_cap}");
+        assert!(gpu_cap.abs_diff(cpu_cap) * 10 < cpu_cap, "fov {fov}: GPU cap {gpu_cap} px, CPU {cpu_cap} px");
     }
 }
 
@@ -293,7 +329,7 @@ fn pictures_show_the_surface_analysis() {
         ("solid.hole", json!({"position": [30, 20, 20], "diameter": 10, "depth": 20})),
     ]);
     let cam = view::home_camera(&s);
-    let picture = |s: &Session| c.rgba(&view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }), &cam, 320, 200).unwrap();
+    let picture = |s: &Session| c.rgba(&view::scene_with_guides(s, &cam, &[], Guides { grid: false, axes: false }), &cam, 320, 200).unwrap();
     let plain = picture(&s);
     s.execute("inspect.curvature_map", &json!({})).unwrap();
     let curvature = picture(&s);
@@ -332,7 +368,7 @@ fn zebra_on_flat_faces_holds_still_while_the_view_turns() {
         .map(|step| {
             let mut cam = home;
             cam.yaw += f64::from(step) * 0.11_f64.to_radians();
-            let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }), &cam, 320, 200).unwrap();
+            let img = c.rgba(&view::scene_with_guides(&s, &cam, &[], Guides { grid: false, axes: false }), &cam, 320, 200).unwrap();
             pixels(&img).filter(|p| p[0] > 225 && p[1] > 225 && p[2] > 225).count()
         })
         .collect();

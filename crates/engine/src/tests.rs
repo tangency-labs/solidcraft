@@ -1693,6 +1693,12 @@ fn measure_items() {
     assert!(s.execute("inspect.measure", &json!({"items": [{"type": "nonsense"}]})).is_err());
 }
 
+/// The one plane of the session's section (origin, normal).
+fn only_cut(s: &Session) -> (Vec3, Vec3) {
+    let [c] = s.section[..] else { panic!("one section plane: {:?}", s.section) };
+    (c.origin, c.normal)
+}
+
 /// Section Analysis sets and clears the view cut without touching the design or history.
 #[test]
 fn section_analysis() {
@@ -1700,7 +1706,7 @@ fn section_analysis() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
     let (doc, undo) = (s.doc.clone(), s.undo.len());
     let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
-    let (o, n) = s.section.unwrap();
+    let (o, n) = only_cut(&s);
     assert!((o - n * 15.0).len() < 1e-12 && (n.y.abs() - 1.0).abs() < 1e-12);
     // The cut faces are hatched unless `hatch` says otherwise.
     assert!(s.section_hatch && r["section"]["hatch"] == true, "{r}");
@@ -1709,11 +1715,11 @@ fn section_analysis() {
     run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
     assert!(s.section_hatch);
     run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 2]}, "flip": true}));
-    let (o, n) = s.section.unwrap();
+    let (o, n) = only_cut(&s);
     assert!((o.z - 5.0).abs() < 1e-12 && (n.z + 1.0).abs() < 1e-12);
     assert!(s.execute("inspect.section", &json!({"plane": {"normal": [0, 0, 0]}})).is_err());
     run(&mut s, "inspect.section", json!({"clear": true}));
-    assert!(s.section.is_none());
+    assert!(s.section.is_empty());
     // XZ's normal is +Y: an offset moves the cut to +Y, `at` places it at a world Y, and the
     // result says where the cut landed either way.
     let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 10}));
@@ -1721,7 +1727,7 @@ fn section_analysis() {
     for (plane, at, flip) in [("XZ", -282.5, false), ("XZ", 7.0, true), ("XY", 3.0, false), ("YZ", -4.0, true)] {
         let r = run(&mut s, "inspect.section", json!({"plane": plane, "at": at, "flip": flip}));
         assert_eq!(r["section"]["at"].as_f64(), Some(at), "{plane} {r}");
-        let (o, _) = s.section.unwrap();
+        let (o, _) = only_cut(&s);
         assert!(((o.x + o.y + o.z) - at).abs() < 1e-12, "{plane} {o:?}");
     }
     assert!(s.execute("inspect.section", &json!({"plane": "XZ", "at": 1, "offset": 1})).is_err());
@@ -1729,6 +1735,90 @@ fn section_analysis() {
     run(&mut s, "inspect.section", json!({"clear": true}));
     assert!(Arc::ptr_eq(&doc, &s.doc));
     assert_eq!(s.undo.len(), undo);
+}
+
+/// A section of several planes: `add` puts a plane beside the others (or starts the section),
+/// `remove` takes one out by its id, the last one turning the section off, and a plane without
+/// `add` replaces them all, as one plane always did. None of it touches the design or history.
+#[test]
+fn section_analysis_with_several_planes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let (doc, undo) = (s.doc.clone(), s.undo.len());
+    let r = run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}, "add": true}));
+    assert_eq!((r["section"]["id"].as_u64(), r["planes"].as_array().map(Vec::len)), (Some(1), Some(1)), "{r}");
+    let r = run(&mut s, "inspect.section", json!({"plane": "YZ", "at": 20, "flip": true, "add": true, "hatch": false}));
+    assert_eq!((r["section"]["id"].as_u64(), r["section"]["axis"].as_str(), r["section"]["at"].as_f64()), (Some(2), Some("X"), Some(20.0)), "{r}");
+    assert_eq!(r["planes"][0]["normal"], json!([0.0, -1.0, 0.0]), "{r}");
+    assert_eq!(r["planes"][1]["normal"], json!([-1.0, 0.0, 0.0]), "{r}");
+    assert!(!s.section_hatch, "`hatch` applies to the whole section");
+    // The section hides what both planes hide: a quarter of the box is cut away.
+    let kept = |s: &Session, p: Vec3| s.section.iter().any(|c| c.keeps(p, 0.0));
+    assert!(!kept(&s, Vec3::new(10.0, 5.0, 10.0)));
+    for p in [Vec3::new(10.0, 20.0, 10.0), Vec3::new(30.0, 5.0, 10.0), Vec3::new(30.0, 20.0, 10.0)] {
+        assert!(kept(&s, p), "{p:?}");
+    }
+    // Adding keeps the hatch unless it is given.
+    run(&mut s, "inspect.section", json!({"plane": "XY", "at": 18, "add": true}));
+    assert!(!s.section_hatch && s.section.len() == 3);
+    // The same plane twice is refused, and so is a seventh plane.
+    let twice = s.execute("inspect.section", &json!({"plane": "XY", "at": 18, "add": true})).unwrap_err();
+    assert!(twice.to_string().contains("already cuts with this plane"), "{twice}");
+    for z in [1, 2, 3] {
+        run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, z], "normal": [0, 0, -1]}, "add": true}));
+    }
+    assert_eq!(s.section.len(), crate::view::MAX_SECTION_PLANES);
+    let full = s.execute("inspect.section", &json!({"plane": "XY", "at": 4, "add": true})).unwrap_err();
+    assert!(full.to_string().contains("at most 6 planes"), "{full}");
+    assert_eq!(s.section.len(), 6);
+    // Removing by id leaves the others, and their ids, as they were.
+    let r = run(&mut s, "inspect.section", json!({"remove": 2}));
+    let ids: Vec<u64> = s.section.iter().map(|c| c.id).collect();
+    assert_eq!(ids, [1, 3, 4, 5, 6]);
+    assert_eq!(r["planes"].as_array().map(Vec::len), Some(5), "{r}");
+    let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "at": 9, "add": true}));
+    assert_eq!(r["section"]["id"].as_u64(), Some(7), "a new plane takes a new id: {r}");
+    // A plane without `add` replaces the section, as before.
+    let r = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 15}));
+    assert_eq!((s.section.len(), r["section"]["id"].as_u64()), (1, Some(1)), "{r}");
+    assert!(s.section_hatch, "a new section is hatched by default");
+    // Removing the last plane turns the section off.
+    let r = run(&mut s, "inspect.section", json!({"remove": 1}));
+    assert!(s.section.is_empty() && r["section"].is_null() && r["planes"] == json!([]), "{r}");
+    // Clear takes every plane.
+    run(&mut s, "inspect.section", json!({"plane": "XZ", "add": true}));
+    run(&mut s, "inspect.section", json!({"plane": "XY", "add": true}));
+    let r = run(&mut s, "inspect.section", json!({"clear": true}));
+    assert!(s.section.is_empty() && r["section"].is_null(), "{r}");
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(s.undo.len(), undo);
+}
+
+/// Hostile `inspect.section` parameters are refused and leave the section as it was.
+#[test]
+fn section_analysis_refuses_hostile_params() {
+    let mut s = Session::default();
+    run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 5}));
+    let before = s.section.clone();
+    for p in [
+        json!({"remove": 9}),
+        json!({"remove": -1}),
+        json!({"remove": 1.5}),
+        json!({"remove": "1"}),
+        json!({"remove": 1, "plane": "XY"}),
+        json!({"remove": 1, "add": true}),
+        json!({"plane": "XY", "add": "yes"}),
+        json!({"plane": "XY", "add": 1}),
+        json!({"plane": {"origin": [0, 0, 0], "normal": [1e308, 1e308, 1e308]}, "add": true}),
+        json!({"plane": {"origin": "here", "normal": [1, 0, 0]}, "add": true}),
+        json!({"plane": {"origin": [0, 0, 0], "normal": [0, 0, 0]}, "add": true}),
+        json!({"plane": null, "add": true}),
+        json!({"add": true}),
+        json!({"plane": [1, 2, 3], "add": true}),
+    ] {
+        assert!(s.execute("inspect.section", &p).is_err(), "{p}");
+        assert_eq!(s.section, before, "{p}");
+    }
 }
 
 /// A section index finds the same cut segments, in the same order, as cutting every triangle:

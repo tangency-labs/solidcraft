@@ -8,7 +8,9 @@ use solidcraft_geom::{Aabb3, Plane, Vec3};
 use solidcraft_render::{AnalysisColors, Camera, Rgb, Scene, SceneAnalysis, SceneLine, SceneMesh};
 use solidcraft_sketch::Sketch;
 
-use crate::{Sel, Session};
+pub use solidcraft_render::MAX_SECTION_PLANES;
+
+use crate::{SectionPlane, Sel, Session};
 
 /// Colours (shared with the GPU viewport).
 pub mod colors {
@@ -657,13 +659,13 @@ pub fn component_color(s: &Session, component: u64) -> Option<[u8; 3]> {
 
 /// The scene for a headless render, cut by the session's section.
 pub fn scene(s: &Session, cam: &Camera) -> Scene {
-    scene_with_section(s, cam, s.section)
+    scene_with_section(s, cam, &s.section)
 }
 
-/// The scene for a headless render, cut by `section` (origin, normal) instead of the session's:
+/// The scene for a headless render, cut by `section` (its planes) instead of the session's:
 /// the app passes the cut its viewport shows (an open Section Analysis dialog's preview, a
 /// sketch's Slice), so model renders match the window.
-pub fn scene_with_section(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>) -> Scene {
+pub fn scene_with_section(s: &Session, cam: &Camera, section: &[SectionPlane]) -> Scene {
     scene_with_guides(s, cam, section, Guides::default())
 }
 
@@ -699,7 +701,7 @@ impl Default for Guides {
 }
 
 /// [`scene_with_section`] with the grid and the axes shown or left out.
-pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)>, guides: Guides) -> Scene {
+pub fn scene_with_guides(s: &Session, cam: &Camera, section: &[SectionPlane], guides: Guides) -> Scene {
     scene_with_palette_and_guides(s, cam, section, world_curve_parts, &Palette::DEFAULT, guides)
 }
 
@@ -707,14 +709,14 @@ pub fn scene_with_guides(s: &Session, cam: &Camera, section: Option<(Vec3, Vec3)
 /// Callers can use the same pixel sampler as a GPU viewport without changing the
 /// body, grid, appearance, section or sketch styling policies of [`scene`].
 pub fn scene_with_sketch_sampler(s: &Session, cam: &Camera, sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>) -> Scene {
-    scene_with_section_and_sketch_sampler(s, cam, s.section, sampler)
+    scene_with_section_and_sketch_sampler(s, cam, &s.section, sampler)
 }
 
 /// A headless scene with an explicit section and supplied sketch display paths.
 pub fn scene_with_section_and_sketch_sampler(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
 ) -> Scene {
     scene_with_palette(s, cam, section, sampler, &Palette::DEFAULT)
@@ -724,7 +726,7 @@ pub fn scene_with_section_and_sketch_sampler(
 pub fn scene_with_palette(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
 ) -> Scene {
@@ -735,7 +737,7 @@ pub fn scene_with_palette(
 pub fn scene_with_palette_and_guides(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     guides: Guides,
@@ -748,7 +750,7 @@ pub fn scene_with_palette_and_guides(
 pub fn scene_with_thread_markings(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     guides: Guides,
@@ -760,17 +762,18 @@ pub fn scene_with_thread_markings(
 fn build_scene(
     s: &Session,
     cam: &Camera,
-    section: Option<(Vec3, Vec3)>,
+    section: &[SectionPlane],
     guides: Guides,
     mut sampler: impl FnMut(&Sketch, usize, &Plane) -> Vec<Vec<Vec3>>,
     p: &Palette,
     cosmetic_threads: bool,
 ) -> Scene {
     let st = s.world_state();
-    let section = section.filter(|(o, n)| o.is_finite() && n.is_finite() && n.len() > 1e-9);
+    let section: Vec<SectionPlane> =
+        section.iter().filter(|c| c.origin.is_finite() && c.normal.is_finite() && c.normal.len() > 1e-9).take(MAX_SECTION_PLANES).copied().collect();
     let mut sc = Scene {
         background: Some(p.background),
-        clip: section.map(|(o, n)| (n, n.dot(o))),
+        clip: section.iter().map(|c| c.clip()).collect(),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,
         analysis: s.analysis.map(|a| SceneAnalysis { mode: a.mode(), colors: p.analysis }),
@@ -884,9 +887,9 @@ fn build_scene(
             }
             sc.lines.push(SceneLine { points: e.clone(), color: p.edge, alpha: 1.0, width: 1.2, on_top: false });
         }
-        // The outline of the body where the section cuts it.
-        if let Some((o, n)) = section {
-            for (a, b) in section_segments(&mesh, o, n) {
+        // The outline of the body where each section plane cuts what the section hides.
+        for (i, c) in section.iter().enumerate() {
+            for (a, b) in section_segments(&mesh, c.origin, c.normal).into_iter().filter_map(|(a, b)| outline_part(a, b, &section, i)) {
                 sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
             }
         }
@@ -912,6 +915,24 @@ pub fn section_segments(m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec
         cut_triangle(m, t, o, n, eps, &mut out);
     }
     out
+}
+
+/// The part of a cut outline segment `a`–`b` of plane `own` that bounds what the section hides:
+/// where every other plane hides too (the section hides what lies on the positive side of all
+/// of its planes).
+pub fn outline_part(a: Vec3, b: Vec3, planes: &[SectionPlane], own: usize) -> Option<(Vec3, Vec3)> {
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for (_, c) in planes.iter().enumerate().filter(|(i, _)| *i != own) {
+        let tol = 1e-9 * (1.0 + a.len().max(b.len()));
+        let (da, db) = (c.normal.dot(a - c.origin) + tol, c.normal.dot(b - c.origin) + tol);
+        match (da > 0.0, db > 0.0) {
+            (true, true) => {}
+            (false, false) => return None,
+            (true, false) => hi = hi.min(da / (da - db)),
+            (false, true) => lo = lo.max(da / (da - db)),
+        }
+    }
+    (lo < hi).then(|| (a + (b - a) * lo, a + (b - a) * hi))
 }
 
 /// How far [`section_segments`] nudges the cut to the kept side.
@@ -1195,8 +1216,8 @@ mod tests {
         let (grid_lines, edges) = (count(&all, &grid), count(&all, &[colors::EDGE]));
         assert!(grid_lines > 20 && edges >= 12, "{grid_lines} grid lines, {edges} edges");
         assert_eq!(count(&all, &axes), 3);
-        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, s.section, Guides::default()).lines.len());
-        let render = |g: Guides| scene_with_guides(&s, &cam, s.section, g);
+        assert_eq!(all.lines.len(), scene_with_guides(&s, &cam, &s.section, Guides::default()).lines.len());
+        let render = |g: Guides| scene_with_guides(&s, &cam, &s.section, g);
         let no_grid = render(Guides { grid: false, axes: true });
         assert_eq!((count(&no_grid, &grid), count(&no_grid, &axes), count(&no_grid, &[colors::EDGE])), (0, 3, edges));
         let no_axes = render(Guides { grid: true, axes: false });
@@ -1222,7 +1243,7 @@ mod tests {
         assert_eq!(shown(&s), [colors::AXIS_X, colors::AXIS_Z]);
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": false})).unwrap();
         assert!(shown(&s).is_empty());
-        let sc = scene_with_guides(&s, &cam, None, Guides { grid: true, axes: true });
+        let sc = scene_with_guides(&s, &cam, &[], Guides { grid: true, axes: true });
         assert!(sc.grid.iter().any(|l| l.color == colors::GRID), "the grid is not part of the origin");
         s.execute("browser.visibility", &json!({"folder": "origin", "visible": true})).unwrap();
         assert_eq!(shown(&s), axes);
@@ -1235,13 +1256,26 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         let cam = home_camera(&s);
-        assert!(scene(&s, &cam).clip.is_none());
+        assert!(scene(&s, &cam).clip.is_empty());
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         let sc = scene(&s, &cam);
-        let (n, d) = sc.clip.unwrap();
+        let [(n, d)] = sc.clip[..] else { panic!("one plane: {:?}", sc.clip) };
         assert!((n - Vec3::new(0.0, -1.0, 0.0)).len() < 1e-12 && (d + 15.0).abs() < 1e-12, "{n:?} {d}");
         assert_eq!(sc.cap, Some(colors::SECTION_CAP));
         assert!(!section_segments(&s.world_state().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
+        // A second plane clips too. The section hides what both hide (x > 20, y < 15), and each
+        // plane's outline runs only along that: the first's at y 15 where x > 20, the second's
+        // at x 20 where y < 15.
+        s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+        let sc = scene(&s, &cam);
+        assert_eq!(sc.clip.len(), 2);
+        assert!((sc.clip[1].0 - Vec3::X).len() < 1e-12 && (sc.clip[1].1 - 20.0).abs() < 1e-12, "{:?}", sc.clip);
+        let outline: Vec<&SceneLine> = sc.lines.iter().filter(|l| l.width == 1.6 && l.color == colors::EDGE).collect();
+        let on = |l: &SceneLine, f: fn(&Vec3) -> bool| l.points.iter().all(f);
+        assert!(outline.iter().any(|l| on(l, |p| (p.y - 15.0).abs() < 1e-2)) && outline.iter().any(|l| on(l, |p| (p.x - 20.0).abs() < 1e-2)));
+        for l in &outline {
+            assert!(on(l, |p| p.x > 20.0 - 1e-2 && p.y < 15.0 + 1e-2), "outside what is cut away: {:?}", l.points);
+        }
     }
 
     /// The surface analysis shades the headless scene too, in the palette's colours.
@@ -1277,10 +1311,29 @@ mod tests {
         let whole = solidcraft_render::render(&scene(&s, &cam), &cam, 200, 140).rgba;
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
         let sc = scene(&s, &cam);
-        assert!(sc.clip.is_some());
+        assert_eq!(sc.clip.len(), 1);
         let cut = solidcraft_render::render(&sc, &cam, 200, 140).rgba;
         let changed = whole.chunks(4).zip(cut.chunks(4)).filter(|(a, b)| a != b).count();
         assert!(changed > 500, "{changed} pixels changed");
+    }
+
+    /// The CPU rasterizer: two planes cut a quarter of the box away (what both hide), and both
+    /// cut faces show in the cap colour.
+    #[test]
+    fn cpu_pictures_cut_with_two_planes() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let cam = home_camera(&s);
+        let warm = |s: &Session| {
+            let img = solidcraft_render::render(&scene(s, &cam), &cam, 300, 220);
+            img.rgba.chunks(4).filter(|p| p[0] as i32 - p[2] as i32 > 20).count()
+        };
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+        let one = warm(&s);
+        s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+        let two = warm(&s);
+        // One plane shows its whole cut face; two show what is left of it and the second's.
+        assert!(one > 500 && two > 300 && two != one, "cap pixels: one plane {one}, two {two}");
     }
 
     /// The section's cut face hides what lies inside the body behind it (it is drawn at the

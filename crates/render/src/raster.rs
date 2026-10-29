@@ -107,8 +107,17 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     // pixel's view ray. Written into the depth buffer once the solids are drawn, so the cut face
     // hides edges inside the body (holes, far corners) instead of showing them like a pane of
     // glass, while holes through the cut stay open (as the viewport does with its stencil).
-    let cap_z = scene.clip.and_then(|(n, d)| cap_plane(cam, n, d, scene.radius.max(1.0), &project));
-    let mut cap_depth = if cap_z.is_some() { vec![f32::INFINITY; sw * sh] } else { Vec::new() };
+    // The section hides what lies on the positive side of every plane, so the cut is where the
+    // ray leaves that stretch.
+    let radius = scene.radius.max(1.0);
+    let cut_depth = |at: Vec3| -> Option<f32> {
+        let dir = if cam.fov > 0.0 { at - cam.eye() } else { -view_dir };
+        let p = at + dir * hidden_until(at, dir, &scene.clip, 1e-3 * (1.0 + radius))?;
+        project(p).map(|q| q[2] as f32)
+    };
+    let cap_slope =
+        scene.clip.iter().filter_map(|(n, d)| cap_plane(cam, *n, *d, radius, &project)).map(|[a, b, _]| a.hypot(b) as f32).fold(0.0, f32::max);
+    let mut cap_depth = if scene.clip.is_empty() { Vec::new() } else { vec![f32::INFINITY; sw * sh] };
     // The screen depth slope (per canvas pixel) of the surface each pixel shows, for the lines'
     // depth test.
     let mut slope = vec![0f32; sw * sh];
@@ -165,9 +174,8 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         let (q0, q1, q2) = (w0 * iw[0], w1 * iw[1], w2 * iw[2]);
                         let qs = q0 + q1 + q2;
                         let (p0, p1, p2) = if qs > 1e-12 { (q0 / qs, q1 / qs, q2 / qs) } else { (w0, w1, w2) };
-                        if let Some((cn, cd)) = scene.clip
-                            && cn.dot(wp[0] * p0 + wp[1] * p1 + wp[2] * p2) > cd
-                        {
+                        let at = wp[0] * p0 + wp[1] * p1 + wp[2] * p2;
+                        if hidden(at, &scene.clip) {
                             continue;
                         }
                         let z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
@@ -186,12 +194,9 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                             }
                             let n = (ns[0] * p0 + ns[1] * p1 + ns[2] * p2).normalized().unwrap_or(Vec3::Z);
                             // A see-through body has no cut face: the interior already shows.
-                            let cut = !pass.glass() && scene.clip.is_some() && inside;
+                            let cut = !pass.glass() && !scene.clip.is_empty() && inside;
                             if let Some(d) = cap_depth.get_mut(i).filter(|_| !pass.glass()) {
-                                *d = match cap_z {
-                                    Some([a, b, k]) if cut => ((a * px + b * py + k) as f32).min(z),
-                                    _ => f32::INFINITY,
-                                };
+                                *d = if cut { cut_depth(at).map_or(f32::INFINITY, |c| c.min(z)) } else { f32::INFINITY };
                             }
                             if cut {
                                 // The cut: the body's colour tinted toward the cap colour, hatched
@@ -221,7 +226,6 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             }
         }
     }
-    let cap_slope = cap_z.map_or(0.0, |[a, b, _]| a.hypot(b) as f32);
     for ((d, s), cz) in c.depth.iter_mut().zip(slope.iter_mut()).zip(&cap_depth) {
         if cz.is_finite() {
             *d = *cz;
@@ -237,36 +241,40 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             let (Some(&p), Some(&q)) = (seg.first(), seg.get(1)) else { continue };
             // The section cuts the segment in 3D (screen space is not linear in depth in
             // perspective views).
-            let Some((p, q)) = clip_segment(p, q, scene.clip) else { continue };
-            let (Some(a), Some(b)) = (project(p), project(q)) else { continue };
-            let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
-            let steps = (len.ceil() as usize).clamp(1, 20_000);
-            for k in 0..=steps {
-                let t = k as f64 / steps as f64;
-                let (x, y, z) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
-                let r = half.ceil() as i64;
-                for dy in -r..=r {
-                    for dx in -r..=r {
-                        let (ix, iy) = (x.floor() as i64 + dx, y.floor() as i64 + dy);
-                        if ix < 0 || iy < 0 || ix >= sw as i64 || iy >= sh as i64 {
-                            continue;
-                        }
-                        let d = ((ix as f64 + 0.5 - x).powi(2) + (iy as f64 + 0.5 - y).powi(2)).sqrt();
-                        let cov = (half + 0.5 - d).clamp(0.0, 1.0);
-                        if cov <= 0.0 {
-                            continue;
-                        }
-                        let i = iy as usize * sw + ix as usize;
-                        // A line on a face lies at the face's depth, but the pixel holds the
-                        // face's depth at its centre, `d` away: allow what the face's slope
-                        // spans over that distance, and the rounding. (A fixed allowance in
-                        // screen depth is a share of the scene's depth range, a millimetre or
-                        // more on a large design: close views showed the far side of thin
-                        // sheet, and parts just behind it, through it.)
-                        let visible = l.on_top
-                            || c.depth.get(i).zip(slope.get(i)).is_some_and(|(dd, s)| z <= f64::from(*dd) + f64::from(*s) * d + z.abs() * DEPTH_EPS);
-                        if visible {
-                            c.put(ix as usize, iy as usize, col, cov * alpha);
+            for (p, q) in clip_segment(p, q, &scene.clip).into_iter().flatten() {
+                let (Some(a), Some(b)) = (project(p), project(q)) else { continue };
+                let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+                let steps = (len.ceil() as usize).clamp(1, 20_000);
+                for k in 0..=steps {
+                    let t = k as f64 / steps as f64;
+                    let (x, y, z) = (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+                    let r = half.ceil() as i64;
+                    for dy in -r..=r {
+                        for dx in -r..=r {
+                            let (ix, iy) = (x.floor() as i64 + dx, y.floor() as i64 + dy);
+                            if ix < 0 || iy < 0 || ix >= sw as i64 || iy >= sh as i64 {
+                                continue;
+                            }
+                            let d = ((ix as f64 + 0.5 - x).powi(2) + (iy as f64 + 0.5 - y).powi(2)).sqrt();
+                            let cov = (half + 0.5 - d).clamp(0.0, 1.0);
+                            if cov <= 0.0 {
+                                continue;
+                            }
+                            let i = iy as usize * sw + ix as usize;
+                            // A line on a face lies at the face's depth, but the pixel holds the
+                            // face's depth at its centre, `d` away: allow what the face's slope
+                            // spans over that distance, and the rounding. (A fixed allowance in
+                            // screen depth is a share of the scene's depth range, a millimetre or
+                            // more on a large design: close views showed the far side of thin
+                            // sheet, and parts just behind it, through it.)
+                            let visible = l.on_top
+                                || c.depth
+                                    .get(i)
+                                    .zip(slope.get(i))
+                                    .is_some_and(|(dd, s)| z <= f64::from(*dd) + f64::from(*s) * d + z.abs() * DEPTH_EPS);
+                            if visible {
+                                c.put(ix as usize, iy as usize, col, cov * alpha);
+                            }
                         }
                     }
                 }
@@ -297,16 +305,53 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     out
 }
 
-/// The part of segment `p`–`q` the section keeps (where normal·x <= d).
-fn clip_segment(p: Vec3, q: Vec3, clip: Option<(Vec3, f64)>) -> Option<(Vec3, Vec3)> {
-    let Some((n, d)) = clip else { return Some((p, q)) };
-    let (dp, dq) = (n.dot(p) - d - 1e-6, n.dot(q) - d - 1e-6);
-    match (dp > 0.0, dq > 0.0) {
-        (true, true) => None,
-        (false, false) => Some((p, q)),
-        (true, false) => Some((p + (q - p) * (dp / (dp - dq)), q)),
-        (false, true) => Some((p, p + (q - p) * (dp / (dp - dq)))),
+/// Whether the section hides `p`: it lies on the positive side (normal·p > d) of every plane.
+fn hidden(p: Vec3, clip: &[(Vec3, f64)]) -> bool {
+    !clip.is_empty() && clip.iter().all(|(n, d)| n.dot(p) > *d)
+}
+
+/// Where the ray `at + dir·t` leaves the stretch the section hides (each plane moved `margin`
+/// to its hidden side), as `t`; None when it never is hidden or never leaves.
+fn hidden_until(at: Vec3, dir: Vec3, clip: &[(Vec3, f64)], margin: f64) -> Option<f64> {
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (n, d) in clip {
+        // n·(at + dir·t) > d + margin: t·dn > s.
+        let (dn, s) = (n.dot(dir), d + margin - n.dot(at));
+        if dn.abs() < 1e-12 {
+            if s >= 0.0 {
+                return None;
+            }
+        } else if dn > 0.0 {
+            lo = lo.max(s / dn);
+        } else {
+            hi = hi.min(s / dn);
+        }
     }
+    (hi.is_finite() && lo < hi).then_some(hi)
+}
+
+/// The parts of segment `p`–`q` the section keeps: all but the stretch on the positive side of
+/// every plane, so at most two.
+fn clip_segment(p: Vec3, q: Vec3, clip: &[(Vec3, f64)]) -> [Option<(Vec3, Vec3)>; 2] {
+    if clip.is_empty() {
+        return [Some((p, q)), None];
+    }
+    // The hidden stretch `p + (q - p)·s`, lo < s < hi.
+    let (mut lo, mut hi) = (0.0f64, 1.0f64);
+    for (n, d) in clip {
+        let (dp, dq) = (n.dot(p) - d - 1e-6, n.dot(q) - d - 1e-6);
+        match (dp > 0.0, dq > 0.0) {
+            (true, true) => {}
+            (false, false) => return [Some((p, q)), None],
+            (true, false) => hi = hi.min(dp / (dp - dq)),
+            (false, true) => lo = lo.max(dp / (dp - dq)),
+        }
+    }
+    if lo >= hi {
+        return [Some((p, q)), None];
+    }
+    let at = |s: f64| p + (q - p) * s;
+    [(lo > 0.0).then(|| (p, at(lo))), (hi < 1.0).then(|| (at(hi), q))]
 }
 
 /// Screen depth of the section plane `n·p = d` as `z = a·x + b·y + k` in canvas pixels (a plane
@@ -368,12 +413,18 @@ mod tests {
     /// Lines are cut by the section in 3D: the kept piece ends on the plane.
     #[test]
     fn section_clips_lines_at_the_plane() {
-        let clip = Some((Vec3::X, 2.0));
-        let (p, q) = clip_segment(Vec3::ZERO, Vec3::new(10.0, 4.0, 0.0), clip).unwrap();
+        let clip = [(Vec3::X, 2.0)];
+        let [Some((p, q)), None] = clip_segment(Vec3::ZERO, Vec3::new(10.0, 4.0, 0.0), &clip) else { panic!("one piece") };
         assert_eq!(p, Vec3::ZERO);
         assert!((q.x - 2.0).abs() < 1e-5 && (q.y - 0.8).abs() < 1e-5, "{q:?}");
-        assert!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), clip).is_none());
-        assert!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), None).is_some());
+        assert_eq!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), &clip), [None, None]);
+        assert!(clip_segment(Vec3::new(3.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), &[])[0].is_some());
+        // Two planes hide only what both hide (2 < x < 6): the segment keeps both ends.
+        let both = [(Vec3::X, 2.0), (-Vec3::X, -6.0)];
+        let [Some((a, b)), Some((c, d))] = clip_segment(Vec3::ZERO, Vec3::new(10.0, 4.0, 0.0), &both) else { panic!("two pieces") };
+        assert!(a == Vec3::ZERO && (b.x - 2.0).abs() < 1e-5 && (c.x - 6.0).abs() < 1e-5 && d == Vec3::new(10.0, 4.0, 0.0), "{b:?} {c:?}");
+        // Where one of them keeps it, the other hides nothing.
+        assert_eq!(clip_segment(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), &both), [Some((Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0))), None]);
     }
 
     #[test]
@@ -395,7 +446,7 @@ mod tests {
             lines: vec![],
             background: None,
             radius: 20.0,
-            clip: None,
+            clip: Vec::new(),
             cap: None,
             ..Default::default()
         };

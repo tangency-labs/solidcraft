@@ -531,8 +531,9 @@ pub struct Session {
     /// What was copied in another design, to paste here (`component.paste_from_design`). The
     /// host puts it here; each design's own copies stay in its own clipboard.
     pub foreign_copy: Option<Arc<ForeignCopy>>,
-    /// Section Analysis: a view cut by a plane (origin, unit normal; the normal side is hidden).
-    pub section: Option<(Vec3, Vec3)>,
+    /// Section Analysis: a view cut by planes, at most [`view::MAX_SECTION_PLANES`]: what lies
+    /// on the normal side of every one is hidden (none: no section).
+    pub section: Vec<SectionPlane>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
     pub section_hatch: bool,
     /// Component identification colours are enabled when present; view state only.
@@ -616,6 +617,29 @@ pub enum SurfaceAnalysis {
     /// Green where a tool coming along `dir` reaches the face (facing it, nothing above), red
     /// elsewhere.
     Access { dir: Vec3 },
+}
+
+/// One plane of a Section Analysis: what lies on its normal's side, and on every other plane's,
+/// is hidden. View state only.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+pub struct SectionPlane {
+    /// Its number in the section, from 1 (`inspect.section`'s `remove` takes it).
+    pub id: u64,
+    pub origin: Vec3,
+    /// Unit length.
+    pub normal: Vec3,
+}
+
+impl SectionPlane {
+    /// The plane as (normal, d): what lies where normal·p > d is hidden.
+    pub fn clip(&self) -> (Vec3, f64) {
+        (self.normal, self.normal.dot(self.origin))
+    }
+
+    /// Whether the plane keeps `p` (within `eps`).
+    pub fn keeps(&self, p: Vec3, eps: f64) -> bool {
+        self.normal.dot(p - self.origin) <= eps
+    }
 }
 
 /// One seam measured by `inspect.continuity`, where the viewport shades it: the stations it was
@@ -739,7 +763,7 @@ impl Session {
             sketch_clipboard: None,
             appearance_clipboard: None,
             foreign_copy: None,
-            section: None,
+            section: Vec::new(),
             section_hatch: true,
             colored_components: None,
             analysis: None,
@@ -1737,7 +1761,7 @@ impl Session {
             sketch_clipboard: self.sketch_clipboard.clone(),
             appearance_clipboard: self.appearance_clipboard.clone(),
             foreign_copy: self.foreign_copy.clone(),
-            section: None,
+            section: Vec::new(),
             section_hatch: true,
             colored_components: None,
             analysis: None,

@@ -59,7 +59,7 @@ fn session(script: &[(&str, serde_json::Value)]) -> Session {
 }
 
 fn picture(c: &Capturer, s: &Session, cam: &Camera, w: u32, h: u32) -> Vec<u8> {
-    c.rgba(&view::scene_with_guides(s, cam, None, Guides { grid: false, axes: false }), cam, w, h).unwrap()
+    c.rgba(&view::scene_with_guides(s, cam, &[], Guides { grid: false, axes: false }), cam, w, h).unwrap()
 }
 
 fn differing(a: &[u8], b: &[u8]) -> usize {
@@ -148,7 +148,7 @@ fn sheet(tilt: f64) -> Mesh {
 /// A front view of `mesh` with `lines`, as part of a design of `radius`, 40 mm high on 200 px.
 /// `section`: with a section that cuts nothing shown, so the section's own passes draw the faces.
 fn front(mesh: Mesh, lines: Vec<SceneLine>, radius: f64, fov: f64, section: bool) -> (Scene, Camera) {
-    let clip = section.then_some((Vec3::X, 1e3));
+    let clip = section.then_some((Vec3::X, 1e3)).into_iter().collect();
     let scene = Scene { meshes: vec![SceneMesh::solid(Arc::new(mesh), Rgb(160, 165, 175))], lines, radius, clip, ..Default::default() };
     let mut cam = Camera { distance: if fov > 0.0 { 25.0 / (fov * 0.5).tan() } else { 62.5 }, fov, ..Default::default() };
     cam.set_view(StandardView::Front);

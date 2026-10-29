@@ -298,6 +298,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 flip: bool,
                 /// Hatch the cut faces.
                 hatch: bool,
+                /// Add the plane to the section on show instead of replacing it.
+                add: bool,
             },
             /// Measure one or two picked items (vertices, edges, faces): the result of the last
             /// measurement and the items it was for.
@@ -940,7 +942,7 @@ impl Dialog {
                 Dialog::new(Kind::Material { index: usize::MAX, editor: Default::default() }, vec![SelInput::new("Bodies", BODIES, true)])
             }
             "inspect.section" => Dialog::new(
-                Kind::Section { offset: length_default(s, "0"), flip: false, hatch: true },
+                Kind::Section { offset: length_default(s, "0"), flip: false, hatch: true, add: false },
                 vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
             ),
             "inspect.measure" => Dialog::new(
@@ -4114,9 +4116,10 @@ fn sels(d: &Dialog, i: usize) -> &[Sel] {
     selection::items(&d.inputs, i)
 }
 
-/// Section Analysis with a section on and no plane picked: OK turns the section off.
-fn section_turns_off(s: &Session, inputs: &[selection::SelInput]) -> bool {
-    s.section.is_some() && selection::items(inputs, 0).is_empty()
+/// Section Analysis with a section on and no plane picked: OK turns the section off (unless the
+/// plane is to be added to it).
+fn section_turns_off(s: &Session, add: bool, inputs: &[selection::SelInput]) -> bool {
+    !s.section.is_empty() && !add && selection::items(inputs, 0).is_empty()
 }
 
 /// Run the dialog's commands on the window thread, taking the Join its operation check already
@@ -4167,9 +4170,10 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
             }
         }
     }
-    if let Kind::Section { offset, flip, hatch } = &d.kind
-        && let Some(cut) = app.session.section
+    if let Kind::Section { offset, flip, hatch, add: false } = &d.kind
+        && let [cut] = app.session.section[..]
     {
+        let cut = (cut.origin, cut.normal);
         app.tree.section_dialog = if d.extra.contains_key("plane") && sels(d, 0).is_empty() {
             None // Programmatic geometry is reconstructed from the actual session, never cached.
         } else {
@@ -4180,10 +4184,15 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 }
 
 /// Edit Section Analysis: its dialog, where the dialog that made the section shown (or hidden)
-/// now left it. Programmatic cuts use their actual geometry in the same existing form.
+/// now left it. Programmatic cuts use their actual geometry in the same existing form; a section
+/// of several planes opens it afresh, as the toolbar always does (a new section, in place of the old).
 pub fn edit_section(app: &mut SolveApp) {
     app.start_section_edit();
-    let cut = app.session.section.or(app.tree.hidden_section);
+    let planes = if app.session.section.is_empty() { &app.tree.hidden_section } else { &app.session.section };
+    let cut = match planes[..] {
+        [c] => Some((c.origin, c.normal)),
+        _ => None,
+    };
     let last = app.tree.section_dialog.clone().filter(|last| cut.is_some_and(|c| same_cut(c, last.cut)));
     if app.preferences.viewport_section_status {
         if let Some((origin, normal)) = cut {
@@ -4194,7 +4203,7 @@ pub fn edit_section(app: &mut SolveApp) {
                 let offset = format!("{distance} mm");
                 let hatch = app.session.section_hatch;
                 if let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Section { .. })) {
-                    d.kind = Kind::Section { offset, flip, hatch };
+                    d.kind = Kind::Section { offset, flip, hatch, add: false };
                     if let Some(input) = d.inputs.first_mut() {
                         input.items.clear();
                     }
@@ -4207,7 +4216,7 @@ pub fn edit_section(app: &mut SolveApp) {
     }
     let Some(last) = last else { return };
     if let Some(d) = app.dialog.as_mut().filter(|d| matches!(d.kind, Kind::Section { .. })) {
-        d.kind = Kind::Section { offset: last.offset, flip: last.flip, hatch: last.hatch };
+        d.kind = Kind::Section { offset: last.offset, flip: last.flip, hatch: last.hatch, add: false };
         if let Some(plane) = d.inputs.first_mut() {
             plane.items = last.plane;
         }
@@ -4915,8 +4924,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let name = s.doc.material_names().get(*index).cloned().ok_or_else(|| crate::i18n::tr("material.selection.choose").to_string())?;
             ("material.assign", json!({"bodies": sels(d, 0).body_names(), "material": name}))
         }
-        Kind::Section { offset, flip, hatch } => {
-            if section_turns_off(s, &d.inputs) && !d.extra.contains_key("plane") {
+        Kind::Section { offset, flip, hatch, add } => {
+            if section_turns_off(s, *add || d.extra.contains_key("plane"), &d.inputs) {
                 return Ok(vec![("inspect.section".into(), json!({"clear": true}))]);
             }
             if !d.extra.contains_key("plane") {
@@ -4939,7 +4948,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 _ => return Err("pick a plane or a planar face".into()),
             };
-            ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch}))
+            let mut p = json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch});
+            if *add {
+                p["add"] = json!(true);
+            }
+            ("inspect.section", p)
         }
         Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {

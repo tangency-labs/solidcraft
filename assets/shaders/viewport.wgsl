@@ -3,7 +3,7 @@ struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
     screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
-    clip: vec4<f32>,   // section plane: normal, d (zero normal: no section)
+    clip: array<vec4<f32>, 6>, // section planes: normal, d each, the first ones (zero normal: unused)
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature), parameter
     pull: vec4<f32>,   // draft pull direction
@@ -36,8 +36,18 @@ fn near_z(c: vec4<f32>) -> f32 {
 @group(1) @binding(2) var acc_t: texture_2d<f32>;
 @group(2) @binding(0) var ao_depth: texture_2d<u32>;
 
+/// Whether the section hides `p`: it lies on the positive side of every plane.
 fn clipped(p: vec3<f32>) -> bool {
-    return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
+    if (!sectioned()) { return false; }
+    for (var k = 0u; k < 6u; k++) {
+        let c = u.clip[k];
+        if (length(c.xyz) > 0.5 && dot(c.xyz, p) <= c.w) { return false; }
+    }
+    return true;
+}
+
+fn sectioned() -> bool {
+    return length(u.clip[0].xyz) > 0.5;
 }
 @group(0) @binding(0) var<uniform> u: U;
 // The scene's colours, 2048 entries to a row: an R32Uint texture rather than a storage buffer,
@@ -282,14 +292,30 @@ fn touch_depth(wp: vec3<f32>, z: f32) -> f32 {
     return clamp(min(pulled, z) - 2.0 * slope, 0.0, 1.0);
 }
 
-/// Depth of the section plane on the view ray through `wp` (a far wall seen through the cut),
-/// never behind the wall itself (`z`).
+/// Depth of the section's cut on the view ray through `wp` (a far wall seen through the cut),
+/// never behind the wall itself (`z`): where the ray leaves the stretch the section hides, on
+/// the positive side of every plane.
 fn cap_depth(wp: vec3<f32>, z: f32) -> f32 {
     var dir = -u.back.xyz;
     if (u.eye.w > 0.5) { dir = wp - u.eye.xyz; }
-    let dn = dot(u.clip.xyz, dir);
-    if (abs(dn) < 1e-9) { return z; }
-    let p = wp + dir * ((u.clip.w - dot(u.clip.xyz, wp)) / dn);
+    // The hidden stretch `wp + dir * t`, lo < t < hi: n·p > d is t·dn > d - n·wp.
+    var lo = -1e30;
+    var hi = 1e30;
+    for (var k = 0u; k < 6u; k++) {
+        let c = u.clip[k];
+        if (length(c.xyz) < 0.5) { continue; }
+        let dn = dot(c.xyz, dir);
+        let s = c.w - dot(c.xyz, wp);
+        if (abs(dn) < 1e-9) {
+            if (s >= 0.0) { return z; }
+        } else if (dn > 0.0) {
+            lo = max(lo, s / dn);
+        } else {
+            hi = min(hi, s / dn);
+        }
+    }
+    if (hi > 1e29 || lo >= hi) { return z; }
+    let p = wp + dir * hi;
     let c = u.vp * vec4<f32>(p, 1.0);
     if (c.w <= 0.0) { return z; }
     if (reversed()) { return clamp(c.z / c.w, z, 1.0); }
@@ -303,7 +329,7 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let ndv = dot(normalize(i.n), normalize(u.back.xyz));
     let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
-    if (!front && length(u.clip.xyz) > 0.5) {
+    if (!front && sectioned()) {
         // The cut face in its body's colour ("from component" colouring), tinted toward the
         // cap colour so it reads as a cut, hatched at 45 degrees on screen; with the hatch off
         // (`u.cap.a` 0), plain in the body's own colour.
@@ -342,7 +368,7 @@ fn fs_ao_depth(i: TOut, @builtin(front_facing) front: bool) -> AoDepth {
 fn opaque_depth(i: TOut, front: bool) -> AoDepth {
     if (clipped(i.wp) || length(i.n) < 0.5) { discard; }
     var depth = i.pos.z;
-    if (!front && length(u.clip.xyz) > 0.5) { depth = cap_depth(i.wp, i.pos.z); }
+    if (!front && sectioned()) { depth = cap_depth(i.wp, i.pos.z); }
     return AoDepth(depth, bitcast<u32>(depth));
 }
 

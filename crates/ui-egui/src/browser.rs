@@ -158,9 +158,9 @@ pub struct TreeState {
     pub cloud_panel: Option<CloudPanel>,
     /// The plane a row at the top of the history lights this frame, kept the same way (#6975).
     history_plane: Option<String>,
-    /// A Section Analysis hidden with its eye in the Analysis folder: its plane (origin,
-    /// normal), so the eye can bring it back (#822).
-    pub hidden_section: Option<(solidcraft_engine::geom::Vec3, solidcraft_engine::geom::Vec3)>,
+    /// A Section Analysis hidden with its eye in the Analysis folder: its planes, so the eye can
+    /// bring it back (#822). Empty: none hidden.
+    pub hidden_section: Vec<solidcraft_engine::SectionPlane>,
     /// What the Section Analysis dialog's OK last made, for Edit to start from.
     pub section_dialog: Option<crate::dialogs::SectionDraft>,
     /// The Analysis folder hidden with its own eye, and the Section Analysis hidden with its
@@ -2005,13 +2005,13 @@ pub fn view_items(app: &SolveApp, name: &str) -> Vec<Item> {
 /// The Analysis folder: the Section Analysis, while there is one (shown or hidden), with an eye
 /// to hide and show it, a double-click to edit it and a menu to delete it (#822).
 fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    if app.session.section.is_some() {
+    if !app.session.section.is_empty() {
         // A section made (or remade) while an older one was hidden replaces it, shown.
-        app.tree.hidden_section = None;
+        app.tree.hidden_section.clear();
         app.tree.analysis_hidden = false;
         app.tree.section_hidden = false;
     }
-    if app.session.section.is_none() && app.tree.hidden_section.is_none() {
+    if app.session.section.is_empty() && app.tree.hidden_section.is_empty() {
         app.tree.analysis_hidden = false;
         app.tree.section_hidden = false;
         return;
@@ -2071,19 +2071,23 @@ fn sync_section(app: &mut SolveApp) {
     set_section_visible(app, on);
 }
 
-/// Hide the Section Analysis (keeping its plane to show it again) or show the hidden one.
+/// Hide the Section Analysis (keeping its planes to show it again) or show the hidden one.
 pub fn set_section_visible(app: &mut SolveApp, visible: bool) {
     if visible {
-        if let Some((origin, normal)) = app.tree.hidden_section {
-            let plane = json!({"origin": [origin.x, origin.y, origin.z], "normal": [normal.x, normal.y, normal.z]});
-            if app.run("inspect.section", json!({"plane": plane, "hatch": app.session.section_hatch})).is_ok() {
-                app.tree.hidden_section = None;
-            }
+        let hidden = std::mem::take(&mut app.tree.hidden_section);
+        let hatch = app.session.section_hatch;
+        let shown = hidden.iter().enumerate().all(|(i, c)| {
+            let plane = json!({"origin": [c.origin.x, c.origin.y, c.origin.z], "normal": [c.normal.x, c.normal.y, c.normal.z]});
+            app.run("inspect.section", json!({"plane": plane, "hatch": hatch, "add": i > 0})).is_ok()
+        });
+        if !shown {
+            app.tree.hidden_section = hidden;
         }
-    } else if let Some(section) = app.session.section
-        && app.run("inspect.section", json!({"clear": true})).is_ok()
-    {
-        app.tree.hidden_section = Some(section);
+    } else if !app.session.section.is_empty() {
+        let section = app.session.section.clone();
+        if app.run("inspect.section", json!({"clear": true})).is_ok() {
+            app.tree.hidden_section = section;
+        }
     }
 }
 

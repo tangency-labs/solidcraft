@@ -104,6 +104,22 @@ fn a_section_pick_lands_on_the_cap_not_the_removed_face() {
     assert_eq!(r["hits"].as_array().map(Vec::len), Some(1));
 }
 
+/// A section of two planes hides only what both hide: a pick over the cut-away quarter lands
+/// on the cap and names the plane it is the cut face of; beside it, the kept top face answers.
+#[test]
+fn a_pick_names_the_section_plane_of_the_cap() {
+    let mut h = top_view();
+    for plane in [json!({"origin": [5, 0, 0], "normal": [1, 0, 0]}), json!({"origin": [0, 0, 5], "normal": [0, 0, 1]})] {
+        h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": plane, "add": true}}));
+    }
+    let ray = |x: f64| json!({"origin": [x, 5, 100], "dir": [0, 0, -1]});
+    let r = pick(&mut h, json!({"rays": [ray(7.5), ray(2.5)]}));
+    let (cut, kept) = (&r["hits"][0], &r["hits"][1]);
+    assert_eq!((cut["section_cap"].as_bool(), cut["section_plane"].as_u64()), (Some(true), Some(2)), "{cut}");
+    assert!((cut["point"][2].as_f64().unwrap() - 5.0).abs() < 1e-9, "{cut}");
+    assert!(kept["face"].is_u64() && (kept["point"][2].as_f64().unwrap() - 10.0).abs() < 1e-9, "{kept}");
+}
+
 /// A pixel near a silhouette edge reports that edge with its distance; a pixel in the
 /// middle of the face reports none.
 #[test]

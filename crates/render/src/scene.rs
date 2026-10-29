@@ -77,9 +77,9 @@ pub struct Scene {
     pub background: Option<(Rgb, Rgb)>,
     /// Scene radius for clipping planes.
     pub radius: f64,
-    /// A section cut: (normal, d); what lies where normal·p > d is cut away, and the inside
-    /// shows as a hatched cap.
-    pub clip: Option<(Vec3, f64)>,
+    /// A section cut by up to [`MAX_SECTION_PLANES`] planes, each (normal, d): what lies where
+    /// normal·p > d for any of them is cut away, and the inside shows as a hatched cap.
+    pub clip: Vec<(Vec3, f64)>,
     /// The colour the section cap is tinted toward (default: [`SECTION_CAP`]).
     pub cap: Option<Rgb>,
     /// The section cap without its hatch: plain, in the body's own colour.
@@ -87,6 +87,9 @@ pub struct Scene {
     /// A surface analysis shading the meshes (zebra, draft, curvature map, ...).
     pub analysis: Option<SceneAnalysis>,
 }
+
+/// The most planes a section cuts with: the viewport shader's fixed array of clip planes.
+pub const MAX_SECTION_PLANES: usize = 6;
 
 /// The section cap's default tint, as in the viewport.
 pub const SECTION_CAP: Rgb = Rgb(214, 128, 72);

@@ -24,9 +24,14 @@ pub struct SectionParams {
     pub flip: Option<bool>,
     pub hatch: Option<bool>,
     pub clear: Option<bool>,
+    /// Add the plane to the section instead of replacing it (at most 6 planes).
+    pub add: Option<bool>,
+    /// Take this plane (by id) out of the section.
+    pub remove: Option<u64>,
 }
 #[derive(Serialize, JsonSchema)]
 pub struct Section {
+    pub id: u64,
     pub origin: [f64; 3],
     pub normal: [f64; 3],
     pub hatch: bool,
@@ -38,6 +43,14 @@ pub struct Section {
 #[derive(Serialize, JsonSchema)]
 pub struct SectionResult {
     pub section: Option<Section>,
+    /// Every plane of the section, by id.
+    pub planes: Vec<SectionPlaneState>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+#[derive(Serialize, JsonSchema)]
+pub struct SectionPlaneState {
+    pub id: u64,
+    pub origin: [f64; 3],
+    pub normal: [f64; 3],
 }

@@ -344,11 +344,11 @@ mod tests {
                     distance,
                     ..Default::default()
                 };
-                for section in [None, Some((cam.target, Vec3::X))] {
+                for section in [Vec::new(), vec![crate::SectionPlane { id: 1, origin: cam.target, normal: Vec3::X }]] {
                     let mut scene = crate::view::scene_with_thread_markings(
                         &s,
                         &cam,
-                        section,
+                        &section,
                         crate::view::world_curve_parts,
                         &crate::view::Palette::DEFAULT,
                         Default::default(),

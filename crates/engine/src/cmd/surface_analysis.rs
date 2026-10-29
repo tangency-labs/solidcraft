@@ -543,7 +543,7 @@ mod tests {
             s.execute("inspect.continuity", &json!({"edges": [[5, 0, 0]]})).unwrap();
             s.execute("inspect.continuity", &json!({"clear": true})).unwrap();
             assert!(s.analysis.is_some());
-            assert!(s.section.is_some());
+            assert!(!s.section.is_empty());
             assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
             assert!(!s.is_dirty());
             assert_eq!(s.undo.len(), undo);
@@ -696,7 +696,7 @@ mod tests {
         assert_eq!(status(&mut s)[0].setting, StatusSetting::Continuity { edge_count: 2 });
         let before = status(&mut s);
         let order = s.status_order.clone();
-        let effects = (s.analysis, s.continuity.clone(), s.section, s.section_hatch, s.revision);
+        let effects = (s.analysis, s.continuity.clone(), s.section.clone(), s.section_hatch, s.revision);
         for (command, params) in [
             ("inspect.continuity", json!({"body": "missing"})),
             ("inspect.continuity", json!({"samples": 2})),
@@ -707,7 +707,7 @@ mod tests {
             assert!(s.execute(command, &params).is_err());
             assert_eq!(status(&mut s), before);
             assert_eq!(s.status_order, order);
-            assert_eq!((s.analysis, s.continuity.clone(), s.section, s.section_hatch, s.revision), effects);
+            assert_eq!((s.analysis, s.continuity.clone(), s.section.clone(), s.section_hatch, s.revision), effects);
         }
         s.execute("inspect.draft", &json!({})).unwrap();
         assert!(s.continuity.is_empty());

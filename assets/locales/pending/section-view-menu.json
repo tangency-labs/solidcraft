@@ -1,0 +1,26 @@
+{
+  "en": {
+    "section.add_hint": "The plane joins the section: what lies beyond all of its planes is hidden."
+  },
+  "ar": {
+    "section.add_hint": "يُضاف المستوى إلى المقطع: يُخفى ما يقع خلف جميع مستوياته."
+  },
+  "de": {
+    "section.add_hint": "Die Ebene kommt zum Schnitt hinzu: Was jenseits all seiner Ebenen liegt, wird ausgeblendet."
+  },
+  "he": {
+    "section.add_hint": "המישור מצטרף לחתך: מה שנמצא מעבר לכל המישורים שלו מוסתר."
+  },
+  "ja": {
+    "section.add_hint": "平面をセクションに追加します。すべての平面の外側にある部分が非表示になります。"
+  },
+  "ko": {
+    "section.add_hint": "평면이 단면에 추가됩니다. 모든 평면 너머에 있는 부분이 숨겨집니다."
+  },
+  "vi": {
+    "section.add_hint": "Mặt phẳng được thêm vào mặt cắt: phần nằm ngoài tất cả các mặt phẳng của nó sẽ bị ẩn."
+  },
+  "zh": {
+    "section.add_hint": "该平面将加入剖面：位于其所有平面外侧的部分将被隐藏。"
+  }
+}

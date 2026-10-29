@@ -5692,7 +5692,7 @@ mod persistent_ribbon_tests {
     fn persistent_grid_tracks_all_six_analysis_replacements_queries_and_failed_activation() {
         let mut h = harness();
         h.app.session.execute("inspect.section", &json!({"plane":"YZ","at":3})).unwrap();
-        let cut = h.app.session.section;
+        let cut = h.app.session.section.clone();
         for id in PERSISTENT_COMMANDS.iter().copied().filter(|id| *id != "inspect.section") {
             h.app.session.execute(id, &json!({})).unwrap();
             let before = h.app.session.status_items();
@@ -5728,7 +5728,7 @@ mod persistent_ribbon_tests {
             drawn.iter().any(|shape| matches!(shape, egui::Shape::Text(text) if text.galley.text() == hint)),
             "the actual grid uses the same native turn-off tooltip"
         );
-        assert!(h.app.session.section.is_some());
+        assert!(!h.app.session.section.is_empty());
     }
 
     #[test]
@@ -5776,7 +5776,7 @@ mod persistent_ribbon_tests {
                 .map(|(_, node)| node)
                 .expect("the actual cleared grid button, distinguished from its pinned ribbon button by bounds");
             assert_eq!(node.toggled(), Some(egui::accesskit::Toggled::False), "{id} grid accessibility is off on the release frame");
-            assert_eq!(h.app.session.section.is_some(), id != "inspect.section");
+            assert_eq!(!h.app.session.section.is_empty(), id != "inspect.section");
             assert_eq!(h.app.session.analysis.is_some(), id != "inspect.zebra");
         }
     }
@@ -5796,7 +5796,7 @@ mod persistent_ribbon_tests {
         h.frame();
         assert_paint(&h, "inspect.section", false);
         assert!(persistent_hint(&h.app, solidcraft_engine::find_command("inspect.section").unwrap(), true).is_none());
-        assert!(h.app.session.section.is_some());
+        assert!(!h.app.session.section.is_empty());
         h.app.preferences.viewport_section_status = true;
         h.app.preferences.persistent_ribbon_pressed = false;
         h.frame();
@@ -5804,7 +5804,7 @@ mod persistent_ribbon_tests {
         h.app.preferences.persistent_ribbon_pressed = true;
         h.frames(2);
         tap(&mut h, "inspect.section");
-        assert!(h.app.session.section.is_none() && h.app.session.analysis.is_some());
+        assert!(h.app.session.section.is_empty() && h.app.session.analysis.is_some());
         assert_paint(&h, "inspect.section", false);
         assert_paint(&h, "inspect.zebra", true);
     }
