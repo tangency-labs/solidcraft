@@ -311,6 +311,19 @@ The first instance is the original.
 - **Elsewhere:** instance, element, occurrence.
 - **For translators:** not an occurrence of a component.
 
+### print face
+
+The flat face of a body that lies on the print bed when the body is sent to a slicer.
+
+A body has one print face at most. The export turns a copy of the body so this face points down
+at Z = 0, with the centre of mass over the origin; the design itself does not move.
+
+- **In SolidCraft:** `body.print_face`; the `print_faces` of a design; the `print_faces` and
+  `warnings` of a `file.send_to_slicer` reply.
+- **Don't use:** bottom face, base face (both say where a face is now, not where it is printed).
+- **Elsewhere:** place on face, lay flat, bed face.
+- **For translators:** the face the part stands on while it prints, not the printer's bed.
+
 ### reference edge
 
 A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a

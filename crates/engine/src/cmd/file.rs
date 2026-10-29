@@ -18,6 +18,7 @@ use solidcraft_doc::Document;
 use solidcraft_io::Format;
 
 use super::CommandSpec;
+use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
 use crate::{EngineError, Result, Session};
 
@@ -684,6 +685,26 @@ fn export_to(
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
+}
+
+/// [`export_to`] for a mesh file a slicer is sent (STL or 3MF): each body laid on its print face.
+#[cfg(not(target_arch = "wasm32"))]
+fn export_laid_to(
+    s: &Session,
+    path: &str,
+    format: Format,
+    bodies: &[String],
+    parts: &[(String, Vec<String>)],
+    quality: solidcraft_io::MeshQuality,
+) -> Result<Value> {
+    let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
+    let mut state = s.doc.painted(&s.world_state());
+    let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
+    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality)?;
+    solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let mut out = json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")});
+    laid.report(&mut out);
+    Ok(out)
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {

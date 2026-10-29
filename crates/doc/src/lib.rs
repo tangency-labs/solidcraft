@@ -61,6 +61,8 @@ pub use thread_catalog::{TappedThread, TappedThreadFamily, parse_tapped_thread, 
 mod walk;
 pub use profile_refs::{capture_profile_selection, profile_fallback_notes, profile_selection_indices, profile_selection_indices_lenient};
 pub mod plastic;
+mod print_face;
+pub use print_face::PrintFace;
 pub mod project;
 mod project3d;
 pub mod render_aging;

@@ -1,0 +1,92 @@
+{
+  "en": {
+    "cmd.body.print_face": "Print Face"
+  },
+  "de": {
+    "cmd.body.print_face": "Auflagefläche"
+  },
+  "ja": {
+    "cmd.body.print_face": "造形面"
+  },
+  "zh": {
+    "cmd.body.print_face": "打印底面"
+  },
+  "ko": {
+    "cmd.body.print_face": "출력 바닥면"
+  },
+  "ar": {
+    "cmd.body.print_face": "وجه الطباعة"
+  },
+  "he": {
+    "cmd.body.print_face": "פאת הדפסה"
+  },
+  "vi": {
+    "cmd.body.print_face": "Mặt in"
+  },
+  "bs": {
+    "cmd.body.print_face": "Površina za štampu"
+  },
+  "cs": {
+    "cmd.body.print_face": "Tisková plocha"
+  },
+  "da": {
+    "cmd.body.print_face": "Printflade"
+  },
+  "es": {
+    "cmd.body.print_face": "Cara de impresión"
+  },
+  "fr": {
+    "cmd.body.print_face": "Face d’impression"
+  },
+  "gl": {
+    "cmd.body.print_face": "Cara de impresión"
+  },
+  "hr": {
+    "cmd.body.print_face": "Ploha ispisa"
+  },
+  "hu": {
+    "cmd.body.print_face": "Nyomtatási lap"
+  },
+  "id": {
+    "cmd.body.print_face": "Permukaan cetak"
+  },
+  "it": {
+    "cmd.body.print_face": "Faccia di stampa"
+  },
+  "ms": {
+    "cmd.body.print_face": "Muka cetakan"
+  },
+  "nb": {
+    "cmd.body.print_face": "Utskriftsflate"
+  },
+  "nl": {
+    "cmd.body.print_face": "Printvlak"
+  },
+  "pl": {
+    "cmd.body.print_face": "Powierzchnia druku"
+  },
+  "pt-BR": {
+    "cmd.body.print_face": "Face de impressão"
+  },
+  "ro": {
+    "cmd.body.print_face": "Față de imprimare"
+  },
+  "ru": {
+    "cmd.body.print_face": "Грань печати"
+  },
+  "sr": {
+    "cmd.body.print_face": "Површина за штампу"
+  },
+  "sv": {
+    "cmd.body.print_face": "Utskriftsyta"
+  },
+  "tr": {
+    "cmd.body.print_face": "Baskı yüzeyi"
+  },
+  "uk": {
+    "cmd.body.print_face": "Грань друку"
+  },
+  "zh-TW": {
+    "cmd.body.print_face": "列印底面"
+  }
+}
