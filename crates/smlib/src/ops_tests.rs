@@ -206,11 +206,15 @@ fn hostile_inputs_are_errors() {
     for t in [0.0, f64::NAN, -1e7] {
         assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, t).unwrap_err(), Error::Argument, "thickness {t}");
     }
-    // Sizes SMLib cannot build fail as errors, whatever SMLib says.
-    match c.fillet(&mid, 0.1, 50.0) {
-        Ok(b) => panic!("radius larger than the cube: SMLib built a body of volume {:?}, counts {:?}", b.volume(ACC), b.counts()),
-        Err(e) => eprintln!("radius larger than the cube: {e:?}"),
-    }
+    // A round larger than the cube overflows its faces' far edges, convex, so it is cut as if the
+    // faces went on: the r50 cylinder about y = z = -30 uses up both faces of the edge and leaves
+    // the part of the cube's 20 x 20 section inside it, from (0, 10) to (10, 0), along x: 20 x
+    // that area, 20 (F(40) - F(30) - 300) with F(u) = (u sqrt(2500 - u^2) + 2500 asin(u / 50)) / 2.
+    let over = c.fillet(&mid, 0.1, 50.0).unwrap();
+    let f = |u: f64| 0.5 * (u * (2500.0 - u * u).sqrt() + 2500.0 * (u / 50.0).asin());
+    let want = 20.0 * (f(40.0) - f(30.0) - 300.0);
+    assert!((volume(&over) - want).abs() < 1e-6 * want, "radius larger than the cube: {} vs {want}", volume(&over));
+    assert_eq!(over.counts().unwrap(), [5, 9, 6], "the two ends, the two far faces and the round");
     // A chamfer past the faces runs over their far edges, cliffs: it is cut as if the faces went
     // on (the plane y + z = 10 through the setbacks 30 back from the edge y = z = 20), leaving the
     // triangle y + z <= 10 of the cube's section along x: 50 x 20.

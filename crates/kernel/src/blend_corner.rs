@@ -177,13 +177,15 @@ mod tests {
         // using the reported picks, with and without the open cavity visible in the screenshot.
         let picks = [Vec3::new(-5.0, 87.2, 12.5), Vec3::new(-4.283446394180081, 86.48344639418008, -1.5001085324947512)];
         for base in [b.clone(), crate::shell(&b, &[Vec3::new(15.0, 47.2, 25.0)], 1.0).unwrap()] {
+            // Each fillet with its tangent chain, as the Fillet feature asks for it by default
+            // (tangent propagation).
             let mut rounded = base;
             for edge in bottom {
-                rounded = fillet(&rounded, &[edge], 2.0).unwrap();
+                rounded = fillet(&rounded, &crate::tangent_chain(&rounded, &[edge]).unwrap(), 2.0).unwrap();
             }
-            let reference = fillet(&rounded, &picks[..1], 2.0).unwrap();
+            let reference = fillet(&rounded, &crate::tangent_chain(&rounded, &picks[..1]).unwrap(), 2.0).unwrap();
             for selection in [picks, [picks[1], picks[0]]] {
-                let result = fillet(&rounded, &selection, 2.0).unwrap();
+                let result = fillet(&rounded, &crate::tangent_chain(&rounded, &selection).unwrap(), 2.0).unwrap();
                 assert_eq!(result.face_count(), reference.face_count());
                 assert_eq!(result.unmeshed_faces(), 0);
                 assert!(result.validity().is_empty(), "{:?}", result.validity());
