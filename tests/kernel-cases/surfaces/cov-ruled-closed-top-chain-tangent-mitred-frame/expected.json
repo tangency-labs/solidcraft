@@ -1,0 +1,29 @@
+{
+ "sources": [],
+ "what": "ruled strips 5 wide off all four top edges of a box, continuing the top: mitred at the corners into a flat frame",
+ "source": "analytic",
+ "method": "each strip continues the top (z = 10) outward 5; mitred corners close the frame 30 x 20 round the 20 x 10 top: area 600 - 200 = 400, all in z = 10; 4 strips (coplanar, counted [1, 4]), 8 free edges (4 inner, 4 outer)",
+ "valid": false,
+ "body_count": 1,
+ "faces": [
+  1,
+  4
+ ],
+ "boundary_edges": 8,
+ "area_mm2": 400.0,
+ "surface_types": [
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   -5,
+   -5,
+   10
+  ],
+  "max": [
+   25,
+   15,
+   10
+  ]
+ }
+}

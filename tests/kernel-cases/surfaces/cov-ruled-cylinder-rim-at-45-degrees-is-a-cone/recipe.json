@@ -1,0 +1,42 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 10,
+    "body_name": "Post"
+   }
+  },
+  {
+   "command": "surface.ruled",
+   "params": {
+    "body": "Post",
+    "edges": [
+     [
+      10,
+      0,
+      10
+     ]
+    ],
+    "face": [
+     0,
+     0,
+     10
+    ],
+    "mode": "angle",
+    "angle": "45 deg",
+    "distance": 5,
+    "body_name": "Flare"
+   }
+  },
+  {
+   "command": "solid.remove",
+   "params": {
+    "bodies": [
+     "Post"
+    ]
+   }
+  }
+ ]
+}

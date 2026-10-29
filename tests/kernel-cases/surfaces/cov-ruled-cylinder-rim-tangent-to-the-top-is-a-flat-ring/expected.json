@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a ruled strip off a cylinder's top rim continuing the top face: the flat ring r 10..15",
+ "source": "analytic",
+ "method": "tangent rulings continue the top (z = 10) square to the rim, outward: the plane annulus r 10..15, area pi (225 - 100) = 392.70; one plane face, two free circles",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 2,
+ "area_mm2": 392.6990816987241,
+ "surface_types": [
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   -15,
+   -15,
+   10
+  ],
+  "max": [
+   15,
+   15,
+   10
+  ]
+ }
+}
