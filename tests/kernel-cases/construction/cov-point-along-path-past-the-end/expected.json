@@ -1,0 +1,15 @@
+{
+ "sources": [],
+ "what": "a point at t 1.5, past the end of a sketch line",
+ "source": "analytic",
+ "method": "t runs 0..1 along the path; a point along it can go no further than its end: (40,0,0)",
+ "construction": {
+  "P": {
+   "point": [
+    40,
+    0,
+    0
+   ]
+  }
+ }
+}

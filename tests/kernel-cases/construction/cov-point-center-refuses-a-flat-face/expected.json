@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "the centre of a flat face",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the top is a plane, not a sphere or torus: refused",
+ "outcome": "refused",
+ "refusal": "the face is not a sphere or torus"
+}

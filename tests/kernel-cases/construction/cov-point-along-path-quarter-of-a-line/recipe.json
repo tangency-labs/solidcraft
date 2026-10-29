@@ -1,0 +1,41 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Path"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      40,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "construct.point.along_path",
+   "params": {
+    "path": {
+     "sketch": "Path",
+     "curve": "l1"
+    },
+    "t": 0.25,
+    "name": "P"
+   }
+  }
+ ]
+}

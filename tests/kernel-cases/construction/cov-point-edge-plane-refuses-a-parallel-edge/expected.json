@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a box edge parallel to the plane",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the edge y 0, z 0 along X never crosses y = 10: refused",
+ "outcome": "refused",
+ "refusal": "the edge is parallel to the plane"
+}
