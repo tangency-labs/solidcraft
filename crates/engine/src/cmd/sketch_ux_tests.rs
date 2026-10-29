@@ -1650,13 +1650,31 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
     let (r, end) = placed("major", json!({}));
     assert_eq!((r["axis"].clone(), r["type"].clone()), (json!("minor"), json!("LinearDimension")), "{r}");
     assert!(end.is_some_and(|q| (q.len() - 8.0).abs() < 1e-6), "{r}");
-    // Without its axes (an older design), the ellipse keeps today's minor radius.
+    // Without its axes (an older design, or both deleted) the half-axis is still chosen by
+    // where the text is: the major one to the ellipse's own major end, the minor one as its
+    // minor radius; with no text, the minor radius as before.
+    for ((x, y), expected, want) in [((3.0, 16.0), "major", 20.0), ((-4.0, -14.0), "major", 20.0), ((30.0, 3.0), "minor", 8.0)] {
+        let mut s = new_sketch();
+        let (e, major, minor) = ellipse_with_axes(&mut s, false);
+        run(&mut s, "sketch.delete", json!({"entities": [major, minor]}));
+        let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": [x, y]}));
+        assert_eq!(r["axis"], json!(expected), "text at ({x}, {y}): {r}");
+        assert!(r["measured"].as_f64().is_some_and(|v| (v - want).abs() < 1e-6), "text at ({x}, {y}): {r}");
+    }
     let mut s = new_sketch();
     let (e, major, minor) = ellipse_with_axes(&mut s, false);
     run(&mut s, "sketch.delete", json!({"entities": [major, minor]}));
-    let r = run(&mut s, "sketch.dimension", json!({"entities": [e], "text_at": [3, 16]}));
-    assert!(r.get("axis").is_none(), "{r}");
-    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Radius { .. })), "{r}");
+    run(&mut s, "sketch.dimension", json!({"entities": [e]}));
+    assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Radius { .. })));
+    // The mirror of an ellipse has no axes (Mirror copies no midpoints): D on it reaches the
+    // major half-axis as well.
+    let mut s = new_sketch();
+    let (e, major, minor) = ellipse_with_axes(&mut s, false);
+    run(&mut s, "sketch.delete", json!({"entities": [minor]}));
+    let line = run(&mut s, "sketch.line", json!({"points": [[40, -30], [40, 30]], "connect": false}))["curves"][0].as_str().unwrap().to_string();
+    let copy = run(&mut s, "sketch.mirror", json!({"entities": [e, major], "line": line}))["curves"][0].as_str().unwrap().to_string();
+    let r = run(&mut s, "sketch.dimension", json!({"entities": [copy], "text_at": [77, 16]}));
+    assert_eq!((r["axis"].clone(), r["measured"].clone()), (json!("major"), json!(20.0)), "{r}");
 }
 
 /// A half-axis and its whole axis are one dimension: whichever comes second is determined by
