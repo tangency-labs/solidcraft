@@ -497,6 +497,48 @@ fn surface_normal(s: FaceSurface, p: Vec3) -> Option<(Vec3, Vec3)> {
     }
 }
 
+/// A point over `s` where the face turns towards `towards` (a reference plane's normal): around
+/// the axis of a cylinder, cone or torus, turned `angle` about it; straight at it on a sphere. Of
+/// the two sides, the one `at` is on (#8822).
+fn facing(s: FaceSurface, at: Vec3, towards: Vec3, angle: f64) -> Result<Vec3> {
+    let side = |d: Vec3, w: Vec3| if d.dot(w) < 0.0 { d * -1.0 } else { d };
+    let around = |axis: Vec3, w: Vec3| -> Result<(Vec3, f64)> {
+        let d = (towards - axis * towards.dot(axis))
+            .normalized()
+            .ok_or_else(|| bad("the reference is square to the face's axis: every plane tangent to the face meets it at a right angle"))?;
+        let d = d * angle.cos() + axis.cross(d) * angle.sin();
+        let r = w - axis * w.dot(axis);
+        Ok((side(d, r), r.len()))
+    };
+    if !angle.is_finite() {
+        return Err(bad("the angle is not a number"));
+    }
+    Ok(match s {
+        FaceSurface::Plane { .. } => at,
+        FaceSurface::Cylinder { origin, axis, radius } => {
+            let w = at - origin;
+            let (d, _) = around(axis.into(), w)?;
+            origin + axis * w.dot(axis) + d * radius
+        }
+        FaceSurface::Cone { apex, axis, .. } => {
+            let w = at - apex;
+            let (d, r) = around(axis.into(), w)?;
+            apex + axis * w.dot(axis) + d * r.max(1e-6)
+        }
+        // On the outer equator, where the tube faces away from the axis.
+        FaceSurface::Torus { center, axis, major, minor } => {
+            let (d, _) = around(axis.into(), at - center)?;
+            center + d * (major + minor)
+        }
+        FaceSurface::Sphere { center, radius } => {
+            if angle.abs() > 1e-12 {
+                return Err(bad("a sphere has no axis to turn the plane about: leave the angle out"));
+            }
+            center + side(towards, at - center) * radius
+        }
+    })
+}
+
 fn face_surface_at(ctx: &Ctx, g: &GeoRef) -> Result<(FaceSurface, Vec3)> {
     match g {
         GeoRef::Face { at, name } => {
@@ -637,9 +679,17 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             }
             Plane::new(pa, pb - pa, pc - pa).ok_or_else(degenerate)
         }
-        PlaneRef::Tangent { face, at } => {
+        PlaneRef::Tangent { face, at, reference, angle } => {
             let (s, _) = face_surface_at(ctx, face)?;
-            let (on, n) = surface_normal(s, *at).ok_or_else(|| bad("the point is on the face's axis"))?;
+            let at = match reference {
+                Some(r) => {
+                    let towards = plane(ctx, r)?.normal().normalized().ok_or_else(degenerate)?;
+                    let angle = angle.as_ref().map(|a| Document::eval_in(ctx.vals, a, Kind::Angle)).transpose()?.unwrap_or(0.0);
+                    facing(s, *at, towards, angle)?
+                }
+                None => *at,
+            };
+            let (on, n) = surface_normal(s, at).ok_or_else(|| bad("the point is on the face's axis"))?;
             Plane::from_normal(on, n).ok_or_else(degenerate)
         }
         PlaneRef::Perpendicular { plane: base, line: l } => {
@@ -781,7 +831,11 @@ impl PlaneRef {
             PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
-            PlaneRef::Tangent { face, .. } => vec![face.as_mut()],
+            PlaneRef::Tangent { face, reference, .. } => {
+                let mut v = vec![face.as_mut()];
+                v.extend(reference.as_deref_mut());
+                v
+            }
             PlaneRef::AlongPath { path, .. } => vec![path.as_mut()],
             PlaneRef::ThroughPoint { base, point } => {
                 let mut refs = base.refs_mut();

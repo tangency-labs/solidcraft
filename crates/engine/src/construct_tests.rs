@@ -343,6 +343,57 @@ fn plane_tangent_to_a_cylinder() {
     assert!(parallel(u.normal(), Vec3::Z) && on_plane(&u, Vec3::new(3.0, 3.0, 65.0)), "{u:?}");
 }
 
+/// #8822: with a reference plane or planar face, the plane touches where the face turns towards
+/// the reference (parallel to it, on the side of the pick), turned by an angle about the axis,
+/// and follows the reference when it moves.
+#[test]
+fn plane_tangent_lined_up_with_a_reference() {
+    let mut s = part();
+    // Picked 60° round the cylinder (axis Z through (60, 0)); the XZ plane faces ±Y.
+    let pick = json!([62.5, 4.330127, 5]);
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"plane": "XZ"}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(parallel(t.normal(), Vec3::Y) && on_plane(&t, Vec3::new(60.0, 5.0, 9.0)), "{t:?}");
+    // Turned 30° about the axis: still on the pick's side.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"plane": "XZ"}, "angle": "30 deg", "name": "A"}));
+    let a = plane(&s, "A");
+    let d = Vec3::new(-0.5, 3f64.sqrt() / 2.0, 0.0);
+    assert!(parallel(a.normal(), d) && on_plane(&a, Vec3::new(60.0, 0.0, 2.0) + d * 5.0), "{a:?}");
+    // A planar face of the box (x = 40, facing X) as the reference.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"face": [40, 15, 10]}, "name": "F"}));
+    let f = plane(&s, "F");
+    assert!(parallel(f.normal(), Vec3::X) && on_plane(&f, Vec3::new(65.0, 1.0, 1.0)), "{f:?}");
+    // The torus (axis Z through (0, 60)): on its outer equator.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [0, 72, 0]}, "reference": {"plane": "XZ"}, "name": "R"}));
+    let r = plane(&s, "R");
+    assert!(parallel(r.normal(), Vec3::Y) && on_plane(&r, Vec3::new(3.0, 72.0, 1.0)), "{r:?}");
+    // The sphere (centre (0, 0, 60)), picked below its middle: under it, parallel to XY.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [3, 0, 56]}, "reference": {"plane": "XY"}, "name": "U"}));
+    let u = plane(&s, "U");
+    assert!(parallel(u.normal(), Vec3::Z) && on_plane(&u, Vec3::new(1.0, 1.0, 55.0)), "{u:?}");
+
+    // A reference built on a parameter: the tangent plane follows it.
+    run(&mut s, "parameters.add", json!({"name": "turn", "expression": "0 deg"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XZ", "axis": "Z", "angle": "turn", "name": "Ref"}));
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"plane": "Ref"}, "name": "M"}));
+    assert!(on_plane(&plane(&s, "M"), Vec3::new(60.0, 5.0, 1.0)));
+    run(&mut s, "parameters.change", json!({"name": "turn", "expression": "-90 deg"}));
+    let m = plane(&s, "M");
+    assert!(parallel(m.normal(), Vec3::X) && on_plane(&m, Vec3::new(65.0, 2.0, 1.0)), "{m:?}");
+
+    // What has no answer is refused and adds nothing.
+    let count = construction_planes(&s).len();
+    for (p, why) in [
+        (json!({"face": {"face": pick}, "reference": {"plane": "XY"}}), "a reference square to the axis"),
+        (json!({"face": {"face": [3, 0, 56]}, "reference": {"plane": "XY"}, "angle": "10 deg"}), "an angle on a sphere"),
+        (json!({"face": {"face": pick}, "angle": "10 deg"}), "an angle without a reference"),
+        (json!({"face": {"face": pick}, "reference": {"plane": "XZ"}, "angle": "2 mm"}), "a length for the angle"),
+    ] {
+        assert!(s.execute("construct.plane.tangent", &p).is_err(), "{why}");
+    }
+    assert_eq!(construction_planes(&s).len(), count);
+}
+
 #[test]
 fn plane_along_a_path() {
     let mut s = part();
