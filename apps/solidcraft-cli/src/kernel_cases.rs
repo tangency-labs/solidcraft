@@ -262,13 +262,13 @@ fn continuity_order(
 /// matching, an array element by element and as long, a whole number exactly, any other number
 /// within `rel` of it (relative, at least 1 absolute), anything else equal. `None` where it
 /// matches; else the path to the first difference with both values.
-fn json_mismatch(got: &Value, want: &Value, rel: f64, path: &str) -> Option<String> {
+fn json_mismatch(got: &Value, want: &Value, rel: f64, abs: f64, path: &str) -> Option<String> {
     let differ = || Some(format!("{path}: got {got}, want {want}"));
     match (got, want) {
         (_, Value::Object(w)) => {
             let Value::Object(g) = got else { return differ() };
             w.iter().find_map(|(k, wv)| match g.get(k) {
-                Some(gv) => json_mismatch(gv, wv, rel, &format!("{path}.{k}")),
+                Some(gv) => json_mismatch(gv, wv, rel, abs, &format!("{path}.{k}")),
                 None => Some(format!("{path}.{k}: missing, want {wv}")),
             })
         }
@@ -277,12 +277,12 @@ fn json_mismatch(got: &Value, want: &Value, rel: f64, path: &str) -> Option<Stri
             if g.len() != w.len() {
                 return Some(format!("{path}: {} items, want {}", g.len(), w.len()));
             }
-            g.iter().zip(w).enumerate().find_map(|(i, (gv, wv))| json_mismatch(gv, wv, rel, &format!("{path}[{i}]")))
+            g.iter().zip(w).enumerate().find_map(|(i, (gv, wv))| json_mismatch(gv, wv, rel, abs, &format!("{path}[{i}]")))
         }
         (_, Value::Number(w)) if w.is_i64() || w.is_u64() => (got.as_f64() != w.as_f64()).then(differ).flatten(),
         (_, Value::Number(w)) => {
             let (g, w) = (got.as_f64(), w.as_f64().unwrap_or(f64::NAN));
-            (!g.is_some_and(|g| g.is_finite() && (g - w).abs() <= rel * w.abs().max(1.0))).then(differ).flatten()
+            (!g.is_some_and(|g| g.is_finite() && (g - w).abs() <= (rel * w.abs().max(1.0)).max(abs))).then(differ).flatten()
         }
         _ => (got != want).then(differ).flatten(),
     }
@@ -387,7 +387,9 @@ fn dxf_layers(text: &str) -> Value {
 /// read and matched as [`json_mismatch`] does: `json` against the file's JSON, `csv` against its
 /// rows ([`csv_rows`]), `dxf` against its layers ([`dxf_layers`]), a count there exact or an
 /// inclusive range `[min, max]`. And the `results` check of the commands' own answers: each
-/// `{step, json}`, the answer of the `step`th command (from 1) matched against `json`.
+/// `{step, pointer?, json, rel?, abs_mm?}`, the answer of the `step`th command (from 1, base
+/// commands included), or its part at the JSON `pointer` (RFC 6901), matched against `json`,
+/// a number within the entry's `rel` (or the case's) or its `abs_mm`.
 fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel: f64) {
     for f in want["files"].as_array().into_iter().flatten() {
         let path = f["path"].as_str().unwrap_or_default();
@@ -435,15 +437,18 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
             c.push(&what, json!(f), json!("json, csv or dxf"), false);
             continue;
         };
-        let miss = json_mismatch(&got, &wanted, rel, "");
+        let miss = json_mismatch(&got, &wanted, rel, 0.0, "");
         c.push(&what, json!(miss.clone().unwrap_or_else(|| "matches".into())), wanted, miss.is_none());
     }
     for r in want["results"].as_array().into_iter().flatten() {
         let step = r["step"].as_u64().unwrap_or(0);
-        let what = format!("result of step {step}");
+        let pointer = r["pointer"].as_str().unwrap_or("");
+        let what = format!("result of step {step}{pointer}");
+        let (rel, abs) = (r["rel"].as_f64().unwrap_or(rel), r["abs_mm"].as_f64().unwrap_or(0.0));
         let got = step.checked_sub(1).and_then(|i| results.get(i as usize));
-        let miss = match got {
-            Some(g) => json_mismatch(g, &r["json"], rel, ""),
+        let miss = match got.map(|g| g.pointer(pointer)) {
+            Some(Some(g)) => json_mismatch(g, &r["json"], rel, abs, ""),
+            Some(None) => Some(format!("no {pointer} in step {step}'s answer")),
             None => Some(format!("no step {step} of {}", results.len())),
         };
         c.push(&what, json!(miss.clone().unwrap_or_else(|| "matches".into())), r["json"].clone(), miss.is_none());
@@ -512,6 +517,55 @@ fn splines_match(faces: &[[[u64; 2]; 2]], want: &Value) -> Result<(Value, bool),
     }
     let got: Vec<Value> = faces.iter().map(|f| json!({"degree": [f[0][0], f[1][0]], "spans": [f[0][1], f[1][1]]})).collect();
     Ok((json!(got), ok && left.is_empty()))
+}
+
+/// Largest sine of the angle between a construction's direction (an axis's, a plane's normal)
+/// and the case's: either way along it.
+const CONSTRUCT_DIR_TOL: f64 = 1e-6;
+
+/// The `construction` check: each named construction plane, axis or point, as the timeline
+/// evaluated it, is the case's: a point within `tol` (mm); an axis whose direction is parallel to
+/// `dir` (either way) and whose line passes within `tol` of `through`; a plane whose normal is
+/// parallel to `normal` (either way) and which passes within `tol` of `through`. An axis or plane
+/// is graded as the line or plane it is, never by the origin it happens to keep.
+fn check_construction(s: &solidcraft_engine::Session, want: &Value, tol: f64, c: &mut Checks) {
+    use solidcraft_engine::geom::Vec3;
+    use solidcraft_engine::view::{construction_axes, construction_planes, construction_points};
+    let Some(named) = want.as_object() else {
+        c.push("construction", json!("`construction` must map names to {point} | {axis} | {plane}"), json!("an object"), false);
+        return;
+    };
+    let vec = |v: &Value| v3(v).map(Vec3::from);
+    let parallel = |a: Vec3, b: Vec3| a.normalized().zip(b.normalized()).is_some_and(|(a, b)| a.cross(b).len() <= CONSTRUCT_DIR_TOL);
+    for (name, w) in named {
+        let what = format!("construction {name}");
+        let (got, ok) = if let Some(p) = w.get("point").and_then(vec) {
+            match construction_points(s).into_iter().find(|x| &x.1 == name) {
+                Some((_, _, q)) => (json!({"point": q}), q.dist(p) <= tol),
+                None => (json!("no such construction point"), false),
+            }
+        } else if let Some((through, dir)) = w.get("axis").and_then(|a| vec(&a["through"]).zip(vec(&a["dir"]))) {
+            match construction_axes(s).into_iter().find(|x| &x.1 == name) {
+                Some((_, _, o, d)) => {
+                    let off = d.normalized().map(|u| (through - o) - u * (through - o).dot(u)).map_or(f64::INFINITY, Vec3::len);
+                    (json!({"axis": {"origin": o, "dir": d, "through_off_mm": off}}), parallel(d, dir) && off <= tol)
+                }
+                None => (json!("no such construction axis"), false),
+            }
+        } else if let Some((through, normal)) = w.get("plane").and_then(|p| vec(&p["through"]).zip(vec(&p["normal"]))) {
+            match construction_planes(s).into_iter().find(|x| &x.1 == name) {
+                Some((_, _, pl)) => {
+                    let n = pl.normal();
+                    let off = n.normalized().map_or(f64::INFINITY, |u| (through - pl.origin).dot(u).abs());
+                    (json!({"plane": {"origin": pl.origin, "normal": n, "through_off_mm": off}}), parallel(n, normal) && off <= tol)
+                }
+                None => (json!("no such construction plane"), false),
+            }
+        } else {
+            (json!("give {point: [x,y,z]}, {axis: {through, dir}} or {plane: {through, normal}}"), false)
+        };
+        c.push(&what, got, w.clone(), ok);
+    }
 }
 
 fn unsupported(e: &str) -> bool {
@@ -793,6 +847,11 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
             Err(e) => c.push("splines", json!(e), want["splines"].clone(), false),
         }
     }
+    // With no body and no `bbox` the diagonal is not finite: positions then take ABS_FRAC of 1 mm.
+    let pos_tol = if abs.is_finite() { abs } else { ABS_FRAC };
+    if has("construction") {
+        check_construction(&s, &want["construction"], pos_tol, &mut c);
+    }
     out["status"] = json!(if c.pass { "pass" } else { "fail" });
     out["checks"] = json!(c.list);
     out
@@ -904,11 +963,11 @@ mod tests {
     #[test]
     fn json_parts_match_within_tolerance_and_whole_numbers_exactly() {
         let got = json!({"bends": [{"angle_deg": 90.00001, "direction": "up", "count": 3}], "extra": 1});
-        assert_eq!(json_mismatch(&got, &json!({"bends": [{"angle_deg": 90.0, "direction": "up"}]}), 1e-3, ""), None);
-        assert!(json_mismatch(&got, &json!({"bends": [{"count": 4}]}), 1e-3, "").is_some_and(|m| m.contains(".bends[0].count")));
-        assert!(json_mismatch(&got, &json!({"bends": []}), 1e-3, "").is_some_and(|m| m.contains("1 items, want 0")));
-        assert!(json_mismatch(&got, &json!({"missing": 1}), 1e-3, "").is_some_and(|m| m.contains("missing")));
-        assert!(json_mismatch(&got, &json!({"bends": [{"direction": "down"}]}), 1e-3, "").is_some());
+        assert_eq!(json_mismatch(&got, &json!({"bends": [{"angle_deg": 90.0, "direction": "up"}]}), 1e-3, 0.0, ""), None);
+        assert!(json_mismatch(&got, &json!({"bends": [{"count": 4}]}), 1e-3, 0.0, "").is_some_and(|m| m.contains(".bends[0].count")));
+        assert!(json_mismatch(&got, &json!({"bends": []}), 1e-3, 0.0, "").is_some_and(|m| m.contains("1 items, want 0")));
+        assert!(json_mismatch(&got, &json!({"missing": 1}), 1e-3, 0.0, "").is_some_and(|m| m.contains("missing")));
+        assert!(json_mismatch(&got, &json!({"bends": [{"direction": "down"}]}), 1e-3, 0.0, "").is_some());
     }
 
     #[test]
@@ -983,6 +1042,64 @@ mod tests {
         assert!(run(json!({"results": [{"step": 1, "json": {"count": 3}}]})));
         assert!(!run(json!({"results": [{"step": 2, "json": {}}]})));
         let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn construction_is_graded_as_the_point_line_or_plane_it_is() {
+        let mut s = solidcraft_engine::Session::default();
+        let script = json!({"commands": [
+            {"command": "construct.point.three_planes", "params": {"a": "XY", "b": "XZ", "c": "YZ", "name": "Pin"}},
+            {"command": "construct.axis.two_planes", "params": {"a": "XZ", "b": "YZ", "name": "Spine"}},
+            {"command": "construct.plane.offset", "params": {"base": "XY", "offset": "5 mm", "name": "Shelf"}},
+        ]});
+        s.run_script(&script).unwrap();
+        let grade = |want: Value| {
+            let mut c = Checks { list: Vec::new(), pass: true };
+            check_construction(&s, &want, 1e-3, &mut c);
+            c.pass
+        };
+        // An axis is its line, either way along it, through any point of it; a plane likewise.
+        assert!(grade(json!({
+            "Pin": {"point": [0, 0, 0]},
+            "Spine": {"axis": {"through": [0, 0, 40], "dir": [0, 0, -1]}},
+            "Shelf": {"plane": {"through": [7, -3, 5], "normal": [0, 0, 2]}},
+        })));
+        assert!(!grade(json!({"Pin": {"point": [0, 0, 0.01]}})));
+        assert!(!grade(json!({"Spine": {"axis": {"through": [0.01, 0, 0], "dir": [0, 0, 1]}}})));
+        assert!(!grade(json!({"Spine": {"axis": {"through": [0, 0, 0], "dir": [0, 0.01, 1]}}})));
+        assert!(!grade(json!({"Shelf": {"plane": {"through": [0, 0, 5.01], "normal": [0, 0, 1]}}})));
+        assert!(!grade(json!({"Shelf": {"plane": {"through": [0, 0, 5], "normal": [1, 0, 0]}}})));
+        // A name the timeline has not got, or of another kind, fails.
+        assert!(!grade(json!({"Pin": {"plane": {"through": [0, 0, 0], "normal": [0, 0, 1]}}})));
+        assert!(!grade(json!({"Nothing": {"point": [0, 0, 0]}})));
+        assert!(!grade(json!({"Pin": {"centre": [0, 0, 0]}})));
+    }
+
+    #[test]
+    fn results_are_read_from_each_commands_reply() {
+        let replies = [json!({"center": [1.0, 2.0, 3.0], "volume": 24000.0}), json!({"summary": {"worst": "g1"}, "count": 1})];
+        let grade = |results: Value| {
+            let mut c = Checks { list: Vec::new(), pass: true };
+            output_checks(&mut c, &json!({ "results": results }), "", &replies, 1e-3);
+            c.pass
+        };
+        assert!(grade(json!([
+            {"step": 1, "pointer": "/center", "json": [1.0, 2.0, 3.0]},
+            {"step": 1, "pointer": "/volume", "json": 24010.0},
+            {"step": 2, "pointer": "/summary/worst", "json": "g1"},
+            {"step": 2, "json": {"count": 1}},
+        ])));
+        assert!(!grade(json!([{"step": 1, "pointer": "/volume", "json": 24100.0}])));
+        assert!(grade(json!([{"step": 1, "pointer": "/volume", "json": 24100.0, "rel": 0.01}])));
+        assert!(!grade(json!([{"step": 1, "pointer": "/center", "json": [1.0, 2.0, 3.01]}])));
+        assert!(grade(json!([{"step": 1, "pointer": "/center", "json": [1.0, 2.0, 3.01], "abs_mm": 0.02}])));
+        assert!(!grade(json!([{"step": 2, "pointer": "/summary/worst", "json": "g2"}])));
+        // A whole number is exact: a count.
+        assert!(!grade(json!([{"step": 2, "pointer": "/count", "json": 2}])));
+        // A step or a part that is not there fails, as does an entry without a step.
+        assert!(!grade(json!([{"step": 3, "pointer": "/count", "json": 1}])));
+        assert!(!grade(json!([{"step": 2, "pointer": "/missing", "json": null}])));
+        assert!(!grade(json!([{"pointer": "/count", "json": 1}])));
     }
 
     #[test]
