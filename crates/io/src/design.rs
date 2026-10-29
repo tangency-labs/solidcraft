@@ -766,7 +766,11 @@ pub fn read_design_file(path: &str, notify: Option<impl FnOnce(DesignPreview)>) 
     read_source(open_regular_file(path)?, notify, true)
 }
 
-fn read_source<R: Read + Seek>(mut source: R, notify: Option<impl FnOnce(DesignPreview)>, shared: bool) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
+fn read_source<R: Read + Seek>(
+    mut source: R,
+    notify: Option<impl FnOnce(DesignPreview)>,
+    shared: bool,
+) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     if is_container_source(&mut source)? {
         if shared {
             if let Some(inner) = share::inner(&mut source)? {
@@ -822,7 +826,7 @@ fn open_regular_file(path: &str) -> Result<FileSource> {
 }
 
 /// Whether a source starts as a container does, leaving it at its start.
-fn is_container_source(source: &mut FileSource) -> Result<bool> {
+fn is_container_source<R: Read + Seek>(source: &mut R) -> Result<bool> {
     let mut prefix = [0u8; 4];
     let size = source.seek(SeekFrom::End(0)).map_err(invalid)?;
     source.seek(SeekFrom::Start(0)).map_err(invalid)?;

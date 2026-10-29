@@ -33,5 +33,26 @@
     "issue.note_design_save_failed": "无法保存设计：{error}",
     "issue.note_design_saved": "设计已保存为 .zip。仅在可以公开时将其附加到 GitHub 草稿中。",
     "issue.save_design": "保存设计 (.zip)…"
+  },
+  "ar": {
+    "cmd.file_save_for_sharing": "حفظ التصميم للمشاركة (.zip)",
+    "issue.attach_design": "لمشاركة التصميم، أرفقه بصيغة .zip: لا يقبل GitHub ملفات .solidcraft. استخدم حفظ التصميم (.zip)، أو غيّر اسم name.solidcraft إلى name.solidcraft.zip. أرفقه فقط إذا كان يمكن مشاركة التصميم علنًا.",
+    "issue.note_design_save_failed": "تعذّر حفظ التصميم: {error}",
+    "issue.note_design_saved": "حُفظ التصميم بصيغة .zip. أرفقه بمسودة GitHub فقط إذا كان يمكن مشاركته علنًا.",
+    "issue.save_design": "حفظ التصميم (.zip)…"
+  },
+  "he": {
+    "cmd.file_save_for_sharing": "שמירת העיצוב לשיתוף (.zip)",
+    "issue.attach_design": "כדי לשתף את העיצוב, יש לצרף אותו כקובץ .zip: GitHub אינו מקבל קובצי .solidcraft. יש להשתמש בשמירת עיצוב (.zip), או לשנות את השם name.solidcraft לשם name.solidcraft.zip. יש לצרף רק עיצוב שמותר לשתף בפומבי.",
+    "issue.note_design_save_failed": "לא ניתן לשמור את העיצוב: {error}",
+    "issue.note_design_saved": "העיצוב נשמר כקובץ .zip. יש לצרף אותו לטיוטה ב־GitHub רק אם מותר לשתף אותו בפומבי.",
+    "issue.save_design": "שמירת עיצוב (.zip)…"
+  },
+  "vi": {
+    "cmd.file_save_for_sharing": "Lưu thiết kế để chia sẻ (.zip)",
+    "issue.attach_design": "Để chia sẻ thiết kế, hãy đính kèm dưới dạng .zip: GitHub không chấp nhận tệp .solidcraft. Dùng Lưu thiết kế (.zip), hoặc đổi tên name.solidcraft thành name.solidcraft.zip. Chỉ đính kèm nếu thiết kế có thể được chia sẻ công khai.",
+    "issue.note_design_save_failed": "Không thể lưu thiết kế: {error}",
+    "issue.note_design_saved": "Đã lưu thiết kế dưới dạng .zip. Chỉ đính kèm vào bản nháp GitHub nếu có thể chia sẻ công khai.",
+    "issue.save_design": "Lưu thiết kế (.zip)…"
   }
 }
