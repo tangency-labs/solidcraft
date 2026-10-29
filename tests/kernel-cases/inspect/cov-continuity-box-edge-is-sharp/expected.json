@@ -1,0 +1,34 @@
+{
+ "sources": [],
+ "what": "the order at a box's square edge",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin: the faces y = 0 and z = 0 meet at 90 deg along their edge: g0, sharp, normal angle 90",
+ "results": [
+  {
+   "command": 1,
+   "pointer": "/summary/edges",
+   "value": 1
+  },
+  {
+   "command": 1,
+   "pointer": "/bodies/0/edges/0/order",
+   "value": "g0"
+  },
+  {
+   "command": 1,
+   "pointer": "/bodies/0/edges/0/verdict",
+   "value": "sharp"
+  },
+  {
+   "command": 1,
+   "pointer": "/bodies/0/edges/0/normal_angle_deg/value",
+   "value": 90.0
+  },
+  {
+   "command": 1,
+   "pointer": "/bodies/0/edges/0/gap_mm/value",
+   "value": 0.0,
+   "rel": 1e-06
+  }
+ ]
+}
