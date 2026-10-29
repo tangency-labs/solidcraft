@@ -41,7 +41,6 @@ const READ_METHODS: &[&str] = &[
     "ui.inspect",
     "ui.selection",
     "ui.sketchToScreen",
-    "ui.triad",
     "ui.worldToScreen",
 ];
 

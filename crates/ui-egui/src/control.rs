@@ -785,14 +785,6 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "dimension_selected": crate::dim_view::selected(app),
             "dimension_editing": crate::dim_view::editing(),
         })),
-        "ui.triad" => {
-            // Screen points of the 3D move triad's handles (x, y, z arrows and the plane square).
-            let Some(rect) = app.viewport.rect else { return err("no viewport") };
-            let proj = crate::viewport::projection(app, rect);
-            ok(json!(
-                crate::sketch3d::handle_points(app, &proj).into_iter().map(|(n, p)| json!({"handle": n, "x": p.x, "y": p.y})).collect::<Vec<_>>()
-            ))
-        }
         "ui.dialogInput" => {
             // What clicking a selection input's chip does: make it the one picks go to.
             let i = p.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;

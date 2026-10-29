@@ -92,7 +92,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, z?: mm along the sketch's normal (3D sketches: the moved lines and fit-point splines become drawn 3D curves that far off the plane); rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", mirror)
         .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
@@ -2797,6 +2797,44 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
     let ang = if p.get("angle").is_some() { num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 0.0 }.to_radians();
     let copy = bool_(p, "copy").unwrap_or(false);
+    let z = match p.get("z") {
+        None => 0.0,
+        Some(v) => v.as_f64().filter(|z| z.is_finite() && z.abs() <= 1e6).ok_or_else(|| bad(cmd, "`z` must be a distance in mm"))?,
+    };
+    // Drawn 3D geometry picked too: `wire@index` (a drawn point) or a drawn curve's id. It moves
+    // in 3D (`sketch_3d::move_drawn`); the rest is plane geometry, moved as before.
+    let sketch = super::sketch::target_sketch(s, p, cmd)?;
+    let raw = s.model.state().sketch(sketch).map(|ss| ss.sketch.clone());
+    let wires: Vec<String> = raw.as_ref().map(|sk| sk.wires.iter().map(|w| w.id.clone()).collect()).unwrap_or_default();
+    let (mut drawn, mut plane_picks) = (Vec::new(), Vec::new());
+    for e in string_list(p, "entities") {
+        match e.split_once('@') {
+            Some((w, i)) if wires.iter().any(|x| x == w) => {
+                drawn.push((w.to_string(), Some(i.parse::<usize>().map_err(|_| bad(cmd, format!("`{e}`: no such drawn point")))?)))
+            }
+            None if wires.contains(&e) => drawn.push((e, None)),
+            _ => plane_picks.push(e),
+        }
+    }
+    if !drawn.is_empty() && copy {
+        return Err(bad(cmd, "not supported yet: copying drawn 3D curves or points"));
+    }
+    let mut p = p.clone();
+    if let Some(o) = p.as_object_mut() {
+        o.insert("entities".into(), json!(plane_picks));
+    }
+    let p = &p;
+    if !drawn.is_empty() {
+        let c = match (p.get("center"), &raw) {
+            (Some(_), Some(sk)) => point_or_ref(sk, p, "center", cmd)?,
+            _ => Vec2::ZERO,
+        };
+        let rot = rotate(c, ang);
+        let (moved, info) = super::sketch_3d::move_drawn(s, p, cmd, &drawn, &|q: Vec2| rot(q) + t, z)?;
+        if plane_picks.is_empty() {
+            return Ok(json!({"curves": drawn.iter().map(|(w, _)| w.clone()).collect::<Vec<_>>(), "moved_drawn": moved, "sketch": info}));
+        }
+    }
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) = entities(sk, p, cmd)?;
@@ -2817,10 +2855,15 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         for link in links {
             text_curves.extend(super::sketch_create::move_text(sk, &link, t, ang, c, copy)?);
         }
+        // The points picked on their own (not as part of a picked curve): off the plane they
+        // move too, each by itself.
+        let own: Vec<usize> = ps.iter().copied().filter(|q| !cs.iter().any(|c| sk.curves.get(*c).is_some_and(|c| c.kind.uses(*q)))).collect();
+        let point_ids = |sk: &Sketch, qs: &[usize]| qs.iter().filter_map(|q| sk.points.get(*q).map(|x| x.id.clone())).collect::<Vec<_>>();
         if copy {
-            let (mut m, _) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
+            let (mut m, map) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
             m.extend(text_curves);
-            return Ok(ids_of(sk, &m));
+            let copies: Vec<usize> = own.iter().filter_map(|q| map.iter().find(|(old, _)| old == q).map(|(_, new)| *new)).collect();
+            return Ok((ids_of(sk, &m), point_ids(sk, &copies)));
         }
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         if rotate_constraints {
@@ -2828,9 +2871,18 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             rotate_axis_constraints(sk, doc, &moved, ang)?;
         }
         cs.extend(text_curves);
-        Ok(ids_of(sk, &cs))
+        Ok((ids_of(sk, &cs), point_ids(sk, &own)))
     })?;
+    let (out, moved_points) = out;
     s.doc_mut().prune_model_params();
+    if z != 0.0 {
+        // Off the plane: what moved (or its copy) becomes drawn 3D curves `z` along the normal.
+        let id = super::sketch::target_sketch(s, p, cmd)?;
+        let n = s.world_state().sketch(id).map(|ss| ss.plane.normal()).ok_or_else(|| bad(cmd, "the sketch has no plane"))?;
+        let names: Vec<String> = out.clone();
+        let (wires, _, info) = super::sketch_3d::lift(s, p, cmd, &names, &moved_points, n * z, None)?;
+        return Ok(json!({"curves": wires, "sketch": info}));
+    }
     Ok(json!({"curves": out, "sketch": info}))
 }
 

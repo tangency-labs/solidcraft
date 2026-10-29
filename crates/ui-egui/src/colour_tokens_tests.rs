@@ -74,7 +74,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
     let cam = solidcraft_engine::render::Camera::default();
     let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
-    let triad = crate::gizmo::Triad { center: Vec3::ZERO, translate: true, rotate: true };
+    let triad = crate::gizmo::Triad::world(Vec3::ZERO, true, true);
     for (dark, mode) in [false, true].into_iter().flat_map(|d| ColorVision::ALL.map(|m| (d, m))) {
         set_dark(dark);
         set_vision(mode);

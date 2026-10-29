@@ -263,7 +263,7 @@ pub fn triad(app: &SolveApp, d: &Dialog) -> Option<gizmo::Triad> {
         return None;
     }
     let t = Vec3::new(len(app, x).unwrap_or(0.0), len(app, y).unwrap_or(0.0), len(app, z).unwrap_or(0.0));
-    Some(gizmo::Triad { center: pivot(app, d)? + t, translate: true, rotate: *mode == FREE })
+    Some(gizmo::Triad::world(pivot(app, d)? + t, true, *mode == FREE))
 }
 
 /// Rotate's ring lies on the selected axis, level with the picked bodies' centre.

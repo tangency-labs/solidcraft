@@ -102,8 +102,9 @@ pub enum Mod {
     Mirror,
     /// `sketch.move`: how far the picked entities move along the sketch's own axes, how far they
     /// turn about the centre, and whether the originals stay behind. The command already
-    /// carries the copy flag, so the Create Copy row needs no engine change.
-    Move { x: String, y: String, angle: String, copy: bool },
+    /// carries the copy flag, so the Create Copy row needs no engine change. In a 3D sketch
+    /// (`three_d`, taken when the window opens) `z` moves them off the plane along its normal.
+    Move { x: String, y: String, z: String, angle: String, copy: bool, three_d: bool },
     /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the middle
     /// of their box. `x` and `y` move that middle, `factor` scales and `angle` turns about it.
     /// `frame` is the box (middle and size in the sketch, kept up to date from the picks by
@@ -135,7 +136,10 @@ pub enum Mod {
 
 impl Mod {
     pub fn previews(&self) -> bool {
-        matches!(self, Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. })
+        matches!(
+            self,
+            Self::Mirror | Self::Move { .. } | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. }
+        )
     }
 
     pub fn title(&self) -> &'static str {
@@ -224,8 +228,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.move" => Mod::Move {
             x: crate::dialogs::length_default(&app.session, "0"),
             y: crate::dialogs::length_default(&app.session, "0"),
+            z: crate::dialogs::length_default(&app.session, "0"),
             angle: "0 deg".into(),
             copy: false,
+            three_d: crate::sketch3d::active(app),
         },
         "sketch.pattern.rectangular" => Mod::PatternRect {
             count: "3".into(),
@@ -429,8 +435,12 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             });
         }
         Mod::Mirror => {}
-        Mod::Move { x, y, angle, copy } => {
+        Mod::Move { x, y, z, angle, copy, three_d } => {
             enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
+            // A 3D sketch moves off the plane too.
+            if *three_d {
+                enter |= number(ui, "Z Distance", z);
+            }
             enter |= number(ui, "Angle", angle);
             ui_kit::options(ui, "move_options", &mut [("Create Copy", copy)]);
         }
@@ -806,7 +816,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             ("sketch.mirror", json!({"entities": entities, "line": line}))
         }
-        Mod::Move { x, y, angle, copy } => {
+        Mod::Move { x, y, z, angle, copy, three_d } => {
             let entities = entity_ids(&app.session, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to move first".into());
@@ -814,10 +824,14 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let dx = value(app, x, ValueKind::Length, "X Distance")?;
             let dy = value(app, y, ValueKind::Length, "Y Distance")?;
             let deg = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
-            if dx.abs() < 1e-9 && dy.abs() < 1e-9 && deg.abs() < 1e-9 {
+            let dz = if *three_d { value(app, z, ValueKind::Length, "Z Distance")? } else { 0.0 };
+            if dx.abs() < 1e-9 && dy.abs() < 1e-9 && dz.abs() < 1e-9 && deg.abs() < 1e-9 {
                 return Err("Type a distance or an angle to move by".into());
             }
             let mut p = json!({"entities": entities, "translate": [dx, dy], "angle": deg, "copy": copy});
+            if dz.abs() >= 1e-9 {
+                p["z"] = json!(dz);
+            }
             if let Some(center) = items(inputs, 1).first().and_then(|sel| point_id(&app.session, sel)) {
                 p["center"] = json!(center);
             }
