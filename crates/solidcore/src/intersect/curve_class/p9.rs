@@ -31,6 +31,7 @@ use crate::curve::curve::p5::make_curve_cache;
 use crate::curve::curve::p6::DroppedPoint;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
+use crate::curve::curve_cache::CurveCache;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::context::ALL_MARKS;
 use crate::geom::extent1d::Extent1d;
@@ -242,6 +243,8 @@ impl<O: ClassObject> CurveClassification<O> {
             source
         };
         let source_zone = src_zone_tol_3d_of(k, Some(self));
+        // the source curve's cache, kept across the edges (see `edge_solutions`)
+        let mut source_cache = None;
         for edge in edges {
             let (mut solutions, tolerance) = self.edge_solutions(
                 k,
@@ -251,8 +254,10 @@ impl<O: ClassObject> CurveClassification<O> {
                 source_zone,
                 edge,
                 options,
+                &mut source_cache,
             )?;
             if !solutions.is_empty() {
+                source_cache = None;
                 insert_solutions(
                     k,
                     geometry,
@@ -300,6 +305,8 @@ impl<O: ClassObject> CurveClassification<O> {
             }
         };
         let source_zone = src_zone_tol_3d_of(k, Some(self));
+        // the source curve's cache, kept across the edges (see `edge_solutions`)
+        let mut source_cache = None;
         for edge in edges {
             let (mut solutions, tolerance) = {
                 let working = match &lift {
@@ -314,9 +321,12 @@ impl<O: ClassObject> CurveClassification<O> {
                     source_zone,
                     edge,
                     options,
+                    &mut source_cache,
                 )?
             };
             if !solutions.is_empty() {
+                // the insertion's surf/surf/surf refinement may edit the source curve
+                source_cache = None;
                 insert_solutions_mut(
                     k,
                     geometry,
@@ -331,6 +341,9 @@ impl<O: ClassObject> CurveClassification<O> {
     }
 
     /// The solutions of one edge of `IntersectEdges` and their intersection tolerance.
+    /// `source_cache` keeps the source curve `working`'s cache across the edges, as
+    /// upstream keeps it on the curve; the caller drops it whenever an insertion may
+    /// have edited the curve.
     #[allow(clippy::too_many_arguments)]
     fn edge_solutions(
         &self,
@@ -341,6 +354,7 @@ impl<O: ClassObject> CurveClassification<O> {
         source_zone: f64,
         edge: &BoundaryEdge<O>,
         options: IntersectEdgesOptions,
+        source_cache: &mut Option<CurveCache<Side>>,
     ) -> Result<(Vec<Solution<O>>, f64)> {
         let target = curve(geometry, edge.curve)?;
         let edge_zone = edge.zone_tol_3d;
@@ -371,7 +385,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 solutions.push(sol);
             }
         } else {
-            let found = working.global_curve_intersect(
+            let found = working.global_curve_intersect_cached(
                 k,
                 &self.interval(),
                 target,
@@ -384,6 +398,8 @@ impl<O: ClassObject> CurveClassification<O> {
                     ],
                     ..CurveIntersectOptions::default()
                 },
+                source_cache,
+                &mut None,
             )?;
             solutions.extend(
                 found
@@ -923,5 +939,137 @@ mod tests {
             assert_eq!(found.parameter, parameter);
             assert_eq!(found.distance, 1.1641532182693481e-10);
         }
+    }
+
+    /// Handles of [`a_kept_source_cache_intersects_edges_as_fresh_caches`].
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum E {
+        Source,
+        Target(usize),
+        Edge(usize),
+    }
+    impl ClassObject for E {
+        fn class_kind(&self) -> ClassObjectKind {
+            match self {
+                Self::Edge(_) => ClassObjectKind::Edge,
+                _ => ClassObjectKind::Curve,
+            }
+        }
+    }
+    struct Edges {
+        source: Curve,
+        targets: Vec<Curve>,
+    }
+    impl ClassGeometry<E> for Edges {
+        fn topology_zone_tol_3d(&self, h: E) -> Option<f64> {
+            matches!(h, E::Edge(_)).then_some(1e-6)
+        }
+        fn curve(&self, h: E) -> Option<&Curve> {
+            match h {
+                E::Source => Some(&self.source),
+                E::Target(i) => self.targets.get(i),
+                E::Edge(_) => None,
+            }
+        }
+        fn surface(&self, _: E) -> Option<&Surface> {
+            None
+        }
+        fn volume(&self, _: E) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _: E) -> Option<Point3> {
+            None
+        }
+    }
+
+    /// The source curve's cache kept across the edges (and dropped after an edge with
+    /// hits, as the edge loops do) gives the solutions of a fresh cache for each edge.
+    #[test]
+    fn a_kept_source_cache_intersects_edges_as_fresh_caches() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+
+        let k = Kernel::default();
+        // a planar cubic B-spline (not analytic, so the intersection reads the caches)
+        let pts = [[0.0, 0.0], [1.0, 2.0], [3.0, -1.0], [4.0, 1.0], [6.0, 0.0]];
+        let mut nurb = allocate_nurb_curve(4, 3, 8).unwrap();
+        for (d, s) in nurb.cpts_mut().iter_mut().zip(pts) {
+            *d = CPoint::new(s[0], s[1], 0.0, NOW);
+        }
+        nurb.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0]);
+        let source = Curve::from(BSplineCurve::from_nurb(nurb, 3, false));
+        let line = |a: Vec3, dir: Vec3, len: f64| {
+            Curve::from(Line::bounded(
+                a,
+                dir,
+                &Extent1d::from_min_max(0., len),
+                &BoundedLineOptions {
+                    scale: 1.,
+                    dim: 3,
+                    ..Default::default()
+                },
+            ))
+        };
+        let up = Vec3::new(0., 1., 0.);
+        let far = |y: f64| line(Vec3::new(-10., y, 0.), Vec3::new(1., 0., 0.), 1.);
+        // misses and crossings in turn: reuse after misses, a rebuild after each hit
+        let targets = vec![
+            far(20.),
+            line(Vec3::new(1., -5., 0.), up, 10.),
+            far(30.),
+            far(40.),
+            line(Vec3::new(2.5, -5., 0.), up, 10.),
+            line(Vec3::new(4., -5., 0.), up, 10.),
+            far(50.),
+        ];
+        let geometry = Edges { source, targets };
+        let cc = CurveClassification::with_curve_interval(
+            &k,
+            E::Source,
+            Extent1d::from_min_max(0., 1.),
+            1e-6,
+        );
+        let source_zone = src_zone_tol_3d_of(&k, Some(&cc));
+        let working = &geometry.source;
+        let mut kept = None;
+        let (mut hits, mut reused) = (0, 0);
+        for (i, target) in geometry.targets.iter().enumerate() {
+            let interval = target.natural_interval();
+            let edge = BoundaryEdge {
+                edge: E::Edge(i),
+                curve: E::Target(i),
+                interval,
+                face_gap: None,
+                zone_tol_3d: 1e-6,
+            };
+            let solve = |cache: &mut Option<CurveCache<Side>>| {
+                cc.edge_solutions(
+                    &k,
+                    &geometry,
+                    working,
+                    E::Source,
+                    source_zone,
+                    &edge,
+                    IntersectEdgesOptions::default(),
+                    cache,
+                )
+                .unwrap()
+            };
+            let fresh = solve(&mut None);
+            if kept.is_some() {
+                reused += 1;
+            }
+            let with_kept = solve(&mut kept);
+            assert!(kept.is_some());
+            assert_eq!(format!("{with_kept:?}"), format!("{fresh:?}"), "edge {i}");
+            if !with_kept.0.is_empty() {
+                hits += 1;
+                kept = None;
+            }
+        }
+        assert_eq!(hits, 3);
+        assert!(reused >= 3);
     }
 }

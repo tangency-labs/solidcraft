@@ -58,7 +58,6 @@ use super::{
     make_consistent_classifications, src_zone_tol_3d_of, CurveClassification, CurveInterval,
 };
 use crate::curve::crv_on_surf::CrvOnSurf;
-use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -738,6 +737,7 @@ impl<O: ClassObject> CurveClassification<O> {
             surface,
             has_big_gaps,
             uv_space_okay,
+            true,
         )
     }
 
@@ -765,9 +765,13 @@ impl<O: ClassObject> CurveClassification<O> {
             surface,
             has_big_gaps,
             uv_space_okay,
+            true,
         )
     }
 
+    /// The body of [`CurveClassification::intersect_vertices`]. With `keep_curve_cache`
+    /// off every vertex drop builds its own curve cache (the reference the kept cache
+    /// must reproduce).
     fn intersect_vertices_in(
         &mut self,
         k: &Kernel,
@@ -776,6 +780,7 @@ impl<O: ClassObject> CurveClassification<O> {
         surface: &Surface,
         has_big_gaps: bool,
         uv_space_okay: bool,
+        keep_curve_cache: bool,
     ) -> Result<()> {
         // work in 3d when asked
         let mut wrapped = {
@@ -796,6 +801,9 @@ impl<O: ClassObject> CurveClassification<O> {
         // temporarily clear surface->Owner pointer to prevent building trimSrfCache for
         // crSurface (after the face is taken from it): an owner-free copy
         let detached = surface.clone();
+        // the classification curve's cache, kept across the vertex drops as upstream keeps
+        // it on the curve; dropped when the surf/surf/surf block may edit the curve
+        let mut curve_cache = None;
         for &vertex in vertices {
             let geometry = access.geometry();
             let vertex_zone = object_zone_tol_3d(k, geometry, Some(vertex))?;
@@ -819,19 +827,20 @@ impl<O: ClassObject> CurveClassification<O> {
                     Some(c) => c,
                     None => self.curve_geometry(geometry)?,
                 };
-                curve.global_point_solve::<NoObject>(
+                curve.global_point_solve_unnamed_cached::<NoObject>(
                     k,
                     &self.interval(),
                     SolverOperation::Minimize,
                     point,
                     tolerance,
                     SolutionRequested::All,
-                    &GlobalPointSolveOptions {
-                        target_distance: Some(0.0),
-                        ..GlobalPointSolveOptions::default()
-                    },
+                    Some(0.0),
+                    &mut curve_cache,
                 )?
             };
+            if !keep_curve_cache {
+                curve_cache = None;
+            }
             if solutions.is_empty() {
                 continue;
             }
@@ -846,6 +855,7 @@ impl<O: ClassObject> CurveClassification<O> {
                                 && s.start.solution_value < tolerance
                         })))
             {
+                curve_cache = None;
                 self.refine_vertex_solutions(
                     k,
                     access,
@@ -2141,5 +2151,150 @@ mod tests {
             }
             assert_eq!(visited, expected);
         }
+    }
+
+    /// Handles of [`a_kept_curve_cache_intersects_vertices_as_fresh_caches`].
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    enum V {
+        Curve,
+        Vertex(usize),
+        Surface1,
+        Surface2,
+    }
+    impl ClassObject for V {
+        fn class_kind(&self) -> ClassObjectKind {
+            match self {
+                Self::Curve => ClassObjectKind::Curve,
+                Self::Vertex(_) => ClassObjectKind::Vertex,
+                Self::Surface1 | Self::Surface2 => ClassObjectKind::Surface,
+            }
+        }
+    }
+    struct Vertices {
+        curve: Curve,
+        points: Vec<Point3>,
+        surfaces: [Surface; 2],
+    }
+    impl ClassGeometry<V> for Vertices {
+        fn curve(&self, o: V) -> Option<&Curve> {
+            (o == V::Curve).then_some(&self.curve)
+        }
+        fn surface(&self, o: V) -> Option<&Surface> {
+            match o {
+                V::Surface1 => self.surfaces.first(),
+                V::Surface2 => self.surfaces.get(1),
+                _ => None,
+            }
+        }
+        fn volume(&self, _: V) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _: V) -> Option<Point3> {
+            None
+        }
+        fn classification_vertex_point(&self, o: V) -> Option<Point3> {
+            match o {
+                V::Vertex(i) => self.points.get(i).copied(),
+                _ => None,
+            }
+        }
+        fn topology_zone_tol_3d(&self, _: V) -> Option<f64> {
+            Some(1e-4)
+        }
+        fn vertex_face_gap(&self, _: V, _: &Surface, _: Option<V>) -> Option<f64> {
+            None
+        }
+    }
+
+    /// The classification curve's cache kept across the vertex drops (dropped when a
+    /// vertex enters the surf/surf/surf refinement, which may edit the curve) classifies
+    /// the vertices as a fresh cache for each drop does.
+    #[test]
+    fn a_kept_curve_cache_intersects_vertices_as_fresh_caches() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+        use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+        use crate::surface::plane::Plane;
+
+        let k = Kernel::default();
+        // a planar cubic B-spline in z = 0 (not analytic, so the drops read the cache)
+        let pts = [[0.0, 0.0], [1.0, 2.0], [3.0, -1.0], [4.0, 1.0], [6.0, 0.0]];
+        let mut nurb = allocate_nurb_curve(4, 3, 8).unwrap();
+        for (d, s) in nurb.cpts_mut().iter_mut().zip(pts) {
+            *d = CPoint::new(s[0], s[1], 0.0, NOW);
+        }
+        nurb.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0]);
+        let curve = Curve::from(BSplineCurve::from_nurb(nurb, 3, false));
+        let on = |t: f64| curve.evaluate_point(&k, t).unwrap();
+        // vertex 1 lies 1e-6 off the curve (normal to its plane): one drop point in
+        // [LOOSE_CRV_DROP_SIZE, tolerance], so the refinement runs (and the slot is
+        // dropped); it is 1e-6 off surface 1 and 5 off surface 2, so the refinement
+        // makes no edit. Vertices 0 and 3 miss, vertex 2 lies on the curve.
+        let points = vec![
+            Vec3::new(-20., 30., 0.),
+            on(0.3) + Vec3::new(0., 0., 1e-6),
+            on(0.7),
+            Vec3::new(40., -30., 0.),
+        ];
+        let plane = |z: f64| Surface::from(Plane::from_normal(Vec3::new(0., 0., z), Vec3::Z));
+        let g = Vertices {
+            curve,
+            points,
+            surfaces: [plane(0.), plane(5.)],
+        };
+        let face_surface = plane(0.);
+        let vertices: Vec<V> = (0..4).map(V::Vertex).collect();
+
+        // vertex 1's drop lies in the refinement band of IntersectVertices: one drop
+        // point farther than LOOSE_CRV_DROP_SIZE and within the curve+vertex tolerance
+        let ivl = Extent1d::from_min_max(0., 1.);
+        let tolerance = xsect_tol_3d_from_zones(&k, 1e-6, 1e-4);
+        let band = g
+            .curve
+            .global_point_solve::<NoObject>(
+                &k,
+                &ivl,
+                SolverOperation::Minimize,
+                g.points[1],
+                tolerance,
+                SolutionRequested::All,
+                &crate::curve::curve::p1::GlobalPointSolveOptions {
+                    target_distance: Some(0.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(band.len(), 1);
+        let gap = band.as_slice().first().unwrap().start.solution_value;
+        assert!(
+            gap > LOOSE_CRV_DROP_SIZE && gap < tolerance,
+            "{gap} {tolerance}"
+        );
+
+        let classify = |keep: bool| {
+            // one unclassified interval over the curve, as the classifiers start
+            let mut cc = CurveClassification::with_curve_interval(&k, V::Curve, ivl, 1e-6);
+            cc.set_surface1(Some(V::Surface1));
+            cc.set_surface2(Some(V::Surface2));
+            let r = cc.intersect_vertices_in(
+                &k,
+                &mut ReadOnly(&g),
+                &vertices,
+                &face_surface,
+                false,
+                true,
+                keep,
+            );
+            format!("{r:?} {:?}", cc.intervals())
+        };
+        let fresh = classify(false);
+        assert!(fresh.starts_with("Ok"), "{fresh}");
+        // the near and the on-curve vertex are classified (the refinement made no edit)
+        assert!(
+            fresh.contains("Vertex(1)") && fresh.contains("Vertex(2)"),
+            "{fresh}"
+        );
+        assert_eq!(classify(true), fresh);
     }
 }
