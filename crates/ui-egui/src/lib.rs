@@ -1760,6 +1760,11 @@ impl SolveApp {
             let _ = self.run_heavy(id, json!({}));
             return;
         }
+        // Change Part Size with no standard part selected (its dialog had nothing to open on).
+        if id == "parts.resize" {
+            dialogs_part_size::needs_a_part(self);
+            return;
+        }
         let _ = self.run(id, json!({}));
     }
 

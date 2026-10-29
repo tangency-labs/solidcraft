@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Panoramica, zoom, orbita",
   "ui.parallel": "Parallelo",
   "ui.parameters": "Parametri",
+  "ui.part_size_needs_a_part": "Seleziona una parte standard inserita (vite, dado, rondella o spina) per cambiarne le dimensioni. Per ingrandire o rimpicciolire un corpo usa Scala.",
   "ui.part_size_shared": "Ricostruisce la parte, sostituendo le eventuali lavorazioni aggiunte. Si aggiornano tutte le occorrenze del componente.",
   "ui.paste": "Incolla",
   "ui.path": "Percorso",

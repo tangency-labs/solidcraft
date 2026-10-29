@@ -609,8 +609,7 @@ pub(crate) fn nav_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 crate::ui_kit::Text::Hint("mouse_gesture_mode"),
             );
             if crate::ui_kit::button(ui, crate::i18n::tr_label("Use the SolidWorks mouse mode"), crate::ui_kit::Button::Normal).clicked() {
-                app.preferences.nav = MOUSE_MODE.to_string();
-                app.preferences.zoom_reverse = crate::prefs::nav_preset(MOUSE_MODE).reverse_zoom;
+                crate::prefs::choose_nav_preset(&mut app.preferences, crate::prefs::nav_preset(MOUSE_MODE));
             }
         } else if app.preferences.mouse_gestures.enabled {
             crate::ui_kit::text(

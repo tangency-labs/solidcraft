@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Panorera, zooma, orbitera",
   "ui.parallel": "Parallell",
   "ui.parameters": "Parametrar",
+  "ui.part_size_needs_a_part": "Välj en infogad standarddel (en skruv, mutter, bricka eller ett stift) för att ändra dess storlek. Använd Skala för att göra en kropp större eller mindre.",
   "ui.part_size_shared": "Återbygger delen och ersätter eventuella tillagda funktioner. Alla förekomster av denna komponent uppdateras.",
   "ui.paste": "Klistra in",
   "ui.path": "Bana",

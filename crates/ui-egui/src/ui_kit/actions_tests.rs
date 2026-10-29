@@ -73,6 +73,85 @@ fn enabled_buttons_show_the_pointing_hand_and_disabled_ones_do_not() {
     }
 }
 
+/// With nothing to apply (#8561), Apply is disabled for the pointer, the keyboard and
+/// accessibility, and drawn with the theme's dim ink; with a change it works as before. OK and
+/// Cancel are not affected. The same holds for a confirmation's third action on the left.
+#[test]
+fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibility() {
+    use crate::theme::Tokens;
+    for confirm in [false, true] {
+        for nothing_to_apply in [true, false] {
+            let live = !nothing_to_apply;
+            let ctx = crate::fonts::test_context();
+            ctx.enable_accesskit();
+            let action = std::cell::Cell::new(Action::None);
+            let run = |events: Vec<egui::Event>| {
+                scenario::clear_handles();
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                    events,
+                    focused: true,
+                    ..Default::default()
+                };
+                crate::test_support::frame(&ctx, input, |ui| {
+                    ui.set_width(280.0);
+                    scope(ui, |ui| {
+                        let options = Footer { apply: Some("Apply"), confirm, nothing_to_apply, ..Default::default() };
+                        action.set(footer(ui, "OK", "Cancel", true, options));
+                    });
+                })
+            };
+            let case = format!("confirm {confirm}, nothing to apply {nothing_to_apply}");
+            let output = run(vec![]);
+            assert_eq!(scenario::count_of("dialog:apply:enabled"), Some(f64::from(live)), "{case}");
+            assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{case}: OK keeps its own state");
+            let node = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .and_then(|update| update.nodes.iter().find(|(_, node)| node.label() == Some("Apply")))
+                .map(|(_, node)| node.clone())
+                .unwrap_or_else(|| panic!("{case}: Apply is an accessible button"));
+            assert_eq!(node.role(), egui::accesskit::Role::Button, "{case}");
+            assert_eq!(node.is_disabled(), nothing_to_apply, "{case}: accessibility reports the state");
+            if !confirm {
+                let ink = crate::test_support::text_shapes(&output)
+                    .find(|text| text.galley.job.text == "Apply")
+                    .and_then(|text| text.galley.job.sections.first().map(|section| section.format.color))
+                    .unwrap_or_else(|| panic!("{case}: Apply's label is painted"));
+                let t = Tokens::get();
+                assert_eq!(ink, if live { t.form_ink } else { t.form_dim }, "{case}: a disabled Apply looks disabled");
+            }
+
+            // The pointer: no hand and no click without something to apply.
+            let apply = scenario::handle_at("dialog:apply").unwrap_or_else(|| panic!("{case}: Apply has a handle"));
+            run(vec![egui::Event::PointerMoved(apply)]);
+            let cursor = run(vec![egui::Event::PointerMoved(apply)]).platform_output.cursor_icon;
+            assert_eq!(cursor, if live { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default }, "{case}");
+            run(pointer(apply, true));
+            run(pointer(apply, false));
+            assert_eq!(action.get(), if live { Action::Apply } else { Action::None }, "{case}: click");
+
+            // The keyboard: Tab never lands on a disabled Apply, so Space/Enter can't press it.
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            let mut focused = Vec::new();
+            for _ in 0..4 {
+                for event in run(key(egui::Key::Tab)).platform_output.events {
+                    if let egui::output::OutputEvent::FocusGained(info) = event {
+                        focused.push(info.label.unwrap_or_default());
+                    }
+                }
+            }
+            assert!(focused.iter().any(|label| label == "Cancel"), "{case}: Tab reaches the footer: {focused:?}");
+            assert_eq!(focused.iter().any(|label| label == "Apply"), live, "{case}: Tab and Apply: {focused:?}");
+        }
+    }
+}
+
 #[test]
 fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_themes() {
     use crate::theme::Tokens;

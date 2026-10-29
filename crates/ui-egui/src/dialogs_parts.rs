@@ -75,7 +75,9 @@ pub struct Pt {
 
 /// The dialog for Insert Part.
 pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
-    matches!(id, "parts.fastener" | "parts.insert").then(|| {
+    // Standard Parts itself only lists the library: started from the app it opens the dialog
+    // that shows it (#8735), which did nothing before.
+    matches!(id, "parts.fastener" | "parts.insert" | "parts.library").then(|| {
         (
             Kind::Part(Pt { family: 0, size: 0, length: None, name: String::new(), picture: None, lib: None }),
             vec![SelInput::new("Hole (optional)", FACES | EDGES, false)],

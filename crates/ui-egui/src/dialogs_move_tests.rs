@@ -482,3 +482,61 @@ fn triad_drag_ends_where_the_button_was_released() {
     h.frame_with(vec![button(released, false), egui::Event::PointerMoved(pos(later))]);
     assert_eq!(value(&h), "20 mm", "the drag ends where the button was released");
 }
+
+/// A Move dialog on the 20 × 30 × 10 box, translated 10 mm along X.
+fn translated_box() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(TRANSLATE, &h.app.session.doc);
+    d.inputs = inputs(TRANSLATE);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    if let Kind::Move { x, .. } = &mut d.kind {
+        *x = "10 mm".into();
+    }
+    h
+}
+
+/// #8746: changing the Move Type keeps the move made so far, and the new type moves the body
+/// on from there; one solid.move holds the chain.
+#[test]
+fn changing_the_move_type_keeps_the_move_made_so_far() {
+    let mut h = translated_box();
+    let corners = |b: solidcraft_engine::geom::Aabb3| [b.min, b.max];
+    let before = corners(h.app.session.world_state().body("Body1").unwrap().mesh().bounds());
+    let mut d = h.app.dialog.take().unwrap();
+    switch_type(&h.app, &mut d, ROTATE);
+    // No axis yet: the translation alone is made.
+    let p = params(&h.app, &d).unwrap();
+    assert_eq!(p["translate"], json!(["10 mm", "0 mm", "0 mm"]), "{p}");
+    assert!(p.get("angle").is_none(), "{p}");
+    // A quarter turn about Z, after the translation.
+    d.inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
+    if let Kind::Move { angle, .. } = &mut d.kind {
+        *angle = "90 deg".into();
+    }
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let after = h.app.session.world_state().body("Body1").unwrap().mesh().bounds();
+    let turn = |p: Vec3| Vec3::new(-p.y, p.x + 10.0, p.z);
+    let mut want = solidcraft_engine::geom::Aabb3::EMPTY;
+    for c in before {
+        want.add(turn(c));
+    }
+    assert!((after.min - want.min).len() < 1e-6 && (after.max - want.max).len() < 1e-6, "{after:?} != {want:?}");
+}
+
+/// #8746: a pick on the moving body is made where the preview draws it, and is kept where the
+/// current type's move starts from.
+#[test]
+fn a_pick_on_the_moved_body_is_taken_back_by_the_current_move() {
+    let h = translated_box();
+    let shown = Sel::Vertex { body: "Body1".into(), point: Vec3::new(30.0, 30.0, 10.0) };
+    let kept = from_shown(&h.app, shown);
+    assert_eq!(kept, Sel::Vertex { body: "Body1".into(), point: Vec3::new(20.0, 30.0, 10.0) });
+    assert_eq!(shown_point(&h.app, "Body1", Vec3::new(20.0, 30.0, 10.0)), Vec3::new(30.0, 30.0, 10.0));
+    let elsewhere = Sel::Vertex { body: "Other".into(), point: Vec3::new(30.0, 30.0, 10.0) };
+    assert_eq!(from_shown(&h.app, elsewhere.clone()), elsewhere, "a pick on another body stays where it was made");
+}

@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Panoramique, zoom, orbite",
   "ui.parallel": "Parallélisme",
   "ui.parameters": "Paramètres",
+  "ui.part_size_needs_a_part": "Sélectionnez une pièce standard insérée (vis, écrou, rondelle ou goupille) pour changer sa taille. Pour agrandir ou réduire un corps, utilisez Échelle.",
   "ui.part_size_shared": "Reconstruit la pièce en remplaçant les entités ajoutées. Toutes les occurrences de ce composant sont mises à jour.",
   "ui.paste": "Coller",
   "ui.path": "Trajectoire",

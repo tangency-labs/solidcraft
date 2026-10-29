@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Panorer, zoom og roter visningen",
   "ui.parallel": "Parallell",
   "ui.parameters": "Parametere",
+  "ui.part_size_needs_a_part": "Velg en innsatt standarddel (en skrue, mutter, skive eller stift) for å endre størrelsen. Bruk Skaler for å gjøre en kropp større eller mindre.",
   "ui.part_size_shared": "Bygger delen på nytt og erstatter eventuelle funksjoner som er lagt til. Alle forekomster av denne komponenten oppdateres.",
   "ui.paste": "Lim inn",
   "ui.path": "Bane",

@@ -3953,6 +3953,7 @@
   "ui.pan_zoom_orbit": "Kaydır, yakınlaştır, döndür",
   "ui.parallel": "Paralel",
   "ui.parameters": "Parametreler",
+  "ui.part_size_needs_a_part": "Boyutunu değiştirmek için eklenmiş bir standart parça (vida, somun, pul veya pim) seçin. Bir gövdeyi büyütmek veya küçültmek için Ölçekle'yi kullanın.",
   "ui.part_size_shared": "Parçayı yeniden oluşturur ve eklenen tüm özelliklerin yerine geçer. Bu bileşenin tüm örnekleri güncellenir.",
   "ui.paste": "Yapıştır",
   "ui.path": "Yol",

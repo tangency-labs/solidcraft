@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Pan, zoom, orbit",
   "ui.parallel": "Paralel",
   "ui.parameters": "Parameter",
+  "ui.part_size_needs_a_part": "Pilih part standar yang disisipkan (sekrup, mur, ring, atau pin) untuk mengubah ukurannya. Untuk memperbesar atau memperkecil bodi, gunakan Skala.",
   "ui.part_size_shared": "Membangun ulang part, menggantikan fitur tambahan apa pun. Semua kemunculan komponen ini diperbarui.",
   "ui.paste": "Tempel",
   "ui.path": "Jalur",

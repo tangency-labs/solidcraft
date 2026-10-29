@@ -1298,7 +1298,9 @@ impl Dialog {
             Kind::PathPlane { t, .. } => ("Position (0 to 1)", ValueKind::Unitless, t),
             Kind::Rib { thickness, .. } => ("Thickness", ValueKind::Length, thickness),
             Kind::Emboss { depth, .. } => ("Depth", ValueKind::Length, depth),
-            Kind::PathPattern { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
+            Kind::PathPattern { spacing, .. } => {
+                (if self.extra.contains_key("distance") { "Distance" } else { "Spacing" }, ValueKind::Length, spacing)
+            }
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
             Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
@@ -2248,13 +2250,14 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
 
 /// Rows above the selection inputs: the pattern type and object type, the Hole placement (one
 /// face point, or sketch points).
-fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, session: &Session) {
+fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
+    let session = &app.session;
     if matches!(d.kind, Kind::Mirror) {
         object_type_row(d, ui);
         return;
     }
     if matches!(d.kind, Kind::Move { .. }) {
-        crate::dialogs_move::type_row(d, ui, &session.doc);
+        crate::dialogs_move::type_row(app, d, ui);
         return;
     }
     let current = match d.kind {
@@ -4343,7 +4346,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(1, "the path")?;
             let path = sels(d, 1).curve_ids();
             let sketch = picks_sketch(app, sels(d, 1), None).ok_or("the path curves must be in one sketch")?;
-            let mut p = json!({"path_sketch": sketch, "path": path, "count": count, "spacing": spacing});
+            let mut p = json!({"path_sketch": sketch, "path": path, "count": count});
+            // A saved extent stays first-to-last distance when the quantity changes.
+            p[if d.extra.contains_key("distance") { "distance" } else { "spacing" }] = json!(spacing);
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.pattern.path", p)
         }
@@ -5811,8 +5816,20 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     }
                     d
                 }
-                // No dialog for a path pattern yet: edit it with timeline.redefine.
-                PatternKind::Path { .. } => return None,
+                PatternKind::Path { path_sketch, path, count, spacing, extent, flip, orient } => {
+                    let mut d = start("solid.pattern.path")?;
+                    d.kind = Kind::PathPattern { count: count.to_string(), spacing: spacing.to_string() };
+                    if let Some(inp) = d.inputs.get_mut(1) {
+                        inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+                    }
+                    // Preserve options the current dialog does not expose as controls.
+                    d.extra.insert("flip".into(), json!(flip));
+                    d.extra.insert("orientation".into(), json!(if *orient { "path" } else { "identical" }));
+                    if *extent {
+                        d.extra.insert("distance".into(), json!(spacing));
+                    }
+                    d
+                }
             };
             // Replay references stay features, including features that created a body.
             let as_features = !features.is_empty();

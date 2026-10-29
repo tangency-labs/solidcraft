@@ -117,12 +117,23 @@ impl Layout {
         } else {
             Rect::NOTHING
         };
+        // A navigation bar on the view's top edge (#8183) keeps the pair and the axis view below it.
+        let bar_on_top = navigation.is_positive() && navigation.center().y < available.center().y;
+        let below_bar = |rect: Rect| {
+            if bar_on_top && rect.intersect(navigation).is_positive() {
+                rect.translate(vec2(0.0, navigation.bottom() + CORNER_GAP - rect.top()))
+            } else {
+                rect
+            }
+        };
+        let confirm = below_bar(confirm);
         // The axis view starts below the pair while it is shown.
         let top = if confirm.is_positive() { confirm.bottom() + CORNER_GAP } else { available.top() };
         let cube_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
         let axis_left = |size| {
             if inspector_side == Some(crate::frame::Side::Left) { available.left() } else { available.right() - size }
         };
+        let top = below_bar(Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))).top();
         let mut axis_view = if available.width() >= cube_size && available.bottom() - top >= cube_size {
             Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))
         } else {

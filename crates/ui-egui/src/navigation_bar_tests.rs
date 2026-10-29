@@ -152,6 +152,39 @@ fn measured_bar_honours_size_position_and_ignores_unknown_slots() {
 }
 
 #[test]
+fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_it() {
+    use crate::ui_kit::NAV_BOTTOM;
+    // Older settings have no edge and keep the bar at the bottom; a bad value recovers the same way.
+    let old: NavigationBar = serde_json::from_value(json!({"position": "right"})).unwrap();
+    assert_eq!(old.edge, Edge::Bottom);
+    let bad: NavigationBar = serde_json::from_value(json!({"edge": "sideways"})).unwrap();
+    assert_eq!(bad.edge, Edge::Bottom);
+    assert!(validate(&json!({"edge": "sideways"})).is_err());
+    assert!(validate(&json!({"edge": "top"})).is_ok());
+    let canvas = Rect::from_min_size(pos2(20.0, 30.0), vec2(900.0, 600.0));
+    for position in [Position::Centre, Position::Left, Position::Right] {
+        for edge in [Edge::Bottom, Edge::Top] {
+            let prefs: NavigationBar = serde_json::from_value(json!({"position": position, "edge": edge})).unwrap();
+            assert_eq!(serde_json::to_value(&prefs).unwrap()["edge"], if edge == Edge::Top { "top" } else { "bottom" });
+            let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 50.0);
+            match edge {
+                Edge::Bottom => assert_eq!(bar.rect.bottom(), canvas.bottom() - NAV_BOTTOM),
+                Edge::Top => assert_eq!(bar.rect.top(), canvas.top() + NAV_BOTTOM),
+            }
+            for corner in [egui::Vec2::ZERO, vec2(120.0, 32.0)] {
+                let layout =
+                    crate::viewport_layout::Layout::with_content(canvas, canvas, &[], 1.0, crate::prefs::NavigatorStyle::Cube, corner, bar.rect);
+                // The axis view keeps its full size: on top, it moves down past the bar instead.
+                assert_eq!(layout.axis_view.width(), crate::viewport::axis_view_size(crate::prefs::NavigatorStyle::Cube));
+                assert!(!layout.axis_view.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
+                assert!(!layout.confirm.intersect(bar.rect).is_positive(), "{position:?} {edge:?}");
+                assert!(!layout.confirm.intersect(layout.axis_view).is_positive(), "{position:?} {edge:?}");
+            }
+        }
+    }
+}
+
+#[test]
 fn navigation_slot_visuals_never_use_focus_as_a_fill() {
     use crate::ui_kit::{NavigationFill, navigation_visual};
     for kind in [Kind::Action, Kind::Tool, Kind::Toggle, Kind::Menu] {
@@ -510,6 +543,34 @@ fn navigation_board_popup_width_includes_its_border_and_padding() {
             assert_eq!(row.left() - outer.left(), f32::from(NAV_POPUP_PADDING) + NAV_BORDER);
             assert_eq!(outer.right() - row.right(), f32::from(NAV_POPUP_PADDING) + NAV_BORDER);
         }
+    }
+}
+
+/// A label longer than its menu row (the Display menu's "Perspective while orbiting, ortho on
+/// faces", #8700) is cut with an ellipsis before the row's check, not drawn past the menu's edge;
+/// a short one is drawn whole.
+#[test]
+fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
+    use crate::ui_kit::*;
+    let ctx = crate::fonts::test_context();
+    for (label, selected, cut) in [
+        ("Perspective while orbiting, ortho on faces", false, true),
+        ("Perspective while orbiting, ortho on faces", true, true),
+        ("Show tool at cursor", true, false),
+    ] {
+        let mut row = Rect::NOTHING;
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            navigation_menu(ui, NAV_POPUP_WIDTH, |ui| {
+                let mut item = NavigationMenuRow::new("row", label, "select");
+                item.selected = selected;
+                row = item.show(ui).rect;
+            });
+        });
+        let text = crate::test_support::text_shapes(&output).find(|t| t.galley.text() == label).unwrap_or_else(|| panic!("{label} is drawn"));
+        assert_eq!(text.galley.elided, cut, "{label}");
+        let end = row.right() - NAV_MENU_INSET - if selected { crate::theme::Tokens::get().space_14 } else { 0.0 };
+        let drawn = text.pos.x + text.galley.size().x;
+        assert!(drawn <= end, "{label}: ends at {drawn}, past {end}");
     }
 }
 

@@ -57,6 +57,11 @@
   preset. With SolidWorks navigation, right-click a planar face and choose **Normal to Selection**
   to use Look At (also Ctrl+8); repeat to flip the side, preserving scale and projection.
 
+  **Right drag orbits** (Preferences › Navigation, on by default) is shown where the mouse
+  preset orbits on a right drag. Off, a right drag leaves the camera alone and the right button
+  only opens the context menu. Picking the SolidWorks preset turns it off and sets Middle
+  double-click to Fit; both can be changed back afterwards.
+
   **Mouse gestures** (Preferences › Navigation, off by default) work with the SolidWorks mouse preset
   only (the wheel orbits, Ctrl + wheel pans) and take over the right button, which then no longer
   orbits: hold it and move the pointer 4 pt to open a ring of tools (280 pt inside, 350 pt outside), even

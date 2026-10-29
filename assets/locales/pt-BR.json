@@ -2161,6 +2161,7 @@
   "ui.pan_zoom_orbit": "Deslocar, zoom, orbitar",
   "ui.parallel": "Paralelo",
   "ui.parameters": "Parâmetros",
+  "ui.part_size_needs_a_part": "Selecione uma peça padrão inserida (um parafuso, uma porca, uma arruela ou um pino) para alterar o tamanho. Para aumentar ou diminuir um corpo, use Escala.",
   "ui.part_size_shared": "Reconstrói a peça, substituindo quaisquer recursos adicionados. Todas as ocorrências deste componente são atualizadas.",
   "ui.paste": "Colar",
   "ui.path": "Caminho",

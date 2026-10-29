@@ -3975,6 +3975,7 @@
   "ui.pan_zoom_orbit": "Pomjeranje, zumiranje, orbitiranje",
   "ui.parallel": "Paralelnost",
   "ui.parameters": "Parametri",
+  "ui.part_size_needs_a_part": "Odaberite umetnuti standardni dio (vijak, maticu, podlošku ili zatik) da biste mu promijenili veličinu. Da tijelo povećate ili smanjite, koristite Skaliraj.",
   "ui.part_size_shared": "Ponovo gradi dio, zamjenjujući sve dodane operacije. Svi primjerci ove komponente se ažuriraju.",
   "ui.paste": "Zalijepi",
   "ui.path": "Putanja",

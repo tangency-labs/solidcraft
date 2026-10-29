@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Desprazar, zoom, orbitar",
   "ui.parallel": "Paralela",
   "ui.parameters": "Parámetros",
+  "ui.part_size_needs_a_part": "Selecciona unha peza normalizada inserida (un parafuso, unha porca, unha arandela ou un pasador) para cambiar o seu tamaño. Para agrandar ou reducir un corpo, usa Escala.",
   "ui.part_size_shared": "Reconstrúe a peza, substituíndo as operacións engadidas. Actualízanse todas as ocorrencias deste compoñente.",
   "ui.paste": "Pegar",
   "ui.path": "Traxectoria",

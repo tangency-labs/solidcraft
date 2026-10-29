@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Panoramare, zoom, orbitare",
   "ui.parallel": "Paralel",
   "ui.parameters": "Parametri",
+  "ui.part_size_needs_a_part": "Selectați o piesă standard inserată (un șurub, o piuliță, o șaibă sau un știft) pentru a-i schimba dimensiunea. Pentru a mări sau micșora un corp, folosiți Scalare.",
   "ui.part_size_shared": "Reconstruiește piesa, înlocuind orice operații adăugate. Toate aparițiile acestei componente se actualizează.",
   "ui.paste": "Lipește",
   "ui.path": "Traseu",

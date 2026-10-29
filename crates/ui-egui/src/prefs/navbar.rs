@@ -1,6 +1,6 @@
 //! Navigation bar editor. The shared viewport painter owns the preview's appearance.
 use crate::navigation::NavCaps;
-use crate::navigation_bar::{self, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Size, SlotOptions};
+use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Size, SlotOptions};
 use crate::navigation_bar_view;
 use crate::{SolveApp, scenario, theme::Tokens, ui_kit};
 use egui::{Rect, Sense, vec2};
@@ -379,6 +379,9 @@ fn appearance(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             },
         );
+        segments(ui, "edge", &mut usize::from(bar.edge == Edge::Top), &["navbar.custom.edge_bottom", "navbar.custom.edge_top"], |i| {
+            bar.edge = if i == 1 { Edge::Top } else { Edge::Bottom }
+        });
         segments(ui, "size", &mut usize::from(bar.size == Size::Regular), &["navbar.custom.compact", "navbar.custom.regular"], |i| {
             bar.size = if i == 1 { Size::Regular } else { Size::Compact }
         });

@@ -1,6 +1,6 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
-use crate::{icons, theme::Tokens};
+use crate::{icons, navigation_bar::Edge, theme::Tokens};
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
 
 pub(crate) fn navigation_popup_frame() -> egui::Frame {
@@ -59,22 +59,26 @@ impl<'a> NavigationMenuRow<'a> {
             icons::paint_ink(ui.painter(), icon, self.icon, if self.selected { ink } else { t.form_dim });
         }
         let font = if self.selected { crate::fonts::semibold(NAV_TEXT) } else { FontId::proportional(NAV_TEXT) };
-        ui.painter().text(
-            pos2(rect.left() + NAV_MENU_INSET + NAV_MENU_ICON + NAV_ROW_GAP, rect.center().y),
-            Align2::LEFT_CENTER,
-            self.label,
-            font,
-            ink,
-        );
+        // The label ends before the detail and the check or chevron: one that doesn't fit is cut
+        // with an ellipsis and shown whole on hover, as a long name in a list is (#8700).
+        let mut end = rect.right() - NAV_MENU_INSET - if self.selected || self.submenu { t.space_14 + t.space_4 } else { 0.0 };
         if let Some(detail) = self.detail {
-            ui.painter().text(
-                pos2(rect.right() - NAV_MENU_INSET - if self.submenu { NAV_CHEVRON + t.space_4 } else { 0.0 }, rect.center().y),
+            let at = rect.right() - NAV_MENU_INSET - if self.submenu { NAV_CHEVRON + t.space_4 } else { 0.0 };
+            let detail = ui.painter().text(
+                pos2(at, rect.center().y),
                 Align2::RIGHT_CENTER,
                 detail,
                 FontId::proportional(if self.enabled { t.font_body } else { t.font_small }),
                 if self.enabled { t.form_dim } else { t.nav_dim },
             );
+            end = end.min(detail.left() - t.space_8);
         }
+        let left = rect.left() + NAV_MENU_INSET + NAV_MENU_ICON + NAV_ROW_GAP;
+        let mut job = egui::text::LayoutJob::simple_singleline(self.label.to_owned(), font, ink);
+        job.wrap = egui::text::TextWrapping::truncate_at_width((end - left).max(0.0));
+        let galley = ui.painter().layout_job(job);
+        let cut = galley.elided;
+        ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, ink);
         let tail = Rect::from_center_size(pos2(rect.right() - NAV_MENU_INSET - t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
         if self.selected {
             super::checks::paint_check_glyph(ui.painter(), tail, false, t.form_primary);
@@ -84,7 +88,7 @@ impl<'a> NavigationMenuRow<'a> {
             icons::paint_ink(ui.painter(), arrow, "chevron", t.form_dim);
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
-        response
+        if cut { response.on_hover_text(self.label) } else { response }
     }
 }
 
@@ -103,7 +107,9 @@ pub(crate) fn navigation_menu_separator(ui: &mut Ui) {
     ui.painter().hline(rect.shrink2(vec2(t.space_2, 0.0)).x_range(), rect.center().y, egui::Stroke::new(NAV_BORDER, t.dialog_rule));
 }
 
-pub(crate) fn navigation_tooltip(response: &Response, top: f32, label: &str, shortcut: Option<&str>) {
+/// A tip beyond `along` (the bar, or the row it names): above it, or below it for a bar on the
+/// view's top edge.
+pub(crate) fn navigation_tooltip(response: &Response, along: Rect, edge: Edge, label: &str, shortcut: Option<&str>) {
     let ctx = &response.ctx;
     let id = response.id.with("nav_tooltip_delay");
     if !response.hovered() {
@@ -123,8 +129,11 @@ pub(crate) fn navigation_tooltip(response: &Response, top: f32, label: &str, sho
         .area(response.id.with("nav_tooltip"))
         .order(egui::Order::Tooltip)
         .interactable(false)
-        .pivot(Align2::CENTER_BOTTOM)
-        .fixed_pos(pos2(response.rect.center().x, top - NAV_POPUP_GAP))
+        .pivot(if edge == Edge::Top { Align2::CENTER_TOP } else { Align2::CENTER_BOTTOM })
+        .fixed_pos(match edge {
+            Edge::Bottom => pos2(response.rect.center().x, along.top() - NAV_POPUP_GAP),
+            Edge::Top => pos2(response.rect.center().x, along.bottom() + NAV_POPUP_GAP),
+        })
         .show(ctx, |ui| {
             Container::new(ctx, Surface::Popup).show_frame(ui, frame, ui.max_rect(), |ui| {
                 ui.spacing_mut().item_spacing.x = t.space_8;

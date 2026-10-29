@@ -86,6 +86,10 @@ pub struct NavPreset {
     pub help: &'static str,
     /// Choosing the preset turns the wheel the other way.
     pub reverse_zoom: bool,
+    /// Choosing the preset sets what a middle double-click does (`None` leaves it as it is).
+    pub middle_double_click: Option<&'static str>,
+    /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
+    pub right_drag_orbits: Option<bool>,
     pub bindings: &'static [NavBinding],
 }
 
@@ -106,6 +110,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Fusion",
         help: "Middle drag pans, Shift+middle orbits, right drag orbits",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
     },
     NavPreset {
@@ -113,6 +119,9 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "SolidWorks",
         help: "Middle drag orbits, Ctrl+middle pans, Shift+middle zooms, right drag orbits",
         reverse_zoom: true,
+        // Picked here, the right button is left to the context menu and mouse gestures (#6492).
+        middle_double_click: Some("fit"),
+        right_drag_orbits: Some(false),
         bindings: &[
             bind(Middle, NavKeys::CTRL, Pan),
             bind(Middle, NavKeys::SHIFT, Zoom),
@@ -125,6 +134,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Inventor",
         help: "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[
             bind(Middle, NavKeys::SHIFT, Orbit),
             bind(Middle, NavKeys::CTRL, Zoom),
@@ -137,6 +148,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Alias",
         help: "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms; middle drag also pans and right drag orbits",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[
             bind(Left, NavKeys::SHIFT_ALT, Orbit),
             bind(Middle, NavKeys::SHIFT_ALT, Pan),
@@ -151,6 +164,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Maya",
         help: "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[
             bind(Left, NavKeys::ALT, Orbit),
             bind(Middle, NavKeys::ALT, Pan),
@@ -163,6 +178,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Blender",
         help: "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag leaves the camera alone",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
     },
     NavPreset {
@@ -170,6 +187,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Tinkercad",
         help: "Right drag orbits, middle or Shift+right drag pans",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
     },
     NavPreset {
@@ -177,6 +196,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "OpenSCAD",
         help: "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[
             bind(Left, NavKeys::NONE, Orbit),
             bind(Right, NavKeys::SHIFT, Zoom),
@@ -190,6 +211,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "HFSS",
         help: "Alt+left drag pans, Shift+Alt+left zooms, Ctrl+left drag on empty space orbits",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
         // also take a Ctrl+click on geometry, which adds to the selection.
         bindings: &[bind(Left, NavKeys::SHIFT_ALT, Zoom), bind(Left, NavKeys::ALT, Pan)],
@@ -199,6 +222,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         label: "Touchpad",
         help: "Hold Shift and move the pointer to pan; hold Alt/Option and move it to orbit. No mouse button is needed. Vertical scroll zooms.",
         reverse_zoom: false,
+        middle_double_click: None,
+        right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
     },
 ];
@@ -231,6 +256,19 @@ impl Prefs {
 /// The preset with this id (the default for an unknown one).
 pub fn nav_preset(id: &str) -> &'static NavPreset {
     NAV_PRESETS.iter().find(|p| p.id == id).unwrap_or(&NAV_PRESETS[0])
+}
+
+/// Picks `preset` the way the Preferences page does: its bindings, wheel direction and, when the
+/// preset names them, middle double-click and "Right drag orbits".
+pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
+    prefs.nav = preset.id.into();
+    prefs.zoom_reverse = preset.reverse_zoom;
+    if let Some(double_click) = preset.middle_double_click {
+        prefs.middle_double_click = double_click.into();
+    }
+    if let Some(orbits) = preset.right_drag_orbits {
+        prefs.right_drag_orbits = orbits;
+    }
 }
 /// Stable control-channel names; presentation labels may be shorter.
 pub const PAGES: &[&str] = &["General", "Interface", "Design", "Navigation", "Keyboard Shortcuts", "Sketch", "Graphics", "AI", "Plugins"];
@@ -783,6 +821,8 @@ preference_settings! {
     /// With free orbit, mouse drags turn sideways about the world's up axis (a turntable without
     /// the pole limit) instead of the screen's.
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
+    /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
+    right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
@@ -1321,7 +1361,7 @@ struct Snapshot {
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
-    keys: std::collections::BTreeMap<String, String>,
+    keys: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl Snapshot {
@@ -1371,6 +1411,52 @@ impl Snapshot {
             save_graphics(app);
         }
     }
+
+    /// Whether everything is as in the snapshot: nothing Cancel would put back. Destructured, so
+    /// a setting added to the snapshot can't be left out of the comparison.
+    fn matches(&self, app: &SolveApp) -> bool {
+        let Snapshot {
+            prefs,
+            dark,
+            layout,
+            grid,
+            navigation_bar,
+            tool_cursor,
+            shadow,
+            perspective,
+            style,
+            pick_bodies,
+            agent,
+            autosave,
+            auto_project,
+            keys,
+        } = self;
+        *prefs == app.preferences
+            && *dark == app.ui.dark
+            && *layout == app.ui.layout
+            && *grid == app.ui.show_grid
+            && *navigation_bar == app.ui.show_navigation_bar
+            && *tool_cursor == app.ui.tool_cursor
+            && *shadow == app.ui.ground_shadow
+            && *perspective == app.ui.perspective
+            && *style == app.ui.visual_style
+            && *pick_bodies == app.ui.pick_bodies
+            && *agent == app.ui.agent_cursor
+            && *autosave == app.autosave_minutes
+            && *auto_project == app.session.auto_project
+            && *keys == app.keymap.custom
+    }
+}
+
+/// Whether Apply has anything to do (#8561): something changed since the dialog opened or since
+/// the last Apply. False while the dialog is closed.
+fn apply_pending(app: &mut SolveApp) -> bool {
+    let Some(snapshot) = app.prefs_window.snapshot.as_mut() else {
+        return false;
+    };
+    // Update bookkeeping isn't a setting and Cancel keeps it (`restore`), so it isn't a change.
+    snapshot.prefs.update.clone_from(&app.preferences.update);
+    app.prefs_window.snapshot.as_ref().is_some_and(|s| !s.matches(app))
 }
 
 /// The colour theme (#2255): Dark, Light, System, the built-in theme files and the imported
@@ -1732,7 +1818,12 @@ pub fn nav_mode(app: &SolveApp, button: NavButton, mods: Modifiers) -> Option<Na
     if button == NavButton::Right && crate::mouse_gesture::active(app) {
         return None;
     }
-    nav_preset(&app.preferences.nav).mode(button, mods)
+    let mode = nav_preset(&app.preferences.nav).mode(button, mods);
+    // "Right drag orbits" off leaves the right button to the context menu (#6492).
+    if button == NavButton::Right && mode == Some(NavMode::Orbit) && !app.preferences.right_drag_orbits {
+        return None;
+    }
+    mode
 }
 
 /// +1, or −1 when horizontal scrolling pans the other way (#2007).
@@ -1985,6 +2076,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut button: Option<&str> = None;
     let before = app.preferences.clone();
     let capturing = crate::keymap::capturing(app);
+    let pending = apply_pending(app);
     let window = ui_kit::Window::new(egui::Id::new("sc_prefs"), "settings", app.tr("ui.preferences"))
         .cards(10.0 / 3.0)
         .page_rows(24.0)
@@ -1995,7 +2087,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             bottom: (Tokens::get().space_16 + Tokens::get().space_4) as i8,
         })
         .fields()
-        .actions("OK", "Cancel", Some("Apply"));
+        .actions("OK", "Cancel", Some("Apply"))
+        .apply_enabled(pending);
     let window = if capturing { window.keep_open_on_escape() } else { window };
     let mut selected = app.prefs_window.section;
     let (closed, action) = window.show_pages_with_header(ctx, &mut selected, WINDOW_PAGES, app, search_header, clear_search, |ui| {
@@ -2040,6 +2133,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
         _ => {}
+    }
+    // The footer was drawn before this frame's edits (and before an Apply): show Apply's new
+    // state on the next frame rather than at the next input.
+    if app.prefs_window.open && apply_pending(app) != pending {
+        ctx.request_repaint();
     }
 }
 
@@ -2707,6 +2805,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     }
     if let Some(o) = out.as_object_mut() {
         o.insert("dialog".into(), json!(app.prefs_window.open.then(|| PAGES.get(app.prefs_window.section).copied().unwrap_or_default())));
+        o.insert("apply_enabled".into(), json!(apply_pending(app)));
         o.insert("stand_up_offer".into(), json!(app.stand_up));
         o.insert("stand_up_note".into(), json!(app.stand_up.is_some() && app.stand_up_note));
         o.insert("dark".into(), json!(app.ui.dark));
@@ -3129,26 +3228,27 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 mod tests {
     #[test]
     fn navigation_bar_preferences_round_trip_and_recover_hostile_fields() {
-        use crate::navigation_bar::{Idle, Labels, NavigationBar, Position, Size};
+        use crate::navigation_bar::{Edge, Idle, Labels, NavigationBar, Position, Size};
         use serde_json::json;
         assert_eq!(super::lenient(&json!({})).navigation_bar, NavigationBar::default());
         let p = super::lenient(&json!({"navigation_bar": {
             "slots":["pan", "future_slot", "pan", "separator", "separator", "separator", "separator", "separator", 7, "fit"],
-            "position":"bottom_left", "size":"regular", "labels":"labels", "idle":"hide"
+            "position":"bottom_left", "edge":"top", "size":"regular", "labels":"labels", "idle":"hide"
         }}));
         assert_eq!(p.navigation_bar.slots, ["pan", "future_slot", "separator", "separator", "separator", "separator", "fit"]);
         assert_eq!(
-            (p.navigation_bar.position, p.navigation_bar.size, p.navigation_bar.labels, p.navigation_bar.idle),
-            (Position::Left, Size::Regular, Labels::Labels, Idle::Hide)
+            (p.navigation_bar.position, p.navigation_bar.edge, p.navigation_bar.size, p.navigation_bar.labels, p.navigation_bar.idle),
+            (Position::Left, Edge::Top, Size::Regular, Labels::Labels, Idle::Hide)
         );
         let saved = serde_json::to_value(&p).unwrap();
         assert_eq!(serde_json::from_value::<super::Prefs>(saved).unwrap(), p);
-        for field in ["position", "size", "labels", "idle"] {
+        for field in ["position", "edge", "size", "labels", "idle"] {
             let mut value = serde_json::to_value(&p).unwrap();
             value["navigation_bar"][field] = json!({"wrong":"type"});
             let mut expected = p.clone();
             match field {
                 "position" => expected.navigation_bar.position = Position::default(),
+                "edge" => expected.navigation_bar.edge = Edge::default(),
                 "size" => expected.navigation_bar.size = Size::default(),
                 "labels" => expected.navigation_bar.labels = Labels::default(),
                 _ => expected.navigation_bar.idle = Idle::default(),
@@ -5783,6 +5883,28 @@ mod tests {
     }
 
     #[test]
+    fn choosing_the_solidworks_preset_frees_the_right_button_and_fits_on_middle_double_click() {
+        let none = Modifiers::default();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.preferences.middle_double_click = "off".into();
+        set(&mut app, &json!({"nav": "solidworks"})).unwrap();
+        assert!(app.preferences.right_drag_orbits, "a saved SolidWorks preset keeps its right-drag orbit");
+        assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit));
+        choose_nav_preset(&mut app.preferences, nav_preset("fusion"));
+        let p = &app.preferences;
+        assert_eq!((p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits), ("fusion", false, "off", true));
+        choose_nav_preset(&mut app.preferences, nav_preset("solidworks"));
+        let p = &app.preferences;
+        assert_eq!((p.nav.as_str(), p.zoom_reverse, p.middle_double_click.as_str(), p.right_drag_orbits), ("solidworks", true, "fit", false));
+        assert_eq!(nav_mode(&app, NavButton::Right, none), None, "right drag is left to the context menu (#6492)");
+        assert_eq!(nav_mode(&app, NavButton::Middle, none), Some(NavMode::Orbit));
+        set(&mut app, &json!({"nav": "openscad"})).unwrap();
+        assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Pan), "only an orbiting right drag is affected");
+        set(&mut app, &json!({"right_drag_orbits": true, "nav": "solidworks"})).unwrap();
+        assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit), "turned back on, the right drag orbits again");
+    }
+
+    #[test]
     fn openscad_preset_maps_navigation_and_persists() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         set(&mut app, &json!({"nav": OPENSCAD_NAV})).unwrap();
@@ -5953,7 +6075,7 @@ mod tests {
         assert!(app.prefs_window.open && app.prefs_window.section == 0);
         control(&mut app, &json!({"theme": "light", "ui_scale": 1.25, "zoom_to_cursor": false})).unwrap();
         assert!(!app.ui.dark, "light applies at once");
-        app.keymap.custom.insert("solid.extrude".into(), "Shift+E".into());
+        app.keymap.custom.insert("solid.extrude".into(), vec!["Shift+E".into()]);
         let v = control(&mut app, &json!({"button": "cancel"})).unwrap();
         assert_eq!(v["dialog"], serde_json::Value::Null);
         assert!(app.ui.dark && app.preferences.theme == "dark" && app.preferences.ui_scale == 1.0 && app.preferences.zoom_to_cursor);
@@ -5989,6 +6111,62 @@ mod tests {
         assert!(set(&mut app, &json!({"up_axis": "x"})).is_err());
         assert!(set(&mut app, &json!({"theme": "sepia"})).is_err());
         assert!(set(&mut app, &json!({"language": "xx"})).is_err());
+    }
+
+    /// Apply is disabled while nothing changed since the dialog opened or since the last Apply,
+    /// enabled by a change, and disabled again by Apply (#8561).
+    #[test]
+    fn apply_is_enabled_only_while_something_changed() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let ctx = crate::fonts::test_context();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+            focused: true,
+            ..Default::default()
+        };
+        let draw = |app: &mut SolveApp, events: Vec<egui::Event>| {
+            crate::test_support::frame(&ctx, egui::RawInput { events, ..input() }, |ui| show(app, ui.ctx()));
+            crate::scenario::count_of("dialog:apply:enabled")
+        };
+        let v = control(&mut app, &json!({"open": "Navigation"})).unwrap();
+        assert_eq!(v["apply_enabled"], false, "nothing changed yet");
+        assert_eq!(draw(&mut app, vec![]), Some(0.0), "just opened: Apply is disabled");
+
+        let v = control(&mut app, &json!({"zoom_to_cursor": false})).unwrap();
+        assert_eq!(v["apply_enabled"], true);
+        assert_eq!(draw(&mut app, vec![]), Some(1.0), "after a change: Apply is enabled");
+        let v = control(&mut app, &json!({"zoom_to_cursor": true})).unwrap();
+        assert_eq!(v["apply_enabled"], false, "a change put back by hand leaves nothing to apply");
+        control(&mut app, &json!({"zoom_to_cursor": false})).unwrap();
+
+        // Clicking Apply keeps the change and leaves nothing to apply.
+        draw(&mut app, vec![]);
+        let apply = crate::scenario::handle_at("dialog:apply").unwrap();
+        draw(&mut app, crate::test_support::pointer(apply, true));
+        draw(&mut app, crate::test_support::pointer(apply, false));
+        assert!(app.prefs_window.open && !app.preferences.zoom_to_cursor, "Apply keeps the dialog and the change");
+        assert_eq!(draw(&mut app, vec![]), Some(0.0), "after Apply: Apply is disabled");
+        // A disabled Apply does nothing when clicked.
+        draw(&mut app, crate::test_support::pointer(apply, true));
+        draw(&mut app, crate::test_support::pointer(apply, false));
+        assert_eq!(draw(&mut app, vec![]), Some(0.0));
+
+        // Every setting Cancel would put back counts, the shortcuts and view settings included;
+        // update bookkeeping (not a setting, and Cancel keeps it) does not.
+        app.preferences.update.last_check += 1.0;
+        assert_eq!(draw(&mut app, vec![]), Some(0.0), "update bookkeeping is not a change");
+        app.keymap.custom.insert("solid.extrude".into(), vec!["Shift+E".into()]);
+        assert_eq!(draw(&mut app, vec![]), Some(1.0), "a rebinding is a change");
+        let v = control(&mut app, &json!({"button": "apply"})).unwrap();
+        assert_eq!(v["apply_enabled"], false);
+        app.ui.show_grid = !app.ui.show_grid;
+        assert_eq!(draw(&mut app, vec![]), Some(1.0), "a view setting is a change");
+
+        // Cancel puts it back and closes; opened again, there is nothing to apply.
+        let v = control(&mut app, &json!({"button": "cancel"})).unwrap();
+        assert_eq!(v["apply_enabled"], false);
+        let v = control(&mut app, &json!({"open": "General"})).unwrap();
+        assert_eq!(v["apply_enabled"], false);
     }
 
     #[test]

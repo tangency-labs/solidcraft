@@ -129,6 +129,24 @@ fn occurrence_second_row_selects_exact_path_and_menu_actions() {
 }
 
 #[test]
+fn turn_up_axis_follows_the_placement_right_clicked() {
+    // Whichever placement comes first, a grounded one can't turn and a free one can.
+    let (mut h, _, first, second) = fixture();
+    let turns = |h: &Harness, occurrence: u64| {
+        let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![occurrence] });
+        let turn = items.into_iter().find(|i| i.id == "ui.turnUpAxis").unwrap();
+        let children: Vec<_> = turn.children.iter().map(|c| (c.enabled, c.params.as_ref().unwrap()["occurrence"].as_u64())).collect();
+        (turn.enabled, children)
+    };
+    for (grounded, free) in [(first, second), (second, first)] {
+        h.app.run("occurrence.ground", json!({"occurrence": grounded, "grounded": true})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": free, "grounded": false})).unwrap();
+        assert_eq!(turns(&h, free), (true, vec![(true, Some(free)); 2]), "free placement {free}");
+        assert_eq!(turns(&h, grounded), (false, vec![(false, Some(grounded)); 2]), "grounded placement {grounded}");
+    }
+}
+
+#[test]
 fn occurrence_eye_and_fold_are_independent_and_survive_rename() {
     let (mut h, component, first, second) = fixture();
     click(&mut h, &[second], "eye");

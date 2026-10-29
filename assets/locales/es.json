@@ -3340,6 +3340,7 @@
   "ui.pan_zoom_orbit": "Desplazar, zoom y orbitar",
   "ui.parallel": "Paralelo",
   "ui.parameters": "Parámetros",
+  "ui.part_size_needs_a_part": "Seleccione una pieza normalizada insertada (un tornillo, una tuerca, una arandela o un pasador) para cambiar su tamaño. Para agrandar o reducir un cuerpo, use Escala.",
   "ui.part_size_shared": "Reconstruye la pieza y sustituye las operaciones añadidas. Se actualizan todas las apariciones de este componente.",
   "ui.paste": "Pegar",
   "ui.path": "Trayectoria",

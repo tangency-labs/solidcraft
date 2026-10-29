@@ -2030,6 +2030,7 @@
   "ui.pan_zoom_orbit": "Przesuwanie, powiększanie, obracanie",
   "ui.parallel": "Równoległość",
   "ui.parameters": "Parametry",
+  "ui.part_size_needs_a_part": "Zaznacz wstawioną część znormalizowaną (śrubę, nakrętkę, podkładkę lub kołek), aby zmienić jej rozmiar. Aby powiększyć lub pomniejszyć bryłę, użyj polecenia Skala.",
   "ui.part_size_shared": "Przebudowuje część, zastępując wszystkie dodane elementy. Wszystkie wystąpienia tego komponentu zostaną zaktualizowane.",
   "ui.paste": "Wklej",
   "ui.path": "Ścieżka",

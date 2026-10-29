@@ -97,6 +97,26 @@ fn fillet_and_chamfer_corners() {
     assert!((area(&s) - (a0 - 8.0)).abs() < 1e-6, "{}", area(&s));
 }
 
+/// A chamfer where the two lines have no corner is refused, as a fillet there is: two lines
+/// lying on each other made a chamfer line of no length between their cut-back ends (found by a
+/// local trim fuzzer), and two lines in line with each other have no corner either.
+#[test]
+fn a_chamfer_where_two_lines_lie_in_line_is_refused() {
+    for far in [[0, 10], [0, 30]] {
+        let mut s = new_sketch();
+        let a = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 20]], "infer": false})))[0].clone();
+        let b = curves(&run(&mut s, "sketch.line", json!({"points": [far, [0, 20]], "infer": false, "connect": false})))[0].clone();
+        run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{a}.end"), "b": format!("{b}.end")}));
+        let n = sk(&s).curves.len();
+        for cmd in ["sketch.chamfer.equal_distance", "sketch.fillet"] {
+            let p = if cmd == "sketch.fillet" { json!({"a": a, "b": b, "radius": 2}) } else { json!({"a": a, "b": b, "distance": 2}) };
+            let e = s.execute(cmd, &p).unwrap_err().to_string();
+            assert!(e.contains("parallel"), "{cmd} at {far:?}: {e}");
+            assert_eq!(sk(&s).curves.len(), n, "{cmd} at {far:?}");
+        }
+    }
+}
+
 /// The ids of the constraints driven by the model parameter `name`.
 fn driven_by(s: &Session, name: &str) -> Vec<String> {
     sk(s).constraints.iter().filter(|c| c.param.as_deref() == Some(name)).map(|c| c.id.clone()).collect()

@@ -2202,6 +2202,7 @@
   "ui.pan_zoom_orbit": "Panorér, zoom, rotér visning",
   "ui.parallel": "Parallel",
   "ui.parameters": "Parametre",
+  "ui.part_size_needs_a_part": "Vælg en indsat standarddel (en skrue, møtrik, skive eller stift) for at ændre dens størrelse. Brug Skalering til at gøre et emne større eller mindre.",
   "ui.part_size_shared": "Genopbygger delen og erstatter alle tilføjede features. Alle forekomster af komponenten opdateres.",
   "ui.paste": "Indsæt",
   "ui.path": "Bane",

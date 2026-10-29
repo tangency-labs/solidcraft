@@ -44,6 +44,10 @@ pub enum Target {
     OriginPlane {
         name: String,
     },
+    /// An origin axis (X, Y or Z).
+    OriginAxis {
+        name: String,
+    },
     Component {
         id: u64,
     },
@@ -375,6 +379,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Feature { id } => feature_items(app, *id),
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
+        Target::OriginAxis { name } => origin_axis_items(app, name),
         Target::Component { id } => component_items(app, *id),
         Target::Occurrence { path } => occurrence_items(app, path),
         Target::Group { id, scope } => crate::browser::group_items(app, *id, scope),
@@ -789,6 +794,12 @@ fn origin_plane_items(app: &SolveApp, name: &str) -> Vec<Item> {
     ]
 }
 
+/// An origin axis: Show/Hide, as on a plane (an axis takes no sketch) (#8382).
+fn origin_axis_items(app: &SolveApp, name: &str) -> Vec<Item> {
+    let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == name);
+    vec![act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [name], "show": !visible }))]
+}
+
 /// An assembly joint: edit, drive, suppress, delete.
 fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { return Vec::new() };
@@ -822,6 +833,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         entries.insert(0, Item::heading("Shared child: edits affect all copies of its parent"));
     }
     let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
+    // The component's menu asks its first placement; this row may be another one.
+    let movable = !placement.grounded && app.session.held_by_rigid_group(placement.occurrence).is_none();
     for item in &mut entries {
         match item.id.as_str() {
             "ui.activate" => {
@@ -835,11 +848,13 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             }
             "ui.moveOccurrence" => {
                 item.params = Some(json!({"occurrence": placement.occurrence, "path": path}));
-                item.enabled = !placement.grounded && app.session.held_by_rigid_group(placement.occurrence).is_none();
+                item.enabled = movable;
             }
             "ui.properties" => item.params = Some(json!({"occurrence": placement.occurrence, "path": path})),
             "ui.turnUpAxis" => {
+                item.enabled = movable;
                 for child in &mut item.children {
+                    child.enabled = movable;
                     if let Some(params) = child.params.as_mut() {
                         params["occurrence"] = json!(placement.occurrence);
                     }

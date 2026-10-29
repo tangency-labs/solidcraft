@@ -1690,10 +1690,15 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             // Through the command, so the Origin row's eye is an undo step (#2219).
             let _ = app.run("browser.visibility", json!({ "items": [k], "visible": !visible }));
         }
-        if let Some(p) = r.secondary
-            && icon == "plane"
-        {
-            crate::context_menu::open_for(app, p, Target::OriginPlane { name: k.into() });
+        if let Some(p) = r.secondary {
+            let target = match icon {
+                "plane" => Some(Target::OriginPlane { name: k.into() }),
+                "axis" => Some(Target::OriginAxis { name: k.into() }),
+                _ => None,
+            };
+            if let Some(target) = target {
+                crate::context_menu::open_for(app, p, target);
+            }
         }
         if r.hovered && icon == "plane" {
             acts.hover_plane = Some(k.into());

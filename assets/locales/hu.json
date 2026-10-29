@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Pásztázás, nagyítás, keringés",
   "ui.parallel": "Párhuzamos",
   "ui.parameters": "Paraméterek",
+  "ui.part_size_needs_a_part": "Jelöljön ki egy beillesztett szabványos alkatrészt (csavart, anyát, alátétet vagy csapot) a méretének módosításához. Test nagyításához vagy kicsinyítéséhez használja az Átlépték parancsot.",
   "ui.part_size_shared": "Újraépíti az alkatrészt, a hozzáadott elemeket lecserélve. A komponens minden előfordulása frissül.",
   "ui.paste": "Beillesztés",
   "ui.path": "Útvonal",

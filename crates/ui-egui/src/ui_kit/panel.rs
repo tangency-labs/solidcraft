@@ -892,6 +892,7 @@ pub struct Window<'a> {
     ok: &'a str,
     cancel: &'a str,
     apply: Option<&'a str>,
+    nothing_to_apply: bool,
     enter_submits: bool,
     escape_closes: bool,
     closeable: bool,
@@ -915,6 +916,7 @@ impl<'a> Window<'a> {
             ok: "OK",
             cancel: "Cancel",
             apply: None,
+            nothing_to_apply: false,
             enter_submits: true,
             escape_closes: true,
             closeable: true,
@@ -943,6 +945,14 @@ impl<'a> Window<'a> {
     /// leaves the primary action out.
     pub(crate) fn actions(mut self, ok: &'a str, cancel: &'a str, apply: Option<&'a str>) -> Self {
         (self.ok, self.cancel, self.apply) = (ok, cancel, apply);
+        self
+    }
+
+    /// Whether the third action has anything to do: for an Apply that keeps the window open,
+    /// whether anything changed since it opened or since the last Apply (#8561). Without it
+    /// the action is disabled for the pointer, the keyboard and accessibility.
+    pub(crate) fn apply_enabled(mut self, enabled: bool) -> Self {
+        self.nothing_to_apply = !enabled;
         self
     }
 
@@ -1045,7 +1055,14 @@ impl<'a> Window<'a> {
             let action = if self.ok.is_empty() && self.cancel.is_empty() && self.apply.is_none() && !self.left_slot {
                 super::Action::None
             } else {
-                super::actions::footer_with_left(ui, self.ok, self.cancel, valid, super::Footer { apply: self.apply, ..Default::default() }, left)
+                super::actions::footer_with_left(
+                    ui,
+                    self.ok,
+                    self.cancel,
+                    valid,
+                    super::Footer { apply: self.apply, nothing_to_apply: self.nothing_to_apply, ..Default::default() },
+                    left,
+                )
             };
             (close, action)
         })

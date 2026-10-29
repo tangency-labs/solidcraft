@@ -1789,6 +1789,12 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl FnOnce(f64) -> Res
         let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
         let (u, v) = ((pa - pc).normalized().unwrap_or(Vec2::X), (pb - pc).normalized().unwrap_or(Vec2::Y));
         let corner_angle = u.cross(v).atan2(u.dot(v)).abs();
+        // Lines in line with each other, or lying on each other, have no corner to cut, as a
+        // fillet refuses them: on two lines lying on each other the chamfer was a line of no
+        // length between their cut-back ends.
+        if !(2e-6..=std::f64::consts::PI - 2e-9).contains(&corner_angle) {
+            return Err(bad(cmd, "the lines are parallel"));
+        }
         let (da, db) = dists(corner_angle)?;
         let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
         let l = sk.add_line_pts(ta, tb, None)?;

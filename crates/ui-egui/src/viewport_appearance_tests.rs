@@ -202,6 +202,29 @@ fn a_colour_edit_reuses_every_block_vertex() {
 }
 
 #[test]
+fn a_material_colour_edit_its_undo_and_redo_reach_the_viewport() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
+    let name = app.session.world_state().bodies[0].name.clone();
+    app.run("material.create", json!({"name": "Wood dark", "density_g_cm3": 0.7, "color": "#c8a573"})).unwrap();
+    app.run("material.assign", json!({"bodies": [name], "material": "Wood dark"})).unwrap();
+    let colour = |app: &SolveApp| {
+        let scene = build_scene(app);
+        let block = scene.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
+        first_vertex(&scene, &block.bytes.vertices).1
+    };
+    assert_eq!(colour(&app), Some([0xc8, 0xa5, 0x73, 255]));
+    app.run("material.edit", json!({"material": "Wood dark", "color": "#ccb799"})).unwrap();
+    assert_eq!(colour(&app), Some([0xcc, 0xb7, 0x99, 255]), "the edited material colour is drawn");
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(colour(&app), Some([0xc8, 0xa5, 0x73, 255]), "undo draws the old colour again");
+    app.run("edit.redo", json!({})).unwrap();
+    assert_eq!(colour(&app), Some([0xcc, 0xb7, 0x99, 255]), "redo draws the edited colour again");
+}
+
+#[test]
 fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.ui.ground_shadow = false;

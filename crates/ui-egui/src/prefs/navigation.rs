@@ -8,6 +8,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             .bindings
             .iter()
             .filter(|binding| !(crate::mouse_gesture::active(app) && binding.button == NavButton::Right))
+            .filter(|binding| app.preferences.right_drag_orbits || !(binding.button == NavButton::Right && binding.mode == NavMode::Orbit))
             .map(|binding| {
                 let button = match binding.button {
                     NavButton::Left => "prefs.button_left",
@@ -55,8 +56,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     let picker = ui_kit::dropdown_menu(ui, "pref_nav", nav_preset(&app.preferences.nav).translated_label(), |ui| {
                         for preset in NAV_PRESETS {
                             if ui_kit::list_picker(ui, preset.id, preset.translated_label(), app.preferences.nav == preset.id).clicked() {
-                                app.preferences.nav = preset.id.into();
-                                app.preferences.zoom_reverse = preset.reverse_zoom;
+                                choose_nav_preset(&mut app.preferences, preset);
                             }
                         }
                     });
@@ -76,6 +76,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             if app.preferences.free_orbit_upright {
                 ui_kit::text(ui, crate::i18n::tr("nav.free_orbit_upright.help"), ui_kit::Text::Hint("free_orbit_upright"));
             }
+        }
+        // Only shown where the mapping orbits on a right drag (#6492).
+        if nav_preset(&app.preferences.nav).bindings.iter().any(|b| b.button == NavButton::Right && b.mode == NavMode::Orbit) {
+            let right_drag = setting::right_drag_orbits(app, ui).on_hover_text(crate::i18n::tr("nav.right_drag_orbits.help"));
+            crate::scenario::publish_target("prefs:right_drag_orbits", right_drag.rect);
         }
         let help = if app.preferences.nav == TOUCHPAD_NAV {
             app.tr("nav.touchpad.help").to_owned()

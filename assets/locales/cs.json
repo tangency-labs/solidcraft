@@ -3950,6 +3950,7 @@
   "ui.pan_zoom_orbit": "Posun, přiblížení, otáčení",
   "ui.parallel": "Rovnoběžnost",
   "ui.parameters": "Parametry",
+  "ui.part_size_needs_a_part": "Vyberte vložený normalizovaný díl (šroub, matici, podložku nebo kolík), jehož velikost chcete změnit. Těleso zvětšíte nebo zmenšíte příkazem Měřítko.",
   "ui.part_size_shared": "Přestaví díl a nahradí všechny přidané prvky. Aktualizují se všechny výskyty této komponenty.",
   "ui.paste": "Vložit",
   "ui.path": "Cesta",
