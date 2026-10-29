@@ -7,6 +7,7 @@
 //! each lives in its own submodule and adds methods to [`Surface`] (or free
 //! functions).
 
+pub mod approximate;
 pub mod assert_valid;
 pub mod p1;
 pub mod p10;
