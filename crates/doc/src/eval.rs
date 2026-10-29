@@ -8775,6 +8775,23 @@ pub fn world_state_moved_reusing(
     out
 }
 
+/// The occurrence path that places each body of the [`world_state`] of `doc` and `st`, in the
+/// order of its bodies (a body of the root's own: an empty path). Bodies under the same moved
+/// occurrence move together: a joint drag draws them as one rigid layer (#6325) without placing
+/// them again.
+pub fn world_body_paths(doc: &Document, st: &ModelState) -> Vec<Vec<u64>> {
+    if doc.occurrences.is_empty() {
+        return vec![Vec::new(); st.bodies.len()];
+    }
+    let owners = doc.model_body_components(st);
+    let mut out = Vec::with_capacity(st.bodies.len());
+    // The same walk as `world_state_moved_reusing`: placements in order, each its component's bodies.
+    for (comp, path, _) in doc.placements() {
+        out.extend(owners.iter().filter(|owner| **owner == comp).map(|_| path.clone()));
+    }
+    out
+}
+
 #[cfg(test)]
 mod display_preparation_tests {
     use super::*;

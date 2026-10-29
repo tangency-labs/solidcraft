@@ -10,7 +10,7 @@ use std::sync::Arc;
 use egui::Pos2;
 use serde_json::json;
 use solidcraft_engine::DragPreview;
-use solidcraft_engine::doc::{Document, Mat, apply_point, joints, mat_inverse};
+use solidcraft_engine::doc::{Document, Mat, ModelState, apply_point, joints, mat_inverse};
 use solidcraft_engine::geom::Vec3;
 
 use crate::SolveApp;
@@ -28,6 +28,11 @@ pub struct Drag {
     /// The design the drag began on. A change to it from elsewhere (undo pressed mid-drag) ends
     /// the drag without applying it.
     design: Arc<Document>,
+    /// The world shown when the drag began and the moves not captured then: the viewport draws
+    /// the drag's frames from it, the moving parts as layers moved on the GPU
+    /// (`viewport_layers.rs`).
+    world: Arc<ModelState>,
+    pending: BTreeMap<u64, Mat>,
     /// The design with the joint values and placements the last frame reached: where the next
     /// frame starts from, and what the view shows.
     pose: Document,
@@ -62,12 +67,18 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let Some(local) = mat_inverse(&joints::occurrence_world(&s.doc, occurrence)).map(|inv| apply_point(&inv, at)) else { return false };
     let normal = proj.ray(p).1;
     let (design, pose) = (s.doc.clone(), (*s.doc).clone());
-    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, design, pose, last: None });
+    let (world, pending) = (s.world_state(), s.pending_moves.clone());
+    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, design, world, pending, pose, last: None });
     true
 }
 
 pub fn active(app: &SolveApp) -> bool {
     app.viewport.joint_drag.is_some()
+}
+
+/// The design, world and uncaptured moves the drag under way began on.
+pub(crate) fn began_on(app: &SolveApp) -> Option<(&Arc<Document>, &Arc<ModelState>, &BTreeMap<u64, Mat>)> {
+    app.viewport.joint_drag.as_ref().map(|d| (&d.design, &d.world, &d.pending))
 }
 
 /// Every joint's values in `doc`.
@@ -311,6 +322,45 @@ mod tests {
         release(&mut h, b);
         assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc) && h.app.session.undo.len() == undo, "the release applies nothing");
         assert!(arm_at(&h, end).dist(end) < 1e-9);
+    }
+
+    /// #6325: on a GPU viewport the frames of a drag draw the arm as a layer moved on the GPU:
+    /// the world shown stays the one the drag began on (nothing is placed again), the layer's move
+    /// puts the arm where the frame's solve has it, the view's extent follows it, and the release
+    /// draws the design whole again. A highlight on the arm draws the frame from the world.
+    #[test]
+    fn a_drag_draws_its_moving_part_as_a_layer() {
+        let (mut h, end, a, b) = hinged_arm();
+        h.app.viewport.gpu =
+            Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        h.frames(2);
+        let before = crate::open_meshing::shown_world(&h.app);
+        press_and_move(&mut h, a, b);
+        h.frames(1);
+        let shown = crate::open_meshing::shown_world(&h.app);
+        assert!(std::sync::Arc::ptr_eq(&before, &shown), "the world shown is the one the drag began on");
+        let layers = crate::viewport::layers::frame(&mut h.app);
+        assert_eq!(layers.len(), 2, "the arm's layer and the ground shadow's");
+        let m = layers[0].transform;
+        let moved = [0, 1, 2].map(|r| m[0][r] * end.x as f32 + m[1][r] * end.y as f32 + m[2][r] * end.z as f32 + m[3][r]);
+        let reached = h.app.session.world_state();
+        let tip = reached.bodies.iter().filter(|b| b.mesh().bounds().max.y > 50.0).count();
+        assert_eq!(tip, 1, "the frame's exact world has the arm turned");
+        assert!(Vec3::new(f64::from(moved[0]), f64::from(moved[1]), f64::from(moved[2])).dist(Vec3::new(0.0, 55.0, 10.0)) < 0.5, "{moved:?}");
+        let bounds = crate::viewport::model_bounds(&h.app);
+        assert!(bounds.max.y > 55.0 && bounds.max.x < 10.0, "the extent follows the arm: {bounds:?}");
+        // The arm selected: its highlight is drawn from the world, so the frame is too.
+        let arm = reached.bodies.iter().find(|b| b.mesh().bounds().max.y > 50.0).map(|b| b.name.clone()).unwrap_or_default();
+        h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: arm }];
+        h.frames(1);
+        assert!(crate::viewport::layers::frame(&mut h.app).is_empty(), "a highlighted moving part draws the frame from the world");
+        assert!(!std::sync::Arc::ptr_eq(&before, &crate::open_meshing::shown_world(&h.app)));
+        h.app.session.selection.clear();
+        h.frames(1);
+        assert_eq!(crate::viewport::layers::frame(&mut h.app).len(), 2, "and back in layers without it");
+        release(&mut h, b);
+        h.frames(1);
+        assert!(h.app.viewport.layers.is_none() && crate::viewport::layers::frame(&mut h.app).is_empty(), "the release draws the design whole");
     }
 
     /// With the undo history full, a drag still adds one step: it drops the oldest once, not one

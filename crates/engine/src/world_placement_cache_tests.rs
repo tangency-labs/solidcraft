@@ -478,3 +478,27 @@ fn body_frames_are_kept_with_the_world_state() {
     let _ = session.world_state();
     assert!(session.body_frames().iter().any(|(world, ..)| world.starts_with("Other")), "a new body is in them");
 }
+
+/// #6325: each world body's occurrence path, in the world's body order: a joint drag moves the
+/// bodies under a moved occurrence as one layer, drawn without placing them again.
+#[test]
+fn world_bodies_know_the_occurrence_path_that_places_them() {
+    let mut session = Session::default();
+    run(&mut session, "solid.box", json!({"length":1,"width":1,"height":1,"body_name":"Root"}));
+    let outer = run(&mut session, "component.create", json!({"name":"Outer"}))["occurrence"].as_u64().unwrap();
+    run(&mut session, "solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Shell","operation":"new"}));
+    let inner = run(&mut session, "component.create", json!({"name":"Inner"}))["occurrence"].as_u64().unwrap();
+    run(&mut session, "solid.box", json!({"length":1,"width":2,"height":1,"body_name":"Pin","operation":"new"}));
+    run(&mut session, "component.activate", json!({"component":"root"}));
+    let copy = run(&mut session, "occurrence.copy", json!({"occurrence":outer}))["occurrence"].as_u64().unwrap();
+    let world = session.world_state();
+    let paths = crate::doc::world_body_paths(&session.doc, &session.model.state());
+    assert_eq!(paths.len(), world.bodies.len());
+    for (body, path) in world.bodies.iter().zip(&paths) {
+        let placed = path.last().and_then(|o| session.doc.occurrences.iter().find(|x| x.id == *o)).map_or(0, |o| o.component);
+        assert_eq!(placed, body.component, "{} placed by {path:?}", body.name);
+    }
+    for want in [vec![], vec![outer], vec![outer, inner], vec![copy], vec![copy, inner]] {
+        assert!(paths.contains(&want), "{want:?} in {paths:?}");
+    }
+}

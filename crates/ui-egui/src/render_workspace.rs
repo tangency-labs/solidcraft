@@ -2248,6 +2248,7 @@ fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera
                 let c = Tokens::get().body_selected;
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
+            layers: Vec::new(),
         });
         crate::blur::viewport(ui.painter(), rect, callback, rect, [background.viewport_top, background.viewport_bottom]);
         Ok(())
