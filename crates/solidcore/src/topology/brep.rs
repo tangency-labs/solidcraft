@@ -5,6 +5,7 @@
 //!
 //! | Rust      | Upstream                                                        |
 //! |-----------|-----------------------------------------------------------------|
+//! | [`local_operation`] | `LocalOperation`                                     |
 //! | [`mirror`]| `Mirror` (unit `topology.brep_mirror`)                          |
 //! | [`p1`]    | see the module                                                  |
 //! | [`p2`]    | see the module                                                  |
@@ -17,6 +18,7 @@
 //!
 //! Deviations: the B-rep records are the arenas of [`crate::topology::Brep`].
 
+pub mod local_operation;
 pub mod mirror;
 pub mod p1;
 pub mod p10;

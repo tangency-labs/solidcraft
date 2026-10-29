@@ -4116,6 +4116,51 @@ pub struct LocalOperationGeometryCreation<O> {
     pub surfaces: Vec<O>,
 }
 
+impl<O: Copy + PartialEq> LocalOperationGeometryCreation<O> {
+    /// The creator over the owned-geometry face adapter ([`FaceOffsetBrep`]) of the
+    /// executive: [`LocalOperationGeometryCreation::new`] without the handle bounds.
+    pub(crate) fn from_handles(
+        offset_distance: f64,
+        this_approx_tol_3d: f64,
+        faces: Vec<O>,
+        surfaces: Vec<O>,
+    ) -> Self {
+        let mut base = OffsetGeometryCreation::new(offset_distance, this_approx_tol_3d);
+        base.make_analytics = false;
+        Self {
+            base,
+            faces,
+            surfaces,
+        }
+    }
+
+    /// [`LocalOperationGeometryCreation::faceuse_offset`] over the face adapter: the
+    /// surface listed for the face use's face, as it is (`m_bMakeAnalytics` is `FALSE`
+    /// from the constructor on, so the reparameterisation and analytic copy are never
+    /// reached; a creator that asks for them is refused as `SM_ERR`).
+    pub(crate) fn faceuse_offset_with_backend(
+        &self,
+        brep: &mut impl FaceOffsetBrep<O>,
+        original_faceuse: O,
+    ) -> Result<(Option<O>, SsiData<O>)> {
+        let face = brep
+            .faceuse_face(original_faceuse)?
+            .ok_or(dangling("face use without face"))?;
+        let Some(index) = self.faces.iter().position(|f| *f == face) else {
+            return Err(sm_err(OP_LOCAL));
+        };
+        let new_surface = self
+            .surfaces
+            .get(index)
+            .copied()
+            .ok_or(dangling("surface list shorter than the face list"))?;
+        if self.base.make_analytics {
+            return Err(sm_err(OP_LOCAL));
+        }
+        Ok((Some(new_surface), SsiData::default()))
+    }
+}
+
 impl<O: ClassObject + SolutionObject> LocalOperationGeometryCreation<O> {
     /// `SmLocalOperationGeometryCreation(dOffsetDistance, dThisApproxTol3d, rFaces,
     /// rSurfaces)`.

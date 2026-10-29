@@ -1025,11 +1025,17 @@ impl OffsetExecutive {
     ) -> Result<()> {
         let operation = if extended { OP_EXTENDED } else { OP_SOLID };
         let faceuse = select_offset_faceuse(original, id, extended, self.inset(), operation)?;
-        let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
-            self.offset_distance(),
-            self.approximation_tol_3d(),
-        );
-        let (mut surface, ssi) = super::face::build(kernel, &creator, original, faceuse, true)?;
+        let (mut surface, ssi) = if self.local_faces.is_empty() {
+            let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
+                self.offset_distance(),
+                self.approximation_tol_3d(),
+            );
+            super::face::build(kernel, &creator, original, faceuse, true)?
+        } else {
+            // SmLocalOperationGeometryCreation::FaceuseOffset: the surface given per face. The
+            // creator object decides upstream (virtual call), not `m_eOffsetOperation`.
+            super::face::build_local(original, &self.local_faces, &self.local_surfaces, faceuse)?
+        };
         // Not upstream (WR-346, tangency-labs/solidcore#397), opt-in
         // `Kernel::fixes.offset_collapsed_rounds_mated`: an inset face whose offset collapses (a
         // convex round thinner than the wall) gets no offset face; the faces beside it are

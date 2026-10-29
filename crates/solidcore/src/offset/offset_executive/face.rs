@@ -6,6 +6,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | `build` (private) | `DoSolidOffset` / `DoExtendedOffset` calls to `FaceuseOffset` |
+//! | `build_local` (private) | the same call of a local operation (`SmLocalOperationGeometryCreation::FaceuseOffset`) |
 //! | `FaceBrep` (private) | source lookup and owned geometry from `FaceuseOffset` |
 //!
 //! Deviations: tagged handles separate source topology/geometry from owned results;
@@ -17,13 +18,15 @@ use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::offset::offset_geometry_creation::{FaceOffsetBrep, OffsetGeometryCreation, SsiData};
+use crate::offset::offset_geometry_creation::{
+    FaceOffsetBrep, LocalOperationGeometryCreation, OffsetGeometryCreation, SsiData,
+};
 use crate::surface::surface::Surface;
 use crate::topology::{edgeuse::p1 as faceuse_ops, face::p2 as face_ops, Brep, FaceId, FaceuseId};
 
 const OP: &str = "offset::offset_executive::face";
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Handle {
     SourceFaceuse(FaceuseId),
     SourceFace(FaceId),
@@ -165,6 +168,29 @@ pub(super) fn build(
         Handle::SourceFaceuse(faceuse),
         skip_self_intersection,
     )?;
+    backend.take_output(made)
+}
+
+/// The surface `SmLocalOperationGeometryCreation::FaceuseOffset` lists for a source face
+/// use's face: `surfaces[i]` replaces the surface of `faces[i]`. No self-intersections.
+pub(super) fn build_local(
+    original: &Brep,
+    faces: &[FaceId],
+    surfaces: &[Surface],
+    faceuse: FaceuseId,
+) -> Result<(Option<Surface>, SsiData<Curve>)> {
+    let mut backend = FaceBrep {
+        original,
+        surfaces: surfaces.iter().cloned().map(Some).collect(),
+        curves: Vec::new(),
+    };
+    let creator = LocalOperationGeometryCreation::from_handles(
+        0.0,
+        0.0,
+        faces.iter().map(|&f| Handle::SourceFace(f)).collect(),
+        (0..surfaces.len()).map(Handle::NewSurface).collect(),
+    );
+    let made = creator.faceuse_offset_with_backend(&mut backend, Handle::SourceFaceuse(faceuse))?;
     backend.take_output(made)
 }
 
