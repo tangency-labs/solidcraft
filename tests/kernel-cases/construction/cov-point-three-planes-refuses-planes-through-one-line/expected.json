@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "three planes sharing one line",
+ "source": "analytic",
+ "method": "XZ, YZ and x = y all hold the Z axis: they meet in a line, not a point: refused",
+ "outcome": "refused",
+ "refusal": "the planes don't meet in a point"
+}

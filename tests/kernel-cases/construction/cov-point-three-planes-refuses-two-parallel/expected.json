@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "three planes, two of them parallel",
+ "source": "analytic",
+ "method": "XY and z = 5 are parallel: refused",
+ "outcome": "refused",
+ "refusal": "two of the planes are parallel"
+}
