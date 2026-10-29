@@ -1899,9 +1899,12 @@ mod tests {
         assert!(rel(v, want) < 3e-3, "{v} vs {want}"); // (measured on meshes)
     }
 
-    /// Three faces of a box meeting at a corner (sharp edges), thickened out by 1: three slabs,
-    /// a wedge along each sharp edge and a corner tetrahedron, 3·100 + 3·(½·1²·10) + 1/6; a closed
-    /// solid that every check accepts. Thickened into the inside corner, refused.
+    /// Three faces of a box meeting at a corner (sharp edges), thickened out by 1: each face's
+    /// offset extended until the offsets meet, as SMLib thickens across a convex sharp edge (and
+    /// other CAD does): three slabs, a 1 × 1 × 10 block along each sharp edge and a unit cube at
+    /// the corner, 3·100 + 3·10 + 1 = 331 = 11³ − 10³; a closed solid that every check accepts.
+    /// Into the inside corner, and half each way, the same with the offsets trimmed where they
+    /// cross.
     #[test]
     fn thicken_a_box_corner_across_its_sharp_edges() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
@@ -1909,12 +1912,17 @@ mod tests {
         assert!(corner.is_surface() && corner.face_count() == 3);
         let t = thicken(&corner, 1.0, false).unwrap();
         assert!(!t.is_surface());
-        let want = 300.0 + 15.0 + 1.0 / 6.0;
+        let want = 300.0 + 30.0 + 1.0;
         let v = measure(&t).unwrap().volume;
         assert!(rel(v, want) < 1e-9, "{v} vs {want}");
         assert!(t.validity().is_empty(), "{:?}", t.validity());
-        assert!(thicken(&corner, -1.0, false).is_err());
-        assert!(thicken(&corner, 1.0, true).is_err(), "half of it goes into the inside corner");
+        // Into the inside corner the offsets are trimmed where they meet: 10³ − 9³; half each way,
+        // 10.5³ − 9.5³.
+        for (t, symmetric, want) in [(-1.0, false, 1000.0 - 729.0), (1.0, true, 10.5f64.powi(3) - 9.5f64.powi(3))] {
+            let t = thicken(&corner, t, symmetric).unwrap();
+            let v = measure(&t).unwrap().volume;
+            assert!(rel(v, want) < 1e-9 && t.validity().is_empty(), "{v} vs {want}");
+        }
     }
 
     /// A saddle B-spline patch thickened by 1.5 holds the volume its offsets sweep: by Steiner,
@@ -1992,12 +2000,12 @@ mod tests {
         let v = measure(&thicken(&side, -1.0, false).unwrap()).unwrap().volume;
         let want = std::f64::consts::PI * (100.0 - 81.0) * 20.0;
         assert!(rel(v, want) < 3e-4, "{v} vs {want}"); // (measured on meshes)
-        // Two faces meeting at a sharp edge: two slabs and the wedge closing the gap between
-        // them, its ends patched: 2·100 + ½·1²·10.
+        // Two faces meeting at a sharp edge: two slabs and, the offsets extended until they
+        // meet, the 1 × 1 × 10 block along the edge: 2·100 + 10.
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
         let two = copy_faces(&b, &[Vec3::new(5.0, 5.0, 10.0), Vec3::new(5.0, 0.0, 5.0)]).unwrap();
         let v = measure(&thicken(&two, 1.0, false).unwrap()).unwrap().volume;
-        assert!(rel(v, 205.0) < 1e-9, "{v}");
+        assert!(rel(v, 210.0) < 1e-9, "{v}");
     }
 
     #[test]
