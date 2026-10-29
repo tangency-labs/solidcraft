@@ -13,7 +13,10 @@
 //! Deviations: the solvers of the corner's two filleted edge uses are resolved by the
 //! caller (`GetFilletSolverOfEdgeuse`, which has no effects) and swapped with them.
 //! Edge uses, faces and edges that upstream dereferences are input errors when
-//! missing. There is no recursion.
+//! missing. There is no recursion. With `Kernel::fixes.fillet_3x2_mixed_concave_side_edge`
+//! (WR-524, off by default) the roles of the two fillets follow the unfilleted edge's
+//! convexity, as tangency-labs/smlib@1255993: where that edge is concave, the convex
+//! fillet's rail crosses it and the concave one's crosses its continuation.
 
 use std::collections::BTreeMap;
 
@@ -124,32 +127,49 @@ impl FilletCorner {
             .ok_or_else(|| invalid("corner without vertex"))?;
         let unknown = OrientType::Unknown;
 
+        // The edge use 'in-between' the two filleted edge uses (pCurrEU).
+        let curr_eu_found = all
+            .iter()
+            .copied()
+            .find(|&eu| eu != convex_eu && eu != concave_eu);
+        // By default the concave fillet's rail crosses the unfilleted edge (pCrossEU) and
+        // the convex one's its continuation (pExtEU), as in an L-shaped box. With
+        // `fillet_3x2_mixed_concave_side_edge` (WR-524) the roles follow the unfilleted
+        // edge's convexity, as tangency-labs/smlib@1255993: that fork resolves the
+        // in-between edge use and its convexity before the solvers.
+        let (cross_eu, ext_eu, cross_id, ext_id) = if k.fixes.fillet_3x2_mixed_concave_side_edge {
+            let curr_eu = curr_eu_found.ok_or_else(|| SolidError::null_pointer(OP))?;
+            if eu2::is_convex_radial_sector(k, target, curr_eu, 5, false, 0.0)? {
+                (convex_eu, concave_eu, convex_id, concave_id)
+            } else {
+                (concave_eu, convex_eu, concave_id, convex_id)
+            }
+        } else {
+            (concave_eu, convex_eu, concave_id, convex_id)
+        };
+
         {
             // Get Solvers
-            let convex_solver = live(solvers, convex_id)?;
-            let concave_solver = live(solvers, concave_id)?;
-            let convex_fg = convex_solver.first_fillet_geom()?;
-            let concave_fg = concave_solver.first_fillet_geom()?;
+            let ext_solver = live(solvers, ext_id)?;
+            let cross_solver = live(solvers, cross_id)?;
+            let ext_fg = ext_solver.first_fillet_geom()?;
+            let cross_fg = cross_solver.first_fillet_geom()?;
 
-            let curr_eu = all
-                .iter()
-                .copied()
-                .find(|&eu| eu != convex_eu && eu != concave_eu)
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let curr_eu = curr_eu_found.ok_or_else(|| SolidError::null_pointer(OP))?;
 
             // This edgeuse is 'in-between' two filletted edgeuses
             let fv0 = new_corner_vertex(k, pseudo, corner)?;
-            let side_eu = find_side_edgeuse(target, concave_eu, curr_eu)?;
+            let side_eu = find_side_edgeuse(target, cross_eu, curr_eu)?;
             let side = need(side_eu, "no side edge use intersects rail")?;
-            let rail_index = concave_solver.find_index_of_rail_x_side_edgeuse(target, side)?;
+            let rail_index = cross_solver.find_index_of_rail_x_side_edgeuse(target, side)?;
             pseudo.make_rail_edgeuse_on(
-                concave_fg,
+                cross_fg,
                 rail_index,
                 Some(fv0),
                 unknown,
                 None,
                 lookup(corner, self),
-                concave_solver,
+                cross_solver,
                 target,
             )?;
             {
@@ -160,7 +180,7 @@ impl FilletCorner {
             self.vertices.push(fv0);
 
             let common_face =
-                face_by_two_edgeuses(target, Some(convex_eu), Some(concave_eu), Some(curr_eu))?;
+                face_by_two_edgeuses(target, Some(ext_eu), Some(cross_eu), Some(curr_eu))?;
             let fv1 = new_corner_vertex(k, pseudo, corner)?;
             {
                 let v = pseudo.fillet_vertex_mut(fv1)?;
@@ -170,30 +190,30 @@ impl FilletCorner {
             self.vertices.push(fv1);
 
             // Setup rails of fillet
-            let rail_index = concave_solver.find_index_of_rail_on_face(target, common_face)?;
+            let rail_index = cross_solver.find_index_of_rail_on_face(target, common_face)?;
             pseudo.make_rail_edgeuse_on(
-                concave_fg,
+                cross_fg,
                 rail_index,
                 Some(fv1),
                 unknown,
                 None,
                 lookup(corner, self),
-                concave_solver,
+                cross_solver,
                 target,
             )?;
-            let other_rail_index = convex_solver.find_index_of_rail_on_face(target, common_face)?;
+            let other_rail_index = ext_solver.find_index_of_rail_on_face(target, common_face)?;
             pseudo.make_rail_edgeuse_on(
-                convex_fg,
+                ext_fg,
                 other_rail_index,
                 Some(fv1),
                 unknown,
                 None,
                 lookup(corner, self),
-                convex_solver,
+                ext_solver,
                 target,
             )?;
 
-            // Make a cross section on the concave fillet
+            // Make a cross section on the crossing (by default the concave) fillet
             let fe0 = pseudo.make_fillet_edge(Some(fv0), Some(fv1), Some(corner))?;
             pseudo
                 .fillet_edge_mut(fe0)?
@@ -202,24 +222,24 @@ impl FilletCorner {
                 eu1::primary_edgeuse(pseudo.brep(), fe0)?,
                 "cross edge without primary edge use",
             )?;
-            pseudo.set_edgeuse_fillet_geom(prim_eu, Some(concave_fg))?;
+            pseudo.set_edgeuse_fillet_geom(prim_eu, Some(cross_fg))?;
             self.edges.push(fe0);
 
             let fv2 = new_corner_vertex(k, pseudo, corner)?;
             pseudo
                 .fillet_vertex_mut(fv2)?
                 .set_fillet_vertex_type(FilletVertexType::RailXExtendedEdgeuse);
-            let side_eu = find_side_edgeuse(target, convex_eu, curr_eu)?;
+            let side_eu = find_side_edgeuse(target, ext_eu, curr_eu)?;
             let side = need(side_eu, "no side edge use intersects rail")?;
-            let rail_index = convex_solver.find_index_of_rail_x_side_edgeuse(target, side)?;
+            let rail_index = ext_solver.find_index_of_rail_x_side_edgeuse(target, side)?;
             pseudo.make_rail_edgeuse_on(
-                convex_fg,
+                ext_fg,
                 rail_index,
                 Some(fv2),
                 unknown,
                 None,
                 lookup(corner, self),
-                convex_solver,
+                ext_solver,
                 target,
             )?;
             pseudo
@@ -227,7 +247,7 @@ impl FilletCorner {
                 .set_point_class(PointClassType::Edgeuse, side_eu.map(EntityRef::Edgeuse));
             self.vertices.push(fv2);
 
-            // Make a cross section on the conveex fillet
+            // Make a cross section on the extended (by default the convex) fillet
             let fe1 = pseudo.make_fillet_edge(Some(fv1), Some(fv2), Some(corner))?;
             pseudo
                 .fillet_edge_mut(fe1)?
@@ -236,7 +256,7 @@ impl FilletCorner {
                 eu1::primary_edgeuse(pseudo.brep(), fe1)?,
                 "cross edge without primary edge use",
             )?;
-            pseudo.set_edgeuse_fillet_geom(prim_eu1, Some(convex_fg))?;
+            pseudo.set_edgeuse_fillet_geom(prim_eu1, Some(ext_fg))?;
             self.edges.push(fe1);
 
             let fv3 = new_corner_vertex(k, pseudo, corner)?;
@@ -248,7 +268,7 @@ impl FilletCorner {
             self.vertices.push(fv3);
 
             // Find the original face
-            let orig_face = face_by_two_edgeuses(target, Some(curr_eu), Some(convex_eu), None)?;
+            let orig_face = face_by_two_edgeuses(target, Some(curr_eu), Some(ext_eu), None)?;
             let curr_edge = edge_of(target, curr_eu)?;
             // Make an extended edge
             let fe2 = pseudo.make_fillet_edge(Some(fv2), Some(fv3), Some(corner))?;
@@ -272,19 +292,18 @@ impl FilletCorner {
         }
 
         // Extend the Side Surface if necessary
-        let convex_solver = solvers
-            .get_mut(convex_id.0 as usize)
+        let ext_solver = solvers
+            .get_mut(ext_id.0 as usize)
             .and_then(Option::as_mut)
             .ok_or_else(|| invalid("corner solver is not live"))?;
-        let ext_dist =
-            find_surface_extension_dist_at_corner(target, convex_eu, convex_solver, vertex)?;
+        let ext_dist = find_surface_extension_dist_at_corner(target, ext_eu, ext_solver, vertex)?;
         let curr_eu = all
             .iter()
             .copied()
             .find(|&eu| eu != convex_eu && eu != concave_eu)
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let orig_face1 = need(
-            face_by_two_edgeuses(target, Some(curr_eu), Some(concave_eu), None)?,
+            face_by_two_edgeuses(target, Some(curr_eu), Some(cross_eu), None)?,
             "no concave side face",
         )?;
         let surface = target
