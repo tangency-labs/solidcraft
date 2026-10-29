@@ -467,3 +467,32 @@ fn a_drag_that_would_fling_points_far_away_leaves_them_near_the_sketch() {
         assert!(p.len() < 1000.0, "p{i} was thrown to {p:?}");
     }
 }
+
+/// A line held at its midpoint, with an angle to a horizontal line from there: its end dragged
+/// past the midpoint, where the line would have to turn over, pressed it to no length (the angle
+/// then held no direction). The drag now stops just short of that, the line still pointing the
+/// way the angle says.
+#[test]
+fn an_end_dragged_past_its_lines_midpoint_leaves_the_line_a_length() {
+    for live in [false, true] {
+        let mut s = solidcraft_engine::Session::default();
+        for (id, params) in [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.line", json!({"points":[[-10,-6],[10,6]],"infer":false})),
+            ("sketch.constraint.midpoint", json!({"line":"l1","point":"origin"})),
+            ("sketch.line", json!({"points":["origin",[15,0]],"infer":false})),
+            ("sketch.constraint.horizontal_vertical", json!({"line":"l2"})),
+            ("sketch.dimension", json!({"entities":["l1","l2"],"type":"angle"})),
+            ("sketch.drag", json!({"entity":"l1.start","from":[-10,-6],"to":[12,4],"live":live})),
+        ] {
+            s.execute(id, &params).unwrap();
+        }
+        if live {
+            s.execute("sketch.drag_end", &json!({})).unwrap();
+        }
+        let (a, b) = (four_bar::point(&s, "l1.start").unwrap(), four_bar::point(&s, "l1.end").unwrap());
+        assert!(a.dist(b) > 1e-3, "l1 is left {} mm long (live {live})", a.dist(b));
+        let d = b - a;
+        assert!((d.y.atan2(d.x) - 6f64.atan2(10.0)).abs() < 1e-6, "l1 turned to {d:?} (live {live})");
+    }
+}

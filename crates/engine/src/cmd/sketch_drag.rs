@@ -181,6 +181,9 @@ pub(super) fn drag_entity(
     let start = line_grab.and_then(|g| g.point(sk)).or_else(|| if let Ent::Point(q) = e { sk.point(q) } else { None });
     let mut frame = live.then(frame_budget);
     let reach = FLUNG * (extent(sk) + path.length()).max(1.0);
+    // The sketch as the drag found it: no step may press one of its lines to no length.
+    let mut as_found = Geometry::default();
+    as_found.take(sk);
     // Only success matters to these solves: the degrees of freedom of a sketch with the entity
     // held are not the sketch's. Each is seeded on the last solved state (`last`), so what the
     // constraints pin down keeps the orientation it had there. A failed or wrapping step is
@@ -216,7 +219,7 @@ pub(super) fn drag_entity(
             Step::Failed
         } else if last.sweep_wrapped(sk) {
             Step::Wrapped
-        } else if last.flung(sk, reach) {
+        } else if last.flung(sk, reach) || as_found.squashed(sk) {
             Step::Failed
         } else {
             return Step::Solved;
@@ -349,7 +352,11 @@ pub(super) fn drag_entity(
         let valid = |before: &Sketch, after: &Sketch| {
             let mut geometry = Geometry::default();
             geometry.take(before);
-            !geometry.sweep_wrapped(after) && !geometry.shrank(after) && !geometry.flung(after, reach) && solidcraft_sketch::fillets_kept(before, after)
+            !geometry.sweep_wrapped(after)
+                && !geometry.shrank(after)
+                && !geometry.flung(after, reach)
+                && !as_found.squashed(after)
+                && solidcraft_sketch::fillets_kept(before, after)
         };
         let followed = match (e, line_grab) {
             (Ent::Point(q), _) => solidcraft_sketch::move_point_towards(sk, q, to, max_step, frame.as_mut(), valid),
@@ -587,6 +594,18 @@ impl Geometry {
             c.kind = kind.clone();
             c.reversed = *reversed;
         }
+    }
+
+    /// Did the step press a line to (nearly) no length: under 1/1000 of what it had when this
+    /// geometry was taken? A line with no length has no direction left for the constraints on
+    /// it, so an end dragged past the point where its line would have to turn over stops there.
+    fn squashed(&self, sk: &Sketch) -> bool {
+        self.curves.iter().any(|(kind, _)| {
+            let CurveKind::Line { a, b } = *kind else { return false };
+            let (Some(a0), Some(b0)) = (self.pos.get(a), self.pos.get(b)) else { return false };
+            let before = a0.dist(*b0);
+            before > 1e-3 && sk.point(a).zip(sk.point(b)).is_some_and(|(a1, b1)| a1.dist(b1) < before * 1e-3)
+        })
     }
 
     /// Did the step throw some point further than `reach` (or to no number at all)?
