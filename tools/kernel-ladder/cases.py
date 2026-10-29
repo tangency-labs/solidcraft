@@ -530,11 +530,11 @@ case(T5, "005-countersink", "a countersunk hole: d6.6 through, d12 x 90 deg coun
 case(T5, "006-tapped-m6-through", "an M6 tapped hole through: the tap drill d5 (major - pitch), cosmetic thread",
      [H(position=top, thread="M6")],
      {"body_count": 1, "volume_mm3": VB - PI * 6.25 * 20, "faces": 7}, "M6 coarse pitch 1: tap drill 6 - 1 = 5; removed pi 2.5^2 20; the cosmetic thread adds no geometry", base=B1)
-ch8 = 3.375 / math.tan(math.radians(59))
+ch8 = 3.4 / math.tan(math.radians(59))
 case(T5, "007-tapped-m8-blind", "an M8 tapped blind hole 12 deep with a 118 deg drill point",
      [H(position=top, thread="M8", depth=12, type="drilled", tip_angle=118)],
-     {"body_count": 1, "volume_mm3": VB - PI * 3.375 ** 2 * 12 - PI * 3.375 ** 2 * ch8 / 3, "faces": 8},
-     "M8 coarse pitch 1.25: tap drill (major - pitch) 6.75; removed pi r^2 12 to the shoulder + the point cone pi r^2 (r/tan59)/3", base=B1)
+     {"body_count": 1, "volume_mm3": VB - PI * 3.4 ** 2 * 12 - PI * 3.4 ** 2 * ch8 / 3, "faces": 8},
+     "M8 coarse pitch 1.25: the tap maker's drill 6.8 (Yamawa YEU23 p.704); removed pi r^2 12 to the shoulder + the point cone pi r^2 (r/tan59)/3", base=B1)
 r, Rc = 2.1, 20
 vint = quad(lambda y: 2 * math.sqrt(max(r * r - y * y, 0)) * 2 * math.sqrt(Rc * Rc - y * y), -r, r, 128)
 case(T5, "008-tapped-m5-into-curved-face", "an M5 tapped hole drilled radially through a cylinder r20 lying along X",
@@ -568,7 +568,6 @@ case(T5, "013-part-holes", "the running part: an M6 tapped through hole, an M5 t
      {"body_count": 1, "volume_mm3": V5, "faces": 20},
      "removed pi 2.5^2 20 (M6, tap drill 5) + pi 2.1^2 8 (M5, tap drill 4.2, flat) + pi 1.65^2 35; faces +1 +2 +1", base=C4)
 C5 = up(T5, "013-part-holes")
-
 # ---------------------------------------------------------------- 06 threads
 def thr(face, **p):
     return C("solid.thread", face=face, modeled=True, **p)
@@ -759,14 +758,14 @@ case(T6, "019-external-tr40x14-p7-two-start", "a modelled two-start trapezoidal 
                    "groove of pitch 7 would: over 42 mm (three leads, six pitches) between free ends") + "ISO 2904 for P 7: 30 deg, H1 = P/2, crest flat 0.366 P, "
      "ac = 0.5 (P 6..12), external minor d3 = d - 2 (H1 + ac) = 32")
 
-rf10 = 5 - 5 * math.sqrt(3) / 2 * 1.5 / 8
-case(T6, "017-external-m10-chamfered-tip", "001's modelled M10 thread with ISO 4753's chamfered end at both free ends: a 45 deg cone down to the minor diameter, cut after the groove",
-     cylT + [thr([5, 0, 15], designation="M10", tip="chamfer")],
+rf10 = 5 - 17 / 24 * math.sqrt(3) / 2 * 1.5  # ISO 724: d3 = d - 2 (17/24) H
+case(T6, "017-external-m10-chamfered-tip", "001's modelled M10 thread with ISO 4753's chamfered end at both free ends: a 45 deg cone down to the external minor diameter d3, cut after the groove",
+     cylT + [thr([5, 0, 15], designation="M10", tip="both")],
      {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 5 - rf10, lambda z: rf10 + z), (5 - rf10, 25 + rf10, lambda z: 5), (25 + rf10, 30, lambda z: rf10 + 30 - z)]),
       "tolerance": {"rel": 1e-4}},
      TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
-     "; the chamfer is axisymmetric and cut after the groove, so it only lowers the stock's outer radius: r <= d_f/2 + distance from the end (45 deg), d_f the minor diameter d - 5H/4 = 8.376 "
-     "(ISO 4753 chamfered end: the end's diameter at most the minor diameter)")
+     "; the chamfer is axisymmetric and cut after the groove, so it only lowers the stock's outer radius: r <= d_f/2 + distance from the end (45 deg), d_f the external minor diameter d3 = d - 1.226869 P = 8.160 "
+     "(ISO 724; ISO 4753 chamfered end: the end's diameter at most the minor diameter), below the modelled root d1")
 
 # ---------------------------------------------------------------- 07 fillets
 F = lambda edges, r, **p: C("solid.fillet", edges=edges, radius=r, **p)
@@ -814,7 +813,7 @@ case(T7, "010-corner-unequal-r7-r3", "an r7 vertical round at a corner, then r3 
      "Faces: 6 planes + the r7 cylinder + the r3 chain's cylinder, torus, cylinder; edges: 5 round the bottom, 5 round the top, 5 vertical (two r7 tangent lines, the box's "
      "three other verticals), the chain's three on the walls and two end arcs, its two seams; vertices from Euler (V - E + F = 2): 14", base=B1)
 case(T7, "016-corner-three-sequential-r5-r3-r7", 'rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them: refused, the r7 cannot exist',
-     [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 7)], {"outcome": "refused"},
+     [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 7)], {"outcome": "refused", "refusal": "the fillet is larger than the faces beside its edges allow"},
      "the r7 runs on (tangent chain) up the side x=60 along its arc on the r5 round, a circle of radius 5 about the r5 axis: the r7's contact line on that face would be the arc offset 7 towards its centre, radius 5 - 7 < 0, so the blend passes through itself; and along the seam of the r5 and r3 rounds no ball over r3 fits the r3 round. No such round exists, so the right answer is a clean refusal (SMLib: no room for the rolling ball). 018 is the same corner with a radius that fits.", base=B1, source="invariants")
 case(T7, "018-corner-three-sequential-r5-r3-r2", 'rounds r5 and r3 on the two top edges at a corner, then r2 on the vertical edge under them, run on up into the corner',
      [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 2)], {"body_count": 1, "faces": 11, "bbox": BBOX},
@@ -1119,12 +1118,12 @@ case(T11, "002-flange", "a revolved flange and hub with a bore, six bolt holes, 
 w30 = ext_half_width(30, 3.5)
 case(T11, "003-threaded-flange", "the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk",
      [thr([15, 0, 20], designation="M30"), H(position=[0, 28, 10], thread="M8", name="Tap"), C("solid.pattern.circular", features=["Tap"], axis="Z", count=3)],
-     {"body_count": 1, "volume_mm3": Vf - groove(30, 3.5, [(13 + w30, 28.5, lambda z: 15), (28.5, 30, lambda z: 15 - (z - 28.5))]) - 3 * PI * 3.375 ** 2 * 10,
+     {"body_count": 1, "volume_mm3": Vf - groove(30, 3.5, [(13 + w30, 28.5, lambda z: 15), (28.5, 30, lambda z: 15 - (z - 28.5))]) - 3 * PI * 3.4 ** 2 * 10,
       "bbox": {"min": [-40, -40, 0], "max": [40, 40, 30]}, "tolerance": {"rel": 1e-4}},
      "the hub's cylinder (r15) runs from the r3 round at its root (z 13) to the 1.5 chamfer at its top (z 28.5): the M30 groove (P 3.5) stops w = %.6f clear of the round, "
      "a shoulder (06/007's rule), and runs out through the chamfer, a free end (06/006's): it removes the stock less 2 pi int int r m(r) dr dz over z 13 + w..28.5 at r 15 and the chamfer "
-     "(r 15 - (z - 28.5)); the bore r8 is inside the root r 13.1. The M8 tap drills (6.75) go through the 10 mm disk at r 28, 90 deg + k 120, clear of the bolt holes (30 deg apart): "
-     "3 pi 3.375^2 10. Bbox: the flange's" % w30, base=up(T11, "002-flange"))
+     "(r 15 - (z - 28.5)); the bore r8 is inside the root r 13.1. The M8 tap drills (6.8, the tap maker's) go through the 10 mm disk at r 28, 90 deg + k 120, clear of the bolt holes (30 deg apart): "
+     "3 pi 3.4^2 10. Bbox: the flange's" % w30, base=up(T11, "002-flange"))
 case(T11, "004-housing", "the running part with every tier: back wall, boss, slot, spline window, tapped holes, rounds, chamfers, shell, vents, and a modelled M16 thread on the boss",
      [thr([23, 15, 25], designation="M16")],
      {"body_count": 1, "volume_mm3": V9 - 4 * PI * 1.5 ** 2 * 1.5 - groove(16, 2, [(21 + w16, 29, lambda z: 8), (29, 30, lambda z: 8 - (z - 29))]),
