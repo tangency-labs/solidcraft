@@ -531,11 +531,14 @@ fn curves(flat: View, n_edges: usize) -> Res<(Vec<(b::Curve, Option<b::Curve>, [
                 }
             }
             CURVE_NURBS => {
-                let c = next_nurbs()?;
+                let c = next_nurbs()?.record();
                 // A NURBS edge stays the NURBS SMLib holds, its trims on its own parameter: SMLib
                 // gives lines, circles and ellipses as their own kinds, and nothing is recognised here.
+                // SMLib's interval may start or end a rounding past its knots (a variable round's
+                // end trimmed by a cylinder, ladder 07-fillets/012: 7e-15 before the first knot).
                 kept += 1;
-                (c.record(), None, r, Some([1.0, 0.0]))
+                let r = onto(r, c.natural());
+                (c, None, r, Some([1.0, 0.0]))
             }
             other => return Err(unsupported(format!("SMLib curve kind {other}"))),
         });
@@ -626,8 +629,8 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
     })
 }
 
-/// A domain side moved onto the natural range where it overshoots it by rounding (a sphere's
-/// latitudes, a cone's apex).
+/// A domain side or an edge's interval moved onto the natural range where it overshoots it by
+/// rounding (a sphere's latitudes, a cone's apex, a NURBS edge's end knots).
 fn onto(r: [f64; 2], natural: b::Natural) -> [f64; 2] {
     match natural {
         b::Natural::Range(lo, hi) => {
