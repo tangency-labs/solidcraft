@@ -1,0 +1,43 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 8,
+    "body_name": "Ball"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": -10,
+    "name": "Below"
+   }
+  },
+  {
+   "command": "sketch.project",
+   "params": {
+    "refs": [
+     {
+      "body": "Ball"
+     }
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Below"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Below",
+    "distance": -5,
+    "operation": "new"
+   }
+  }
+ ]
+}

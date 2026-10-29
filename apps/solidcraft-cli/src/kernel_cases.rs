@@ -258,6 +258,192 @@ fn continuity_order(
     Ok((got, ok))
 }
 
+/// Where `got` differs from `want`, a part of it: every key of a `want` object in `got` and
+/// matching, an array element by element and as long, a whole number exactly, any other number
+/// within `rel` of it (relative, at least 1 absolute), anything else equal. `None` where it
+/// matches; else the path to the first difference with both values.
+fn json_mismatch(got: &Value, want: &Value, rel: f64, path: &str) -> Option<String> {
+    let differ = || Some(format!("{path}: got {got}, want {want}"));
+    match (got, want) {
+        (_, Value::Object(w)) => {
+            let Value::Object(g) = got else { return differ() };
+            w.iter().find_map(|(k, wv)| match g.get(k) {
+                Some(gv) => json_mismatch(gv, wv, rel, &format!("{path}.{k}")),
+                None => Some(format!("{path}.{k}: missing, want {wv}")),
+            })
+        }
+        (_, Value::Array(w)) => {
+            let Value::Array(g) = got else { return differ() };
+            if g.len() != w.len() {
+                return Some(format!("{path}: {} items, want {}", g.len(), w.len()));
+            }
+            g.iter().zip(w).enumerate().find_map(|(i, (gv, wv))| json_mismatch(gv, wv, rel, &format!("{path}[{i}]")))
+        }
+        (_, Value::Number(w)) if w.is_i64() || w.is_u64() => (got.as_f64() != w.as_f64()).then(differ).flatten(),
+        (_, Value::Number(w)) => {
+            let (g, w) = (got.as_f64(), w.as_f64().unwrap_or(f64::NAN));
+            (!g.is_some_and(|g| g.is_finite() && (g - w).abs() <= rel * w.abs().max(1.0))).then(differ).flatten()
+        }
+        _ => (got != want).then(differ).flatten(),
+    }
+}
+
+/// The rows of a CSV text (RFC 4180: quoted fields may hold commas, quotes and line breaks) as
+/// objects keyed by the header row; a field that reads as a number is one.
+fn csv_rows(text: &str) -> Vec<Value> {
+    let mut records: Vec<Vec<String>> = Vec::new();
+    let (mut row, mut field, mut quoted, mut chars) = (Vec::new(), String::new(), false, text.chars().peekable());
+    while let Some(c) = chars.next() {
+        match (c, quoted) {
+            ('"', true) if chars.peek() == Some(&'"') => {
+                chars.next();
+                field.push('"');
+            }
+            ('"', _) => quoted = !quoted,
+            (',', false) => row.push(std::mem::take(&mut field)),
+            ('\r', false) => {}
+            ('\n', false) => {
+                row.push(std::mem::take(&mut field));
+                records.push(std::mem::take(&mut row));
+            }
+            _ => field.push(c),
+        }
+    }
+    if !field.is_empty() || !row.is_empty() {
+        row.push(field);
+        records.push(row);
+    }
+    let Some((head, rows)) = records.split_first() else { return Vec::new() };
+    rows.iter()
+        .map(|r| {
+            let cell = |v: &String| v.parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| json!(v), |x| json!(x));
+            Value::Object(head.iter().cloned().zip(r.iter().map(cell)).collect())
+        })
+        .collect()
+}
+
+/// Per layer of a DXF text's ENTITIES section, how many of each entity it has and the total
+/// length of its curves (`length_mm`: lines, arcs, circles, ellipses and polylines; a spline makes
+/// the layer's length null, as not measured): `{layer: {"LINE": n, …, "length_mm": l}}`.
+fn dxf_layers(text: &str) -> Value {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let pairs: Vec<(&str, &str)> = lines.chunks(2).filter_map(|p| Some((*p.first()?, *p.get(1)?))).collect();
+    let start = pairs.windows(2).position(|w| w[0] == ("0", "SECTION") && w[1] == ("2", "ENTITIES")).map_or(pairs.len(), |i| i + 2);
+    let mut layers = serde_json::Map::new();
+    let mut i = start;
+    while let Some(&(code, kind)) = pairs.get(i) {
+        if code != "0" || kind == "ENDSEC" {
+            break;
+        }
+        let end = pairs.get(i + 1..).and_then(|r| r.iter().position(|p| p.0 == "0")).map_or(pairs.len(), |k| i + 1 + k);
+        let group = pairs.get(i + 1..end).unwrap_or(&[]);
+        let num = |c: &str| group.iter().find(|p| p.0 == c).and_then(|p| p.1.parse::<f64>().ok()).unwrap_or(0.0);
+        let all = |c: &str| group.iter().filter(|p| p.0 == c).filter_map(|p| p.1.parse::<f64>().ok()).collect::<Vec<_>>();
+        let layer = group.iter().find(|p| p.0 == "8").map_or("0", |p| p.1);
+        let length = match kind {
+            "LINE" => Some((num("11") - num("10")).hypot(num("21") - num("20"))),
+            "CIRCLE" => Some(std::f64::consts::TAU * num("40")),
+            "ARC" => Some(num("40") * (num("51") - num("50")).rem_euclid(360.0).to_radians()),
+            "LWPOLYLINE" => {
+                let mut pts: Vec<(f64, f64)> = all("10").into_iter().zip(all("20")).collect();
+                if (num("70") as i64) & 1 == 1
+                    && let Some(&p) = pts.first()
+                {
+                    pts.push(p);
+                }
+                Some(pts.windows(2).map(|w| (w[1].0 - w[0].0).hypot(w[1].1 - w[0].1)).sum())
+            }
+            "ELLIPSE" => {
+                // Arc length of c + cos t·major + sin t·ratio·minor, t from 41 to 42, by Simpson's rule.
+                let (a, b) = (num("11").hypot(num("21")), num("11").hypot(num("21")) * num("40"));
+                let (t0, t1) = (num("41"), num("42"));
+                let sweep = if t1 > t0 { t1 - t0 } else { t1 - t0 + std::f64::consts::TAU };
+                let n = 4096;
+                let speed = |t: f64| (a * t.sin()).hypot(b * t.cos());
+                let h = sweep / n as f64;
+                let sum: f64 = (0..=n).map(|k| speed(t0 + k as f64 * h) * if k == 0 || k == n { 1.0 } else if k % 2 == 1 { 4.0 } else { 2.0 }).sum();
+                Some(sum * h / 3.0)
+            }
+            _ => None,
+        };
+        let entry = layers.entry(layer.to_string()).or_insert_with(|| json!({"length_mm": 0.0}));
+        entry[kind] = json!(entry[kind].as_u64().unwrap_or(0) + 1);
+        entry["length_mm"] = match (entry["length_mm"].as_f64(), length) {
+            (Some(l), Some(more)) => json!(l + more),
+            _ => Value::Null,
+        };
+        i = end;
+    }
+    Value::Object(layers)
+}
+
+/// The `files` check of the files a case wrote to `$OUT` (`out`): each `{path, json | csv | dxf}`
+/// read and matched as [`json_mismatch`] does: `json` against the file's JSON, `csv` against its
+/// rows ([`csv_rows`]), `dxf` against its layers ([`dxf_layers`]), a count there exact or an
+/// inclusive range `[min, max]`. And the `results` check of the commands' own answers: each
+/// `{step, json}`, the answer of the `step`th command (from 1) matched against `json`.
+fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel: f64) {
+    for f in want["files"].as_array().into_iter().flatten() {
+        let path = f["path"].as_str().unwrap_or_default();
+        let what = format!("file {path}");
+        let text = match std::fs::read_to_string(std::path::Path::new(out).join(path)) {
+            Ok(t) => t,
+            Err(e) => {
+                c.push(&what, json!(e.to_string()), json!("written"), false);
+                continue;
+            }
+        };
+        let (got, wanted) = if let Some(w) = f.get("json") {
+            (serde_json::from_str::<Value>(&text).unwrap_or_else(|e| json!(format!("not JSON: {e}"))), w.clone())
+        } else if let Some(w) = f.get("csv") {
+            (Value::Array(csv_rows(&text)), w.clone())
+        } else if let Some(w) = f.get("dxf") {
+            let layers = dxf_layers(&text);
+            // A count given as a range is in it: compare the count itself with the range's bounds.
+            let mut w = w.clone();
+            let mut ranged = Vec::new();
+            for (layer, kinds) in w.as_object_mut().into_iter().flatten() {
+                for (kind, n) in kinds.as_object_mut().into_iter().flatten() {
+                    if let Some([lo, hi]) = n.as_array().and_then(|r| <[Value; 2]>::try_from(r.clone()).ok()) {
+                        let g = layers[layer.as_str()][kind.as_str()].as_u64().unwrap_or(0);
+                        ranged.push((format!("{layer}.{kind}"), g, lo.clone(), hi.clone()));
+                        *n = json!(g);
+                    }
+                }
+            }
+            for (k, g, lo, hi) in ranged {
+                let ok = lo.as_u64().is_some_and(|lo| g >= lo) && hi.as_u64().is_some_and(|hi| g <= hi);
+                c.push(&format!("{what} {k}"), json!(g), json!([lo, hi]), ok);
+            }
+            // An entity the case names but the layer lacks counts 0.
+            let mut got = layers;
+            for (layer, kinds) in w.as_object().into_iter().flatten() {
+                for kind in kinds.as_object().into_iter().flatten().map(|(k, _)| k) {
+                    if got[layer.as_str()].get(kind.as_str()).is_none() && kind != "length_mm" {
+                        got[layer.as_str()][kind.as_str()] = json!(0);
+                    }
+                }
+            }
+            (got, w)
+        } else {
+            c.push(&what, json!(f), json!("json, csv or dxf"), false);
+            continue;
+        };
+        let miss = json_mismatch(&got, &wanted, rel, "");
+        c.push(&what, json!(miss.clone().unwrap_or_else(|| "matches".into())), wanted, miss.is_none());
+    }
+    for r in want["results"].as_array().into_iter().flatten() {
+        let step = r["step"].as_u64().unwrap_or(0);
+        let what = format!("result of step {step}");
+        let got = step.checked_sub(1).and_then(|i| results.get(i as usize));
+        let miss = match got {
+            Some(g) => json_mismatch(g, &r["json"], rel, ""),
+            None => Some(format!("no step {step} of {}", results.len())),
+        };
+        c.push(&what, json!(miss.clone().unwrap_or_else(|| "matches".into())), r["json"].clone(), miss.is_none());
+    }
+}
+
 fn unsupported(e: &str) -> bool {
     e.contains("not supported yet")
 }
@@ -292,7 +478,15 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
         out["error"] = json!(missing);
         return out;
     }
-    let commands = match scratch(&area, &name).and_then(|o| read_json(&format!("{dir}/recipe.json")).and_then(|r| script(dir, &o, &r))) {
+    let scratch_dir = match scratch(&area, &name) {
+        Ok(o) => o,
+        Err(e) => {
+            out["status"] = json!("fail");
+            out["error"] = json!(e);
+            return out;
+        }
+    };
+    let commands = match read_json(&format!("{dir}/recipe.json")).and_then(|r| script(dir, &scratch_dir, &r)) {
         Ok(s) => s,
         Err(e) => {
             out["status"] = json!("fail");
@@ -328,7 +522,7 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
     let ran = s.run_script(&commands);
     // The commands' own time, without process start or grading: the ladder's timing golden.
     out["seconds"] = json!(clock.elapsed().as_secs_f64());
-    match (ran, may_refuse) {
+    let answers = match (ran, may_refuse) {
         (Err(e), _) if crashed(&e.to_string()) => {
             out["status"] = json!("crash");
             out["error"] = json!(e.to_string());
@@ -364,8 +558,8 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
             out["error"] = json!("succeeded where the case expects a refusal");
             return out;
         }
-        (Ok(_), _) => {}
-    }
+        (Ok(r), _) => r,
+    };
 
     // Every body in the world, imported components included.
     let world = match s.world_state() {
@@ -504,6 +698,7 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
         c.vec("bbox.min", got.bbox.0, want_bbox.map(|b| b.0), abs);
         c.vec("bbox.max", got.bbox.1, want_bbox.map(|b| b.1), abs);
     }
+    output_checks(&mut c, &want, &scratch_dir, &answers, rel);
     out["status"] = json!(if c.pass { "pass" } else { "fail" });
     out["checks"] = json!(c.list);
     out
@@ -555,6 +750,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    use std::f64::consts::PI;
+
     use super::*;
 
     fn case_dir(root: &std::path::Path, name: &str, recipe: &Value) -> String {
@@ -579,6 +776,80 @@ mod tests {
         // `$OUT` is the running case's scratch directory, in its bases too.
         assert_eq!(s["commands"][0]["params"]["file"], json!("/scratch/a.step"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn json_parts_match_within_tolerance_and_whole_numbers_exactly() {
+        let got = json!({"bends": [{"angle_deg": 90.00001, "direction": "up", "count": 3}], "extra": 1});
+        assert_eq!(json_mismatch(&got, &json!({"bends": [{"angle_deg": 90.0, "direction": "up"}]}), 1e-3, ""), None);
+        assert!(json_mismatch(&got, &json!({"bends": [{"count": 4}]}), 1e-3, "").is_some_and(|m| m.contains(".bends[0].count")));
+        assert!(json_mismatch(&got, &json!({"bends": []}), 1e-3, "").is_some_and(|m| m.contains("1 items, want 0")));
+        assert!(json_mismatch(&got, &json!({"missing": 1}), 1e-3, "").is_some_and(|m| m.contains("missing")));
+        assert!(json_mismatch(&got, &json!({"bends": [{"direction": "down"}]}), 1e-3, "").is_some());
+    }
+
+    #[test]
+    fn csv_rows_are_keyed_by_the_header_and_read_quoted_fields() {
+        let rows = csv_rows("body,angle_deg,note\r\n\"a, \"\"b\"\"\",90.5,x\r\n\"c\",180,\r\n");
+        assert_eq!(rows, vec![json!({"body": "a, \"b\"", "angle_deg": 90.5, "note": "x"}), json!({"body": "c", "angle_deg": 180.0, "note": ""})]);
+    }
+
+    #[test]
+    fn dxf_layers_count_entities_and_measure_their_length() {
+        let pair = |c: &str, v: &str| format!("{c}\n{v}\n");
+        let mut t = String::new();
+        // A circle in the BLOCKS section is not an entity of the drawing.
+        for (c, v) in [("0", "SECTION"), ("2", "BLOCKS"), ("0", "CIRCLE"), ("8", "CUT"), ("40", "9"), ("0", "ENDSEC")] {
+            t += &pair(c, v);
+        }
+        t += &pair("0", "SECTION");
+        t += &pair("2", "ENTITIES");
+        for e in [
+            vec![("0", "LINE"), ("8", "OUTLINE"), ("10", "0"), ("20", "0"), ("11", "3"), ("21", "4")],
+            vec![("0", "ARC"), ("8", "OUTLINE"), ("10", "0"), ("20", "0"), ("40", "2"), ("50", "270"), ("51", "0")],
+            vec![("0", "CIRCLE"), ("8", "CUT"), ("10", "5"), ("20", "5"), ("40", "1")],
+            vec![("0", "LWPOLYLINE"), ("8", "BEND_UP"), ("90", "2"), ("70", "128"), ("10", "0"), ("20", "1"), ("10", "10"), ("20", "1")],
+            vec![("0", "ELLIPSE"), ("8", "CUT"), ("10", "0"), ("20", "0"), ("11", "10"), ("21", "0"), ("40", "1"), ("41", "0"), ("42", "6.283185307179586")],
+        ] {
+            for (c, v) in e {
+                t += &pair(c, v);
+            }
+        }
+        t += &pair("0", "ENDSEC");
+        t += &pair("0", "EOF");
+        let l = dxf_layers(&t);
+        assert_eq!(l["OUTLINE"]["LINE"], 1);
+        assert_eq!(l["OUTLINE"]["ARC"], 1);
+        assert!((l["OUTLINE"]["length_mm"].as_f64().unwrap() - (5.0 + PI)).abs() < 1e-9, "{l}");
+        assert_eq!(l["CUT"]["CIRCLE"], 1);
+        assert_eq!(l["CUT"]["ELLIPSE"], 1);
+        // A circle of radius 1 and an ellipse of ratio 1 (a circle of radius 10).
+        assert!((l["CUT"]["length_mm"].as_f64().unwrap() - 22.0 * PI).abs() < 1e-6, "{l}");
+        assert!((l["BEND_UP"]["length_mm"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{l}");
+    }
+
+    #[test]
+    fn output_checks_read_the_files_and_answers_a_case_names() {
+        let out = std::env::temp_dir().join(format!("kernel-cases-files-{}", std::process::id()));
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("t.json"), r#"{"bends": [{"angle_deg": 90}]}"#).unwrap();
+        std::fs::write(out.join("t.csv"), "bend,angle_deg\r\n1,90\r\n").unwrap();
+        std::fs::write(out.join("t.dxf"), "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\nOUTLINE\n10\n0\n20\n0\n11\n1\n21\n0\n0\nENDSEC\n").unwrap();
+        let dir = out.to_string_lossy().to_string();
+        let run = |want: Value| {
+            let mut c = Checks { list: Vec::new(), pass: true };
+            output_checks(&mut c, &want, &dir, &[json!({"count": 3})], 1e-3);
+            c.pass
+        };
+        assert!(run(json!({"files": [{"path": "t.json", "json": {"bends": [{"angle_deg": 90.0}]}}]})));
+        assert!(run(json!({"files": [{"path": "t.csv", "csv": [{"bend": 1, "angle_deg": 90.0}]}]})));
+        assert!(run(json!({"files": [{"path": "t.dxf", "dxf": {"OUTLINE": {"LINE": [1, 8], "ARC": 0, "length_mm": 1.0}}}]})));
+        assert!(!run(json!({"files": [{"path": "t.dxf", "dxf": {"OUTLINE": {"LINE": [2, 8]}}}]})));
+        assert!(!run(json!({"files": [{"path": "t.dxf", "dxf": {"CUT": {"CIRCLE": 1}}}]})));
+        assert!(!run(json!({"files": [{"path": "none.json", "json": {}}]})));
+        assert!(run(json!({"results": [{"step": 1, "json": {"count": 3}}]})));
+        assert!(!run(json!({"results": [{"step": 2, "json": {}}]})));
+        let _ = std::fs::remove_dir_all(&out);
     }
 
     #[test]

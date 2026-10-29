@@ -2,7 +2,7 @@
  "sources": [],
  "what": "Boundary Fill of the cell inside one cylinder and outside the other: the crescent",
  "source": "analytic",
- "method": "A minus the lens: 1000 pi - 1228.370; faces: bottom, top, A's outer arc, B's inner arc = 4",
+ "method": "A minus the lens: 1000 pi - 1228.370; faces: bottom, top, A's outer arc, B's inner arc = 4; A's arc with x > 5 lies inside B (|p - (10,0)|^2 = 200 - 200 cos t < 100 when cos t > 1/2), so the crescent ends at the cusps x = 5, y = \u00b15\u221a3: bbox max x = 5",
  "body_count": 1,
  "faces": 4,
  "volume_mm3": 1913.222954981036,
@@ -13,7 +13,7 @@
    0
   ],
   "max": [
-   10,
+   5,
    10,
    10
   ]

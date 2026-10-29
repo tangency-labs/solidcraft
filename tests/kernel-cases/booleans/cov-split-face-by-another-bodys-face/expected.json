@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a block's top face split by the side of a cylinder standing on it (the tool face's surface extended)",
+ "source": "analytic",
+ "method": "the cylinder's side meets the top in the circle r5: the top becomes two faces (7); the block keeps V 12000, the cylinder 250 pi and its 3 faces",
+ "body_count": 2,
+ "faces": 10,
+ "volume_mm3": 12785.398163397449
+}
