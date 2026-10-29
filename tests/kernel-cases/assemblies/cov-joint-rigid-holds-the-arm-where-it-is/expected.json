@@ -1,0 +1,41 @@
+{
+ "sources": [],
+ "what": "a rigid joint between two blocks made where they sit",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); rigid with equal origins and flip: B = F\u00b7I\u00b7F^-1 = I, so Arm stays at (20,0,5) with 0 degrees of freedom left",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "conflicts": [],
+    "errors": []
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       -5.0,
+       0.0
+      ],
+      "max": [
+       40.0,
+       5.0,
+       10.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

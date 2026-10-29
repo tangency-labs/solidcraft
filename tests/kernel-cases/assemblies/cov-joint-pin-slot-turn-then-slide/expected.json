@@ -1,0 +1,47 @@
+{
+ "sources": [],
+ "what": "a pin-slot joint driven to 90 degrees and a 7 mm slide",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); pin_slot with frame z = +z, x = +x at the origin: M = T(slide along x)\u00b7Rz(angle): (20,0,5) -> (0,20,5) -> (7,20,5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "values": [
+     {
+      "value": 90.0
+     },
+     {
+      "value": 7.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      7.0,
+      20.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       2.0,
+       0.0,
+       0.0
+      ],
+      "max": [
+       12.0,
+       40.0,
+       10.0
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

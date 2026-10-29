@@ -1,0 +1,34 @@
+{
+ "sources": [],
+ "what": "Arm and Gear in a rigid group, the arm turned 90 degrees",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear block from (60,-5,0), centre (65,0,5), rigid-grouped with Arm: both turn about z through the origin: Gear (65,0,5) -> (0,65,5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 14,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      65.0,
+      5.0
+     ]
+    }
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      20.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}
