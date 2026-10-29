@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the shared volume of two overlapping spheres",
+ "source": "analytic",
+ "method": "spheres r 5 on (0,0,0) and (8,0,0): the lens pi (4r + d)(2r - d)^2 / 12 = pi 28 4 / 12 = 29.3215, centred on (4,0,0)",
+ "results": [
+  {
+   "command": 2,
+   "pointer": "/overlaps/0/volume_mm3",
+   "value": 29.321531433504735
+  },
+  {
+   "command": 2,
+   "pointer": "/overlaps/0/center",
+   "value": [
+    4,
+    0,
+    0
+   ]
+  }
+ ]
+}
