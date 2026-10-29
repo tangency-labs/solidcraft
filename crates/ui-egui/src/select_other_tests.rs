@@ -615,3 +615,22 @@ fn a_small_body_on_a_large_one_is_not_picked_through() {
         assert!(point.x > 0.9, "at {distance} mm away the pick is behind the near face: {first:?}");
     }
 }
+
+#[test]
+fn a_curve_from_intersect_is_labelled_intersected_and_one_from_project_projected() {
+    use solidcraft_engine::sketch::LinkKind;
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":10,"height":10,"body_name":"Block"})).unwrap();
+    let label = |h: &Harness, kind: LinkKind| {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let c = sk.curves.iter().find(|c| c.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.kind == kind)).unwrap();
+        crate::select_other::curve_label(sk, &c.id)
+    };
+    h.app.run("sketch.create", json!({"plane":"XY","offset":5,"project_edges":false})).unwrap();
+    h.app.run("sketch.intersect", json!({"refs":[{"body":"Block"}]})).unwrap();
+    assert!(label(&h, LinkKind::Intersect).ends_with("(intersected)"));
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":20,"project_edges":false})).unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Block"}]})).unwrap();
+    assert!(label(&h, LinkKind::Project).ends_with("(projected)"));
+}
