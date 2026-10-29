@@ -199,6 +199,27 @@ local segment. Preview does not change the design; OK creates one editable timel
 The plane follows later path edits. Curved paths use their sampled polyline; absolute distance,
 reference-object placement and multi-curve chains are not yet available in this dialog.
 
+## Section Analysis
+
+Section Analysis cuts the view, not the design: what lies beyond the section's planes is hidden
+and the cut faces are hatched (Hatch off draws them in each body's own colour). It changes no
+geometry and is no step in the undo history. A section has up to six planes, and it hides what
+lies beyond all of them at once: one plane hides its side, two square to each other cut a quarter
+away.
+
+- The toolbar's **Section Analysis** starts a new section on a plane or planar face; its arrow
+  and **Distance** move the cut along the plane's normal.
+- Right-click a planar face and choose **Section View**: the dialog starts on the face's plane,
+  facing out of the part, so dragging the arrow inward cuts into it. With a section on, the
+  face's plane joins it as another plane.
+- Right-click a cut face and choose **Turn Off Section View**: with one plane the section goes;
+  with several, only the plane of the face you clicked.
+- The browser's **Analysis** folder lists the section: its eye hides and shows it, and Delete
+  removes it.
+
+Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds the plane to it,
+`remove` takes a plane out by its id, and `clear: true` removes them all.
+
 ## Comparing two bodies
 
 **Compare Bodies** (`inspect.compare`) lays two versions of one part over each other, such as a
