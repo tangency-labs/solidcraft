@@ -8304,6 +8304,21 @@ mod tests {
         app
     }
 
+    /// A Ø20 × 20 cylinder whose wall and rims are each in two halves: a circle drawn as two
+    /// half arcs, extruded (one wall face per arc). SMLib's own cylinder has one wall and one
+    /// edge per rim; a rim or wall in pieces comes from a profile like this one or an import.
+    fn split_cylinder_app() -> SolveApp {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.arc.three_point", &json!({"start": [10, 0], "end": [-10, 0], "through": [0, 10]})).unwrap();
+        s.execute("sketch.arc.three_point", &json!({"start": [-10, 0], "end": [10, 0], "through": [0, -10]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"distance": 20})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        app
+    }
+
     /// Moving the pointer across a face keeps its highlight (a scanned mesh is one face of
     /// millions of triangles): only another face, edge or plane builds it again.
     #[test]
@@ -8642,9 +8657,13 @@ mod tests {
                 })
             })
             .unwrap();
-        assert!(mesh.seams[crease], "the fixture must exercise the coarse seam false positive");
+        // Truck's coarse seam fit took this crease for a seam between pieces of one surface;
+        // the seam flags now compare the exact surfaces (`topo::seam_flags`). Either way the
+        // certified crease is sharp, drawn in wireframe and picked. Its kink of a millionth is
+        // too close to tangent to show in the shading (`smooth_edges::Join`: smooth and a
+        // measured crease at once), so the shaded view leaves it out.
         assert!(mesh.sharp_edges[crease]);
-        assert!(mesh.shaded_edge_visible(crease));
+        assert!(mesh.edge_visible(crease) && !mesh.shaded_edge_visible(crease));
         assert!(mesh.edge_pickable(crease));
         assert!(mesh.edge_faces[crease].iter().any(|f| mesh.surface_patch(*f as usize).len() == 1));
         let mid = polyline_mid(&mesh.edges[crease]);
@@ -8660,7 +8679,7 @@ mod tests {
 
     #[test]
     fn circular_items_measure_as_whole_rims_and_surfaces() {
-        let mut app = cylinder_app();
+        let mut app = split_cylinder_app();
         let st = app.session.world_state().unwrap();
         let b = &st.bodies[0];
         let m = b.mesh();
@@ -8741,7 +8760,7 @@ mod tests {
 
     #[test]
     fn circular_rim_hover_click_and_dialog_pick_include_both_halves() {
-        let mut app = cylinder_app();
+        let mut app = split_cylinder_app();
         let st = app.session.world_state().unwrap();
         let b = &st.bodies[0];
         let m = b.mesh();
@@ -8788,7 +8807,7 @@ mod tests {
 
     #[test]
     fn curved_face_hover_selection_and_dialogs_cross_the_seam() {
-        let mut app = cylinder_app();
+        let mut app = split_cylinder_app();
         let st = app.session.world_state().unwrap();
         let b = &st.bodies[0];
         let m = b.mesh();
