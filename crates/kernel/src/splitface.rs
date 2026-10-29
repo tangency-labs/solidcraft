@@ -656,12 +656,13 @@ mod tests {
         let m = measure(&s).unwrap();
         // (Measured on meshes: curved faces agree to about 1e-4.)
         assert!(rel(m.volume, m0.volume) < 2e-4 && rel(m.area, m0.area) < 2e-4, "{} {} {} {}", m.volume, m0.volume, m.area, m0.area);
-        // The half side face splits at z = 5: a quarter and three quarters of its area.
+        // The side (one face round the whole turn) splits at z = 5: a quarter and three quarters
+        // of its area.
         let mut sides: Vec<f64> = s.faces(0.01).unwrap().iter().filter(|f| f.plane_normal.is_none()).map(|f| f.area).collect();
         sides.sort_by(f64::total_cmp);
-        let half = std::f64::consts::PI * 10.0 * 20.0;
-        assert_eq!(sides.len(), 3);
-        assert!(rel(sides[0], half / 4.0) < 1e-3 && rel(sides[1], half * 0.75) < 1e-3 && rel(sides[2], half) < 1e-3, "{sides:?}");
+        let whole = std::f64::consts::TAU * 10.0 * 20.0;
+        assert_eq!(sides.len(), 2);
+        assert!(rel(sides[0], whole / 4.0) < 1e-3 && rel(sides[1], whole * 0.75) < 1e-3, "{sides:?}");
         assert!(s.face_count() > c.face_count());
         // A smaller cylinder's side splits the top in a ring and a disc.
         let pin = cylinder(Vec3::ZERO, Vec3::Z, 4.0, 40.0).unwrap();
