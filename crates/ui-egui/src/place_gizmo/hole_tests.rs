@@ -289,3 +289,18 @@ fn the_hole_after_one_taken_out_does_not_take_over_its_hover() {
     h.frames(1);
     assert_eq!(crate::scenario::count_of("hole:0:hot"), Some(0.0), "not fading from the hole taken out");
 }
+
+#[test]
+fn a_held_marker_seen_end_on_leaves_the_pointer_to_the_view() {
+    // Seen from the front, the left edge the hole is held by runs straight into the screen: the
+    // marker is the dot alone and takes no press, so navigation is not kept from it either.
+    let mut h = held_by_the_left_edge();
+    h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+    h.settle();
+    let c = handle_at("hole:0").expect("the held hole is still drawn");
+    assert!(!crate::place_gizmo::contains_pointer(&h.app, c), "no press area, so the view keeps the pointer");
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    let c = handle_at("hole:0").expect("the hole's marker");
+    assert!(crate::place_gizmo::contains_pointer(&h.app, c), "seen from the top it drags along the edge again");
+}
