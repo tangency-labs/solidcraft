@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the centre of mass of a box",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin: the middle (20,15,10), V = 40 x 30 x 20 = 24000",
+ "results": [
+  {
+   "command": 1,
+   "pointer": "/center",
+   "value": [
+    20,
+    15,
+    10
+   ]
+  },
+  {
+   "command": 1,
+   "pointer": "/volume",
+   "value": 24000.0
+  }
+ ]
+}

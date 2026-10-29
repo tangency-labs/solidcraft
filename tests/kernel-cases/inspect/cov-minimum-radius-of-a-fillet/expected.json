@@ -1,0 +1,13 @@
+{
+ "sources": [],
+ "what": "the smallest radius over every face of a box with one rounded edge",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin, its top-front edge (y 0, z 20) rounded r 3: the flat faces have none, the round is a cylinder of r 3: the smallest radius is 3",
+ "results": [
+  {
+   "command": 2,
+   "pointer": "/min_radius",
+   "value": 3.0
+  }
+ ]
+}

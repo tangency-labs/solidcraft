@@ -1,0 +1,36 @@
+{
+ "sources": [],
+ "what": "the centre of mass of a box and a cylinder together",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (V 24000 at (20,15,10)) and a cylinder r 5, h 10 on (60,0,0) (V 250 pi = 785.40 at (60,0,5)): the volume-weighted mean (21.2675, 14.5247, 9.8416), V = 24000 + 250 pi",
+ "results": [
+  {
+   "command": 2,
+   "pointer": "/center",
+   "value": [
+    21.267517524987444,
+    14.524680928129708,
+    9.84156030937657
+   ]
+  },
+  {
+   "command": 2,
+   "pointer": "/volume",
+   "value": 24785.398163397447
+  },
+  {
+   "command": 2,
+   "pointer": "/bodies/1/center",
+   "value": [
+    60,
+    0,
+    5
+   ]
+  },
+  {
+   "command": 2,
+   "pointer": "/bodies/1/volume",
+   "value": 785.3981633974482
+  }
+ ]
+}
