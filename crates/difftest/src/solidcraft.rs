@@ -1614,7 +1614,6 @@ pub fn run_cases(root: &Path, opts: &CasesOptions) -> ExitCode {
             "SOLIDCRAFT-CASES: no case matches `{}`",
             opts.glob.as_deref().unwrap_or("*")
         );
-        return ExitCode::SUCCESS;
     }
     println!(
         "SOLIDCRAFT-CASES: {} case(s), Rust engine only",
@@ -1706,6 +1705,74 @@ mod tests {
 
     fn all() -> Vec<Loaded> {
         load(&cases_dir(&crate::case::repo_root()), None).unwrap()
+    }
+
+    #[test]
+    fn empty_selection_replaces_stale_reports_and_respects_report_options() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "difftest-solidcraft-empty-report-{}-{nonce}",
+            std::process::id()
+        ));
+        let fixtures = cases_dir(&root);
+        std::fs::create_dir_all(&fixtures).unwrap();
+        // Exercise both an empty corpus and a nonempty corpus filtered to zero cases.
+        for glob in [None, Some("missing")] {
+            if glob.is_some() {
+                let fixture = json!({
+                    "issue": "test", "pr": "test", "test": "test", "summary": "test",
+                    "cases": [{"name": "box", "steps": [
+                        {"op": "box", "id": "result", "origin": [0, 0, 0], "size": [1, 1, 1]}
+                    ], "expect": {"lumps": 1}}]
+                });
+                std::fs::write(fixtures.join("case.json"), fixture.to_string()).unwrap();
+            }
+            let mut opts = CasesOptions {
+                glob: glob.map(str::to_string),
+                report_dir: glob.map(|_| root.join("custom-reports")),
+                no_report: false,
+            };
+            let dir = opts
+                .report_dir
+                .clone()
+                .unwrap_or_else(|| root.join("reports"));
+            std::fs::create_dir_all(&dir).unwrap();
+            let filename = if glob.is_some() {
+                "solidcraft-cases_missing.json"
+            } else {
+                "solidcraft-cases.json"
+            };
+            let path = dir.join(filename);
+            let stale = r#"{"cases":[{"id":"stale"}],"summary":{"rust":{"PASS":1}}}"#;
+            std::fs::write(&path, stale).unwrap();
+            assert_eq!(run_cases(&root, &opts), ExitCode::SUCCESS);
+            let report: Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(report["cases"], json!([]), "glob {glob:?}");
+            assert_eq!(report["glob"], json!(glob));
+            assert_eq!(report["volume_accuracy"], json!(VOLUME_ACCURACY));
+            assert_eq!(report["summary"]["blocked_by"], json!({}));
+            for verdict in VERDICTS {
+                assert_eq!(report["summary"]["rust"][verdict], json!(0));
+            }
+            // --no-report must not overwrite an existing report or create a directory.
+            std::fs::write(&path, stale).unwrap();
+            opts.no_report = true;
+            assert_eq!(run_cases(&root, &opts), ExitCode::SUCCESS);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), stale);
+            let absent = dir.join("not-created");
+            opts.report_dir = Some(absent.clone());
+            assert_eq!(run_cases(&root, &opts), ExitCode::SUCCESS);
+            assert!(!absent.exists());
+            // A file cannot be a report directory, even when there are zero results.
+            opts.no_report = false;
+            opts.report_dir = Some(path);
+            assert_eq!(run_cases(&root, &opts), ExitCode::from(2));
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

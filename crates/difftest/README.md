@@ -821,6 +821,8 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
 
   and `reports/solidcraft-cases.json` (`reports/solidcraft-cases_<glob>.json` for a
   glob): per case its source links, verdict, deferral, measured values and checks.
+  With no matching cases, the report still contains an empty case list and zero
+  verdict counts, replacing any earlier report at that path. `--no-report` writes nothing.
 * `cargo test -p difftest --lib solidcraft` checks that every case file loads, every
   case runs to a verdict, and every deferral names a plan unit.
 * **Adding cases:** add a new `fixtures/solidcraft/<issue>-<slug>.json`. Files load in
