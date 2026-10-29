@@ -608,9 +608,11 @@ mod tests {
         assert!(imp::blend(&b, "fillet", Kind::Round, &[], &[]).is_err());
     }
 
-    /// A smooth edge (a round's seam with the face it runs into) has nothing to round, and an
-    /// edge that runs on tangentially into one left out has no end SMLib can blend: both are
-    /// refused before SMLib, saying so. Rounded with its tangent chain the edge builds.
+    /// A smooth edge (a round's seam with the face it runs into) has nothing to round: refused
+    /// before SMLib, saying so. An edge that runs on tangentially into one left out is SMLib's to
+    /// end: where it cannot (the end face's top edge into the round's end arc) the refusal says
+    /// why, and rounded with its tangent chain the edge builds; where it can (a vertical edge run
+    /// on up a top round's end arc into the corner, ladder 07-fillets/018) it builds.
     #[test]
     fn smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why() {
         let b = cube();
@@ -626,5 +628,16 @@ mod tests {
         assert!(chain.len() > 1, "{chain:?}");
         let whole = fillet(&rounded, &chain, 1.0).unwrap();
         assert!(volume(&whole) < volume(&rounded));
+
+        // r5 and r3 on two top edges at a corner, then r2 on the vertical edge under them: it
+        // runs on up the r5 round's end arc, and SMLib ends it there
+        let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 40.0, 20.0)).unwrap();
+        let b = fillet(&b, &[Vec3::new(30.0, 40.0, 20.0)], 5.0).unwrap();
+        let b = fillet(&b, &[Vec3::new(60.0, 20.0, 20.0)], 3.0).unwrap();
+        let vertical = Vec3::new(60.0, 40.0, 8.0);
+        let chain = crate::tangent_chain(&b, &[vertical]).unwrap();
+        assert!(chain.len() > 1, "{chain:?}");
+        let run_on = fillet(&b, &[vertical], 2.0).unwrap();
+        assert!(volume(&run_on) < volume(&b));
     }
 }
