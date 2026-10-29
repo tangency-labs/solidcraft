@@ -1244,6 +1244,10 @@ fn main() -> eframe::Result {
     let custom_titlebar = CUSTOM_TITLEBAR && app_titlebar_wanted() && !startup::system_title_bar(cfg!(target_os = "windows"), started);
     eframe::egui_wgpu::set_startup_hook(startup_step);
     solidcraft_engine::crash::phase("window");
+    // The control channel's wake (#743): eframe's event loop proxy, handed over when the loop
+    // starts, so the control server serves requests without waiting for a GUI frame.
+    let wake = control_server::Wake::new(std::sync::Arc::new(std::sync::Mutex::new(None)));
+    let wake_hook = wake.clone();
     let options = eframe::NativeOptions {
         viewport: app_viewport(custom_titlebar)?,
         // The window's pass (egui's) has no depth and one sample: the viewport draws its scene
@@ -1262,6 +1266,8 @@ fn main() -> eframe::Result {
         },
         persist_window: !safe_mode,
         wgpu_options,
+        // #743: hand the control channel the event loop's proxy so it can run a logic pass at once.
+        event_loop_ready: Some(Box::new(move |proxy| wake_hook.set(proxy.clone()))),
         ..Default::default()
     };
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1386,11 +1392,12 @@ fn main() -> eframe::Result {
             // by default) opens its port, and turning it off or on later takes effect at once
             // (docs/control-protocol.md).
             let ctx = cc.egui_ctx.clone();
-            solidcraft_ui_egui::control_switch::launch(&mut app, Box::new(move |listen| control_server::start(listen, ctx.clone())), control_port);
+            solidcraft_ui_egui::control_switch::launch(&mut app, Box::new(move |listen| control_server::start(listen, ctx.clone(), wake.clone())), control_port);
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
-            app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone())));
+            let wake = wake.clone();
+            app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone(), &wake)));
             // A launch from Finder: its files arrived before the window.
             #[cfg(target_os = "macos")]
             let files = {
