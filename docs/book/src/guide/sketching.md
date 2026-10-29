@@ -320,6 +320,8 @@ midpoint, symmetry, fix, curvature (G2) and polygon. **Sketch Dimension** (D) ad
 aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, circle-to-circle,
 radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points.
 An ellipse is drawn with its major and minor axes as construction lines through its centre.
+As with a Center Rectangle's diagonals, trim, extend and break stop at them, and they stay when the
+ellipse is deleted.
 Click the ellipse and pull the value across its major axis for the major half-axis, or out past an
 end of the major axis for the minor half-axis; click an axis line for the whole axis. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.

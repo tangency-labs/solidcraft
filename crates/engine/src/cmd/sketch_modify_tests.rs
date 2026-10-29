@@ -189,14 +189,57 @@ fn analytic_trim_and_break_use_freeform_cutters() {
     let mut s = new_sketch();
     let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0,0], "radius": 5}))["curves"])[0].clone();
     run(&mut s, "sketch.ellipse", json!({"center": [0,0], "major": [8,0], "minor": [0,3]}));
-    // Its construction axes cut too, the major one right at the pick: only the ellipse here.
-    let axes: Vec<String> = sketch(&s).curves.iter().filter(|c| c.construction).map(|c| c.id.clone()).collect();
-    run(&mut s, "sketch.delete", json!({"entities": axes}));
-    run(&mut s, "sketch.trim", json!({"curve": circle, "at": [5,0]}));
+    // Picked 15 degrees round from where the major axis crosses the circle: the piece from the
+    // axis to the ellipse's crossing goes, the rest stays. Its construction axes cut too (see
+    // the next test).
+    run(&mut s, "sketch.trim", json!({"curve": circle, "at": [4.8296,1.2941]}));
     let sk = sketch(&s);
     let ci = sk.curve_index(&circle).unwrap();
-    assert!(matches!(sk.curves[ci].kind, CurveKind::Arc { .. }));
-    assert!(sk.shape(ci).unwrap().dist(Vec2::new(-5.0, 0.0)) < 1e-6);
+    let CurveKind::Arc { a, b, .. } = sk.curves[ci].kind else { panic!("{:?}", sk.curves[ci].kind) };
+    let crossing = Vec2::new((25.0f64 - 351.0 / 55.0).sqrt(), (351.0f64 / 55.0).sqrt());
+    let mut ends = [sk.point(a).unwrap(), sk.point(b).unwrap()];
+    ends.sort_by(|p, q| p.y.total_cmp(&q.y));
+    assert!(ends[0].dist(Vec2::new(5.0, 0.0)) < 1e-6 && ends[1].dist(crossing) < 1e-6, "{ends:?}");
+    let shape = sk.shape(ci).unwrap();
+    assert!(shape.dist(Vec2::new(-5.0, 0.0)) < 1e-6 && shape.dist(Vec2::new(4.8296, -1.2941)) < 1e-3);
+    assert!(shape.dist(Vec2::new(4.8296, 1.2941)) > 0.5);
+}
+
+/// An ellipse's construction axes cut a trim, as a Center Rectangle's construction diagonals
+/// do: a line inside the ellipse trims back to the minor axis, one inside the rectangle to the
+/// diagonals.
+#[test]
+fn an_ellipse_s_axes_cut_as_a_center_rectangle_s_diagonals_do() {
+    // What is left of the line at y = 1, as x ranges.
+    let lines = |s: &Session| {
+        let sk = sketch(s);
+        let mut ends: Vec<[f64; 2]> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Line { a, b } => {
+                    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+                    (close(a.y, 1.0) && close(b.y, 1.0)).then(|| [a.x.min(b.x), a.x.max(b.x)])
+                }
+                _ => None,
+            })
+            .collect();
+        ends.sort_by(|x, y| x[0].total_cmp(&y[0]));
+        ends
+    };
+    let mut s = new_sketch();
+    run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[-3, 1], [3, 1]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.trim", json!({"curve": line, "at": [1, 1]}));
+    let ends = lines(&s);
+    assert!(ends.len() == 1 && close(ends[0][0], -3.0) && close(ends[0][1], 0.0), "{ends:?}");
+
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 8]}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[-3, 1], [3, 1]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.trim", json!({"curve": line, "at": [1, 1]}));
+    let ends = lines(&s);
+    assert!(ends.len() == 2 && close(ends[0][1], -2.5) && close(ends[1][0], 2.5), "{ends:?}");
 }
 
 #[test]
