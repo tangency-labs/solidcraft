@@ -1761,15 +1761,23 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     let far = |c: usize| ends(c).map(|(a, b)| if a == q { b } else { a }).and_then(|f| sk.point(f));
     let (far_a, far_b) = (far(ca), far(cb));
     let used_up = |t: Vec2, end: Option<Vec2>| end.is_some_and(|e| t.dist(e) < TOL * 10.0);
+    // Where the curves meet smoothly (a line along an arc's end, off by rounding), the round's
+    // tangent points fall on the corner within rounding: an arc of no length, refused as such.
+    let (mut smooth, mut short) = (false, false);
     let mut best: Option<(f64, Vec2, Vec2, Vec2)> = None;
     for oa in offsets(&sa) {
         for ob in offsets(&sb) {
             for cen in intersections(&oa, &ob) {
                 let (ta, tb) = (sa.project(cen), sb.project(cen));
-                if on_bounded(&sa, ta).is_none() || on_bounded(&sb, tb).is_none() || ta.dist(pc) < 1e-9 || tb.dist(pc) < 1e-9 {
+                if on_bounded(&sa, ta).is_none() || on_bounded(&sb, tb).is_none() {
+                    continue;
+                }
+                if ta.dist(pc) < TOL * 10.0 || tb.dist(pc) < TOL * 10.0 {
+                    smooth = true;
                     continue;
                 }
                 if used_up(ta, far_a) || used_up(tb, far_b) {
+                    short = true;
                     continue;
                 }
                 let score = ta.dist(pc) + tb.dist(pc);
@@ -1779,7 +1787,9 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
             }
         }
     }
-    let (_, cen, ta, tb) = best.ok_or_else(|| bad(cmd, "that radius does not fit the corner"))?;
+    let (_, cen, ta, tb) = best.ok_or_else(|| {
+        bad(cmd, if smooth && !short { "the curves meet smoothly there: there is no corner to round" } else { "that radius does not fit the corner" })
+    })?;
     let (na, nb) = (sk.add_point(ta, None)?, sk.add_point(tb, None)?);
     for (c, n) in [(ca, na), (cb, nb)] {
         if let Some(cu) = sk.curves.get_mut(c) {

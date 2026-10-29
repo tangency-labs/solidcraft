@@ -74,9 +74,10 @@ fn fillet_and_chamfer_corners() {
     let e = s.execute("sketch.chamfer.equal_distance", &json!({"a": c[0], "b": c[1], "distance": 25})).unwrap_err().to_string();
     assert!(e.contains("too large") || e.contains("does not fit") || e.contains("longer"), "{e}");
     assert_eq!(sk(&s).curves.len(), n);
-    // A line meeting an arc, and two arcs (a slot's end rounded into a line).
+    // A line meeting an arc at a corner (down onto its top), and two arcs (a slot's end rounded
+    // into a line).
     let mut s = new_sketch();
-    let l = curves(&run(&mut s, "sketch.line", json!({"points": [[-20, 10], [0, 10]]})))[0].clone();
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 10]]})))[0].clone();
     let a = curves(&run(&mut s, "sketch.arc.three_point", json!({"start": format!("{l}.end"), "end": [10, 0], "through": [7.0710678, 7.0710678]})))
         [0]
     .clone();
@@ -130,6 +131,22 @@ fn a_fillet_that_would_use_up_an_arc_is_refused() {
     let n = sk(&s).curves.len();
     let e = s.execute("sketch.fillet", &json!({"a": a, "b": l, "radius": 5})).unwrap_err().to_string();
     assert!(e.contains("does not fit"), "{e}");
+    assert_eq!(sk(&s).curves.len(), n);
+}
+
+/// A round where a line runs on along an arc's end, off only by rounding, is refused: there is no
+/// corner, and the round came out as an arc about 1e-7 mm long (found by a local trim fuzzer,
+/// after earlier rounds left the line a hair off the arc's tangent).
+#[test]
+fn a_fillet_where_a_line_runs_on_smoothly_from_an_arc_is_refused() {
+    let mut s = new_sketch();
+    let h = 0.5 * 2f64.sqrt();
+    let a = curves(&run(&mut s, "sketch.arc.three_point", json!({"start": [1, 0], "end": [0, 1], "through": [h, h]})))[0].clone();
+    // Off the arc's tangent at (0, 1) by 1e-7 rad.
+    let l = curves(&run(&mut s, "sketch.line", json!({"points": [format!("{a}.end"), [-10, 1.000001]], "infer": false})))[0].clone();
+    let n = sk(&s).curves.len();
+    let e = s.execute("sketch.fillet", &json!({"a": a, "b": l, "radius": 5})).unwrap_err().to_string();
+    assert!(e.contains("smoothly") || e.contains("does not fit"), "{e}");
     assert_eq!(sk(&s).curves.len(), n);
 }
 
