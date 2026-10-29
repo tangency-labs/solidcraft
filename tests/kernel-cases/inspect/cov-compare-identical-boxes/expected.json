@@ -5,19 +5,19 @@
  "method": "boxes 40 x 30 x 20 on the same corner: identical, no region, B - A = 0",
  "results": [
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/identical",
-   "value": true
+   "json": true
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/regions",
-   "value": []
+   "json": []
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/difference/volume_mm3",
-   "value": 0.0
+   "json": 0.0
   }
  ]
 }

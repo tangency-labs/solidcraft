@@ -5,9 +5,9 @@
  "method": "ellipse a 10, b 4: tightest at the ends of the major axis, b^2 / a = 1.6, at (+-10, 0)",
  "results": [
   {
-   "command": 3,
+   "step": 4,
    "pointer": "/min_radius",
-   "value": 1.6
+   "json": 1.6
   }
  ]
 }

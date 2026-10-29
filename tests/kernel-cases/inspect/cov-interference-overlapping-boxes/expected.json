@@ -5,42 +5,42 @@
  "method": "box 40 x 30 x 20 with a corner at the origin and a box 40 x 30 x 20 from (30,20,10): they share the cube x 30..40, y 20..30, z 10..20: V 1000, A 600, centre (35,25,15)",
  "results": [
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/count",
-   "value": 1
+   "json": 1
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/interferences/0/volume_mm3",
-   "value": 1000.0
+   "json": 1000.0
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/interferences/0/area_mm2",
-   "value": 600.0
+   "json": 600.0
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/interferences/0/center",
-   "value": [
+   "json": [
     35,
     25,
     15
    ]
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/interferences/0/bbox/min",
-   "value": [
+   "json": [
     30,
     20,
     10
    ]
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/interferences/0/bbox/max",
-   "value": [
+   "json": [
     40,
     30,
     20

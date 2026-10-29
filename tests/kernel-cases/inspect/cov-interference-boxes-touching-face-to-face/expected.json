@@ -5,14 +5,14 @@
  "method": "box 40 x 30 x 20 with a corner at the origin and a box 40 x 30 x 20 from (40,0,0): they share the face x = 40 and no volume: no interference",
  "results": [
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/count",
-   "value": 0
+   "json": 0
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/interferences",
-   "value": []
+   "json": []
   }
  ]
 }
