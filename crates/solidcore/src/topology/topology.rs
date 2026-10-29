@@ -90,7 +90,7 @@
 //!   helpers, `UnMark`, `IsUnMarked`, `IsMarkLocked`, the flag bit helpers and the
 //!   placement `operator new` / `delete` are not part of this unit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::{EntityRef, Result, SolidError};
@@ -319,17 +319,42 @@ pub struct NotifyRecords {
     progress: Vec<SeedProgress>,
 }
 
-/// Which objects of one B-rep a [`NotifyRecords`] has already checked and seeded,
-/// under one identity: one flag per arena index of each entity kind
-/// (`topology::brep::p3`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// How far a [`NotifyRecords`] has checked and seeded the objects of one B-rep value,
+/// under one identity, per entity kind (`topology::brep::p3`). A B-rep value's arenas
+/// only append and empty slots for good, so indices below a mark stay as they were.
+#[derive(Debug, Clone, Default)]
 pub(crate) struct SeedProgress {
-    /// The B-rep and the caller identity the flags hold for.
+    /// The B-rep and the caller identity the progress holds for.
     pub(crate) id: Vec<u64>,
-    /// Arena indices whose key has passed the reserved-key check, per kind.
-    pub(crate) checked: [Vec<bool>; 10],
-    /// Arena indices whose object has been given a record, per kind.
-    pub(crate) seeded: [Vec<bool>; 10],
+    /// The B-rep value it was taken on ([`ProgressTag`]).
+    pub(crate) instance: Arc<()>,
+    /// Per kind: no arena index from here on has passed the reserved-key check yet.
+    pub(crate) checked_to: [usize; 10],
+    /// Per kind: the indices below `checked_to` that have not passed it (all of them
+    /// emptied slots, which a check only covers once they fall in its window).
+    pub(crate) unchecked: [BTreeSet<usize>; 10],
+    /// Per kind: the arena length up to which every live object has its record.
+    pub(crate) seeded_to: [usize; 10],
+}
+
+/// Names one B-rep value for a [`NotifyRecords`]' progress: what was checked and
+/// seeded of one value stays so, but a copy is another value (`Clone` gives an empty
+/// tag) whose objects may differ. Compared by allocation ([`Arc::ptr_eq`]), never hashed.
+#[derive(Debug, Default)]
+pub(crate) struct ProgressTag(Option<Arc<()>>);
+
+impl Clone for ProgressTag {
+    /// An empty tag: the copy is another B-rep value.
+    fn clone(&self) -> Self {
+        Self(None)
+    }
+}
+
+impl ProgressTag {
+    /// The value's tag, made on first use.
+    pub(crate) fn get(&mut self) -> Arc<()> {
+        Arc::clone(self.0.get_or_insert_with(|| Arc::new(())))
+    }
 }
 
 impl std::ops::Deref for NotifyRecords {
@@ -407,19 +432,27 @@ impl NotifyRecords {
         self.map.clear();
     }
 
-    /// The records and the progress kept for `id` (made empty if there is none), for
-    /// `topology::brep::p3`'s per-edit check and seeding, which only adds records.
+    /// The records and the progress kept for `id` on the B-rep value `instance` (made
+    /// empty if there is none), for `topology::brep::p3`'s per-edit check and seeding,
+    /// which only adds records.
     pub(crate) fn progress_for(
         &mut self,
         id: Vec<u64>,
+        instance: Arc<()>,
     ) -> Option<(&mut BTreeMap<ObjectKey, Topology>, &mut SeedProgress)> {
-        let at = self.progress.iter().position(|p| p.id == id);
+        // (a value only the store still names is gone: its progress is never used again)
+        self.progress.retain(|p| Arc::strong_count(&p.instance) > 1);
+        let at = self
+            .progress
+            .iter()
+            .position(|p| p.id == id && Arc::ptr_eq(&p.instance, &instance));
         let Self { map, progress } = self;
         let p = if let Some(at) = at {
             progress.get_mut(at)
         } else {
             progress.push(SeedProgress {
                 id,
+                instance,
                 ..SeedProgress::default()
             });
             progress.last_mut()

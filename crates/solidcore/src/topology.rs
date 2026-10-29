@@ -287,6 +287,12 @@ impl<I: ArenaId, T> Arena<I, T> {
         self.live
     }
 
+    /// Number of slots, removed items included: the index the next item takes.
+    #[must_use]
+    pub(crate) fn slot_count(&self) -> usize {
+        self.items.len()
+    }
+
     /// True when the arena holds no item.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -756,6 +762,9 @@ pub struct Brep {
     /// its objects' topology keys hold it (`topology::brep::p3::topology_ref`). A
     /// clone is a new B-rep without one.
     notify_identity: IdentitySlot,
+    /// (not upstream) Names this B-rep value for the notify records' seeding progress
+    /// (`topology::brep::p3`); a clone is another value without one.
+    progress_tag: topology::ProgressTag,
     /// Edge/face identities supplied when their geometry was bound. These record
     /// producer provenance; they are never inferred from an opaque geometry owner.
     geometry_owner_keys: std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef>,
@@ -808,6 +817,7 @@ impl Brep {
             naming: self.naming,
             locked_bounding_box: self.locked_bounding_box,
             notify_identity: self.notify_identity.clone(),
+            progress_tag: self.progress_tag.clone(),
             geometry_owner_keys: self.geometry_owner_keys.clone(),
         }
     }
@@ -843,6 +853,7 @@ impl Default for Brep {
             naming: NamingScheme::Unknown,
             locked_bounding_box: None,
             notify_identity: IdentitySlot::default(),
+            progress_tag: topology::ProgressTag::default(),
             geometry_owner_keys: std::collections::BTreeMap::new(),
         }
     }
@@ -1356,6 +1367,11 @@ impl Brep {
     /// The slot of the B-rep's notification serial, read-only.
     pub(crate) const fn notify_identity(&self) -> &IdentitySlot {
         &self.notify_identity
+    }
+
+    /// The tag naming this B-rep value for the notify records' seeding progress.
+    pub(crate) fn progress_tag(&mut self) -> Arc<()> {
+        self.progress_tag.get()
     }
 
     /// Appends a region record as is (no validation).
