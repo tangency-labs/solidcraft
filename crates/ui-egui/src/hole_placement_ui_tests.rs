@@ -796,7 +796,9 @@ fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
     // not the face's or the body's; every point on the face is still counted.
     let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
     let (many, body, face, near) = (c.many, c.body_tris, c.face_tris, c.near_tris);
-    assert!(body >= 4 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
+    // The top cap is one of the cylinder's three faces (the planner meshes both caps alike), under
+    // a third of its triangles; the points lie on a small part of it.
+    assert!(body >= 3 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
     let (list, (lookups, tested)) = c.select_other();
     assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (crate::select_other::MAX_PER_KIND, 1), "{list}");
     assert_eq!(list["total"], json!(many + 1), "every point on the face is counted: {list}");
