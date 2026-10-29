@@ -709,7 +709,7 @@ fn patch_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], surface: b
             })?),
             Pcurves::Computed => None,
         };
-        edges.push(PartEdge { curve: edge.parameters().clone(), interval: edge.interval, vertices: ends });
+        edges.push(PartEdge { curve: edge.curve.clone(), nurbs: edge.nurbs.clone(), interval: edge.interval, vertices: ends });
         uses.push(PartUse { edge: k as u32, forward, given });
     }
     if !ccw {
@@ -797,9 +797,9 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
                                 };
                             }
                             let id = index(edges.len())?;
-                            // The curve the interval and the pcurve's parameter are on: a conic's
-                            // NURBS form.
-                            edges.push(PartEdge { curve: edge.parameters().clone(), interval: [lo, hi], vertices: ends });
+                            // The edge itself: the interval and the pcurve's parameter are on its
+                            // NURBS form (a conic's), which it keeps.
+                            edges.push(PartEdge { curve: edge.curve.clone(), nurbs: edge.nurbs.clone(), interval: [lo, hi], vertices: ends });
                             origin.push(Some(e));
                             piece_of.insert(key, id);
                             id
@@ -827,7 +827,7 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
                                     b::Curve::Spline { knots: curve.knots.clone(), points: curve.points.iter().map(|p| [p.x, p.y, p.z]).collect() }
                                 }
                             };
-                            edges.push(PartEdge { curve: spline, interval: [0.0, 1.0], vertices: [start, end] });
+                            edges.push(PartEdge { curve: spline, nurbs: None, interval: [0.0, 1.0], vertices: [start, end] });
                             origin.push(None);
                             spoke_of.insert(spoke, id);
                             id
@@ -976,11 +976,14 @@ mod tests {
         worst
     }
 
-    /// Whether every edge of `made` is one of `of`'s own (the same curve record on the same
-    /// interval).
+    /// Whether every edge of `made` is one of `of`'s own: the same kind of curve, on the same
+    /// curve record it is parameterised on (its NURBS form where it has one), on the same
+    /// interval. (A circle's or ellipse's frame is SMLib's again after a round trip, its axes
+    /// renormalised to the last bit.)
     fn own_edges(made: &Body, of: &Body) -> bool {
         let own = record(of).edges;
-        record(made).edges.iter().all(|e| own.iter().any(|o| o.curve == e.curve && o.interval == e.interval))
+        let kind = |e: &b::Edge| std::mem::discriminant(&e.curve);
+        record(made).edges.iter().all(|e| own.iter().any(|o| kind(o) == kind(e) && o.parameters() == e.parameters() && o.interval == e.interval))
     }
 
     /// The fill's mesh: every normal finite, and no triangle folded over (all face the same way
@@ -1109,9 +1112,10 @@ mod tests {
         let mut edges = Vec::new();
         for k in 0..n {
             let c = &top[k];
-            edges.push(PartEdge { curve: c.clone(), interval: interval(c), vertices: [k as u32, ((k + 1) % n) as u32] });
-            edges.push(PartEdge { curve: moved(c), interval: interval(c), vertices: [(n + k) as u32, (n + (k + 1) % n) as u32] });
+            edges.push(PartEdge { nurbs: None, curve: c.clone(), interval: interval(c), vertices: [k as u32, ((k + 1) % n) as u32] });
+            edges.push(PartEdge { nurbs: None, curve: moved(c), interval: interval(c), vertices: [(n + k) as u32, (n + (k + 1) % n) as u32] });
             edges.push(PartEdge {
+                nurbs: None,
                 curve: b::Curve::Line { start: arr(corners[k]), end: arr(corners[k] + drop) },
                 interval: [0.0, 1.0],
                 vertices: [k as u32, (n + k) as u32],

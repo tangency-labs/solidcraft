@@ -227,6 +227,49 @@ mod native_tests {
         assert!((got - want).abs() < 1e-6 * want, "volume {got} vs {want}");
     }
 
+    /// The variable round r1 -> r5 along a box's top back edge run on into the R5 round of its
+    /// corner (ladder 07-fillets/012): its end trimmed by the R5 cylinder is a NURBS edge, whose
+    /// interval SMLib gave 7e-15 before the first knot. The record's interval is the NURBS's own
+    /// where it overshoots it by rounding, and the record validates; farther past it stays an error.
+    #[test]
+    fn a_nurbs_edge_interval_a_rounding_past_its_knots_is_moved_onto_them() {
+        let block = Brep::make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap();
+        let rounded = block.fillet(&[[60.0, 40.0, 10.0]], 0.1, 5.0).unwrap();
+        let r = rounded.fillet_variable([27.5, 40.0, 20.0], 0.1, [0.0, 40.0, 20.0], 1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 5.0]).unwrap();
+        let arrays = r.arrays().unwrap();
+        let kinds = arrays.ints.get(&EDGE_CURVE_TYPE).cloned().unwrap_or_default();
+        let counts = arrays.ints.get(&EDGE_NURBS_VERTEX_COUNT).cloned().unwrap_or_default();
+        let orders = arrays.ints.get(&EDGE_NURBS_ORDER).cloned().unwrap_or_default();
+        let forms = arrays.ints.get(&EDGE_NURBS_FORM).cloned().unwrap_or_default();
+        let knots = arrays.reals.get(&EDGE_NURBS_KNOTS).cloned().unwrap_or_default();
+        // Each NURBS block's first and last knots of its domain, in edge order.
+        let (mut at, mut block_of) = (0usize, Vec::new());
+        for (n, o) in counts.iter().zip(&orders) {
+            let (n, o) = (*n as usize, *o as usize);
+            block_of.push((knots[at + o - 1], knots[at + n]));
+            at += n + o;
+        }
+        let mut nurbs = 0usize;
+        let mut edge = None;
+        for (e, kind) in kinds.iter().enumerate() {
+            let has_block = *kind == CURVE_NURBS || forms.get(e) == Some(&1);
+            if *kind == CURVE_NURBS && edge.is_none() {
+                edge = Some((e, block_of[nurbs]));
+            }
+            nurbs += usize::from(has_block);
+        }
+        let (e, (first, last)) = edge.expect("the round's end on the cylinder is a NURBS edge");
+        let shifted = |by: f64| {
+            let mut a = arrays.clone();
+            a.reals.get_mut(&EDGE_RANGE).unwrap()[2 * e] = first - by;
+            a
+        };
+        let (record, _) = native(&shifted(7e-15)).unwrap();
+        record.validate().unwrap();
+        assert!(record.edges.iter().any(|x| x.interval[0] == first && x.interval[1] <= last), "an interval on the NURBS's first knot");
+        assert!(native(&shifted(1e-3)).map(|(r, _)| r.validate()).map_or(true, |v| v.is_err()), "a real overshoot is not moved");
+    }
+
     #[test]
     fn hostile_arrays_are_errors_never_panics() {
         let good = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().arrays().unwrap();

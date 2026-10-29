@@ -765,7 +765,12 @@ pub(crate) fn stitch_no_worse(bodies: &[&Body], tol: f64, exempt: &[u32]) -> Res
 /// ([`crate::offset_backend::thicken`]).
 pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
     body.require_brep("thicken")?;
-    imp::thicken(body, thickness, symmetric)
+    // SMLib holds a sheet's faces with both sides and thickens along their surfaces' natural
+    // normals; a sheet turned to its back (every face used against its natural normal) grows the
+    // other way.
+    let sides = face_sides(body.record());
+    let turned = !sides.is_empty() && sides.iter().all(|forward| !forward);
+    imp::thicken(body, if turned { -thickness } else { thickness }, symmetric)
 }
 
 /// The faces `picked` of `body` (indices in its face order) offset one by one by SMLib, each onto
