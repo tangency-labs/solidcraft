@@ -834,6 +834,11 @@ const ELEMENTS: &[Element] = &[
     element!("section_count", |ui, _| {
         section_count(ui, "count", "Parameters", false, Some(5), |_| {});
     }),
+    element!("prominent_section", |ui, _| {
+        prominent_section(ui, "heading", "Sketches", true, |ui| {
+            text(ui, "Imported sketch", Text::Inline);
+        });
+    }),
     element!("bin_button", |ui, _| {
         bin_button(ui, "Delete");
     }),

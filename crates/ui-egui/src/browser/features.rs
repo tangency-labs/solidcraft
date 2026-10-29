@@ -209,10 +209,23 @@ fn feature_row(
     let visible =
         if is_sketch { crate::browser::sketch_visible(app, id) } else { bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b)) };
     let eye = (is_sketch || !bodies.is_empty()).then_some(visible);
+    let color = matches!(feature.kind, FeatureKind::ImportPlaceholder { .. }).then_some(Tokens::get().warning);
     let r = draw_row(
         ui,
         ui.id().with(("browser_feature", id)),
-        &Row { depth, fold, eye, icon, label: &label, selected, dim: dim || (!is_sketch && eye == Some(false)), action, mark, ..Default::default() },
+        &Row {
+            depth,
+            fold,
+            eye,
+            icon,
+            label: &label,
+            selected,
+            dim: dim || (!is_sketch && eye == Some(false)),
+            action,
+            mark,
+            color,
+            ..Default::default()
+        },
     );
     if r.eye && is_sketch {
         crate::browser::set_sketch_visible(app, id, !visible);
@@ -287,6 +300,29 @@ fn drag_marker(app: &mut SolveApp, ui: &egui::Ui, resp: &egui::Response, slots: 
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn missing_import_operation_is_visible_and_opens_its_explanation_without_rolling_history() {
+        let mut h = Harness::new();
+        let kind = FeatureKind::ImportPlaceholder {
+            source: "Fillet003".into(),
+            source_type: "PartDesign::Fillet".into(),
+            detail: "Edge references could not be imported.".into(),
+        };
+        let id = h.app.session.doc_mut().add_feature(kind, Some("[Not imported] Fillet003")).unwrap();
+        h.app.session.refresh();
+        for cache in ["current", "missing", "stale"] {
+            assert!(feature_rows(&mut h, cache).iter().any(|label| label == "[Not imported] Fillet003"));
+        }
+        let marker = h.app.session.doc.marker;
+        let undo = h.app.session.undo.len();
+        h.app.edit_feature(id);
+        let detail = h.app.freecad_operation_detail.as_ref().unwrap();
+        assert!(detail.summary.contains("Fillet003"));
+        assert!(detail.detail.contains("Edge references"));
+        assert_eq!(h.app.session.doc.marker, marker);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
 
     fn feature_rows(h: &mut Harness, cache: &str) -> Vec<String> {
         h.app.tree.model = match cache {

@@ -58,7 +58,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; active?: bool (as timeline.reorder's); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
     CommandSpec::new("timeline.redefine", "Edit Feature", redefine).icon("edit")
-        .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place)"),
+        .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place), activate?: bool (enable a suppressed feature if the rebuilt result succeeds)"),
     CommandSpec::new("timeline.dependents", "Feature Dependents", dependents).icon("graph")
         .noundo()
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
@@ -1556,6 +1556,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let mut params = p.get("params").cloned().unwrap_or_else(|| json!({}));
     let idx = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
     let old = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
+    let activate = match p.get("activate") {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`activate` must be true or false")),
+    };
     if let FeatureKind::Extrude { extent, .. } | FeatureKind::SurfaceExtrude { extent, .. } = &old.kind
         && matches!(cid, "solid.extrude" | "surface.extrude")
         && let Some(parameters) = params.as_object_mut()
@@ -1652,7 +1657,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         trial.doc_mut().next_id = s.doc.next_id;
     }
     if let Some(slot) = trial.doc_mut().feature_mut(id) {
-        slot.suppressed = old.suppressed;
+        slot.suppressed = old.suppressed && !activate;
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
         slot.edge_names = new.edge_names;
@@ -1673,6 +1678,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // counters read as "nothing was rebuilt" (#5694).
     let rebuilt = trial.model.last_recomputed;
     let reused = trial.model.last_restored;
+    if activate && trial.model.result(id).is_none_or(|r| r.skipped) {
+        return Err(bad(cmd, "the rebuilt feature did not produce an active result"));
+    }
+    if activate
+        && old.suppressed
+        && let Some(name) = old.name.strip_suffix(" [Needs repair]")
+        && !trial.doc.features.iter().any(|feature| feature.id != id && feature.name == name)
+        && let Some(slot) = trial.doc_mut().feature_mut(id)
+    {
+        slot.name = name.to_string();
+    }
     let original_ids: std::collections::BTreeSet<u64> = s.doc.features.iter().map(|feature| feature.id).collect();
     let added_ids: std::collections::BTreeSet<u64> =
         trial.doc.features.iter().filter(|feature| !original_ids.contains(&feature.id)).map(|feature| feature.id).collect();

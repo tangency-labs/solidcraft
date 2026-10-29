@@ -7111,6 +7111,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     match &f.kind {
+        FeatureKind::ImportPlaceholder { source_type, detail, .. } => {
+            *warning = Some(format!("{source_type} was not imported. {detail}"));
+            Ok(())
+        }
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }

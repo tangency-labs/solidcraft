@@ -3012,6 +3012,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 enter |= accepted;
                 value_fields = fields;
                 d.sync_fillet_chain(&app.session);
+                if d.extra.get("activate_repair").and_then(Value::as_bool) == Some(true) {
+                    crate::ui_kit::text(
+                        ui,
+                        "This imported feature is suppressed. Press OK to rebuild and enable it with these settings. Missing earlier operations must still be rebuilt separately.",
+                        crate::ui_kit::Text::Note("activate_imported_feature"),
+                    );
+                }
                 if cell_enter {
                     ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 }
@@ -3799,7 +3806,11 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
                 }
             }
         }
-        return Ok(vec![("timeline.redefine".into(), json!({"feature": id, "command": cmd, "params": params}))]);
+        let mut edit = json!({"feature": id, "command": cmd, "params": params});
+        if d.extra.get("activate_repair").and_then(Value::as_bool) == Some(true) {
+            edit["activate"] = json!(true);
+        }
+        return Ok(vec![("timeline.redefine".into(), edit)]);
     }
     Ok(cmds)
 }
@@ -6113,6 +6124,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         crate::length_input::extra(&mut d.extra, |e| crate::length_input::stored(&s.doc, e));
     }
     d.editing = Some((id, marker));
+    if f.suppressed && f.name.ends_with(" [Needs repair]") {
+        d.extra.insert("activate_repair".into(), json!(true));
+    }
     d.active = 0;
     d.error = None;
     Some(d)

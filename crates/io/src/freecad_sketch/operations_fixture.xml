@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<!-- Independently authored analytic fixture: 30x20x10 plate with a 5x5x4 pocket,
+     plus a radius-5-to-10, height-15 ring revolved 270 degrees and grooved 180 degrees. -->
+<Document>
+  <Objects>
+    <Object name="Plate" type="PartDesign::Body"/>
+    <Object name="Turned" type="PartDesign::Body"/>
+    <Object name="PadProfile" type="Sketcher::SketchObject"/>
+    <Object name="PocketProfile" type="Sketcher::SketchObject"/>
+    <Object name="RevolveProfile" type="Sketcher::SketchObject"/>
+    <Object name="GrooveProfile" type="Sketcher::SketchObject"/>
+    <Object name="Pad" type="PartDesign::Pad"/>
+    <Object name="Pocket" type="PartDesign::Pocket"/>
+    <Object name="Revolution" type="PartDesign::Revolution"/>
+    <Object name="Groove" type="PartDesign::Groove"/>
+  </Objects>
+  <ObjectData>
+    <Object name="Plate"><Properties><Property name="Group"><LinkList>
+      <Link value="PadProfile"/><Link value="Pad"/><Link value="PocketProfile"/><Link value="Pocket"/>
+    </LinkList></Property></Properties></Object>
+    <Object name="Turned"><Properties><Property name="Group"><LinkList>
+      <Link value="RevolveProfile"/><Link value="Revolution"/><Link value="GrooveProfile"/><Link value="Groove"/>
+    </LinkList></Property></Properties></Object>
+    <Object name="PadProfile"><Properties><Property name="Geometry"><GeometryList>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="0" StartY="0" EndX="30" EndY="0"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="30" StartY="0" EndX="30" EndY="20"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="30" StartY="20" EndX="0" EndY="20"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="0" StartY="20" EndX="0" EndY="0"/></Geometry>
+    </GeometryList></Property></Properties></Object>
+    <Object name="PocketProfile"><Properties>
+      <Property name="Placement"><PropertyPlacement Px="0" Py="0" Pz="10" Q0="0" Q1="0" Q2="0" Q3="1"/></Property>
+      <Property name="Geometry"><GeometryList>
+        <Geometry type="Part::GeomLineSegment"><LineSegment StartX="5" StartY="5" EndX="10" EndY="5"/></Geometry>
+        <Geometry type="Part::GeomLineSegment"><LineSegment StartX="10" StartY="5" EndX="10" EndY="10"/></Geometry>
+        <Geometry type="Part::GeomLineSegment"><LineSegment StartX="10" StartY="10" EndX="5" EndY="10"/></Geometry>
+        <Geometry type="Part::GeomLineSegment"><LineSegment StartX="5" StartY="10" EndX="5" EndY="5"/></Geometry>
+      </GeometryList></Property>
+    </Properties></Object>
+    <Object name="RevolveProfile"><Properties><Property name="Geometry"><GeometryList>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="5" StartY="0" EndX="10" EndY="0"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="10" StartY="0" EndX="10" EndY="15"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="10" StartY="15" EndX="5" EndY="15"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="5" StartY="15" EndX="5" EndY="0"/></Geometry>
+    </GeometryList></Property></Properties></Object>
+    <Object name="GrooveProfile"><Properties><Property name="Geometry"><GeometryList>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="8" StartY="5" EndX="12" EndY="5"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="12" StartY="5" EndX="12" EndY="10"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="12" StartY="10" EndX="8" EndY="10"/></Geometry>
+      <Geometry type="Part::GeomLineSegment"><LineSegment StartX="8" StartY="10" EndX="8" EndY="5"/></Geometry>
+    </GeometryList></Property></Properties></Object>
+    <!-- Deliberately stored before its prerequisite, to exercise dependency ordering. -->
+    <Object name="Pocket"><Properties>
+      <Property name="BaseFeature"><Link value="Pad"/></Property>
+      <Property name="Profile"><LinkSub value="PocketProfile"/></Property>
+      <Property name="Length"><Float value="4"/></Property>
+      <Property name="Type"><Integer value="0"/></Property>
+    </Properties></Object>
+    <Object name="Pad"><Properties>
+      <Property name="Profile"><LinkSub value="PadProfile"/></Property>
+      <Property name="Length"><Float value="10"/></Property>
+      <Property name="Type"><Integer value="0"/></Property>
+    </Properties></Object>
+    <Object name="Groove"><Properties>
+      <Property name="BaseFeature"><Link value="Revolution"/></Property>
+      <Property name="Profile"><LinkSub value="GrooveProfile"/></Property>
+      <Property name="Angle"><Float value="180"/></Property>
+      <Property name="ReferenceAxis"><LinkSub value="GrooveProfile"><Sub value="V_Axis"/></LinkSub></Property>
+      <Property name="Type"><Integer value="0"/></Property>
+    </Properties></Object>
+    <Object name="Revolution"><Properties>
+      <Property name="Profile"><LinkSub value="RevolveProfile"/></Property>
+      <Property name="Angle"><Float value="270"/></Property>
+      <Property name="ReferenceAxis"><LinkSub value="RevolveProfile"><Sub value="V_Axis"/></LinkSub></Property>
+      <Property name="Type"><Integer value="0"/></Property>
+    </Properties></Object>
+  </ObjectData>
+</Document>

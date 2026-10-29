@@ -281,17 +281,18 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
         files.extend(build["files"].as_array().into_iter().flatten().filter_map(|f| f["file"].as_str().map(str::to_string)));
     }
     let state_js = STATE_JS.replace("STARTED", started).replace("BUILD_FILES", &json!(files.into_iter().collect::<Vec<_>>()).to_string());
-    let count = std::cell::Cell::new(0);
+    let count = AtomicUsize::new(0);
     let launch_at = |cdp: &mut Cdp, at: &str, build: &str| -> Result<Duration, String> {
-        let n = count.get() + 1;
-        count.set(n);
+        let n = count.fetch_add(1, Ordering::SeqCst) + 1;
         let t = Instant::now();
         let search = format!("?launch={n}");
         let what = format!("launch {n} starts build {build}");
         // One retry: on a heavily loaded machine a launch can stall past the timeout. Loading the
         // same page again must still start the same build.
         for attempt in 1..=2 {
-            let r = cdp.call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))?;
+            let r = cdp
+                .call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))
+                .map_err(|e| format!("{what}: {e}"))?;
             if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
                 return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
             }
@@ -300,7 +301,7 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             }) {
                 Ok(()) => return Ok(t.elapsed()),
                 Err(e) if attempt == 1 => println!("retry {e}"),
-                Err(e) => return Err(e),
+                Err(e) => return Err(format!("{what}: {e}")),
             }
         }
         unreachable!()
@@ -345,14 +346,21 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     let name2_ = cache_name(PREFIX, &kept.get(1).map(|(v, _)| v.clone()).unwrap_or_default());
     let asked = server.slow.load(Ordering::SeqCst);
     server.set(Mode::FailFast(v2.clone()));
-    let t = launch(&mut cdp, "v1")?;
     // The other files of v2 are asked for (and held) around the page's failure; let them go.
     // Only as many as the browser sends at once (less the page's connection) are sure to be
     // asked for: the page's failure cancels the download, and with it the files still waiting
     // for a connection (a real build has more files than that).
     let others = kept.get(1).map_or(0, |(_, n)| n.saturating_sub(1));
-    server.wait_asked_slowly(asked + others.min(CONNECTIONS_PER_SERVER - 1))?;
-    server.release();
+    // Navigation can wait for those responses in newer Chrome builds. Release them while the
+    // navigation is in flight, otherwise neither side can make progress.
+    let t = std::thread::scope(|scope| {
+        let navigating = scope.spawn(|| launch(&mut cdp, "v1"));
+        let requested = server.wait_asked_slowly(asked + others.min(CONNECTIONS_PER_SERVER - 1));
+        server.release();
+        let launched = navigating.join().map_err(|_| "web-offline-test: navigation worker panicked".to_string())?;
+        requested?;
+        launched
+    })?;
     wait_for(&mut cdp, &state_js, "no download is left marked in progress", |s| s["caches"].get(&name2_).is_some() && s["filling"] == json!([]))?;
     step("one file fails at once, others are still coming: v1 starts; v2's isn't left in progress", t);
 
@@ -1078,7 +1086,7 @@ impl Cdp {
         let id = self.next;
         self.send_frame(0x1, json!({ "id": id, "method": method, "params": params }).to_string().as_bytes())?;
         loop {
-            let reply: Value = serde_json::from_str(&self.recv()?).map_err(|e| format!("DevTools: {e}"))?;
+            let reply: Value = serde_json::from_str(&self.recv().map_err(|e| format!("{method}: {e}"))?).map_err(|e| format!("DevTools: {e}"))?;
             if reply["id"] == id {
                 if let Some(e) = reply.get("error") {
                     return Err(format!("{method}: {e}"));

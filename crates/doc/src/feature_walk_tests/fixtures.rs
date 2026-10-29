@@ -30,6 +30,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         |h: Value| json!({"type": "hole", "position": o, "direction": [0, 0, 1], "diameter": "hole.diameter", "depth": "hole.depth", "hole": h});
     vec![
         (
+            "import_placeholder",
+            json!({"type":"import_placeholder", "source":"Fillet003", "source_type":"PartDesign::Fillet", "detail":"Not supported by the importer."}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),

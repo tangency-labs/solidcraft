@@ -578,6 +578,13 @@ impl<'de> Deserialize<'de> for FlangeEdge {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// Persistent notice of a source operation that could not be translated. This records
+    /// history without creating or changing geometry, even when unsuppressed.
+    ImportPlaceholder {
+        source: String,
+        source_type: String,
+        detail: String,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -2327,6 +2334,7 @@ impl FeatureKind {
     /// Short type name (timeline tooltip, `inspect`).
     pub fn type_name(&self) -> &'static str {
         match self {
+            FeatureKind::ImportPlaceholder { .. } => "ImportPlaceholder",
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
@@ -2485,6 +2493,7 @@ impl FeatureKind {
             FeatureKind::Unstitch { .. } => "Unstitch",
             FeatureKind::ReverseNormal { .. } => "ReverseNormal",
             FeatureKind::SurfaceUntrim { .. } => "Untrim",
+            FeatureKind::ImportPlaceholder { .. } => "Not imported",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",

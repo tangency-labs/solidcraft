@@ -13,6 +13,12 @@ pub(crate) mod import;
 #[path = "file_send.rs"]
 mod send;
 
+#[path = "file_freecad_operations.rs"]
+mod freecad_operations;
+
+#[path = "file_freecad_report.rs"]
+mod freecad_report;
+
 use serde_json::{Value, json};
 use solidcraft_doc::Document;
 use solidcraft_io::Format;
@@ -36,6 +42,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept)"),
+    CommandSpec::new("file.inspect_freecad_sketches", "Inspect FreeCAD Sketches", inspect_freecad_sketches)
+        .icon("import")
+        .noundo()
+        .params("path: FreeCAD .FCStd file → {project, nodes, sketches, operations}; reads its Part/Body/Sketch hierarchy and operation settings without changing the design"),
+    CommandSpec::new("file.import_freecad_sketches", "Import FreeCAD Sketches", import_freecad_sketches)
+        .icon("import")
+        .params("path: FreeCAD .FCStd file; sketches?: [source object names] (default: all); organization?: hierarchy|flat (default hierarchy: FreeCAD Parts and Bodies become nested components; flat: all sketches go in the active component); naming?: original|body|path (flat only, default original); preserve_planes?: bool (default true: preserve saved sketch planes and parent placements; false: every sketch uses XY); import_operations?: bool (default false); operations?: [source operation names] (default all when enabled; required base operations and profile sketches are included automatically). Pad/Pocket become Extrude new/join/cut; Revolution/Groove become Revolve new/join/cut. Mirrored and PolarPattern become native transforms when their saved source, plane or axis, and parameters can be resolved. Fixed extents, reversed, symmetric, two-sided and through-all Pocket are supported. Face- and sketch-attached profiles with valid saved placements import on independent planes with nonblocking warnings. Attachments with no usable saved plane suppress affected operations for repair. Unsupported operations are reported as skipped. Operation import requires preserve_planes:true. All additions are one undo step; operations in the reply report feature ids, status and detailed warnings."),
+    CommandSpec::new("file.freecad_import_report", "FreeCAD Import Report", freecad_report::report)
+        .icon("copy")
+        .noundo()
+        .params("report: {project, source, summary, warnings: [{summary, detail, context?}], previews?: [saved sketch previews]}; path?: destination Markdown file; images?: bool (default true). Returns Markdown including every More description. When saving, also writes annotated PNGs in an adjacent images folder where source geometry is available. Copy returns text without image files. Does not change the design."),
     CommandSpec::new("file.save", "Save", save)
         .icon("save")
         .key("Ctrl+S")
@@ -268,6 +285,357 @@ fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
         s.refresh();
     }
     Ok(out)
+}
+
+fn freecad_project(path: &str, cmd: &str) -> Result<solidcraft_io::FreeCadProject> {
+    let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str());
+    if !extension.is_some_and(|e| e.eq_ignore_ascii_case("fcstd")) {
+        return Err(bad(cmd, "only FreeCAD .FCStd files contain importable sketches"));
+    }
+    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    solidcraft_io::read_freecad_sketches(&bytes, path).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn inspect_freecad_sketches(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.inspect_freecad_sketches";
+    let path = path_arg(p, cmd)?;
+    let project = freecad_project(path, cmd)?;
+    Ok(json!({
+        "path": path,
+        "project": project.label,
+        "nodes": project.nodes,
+        "sketches": project.sketches.len(),
+        "operations": project.operations,
+    }))
+}
+
+fn import_freecad_sketches(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "file.import_freecad_sketches";
+    let path = path_arg(p, cmd)?;
+    let project = freecad_project(path, cmd)?;
+    let import_operations = match p.get("import_operations") {
+        None => false,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`import_operations` must be true or false")),
+    };
+    let operations = if import_operations { freecad_operations::plan(&project.operations, p)? } else { Vec::new() };
+    let preserve_planes = match p.get("preserve_planes") {
+        None => true,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`preserve_planes` must be true or false")),
+    };
+    let requested = p.get("sketches").filter(|v| !v.is_null()).map(|_| string_list(cmd, p, "sketches")).transpose()?;
+    if requested.as_ref().is_some_and(Vec::is_empty) && operations.is_empty() {
+        return Err(bad(cmd, "`sketches` must contain at least one source sketch name"));
+    }
+    let mut selected: std::collections::BTreeSet<String> = requested
+        .as_ref()
+        .map(|names| names.iter().cloned().collect())
+        .unwrap_or_else(|| project.sketches.iter().map(|sketch| sketch.source_name.clone()).collect());
+    selected
+        .extend(operations.iter().filter(|op| project.sketches.iter().any(|sketch| sketch.source_name == op.profile)).map(|op| op.profile.clone()));
+    if import_operations && !preserve_planes {
+        return Err(bad(cmd, "operation import requires `preserve_planes: true`"));
+    }
+    if let Some(missing) = selected.iter().find(|name| !project.sketches.iter().any(|sketch| sketch.source_name == **name)) {
+        return Err(bad(cmd, format!("unknown source sketch `{missing}`")));
+    }
+    let organization = match str_(p, "organization") {
+        None | Some("hierarchy") => "hierarchy",
+        Some("flat") => "flat",
+        Some(_) => return Err(bad(cmd, "`organization` must be hierarchy or flat")),
+    };
+    let naming = match str_(p, "naming") {
+        None | Some("original") => "original",
+        Some("body") => "body",
+        Some("path") => "path",
+        Some(_) => return Err(bad(cmd, "`naming` must be original, body or path")),
+    };
+    if organization == "hierarchy" && naming != "original" {
+        return Err(bad(cmd, "`naming` applies to flat FreeCAD sketch imports only"));
+    }
+    let import_parent = s.active_component;
+    let mut part_components = std::collections::BTreeMap::<Vec<String>, u64>::new();
+    let mut created_components = Vec::new();
+    let mut body_components = std::collections::BTreeMap::<(u64, String), (String, u64)>::new();
+    let mut datum_planes = std::collections::BTreeMap::<(u64, String), u64>::new();
+    let mut imported = Vec::new();
+    let mut warnings = Vec::new();
+    let mut operation_sketches = std::collections::BTreeMap::new();
+    for mut source in project.sketches.into_iter().filter(|sketch| selected.contains(sketch.source_name.as_str())) {
+        for warning in &mut source.warnings {
+            if warning.context.is_none() {
+                warning.context = Some(solidcraft_io::FreeCadIssueContext { sketch: source.source_name.clone(), references: Vec::new() });
+            }
+        }
+        if import_operations
+            && source.attachment_unresolved
+            && let Some(saved) = source.saved_plane
+        {
+            source.plane = saved;
+            for warning in &mut source.warnings {
+                if warning.summary.contains("the sketch will use XY") {
+                    warning.summary = "The saved sketch plane is retained; its source attachment needs repair.".into();
+                }
+            }
+        }
+        let mut component = if organization == "hierarchy" {
+            let mut parent = import_parent;
+            let mut key = Vec::new();
+            for (source_name, label) in &source.parts {
+                key.push(source_name.clone());
+                parent = match part_components.get(&key) {
+                    Some(component) => *component,
+                    None => {
+                        let component = s.doc_mut().add_component(Some(label), parent)?;
+                        part_components.insert(key.clone(), component);
+                        created_components.push(json!({"source": source_name, "name": label, "component": component, "parent": parent}));
+                        component
+                    }
+                };
+            }
+            parent
+        } else {
+            import_parent
+        };
+        if organization == "hierarchy"
+            && let Some((body_source, body_label)) = &source.body
+        {
+            let key = (component, body_source.clone());
+            component = if let Some((_, id)) = body_components.get(&key) {
+                *id
+            } else {
+                let parent = component;
+                let id = s.doc_mut().add_component(Some(body_label), parent)?;
+                body_components.insert(key, (body_label.clone(), id));
+                created_components.push(json!({"source": body_source, "name": body_label, "component": id, "parent": parent, "kind": "body"}));
+                id
+            };
+        }
+        let name = match naming {
+            "body" => source.body.as_ref().map(|(_, body)| format!("{body} — {}", source.label)).unwrap_or_else(|| source.label.clone()),
+            "path" => {
+                let mut names: Vec<&str> = source.parts.iter().map(|(_, label)| label.as_str()).collect();
+                if let Some((_, body)) = &source.body {
+                    names.push(body);
+                }
+                names.push(&source.label);
+                names.join(" — ")
+            }
+            _ => source.label.clone(),
+        };
+        // A SolidCraft driving dimension needs a model parameter as well as a constraint. Without
+        // one it still constrains the solver, but the UI mistakes it for a reference dimension and
+        // cannot edit it. Genuine FreeCAD reference dimensions deliberately remain parameterless.
+        for constraint in &mut source.sketch.constraints {
+            if constraint.driven || constraint.param.is_some() || !constraint.kind.is_dimension() {
+                continue;
+            }
+            let Some(value) = constraint.kind.value() else { continue };
+            let (expression, unit) =
+                if constraint.kind.is_angle() { (format!("{} deg", value.to_degrees()), "deg") } else { (format!("{value} mm"), "mm") };
+            constraint.param = Some(s.doc_mut().new_model_param(&expression, unit));
+        }
+        let plane = if preserve_planes {
+            freecad_sketch_plane(s, &source, component, &mut datum_planes)?
+        } else {
+            solidcraft_doc::PlaneRef::Origin { name: "XY".into() }
+        };
+        let kind = solidcraft_doc::FeatureKind::Sketch { plane, sketch: source.sketch };
+        let name = freecad_feature_name(s, &name);
+        let id = s.doc_mut().add_feature(kind, Some(&name))?;
+        if let Some(feature) = s.doc_mut().feature_mut(id) {
+            feature.component = component;
+        }
+        let name = s.doc.feature(id).map(|feature| feature.name.clone()).unwrap_or(name);
+        operation_sketches.insert(
+            source.source_name.clone(),
+            freecad_operations::ImportedSketch {
+                id,
+                label: source.label.clone(),
+                component,
+                body: source.body.clone(),
+                curves: source.source_curves.clone(),
+                needs_repair: source.attachment_unresolved || source.warnings.iter().any(|warning| warning.summary.starts_with("Geometry ")),
+                warnings: source.warnings.clone(),
+            },
+        );
+        for warning in &source.warnings {
+            warnings.push(json!({"sketch": name, "summary": warning.summary, "detail": warning.detail}));
+        }
+        imported.push(json!({
+            "source": source.source_name,
+            "path": source.path,
+            "feature": id,
+            "name": name,
+            "geometry": s.doc.sketch(id).map(|sketch| sketch.curves.len()).unwrap_or(0),
+            "constraints": s.doc.sketch(id).map(|sketch| sketch.constraints.len()).unwrap_or(0),
+            "warnings": source.warnings,
+            "preview": source.preview,
+        }));
+    }
+    if imported.is_empty() && operations.is_empty() {
+        return Err(bad(cmd, "the file contains no selected sketches"));
+    }
+    let mut known_body_components: std::collections::BTreeSet<u64> = s
+        .doc
+        .metadata
+        .get("org.solidcraft.freecad.body_components")
+        .and_then(|value| value.get("ids"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_u64)
+        .collect();
+    known_body_components.extend(body_components.values().map(|(_, id)| *id));
+    if !known_body_components.is_empty() {
+        s.doc_mut().metadata.set(
+            solidcraft_doc::metadata::Owner::Design,
+            "org.solidcraft.freecad.body_components",
+            json!({"ids": known_body_components}),
+        )?;
+    }
+    s.active_sketch = None;
+    s.refresh();
+    let operation_results = freecad_operations::import(s, &operations, &operation_sketches)?;
+    let mut body_warnings = Vec::new();
+    if organization == "hierarchy" && import_operations {
+        for ((_, source), (label, component)) in &body_components {
+            let intended = operations
+                .iter()
+                .filter(|op| op.body.as_ref().is_some_and(|(body_source, _)| body_source == source) && op.base.is_none())
+                .filter_map(|op| operation_results.iter().find(|result| result["source"].as_str() == Some(op.source_name.as_str())))
+                .filter_map(|result| result["feature"].as_u64())
+                .filter_map(|feature| s.doc.feature(feature))
+                .find_map(|feature| feature.body_names.first().cloned())
+                .unwrap_or_else(|| label.clone());
+            let has_solid = s.model.state().bodies.iter().any(|body| s.doc.model_body_component(body) == *component && body.name == intended);
+            if !has_solid {
+                let has_starting_operation = operations.iter().any(|op| {
+                    op.body.as_ref().is_some_and(|(body_source, _)| body_source == source)
+                        && op.base.is_none()
+                        && matches!(
+                            op.type_name.as_str(),
+                            "PartDesign::Pad"
+                                | "PartDesign::Revolution"
+                                | "PartDesign::AdditivePipe"
+                                | "PartDesign::AdditiveLoft"
+                                | "Part::Extrusion"
+                                | "Part::Revolution"
+                        )
+                });
+                if !has_starting_operation {
+                    continue;
+                }
+                let sketches = operation_sketches
+                    .iter()
+                    .filter(|(_, sketch)| sketch.body.as_ref().is_some_and(|(body_source, _)| body_source == source))
+                    .map(|(source_name, sketch)| format!("`{}` (`{source_name}`)", sketch.label))
+                    .collect::<Vec<_>>();
+                let body_operations = operations
+                    .iter()
+                    .filter(|op| op.body.as_ref().is_some_and(|(body_source, _)| body_source == source))
+                    .map(|op| {
+                        let status = operation_results
+                            .iter()
+                            .find(|result| result["source"].as_str() == Some(op.source_name.as_str()))
+                            .and_then(|result| result["status"].as_str())
+                            .unwrap_or("not selected");
+                        format!("`{}` ({}, {status})", op.label, op.type_name)
+                    })
+                    .collect::<Vec<_>>();
+                body_warnings.push(json!({
+                    "summary": format!("FreeCAD Body `{label}` has no imported SolidCraft solid."),
+                    "detail": format!(
+                        "FreeCAD Body `{label}` (`{source}`) is a child component with no solid in its Bodies folder.\n\nImported sketches: {}.\n\nSource operations: {}.\n\n{} This importer rebuilds editable features from the saved history; it does not currently use FreeCAD's cached final Body shape. Review the operation issues and repair or rebuild the missing feature history to create the solid.",
+                        if sketches.is_empty() { "none".into() } else { sketches.join(", ") },
+                        if body_operations.is_empty() { "none".into() } else { body_operations.join(", ") },
+                        "The source has an additive starting operation, but it did not produce a SolidCraft solid.",
+                    ),
+                }));
+            }
+        }
+    }
+    Ok(json!({
+        "path": path,
+        "project": project.label,
+        "organization": organization,
+        "naming": naming,
+        "preserve_planes": preserve_planes,
+        "components": created_components,
+        "groups": [],
+        "imported": imported,
+        "operations": operation_results,
+        "warnings": warnings,
+        "body_warnings": body_warnings,
+    }))
+}
+
+fn freecad_explicit_plane(plane: solidcraft_geom::Plane) -> solidcraft_doc::PlaneRef {
+    for name in ["XY", "XZ", "YZ"] {
+        if let Some(origin) = solidcraft_geom::Plane::named(name)
+            && plane.origin.len() < 1e-9
+            && (plane.x - origin.x).len() < 1e-9
+            && (plane.y - origin.y).len() < 1e-9
+        {
+            return solidcraft_doc::PlaneRef::Origin { name: name.into() };
+        }
+    }
+    solidcraft_doc::PlaneRef::Custom { plane }
+}
+
+fn freecad_feature_name(s: &Session, label: &str) -> String {
+    let base: String = label.trim().chars().take(256).collect();
+    let base = if base.is_empty() { "FreeCAD".to_string() } else { base };
+    let mut name = base.clone();
+    let mut suffix = 2usize;
+    while s.doc.find_feature(&name).is_some() {
+        name = format!("{base} ({suffix})");
+        suffix += 1;
+    }
+    name
+}
+
+fn freecad_sketch_plane(
+    s: &mut Session,
+    source: &solidcraft_io::FreeCadSketch,
+    component: u64,
+    datums: &mut std::collections::BTreeMap<(u64, String), u64>,
+) -> Result<solidcraft_doc::PlaneRef> {
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let Some((source_name, label, datum)) = &source.datum else { return Ok(freecad_explicit_plane(source.plane)) };
+    let key = (component, source_name.clone());
+    let id = if let Some(id) = datums.get(&key) {
+        *id
+    } else {
+        let label = freecad_feature_name(s, label);
+        let id = s.doc_mut().add_feature(FeatureKind::ConstructionPlane { plane: freecad_explicit_plane(*datum) }, Some(&label))?;
+        if let Some(feature) = s.doc_mut().feature_mut(id) {
+            feature.component = component;
+        }
+        datums.insert(key, id);
+        id
+    };
+    let delta = source.plane.origin - datum.origin;
+    let distance = delta.dot(datum.normal());
+    if (delta - datum.normal() * distance).len() > 1e-7 || source.plane.normal().dot(datum.normal()) < 1.0 - 1e-10 {
+        return Ok(freecad_explicit_plane(source.plane));
+    }
+    let mut plane = PlaneRef::Construction { feature: id.into() };
+    if distance.abs() > 1e-9 {
+        plane = PlaneRef::Offset { base: Box::new(plane), distance: format!("{distance} mm").into() };
+    }
+    let angle = datum.normal().dot(datum.x.cross(source.plane.x)).atan2(datum.x.dot(source.plane.x));
+    if angle.abs() > 1e-9 {
+        plane = PlaneRef::AtAngle {
+            base: Box::new(plane),
+            axis_origin: source.plane.origin,
+            axis_dir: datum.normal(),
+            angle: format!("{} deg", angle.to_degrees()).into(),
+            line: None,
+        };
+    }
+    Ok(plane)
 }
 
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
@@ -945,6 +1313,113 @@ mod tests {
             assert_eq!(s.doc, before, "a failed open preserves the current design");
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn freecad_report_copy_and_save_include_the_complete_more_explanations() {
+        let mut session = Session::default();
+        let detail = "The circle's center refers to geometry 4.\nReattach it to the datum plane, then enable the operation.";
+        let report = json!({"project":"Fixture project", "source":"fixture.FCStd", "summary":"One operation needs repair.",
+            "warnings":[{"summary":"Pocket: attachment needs repair", "detail":detail},
+                {"summary":"Sketch uses an independent saved plane", "detail":"Its source face will not move this sketch after import.", "severity":"warning"}]});
+        let copied = session.execute("file.freecad_import_report", &json!({"report":report})).unwrap();
+        let text = copied["text"].as_str().unwrap();
+        assert!(text.contains("Source: fixture.FCStd"));
+        assert!(text.contains("Issue 1: Pocket: attachment needs repair"));
+        assert!(text.contains("Warning 1: Sketch uses an independent saved plane"));
+        assert!(text.contains(detail), "the full More text, including line breaks, is retained");
+        let dir = std::env::temp_dir().join(format!("solidcraft-freecad-report-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("report.md");
+        let saved = session.execute("file.freecad_import_report", &json!({"report":report,"path":path.to_string_lossy()})).unwrap();
+        assert_eq!(saved["text"], copied["text"]);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        assert!(session.undo.is_empty(), "report export does not change the design");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn freecad_report_images_mark_available_entities_and_explain_missing_references() {
+        use std::io::Write;
+        let xml = r#"<Document><Objects><Object type="Sketcher::SketchObject" name="BoltHoles"/></Objects>
+          <ObjectData><Object name="BoltHoles"><Properties>
+            <Property name="Geometry"><GeometryList><Geometry type="Part::GeomCircle"><Circle CenterX="0" CenterY="12" Radius="1.875"/></Geometry></GeometryList></Property>
+            <Property name="Constraints"><ConstraintList><Constrain Type="13" First="0" FirstPos="3" Second="-3" SecondPos="0"/></ConstraintList></Property>
+          </Properties></Object></ObjectData></Document>"#;
+        let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        archive.start_file("Document.xml", zip::write::SimpleFileOptions::default()).unwrap();
+        archive.write_all(xml.as_bytes()).unwrap();
+        let source = solidcraft_io::read_freecad_sketches(&archive.finish().unwrap().into_inner(), "source.FCStd").unwrap();
+        let sketch = &source.sketches[0];
+        assert_eq!(sketch.warnings[0].context.as_ref().unwrap().references, vec![(0, 3), (-3, 0)]);
+        assert_eq!(sketch.preview.curves[0].center, Some(solidcraft_geom::Vec2::new(0.0, 12.0)));
+        let report = json!({"project":"Bolt holes", "source":"source.FCStd", "summary":"A constraint was skipped.",
+            "warnings":sketch.warnings, "previews":[sketch.preview]});
+        let dir = std::env::temp_dir().join(format!("solidcraft-freecad-report-images-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Report with spaces.md");
+        let mut session = Session::default();
+        let saved = session.execute("file.freecad_import_report", &json!({"report":report,"path":path.to_string_lossy()})).unwrap();
+        let text = saved["text"].as_str().unwrap();
+        assert!(text.starts_with("# FreeCAD Import Report"));
+        assert!(text.contains("Report%20with%20spaces-images/issue-001.png"));
+        assert!(text.contains("external reference -3"));
+        assert!(text.contains("No position has been inferred"));
+        let png = std::fs::read(saved["images"][0].as_str().unwrap()).unwrap();
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+        assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), 960);
+        assert_eq!(u32::from_be_bytes(png[20..24].try_into().unwrap()), 640);
+        let copy = session.execute("file.freecad_import_report", &json!({"report":report})).unwrap();
+        assert!(copy["images"].as_array().unwrap().is_empty(), "clipboard text must not have broken links to unwritten images");
+        assert!(copy["text"].as_str().unwrap().contains(&sketch.warnings[0].detail));
+        let disabled = session.execute("file.freecad_import_report", &json!({"report":report,"path":path.to_string_lossy(),"images":false})).unwrap();
+        assert!(disabled["images"].as_array().unwrap().is_empty());
+        // An image write failure must leave the complete text report available.
+        std::fs::write(dir.join("blocked-images"), b"not a directory").unwrap();
+        let blocked =
+            session.execute("file.freecad_import_report", &json!({"report":report,"path":dir.join("blocked.md").to_string_lossy()})).unwrap();
+        assert_eq!(blocked["image_errors"].as_array().unwrap().len(), 1);
+        assert!(std::fs::read_to_string(dir.join("blocked.md")).unwrap().contains("Image unavailable"));
+        assert!(session.undo.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn freecad_datums_are_shared_and_offsets_and_rotations_keep_the_saved_frame() {
+        use solidcraft_geom::{Plane, Vec3};
+        let datum = Plane::new(Vec3::new(2.0, 3.0, 12.0), Vec3::X, Vec3::Y).unwrap();
+        let plane = Plane::new(Vec3::new(2.0, 3.0, 19.0), Vec3::Y, -Vec3::X).unwrap();
+        let source = solidcraft_io::FreeCadSketch {
+            source_name: "Sketch".into(),
+            label: "Profile".into(),
+            path: Vec::new(),
+            parts: Vec::new(),
+            body: None,
+            plane,
+            datum: Some(("Datum".into(), "Mounting plane".into(), datum)),
+            plane_description: "Mounting plane".into(),
+            saved_plane: Some(plane),
+            attachment_unresolved: false,
+            source_curves: Vec::new(),
+            preview: solidcraft_io::FreeCadSketchPreview { source: "Sketch".into(), curves: Vec::new(), omitted: 0 },
+            sketch: solidcraft_sketch::Sketch::new(),
+            warnings: Vec::new(),
+        };
+        let mut session = Session::default();
+        let mut datums = std::collections::BTreeMap::new();
+        let imported = freecad_sketch_plane(&mut session, &source, 0, &mut datums).unwrap();
+        let second = freecad_sketch_plane(&mut session, &source, 0, &mut datums).unwrap();
+        assert_eq!(session.doc.features.len(), 1, "both sketches refer to the same construction plane");
+        assert_eq!(imported, second);
+        let (values, _) = session.doc.param_values();
+        let resolved = session.doc.resolve_plane(&values, &imported, 0).unwrap();
+        assert!((resolved.origin - plane.origin).len() < 1e-9);
+        assert!((resolved.x - plane.x).len() < 1e-9);
+        assert!((resolved.y - plane.y).len() < 1e-9);
+        let mut different = source.clone();
+        different.datum = Some(("AnotherDatum".into(), "Mounting plane".into(), datum));
+        freecad_sketch_plane(&mut session, &different, 0, &mut datums).unwrap();
+        assert_eq!(session.doc.features[1].name, "Mounting plane (2)", "duplicate source labels must not alias plane references");
     }
 
     /// #3044: a save run on a scratch copy of the session (on a worker, so the window keeps

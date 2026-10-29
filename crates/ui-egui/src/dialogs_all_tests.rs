@@ -57,6 +57,27 @@ fn fixture() -> Harness {
     h
 }
 
+#[test]
+fn imported_repair_extrude_edit_enables_the_existing_feature() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let id = h.app.run("solid.extrude", json!({"distance": 5, "name": "Pad002 [Needs repair]"})).unwrap()["feature"].as_u64().unwrap();
+    h.app.run("timeline.suppress", json!({"feature": id, "suppressed": true})).unwrap();
+    h.app.edit_feature(id);
+    let dialog = h.app.dialog.as_ref().unwrap();
+    let commands = apply_commands(&h.app, dialog).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0, "timeline.redefine");
+    assert_eq!(commands[0].1["activate"], true);
+    let dialog = h.app.dialog.take().unwrap();
+    crate::dialogs::run_dialog(&mut h.app, &dialog).unwrap();
+    assert!(!h.app.session.doc.feature(id).unwrap().suppressed);
+    assert_eq!(h.app.session.doc.feature(id).unwrap().name, "Pad002");
+    assert_eq!(h.app.session.model.state().bodies.len(), 1);
+}
+
 fn representative(h: &Harness, command: &str) -> Dialog {
     let mut d = Dialog::for_command(&h.app, command).unwrap();
     let s = &h.app.session;

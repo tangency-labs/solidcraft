@@ -166,7 +166,19 @@ impl Cache {
             "sketches" => &model.sketches,
             _ => &model.planes,
         };
-        let Some(indices) = indices.get(&component) else { return Folder::default() };
+        // An imported FreeCAD Body can contain only sketches or unsupported operations. Keep
+        // its empty Bodies folder visible, just as it was before browser rows were cached.
+        let empty = || {
+            let imported_body = folder == "bodies"
+                && doc
+                    .metadata
+                    .get("org.solidcraft.freecad.body_components")
+                    .and_then(|value| value.get("ids"))
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|ids| ids.iter().any(|id| id.as_u64() == Some(component)));
+            if imported_body { Folder { key: format!("{prefix}/{folder}"), ..Default::default() } } else { Folder::default() }
+        };
+        let Some(indices) = indices.get(&component) else { return empty() };
         let mut all = Vec::with_capacity(indices.len());
         for i in indices {
             let entry = match folder {
@@ -188,7 +200,7 @@ impl Cache {
             }
         }
         if all.is_empty() {
-            return Folder::default();
+            return empty();
         }
         let (groups, loose) = arrange(&doc, component, folder, all);
         let loose_keys = loose.iter().map(|e| e.key.clone()).collect();

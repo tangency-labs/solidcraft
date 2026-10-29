@@ -168,6 +168,7 @@ mod extrude_preview;
 mod file_load;
 mod file_picker;
 pub(crate) mod frame_watch;
+mod freecad_import;
 #[cfg(test)]
 mod history_off_thread_tests;
 mod move_preview;
@@ -482,6 +483,9 @@ pub struct SolveApp {
     pub params: Option<params_dialog::ParamsDialog>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
+    /// The selective FreeCAD sketch-import window, when open.
+    pub(crate) freecad_import: Option<freecad_import::Dialog>,
+    pub(crate) freecad_operation_detail: Option<solidcraft_engine::io::FreeCadWarning>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
@@ -708,6 +712,8 @@ impl SolveApp {
             dialog: None,
             params: None,
             design_properties: None,
+            freecad_import: None,
+            freecad_operation_detail: None,
             bom: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
@@ -1692,6 +1698,15 @@ impl SolveApp {
         use solidcraft_engine::doc::FeatureKind;
         dialogs::cancel(self);
         let Some(f) = self.session.doc.feature(id) else { return };
+        if let FeatureKind::ImportPlaceholder { source_type, detail, .. } = &f.kind {
+            self.freecad_operation_detail = Some(solidcraft_engine::io::FreeCadWarning {
+                summary: format!("{} ({source_type})", f.name),
+                detail: detail.clone(),
+                severity: solidcraft_engine::io::FreeCadWarningSeverity::Issue,
+                context: None,
+            });
+            return;
+        }
         if matches!(f.kind, FeatureKind::Sketch { .. }) {
             self.edit_sketch(id);
             return;
@@ -2517,6 +2532,7 @@ impl SolveApp {
         self.resolve_fit(ui.ctx());
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
+        freecad_import::show(self, ui.ctx());
         bom_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());

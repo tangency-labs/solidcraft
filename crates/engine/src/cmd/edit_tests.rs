@@ -292,6 +292,35 @@ fn redefining_an_extrude_names_new_optional_inputs() {
 }
 
 #[test]
+fn redefining_an_imported_repair_extrude_can_activate_it_in_place() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Pad002 [Needs repair]"}))["feature"].as_u64().unwrap();
+    run(&mut s, "timeline.suppress", json!({"feature": id, "suppressed": true}));
+    assert!(s.model.state().bodies.is_empty());
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({
+            "feature": id,
+            "command": "solid.extrude",
+            "params": {"distance": 7, "operation": "new_body"},
+            "activate": true,
+        }),
+    );
+    let feature = s.doc.feature(id).unwrap();
+    assert!(!feature.suppressed);
+    assert_eq!(feature.name, "Pad002");
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!(s.model.result(id).is_some_and(|result| !result.skipped && result.error.is_none()));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.feature(id).unwrap().suppressed);
+    assert!(s.model.state().bodies.is_empty());
+}
+
+#[test]
 fn redefining_a_shell_replaces_persistent_face_selection() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));

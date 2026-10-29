@@ -59,6 +59,29 @@ fn feature_indices_follow_component_edits_and_undo() {
 }
 
 #[test]
+fn imported_freecad_body_without_a_solid_keeps_its_bodies_folder() {
+    let mut h = crate::scenario::Harness::new();
+    let created = h.app.run("component.create", json!({"name":"FreeCAD Body"})).unwrap();
+    let component = created["component"].as_u64().unwrap();
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app
+        .session
+        .doc_mut()
+        .metadata
+        .set(solidcraft_engine::doc::metadata::Owner::Design, "org.solidcraft.freecad.body_components", json!({"ids":[component]}))
+        .unwrap();
+
+    super::prepare_model(&mut h.app);
+    let mut cache = super::cache::Cache::default();
+    cache.prepare(&h.app);
+    let folder = cache.folder(&h.app, component, Some(&[occurrence]), "bodies");
+    assert_eq!(folder.key, format!("{}/bodies", super::occurrence_key(&[occurrence])));
+    assert_eq!(folder.entries().count(), 0);
+}
+
+#[test]
 fn body_index_and_placements_follow_geometry_undo_and_document_identity() {
     let (mut h, component, occurrence) = fixture();
     let first = super::model_placement(&mut h.app, &[occurrence]).unwrap();

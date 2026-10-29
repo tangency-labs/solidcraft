@@ -14,6 +14,7 @@ mod design_metadata;
 mod dxf;
 mod dxf_out;
 pub mod formats;
+mod freecad_sketch;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
@@ -27,6 +28,10 @@ mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
 pub mod paper;
+pub use freecad_sketch::{
+    FreeCadAxis, FreeCadIssueContext, FreeCadNode, FreeCadNodeKind, FreeCadOperation, FreeCadOperationSettings, FreeCadPreviewCurve, FreeCadProject,
+    FreeCadSketch, FreeCadSketchInfo, FreeCadSketchPreview, FreeCadWarning, FreeCadWarningSeverity, MAX_FREECAD_DOCUMENT_XML, read_freecad_sketches,
+};
 mod ply;
 pub use ply::{ply_counts, read_ply_mesh};
 mod point_cloud;
