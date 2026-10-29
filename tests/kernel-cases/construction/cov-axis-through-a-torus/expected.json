@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the axis of a torus",
+ "source": "analytic",
+ "method": "torus major 10, minor 2 centred on (0,60,0) about Z: the line through (0,60,0) along Z",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     0,
+     60,
+     0
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}
