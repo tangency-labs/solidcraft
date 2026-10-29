@@ -154,8 +154,9 @@ fn face_patch(body: &Body, face: usize) -> Result<Patch> {
     let record = body.record();
     let f = record.faces.get(face).ok_or_else(|| invalid(format!("the tool body has no face {face}")))?;
     let forward = body.face_forward(face);
-    // The surface's own parameter box, unbounded where it is.
-    let dom = SurfaceEval::new(f.parameters()).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
+    // The surface's own parameter box, unbounded where it is: of `surface` itself, not of its
+    // NURBS form (SMLib's cylinder is held on one, parameterised otherwise).
+    let dom = SurfaceEval::new(&f.surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
     let range = |k: usize| dom.range[k].map_or(ALL, |(a, b)| [a, b]);
     Ok(Patch { surface: f.surface.clone(), domain: [range(0), range(1)], flip: !forward })
 }
