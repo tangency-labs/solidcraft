@@ -59,7 +59,12 @@ fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
     assert_eq!(made.crossed_face_loops().unwrap(), 0);
     let history = made.history().expect("the chamfer retains exact face provenance");
     assert!(history.faces.iter().any(|f| f.origins.iter().any(|o| matches!(o, solidcraft_kernel::history::FaceOrigin::Edge { operand: 0, .. }))));
-    let mesh = |body: &Body| body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0005)).unwrap();
+    // Fine enough that the meshes' chord error is below the tolerance: the removed volume
+    // measured on meshes is 37.404 at chord 0.002, 37.672 at 0.0005, 37.761 at 0.0001 and 37.759
+    // at 0.00003, converged on the expected 37.762 (the chamfer as the chord between the contacts
+    // of a 2 mm ball). The planner's meshes of the two bodies differ, so their chord errors no
+    // longer cancel as truck's did.
+    let mesh = |body: &Body| body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap();
     let before = mesh(&body).measure().volume;
     let after = mesh(&made);
     let removed = before - after.measure().volume;

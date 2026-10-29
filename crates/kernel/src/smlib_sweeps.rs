@@ -71,8 +71,8 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, extrude, face_section, loft, loft_rails, loft_to_point, path_curve, project_onto_face, revolve, screw, screw_radial,
-    sphere, sweep, sweep_controlled,
+    body_from_record, curve, extrude, extrude_drafted_with_holes, face_section, loft, loft_rails, loft_to_point, path_curve, project_onto_face,
+    revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
 /// Refuses what no SMLib sweep does, before any work.
@@ -445,6 +445,79 @@ mod imp {
         let sources = (draft.is_none() && sign > 0.0).then(|| extrude_sources(&roles, pieces, region, plane, &base, &top));
         let body = body.with_face_sources(sources.map(std::sync::Arc::new));
         with_history(body, &roles, pieces)
+    }
+
+    /// The solid `pieces` (one closed loop) on `plane` sweep, moved `from` along its normal and
+    /// drafted `d` over `distance` along `sign` × the normal, as [`extrude`] builds it, without
+    /// its roles.
+    fn drafted_loop(plane: &Plane, pieces: &[Piece], from: f64, distance: f64, sign: f64, d: Draft) -> Result<Brep> {
+        let base = plane.offset(from);
+        let n = plane.x.cross(plane.y).normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
+        let dir = n * sign.signum();
+        if d.foot > 0.0 {
+            if !(d.foot < distance) {
+                return Err(KernelError::Invalid(format!("taper foot = {}", d.foot)));
+            }
+            let knee = plane.offset(from + sign.signum() * d.foot);
+            let lean = -(distance * d.taper.tan() / (distance - d.foot)).atan();
+            let prism =
+                Brep::extrude(&curves(&base, pieces)?, p(dir), d.foot, 0.0, DraftCorner::default(), true).map_err(|e| failed("extrude", e))?;
+            let slope =
+                Brep::extrude(&curves(&knee, pieces)?, p(dir), distance - d.foot, lean, corner(d.corner), true).map_err(|e| failed("extrude", e))?;
+            let brep = prism.boolean(&slope, solidcraft_smlib::BooleanOp::Union).map_err(|e| failed("extrude", e))?;
+            return brep.ok_or_else(|| failed("extrude", "nothing is left"));
+        }
+        Brep::extrude(&curves(&base, pieces)?, p(dir), distance, -d.taper, corner(d.corner), true).map_err(|e| failed("extrude", e))
+    }
+
+    /// A drafted extrusion of a region with holes: SMLib's draft extrusion takes one loop, so the
+    /// outer loop is drafted and each hole, turned counter-clockwise, is drafted the other way
+    /// and cut from it. Every wall leans by the taper on the material's side, as a single
+    /// drafted sweep would: a taper that narrows the outer boundary widens the holes. `outer` and
+    /// `holes` are the loops' pieces at `from` as [`extrude`] takes them, `all` the region's
+    /// pieces in their numbering (outer, then the holes as they bound the material), which the
+    /// walls' roles name.
+    pub(crate) fn extrude_drafted_with_holes(
+        plane: &Plane,
+        outer: &[Piece],
+        holes: &[Vec<Piece>],
+        all: &[Piece],
+        from: f64,
+        distance: f64,
+        sign: f64,
+        draft: Draft,
+    ) -> Result<Body> {
+        let mut brep = drafted_loop(plane, outer, from, distance, sign, draft)?;
+        for h in holes {
+            let cutter = drafted_loop(plane, h, from, distance, sign, Draft { taper: -draft.taper, ..draft })?;
+            brep = brep
+                .boolean(&cutter, solidcraft_smlib::BooleanOp::Subtract)
+                .map_err(|e| failed("extrude", e))?
+                .ok_or_else(|| KernelError::Invalid("the draft leaves nothing of the profile".into()))?;
+        }
+        let body = body_of(&brep, "extrude")?;
+        let base = plane.offset(from);
+        let top = plane.offset(from + sign.signum() * distance);
+        let low = roles(&body, &base, Some(&top), &seeds(&base, all, |q| q), &[], false)?;
+        let roles: Vec<Role> = if draft.foot > 0.0 {
+            // The sloping walls stand on their edges at the knee, as in [`extrude`].
+            let knee = plane.offset(from + sign.signum() * draft.foot);
+            let high = roles(&body, &knee, Some(&top), &seeds(&knee, all, |q| q), &[], false)?;
+            low.into_iter()
+                .zip(high)
+                .map(|(a, b)| match (a, b) {
+                    (Role::Wall(mut x), Role::Wall(y)) => {
+                        x.extend(y);
+                        Role::Wall(x)
+                    }
+                    (Role::Unknown, w @ Role::Wall(_)) => w,
+                    (a, _) => a,
+                })
+                .collect()
+        } else {
+            low
+        };
+        with_history(body, &roles, all)
     }
 
     /// The construction sources of a straight extrusion's faces along the normal of `sketch`, as

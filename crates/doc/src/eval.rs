@@ -535,6 +535,10 @@ pub struct ModelState {
     /// How the pieces a join split off into bodies of their own touched the others (by feature
     /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
+    /// For a feature saved before format 14 that split a body, a digest of the later features'
+    /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
+    /// the state stands for the feature only while those picks are the same.
+    legacy_picks: BTreeMap<u64, u64>,
 }
 
 /// How a piece a join split off into a body of its own (`Touching::Separate`) touched the
@@ -645,7 +649,7 @@ impl ModelState {
     /// After a feature evaluated to this state from `before` with cache key `key`: bodies it
     /// made or changed take that key, sketches it made a digest of their solved geometry (see
     /// [`quantize`]); the rest keep theirs.
-    fn stamp(&mut self, before: &Arc<ModelState>, f: &Feature, key: u64, mats: Vec<Mat>) {
+    fn stamp(&mut self, doc: &Document, before: &Arc<ModelState>, f: &Feature, key: u64, mats: Vec<Mat>) {
         let feature = f.id;
         let depth = before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1;
         let sheets = if f.kind.is_sheet() { self.sheets.clone() } else { Vec::new() };
@@ -654,7 +658,13 @@ impl ModelState {
         // the feature was saved when they were named in that order).
         if !f.shell_piece_order {
             crate::lineage::order_lumps(&mut self.bodies, &origin);
+        } else {
+            crate::lineage::order_legacy_lumps(&mut self.bodies, before, doc, f);
         }
+        match crate::lineage::legacy_picks_digest(&self.bodies, before, doc, f) {
+            0 => self.legacy_picks.remove(&f.id),
+            d => self.legacy_picks.insert(f.id, d),
+        };
         // The bodies before the feature by name, in their order (names repeat only in damaged
         // states): every lookup below is the first match of a linear search, without walking
         // every earlier body for every body, after every feature.
@@ -1328,6 +1338,15 @@ fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     h.finish()
 }
 
+/// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
+/// still its result in `doc`: a feature saved before format 14 names the pieces it splits a body
+/// into as the later features pick them ([`crate::lineage::order_legacy_lumps`]), which neither
+/// its fingerprint nor its cache key cover. (A script replays those features after it: the state
+/// made before they were there named the pieces otherwise.)
+fn legacy_current(doc: &Document, f: &Feature, before: &ModelState, after: &ModelState) -> bool {
+    !f.shell_piece_order || after.legacy_picks.get(&f.id).copied().unwrap_or(0) == crate::lineage::legacy_picks_digest(&after.bodies, before, doc, f)
+}
+
 /// The cache key of a feature evaluation: its own inputs, the document context and the state it
 /// starts from. Features that replay other features' definitions (patterns and mirrors of
 /// features) also take the chain fingerprint, which covers every earlier definition.
@@ -1860,9 +1879,11 @@ impl Model {
             if f.suppressed && !rolled_back {
                 reserved.extend(f.body_names.iter().map(|n| n.trim()).filter(|n| !n.is_empty()).map(str::to_string));
             }
+            // A feature that names its pieces as later features pick them (saved before format 14)
+            // has a result only while those picks are what they were.
             if reuse
                 && !unkept
-                && let Some(old) = self.results.get(i).filter(current)
+                && let Some(old) = self.results.get(i).filter(current).filter(|old| old.skipped || legacy_current(doc, f, &state, &old.state))
             {
                 if !old.skipped {
                     state = old.state.clone();
@@ -1898,7 +1919,13 @@ impl Model {
                 cache_key(f, fp, fingerprint(doc, 0, f, &vals, false, &self.step_digests) ^ placement_digest(doc, f, Some(&state)), ctx, &state);
             let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
             if !self.no_cache
-                && let Some(c) = self.cache.lock().ok().and_then(|mut m| m.get(key)).or_else(|| kept.and_then(|k| k.get(key)))
+                && let Some(c) = self
+                    .cache
+                    .lock()
+                    .ok()
+                    .and_then(|mut m| m.get(key))
+                    .or_else(|| kept.and_then(|k| k.get(key)))
+                    .filter(|c| c.error.is_some() || legacy_current(doc, f, &state, &c.state))
             {
                 if let Some(k) = kept {
                     k.put(key, &c);
@@ -1927,7 +1954,12 @@ impl Model {
             }
             // An active result hidden by the marker, or evaluated ahead on these same inputs
             // (the same chain of definitions from the start). Changed inputs never reuse it.
-            if let Some(r) = rolled.as_ref().filter(current).or_else(|| primed.as_ref().and_then(|p| p.get(&f.id)).filter(current)) {
+            if let Some(r) = rolled
+                .as_ref()
+                .filter(current)
+                .or_else(|| primed.as_ref().and_then(|p| p.get(&f.id)).filter(current))
+                .filter(|r| r.error.is_some() || legacy_current(doc, f, &state, &r.state))
+            {
                 restored += 1;
                 if r.error.is_none() {
                     state = r.state.clone();
@@ -2010,7 +2042,7 @@ impl Model {
                         }
                         _ => mats,
                     };
-                    next.stamp(&state, f, key, mats);
+                    next.stamp(doc, &state, f, key, mats);
                     for b in &mut next.bodies {
                         if !b.transferred {
                             b.component = match doc.body_components.get(&b.name) {

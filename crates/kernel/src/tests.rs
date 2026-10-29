@@ -463,6 +463,21 @@ fn tapered_extrudes() {
     assert!(rel(m.volume, v) < 5e-4, "{} vs {v}", m.volume);
     assert!(m.bbox.max.z < 1e-6 && m.bbox.min.z > -10.0 - 1e-6, "{:?}", m.bbox);
     assert!(extrude_tapered(&Plane::XY, &c, 10.0, 1.0, -60f64.to_radians(), crate::DraftCorner::default()).is_err(), "closes the profile");
+    // The square with a 10 × 10 square hole, 30 up, 5° inward: every wall leans in toward the
+    // material's outside, so the outer frustum narrows and the hole's widens; the solid is the
+    // one frustum less the other, with each wall a face of its own (four out, four in, two caps).
+    let t = 5f64.to_radians().tan();
+    let hole = Loop2::polygon(&[Vec2::new(-5.0, -5.0), Vec2::new(-5.0, 5.0), Vec2::new(5.0, 5.0), Vec2::new(5.0, -5.0)]);
+    let ring = Region2 { outer: sq.outer.clone(), holes: vec![hole] };
+    let b = extrude_tapered(&Plane::XY, &ring, 30.0, 1.0, -5f64.to_radians(), crate::DraftCorner::default()).unwrap();
+    let frustum = |a0: f64, a1: f64| 30.0 / 3.0 * (a0 * a0 + a1 * a1 + a0 * a1);
+    let v = frustum(40.0, 40.0 - 60.0 * t) - frustum(10.0, 10.0 + 60.0 * t);
+    let m = measure(&b).unwrap();
+    assert!(rel(m.volume, v) < 1e-6, "{} vs {v}", m.volume);
+    assert_eq!(m.merged.faces, 10);
+    // At 30° the hole would grow past the outer wall: refused, saying why.
+    let e = extrude_tapered(&Plane::XY, &ring, 30.0, 1.0, -30f64.to_radians(), crate::DraftCorner::default()).unwrap_err();
+    assert!(e.to_string().contains("hole"), "{e}");
 }
 
 /// A slot (two lines and two half-circles, tangent) tapered inward: every edge moves in by
