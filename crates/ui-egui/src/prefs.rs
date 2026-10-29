@@ -1494,6 +1494,9 @@ impl Snapshot {
             autosave,
             auto_project,
             keys,
+            toolbar,
+            favourites,
+            profile,
         } = self;
         *prefs == app.preferences
             && *dark == app.ui.dark
@@ -1509,6 +1512,9 @@ impl Snapshot {
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
             && *keys == app.keymap.custom
+            && *toolbar == app.toolbar_custom.prefs()
+            && *favourites == app.sbox.pinned
+            && *profile == app.settings_profiles.active
     }
 }
 
