@@ -27,9 +27,10 @@
 //! - **Offset surface.** `DropCurve`'s `SmOffsetSurface` always offsets the drop
 //!   surface itself, so it is a [`DropOffset`] (its offset distance and the
 //!   singularities it was built with) next to that surface. `DropVectors` and
-//!   `EvaluateDirectionalDerivs` build the ported
-//!   [`OffsetSurface`] over a copy of that surface (upstream shares it) and run the
-//!   `SmSurface` bodies on it.
+//!   `EvaluateDirectionalDerivs` run the `SmSurface` bodies on the ported
+//!   [`OffsetSurface`] over an exact copy of that surface (upstream shares it), built
+//!   at the first of them and kept with the [`DropOffset`], as upstream builds it
+//!   once per `DropCurve`; [`DropOffset::set_offset_distance`] sets its distance.
 //! - **Ignored statuses.** `GetNextPoint` ignores the status of its start
 //!   `Evaluate2ndDerivatives` (upstream then goes on with what the failed evaluator
 //!   left in its outputs): that failure path is not ported, the error propagates
@@ -115,14 +116,18 @@ const OP_ADD: &str = "intersect::surface_drop_lib::add_to_curve";
 
 /// The offset of the drop surface `DropCurve` hands to these steps (its
 /// `SmOffsetSurface(1.0, *this, FALSE, lSingularities)`): the base is always the drop
-/// surface itself, so only the offset distance (which [`DropPt::set_properties`]
-/// sets) and the singularities it was built with are kept.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// surface itself, so the offset distance (which [`DropPt::set_properties`] sets), the
+/// singularities it was built with and, once a step evaluates it, the offset surface
+/// are kept. One `DropOffset` serves one drop surface, as upstream's serves its
+/// `DropCurve`.
+#[derive(Debug)]
 pub struct DropOffset {
     /// `m_dOffsetDistance`.
     pub offset_distance: f64,
     /// The `lSingularities` the offset was built with.
     pub singularities: u32,
+    /// The offset surface, built at its first evaluation (see [`DropOffset::offset_of`]).
+    surface: Option<Surface>,
 }
 
 impl DropOffset {
@@ -132,39 +137,48 @@ impl DropOffset {
         Self {
             offset_distance,
             singularities,
+            surface: None,
         }
     }
 
     /// `SetOffsetDistance`.
     pub fn set_offset_distance(&mut self, offset_distance: f64) {
+        // (the kept offset surface takes it at its next evaluation)
         self.offset_distance = offset_distance;
     }
 
     /// The `SmOffsetSurface` this stands for over `surface` (not owning it, with the
-    /// stored singularities): its constructor's `IsPeriodic` (and, for [`SS_UNKNOWN`],
-    /// `GetSingularities`) depend only on `surface`, so building it per call gives the
-    /// object upstream builds once.
+    /// stored singularities and offset distance), built at the first call and kept: its
+    /// constructor's `IsPeriodic` (and, for [`SS_UNKNOWN`], `GetSingularities`) depend
+    /// only on `surface`, which is the same drop surface at every call.
     ///
     /// Upstream's base is `surface` itself (`m_pSurface(&rSurface)`), so the stand-in is
     /// an exact evaluation copy that keeps its owner: [`Clone`] runs the copy
     /// constructor's knot fix-up, which moves near-coincident knots and changes the
     /// base's derivatives (bottle edge 29 at r=0.1: `DropVectors` at a 7e-10 first knot
     /// span).
-    fn offset_of(&self, k: &Kernel, surface: &Surface) -> Result<Surface> {
-        Ok(Surface::from(OffsetSurface::new(
-            k,
-            self.offset_distance,
-            surface.clone_for_evaluation()?,
-            false,
-            self.singularities,
-        )?))
+    fn offset_of(&mut self, k: &Kernel, surface: &Surface) -> Result<&Surface> {
+        let built = match self.surface.take() {
+            Some(built) => built,
+            None => Surface::from(OffsetSurface::new(
+                k,
+                self.offset_distance,
+                surface.clone_for_evaluation()?,
+                false,
+                self.singularities,
+            )?),
+        };
+        if let SurfaceKind::OffsetSurface(off) = built.kind() {
+            off.set_offset_distance(self.offset_distance);
+        }
+        Ok(self.surface.insert(built))
     }
 
     /// `rOffset.DropVectors(uv, bFromLeftU, bFromLeftV, 1, &vector, &duv)` on the
     /// offset of `surface` (the `SmSurface` body: `SmOffsetSurface` does not override
     /// it).
     fn drop_vectors(
-        offset: &Self,
+        offset: &mut Self,
         k: &Kernel,
         surface: &Surface,
         uv: Point2,
@@ -173,7 +187,7 @@ impl DropOffset {
         vector: Vec3,
     ) -> Result<Vec2> {
         let off = offset.offset_of(k, surface)?;
-        drop_vectors_at(k, &off, uv, side(from_left_u), side(from_left_v), &[vector])?
+        drop_vectors_at(k, off, uv, side(from_left_u), side(from_left_v), &[vector])?
             .first()
             .copied()
             .ok_or_else(|| SolidError::sm_err(OP_SET))
@@ -183,7 +197,7 @@ impl DropOffset {
     /// on the offset of `surface`: the point and first directional derivative (the
     /// `SmSurface` body: `SmOffsetSurface` does not override it).
     fn evaluate_directional_derivs(
-        offset: &Self,
+        offset: &mut Self,
         k: &Kernel,
         surface: &Surface,
         uv: Point2,
