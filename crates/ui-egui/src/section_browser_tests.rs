@@ -327,24 +327,140 @@ fn section_view_on_a_face_starts_a_section_on_its_plane() {
 }
 
 /// With a section on, Section View on another face adds that face's plane to it: the dialog
-/// says so, the preview keeps the planes on show, and OK leaves both.
+/// says so, the preview keeps the planes on show, and OK leaves both. The plane starts flipped,
+/// hiding the part's side, so the cut stays as it was (an immediate OK changes nothing), and
+/// moving it into the part brings back what lies before it.
 #[test]
 fn section_view_adds_a_face_plane_to_the_section_on_show() {
     let mut h = box_in_view();
-    h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}, "hatch": false})).unwrap();
     h.frames(3);
+    let hidden = |planes: &[solidcraft_engine::SectionPlane], p: [f64; 3]| {
+        let p = solidcraft_engine::geom::Vec3::new(p[0], p[1], p[2]);
+        !planes.iter().any(|c| c.keeps(p, 0.0))
+    };
     let labels = menu_at(&mut h, [40.0, 22.0, 10.0]);
     assert!(labels.iter().any(|l| l == "Section View"), "{labels:?}");
     pick(&mut h, "Section View");
-    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Section { add: true, .. })));
+    let kind = h.app.dialog.as_ref().map(|d| d.kind.clone());
+    assert!(matches!(kind, Some(crate::dialogs::Kind::Section { add: true, flip: true, hatch: false, .. })), "{kind:?}");
     h.frames(2);
     assert!(crate::scenario::handle_at("dialog:hint:section_add").is_some(), "the dialog says the plane joins the section");
-    assert_eq!(crate::viewport::section_planes(&h.app).len(), 2, "the preview keeps the section's plane");
+    let preview = crate::viewport::section_planes(&h.app);
+    assert_eq!(preview.len(), 2, "the preview keeps the section's plane");
+    assert!(hidden(&preview, [20.0, 5.0, 10.0]) && hidden(&preview, [39.0, 5.0, 10.0]), "the cut is still on show: {preview:?}");
+    assert!(!crate::viewport::section_hatch(&h.app), "the preview keeps the section plain");
+    ok(&mut h);
+    assert_eq!(h.app.session.section.len(), 2);
+    assert!(hidden(&h.app.session.section, [20.0, 5.0, 10.0]) && !h.app.session.section_hatch, "OK at 0 keeps the cut, and plain");
+    let labels = menu_at(&mut h, [20.0, 15.0, 10.0]);
+    assert!(labels.iter().any(|l| l == "Turn Off Section View"), "the cut face is still there to turn off: {labels:?}");
+
+    // Moved 20 mm into the part, it hides only what lies past x 20.
+    h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    h.frames(3);
+    menu_at(&mut h, [40.0, 22.0, 10.0]);
+    pick(&mut h, "Section View");
     set_offset(&mut h, "-20 mm");
     ok(&mut h);
     let planes: Vec<_> = h.app.session.section.iter().map(|c| (c.id, c.normal)).collect();
     assert_eq!(planes.len(), 2, "{planes:?}");
-    assert!((planes[1].1 - solidcraft_engine::geom::Vec3::X).len() < 1e-9 && (h.app.session.section[1].origin.x - 20.0).abs() < 1e-9, "{planes:?}");
+    assert!((planes[1].1 + solidcraft_engine::geom::Vec3::X).len() < 1e-9 && (h.app.session.section[1].origin.x - 20.0).abs() < 1e-9, "{planes:?}");
+    assert!(h.app.session.section_hatch, "a hatched section stays hatched");
+    assert!(hidden(&h.app.session.section, [10.0, 5.0, 10.0]) && !hidden(&h.app.session.section, [30.0, 5.0, 10.0]));
+}
+
+/// Section View cuts on the face right-clicked, even when the selection holds other faces before
+/// it (a curved one, or another planar one).
+#[test]
+fn section_view_cuts_on_the_face_right_clicked() {
+    let mut h = harness();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [28, 15, 0], "radius": 5, "height": 20, "operation": "cut"})).unwrap();
+    h.app.cam = solidcraft_engine::view::home_camera(&h.app.session);
+    h.frames(3);
+    let face_at = |h: &mut Harness, at: [f64; 3]| {
+        menu_at(h, at);
+        let face = h.app.session.selection.first().cloned().expect("a face under the cursor");
+        crate::context_menu::close(&mut h.app);
+        face
+    };
+    let (hole, top, front) = (face_at(&mut h, [24.47, 18.53, 18.0]), face_at(&mut h, [10.0, 8.0, 20.0]), face_at(&mut h, [12.0, 0.0, 5.0]));
+    let section_face = |h: &mut Harness, selection: &[&solidcraft_engine::Sel], at: [f64; 3]| {
+        h.app.session.selection = selection.iter().map(|s| (*s).clone()).collect();
+        let labels = menu_at(h, at);
+        assert_eq!(h.app.session.selection.len(), selection.len(), "the right-click keeps the selection");
+        let items = context_menu::items(&h.app, &Target::Viewport);
+        let item = items.iter().find(|i| i.id == "ui.sectionView");
+        (labels, item.and_then(|i| i.params.as_ref().and_then(|p| serde_json::from_value::<solidcraft_engine::Sel>(p["face"].clone()).ok())))
+    };
+    let index = |s: &solidcraft_engine::Sel| match s {
+        solidcraft_engine::Sel::Face { index, .. } => *index,
+        _ => usize::MAX,
+    };
+    let (labels, face) = section_face(&mut h, &[&hole, &top], [10.0, 8.0, 20.0]);
+    assert_eq!(face.as_ref().map(index), Some(index(&top)), "the top face, not the hole before it: {labels:?}");
+    let (_, face) = section_face(&mut h, &[&front, &top], [10.0, 8.0, 20.0]);
+    assert_eq!(face.as_ref().map(index), Some(index(&top)), "the face clicked, not the first selected");
+    let (labels, face) = section_face(&mut h, &[&top, &hole], [24.47, 18.53, 18.0]);
+    assert!(face.is_none() && !labels.iter().any(|l| l == "Section View"), "the hole clicked is curved: {labels:?}");
+}
+
+/// Edit on a section of several planes edits its last plane in place: the preview keeps the
+/// others, the dialog says so, OK with no plane picked keeps the section, and a plane Section
+/// View added reopens where it was left, its OK moving that plane alone.
+#[test]
+fn edit_moves_one_plane_of_several() {
+    let mut h = box_in_view();
+    h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    h.frames(3);
+    menu_at(&mut h, [40.0, 22.0, 10.0]);
+    pick(&mut h, "Section View");
+    set_offset(&mut h, "-20 mm");
+    ok(&mut h);
+    let before = h.app.session.section.clone();
+    assert_eq!(before.len(), 2);
+
+    menu(&mut h, "Edit Section Analysis");
+    let kind = h.app.dialog.as_ref().map(|d| d.kind.clone());
+    let Some(crate::dialogs::Kind::Section { offset, flip: true, edit: Some(id), .. }) = kind else { panic!("{kind:?}") };
+    assert_eq!((offset.as_str(), id), ("-20 mm", before[1].id), "the plane Section View added, where it was left");
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:hint:section_edit").is_some(), "the dialog says it edits one plane");
+    assert!(crate::scenario::handle_at("dialog:hint:section_off").is_none());
+    assert_eq!(crate::viewport::section_planes(&h.app), before, "the preview is the section as it is");
+    set_offset(&mut h, "-30 mm");
+    h.frames(2);
+    let preview = crate::viewport::section_planes(&h.app);
+    assert!(preview.len() == 2 && preview[0] == before[0] && (preview[1].origin.x - 10.0).abs() < 1e-9, "{preview:?}");
+    ok(&mut h);
+    let after = h.app.session.section.clone();
+    assert!(after.len() == 2 && after[0] == before[0] && after[1].id == before[1].id && (after[1].origin.x - 10.0).abs() < 1e-9, "{after:?}");
+
+    // A section of several planes made some other way: Edit moves its last plane, and OK with
+    // none picked asks for one instead of turning the section off.
+    h.app.run("inspect.section", json!({"plane": "XZ", "offset": 15})).unwrap();
+    h.app.run("inspect.section", json!({"plane": "YZ", "offset": 20, "add": true})).unwrap();
+    h.frames(3);
+    let before = h.app.session.section.clone();
+    menu(&mut h, "Edit Section Analysis");
+    let (offset, _, plane) = section_dialog(&h);
+    assert!(offset == "0 mm" && plane.is_empty(), "{offset} {plane:?}");
+    assert_eq!(crate::viewport::section_planes(&h.app), before, "the preview keeps every plane");
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.session.section, before, "OK with no plane keeps the section");
+    assert!(h.app.dialog.is_some(), "and asks for a plane");
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(2);
+
+    // Hidden, Edit shows it again to edit it.
+    click(&mut h, "eye:Section Analysis");
+    assert!(h.app.session.section.is_empty());
+    menu(&mut h, "Edit Section Analysis");
+    assert_eq!(h.app.session.section.len(), 2, "shown to edit");
+    assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Section { edit: Some(_), .. })));
 }
 
 /// A curved face has no plane: its menu offers no Section View.

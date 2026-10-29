@@ -161,8 +161,8 @@ pub struct TreeState {
     /// A Section Analysis hidden with its eye in the Analysis folder: its planes, so the eye can
     /// bring it back (#822). Empty: none hidden.
     pub hidden_section: Vec<solidcraft_engine::SectionPlane>,
-    /// What the Section Analysis dialog's OK last made, for Edit to start from.
-    pub section_dialog: Option<crate::dialogs::SectionDraft>,
+    /// What the Section Analysis dialog's OK made, per plane of the section, for Edit to start from.
+    pub section_dialog: Vec<crate::dialogs::SectionDraft>,
     /// The Analysis folder hidden with its own eye, and the Section Analysis hidden with its
     /// own: the section shows only while neither is, and each eye keeps its state.
     pub analysis_hidden: bool,

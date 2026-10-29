@@ -252,6 +252,8 @@ pub struct MenuState {
     /// The section plane whose cut face was under the cursor when the viewport menu opened: it
     /// offers to turn it off.
     pub section_plane: Option<u64>,
+    /// The face under the cursor when the viewport menu opened: Section View cuts on its plane.
+    pub face: Option<Sel>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -685,16 +687,17 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
-        let planar =
-            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
-        v.push(act("ui.lookAt", "Look At", "lookat").on(planar));
+        let planar = |s: &&Sel| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some());
+        v.push(act("ui.lookAt", "Look At", "lookat").on(sel.iter().any(|s| planar(&s))));
         let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
-        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
+        let one_flat = matches!(sel.as_slice(), [face] if planar(&face));
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
-        // A planar face's plane starts a section, or joins the one on show.
-        if let Some(face @ Sel::Face { body, index, .. }) = sel.iter().find(|s| matches!(s, Sel::Face { .. }))
-            && crate::dialogs::planar_face(&app.session, body, *index).is_some()
-        {
+        // The face right-clicked (else the last planar one selected) starts a section on its
+        // plane, or its plane joins the one on show.
+        let same_face =
+            |a: &Sel, b: &Sel| matches!((a, b), (Sel::Face { body, index, .. }, Sel::Face { body: b2, index: i2, .. }) if body == b2 && index == i2);
+        let under = app.menu.face.as_ref().filter(|f| sel.iter().any(|s| same_face(s, f)));
+        if let Some(face) = under.map_or_else(|| sel.iter().rev().find(planar), |f| Some(f).filter(planar)) {
             v.push(act("ui.sectionView", "Section View", "section").with(json!({ "face": face })));
         }
         v.push(Item::sep());
@@ -1907,14 +1910,20 @@ fn sketches_to_parts(app: &mut SolveApp, p: Value) {
 }
 
 /// Section View on a face: the Section Analysis dialog on the face's plane (its outward normal,
-/// so the arrow dragged inward cuts into the part), adding the plane to a section on show.
+/// so the arrow dragged inward cuts into the part). With a section on show the plane joins it,
+/// flipped to hide the part's side, so the cut stays as it was until the plane moves, and
+/// keeping the section's hatch.
 fn section_view(app: &mut SolveApp, face: Sel) {
     let adding = !app.session.section.is_empty();
+    let section_hatch = app.session.section_hatch;
     app.start_section_edit();
     if let Some(d) = app.dialog.as_mut()
-        && let crate::dialogs::Kind::Section { add, .. } = &mut d.kind
+        && let crate::dialogs::Kind::Section { add, flip, hatch, .. } = &mut d.kind
     {
         *add = adding;
+        if adding {
+            (*flip, *hatch) = (true, section_hatch);
+        }
         if let Some(plane) = d.inputs.first_mut() {
             plane.items = vec![face];
         }
@@ -2132,6 +2141,8 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     let before = app.session.selection.clone();
     app.menu.over_geometry = app.viewport.hover.is_some();
     app.menu.section_plane = crate::view_pick::section_plane_at(app, at).map(|c| c.id);
+    app.menu.face =
+        app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).map(|(_, sel)| sel).filter(|s| matches!(s, Sel::Face { .. }));
     // A right-click leaves a plane unselected, but the menu offers a sketch on it.
     app.menu.plane = app.viewport.hover.clone().and_then(|h| crate::viewport::candidate(app, &[h])).and_then(|(_, sel)| match sel {
         Sel::Plane { name } => Some(name),

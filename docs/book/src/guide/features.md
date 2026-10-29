@@ -211,14 +211,16 @@ away.
   and **Distance** move the cut along the plane's normal.
 - Right-click a planar face and choose **Section View**: the dialog starts on the face's plane,
   facing out of the part, so dragging the arrow inward cuts into it. With a section on, the
-  face's plane joins it as another plane.
+  face's plane joins it as another plane, flipped to face into the part: at distance 0 the cut
+  stays as it was, and dragging the arrow inward brings back what lies in front of the plane.
 - Right-click a cut face and choose **Turn Off Section View**: with one plane the section goes;
   with several, only the plane of the face you clicked.
-- The browser's **Analysis** folder lists the section: its eye hides and shows it, and Delete
+- The browser's **Analysis** folder lists the section: its eye hides and shows it, Edit reopens
+  the dialog (on the last plane, the others kept, when the section has several) and Delete
   removes it.
 
 Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds the plane to it,
-`remove` takes a plane out by its id, and `clear: true` removes them all.
+`replace` moves one plane by its id, `remove` takes a plane out by its id, and `clear: true` removes them all.
 
 ## Comparing two bodies
 
