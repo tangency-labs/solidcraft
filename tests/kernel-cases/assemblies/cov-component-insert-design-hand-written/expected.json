@@ -1,0 +1,57 @@
+{
+ "sources": [],
+ "what": "a hand-written design (one 30x20x10 box) inserted 100 mm along x",
+ "source": "analytic",
+ "method": "plate.solidcraft in the case directory: a box 30x20x10 at the origin; inserted with translate (100,0,0): 6000 mm3, box (100,0,0)-(130,20,10), centre (115,10,5)",
+ "body_count": 1,
+ "volume_mm3": 6000.0,
+ "area_mm2": 2200.0,
+ "bbox": {
+  "min": [
+   100,
+   0,
+   0
+  ],
+  "max": [
+   130,
+   20,
+   10
+  ]
+ },
+ "results": [
+  {
+   "step": 1,
+   "json": {
+    "bodies": [
+     "Plate"
+    ],
+    "name": "plate"
+   }
+  },
+  {
+   "step": 2,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      115.0,
+      10.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       100.0,
+       0.0,
+       0.0
+      ],
+      "max": [
+       130.0,
+       20.0,
+       10.0
+      ]
+     },
+     "volume_mm3": 6000.0
+    }
+   }
+  }
+ ]
+}

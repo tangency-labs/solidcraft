@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "component.from_bodies naming a body that is not there",
+ "source": "analytic",
+ "method": "a design with one body P: from_bodies of 'Nope' is refused, naming it",
+ "outcome": "refused",
+ "refusal": "Nope"
+}

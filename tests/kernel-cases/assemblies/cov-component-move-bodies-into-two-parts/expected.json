@@ -1,0 +1,72 @@
+{
+ "sources": [],
+ "what": "two bodies moved from the root into a component each",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); moving bodies into components keeps them where they are: Arm (20,0,5), Base (0,0,-5), 4000 mm3 each",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   -10
+  ],
+  "max": [
+   40,
+   10,
+   10
+  ]
+ },
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ],
+     "bbox": {
+      "min": [
+       0.0,
+       -5.0,
+       0.0
+      ],
+      "max": [
+       40.0,
+       5.0,
+       10.0
+      ]
+     },
+     "volume_mm3": 4000.0
+    }
+   }
+  },
+  {
+   "step": 9,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      0.0,
+      0.0,
+      -5.0
+     ],
+     "bbox": {
+      "min": [
+       -10.0,
+       -10.0,
+       -10.0
+      ],
+      "max": [
+       10.0,
+       10.0,
+       0.0
+      ]
+     },
+     "volume_mm3": 4000.0
+    }
+   }
+  }
+ ]
+}
