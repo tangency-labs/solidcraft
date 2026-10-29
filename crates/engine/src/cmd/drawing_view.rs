@@ -20,6 +20,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::Value;
 use solidcraft_doc::drawing::Drawing;
+use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::dimension::Dimension;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{Looking, ViewDirection, ViewOverrides};
@@ -66,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, display_style, reference_style, reference_hides_model, tangent_edges: {value, from: this|parent|default, parent?, set}}, reference_margin_mm, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], choices: {display_style, scale}}. Read-only; no model is evaluated."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, display_style, reference_style, reference_hides_model, tangent_edges: {value, from: this|parent|default, parent?, set}}, reference_margin_mm, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {display_style, scale}}. Read-only; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", EDIT_CONTRACT, edit))
         .icon("edit")
         .in_drawing()
@@ -87,7 +88,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&COPY_CONTRACT)
         .output(output_schema_for::<ToSheetResult>)
-        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for the copy's centre (default the sheet's centre); with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions are copied with it, with ids of their own. One undo step."),
+        .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for the copy's centre (default the sheet's centre); with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions and balloons are copied with it, with ids of their own. One undo step."),
 ];
 
 fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -182,6 +183,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             _ => Value::String("partly".into()),
         }),
         dimensions: d.dimensions.iter().filter(|dimension| dimension.view == view.id).map(|dimension| ids::encode(dimension.id)).collect(),
+        balloons: d.balloons.iter().filter(|balloon| balloon.view == view.id).map(|balloon| ids::encode(balloon.id)).collect(),
         choices: ChoicesResult {
             display_style: VisualStyle::ALL.iter().map(|s| snake_name(*s)).collect(),
             scale: PRESETS.iter().map(ToString::to_string).collect(),
@@ -412,13 +414,15 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let originals: Vec<u64> = std::iter::once(id).chain(linked.into_iter().filter(|_| with_linked)).collect();
-    // Each view's dimensions are part of what it shows, so they are copied with it.
+    // Each view's dimensions and balloons are part of what it shows, so they are copied with it.
     let measured: Vec<u64> = record.dimensions.iter().filter(|d| originals.contains(&d.view)).map(|d| d.id).collect();
-    let mut copies = (0..originals.len() + measured.len())
+    let ballooned: Vec<u64> = record.balloons.iter().filter(|b| originals.contains(&b.view)).map(|b| b.id).collect();
+    let mut copies = (0..originals.len() + measured.len() + ballooned.len())
         .map(|_| record.allocate_id(&mut s.ids))
         .collect::<solidcraft_doc::Result<Vec<u64>>>()
         .map_err(|e| bad(COPY, e.to_string()))?;
-    let dimension_copies = copies.split_off(originals.len());
+    let mut dimension_copies = copies.split_off(originals.len());
+    let balloon_copies = dimension_copies.split_off(measured.len());
     let copy_of = |old: u64| originals.iter().position(|o| *o == old).and_then(|i| copies.get(i)).copied();
     let sheet = s.edit_drawing(COPY, |d| {
         let (sheet, middle) = sheet_named(d, &request.sheet, COPY)?;
@@ -459,6 +463,15 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect();
         d.add_dimensions(copied);
+        let copied: Vec<Arc<Balloon>> = ballooned
+            .iter()
+            .zip(&balloon_copies)
+            .filter_map(|(old, new)| {
+                let original = d.balloon(*old)?;
+                Some(Arc::new(Balloon { id: *new, view: copy_of(original.view)?, ..original.clone() }))
+            })
+            .collect();
+        d.add_balloons(copied);
         Ok(sheet)
     })?;
     let first = copies.first().copied().unwrap_or_default();

@@ -66,8 +66,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DELETE)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it and their dimensions \
-             with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
+            "sheet: id or name (a drawing keeps at least one); contents?: delete, to delete the views on it, their dimensions and \
+             balloons with it (without it a sheet with anything on it is refused, naming what) → the drawing's sheets. One undo step.",
         ),
 ];
 
@@ -91,13 +91,16 @@ fn named(list: &[u64]) -> String {
     named.join(", ")
 }
 
-/// What is on a sheet, for a message: `2 views (…) and 1 dimension (…)`.
+/// What is on a sheet, for a message: `2 views (…), 1 dimension (…) and 3 balloons (…)`.
 fn listed(on: &OnSheet) -> String {
     let kind = |what: &str, list: &[u64]| {
         let s = if list.len() == 1 { "" } else { "s" };
         (!list.is_empty()).then(|| format!("{} {what}{s} ({})", list.len(), named(list)))
     };
-    [kind("view", &on.views), kind("dimension", &on.dimensions)].into_iter().flatten().collect::<Vec<_>>().join(" and ")
+    let mut kinds: Vec<String> =
+        [kind("view", &on.views), kind("dimension", &on.dimensions), kind("balloon", &on.balloons)].into_iter().flatten().collect();
+    let last = kinds.pop().unwrap_or_default();
+    if kinds.is_empty() { last } else { format!("{} and {last}", kinds.join(", ")) }
 }
 
 /// The position of the sheet `p[key]` names ([`Drawing::sheet_index`]).

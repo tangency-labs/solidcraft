@@ -331,6 +331,8 @@ pub struct InspectResult {
     pub linked: Option<Value>,
     /// Its dimensions' ids, in id order.
     pub dimensions: Vec<String>,
+    /// Its balloons' ids, in id order.
+    pub balloons: Vec<String>,
     pub choices: ChoicesResult,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

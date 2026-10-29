@@ -235,3 +235,34 @@ fn hostile_balloon_params_never_panic() {
     assert!(internal.is_empty(), "balloon commands panicked:\n{}", internal.join("\n"));
 }
 
+/// A view lists its balloons. A copied view's balloons are copies with ids of their own, pointing
+/// at the same part from the same place, and one undo step takes the copy and them out. A sheet
+/// with them on it is refused, naming them, until its contents go with it.
+#[test]
+fn balloons_go_with_their_view_when_it_is_copied_and_with_its_sheet() {
+    let (mut s, view, [_, bracket]) = placed();
+    let original = add(&mut s, view, bracket);
+    let listed = |s: &mut Session, view: &Value| run(s, "drawing.view.inspect", json!({"view": view}))["balloons"].clone();
+    assert_eq!(listed(&mut s, &json!(ids::encode(view))), json!([original["balloon"]]));
+    let before = saved(&s);
+    let sheet = run(&mut s, "drawing.sheet.add", json!({"name": "Sheet 2"}))["sheet"].clone();
+    let reply = run(&mut s, "drawing.view.copy_to_sheet", json!({"view": ids::encode(view), "sheet": sheet, "position_mm": [100, 100]}));
+    let copy = reply["view"].clone();
+    let copied = listed(&mut s, &copy);
+    let [balloon] = copied.as_array().map(Vec::as_slice).unwrap_or_default() else { panic!("one copied balloon: {copied}") };
+    assert_ne!(balloon, &original["balloon"]);
+    let read = run(&mut s, INSPECT, json!({"balloon": balloon}));
+    assert_eq!((read["status"].as_str(), &read["view"]), (Some("ok"), &copy), "{read}");
+    assert_eq!((&read["record"]["edge"], &read["record"]["at"]), (&original["record"]["edge"], &original["record"]["at"]));
+    assert_eq!(listed(&mut s, &json!(ids::encode(view))), json!([original["balloon"]]), "the original keeps its own");
+    let e = refused(&mut s, "drawing.sheet.delete", json!({"sheet": sheet}));
+    let named = format!("1 view (`{}`) and 1 balloon (`{}`)", copy.as_str().unwrap(), balloon.as_str().unwrap());
+    assert!(e.contains(&named), "{e}");
+    run(&mut s, "drawing.sheet.delete", json!({"sheet": sheet, "contents": "delete"}));
+    let e = refused(&mut s, INSPECT, json!({"balloon": balloon}));
+    assert!(e.contains("the drawing has no balloon"), "{e}");
+    for _ in 0..3 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(saved(&s), before);
+}
