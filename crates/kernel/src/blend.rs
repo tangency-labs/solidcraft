@@ -617,6 +617,13 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
     crate::blend_smlib::chamfer_sides(body, edges, d1, side, flip)
 }
 
+/// The edge each pick takes, as a blend takes it (an index in the body's edge order, the order
+/// of its mesh's edges): the nearest, and at a vertex where a seam or a smooth join meets a sharp
+/// edge (a cylinder's seam at its rim), the sharp edge. Picks that find no edge are refused.
+pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
+    crate::blend_smlib::picked_edges(body, picks).map(|(edges, _)| edges)
+}
+
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
 /// nearest edge of `body` to it), then a point on every other edge that continues one of them
 /// tangentially (within 0.5° at a shared vertex), until no more do. Each pick takes its edge as a
