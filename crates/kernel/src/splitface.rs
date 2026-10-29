@@ -632,9 +632,14 @@ mod tests {
         assert!(n > c.face_count());
         // The pieces stay apart; the cylinder's incidental seam pieces still join as before.
         assert_eq!(round_trip_faces(&cs), round_trip_faces(&c) + 1);
-        // Without the record the export joins the top's pieces again (as it does for pieces a
-        // boolean left).
-        assert_eq!(round_trip_faces(&s.clone().with_split_lines(None)), 6);
+        // Without the record (no operation drops it: only Split Face's own removal, which
+        // rebuilds without the split) the pieces are incidental: the file has what the body
+        // has, and the next operation joins them as it joins any pieces on one surface (SMLib's
+        // booleans at their end, the local modifiers through the heal).
+        let unrecorded = s.clone().with_split_lines(None);
+        assert_eq!(round_trip_faces(&unrecorded), unrecorded.face_count());
+        let joined = crate::boolean_record::healed(&unrecorded).unwrap();
+        assert_eq!((joined.face_count(), round_trip_faces(&joined)), (6, 6));
         // A split after a split keeps both lines.
         let pl2 = Plane::new(Vec3::new(0.0, 12.0, 0.0), Vec3::X, Vec3::Z).unwrap();
         let tops: Vec<usize> =
