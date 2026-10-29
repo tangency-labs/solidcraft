@@ -38,6 +38,8 @@ pub(super) struct Layout {
     /// The section's bounding box in those coordinates.
     pub lo: Vec2,
     pub hi: Vec2,
+    /// The section's point on its line, in those coordinates.
+    pub at: Vec2,
     /// What members without a name of their own are named after.
     pub description: String,
 }
@@ -114,7 +116,7 @@ pub(super) fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature
         let d = (b - a).normalized().ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
         members.push(Laid { len: a.dist(b), d, plane, id });
     }
-    Ok(Layout { members, regions, lo, hi, description })
+    Ok(Layout { members, regions, lo, hi, at, description })
 }
 
 /// Build a member: its section run along its line, each end square at the line's end or cut in
@@ -379,26 +381,43 @@ pub(super) fn corner(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature
         return Err(DocError::Invalid(format!("the middle lines of `{}` and `{}` don't meet (they pass {apart:.3} mm apart)", a.name, b.name)));
     }
     let at = (pa + pb) * 0.5;
-    // Each member's end nearer the corner, which must be at the corner (within its section's
-    // size of it), and the way from the corner along the member.
-    let mut away = [Vec3::ZERO; 2];
-    let mut which = [0usize; 2];
-    for (k, (m, (t, t0, t1), laid, lay)) in [(a, (ta, *a0, *a1), ma, la), (b, (tb, *b0, *b1), mb, lb)].into_iter().enumerate() {
-        let end = which_end(t, (t0, t1), TrimEnd::Auto);
-        let off = (t - if end == 0 { t0 } else { t1 }).abs();
+    // Which end of each member is at the corner. Lines that meet at a point S put the corner
+    // there only when both sections sit on their lines by their middles: each middle line is its
+    // line moved square to it, by `oa` and `ob`, and the corner is where the middle lines cross.
+    // With `wa`, `wb` the ways from S along the members and c = wa·wb, the corner
+    // S + oa + sa·wa = S + ob + sb·wb gives, dotted with wa and with wb (oa·wa = ob·wb = 0),
+    //   sa − c·sb = ob·wa  and  c·sa − sb = −oa·wb,  so
+    //   sa = (ob·wa + c·oa·wb) / (1 − c²),  sb = (oa·wb + c·ob·wa) / (1 − c²),
+    // each how far in from its member's end the corner is (negative: past it). Only an offset's
+    // part across the other member counts, at most |o|·sin θ, so |sa| ≤ (|ob| + |cos θ|·|oa|) / sin θ,
+    // which grows as the angle closes: 45 bars on their outer edges 30° apart meet
+    // 22.5·(1 + cos 30°) / sin 30° = 22.5·cot 15° = 83.971 past their lines' ends. Taking that
+    // off leaves how far each line's end is from where the lines meet, which must be within its
+    // section's size (and the gap); a member that the other meets along its length (a T) is
+    // further. Each pair of ends is tried, and the one nearest the corner taken.
+    let (oa, ob) = (*ca - ma.plane.to_world(la.at), *cb - mb.plane.to_world(lb.at));
+    let fit = |ea: usize, eb: usize| {
+        let (wa, wb) = (if ea == 0 { ma.d } else { -ma.d }, if eb == 0 { mb.d } else { -mb.d });
+        let c = wa.dot(wb);
+        let (sa, sb) = ((ob.dot(wa) + c * oa.dot(wb)) / denom, (oa.dot(wb) + c * ob.dot(wa)) / denom);
+        let (ia, ib) = (if ea == 0 { ta - *a0 } else { *a1 - ta }, if eb == 0 { tb - *b0 } else { *b1 - tb });
+        ([ea, eb], [wa, wb], [(ia - sa).abs(), (ib - sb).abs()])
+    };
+    let worst = |off: &[f64; 2]| off[0].max(off[1]);
+    let (which, [wa, wb], off) = [fit(0, 0), fit(0, 1), fit(1, 0), fit(1, 1)]
+        .into_iter()
+        .reduce(|best, next| if worst(&next.2) < worst(&best.2) { next } else { best })
+        .ok_or_else(|| DocError::Invalid("a corner takes two members".into()))?;
+    for (k, (m, lay)) in [(a, la), (b, lb)].into_iter().enumerate() {
+        let off = off.get(k).copied().unwrap_or(f64::NAN);
         if !(off <= size(lay) + gap) {
             return Err(DocError::Invalid(format!(
-                "`{}` doesn't end at the corner with `{}`: its nearer end is {off:.3} mm from it",
+                "`{}` doesn't end at the corner with `{}`: the end of its line is {off:.3} mm from where the lines meet",
                 m.name,
                 if k == 0 { &b.name } else { &a.name }
             )));
         }
-        if let (Some(w), Some(e)) = (away.get_mut(k), which.get_mut(k)) {
-            *w = if end == 0 { laid.d } else { -laid.d };
-            *e = end;
-        }
     }
-    let [wa, wb] = away;
     let planes = match kind {
         CornerKind::Mitre => {
             // The plane halfway between the members, its normal towards the first.

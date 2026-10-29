@@ -1449,6 +1449,60 @@ fn a_corner_extends_members_that_stop_short_of_it() {
     }
 }
 
+/// Two lines `len` long meeting at the origin `deg` apart, one along −X into it and one out of it,
+/// with 45 × 45 bar anchored by its bottom left corner: each bar lies outside the angle, its line
+/// along its inner edge, and the bars' bottoms on Z 0.
+fn outline_corner(s: &mut Session, deg: f64, len: f64) -> Vec<String> {
+    let (c, sn) = (deg.to_radians().cos(), deg.to_radians().sin());
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Frame"}));
+    run(s, "sketch.line", json!({"points": [[len, 0.0], [0.0, 0.0]]}));
+    run(s, "sketch.line", json!({"points": [[0.0, 0.0], [len * c, len * sn]]}));
+    run(s, "sketch.finish", json!({}));
+    made(&run(s, "frame.member", json!({"sketch": "Frame", "profile": bar45(), "anchor": "bottom_left", "body_name": "Bar"})))
+}
+
+#[test]
+fn acute_corners_of_bars_on_their_inner_edges_mitre() {
+    // #8452: 30° apart, the middle lines (22.5 out from the lines, on the outside) cross on the
+    // bisector 22.5 / sin 15° from the origin, 22.5 · cot 15° = 83.971 past the lines' ends,
+    // more than the bar's diagonal √2 · 45 = 63.640.
+    for deg in [15.0, 30.0, 60.0] {
+        let mut s = Session::default();
+        let bars = outline_corner(&mut s, deg, 200.0);
+        run(&mut s, "frame.corner", json!({"members": bars}));
+        // The cut holds the bisector, at θ/2 to each line, so it leans 90° − θ/2 from square.
+        let lean = 90.0 - deg / 2.0;
+        let r: f64 = deg.to_radians();
+        assert!((cut_angle(&s, &bars[0], 1, [1.0, 0.0, 0.0]) - lean).abs() < 1e-9, "{deg}");
+        assert!((cut_angle(&s, &bars[1], 0, [r.cos(), r.sin(), 0.0]) - lean).abs() < 1e-9, "{deg}");
+        // The bisector runs through the origin, where the inner edges (the lines) end; the outer
+        // edge, 45 out, ends 45 · cot(θ/2) past it, and the middle line 22.5 · cot(θ/2): each
+        // bar keeps 2025 × (200 + 22.5 · cot(θ/2)).
+        let cot = 1.0 / (r / 2.0).tan();
+        let bs = boxes(&mut s);
+        assert!(near3(bs[&bars[0]].0, [-45.0 * cot, -45.0, 0.0]) && near3(bs[&bars[0]].1, [200.0, 0.0, 45.0]), "{deg}: {:?}", bs[&bars[0]]);
+        for b in bodies(&mut s) {
+            assert!(rel(b.1, BAR45 * (200.0 + 22.5 * cot)) < MEASURED, "{deg}: {b:?}");
+        }
+    }
+}
+
+#[test]
+fn an_acute_t_is_still_refused() {
+    // A bar from the middle of another, 30° to it: the lines meet 150 from either end of the
+    // first, far more than its section's size even after the 83.971 its outline anchor moves the
+    // corner by.
+    let mut s = Session::default();
+    let (c, sn) = (30f64.to_radians().cos(), 30f64.to_radians().sin());
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Frame"}));
+    run(&mut s, "sketch.line", json!({"points": [[300.0, 0.0], [0.0, 0.0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[150.0, 0.0], [150.0 + 200.0 * c, 200.0 * sn]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let bars = made(&run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": bar45(), "anchor": "bottom_left", "body_name": "Bar"})));
+    let err = s.execute("frame.corner", &json!({"members": bars})).unwrap_err().to_string();
+    assert!(err.contains("doesn't end at the corner"), "{err}");
+}
+
 #[test]
 fn bad_corners_are_refused_with_the_reason() {
     let mut s = Session::default();

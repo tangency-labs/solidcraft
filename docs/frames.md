@@ -154,9 +154,11 @@ each member keeps its body and its name.
   half the gap over the cosine of the angle between the member and the plane's normal: `gap / √2`
   at a right angle.
 
-The members meet where the lines through the middle of their profiles cross. That point must be
-at an end of each member, within its profile's size of the end (members drawn through their
-profiles' middles, or along their outsides or insides, all qualify). A corner is refused, with
+The members meet where the lines through the middle of their profiles cross. Each member's line
+must end within its profile's size of where the lines meet, once the corner's move by the
+profiles' anchors is allowed for: members drawn through their profiles' middles, or along their
+outsides or insides, all qualify at any angle (two 45 bars on their inner edges 30° apart meet
+22.5 · cot 15° = 84 mm past their lines' ends). A corner is refused, with
 the reason, when the members are parallel, when their middle lines pass each other without
 meeting, when they cross away from a member's ends (a T: trim it instead), when one member is given
 twice, and, as for a trim, when a member was changed by a later feature. There is no dialog or ribbon
