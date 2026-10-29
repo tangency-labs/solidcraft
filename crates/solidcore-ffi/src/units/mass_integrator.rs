@@ -148,7 +148,8 @@ pub fn edge(
     })
 }
 /// Face kinds: rectangular plane (0), disk (1), annulus (2), quadratic B-spline
-/// patch (3), rotated plane (4). Disk radii are 0.5 and 0.2.
+/// patch (3), rotated plane (4), multi-span rational quadratic B-spline patch (5: u knot
+/// 0.4, double v knot 0.5). Disk radii are 0.5 and 0.2.
 /// Precise face properties (0), actual oriented trim export (1), API area
 /// (2), centroid (3), B-rep area (4), volume (5), mass properties (6), rectangular surface area (7).
 /// Input: plane origin xyz, UV scales, domain u0 v0 u1 v1, computation origin xyz,
@@ -156,7 +157,7 @@ pub fn edge(
 pub fn face(op: i32, kind: i32, p: &[f64; 16]) -> Result<Vec<f64>, FfiError> {
     let [_, _, _, sx, sy, u0, v0, u1, v1, _, _, _, _, _, orientation, flags] = *p;
     if !(0..=7).contains(&op)
-        || !(0..=4).contains(&kind)
+        || !(0..=5).contains(&kind)
         || !p.iter().all(|v| v.is_finite())
         || ((kind == 1 || kind == 2)
             && (sx != 1.0 || sy != 1.0 || u0 > -0.5 || v0 > -0.5 || u1 < 0.5 || v1 < 0.5))

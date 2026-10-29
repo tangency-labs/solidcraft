@@ -1428,6 +1428,9 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         "analytic_copy_keeps_parameterization" => &mut k.fixes.analytic_copy_keeps_parameterization,
         "precise_properties_body_length_scale" => &mut k.fixes.precise_properties_body_length_scale,
+        "precise_properties_split_at_surface_knots" => {
+            &mut k.fixes.precise_properties_split_at_surface_knots
+        }
         "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
         "sphere_small_circle_not_touching" => &mut k.fixes.sphere_small_circle_not_touching,
         _ => return Err(format!("unknown `fixes` entry `{name}`")),

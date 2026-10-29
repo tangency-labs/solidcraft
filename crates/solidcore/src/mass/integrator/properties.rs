@@ -18,7 +18,9 @@
 //! B-rep enumeration, bounding boxes, and region classification remain calls into
 //! their unported units. `boundary_properties` exposes the integration after trim
 //! construction for callers already holding oriented trim curves. Nested integration
-//! has a fixed two-level call structure, not input-driven recursion.
+//! has a fixed two-level call structure, not input-driven recursion. With
+//! `UpstreamFixes::precise_properties_split_at_surface_knots` (WR-494) both levels split
+//! at the surface's knots, as the SolidCraft fork's tangency-labs/smlib@08d9a14 does.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
@@ -31,7 +33,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::face::p2::{
-    OdeArea, PrecisePropertyLayout, PPF_ALL, PPF_AREA, PPF_AREA_FIRST_MOMENTS,
+    trim_curve_breaks, OdeArea, PrecisePropertyLayout, PPF_ALL, PPF_AREA, PPF_AREA_FIRST_MOMENTS,
 };
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use crate::{EntityRef, Result, SolidError};
@@ -333,7 +335,16 @@ pub fn boundary_properties(
         // Integrate each knot span of the natural interval separately: the RK error
         // estimate assumes a smooth integrand, so a step across a knot can hide a large
         // error.
-        let (knots, _) = trim.knots(k, Some(&ivl))?;
+        //
+        // With `fixes.precise_properties_split_at_surface_knots` (WR-494; the SolidCraft
+        // fork's tangency-labs/smlib@08d9a14) the pieces are those between the trim
+        // curve's knots and its crossings of the surface's knot lines u = k, where the
+        // integrand's derivatives jump too.
+        let knots = if k.fixes.precise_properties_split_at_surface_knots {
+            trim_curve_breaks(k, trim, surface)?
+        } else {
+            trim.knots(k, Some(&ivl))?.0
+        };
 
         // A coarse first Runge-Kutta step can trip the integrator's abort guard for one
         // traversal direction, so a reversed cap loop fails where its twin succeeds. Try
@@ -345,6 +356,12 @@ pub fn boundary_properties(
             let &[a, b] = pair else {
                 continue;
             };
+            // (`!(dB > dA)`: also an unordered pair)
+            if k.fixes.precise_properties_split_at_surface_knots
+                && b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater)
+            {
+                continue; // a crossing at a knot
+            }
             let mut status = Err(SolidError::sm_err(OP));
             for divisor in [2.0, 8.0, 64.0, 512.0, 4096.0] {
                 status = OdeIntegrator::default()

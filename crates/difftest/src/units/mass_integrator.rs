@@ -293,7 +293,8 @@ fn geometry_cpp(g: &Geometry) -> Result<Output, HarnessError> {
         .map(output)
         .map_err(|e| HarnessError::new(e.to_string()))
 }
-/// The shim's face surface: kind 3 is a quadratic B-spline patch, every other kind an
+/// The shim's face surface: kind 3 is a quadratic B-spline patch, kind 5 a multi-span
+/// rational quadratic patch (u knot 0.4, double v knot 0.5; #1435), every other kind an
 /// `SmPlane` over `domain` (kind 4 with rotated axes).
 fn face_surface(
     kind: i32,
@@ -328,6 +329,34 @@ fn face_surface(
                 &cp,
                 &[0., 0., 0., 1., 1., 1.],
                 &[0., 0., 0., 1., 1., 1.],
+            )?,
+        )
+    } else if kind == 5 {
+        let cp: Vec<Vec<_>> = (0..4)
+            .map(|i: i32| {
+                (0..5)
+                    .map(|j: i32| {
+                        CPoint::new(
+                            p[0] + f64::from(i) * p[3] / 3.0,
+                            p[1] + f64::from(j) * p[4] / 4.0,
+                            p[2] + f64::from(i * (3 - i) * j * (4 - j)) * 0.125,
+                            if j == 2 { 0.8 } else { 1.0 },
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        solidcore::surface::surface::Surface::from(
+            solidcore::nurbs::b_spline_surface::BSplineSurface::from_data(
+                3,
+                4,
+                2,
+                2,
+                6,
+                7,
+                &cp,
+                &[0., 0., 0., 0.4, 1., 1., 1.],
+                &[0., 0., 0., 0.5, 0.5, 1., 1., 1.],
             )?,
         )
     } else {

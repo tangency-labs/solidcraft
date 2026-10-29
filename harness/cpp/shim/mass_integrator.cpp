@@ -141,11 +141,12 @@ SC_EXPORT int32_t sc_mass_integrator_edge(int32_t op,int32_t kind,const double* 
 
 // p: plane origin[3], UV scales[2], UV domain[4], computation origin[3], accuracy,
 // thickness, orientation (0 SAME, 1 OPPOSITE), property flags.
-// kind 0 rectangle, 1 disk, 2 annulus, 3 quadratic B-spline patch, 4 rotated plane.
+// kind 0 rectangle, 1 disk, 2 annulus, 3 quadratic B-spline patch, 4 rotated plane,
+// 5 multi-span rational quadratic B-spline patch (u knot 0.4, double v knot 0.5).
 // op 0 properties, 1 export input UV domain/bbox scale/oriented trims (NURB, then 1 + SmLine members or 0), 2 API area, 3 API centroid,
 // 4 API Brep area, 5 API Brep volume, 6 API Brep mass properties (sheet rejection), 7 Surface::Area.
 SC_EXPORT int32_t sc_mass_integrator_face(int32_t op,int32_t kind,const double* p,double* out,int64_t cap,int64_t* len){
-    if(op<0||op>7||kind<0||kind>4)return SC_ERR_ARG;
+    if(op<0||op>7||kind<0||kind>5)return SC_ERR_ARG;
     SC_TRY
     SmContext ctx;
     std::unique_ptr<SmBrep> brep(new(ctx)SmBrep());
@@ -162,6 +163,20 @@ SC_EXPORT int32_t sc_mass_integrator_face(int32_t op,int32_t kind,const double* 
             s->net->Pw[i][j].w=1.0;
         }
         for(int i=0;i<6;++i){s->knu->U[i]=i<3?0:1;s->knv->U[i]=i<3?0:1;}
+        surface=new(ctx)SmBSplineSurface(s,FALSE,NULL);
+    }else if(kind==5){
+        // 4 x 5 control points: knot spans [0,.4],[.4,1] in u and [0,.5],[.5,1] in v,
+        // the v knot double (C0, as a rational circle's), weights .8 on the middle row.
+        gw_SURFACE* s=sm_AllocateNurbSurface(3,4,2,2,6,7);
+        for(int i=0;i<4;++i)for(int j=0;j<5;++j){
+            s->net->Pw[i][j].x=p[0]+i*p[3]/3.0;
+            s->net->Pw[i][j].y=p[1]+j*p[4]/4.0;
+            s->net->Pw[i][j].z=p[2]+(double)(i*(3-i)*j*(4-j))*0.125;
+            s->net->Pw[i][j].w=j==2?0.8:1.0;
+        }
+        const double ku[7]={0,0,0,.4,1,1,1},kv[8]={0,0,0,.5,.5,1,1,1};
+        for(int i=0;i<7;++i)s->knu->U[i]=ku[i];
+        for(int i=0;i<8;++i)s->knv->U[i]=kv[i];
         surface=new(ctx)SmBSplineSurface(s,FALSE,NULL);
     }else surface=new(ctx)SmPlane(SmPoint3d(p[0],p[1],p[2]),xaxis,yaxis,SmVector2d(p[3],p[4]),dom,&ctx);
     SmFace* face=nullptr;

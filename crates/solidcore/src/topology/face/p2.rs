@@ -20,6 +20,8 @@
 //! | [`PrecisePropertyLayout`]               | `SmPrecisePropertyLayout` (constructor, `Add`)    |
 //! | [`OdeIsoCurveLength`]                   | `SmODEIsoCurveLengthIFEO` (constructor, `Evaluate`) |
 //! | [`OdeArea`]                             | `SmODEAreaIFEO::Evaluate`                         |
+//! | [`surface_knots_inside`]                | `sm_SurfaceKnotsInside` (static; the SolidCraft fork's tangency-labs/smlib@08d9a14) |
+//! | [`trim_curve_breaks`]                   | `sm_TrimCurveBreaks` (static; the SolidCraft fork's tangency-labs/smlib@08d9a14) |
 //! | [`create_curves_by_trimming`], [`TrimmedCurves`] | `SmFace::CreateCurvesByTrimming`         |
 //! | [`create_curves_from_face`], [`FaceCurves`] | `SmFace::CreateCurvesFromFace`                |
 //! | [`fix_uv_trim_curves`], [`fix_uv_trim_curves_notified`] | `sm_FixUVTrimCurves`              |
@@ -2128,18 +2130,49 @@ impl OdeArea<'_> {
             let num_components = self.y_scale.len();
             let mut dy = Vec::new();
             dy.resize(num_components, 0.0);
-            let step = p0.y - self.min_v;
+            if k.fixes.precise_properties_split_at_surface_knots {
+                // Along the iso-u line the integrand is smooth only within each knot
+                // span of the surface: integrated span by span, as the trim curve is
+                // (WR-494; the SolidCraft fork's tangency-labs/smlib@08d9a14).
+                let mut breaks =
+                    surface_knots_inside(k, self.surface, SurfParamType::V, self.min_v, p0.y)?;
+                breaks.insert(0, self.min_v);
+                breaks.push(p0.y);
+                let mut piece_y = Vec::new();
+                piece_y.resize(num_components, 0.0);
+                for pair in breaks.windows(2) {
+                    let &[a, b] = pair else {
+                        continue;
+                    };
+                    piece_y.fill(0.0);
+                    // A failed inner integration is not a zero-area contribution.
+                    runge_kutta_ode_integrate(
+                        &eval,
+                        &mut piece_y,
+                        a,
+                        b,
+                        self.iso_curve_accuracy,
+                        (b - a) / 2.0,
+                        self.y_scale,
+                    )?;
+                    for (total, part) in dy.iter_mut().zip(piece_y.iter()) {
+                        *total += *part;
+                    }
+                }
+            } else {
+                let step = p0.y - self.min_v;
 
-            // A failed inner integration is not a zero-area contribution.
-            runge_kutta_ode_integrate(
-                &eval,
-                &mut dy,
-                self.min_v,
-                p0.y,
-                self.iso_curve_accuracy,
-                step / 2.0,
-                self.y_scale,
-            )?;
+                // A failed inner integration is not a zero-area contribution.
+                runge_kutta_ode_integrate(
+                    &eval,
+                    &mut dy,
+                    self.min_v,
+                    p0.y,
+                    self.iso_curve_accuracy,
+                    step / 2.0,
+                    self.y_scale,
+                )?;
+            }
             dydx.clear();
             dydx.push(0.0);
             dydx.extend_from_slice(&dy);
@@ -2151,6 +2184,131 @@ impl OdeArea<'_> {
 
         Ok(())
     }
+}
+
+/// `sm_SurfaceKnotsInside` (the SolidCraft fork's tangency-labs/smlib@08d9a14): the
+/// unique knots of a B-spline-kind surface in `param`'s direction strictly inside
+/// `(lo, hi)`, ascending; none for a surface not of the B-spline kind (smooth
+/// everywhere). The knots are read as upstream's virtual `GetKnots` does, with the NURB
+/// of a lazy analytic surface made ([`Surface::knots_with_nurb`]).
+///
+/// # Errors
+///
+/// Those of [`Surface::is_kind_of`] and [`Surface::knots_with_nurb`].
+pub fn surface_knots_inside(
+    k: &Kernel,
+    surface: &Surface,
+    param: SurfParamType,
+    lo: f64,
+    hi: f64,
+) -> Result<Vec<f64>> {
+    let mut knots = Vec::new();
+    if !surface.is_kind_of(crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE)? {
+        return Ok(knots);
+    }
+    let (all, _) = surface.knots_with_nurb(k, param, None)?;
+    for &knot in &all {
+        if knot > lo && knot < hi {
+            knots.push(knot);
+        }
+    }
+    Ok(knots)
+}
+
+/// `sm_TrimCurveBreaks` (the SolidCraft fork's tangency-labs/smlib@08d9a14): where the
+/// precise-property integrand is not smooth along the UV trim curve `uv_curve` on
+/// `surface`: the curve's own knots over its natural interval, and the parameters where
+/// it crosses a knot line `u = k` of a B-spline surface (found per knot span by a sign
+/// change of `u(t) - k` between `4 (degree + 1)` evenly spaced points, then at most 64
+/// bisections). Ascending, the curve's ends included; breaks the integrator cannot step
+/// between are merged into one, a curve knot kept over a crossing.
+///
+/// # Errors
+///
+/// `SM_ERR` for fewer than two curve knots; those of the curve's knots, bounding box,
+/// degree and evaluation and of [`surface_knots_inside`].
+pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Result<Vec<f64>> {
+    let mut breaks = Vec::new();
+    let ivl = uv_curve.natural_interval();
+    let (knots, _) = uv_curve.knots(k, Some(&ivl))?;
+    if knots.len() < 2 {
+        return Err(SolidError::sm_err("topology::face::trim_curve_breaks"));
+    }
+    let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let bbox = uv_curve
+        .calculate_bounding_box(k, &uv_curve.natural_interval(), req, true)?
+        .normal
+        .ok_or_else(|| null("trim_curve_breaks: bounding box not computed"))?;
+    let u_lines = surface_knots_inside(k, surface, SurfParamType::U, bbox.min().x, bbox.max().x)?;
+
+    let samples = 4 * (uv_curve.degree()? + 1);
+    let u = |t: f64| -> Result<f64> { Ok(uv_curve.evaluate_point(k, t)?.x) };
+    for pair in knots.windows(2) {
+        let &[a, b] = pair else {
+            continue;
+        };
+        breaks.push(a);
+        for &line in &u_lines {
+            let mut t0 = a;
+            let mut u0 = u(t0)?;
+            for i in 1..=samples {
+                // (`(dB - dA) * iS / lSamples`: an unsigned count converted to double)
+                let t1 = a + (b - a) * (i as f64) / (samples as f64);
+                let u1 = u(t1)?;
+                if (u0 - line) * (u1 - line) < 0.0 {
+                    let mut lo = t0;
+                    let mut hi = t1;
+                    let mut u_lo = u0;
+                    let mut bisections = 0;
+                    while bisections < 64 && hi - lo > EFF_ZERO * (1.0 + hi.abs()) {
+                        let mid = 0.5 * (lo + hi);
+                        let u_mid = u(mid)?;
+                        if (u_lo - line) * (u_mid - line) <= 0.0 {
+                            hi = mid;
+                        } else {
+                            lo = mid;
+                            u_lo = u_mid;
+                        }
+                        bisections += 1;
+                    }
+                    breaks.push(0.5 * (lo + hi));
+                } else if u1 == line && i < samples {
+                    breaks.push(t1);
+                }
+                t0 = t1;
+                u0 = u1;
+            }
+        }
+    }
+    if let Some(&last) = knots.last() {
+        breaks.push(last);
+    }
+    breaks.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+
+    // A crossing found next to a knot (a corner of the trim curve on a knot line) is the
+    // knot: breaks the integrator cannot step between are one, the curve's own knots and
+    // ends kept. The integrator takes no step when its ends are `SM_ARE_SAME` or its
+    // first step is `SM_ARE_SAME` as `SM_EFF_ZERO`, and the first step is half the span.
+    let unsteppable = |a: f64, b: f64| {
+        are_same(a, b) || are_same(0.5 * (b - a), EFF_ZERO) || 0.5 * (b - a) < EFF_ZERO
+    };
+    let mut distinct: Vec<f64> = Vec::new();
+    for &brk in &breaks {
+        if let Some(prev) = distinct.last_mut() {
+            if unsteppable(*prev, brk) {
+                if knots.contains(&brk) {
+                    *prev = brk;
+                }
+                continue;
+            }
+        }
+        distinct.push(brk);
+    }
+    Ok(distinct)
 }
 
 // ---- face curves ----------------------------------------------------------------------------
