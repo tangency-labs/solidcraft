@@ -731,14 +731,22 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             ui.add(egui::Label::new(crate::i18n::tr("ui.emboss_wrap_note")).wrap());
         }
-        Kind::Align { flip } => {
+        Kind::Align { flip, angle } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
-            // the other, an edge at its middle), its centre, or a round one's centre.
+            // the other, an edge at its middle), its centre, a round one's centre, or the joint
+            // origin the Joint dialog makes of it (found again as the part changes, #6257).
             for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
                 form_row(ui, label, |ui| {
-                    extra_choice(ui, &mut d.extra, key, key, &[("As Picked", "picked"), ("Centre", "center"), ("Circle Centre", "circle")]);
+                    extra_choice(
+                        ui,
+                        &mut d.extra,
+                        key,
+                        key,
+                        &[("As Picked", "picked"), ("Centre", "center"), ("Circle Centre", "circle"), ("Joint Origin", "origin")],
+                    );
                 });
             }
+            enter |= hint_row(ui, "Angle", angle, tr("none"));
             ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
         }
         Kind::BoundaryFill { operation, cells, .. } => {

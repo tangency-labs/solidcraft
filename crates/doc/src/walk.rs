@@ -62,6 +62,8 @@ impl Walk for crate::document::ExtendMode {}
 impl Walk for crate::document::RuledMode {}
 impl Walk for crate::document::RuledCorners {}
 impl Walk for crate::document::ExtrudeConvention {}
+// An Align frame's joint origin: picks in its component's coordinates, found by their names.
+impl Walk for Box<crate::joints::JointOrigin> {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {

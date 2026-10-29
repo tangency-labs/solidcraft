@@ -574,6 +574,51 @@ impl<'de> Deserialize<'de> for FlangeEdge {
     }
 }
 
+/// One side of an Align by frames (#6257): an origin and a z direction, found again from the
+/// geometry each time the design is evaluated, so the bodies follow it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AlignFrame {
+    /// A joint origin on the model (its component's coordinates): its origin and z.
+    Origin { origin: Box<crate::joints::JointOrigin> },
+    /// A sketch point; z along the sketch's normal.
+    SketchPoint { sketch: SketchId, point: String },
+    /// The centre of a sketch circle, arc or ellipse; z along the sketch's normal.
+    SketchCurve { sketch: SketchId, curve: String },
+}
+
+impl AlignFrame {
+    /// The frame's origin and unit z in the model state `st` (its component's coordinates).
+    pub fn resolve(&self, doc: &Document, st: &crate::ModelState) -> Result<(Vec3, Vec3)> {
+        let sketch = |id: &SketchId| st.sketch(id.0).ok_or_else(|| DocError::Unknown(format!("sketch {id}")));
+        let (o, z) = match self {
+            AlignFrame::Origin { origin } => {
+                let m = crate::joints::resolve_origin(doc, st, origin)?;
+                (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
+            }
+            AlignFrame::SketchPoint { sketch: id, point } => {
+                let ss = sketch(id)?;
+                let q = ss.sketch.point_index(point).and_then(|i| ss.sketch.point(i));
+                (ss.plane.to_world(q.ok_or_else(|| DocError::Unknown(format!("sketch point `{point}`")))?), ss.plane.normal())
+            }
+            AlignFrame::SketchCurve { sketch: id, curve } => {
+                use solidcraft_sketch::CurveKind;
+                let ss = sketch(id)?;
+                let kind = ss.sketch.curve_index(curve).and_then(|i| ss.sketch.curves.get(i)).map(|c| &c.kind);
+                let centre = match kind.ok_or_else(|| DocError::Unknown(format!("sketch curve `{curve}`")))? {
+                    CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => ss.sketch.point(*c),
+                    _ => return Err(DocError::Invalid(format!("sketch curve `{curve}` is not a circle, arc or ellipse"))),
+                };
+                (ss.plane.to_world(centre.ok_or_else(|| DocError::Invalid(format!("sketch curve `{curve}` has no centre")))?), ss.plane.normal())
+            }
+        };
+        match z.normalized() {
+            Some(z) if o.is_finite() => Ok((o, z)),
+            _ => Err(DocError::Invalid("the frame has no finite origin and direction".into())),
+        }
+    }
+}
+
 /// Feature definitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1083,6 +1128,19 @@ pub enum FeatureKind {
         /// bodies follow. Replaces `to`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to_plane: Option<PlaneRef>,
+        /// A frame on the bodies (#6257), found again on every evaluation: its origin and z are
+        /// the `from` point and normal. Replaces `from`, `from_normal` and `from_plane`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_frame: Option<AlignFrame>,
+        /// A frame the bodies move onto, found again on every evaluation, so they follow it when
+        /// it moves. Replaces `to`, `to_normal` and `to_plane`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_frame: Option<AlignFrame>,
+        /// A turn about the target's direction (its frame's z, face normal or plane normal),
+        /// through where `from` lands, after the move.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Angle")]
+        angle: Option<Expr>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).

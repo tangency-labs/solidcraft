@@ -281,6 +281,17 @@ impl crate::Feature {
             K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
             | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => remap_geo(geo, ids, bodies, 0)?,
+            // An Align frame's joint origin finds its faces and edges by name, as the feature's
+            // own face names are found.
+            K::Align { from_frame, to_frame, .. } => {
+                for fr in [from_frame, to_frame].into_iter().flatten() {
+                    if let crate::AlignFrame::Origin { origin } = fr {
+                        for n in origin.snap.face_names_mut() {
+                            *n = remap_topology(n, ids, bodies);
+                        }
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
