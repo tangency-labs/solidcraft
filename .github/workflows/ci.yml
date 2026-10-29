@@ -12,9 +12,8 @@
 # checks (no archive to upload and download). The GPU path tracer's tests run one at a time
 # (.config/nextest.toml), so they have a job of their own in four shards (GPU path tests). A few
 # heavy tests (see .config/nextest.toml) are skipped on pull requests and run on pushes to main and
-# nightly. The reference tests run on a pull request that selects solidcraft-cli (they replay
-# recipes through it). The doc tests run in the merge queue, on main and nightly, not on pull
-# requests (the fast lane, in Select checks); a break there is fixed forward on main. The
+# nightly. The reference tests and the doc tests run in the merge queue, on main and nightly, not
+# on pull requests (the fast lane, in Select checks); a break there is fixed forward on main. The
 # Windows jobs (D3D12 shaders and app startup) run nightly, and in the merge queue only for a group
 # that changes what they exercise. Only main saves the build caches; pull requests restore them.
 # sccache is on a Blacksmith sticky disk that only main commits.
@@ -22,9 +21,8 @@
 # commit, or when nothing a build reads changed since the last push to main whose run passed.
 # Otherwise it runs everything.
 # Heavy checks wait for review: a pull request without the `approved-for-ci` label runs only
-# Select checks, the format and repository checks and a quick compile, unless its author is an
-# owner, member or collaborator of the repository (they could push the code to a branch here
-# anyway). Adding the label (after review) runs everything above, and every later push to the PR does too, except a push that only
+# Select checks, the format and repository checks and a quick compile. Adding the label (after
+# review) runs everything above, and every later push to the PR does too, except a push that only
 # merges main into a change that already passed (scripts/ci/main_merge.py): it carries that
 # result and runs the repository checks. Merge groups, the nightly run and Run workflow are not
 # pull requests and always run the full suite.
@@ -33,8 +31,6 @@
 # `ci` job still runs and reports the commit's real result (see the `ci` job): the merge queue
 # reads `ci` from the newest run of a commit, so a run without it would block a PR that passed.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
-# The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
-# cross-compilation on.
 # Every Linux job runs on Blacksmith's Ubuntu 24.04 runners (blacksmith-<N>vcpu-ubuntu-2404), sized
 # per job: 32 vCPU for the tests, 16 for Clippy, the GPU path tests, the archive build (nightly) and the merge queue's, 8 for compiles, doc and reference tests, 4 for the light checks, 2 for Select checks and ci.
 # The Windows shader job runs on Blacksmith's Windows Server 2025 runners (blacksmith-8vcpu-windows-2025);
@@ -63,14 +59,6 @@ on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
-    inputs:
-      cross_compile:
-        description: "Also check WebAssembly and RISC-V (before a release)"
-        type: boolean
-        default: false
-  # The release gate (release-gate.yml): the event stays the caller's (workflow_dispatch), so a
-  # call runs exactly what Run workflow runs.
-  workflow_call:
     inputs:
       cross_compile:
         description: "Also check WebAssembly and RISC-V (before a release)"
@@ -149,9 +137,6 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
           APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'approved-for-ci') }}
-          # An owner, member or collaborator could push the change to a branch here: their pull
-          # requests need no label.
-          TRUSTED: ${{ contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association) }}
           GH_TOKEN: ${{ github.token }}
         run: |
           native=false
@@ -245,18 +230,16 @@ jobs:
           if [ "$EVENT_NAME" = pull_request ] && [ "$full" != true ]; then
             case " $packages " in *" solidcraft-cli "*) ;; *) oracle=false ;; esac
           fi
-          # The pull request fast lane: Windows and the doc tests run on main (and the nightly),
-          # not on every pull request push; a break there is fixed forward on main. Over three
-          # days of pull requests the doc tests were the only failing job 3 times in about 7,900
-          # runner-minutes. The reference tests run when solidcraft-cli is selected (above): a
-          # kernel change that broke them went unseen until a full run on develop.
+          # The pull request fast lane: Windows, the reference tests and the doc tests run on main
+          # (and the nightly), not on every pull request push; a break there is fixed forward on
+          # main. Over three days of pull requests the doc tests were the only failing job 3 times
+          # in about 7,900 runner-minutes, and the reference tests never were.
           doctests=$native
-          if [ "$EVENT_NAME" = pull_request ]; then windows=false; doctests=false; fi
-          # Until a maintainer adds approved-for-ci, a pull request from outside the repository's
-          # owners, members and collaborators gets a quick compile instead of Clippy, the tests,
-          # the reference tests and the doc tests.
+          if [ "$EVENT_NAME" = pull_request ]; then windows=false; oracle=false; doctests=false; fi
+          # Until a maintainer adds approved-for-ci, a pull request gets a quick compile instead of
+          # Clippy, the tests and the doc tests.
           quick=false
-          if [ "$EVENT_NAME" = pull_request ] && [ "$APPROVED" != true ] && [ "$TRUSTED" != true ]; then
+          if [ "$EVENT_NAME" = pull_request ] && [ "$APPROVED" != true ]; then
             quick=$native
             native=false
             oracle=false
