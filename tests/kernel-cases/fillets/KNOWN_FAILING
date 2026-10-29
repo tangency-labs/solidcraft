@@ -1,9 +1,8 @@
 # The fillet cases that fail today, one a line: `<case> <why it fails today>`. Sorted. The fillet
 # rig gate (.github/workflows/fillet-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
-# Baseline: develop 229739a70 (SMLib 7e917f0), aarch64 Linux, 2026-10-29.
+# Baseline: develop 242bbc89f with the SMLib fixes of 2026-10-29 (integration-overnight + b78bd4a), aarch64 Linux.
 1207-fillet-bar-top-edge-after-boss-arc-round-r0-5 SMLib's check refuses the round: internal coincident control points in a B-spline curve (an internal pole)
-1557-fillet-vertical-corners-after-bottom-rounds SMLib status 1001 since bodies are read back from their records (#8625): the bottom rounds come back as SmCylinder where SMLib's blend made SmCone(0), and the corner-ball trace starts 2.78e-4 off
 4782-fillet-bar-edge-wider-than-both-faces SMLib status 1001: a convex round past both its faces is not yet built by subtraction
 4782-fillet-two-end-verticals-past-a-full-round SMLib's result is not a closed solid, where a refusal naming 7.5 mm (fillet_max for the exact fit) is right
 5158-fillet-round-just-past-a-10mm-face SMLib status 1001: a convex round 0.01 past its face is not yet built by subtraction (10.0001-10.04 open)

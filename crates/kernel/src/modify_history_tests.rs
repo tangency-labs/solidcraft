@@ -596,10 +596,13 @@ mod smlib {
         let tilted = with(h, &[face(face_at(&b, side))]);
         assert_eq!(tilted.len(), 1, "{h:?}");
         assert_eq!(h.faces[tilted[0]].change, Change::Modified);
-        // A round wall isn't flat; the top isn't parallel to the pull.
+        // A round wall along the pull leans in the same way: the rod drafts to a frustum, radius
+        // 5 at the neutral plane and 5 - 10 tan 5 deg at the top. The top isn't parallel to the pull.
         let rod = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
-        let e = offset_backend::draft(&rod, &[Vec3::new(5.0, 0.0, 5.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
-        assert!(e.to_string().contains("not supported yet"), "{e}");
+        let frustum = offset_backend::draft(&rod, &[Vec3::new(5.0, 0.0, 5.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap();
+        let top = 5.0 - 10.0 * (5.0 * deg).tan();
+        let exact = std::f64::consts::PI * 10.0 * (25.0 + 5.0 * top + top * top) / 3.0;
+        assert!((volume(&frustum) - exact).abs() < 1e-3, "{} vs {exact}", volume(&frustum));
         let e = offset_backend::draft(&b, &[Vec3::new(20.0, 15.0, 20.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
         assert!(e.to_string().contains("not supported yet"), "{e}");
     }
