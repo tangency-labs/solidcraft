@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "a sphere r10 scaled non-uniformly (1, 2, 0.5) into an ellipsoid",
+ "source": "analytic",
+ "method": "ellipsoid of semi-axes 10, 20, 5: V = 4/3 pi abc = 4/3 pi 1000 (the factors multiply to 1: the sphere's volume); bbox +-10, +-20, +-5; one closed face",
+ "body_count": 1,
+ "faces": 1,
+ "volume_mm3": 4188.790204786391,
+ "center_of_mass": [
+  0,
+  0,
+  0
+ ],
+ "bbox": {
+  "min": [
+   -10,
+   -20,
+   -5
+  ],
+  "max": [
+   10,
+   20,
+   5
+  ]
+ }
+}

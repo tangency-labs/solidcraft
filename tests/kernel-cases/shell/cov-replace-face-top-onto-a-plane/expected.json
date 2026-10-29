@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a block's top face replaced by the plane z=15",
+ "source": "analytic",
+ "method": "the top moves from z=10 to 15: a 40x30x15 block, V = 18000, A = 2(1200 + 600 + 450)",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 18000.0,
+ "area_mm2": 4500.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   15
+  ]
+ }
+}

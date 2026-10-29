@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.scale",
+   "params": {
+    "bodies": [
+     "Block"
+    ],
+    "factors": [
+     1,
+     0,
+     1
+    ]
+   }
+  }
+ ]
+}

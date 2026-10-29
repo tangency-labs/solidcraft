@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "a boss joined to a plate, patterned 5 times 20 mm apart along a sketch line",
+ "source": "analytic",
+ "method": "plate 100x20x5 = 10000 plus 5 bosses r3 h5 at x = 10, 30 ... 90: 5 pi 9 5; faces: plate 6 + 2 a boss (side, top) = 16",
+ "body_count": 1,
+ "faces": 16,
+ "volume_mm3": 10706.858347057703,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   100,
+   20,
+   10
+  ]
+ }
+}
