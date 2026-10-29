@@ -18,7 +18,9 @@ fn faceted_cut_of_a_helical_groove() {
     let section = [Vec2::new(1.2, -0.06), Vec2::new(1.6, -0.06), Vec2::new(1.6, 0.06), Vec2::new(1.2, 0.06)];
     let groove = sweep_helix_mesh(&plane, &section, base, k, p, 5.0, 48).unwrap();
     let cut = faceted_boolean(&shaft, &groove, BoolOp::Cut, 1e-3).unwrap().unwrap();
-    let m = cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure();
+    // The cut's own volume (SMLib's, of its exact faces): a mesh's at 0.01 mm sags inside the
+    // shaft's round wall by 0.18 mm³, five times the 3 % the groove is held to.
+    let m = crate::measure(&cut).unwrap();
     // In the shaft from z = 0: the section (r 1.2…1.5, 0.12 tall) for 4 turns, plus the part of
     // the first turn's section above z = 0 (its z range is ±0.06 about the turn's height).
     let per_turn = 2.0 * PI * 0.12 * (1.5f64.powi(2) - 1.2f64.powi(2)) / 2.0;

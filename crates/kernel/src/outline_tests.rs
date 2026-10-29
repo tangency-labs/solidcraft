@@ -30,8 +30,12 @@ fn a_lip_swept_on_a_round_rim_joins_it() {
             let r = boolean(a, b, BoolOp::Union).unwrap().unwrap();
             assert_eq!(r.shell_count(), 1, "inset {inset}: one solid");
             assert!(r.validity().is_empty(), "inset {inset}: {:?}", r.validity());
+            // Each mesh lies within its chord (1e-5) of its faces: two meshes of the same solid,
+            // tessellated face by face as each body has its faces, differ by at most their area
+            // times twice that.
             let v = mesh_volume(&r);
-            assert!((v - want).abs() < 1e-3, "inset {inset}: volume {v} vs {want}");
+            let bound = crate::measure(&r).unwrap().area * 2e-5;
+            assert!((v - want).abs() < bound, "inset {inset}: volume {v} vs {want} (within {bound})");
         }
     }
 }

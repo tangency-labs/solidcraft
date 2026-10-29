@@ -927,9 +927,15 @@ mod tests {
             }
         }
         assert_eq!(equivalent(&original, source.size(), &same, source.size()), Some(true));
-        let last = original.faces.len() - 1;
-        let outward = preflight(&original).unwrap()[last];
-        let runs = loop_runs(&original, last, 0, outward).unwrap();
+        // A cap: a face whose plane is square to z (the record's face order is SMLib's, its last
+        // face may be the hole's wall).
+        let cap = original
+            .faces
+            .iter()
+            .position(|f| plane_of(&f.surface).is_some_and(|(_, u, v)| u.cross(v).normalized().is_some_and(|n| n.z.abs() > 0.9)))
+            .unwrap();
+        let outward = preflight(&original).unwrap()[cap];
+        let runs = loop_runs(&original, cap, 0, outward).unwrap();
         assert!(
             loops_same(
                 &cap_loop(&runs, &Plane::XY, 3e-9, &mut 2_000_000).unwrap(),
