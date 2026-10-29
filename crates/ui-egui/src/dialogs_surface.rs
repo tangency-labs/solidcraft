@@ -937,8 +937,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             if let Some(input) = ins.first_mut() {
                 input.items = sels;
             }
+            // A symmetric extrude keeps the reading it was made with; a one-sided one made
+            // symmetric here takes a new one's (timeline.redefine fills it in either way).
             let mut extra = Map::new();
-            extra.insert("convention".into(), json!(extent.convention));
+            if extent.direction == Direction::Symmetric {
+                extra.insert("convention".into(), json!(extent.convention));
+            }
             return Some((Kind::Surface(k), ins, extra));
         }
         FeatureKind::Patch { sketch, edges, crown, continuity, points, .. } => {

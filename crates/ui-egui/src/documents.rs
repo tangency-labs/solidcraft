@@ -159,6 +159,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
     app.session.metric_tap_drill_major_less_pitch = out.session.metric_tap_drill_major_less_pitch;
+    app.session.surface_extrude_symmetric_per_side = out.session.surface_extrude_symmetric_per_side;
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
     // Views cache by revision: the incoming design must not look unchanged.
