@@ -46,7 +46,8 @@ fn null() -> SolidError {
 ///
 /// # Errors
 ///
-/// `SM_ERR` when the extended offset fails; `InvalidInput` where upstream dereferences
+/// `SM_ERR` when the extended offset fails (its own status with
+/// `Kernel::fixes.local_operation_offset_status`); `InvalidInput` where upstream dereferences
 /// null (a surface list shorter than the face list, a face without surface); those of
 /// the callees ([`crate::offset::offset_executive::p2`], the surfaces' normals,
 /// reversal and analytic copy, the bounding box).
@@ -115,7 +116,7 @@ pub fn local_operation(
     let mut new_brep = executive
         .do_extended_offset(k, Some(&mut *b), notifications)
         .map_err(|e| {
-            if e.is_unported() {
+            if e.is_unported() || k.fixes.local_operation_offset_status {
                 e
             } else {
                 SolidError::sm_err(OP)

@@ -217,6 +217,8 @@ pub struct UpstreamFixes {
     pub offset_resolve_crossing_loops: bool,
     /// With `offset_resolve_crossing_loops` (it has no effect without it), loops of an offset face that touch without crossing (run along one another, meet tangentially, or come up to one another and go back on the same side) are refused, before any crossing is resolved, with `SM_ERR_OFFSET_WALLS_TOUCH` (1042) instead of `SM_ERR_BAD_INTERSECTIONS` (1027): the offset walls meet along a line (WR-345 addendum, #1442; tangency-labs/smlib a759622).
     pub offset_walls_touch_refused: bool,
+    /// `SmBrep::LocalOperation` returns the failed extended offset's own status (e.g. `SM_ERR_OFFSET_WALLS_TOUCH`, 1042, or `SM_ERR_BAD_INTERSECTIONS`, 1027) instead of a generic `SM_ERR` (WR-345 addendum, #1442; tangency-labs/smlib a759622).
+    pub local_operation_offset_status: bool,
     /// An inward shell mates the walls across rounds thinner than it (collapsed faces) (#397).
     pub offset_collapsed_rounds_mated: bool,
     /// `FaceuseOffset` fails on a face whose offset surface is missing without collapsing (`SmSurface::OffsetCollapses`: a cone, cylinder, sphere or torus offset onto its spine), where upstream reads any missing surface as a collapsed round (WR-464, #1072).
