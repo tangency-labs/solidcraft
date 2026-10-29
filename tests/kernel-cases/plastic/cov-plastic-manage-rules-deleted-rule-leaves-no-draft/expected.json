@@ -1,0 +1,16 @@
+{
+ "sources": [],
+ "what": "plastic.manage_rules makes an active 5 degree rule, then deletes it; a rest after that has no rule and no draft",
+ "source": "analytic",
+ "method": "deleting a design rule also clears it as the active rule, so the rest (16 x 10 x 3, no draft of its own) is straight: V = 60*40*3 + 16*10*3 = 7680",
+ "body_count": 1,
+ "volume_mm3": 7680.0,
+ "results": [
+  {
+   "step": 3,
+   "json": {
+    "deleted": "Steep"
+   }
+  }
+ ]
+}

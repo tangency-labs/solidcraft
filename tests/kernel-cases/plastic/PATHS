@@ -1,0 +1,20 @@
+# The sources whose change must rerun the plastic cases (git pathspec globs, one a line).
+# The commands and their rules.
+crates/engine/src/cmd/plastic.rs
+crates/doc/src/plastic.rs
+# The features' evaluation (plastic_eval and its helpers) and the join and cut they apply.
+crates/doc/src/eval_more.rs
+crates/doc/src/eval.rs
+# The kernel operations they build with: extrude, tapered extrude, the lip's raised band and the
+# groove's rim band, booleans (ops) and the shell the lip cases
+# start from, and SMLib underneath.
+crates/kernel/src/build.rs
+crates/kernel/src/lip.rs
+crates/kernel/src/ops.rs
+crates/kernel/src/boolean_record.rs
+crates/kernel/src/native.rs
+crates/kernel/src/shell_groups.rs
+crates/smlib/**
+# The cases and the rig itself.
+tests/kernel-cases/plastic/**
+apps/solidcraft-cli/src/kernel_cases.rs

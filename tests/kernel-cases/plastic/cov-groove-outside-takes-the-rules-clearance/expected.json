@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "plastic.lip type groove, 1 wide and 2 deep along the outside edge of the shelled box's rim, with the ABS (1.5mm) rule active and no gap given",
+ "source": "analytic",
+ "method": "a groove's gap defaults to the body's rule's clearance: ABS (1.5mm), 0.1 mm. The groove is the band along the outer edge (80 x 50) w + gap = 1.1 wide, cut h + gap = 2.1 deep: (80*50 - 77.8*47.8)*2.1 = 590.436000. V = 22112 - that = 21521.564000; the height stays 30",
+ "body_count": 1,
+ "volume_mm3": 21521.564,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   80,
+   50,
+   30
+  ]
+ }
+}

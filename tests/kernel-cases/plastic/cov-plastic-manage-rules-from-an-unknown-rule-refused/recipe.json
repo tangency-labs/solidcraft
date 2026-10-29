@@ -1,0 +1,11 @@
+{
+ "commands": [
+  {
+   "command": "plastic.manage_rules",
+   "params": {
+    "name": "Mine",
+    "from": "No Such Rule"
+   }
+  }
+ ]
+}

@@ -39,6 +39,7 @@ One directory per area, one per case: `tests/kernel-cases/<area>/<id>/`.
 | `continuity` (designed seams of known order, G0 to G4, that prove the continuity measurement itself) | history rig |
 | `solids` (cones, scale, align, bounding solids) | tool coverage |
 | `frames` (frame members, inserted profiles) | tool coverage |
+| `plastic` (boss, lip and groove, rest, snap fit, plastic rules) | tool coverage rig |
 
 Each area also has its gate files: `KNOWN_FAILING` and `PATHS` (see [the gate](#the-kernel-rig-gate)).
 
@@ -99,6 +100,8 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `watertight` | `true`: each body's display mesh (chord tolerance `tolerance.mesh_mm`, default 0.01 mm) has no open and no over-shared edges, with vertices closer than `tolerance.weld_mm` (default 1e-4 mm) taken as one. |
 | `timeout_s` | A longer timeout for this case than the run's (at most 1800 s), for cases that are slow by nature. A case that only needs it on a loaded machine shouldn't set it. |
 | `tolerance` | Optional overrides: `rel`, `abs_mm`, `mesh_mm`, `weld_mm`. |
+| `files` | The files the case wrote to `$OUT`, each `{path, json \| csv \| dxf}`, matched as a part of what is there: every key the case gives, an array item by item and as long, a whole number exactly, any other number within `rel`. `json`: the file's JSON; `csv`: its rows, as objects keyed by the header row; `dxf`: per layer of its ENTITIES section, how many of each entity (`{"CUT": {"CIRCLE": 1, "ELLIPSE": 0, "length_mm": 31.416}}`; a count may be a range `[min, max]`) and `length_mm`, the total length of its lines, arcs, circles, ellipses and polylines. |
+| `results` | The commands' own answers, each `{step, json}`: the answer of the `step`th command (from 1) matched as `files` matches JSON (a flat pattern's bends, a rule's values). |
 | `missing` | A capability SolidCraft has no command or parameter for yet (`"solid.thread has no start count"`): the case is reported **not supported yet** without running, so the gap stays visible. |
 
 ## The kernel rig gate
