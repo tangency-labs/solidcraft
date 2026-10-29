@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "fair on a flat boundary patch, with its edges free: a plane has no curvature to even out, so it stays the flat square",
+ "source": "analytic",
+ "method": "the Coons patch of the 20 x 20 square lies in z = 0; fairing moves control points to flatten curvature variation, of which a plane has none, and never past the tolerance: area 400, box z 0..0, 4 free edges",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 4,
+ "area_mm2": 400.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   0
+  ]
+ }
+}
