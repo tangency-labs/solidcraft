@@ -32,8 +32,8 @@ ASCENT = 0.88
 LABELS = [
     ("ja", "日本語", "biz-udp-gothic/BIZUDPGothic-Regular.ttf"),
     ("ko", "한국어", "noto-sans-kr/NotoSansKR-Regular.otf"),
-    ("zh", "中文", "noto-sans-sc/NotoSansSC-Regular.otf"),
-    ("zh-TW", "繁體中文", "noto-sans-tc/NotoSansTC-Regular.otf"),
+    ("zh", "中文", "craft-ui-sc/CraftUI-SC.otf"),
+    ("zh-TW", "繁體中文", "craft-ui-tc/CraftUI-TC.otf"),
 ]
 
 

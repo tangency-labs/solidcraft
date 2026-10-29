@@ -710,7 +710,6 @@ mod web {
                 } else if solidcraft_ui_egui::fonts::needs_cjk_font(effective) {
                     log::warn!("CJK font unavailable; showing English for this session");
                 }
-                }
                 self.font.finished(face, installed, &mut self.app.preferences.language);
                 self.apply_fonts(ctx);
                 ctx.request_repaint();

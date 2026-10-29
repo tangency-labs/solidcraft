@@ -96,7 +96,8 @@ impl CjkFontLoader {
             // The user picked a language themselves since the fallback: that is the preference now.
             self.saved_language = None;
         }
-        let face = WebFace::for_language(language)?;
+        let effective = crate::i18n::effective_language(language);
+        let face = WebFace::for_language(effective)?;
         match self.status(face) {
             FontStatus::Unloaded => {
                 self.set(face, FontStatus::Loading);
@@ -134,7 +135,8 @@ impl CjkFontLoader {
             self.set(face, FontStatus::Installed);
         } else {
             self.set(face, FontStatus::Failed);
-            if WebFace::for_language(language) == Some(face) {
+            let effective = crate::i18n::effective_language(language);
+            if WebFace::for_language(effective) == Some(face) {
                 self.fall_back(language);
             }
         }

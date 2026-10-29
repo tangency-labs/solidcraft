@@ -177,7 +177,8 @@ pub(crate) fn list_picker_locale(ui: &mut Ui, id: &str, fallback_name: &str, sel
     {
         let dark = ui.visuals().dark_mode;
         if let Some((texture, size)) = get_label_texture(ui.ctx(), id, dark) {
-            let response = crate::ui_kit::list_picker(ui, id, "", selected);
+            let mut response = crate::ui_kit::list_picker(ui, id, "", selected);
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, ui.is_enabled(), selected, fallback_name));
             if ui.is_rect_visible(response.rect) {
                 let label_h = 13.0;
                 let label_w = size.x * (label_h / size.y);
