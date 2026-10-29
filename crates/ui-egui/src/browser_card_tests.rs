@@ -972,6 +972,27 @@ fn eye_drag_on_a_full_history_is_one_undo_step() {
     assert!(body_hidden(&h, "One"), "the next undo is the last step before the drag");
 }
 
+/// #9680: an undo while the button is down changes what the press saw, so the first step after it
+/// no longer holds the state before the gesture: the steps stay separate.
+#[test]
+fn eye_drag_after_an_undo_under_the_press_keeps_its_steps() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    h.app.run("browser.visibility", json!({"items":["One"],"visible":false})).unwrap();
+    let session = &h.app.session;
+    h.app.tree.eye_press = Some((session.doc.clone(), session.history.mark(), without_origin(session.visibility.clone())));
+    h.app.run("edit.undo", json!({})).unwrap();
+    for name in ["Two", "Three"] {
+        h.app.run("browser.visibility", json!({"items":[name],"visible":false})).unwrap();
+    }
+    let undo = h.app.session.history.len();
+    let ctx = egui::Context::default();
+    ctx.data_mut(|d| d.insert_temp(crate::ui_kit::eye_drag_id(), true));
+    eye_drag_frame(&mut h.app, &ctx);
+    assert!(h.app.tree.eye_press.is_none(), "the release ends the gesture");
+    assert_eq!(h.app.session.history.len(), undo, "the two steps stay separate");
+}
+
 /// #9680: a plain click on an eye still toggles that one row, as one undo step.
 #[test]
 fn a_plain_eye_click_still_toggles_one_row_as_one_undo_step() {

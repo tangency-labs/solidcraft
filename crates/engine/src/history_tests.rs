@@ -53,6 +53,21 @@ fn undo_and_redo_move_one_step_across() {
     assert!(h.is_empty() && h.redo_steps().len() == 2);
 }
 
+/// An undo and a redo put a step back as it was: a mark taken before them still finds nothing
+/// pushed since, so a gesture begun then doesn't fold the redone step.
+#[test]
+fn undo_then_redo_keeps_a_steps_number() {
+    let mut h = with(3);
+    let mark = h.mark();
+    assert!(h.take_undo().is_some());
+    h.undone(step("state after old 2"));
+    assert!(h.take_redo().is_some());
+    h.redone(step("old 2 again"));
+    assert_eq!(h.steps_since(mark), 0);
+    assert_eq!(h.fold_since(mark), 0);
+    assert_eq!(labels(h.steps()), ["old 0", "old 1", "old 2 again"]);
+}
+
 #[test]
 fn a_gesture_folds_into_its_first_step() {
     let mut h = with(3);
@@ -179,6 +194,22 @@ fn a_mark_from_before_a_clear_folds_only_what_came_after() {
     assert_eq!(labels(h.steps()), ["b"]);
 }
 
+/// A new or opened design keeps nothing of the old one: a clear lets go of the steps kept to give
+/// back too (up to 16 whole designs held for nothing), and dropping steps afterwards gives
+/// nothing from before the clear back.
+#[test]
+fn a_clear_lets_go_of_the_steps_kept_to_give_back() {
+    let mut h = with(MAX_UNDO);
+    h.push(step("a"));
+    assert_eq!(h.pushed_out.len(), 1, "a pushed old 0 out");
+    h.clear();
+    assert!(h.pushed_out.is_empty());
+    let mark = h.mark();
+    h.push(step("b"));
+    h.drop_since(mark);
+    assert!(h.is_empty(), "{:?}", labels(h.steps()));
+}
+
 #[test]
 fn save_as_changes_every_step() {
     let mut h = with(MAX_UNDO + 1);
@@ -186,10 +217,13 @@ fn save_as_changes_every_step() {
     h.undone(to);
     h.for_each_step(|s| s.label.push('!'));
     assert!(h.steps().iter().chain(h.redo_steps()).all(|s| s.label.ends_with('!')));
-    // A step pushed out and given back carries the change too.
+    // A step pushed out before Save As and given back after it carries the change too: a
+    // gesture's first frame pushes old 0 out, the design is saved as, and the gesture is dropped.
+    let mut h = with(MAX_UNDO);
     let mark = h.mark();
-    h.push(step("x"));
-    h.push(step("y"));
+    h.push(step("frame"));
+    h.for_each_step(|s| s.label.push('!'));
     h.drop_since(mark);
+    assert_eq!(h.steps().first().map(|s| s.label.as_str()), Some("old 0!"));
     assert!(h.steps().iter().all(|s| s.label.ends_with('!')), "{:?}", labels(h.steps()));
 }
