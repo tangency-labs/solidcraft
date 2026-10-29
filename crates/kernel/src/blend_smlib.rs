@@ -191,7 +191,7 @@ mod imp {
         body.require_brep(what)?;
         sizes_ok(what, sizes)?;
         let picked = resolve(body, edges)?;
-        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
+        let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
         let kind = match kind {
             Kind::Round => Blend::Round,
             Kind::Curvature => Blend::Curvature,
@@ -199,7 +199,7 @@ mod imp {
             Kind::Chamfer => Blend::Chamfer,
         };
         let tol = pick_tolerance(body);
-        run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol))
+        run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol)).map_err(|e| crate::blend::with_continuation(e, next))
     }
 
     /// Rounds with corner setbacks: each corner point picks the body's nearest vertex (within
@@ -215,13 +215,14 @@ mod imp {
             return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
         }
         let picked = resolve(body, edges)?;
-        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
+        let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
         let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
         let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
         let tol = pick_tolerance(body);
         let at: Vec<Vec3> = setbacks.iter().map(|(p, _)| *p).collect();
         run_with(body, what, &picked.edges, &at, |b| b.blend_setback(Blend::Round, &picked.points, sizes, &corners, &distances, tol).map(|r| (r, ())))
             .map(|(out, (), _)| out)
+            .map_err(|e| crate::blend::with_continuation(e, next))
     }
 
     /// [`blend_setback`] with the set-back corners left open (`super::OpenCorners`).
@@ -236,13 +237,14 @@ mod imp {
             return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
         }
         let picked = resolve(body, edges)?;
-        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
+        let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
         let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
         let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
         let at: Vec<Vec3> = setbacks.iter().map(|(p, _)| *p).collect();
         let tol = pick_tolerance(body);
         let (sheet, holes, order) =
-            run_with(body, what, &picked.edges, &at, |b| b.blend_setback_open(Blend::Round, &picked.points, sizes, &corners, &distances, tol))?;
+            run_with(body, what, &picked.edges, &at, |b| b.blend_setback_open(Blend::Round, &picked.points, sizes, &corners, &distances, tol))
+                .map_err(|e| crate::blend::with_continuation(e, next))?;
         // SMLib's indices in the sheet's own orders.
         let place = |list: &[usize], i: usize| if list.is_empty() { Some(i) } else { list.get(i).copied() };
         let renumber = |hole: &solidcraft_smlib::Hole| -> Result<Vec<(usize, bool)>> {
@@ -284,7 +286,7 @@ mod imp {
         body.require_brep("chamfer")?;
         sizes_ok("chamfer", &vec![d1; edges.len()])?;
         let picked = resolve(body, edges)?;
-        crate::blend::refuse_unblendable(body, edges, &picked.edges, &picked.hidden)?;
+        let next = crate::blend::unfinished_chain(body, edges, &picked.edges, &picked.hidden)?;
         let second = match side {
             crate::ChamferSide::Distance(d) => ChamferSecond::Distance(d),
             crate::ChamferSide::Angle(a) => ChamferSecond::Angle(a),
@@ -292,6 +294,7 @@ mod imp {
         let up = if flip { [0.0, 0.0, -1.0] } else { [0.0, 0.0, 1.0] };
         let tol = pick_tolerance(body);
         run(body, "chamfer", &picked.edges, |b| b.chamfer_sides(&picked.points, tol, d1, second, up))
+            .map_err(|e| crate::blend::with_continuation(e, next))
     }
 
     pub(super) fn variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
@@ -300,12 +303,13 @@ mod imp {
             return Err(KernelError::Invalid("the start point must be finite".into()));
         }
         let picked = resolve(body, &[edge_at])?;
-        crate::blend::refuse_unblendable(body, &[edge_at], &picked.edges, &picked.hidden)?;
+        let next = crate::blend::unfinished_chain(body, &[edge_at], &picked.edges, &picked.hidden)?;
         let [at] = picked.points[..] else { return Err(KernelError::Invalid("one edge".into())) };
         let tol = pick_tolerance(body);
         run(body, "variable fillet", &picked.edges, |b| {
             b.fillet_variable(at, tol, [start.x, start.y, start.z], spline.degree, &spline.knots, &spline.radii)
         })
+        .map_err(|e| crate::blend::with_continuation(e, next))
     }
 
     /// `op` on `body` in SMLib, tagged as operand 0, checked, decoded, with its history.

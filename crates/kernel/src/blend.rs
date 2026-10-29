@@ -728,12 +728,12 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Vec<usize> {
     chain
 }
 
-/// Refuses blending exactly `edges` (the record's edges `picks` took, in order) where SMLib has
-/// no blend to build: an edge whose faces meet tangentially (a smooth edge, nothing to round),
-/// and an edge that runs on tangentially into an edge left out (SMLib rounds a tangent chain
-/// as one sequence; it has no end for a blend at a vertex where its edge continues smoothly,
-/// and fails building the blend's face there). [`tangent_chain`] gives the whole chain.
-pub(crate) fn refuse_unblendable(body: &Body, picks: &[Vec3], edges: &[usize], hidden: &[bool]) -> Result<()> {
+/// Before blending exactly `edges` (the record's edges `picks` took, in order): refuses an edge
+/// whose faces meet tangentially (a smooth edge, nothing to round), and names the first edge a
+/// picked one runs on into tangentially without being blended with it, if any (tangent
+/// propagation off). SMLib blends the picked edges alone where it can end a blend there (a round
+/// ending on the round it runs into); where it can't, [`with_continuation`] says why.
+pub(crate) fn unfinished_chain(body: &Body, picks: &[Vec3], edges: &[usize], hidden: &[bool]) -> Result<Option<Vec3>> {
     let rec = Faces::of(body)?;
     let at = |i: usize| picks.get(i).map(|p| format!("({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
     for (i, &e) in edges.iter().enumerate() {
@@ -747,15 +747,25 @@ pub(crate) fn refuse_unblendable(body: &Body, picks: &[Vec3], edges: &[usize], h
             seeds.push(e);
         }
     }
-    let chain = chain_of(&rec, &seeds, hidden);
-    if let Some(&next) = chain.get(seeds.len()) {
-        let p = edge_middle(&rec, next).map(|p| format!(" ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
-        return Err(KernelError::Invalid(format!(
-            "a picked edge continues tangentially into the edge at{p}, which is not blended with it: a blend cannot end where its \
-             edge runs on smoothly, so blend its tangent chain too (tangent_chain: true)"
-        )));
+    Ok(chain_of(&rec, &seeds, hidden).get(seeds.len()).and_then(|&next| edge_middle(&rec, next)))
+}
+
+/// A blend's failure where a picked edge continues tangentially into `next`, an edge left out
+/// ([`unfinished_chain`]): SMLib rounds a tangent chain as one sequence and could not end the
+/// blend there, so the reason and the way out are named.
+pub(crate) fn with_continuation(e: KernelError, next: Option<Vec3>) -> KernelError {
+    let Some(p) = next else { return e };
+    let why = format!(
+        " (a picked edge continues tangentially into the edge at ({:.3}, {:.3}, {:.3}), which is not blended with it, and the blend \
+         cannot end there: with tangent propagation on, tangent_chain: true, its tangent chain is blended as one)",
+        p.x, p.y, p.z
+    );
+    match e {
+        KernelError::Invalid(m) => KernelError::Invalid(m + &why),
+        KernelError::Failed(m) => KernelError::Failed(m + &why),
+        KernelError::TooLarge(m) => KernelError::TooLarge(m + &why),
+        e => e,
     }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -3552,6 +3552,19 @@ fn off_the_ends(mb: &ModelBody, edge: usize, p: Vec3) -> Vec3 {
 /// The edges a tapered fillet tapered (a point on each, with its taper).
 type Tapered = Vec<(Vec3, kernel::Taper)>;
 
+/// A blend's refusal when the feature blended the picked edges' tangent chains too (tangent
+/// propagation, the default), saying so and how to blend the picked edges alone.
+fn with_propagation_hint(e: DocError) -> DocError {
+    const HINT: &str = " (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)";
+    match e {
+        DocError::Kernel(kernel::KernelError::TooLarge(m)) => DocError::Kernel(kernel::KernelError::TooLarge(m + HINT)),
+        DocError::Kernel(kernel::KernelError::Invalid(m)) => DocError::Kernel(kernel::KernelError::Invalid(m + HINT)),
+        DocError::Kernel(kernel::KernelError::Failed(m)) => DocError::Kernel(kernel::KernelError::Failed(m + HINT)),
+        DocError::Invalid(m) => DocError::Invalid(m + HINT),
+        e => e,
+    }
+}
+
 /// Body `mb` with blend `f` applied at `edges` (radius or distance `r`), the radii a fitted fillet
 /// used (when it reduced any) and the edges it tapered.
 fn blend_body(
@@ -6793,12 +6806,15 @@ fn eval_feature(
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
                 let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                let picked = edges.len();
                 let edges = if chain { kernel::tangent_chain(&mb.body, &edges)? } else { edges };
                 if let Some(w) = w {
                     notes.push(w);
                 }
                 let mut note = None;
-                let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, &mut note)?;
+                let propagated = edges.len() > picked;
+                let (nb, used, tapered) =
+                    blend_body(vals, f, mb, &edges, r, &mut note).map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
                 if let Some(n) = note {
                     notes.push(n);
                 }
@@ -7849,6 +7865,50 @@ mod chain_tests {
             assert_eq!(crate::appearance::face_index_at(b, *point), Some(*index));
         }
         assert_eq!(tangent_face_chain(b, &[Vec3::new(20.0, 15.0, 20.0); 2]), pts);
+    }
+
+    fn fillet(at: Vec3, radius: &str, tangent_chain: bool) -> FeatureKind {
+        FeatureKind::Fillet {
+            edges: vec![crate::Position(at)],
+            radius: radius.into(),
+            body: None,
+            style: crate::FilletStyle::Constant,
+            fit: Default::default(),
+            corner: Default::default(),
+            setbacks: Vec::new(),
+            tangent_chain,
+        }
+    }
+
+    /// A 20 box's top edge along y rounded r2, then the top front edge (along x) rounded r3: that
+    /// edge runs on tangentially into the round's end arc, so by default (tangent propagation)
+    /// the arc is rounded with it, which an r3 round on an r2 arc cannot be: refused, saying that
+    /// propagation blended the chain and how to blend the edge alone. With propagation off the
+    /// edge is rounded alone, ending on the r2 round.
+    #[test]
+    fn a_propagated_chain_that_cannot_build_says_how_to_blend_the_edge_alone() {
+        let build = |chain: bool| {
+            let mut doc = Document::new("T");
+            let solid = FeatureKind::Box {
+                corner: crate::point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "20".into(),
+                operation: Operation::NewBody,
+            };
+            doc.add_feature(solid, None).unwrap();
+            doc.add_feature(fillet(Vec3::new(20.0, 10.0, 20.0), "2", true), None).unwrap();
+            let last = doc.add_feature(fillet(Vec3::new(10.0, 0.0, 20.0), "3", chain), None).unwrap();
+            let mut m = Model::new();
+            m.evaluate(&doc);
+            (m.result(last).and_then(|r| r.error.clone()), m.state().bodies.first().map(|b| b.body.face_count()))
+        };
+        let (on, _) = build(true);
+        let on = on.expect("the propagated chain is refused");
+        assert!(on.contains("with it off, tangent_chain: false, only the picked edges are blended"), "{on}");
+        let (off, faces) = build(false);
+        assert_eq!(off, None);
+        assert_eq!(faces, Some(8));
     }
 }
 

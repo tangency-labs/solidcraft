@@ -252,13 +252,15 @@ fn the_arc_rounded_after_the_back_edge_matches_both_together() {
 }
 
 /// The edge at `first` rounded (2), then the one at `then` as a fillet of its own, against both
-/// rounded together.
+/// rounded together; each with its tangent chain, as the Fillet feature rounds by default (tangent
+/// propagation).
 fn one_then_the_other(first: Vec3, then: Vec3) {
     let body = arc_part();
-    let step = crate::fillet(&body, &[first], 2.0).unwrap();
-    let after = crate::fillet(&step, &[then], 2.0).unwrap();
+    let chained = |b: &Body, pts: &[Vec3]| crate::tangent_chain(b, pts).unwrap();
+    let step = crate::fillet(&body, &chained(&body, &[first]), 2.0).unwrap();
+    let after = crate::fillet(&step, &chained(&step, &[then]), 2.0).unwrap();
     let v = volume(&after);
-    let together = volume(&crate::fillet(&body, &[first, then], 2.0).unwrap());
+    let together = volume(&crate::fillet(&body, &chained(&body, &[first, then]), 2.0).unwrap());
     // Within the display meshes' accuracy (two different B-reps, meshed apart).
     assert!((v - together).abs() < 5e-3, "{first:?} then {then:?}: {v} vs together {together}");
 }
