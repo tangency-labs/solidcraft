@@ -1021,6 +1021,20 @@ fn vertical_group_row(
     if suppressed {
         painter.line_segment([icon.left_bottom(), icon.right_top()], Stroke::new(1.5, t.text_dim));
     }
+    // Folded, it carries the worst mark of its features, as a feature chip marks its own (#8592).
+    let (status, tip) = if open { (None, None) } else { crate::timeline::worst_status(app, &contents) };
+    if let Some(status) = status {
+        let side = if names { t.space_12 } else { t.space_10 };
+        let at =
+            if names { pos2(rect.right() - t.space_3 - side, rect.center().y - side / 2.0) } else { icon.right_top() - vec2(side / 2.0, side / 2.0) };
+        let mark = Rect::from_min_size(at, vec2(side, side));
+        icons::paint_icon(ui.painter(), mark, status.icon(), 1.0);
+        crate::scenario::publish_handle(&format!("timeline-folder-status:{}:{}", status.icon(), group.name), mark.center());
+    }
+    let response = match tip {
+        Some(tip) => response.on_hover_text(tip),
+        None => response,
+    };
     let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
     crate::scenario::publish_handle(&format!("timeline-folder:{}", group.name), rect.center());
     let fold_rect = Rect::from_min_max(pos2(rect.left() + offset, rect.top()), pos2(rect.left() + offset + 18.0, rect.bottom()));
@@ -2434,6 +2448,41 @@ mod tests {
         harness.step(&json!({"click": {"handle": "timeline-folder-fold:Folder"}})).unwrap();
         assert!(handle_at("timeline-folder:Folder").is_some(), "collapsed folder row disappeared");
         assert!(handle_at("timeline:Inside").is_none(), "collapsed folder still showed its contents");
+    }
+
+    /// #8592: a folded folder carries the worst mark of its features, nested folders included,
+    /// and an open one none.
+    #[test]
+    fn a_folded_folder_carries_the_worst_mark_of_its_features() {
+        let mut harness = Harness::new();
+        harness.app.preferences.timeline_left = true;
+        for name in ["Warned", "Broken"] {
+            harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": name})).unwrap();
+        }
+        harness.app.run("timeline.group", json!({"name": "Inner", "features": ["Broken"]})).unwrap();
+        harness.app.run("timeline.group", json!({"name": "Outer", "features": ["Warned"]})).unwrap();
+        let groups = harness.app.session.doc.timeline_groups.clone();
+        let id = |name: &str| groups.iter().find(|group| group.name == name).map(|group| group.id).unwrap();
+        harness.app.run("timeline.move_to_group", json!({"groups": [id("Inner")], "group": id("Outer")})).unwrap();
+        harness.frames(4);
+        let mark = |harness: &mut Harness, name: &str, error: Option<&str>, warning: Option<&str>| {
+            let feature = harness.app.session.doc.features.iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+            let result = harness.app.session.model.results.iter_mut().find(|r| r.id == feature).unwrap();
+            result.error = error.map(str::to_string);
+            result.warning = warning.map(str::to_string);
+        };
+        mark(&mut harness, "Warned", None, Some("edge 3 no longer exists; using the edge at the picked point"));
+        harness.frames(2);
+        let marks = || crate::scenario::handles("timeline-folder-status:").into_iter().map(|(name, _)| name).collect::<Vec<_>>();
+        assert!(marks().is_empty(), "open folders show their features' own marks");
+
+        harness.app.tree.collapsed.insert(format!("timeline_group:{}", id("Outer")));
+        harness.frames(2);
+        assert_eq!(marks(), ["timeline-folder-status:warning:Outer"]);
+
+        mark(&mut harness, "Broken", Some("the blend is larger than the neighbouring faces"), None);
+        harness.frames(2);
+        assert_eq!(marks(), ["timeline-folder-status:error:Outer"], "an error in a nested folder outweighs the warning");
     }
 
     #[test]

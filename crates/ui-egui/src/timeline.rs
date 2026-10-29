@@ -1,6 +1,6 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use crate::ui_kit::{Container, Edge, Surface};
+use crate::ui_kit::{Container, Edge, Status, Surface};
 use egui::{Rect, Sense, UiBuilder, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
@@ -358,6 +358,27 @@ pub(crate) fn status_text(name: &str, ty: &str, error: Option<&str>, warning: Op
         text.push_str(&crate::i18n::format("timeline.feature_warning", &[("message", &crate::i18n::tr_diagnostic(warning))]));
     }
     text
+}
+
+/// A feature's mark: an error, else a warning; none while it is suppressed or rolled back, as
+/// it isn't built then.
+pub(crate) fn feature_status(app: &SolveApp, id: u64) -> Option<Status> {
+    let index = app.session.doc.feature_index(id)?;
+    let feature = app.session.doc.features.get(index)?;
+    if feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker) {
+        return None;
+    }
+    let result = app.session.model.result(id)?;
+    if result.error.is_some() { Some(Status::Error) } else { result.warning.as_ref().map(|_| Status::Warning) }
+}
+
+/// The worst mark among `ids`, with the message of the first feature that has it.
+pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<String>) {
+    let worst = ids.iter().filter_map(|id| feature_status(app, *id).map(|status| (status, *id))).reduce(|a, b| if b.0 > a.0 { b } else { a });
+    match worst {
+        Some((status, id)) => (Some(status), feature_message(app, id)),
+        None => (None, None),
+    }
 }
 
 /// What a feature's error or warning mark says, as its tooltip shows it (name and type, then

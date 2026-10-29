@@ -74,7 +74,21 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     let (key, label) =
         if compact { (format!("{scope}/history"), crate::i18n::tr("ui.history_title")) } else { (format!("{scope}/features"), "Features") };
     let open = is_open(app, &key, compact);
-    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label, ..Default::default() });
+    // Folded, it carries the worst mark of what it holds.
+    let ids: Vec<u64> = if open {
+        Vec::new()
+    } else {
+        app.session
+            .doc
+            .features
+            .iter()
+            .filter(|f| f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. })))
+            .map(|f| f.id)
+            .collect()
+    };
+    let (status, tip) = crate::timeline::worst_status(app, &ids);
+    let r =
+        draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, &key, compact);
     }
@@ -209,10 +223,25 @@ fn feature_row(
     let visible =
         if is_sketch { crate::browser::sketch_visible(app, id) } else { bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b)) };
     let eye = (is_sketch || !bodies.is_empty()).then_some(visible);
+    let status = crate::timeline::feature_status(app, id);
+    let tip = status.and_then(|_| crate::timeline::feature_message(app, id));
     let r = draw_row(
         ui,
         ui.id().with(("browser_feature", id)),
-        &Row { depth, fold, eye, icon, label: &label, selected, dim: dim || (!is_sketch && eye == Some(false)), action, mark, ..Default::default() },
+        &Row {
+            depth,
+            fold,
+            eye,
+            icon,
+            label: &label,
+            selected,
+            dim: dim || (!is_sketch && eye == Some(false)),
+            action,
+            mark,
+            status,
+            tip: tip.as_deref(),
+            ..Default::default()
+        },
     );
     if r.eye && is_sketch {
         crate::browser::set_sketch_visible(app, id, !visible);
@@ -792,5 +821,51 @@ mod tests {
         h.step(&json!({"click": {"handle": "eye:Two"}})).unwrap();
         h.frames(2);
         assert!(!shown(&h), "and hides it again");
+    }
+
+    /// #8592: a feature that failed has an error mark in the browser's history, one that built
+    /// with a warning a warning mark, and the others none; the folded History carries the worst
+    /// of its features, and a suppressed feature none.
+    #[test]
+    fn browser_history_marks_errors_and_warnings_and_the_folded_history_takes_the_worst() {
+        let mut h = Harness::new();
+        let mut boxes = Vec::new();
+        for (i, name) in ["Clean", "Broken", "Warned"].into_iter().enumerate() {
+            let size = 5 + i as u64;
+            let r = h.app.run("solid.box", json!({"length":size,"width":size,"height":size,"name":name,"body_name":name})).unwrap();
+            boxes.push(r["feature"].as_u64().unwrap());
+        }
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        settle_heavy(&mut h);
+        let set = |h: &mut Harness| {
+            for (id, error, warning) in [
+                (boxes[1], Some("the blend is larger than the neighbouring faces"), None),
+                (boxes[2], None, Some("edge 3 no longer exists; using the edge at the picked point")),
+            ] {
+                let result = h.app.session.model.results.iter_mut().find(|r| r.id == id).unwrap();
+                result.error = error.map(str::to_string);
+                result.warning = warning.map(str::to_string);
+            }
+        };
+        set(&mut h);
+        h.frames(2);
+        let marks = || {
+            let mut marks: Vec<String> = crate::scenario::handles("status:").into_iter().map(|(name, _)| name).collect();
+            marks.sort();
+            marks.dedup();
+            marks
+        };
+        assert_eq!(marks(), ["status:error:Broken", "status:warning:Warned"]);
+
+        h.app.tree.collapsed.insert("c0/history".into());
+        h.frames(2);
+        assert_eq!(marks(), ["status:error:History"], "the folded History shows its worst feature's mark");
+
+        h.app.tree.collapsed.remove("c0/history");
+        h.app.run("timeline.suppress", json!({"feature":boxes[1],"suppressed":true})).unwrap();
+        settle_heavy(&mut h);
+        set(&mut h);
+        h.frames(2);
+        assert_eq!(marks(), ["status:warning:Warned"], "a suppressed feature isn't built and has no mark");
     }
 }
