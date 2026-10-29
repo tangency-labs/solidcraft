@@ -14,7 +14,10 @@ name = "solidcraft-web"
 path = "src/main.rs"
 
 [features]
-default = []
+# Cloud Open/Save against the CloudCraft deployment that serves this bundle.
+# A standalone hosting (project Pages) has no service: build without it there.
+cloud = ["dep:craft-cloud-client", "dep:collabcraft-share"]
+default = ["cloud"]
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 
 [dependencies]
@@ -27,6 +30,12 @@ percent-encoding = "2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
+# How this app reaches CloudCraft (the async browser transport; the session
+# rides the service's cookie). No provider credential or protocol in here.
+craft-cloud-client = { git = "https://github.com/wdunn001/collab-craft", rev = "dbfc5e3", optional = true }
+# The Share dialog's backend. On the web it reads the page it is served from,
+# so a bundle CloudCraft hosts needs no configuration.
+collabcraft-share = { git = "https://github.com/wdunn001/collab-craft", rev = "dbfc5e3", optional = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
@@ -38,4 +47,5 @@ web-sys = { version = "0.3", features = [
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
     "Headers", "ReadableStream", "ReadableStreamDefaultReader",
     "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
+    "Request", "RequestCredentials",
 ] }

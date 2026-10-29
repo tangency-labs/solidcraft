@@ -170,3 +170,4 @@ winit = { path = "vendor/winit" }
 [profile.mutants]
 inherits = "ci"
 incremental = true
+

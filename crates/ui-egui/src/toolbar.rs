@@ -448,7 +448,19 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let span = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
         let update_labeled = report_label;
         let update = crate::update::button(app, ui, span, update_labeled);
-        let tabs_end = update.map_or(controls_left, |u| u.left()) - 8.0;
+        let mut tabs_end = update.map_or(controls_left, |u| u.left()) - 8.0;
+        if crate::cloud::available(app) && !compact_actions && tabs_end - tabs_start > 420.0 {
+            let strip = Rect::from_min_max(pos2(tabs_end - 250.0, r.top()), pos2(tabs_end, r.bottom()));
+            let mut strip_ui = ui.new_child(egui::UiBuilder::new().max_rect(strip).layout(egui::Layout::right_to_left(egui::Align::Center)));
+            strip_ui.set_clip_rect(strip.intersect(ui.clip_rect()));
+            crate::cloud::who(app, &mut strip_ui);
+            if crate::cloud::shares(app) {
+                strip_ui.add_space(8.0);
+                let _ = crate::cloud::share_button(app, &mut strip_ui, &crate::cloud::copies());
+            }
+            crate::scenario::publish_rect("titlebar:account", strip);
+            tabs_end = strip.left() - 8.0;
+        }
         // Narrow title bars can fit only part of the tab strip. Its hit regions must not
         // extend into the persistent report and window controls.
         let tabs_rect = Rect::from_min_max(pos2(tabs_start.min(tabs_end), r.top()), pos2(tabs_end, r.bottom()));
@@ -702,6 +714,17 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     close = true;
                 }
+                if crate::cloud::available(app) {
+                    ui.separator();
+                    if item(ui, &format!("{}…", app.tr_label("Open from Cloud")), "", "open") {
+                        let _ = app.run("cloud.open", json!({}));
+                        close = true;
+                    }
+                    if item_if(ui, &format!("{}…", app.tr_label("Save to Cloud")), "", "save", shown) {
+                        app.cloud_save_window = true;
+                        close = true;
+                    }
+                }
                 ui.separator();
                 if item_if(ui, "Export STL…", "", "mesh_export", shown) {
                     FileAction::ExportMesh("stl").run(app);
@@ -786,6 +809,8 @@ pub fn save(app: &mut SolveApp) {
         if crate::open_elsewhere::check_save(app) {
             crate::save_job::start(app, "file.save", json!({}));
         }
+    } else if crate::cloud::has_target(app) {
+        crate::save_job::start(app, "file.save", json!({}));
     } else {
         save_as(app);
     }

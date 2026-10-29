@@ -730,6 +730,14 @@ impl Session {
         }
     }
 
+    /// The version in `snapshot` reached its file (a save that answered on a later frame, such
+    /// as a cloud save): dirtiness is now relative to that version, so an edit made while the
+    /// bytes were on the wire stays unsaved.
+    pub fn mark_saved_as(&mut self, snapshot: Arc<Document>, visibility: Visibility) {
+        self.saved = snapshot;
+        self.saved_visibility = visibility;
+    }
+
     pub fn render_backend(&self) -> render::BackendDescriptor {
         let mut backend = render::builtin_backend();
         if let Some(viewport) = &self.render_viewport {

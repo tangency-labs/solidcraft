@@ -20,6 +20,7 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
+mod cloud;
 mod come_forward;
 mod control_server;
 mod device_lost;
@@ -433,6 +434,11 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         browser_files: None,
         agent_http: Some(std::sync::Arc::new(agent_http)),
         secrets: Some(std::sync::Arc::new(Keychain)),
+        open_url: Some(Box::new(|url| {
+            if let Err(e) = cloud::open_browser(url) {
+                log::warn!("could not open a browser: {e}");
+            }
+        })),
         show_in_folder: Some(Box::new(|path| {
             let folder = std::path::Path::new(path).parent().unwrap_or_else(|| std::path::Path::new("."));
             let mut command = std::process::Command::new(if cfg!(target_os = "windows") {
@@ -929,6 +935,13 @@ fn main() -> eframe::Result {
             mark("fonts");
             let dialog_folder = DialogFolder::default();
             let mut app = SolveApp::new(Session::default(), services(cc, &dialog_folder));
+            // Cloud Open and Save, when a CloudCraft service is configured.
+            if let Some(backend) = cloud::service(cc.egui_ctx.clone()) {
+                app.cloud.connect(backend);
+            }
+            // The Share dialog's backend. It asks for a client each request,
+            // so a session collected later is picked up without a restart.
+            app.share.connect(collabcraft_share::CollabCraft::from_fn(cloud::client).for_app("solidcraft"));
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
             app.custom_titlebar = custom_titlebar;
             #[cfg(target_os = "windows")]
