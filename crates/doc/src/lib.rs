@@ -73,6 +73,7 @@ pub mod render_settings;
 pub mod render_surface;
 pub use project3d::iso_grid;
 pub mod sheet;
+pub mod sketch_equation;
 pub mod text_params;
 
 pub use assembly::{

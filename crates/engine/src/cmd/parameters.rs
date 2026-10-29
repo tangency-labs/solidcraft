@@ -13,7 +13,7 @@ use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.change", "Change Parameters", change_param).at("SOLID", "MODIFY").icon("params").params(
-        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit; \
+        "name, expression (number or text), unit?: mm|cm|m|in|ft|deg|rad|\"\"|text (new parameters default to their value's unit, a length the design's units; \
          a text parameter's expression is its text, quotes round it optional: sketch texts' words are built from it), comment?, \
              favorite?: bool, new_name?: rename (references follow; an expression `new = value` renames to `new` and sets value, \
          or sets `new` when the expression is just `new`); or delete: name; or changes: {name: expression, …} (existing \

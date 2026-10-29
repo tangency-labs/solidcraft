@@ -97,6 +97,8 @@ const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
+const PROJECT_GEOMETRY: Accept =
+    EDGES | FACES | selection::VERTICES | PLANES | AXES | selection::SKETCH_LINES | selection::EXTERNAL_POINTS | selection::ORIGIN;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
 
@@ -388,6 +390,14 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Sketch-space modify tools: scale and offset, and later fillet, chamfer, the patterns,
             /// mirror and move (`sketch_modify_ui`).
             SketchModify(crate::sketch_modify_ui::Mod),
+            SketchIntersect {
+                bodies: bool,
+                projection_link: bool,
+            },
+            SketchProject {
+                bodies: bool,
+                projection_link: bool,
+            },
         }
     }
 }
@@ -797,6 +807,20 @@ impl Dialog {
         let has_bodies = !s.world_state().bodies.is_empty();
         let mut d = match id {
             "sketch.create" => Dialog::new(Kind::Sketch, vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)]),
+            "sketch.intersect" => {
+                let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
+                Dialog::new(
+                    Kind::SketchIntersect { bodies, projection_link: true },
+                    vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { FACES }, true)],
+                )
+            }
+            "sketch.project" => {
+                let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
+                Dialog::new(
+                    Kind::SketchProject { bodies, projection_link: true },
+                    vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
+                )
+            }
             "solid.extrude" => Dialog::new(
                 Kind::Extrude {
                     distance: length_default(s, "10"),
@@ -1049,6 +1073,12 @@ impl Dialog {
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
+            // A sketch line drawn over a body edge is what a click there picks; a command that
+            // takes edges and no sketch curves takes it as that edge (#8927).
+            let as_edge = (!d.inputs.iter().any(|i| fits(i.accept, sel)) && d.inputs.iter().any(|i| i.accept & EDGES != 0))
+                .then(|| sketch_curve_edge(s, sel))
+                .flatten();
+            let sel = as_edge.as_ref().unwrap_or(sel);
             if matches!(d.kind, Kind::Align { components: true, .. }) {
                 let occ = match sel {
                     Sel::Occurrence { path } if !path.is_empty() => Some(Sel::Occurrence { path: path.clone() }),
@@ -2029,6 +2059,53 @@ fn profiles_used(s: &Session, sketch: u64) -> bool {
 }
 
 /// The plane of a planar body face: (point on it, unit normal).
+/// The body edge a sketch curve lies on from end to end, if any: a sketch on a face draws its
+/// lines over the face's edges.
+fn sketch_curve_edge(s: &Session, sel: &Sel) -> Option<Sel> {
+    let (sketch, id) = match sel {
+        Sel::SketchCurve { id, sketch } => ((*sketch).or(s.active_sketch)?, id),
+        Sel::ExternalSketchCurve { sketch, id } => (*sketch, id),
+        _ => return None,
+    };
+    let st = s.world_state();
+    let ss = st.sketch(sketch)?;
+    let segs = ss.sketch.segs(ss.sketch.curve_index(id)?);
+    let (a, b) = (ss.plane.to_world(segs.first()?.start()), ss.plane.to_world(segs.last()?.end()));
+    let mid = ss.plane.to_world(segs.get(segs.len() / 2)?.mid());
+    // Display edges are polylines: allow a curved edge's chords their sag.
+    let tol = (a.dist(mid).max(b.dist(mid)) * 1e-2).max(1e-6);
+    let near = |p: Vec3, pts: &[Vec3]| {
+        pts.windows(2)
+            .filter_map(|w| {
+                let (Some(u), Some(v)) = (w.first(), w.get(1)) else { return None };
+                let uv = *v - *u;
+                let l2 = uv.dot(uv);
+                let t = if l2 > 0.0 { ((p - *u).dot(uv) / l2).clamp(0.0, 1.0) } else { 0.0 };
+                Some((*u + uv * t).dist(p))
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    let mut best: Option<(f64, Sel)> = None;
+    for body in &st.bodies {
+        let (m, place) = body.mesh_in_place();
+        for (index, e) in m.edges.iter().enumerate() {
+            if !m.edge_pickable(index) {
+                continue;
+            }
+            let pts: Vec<Vec3> = e.iter().map(|p| solidcraft_engine::doc::apply_point(&place, *p)).collect();
+            let (Some(p), Some(q)) = (pts.first(), pts.last()) else { continue };
+            if !((p.dist(a) < tol && q.dist(b) < tol) || (p.dist(b) < tol && q.dist(a) < tol)) {
+                continue;
+            }
+            let off = near(mid, &pts);
+            if off < tol && best.as_ref().is_none_or(|(d, _)| off < *d) {
+                best = Some((off, Sel::Edge { body: body.name.clone(), index, point: crate::selection::polyline_mid(&pts) }));
+            }
+        }
+    }
+    best.map(|(_, e)| e)
+}
+
 pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)> {
     let st = s.world_state();
     let known = FACE_PLANES.with(|c| {
@@ -2122,6 +2199,8 @@ fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
 fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
+        Kind::SketchIntersect { .. } => "INTERSECT",
+        Kind::SketchProject { .. } => "PROJECT",
         Kind::Extrude { .. } => "EXTRUDE",
         Kind::Revolve { .. } => "REVOLVE",
         Kind::Fillet { chamfer: false, .. } => "FILLET",
@@ -4752,6 +4831,24 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
+        Kind::SketchIntersect { projection_link, .. } => {
+            need(0, "faces or bodies")?;
+            let refs = sels(d, 0)
+                .iter()
+                .map(|sel| match sel {
+                    Sel::Body { name } => Ok(json!({"body": name})),
+                    Sel::Face { body, point, .. } => Ok(json!({"face": [point.x, point.y, point.z], "body": body})),
+                    _ => Err("select faces or bodies".to_string()),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link}))
+        }
+        Kind::SketchProject { projection_link, .. } => {
+            need(0, "geometry or bodies")?;
+            let refs =
+                crate::tools::projection_preselection(sels(d, 0)).ok_or_else(|| "select geometry or bodies that can be projected".to_string())?;
+            ("sketch.project", json!({"refs": refs, "projection_link": projection_link}))
+        }
         Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
@@ -6854,5 +6951,55 @@ mod construct_ask_tests {
         assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
         assert!(status_error(&h.app).is_none(), "{:?}", status_error(&h.app));
         assert!(!solidcraft_engine::view::construction_planes(&h.app.session).is_empty(), "the tangent plane is created");
+    }
+}
+
+#[cfg(test)]
+mod preselected_sketch_line_tests {
+    //! #8927: a click on a body edge that a shown sketch's line lies on picks the sketch line;
+    //! Fillet and Chamfer, which take edges and no sketch curves, take it as that edge.
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// A 40 × 30 × 10 box made from a sketch on its top face, with that sketch shown.
+    fn box_under_its_sketch(h: &mut Harness) {
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "offset": 10})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": -10})),
+        ] {
+            h.step(&json!({"call": "engine.execute", "params": {"command": command, "params": params}})).unwrap();
+        }
+        h.step(&json!({"call": "ui.set", "params": {"shownSketches": [1]}})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn a_preselected_sketch_line_on_an_edge_fills_the_edges_input() {
+        for (command, kind) in [("solid.fillet", "FilletFeature"), ("solid.chamfer", "ChamferFeature")] {
+            let mut h = Harness::new();
+            box_under_its_sketch(&mut h);
+            h.step(&json!({"click": {"world": [20, 0, 10]}})).unwrap(); // the top front edge
+            h.frames(2);
+            assert!(
+                matches!(h.app.session.selection.as_slice(), [Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. }]),
+                "the click picks the sketch line: {:?}",
+                h.app.session.selection
+            );
+            h.step(&json!({"start": command})).unwrap();
+            h.frames(2);
+            let d = h.app.dialog.as_ref().expect("the dialog opens");
+            assert!(
+                matches!(d.inputs[0].items.first(), Some(Sel::Edge { point, .. }) if point.dist(Vec3::new(20.0, 0.0, 10.0)) < 1e-6),
+                "{command}: the line under the selection is its edge: {:?}",
+                d.inputs[0].items
+            );
+            h.step(&json!({"key": "Enter"})).unwrap();
+            h.frames(2);
+            let made = h.app.session.doc.features.iter().filter(|f| format!("{:?}", f.kind).starts_with(kind.trim_end_matches("Feature"))).count();
+            assert_eq!(made, 1, "{command} runs on the edge");
+        }
     }
 }

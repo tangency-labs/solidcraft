@@ -75,7 +75,9 @@ in use can't be deleted (the error lists its users).
 
 The design's units (Document Settings in the browser: mm, cm, m, in or ft) set how a bare number
 or unitless arithmetic expression typed into a length field is read. In an inch design `0.25`
-and `1 / 4` mean 0.25 in. Operation dialogs start with lengths in the design's units, including
+and `1 / 4` mean 0.25 in. A new user parameter given no unit (`parameters.add` or
+`parameters.import` without `unit`) is a length in the design's units, as the Parameters dialog
+makes it: `40/2` is 20 in. Operation dialogs start with lengths in the design's units, including
 secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
 values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own

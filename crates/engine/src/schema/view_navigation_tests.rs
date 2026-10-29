@@ -11,6 +11,54 @@ fn schemas_and_the_key_check_agree() {
 }
 
 #[test]
+fn status_items_has_strict_empty_input_and_a_typed_output_schema() {
+    use crate::status_items::StatusItems;
+    assert_keys(input_schema_for::<super::StatusItemsParams>(), &[]);
+    let schema = output_schema_for::<StatusItems>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    let described = s.execute("engine.describe", &json!({"command": "view.status_items"})).unwrap();
+    assert_eq!(described["input"]["type"], "object");
+    assert_eq!(described["input"]["additionalProperties"], false);
+    assert_eq!(described["output"]["properties"]["items"]["type"], "array");
+    let spec = crate::find_command("view.status_items").unwrap();
+    assert!(!spec.undoable && !spec.reads_model);
+    for mode in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+        s.param_check = mode;
+        for input in [json!({}), Value::Null] {
+            let reply = s.execute("view.status_items", &input).unwrap();
+            assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+        }
+        for input in [json!({"extra": true}), json!({"clear": true}), json!([]), json!(false), json!(42), json!("status")] {
+            assert!(s.execute("view.status_items", &input).is_err(), "accepted {input} in {mode:?}");
+        }
+    }
+    for (command, params) in [
+        ("inspect.zebra", json!({"stripes": 13.5})),
+        ("inspect.draft", json!({"angle": 4.5})),
+        ("inspect.environment_map", json!({})),
+        ("inspect.accessibility", json!({})),
+        ("inspect.curvature_map", json!({"radius": 2})),
+        ("inspect.section", json!({"plane": "XY", "hatch": false})),
+    ] {
+        s.execute(command, &params).unwrap();
+        let reply = s.execute("view.status_items", &json!({})).unwrap();
+        assert!(conforms(schema, schema, &reply), "{reply} doesn't match {schema}");
+        let typed: StatusItems = serde_json::from_value(reply.clone()).unwrap();
+        assert_eq!(serde_json::to_value(typed).unwrap(), reply);
+    }
+    s.set_single_surface_analysis(false);
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    s.execute("inspect.continuity", &json!({"edges":[[5,0,0]],"samples":5})).unwrap();
+    let reply = s.execute("view.status_items", &json!({})).unwrap();
+    assert!(conforms(schema, schema, &reply), "legacy reply {reply} doesn't match {schema}");
+    assert_eq!(reply["items"].as_array().unwrap().len(), 3);
+    assert!(reply["items"].as_array().unwrap().iter().any(|item| item["id"] == "continuity"));
+    let typed: StatusItems = serde_json::from_value(reply.clone()).unwrap();
+    assert_eq!(serde_json::to_value(typed).unwrap(), reply);
+}
+
+#[test]
 fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
         ("view.angle_readout", json!({"enabled": 1})),

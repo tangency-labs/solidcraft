@@ -247,19 +247,107 @@ fn browser_header_folds_the_floating_card_to_its_header_and_back() {
     h.call("ui.resize", json!({"width":1400,"height":900}));
     h.settle();
     let open = rect_of("browser:card").unwrap();
-    assert!(!h.app.tree.panel_collapsed);
+    assert!(!h.app.preferences.browser_collapsed);
     let at = handle_at("browser:header").unwrap();
     h.call("ui.click", json!({"x":at.x,"y":at.y}));
     h.settle();
     let folded = rect_of("browser:card").unwrap();
-    assert!(h.app.tree.panel_collapsed);
+    assert!(h.app.preferences.browser_collapsed);
     assert!(folded.height() < 60.0 && folded.height() < open.height(), "{folded:?} {open:?}");
     assert_eq!(folded.top(), open.top());
     assert!(drawn_rows().is_empty() || handle_at("row:Plate").is_none());
     h.call("ui.click", json!({"x":at.x,"y":at.y}));
     h.settle();
-    assert!(!h.app.tree.panel_collapsed);
+    assert!(!h.app.preferences.browser_collapsed);
     assert!((rect_of("browser:card").unwrap().height() - open.height()).abs() < 1.0);
+}
+
+/// A folded browser stays folded in the next run, as the toolbar's pins do (#8692).
+#[test]
+fn the_folded_browser_is_remembered_across_runs() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.settle();
+    let open = rect_of("browser:card").unwrap();
+    let at = handle_at("browser:header").unwrap();
+    h.call("ui.click", json!({"x":at.x,"y":at.y}));
+    h.settle();
+    assert!(h.app.preferences.browser_collapsed);
+    let saved = h.app.prefs();
+
+    let mut next = Harness::new();
+    next.app.load_prefs(&saved);
+    assert!(next.app.preferences.browser_collapsed, "the fold round-trips through the settings");
+    next.call("ui.resize", json!({"width":1400,"height":900}));
+    next.settle();
+    let folded = rect_of("browser:card").unwrap();
+    assert!(folded.height() < 60.0 && folded.height() < open.height(), "the next run starts folded: {folded:?}");
+    let at = handle_at("browser:header").unwrap();
+    next.call("ui.click", json!({"x":at.x,"y":at.y}));
+    next.settle();
+    let mut after = SolveApp::new(Default::default(), Default::default());
+    after.load_prefs(&next.app.prefs());
+    assert!(!after.preferences.browser_collapsed, "unfolding is remembered too");
+}
+
+/// Reveal on hover (#8692): the browser is out of sight until the pointer comes over the strip at
+/// its left edge or its place, stays while the pointer is inside it or its menu is open, and
+/// never folds, even if it was folded before.
+#[test]
+fn a_browser_that_reveals_on_hover_shows_and_hides_with_the_pointer() {
+    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.app.ui.layout = mode;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+        h.call("ui.resize", json!({"width":1400,"height":900}));
+        h.settle();
+        let shown = rect_of("browser:card").unwrap();
+        h.app.preferences.browser_collapsed = true;
+        h.app.preferences.browser_show = BrowserShow::Hover;
+        let away = json!({"x":900,"y":450});
+        h.call("ui.move", away.clone());
+        h.settle();
+        assert!(h.app.shell.browser_hidden, "{mode:?}: out of sight while the pointer is elsewhere");
+        let card = rect_of("browser:card").unwrap();
+        assert!((card.height() - shown.height()).abs() < 1.0, "{mode:?}: the card keeps its unfolded place: {card:?} {shown:?}");
+
+        let edge = handle_at("browser:edge").unwrap();
+        h.call("ui.move", json!({"x":edge.x,"y":edge.y}));
+        h.settle();
+        assert!(!h.app.shell.browser_hidden, "{mode:?}: the left edge reveals it");
+        let inside = rect_of("browser:card").unwrap().center();
+        h.call("ui.move", json!({"x":inside.x,"y":inside.y}));
+        h.settle();
+        assert!(!h.app.shell.browser_hidden, "{mode:?}: it stays while the pointer is inside");
+        h.call("ui.move", away.clone());
+        h.settle();
+        assert!(h.app.shell.browser_hidden, "{mode:?}: leaving hides it again");
+
+        h.call("ui.move", json!({"x":inside.x,"y":inside.y}));
+        h.settle();
+        let header = handle_at("browser:header").unwrap();
+        h.call("ui.click", json!({"x":header.x,"y":header.y}));
+        h.settle();
+        assert!(rect_of("browser:card").unwrap().height() > 60.0, "{mode:?}: the header does not fold it");
+        h.step(&json!({"click":{"handle":"row:One"},"button":"right"})).unwrap();
+        assert!(h.app.viewport.context_menu.is_some(), "{mode:?}: the row's menu opens");
+        h.call("ui.move", away.clone());
+        h.settle();
+        assert!(!h.app.shell.browser_hidden, "{mode:?}: its menu keeps it shown");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.call("ui.move", away.clone());
+        h.settle();
+        assert!(h.app.shell.browser_hidden, "{mode:?}: closing the menu away from it hides it");
+
+        h.app.preferences.browser_show = BrowserShow::Shown;
+        h.settle();
+        assert!(!h.app.shell.browser_hidden);
+        assert!(rect_of("browser:card").unwrap().height() < 60.0, "{mode:?}: Shown folds it again as it was left");
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        h.app.preferences.browser_show = BrowserShow::Hover;
+        restored.load_prefs(&h.app.prefs());
+        assert_eq!(restored.preferences.browser_show, BrowserShow::Hover);
+    }
 }
 
 /// Tiny or odd window sizes never panic: the cards leave out what cannot fit.

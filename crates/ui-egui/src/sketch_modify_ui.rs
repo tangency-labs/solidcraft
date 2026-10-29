@@ -20,6 +20,9 @@
 //! second count nor either spacing, so a user who wanted five instances got three and deleted
 //! two. The circular pattern is the same gap and joins this module later.
 //!
+//! The equation curve (#8352) has no picks: its window is the form for the formulas, the range and
+//! the tolerance, and reopens on an existing equation curve to edit them.
+//!
 //! The Chamfer Type choice is a row of icon buttons rather than a drop-down: the modes differ
 //! in shape, and a picture of each shape names it better than a line of text.
 
@@ -56,7 +59,12 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.chamfer.equal_distance", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.chamfer.two_distance", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.chamfer.distance_angle", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    // Formulas only: no picks and no viewport modifier chords.
+    ToolModifiers { tool: "sketch.equation_curve", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
 ];
+
+/// The equation curve's two forms: x(t) and y(t), or y = f(x).
+pub(crate) const EQUATION_FORMS: [&str; 2] = ["Parametric", "Explicit"];
 
 /// The three chamfer types, drawn as the cut each one makes, in `CHAMFER_TYPES` order.
 const CHAMFER_TYPE_ICONS: [&str; 3] = ["sketch_chamfer_equal", "sketch_chamfer_two", "sketch_chamfer_angle"];
@@ -131,6 +139,10 @@ pub enum Mod {
     /// `angle` the angle from the first line. `flip` names the two lines in the other order, so
     /// the first distance lands on the other leg of the corner.
     Corner { chamfer: bool, ctype: usize, size: String, distance2: String, angle: String, flip: bool },
+    /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
+    /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
+    /// how far the curve may stray from the formulas.
+    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String },
 }
 
 impl Mod {
@@ -149,6 +161,7 @@ impl Mod {
             Mod::PatternCirc { .. } => "CIRCULAR PATTERN",
             Mod::Corner { chamfer: false, .. } => "FILLET",
             Mod::Corner { .. } => "CHAMFER",
+            Mod::Equation { .. } => "EQUATION CURVE",
         }
     }
 
@@ -165,6 +178,7 @@ impl Mod {
             Mod::PatternCirc { angle, .. } => Some(("Angle", ValueKind::Angle, angle)),
             Mod::Corner { chamfer: false, size, .. } => Some(("Radius", ValueKind::Length, size)),
             Mod::Corner { size, .. } => Some(("Distance", ValueKind::Length, size)),
+            Mod::Equation { .. } => None,
         }
     }
 }
@@ -191,6 +205,7 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // where more lines meet at its point (#1824), for both.
         Mod::Corner { chamfer: false, .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
         Mod::Corner { .. } => vec![SelInput::new("Corner", SKETCH_POINTS | CURVES, true)],
+        Mod::Equation { .. } => Vec::new(),
     }
 }
 
@@ -244,10 +259,48 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.chamfer.equal_distance" => corner(true, 0),
         "sketch.chamfer.two_distance" => corner(true, 1),
         "sketch.chamfer.distance_angle" => corner(true, 2),
+        // A sine wave to start from: one period, 40 wide and 10 high in the design's unit.
+        "sketch.equation_curve" => Mod::Equation {
+            form: 0,
+            x: "20 * t / pi".into(),
+            y: "5 * sin(t)".into(),
+            start: "0".into(),
+            end: "2 * pi".into(),
+            tolerance: "0.01 mm".into(),
+        },
         _ => return None,
     };
     let i = inputs(&k);
     Some((Kind::SketchModify(k), i))
+}
+
+/// Reopen the equation curve window on curve `id` of the sketch being edited, with its formulas.
+/// OK runs `sketch.equation_curve.edit` on it.
+pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
+    let Some(sid) = app.session.active_sketch else { return false };
+    let state = app.session.world_state();
+    let Some(eq) = state.sketch(sid).and_then(|s| s.sketch.equation_of(id)).cloned() else { return false };
+    let kind = Mod::Equation {
+        form: usize::from(eq.x.is_none()),
+        x: eq.x.clone().unwrap_or_else(|| "t".into()),
+        y: eq.y,
+        start: eq.start,
+        end: eq.end,
+        tolerance: format!("{} mm", eq.tolerance),
+    };
+    let mut dialog = Dialog::new(Kind::SketchModify(kind), Vec::new());
+    dialog.extra.insert("curve".into(), json!(id));
+    app.tool = None;
+    app.dialog = Some(dialog);
+    true
+}
+
+/// The equation curve the selection is, when it is one curve that has formulas.
+pub(crate) fn selected_equation(app: &SolveApp) -> Option<String> {
+    let [Sel::SketchCurve { id, .. }] = app.session.selection.as_slice() else { return None };
+    let sid = app.session.active_sketch?;
+    let state = app.session.world_state();
+    state.sketch(sid)?.sketch.equation_of(id).map(|e| e.curve.clone())
 }
 
 /// Sketch modify inputs accept only the sketch being edited. Origin axes remain valid
@@ -365,6 +418,7 @@ pub(crate) fn command(k: &Mod) -> &'static str {
         Mod::Corner { ctype: 1, .. } => "sketch.chamfer.two_distance",
         Mod::Corner { ctype: 2, .. } => "sketch.chamfer.distance_angle",
         Mod::Corner { .. } => "sketch.chamfer.equal_distance",
+        Mod::Equation { .. } => "sketch.equation_curve",
     }
 }
 
@@ -481,6 +535,19 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Total angle", angle);
             alignment(ui, "Alignment", a, reversed);
             pattern_hint(ui);
+        }
+        Mod::Equation { form, x, y, start, end, tolerance } => {
+            ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
+            if *form == 0 {
+                enter |= number(ui, "x(t)", x);
+                enter |= number(ui, "y(t)", y);
+            } else {
+                enter |= number(ui, "y(x)", y);
+            }
+            enter |= number(ui, "Start", start);
+            enter |= number(ui, "End", end);
+            enter |= number(ui, "Tolerance", tolerance);
+            ui_kit::text(ui, crate::i18n::tr("ui.equation_note"), ui_kit::Text::Note("equation"));
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {
@@ -940,6 +1007,23 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 }
                 _ => ("sketch.chamfer.equal_distance", p),
             }
+        }
+        Mod::Equation { form, x, y, start, end, tolerance } => {
+            let filled = |label: &str, text: &str| -> Result<String, String> {
+                let text = text.trim();
+                if text.is_empty() { Err(format!("{label} is empty")) } else { Ok(text.to_string()) }
+            };
+            let tol = crate::length_input::eval(&app.session.doc, tolerance.trim(), ValueKind::Length).map_err(|e| format!("Tolerance: {e}"))?;
+            if !(tol.is_finite() && (1e-4..=10.0).contains(&tol)) {
+                return Err("Tolerance must be from 0.0001 mm to 10 mm".into());
+            }
+            let mut p = json!({"y": filled(if *form == 0 { "y(t)" } else { "y(x)" }, y)?, "start": filled("Start", start)?, "end": filled("End", end)?, "tolerance": tol});
+            if *form == 0 {
+                p["x"] = json!(filled("x(t)", x)?);
+            } else {
+                p["explicit"] = json!(true);
+            }
+            (if extra.contains_key("curve") { "sketch.equation_curve.edit" } else { "sketch.equation_curve" }, p)
         }
     };
     if let Value::Object(m) = &mut params {

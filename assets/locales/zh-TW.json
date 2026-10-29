@@ -4062,6 +4062,7 @@
   "ui.select": "選擇",
   "ui.selectOther": "選擇其他…",
   "ui.selectTangentChain": "選擇相切鏈",
+  "ui.select_all": "全選",
   "ui.selection": "選擇",
   "ui.selection_modifiers": "選擇修飾鍵",
   "ui.selection_shift_add_only": "Shift+點擊僅新增、不取消選擇",

@@ -32,7 +32,7 @@ fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
                 h.step(&json!({"click":{"handle":"browser:header"}})).unwrap();
             }
             assert_eq!(h.app.dialog.as_ref().unwrap().collapsed, !open);
-            assert_eq!(h.app.tree.panel_collapsed, !open);
+            assert_eq!(h.app.preferences.browser_collapsed, !open);
             assert_eq!(scenario::handle_at("fold:Bodies").is_some(), open);
             assert_eq!(scenario::handle_at("appearance:search").is_some(), open);
             // Fresh context transfers all textures to the software renderer, including fonts.

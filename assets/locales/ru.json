@@ -3803,6 +3803,7 @@
   "ui.select": "Выбрать",
   "ui.selectOther": "Выбрать другое…",
   "ui.selectTangentChain": "Выбрать касательную цепочку",
+  "ui.select_all": "Выделить всё",
   "ui.selection": "Выделение",
   "ui.selection_modifiers": "Модификаторы выбора",
   "ui.selection_shift_add_only": "Shift+щелчок добавляет без удаления",

@@ -24,6 +24,8 @@ const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new
 mod align;
 #[path = "component_drag.rs"]
 mod drag;
+#[path = "component_foreign.rs"]
+mod foreign;
 #[path = "component_matrix.rs"]
 pub(super) mod matrix;
 #[path = "component_placing.rs"]
@@ -102,6 +104,14 @@ pub static COMMANDS: &[CommandSpec] = &[
          from there]; component?: where the copies go (default: the active one); component_path?: its placement to place them \
          by (default: its only one, else the active one; a component placed more than once gets them in every instance). Each \
          copy stays where its body is in the world; the copies' names come back as `bodies`",
+    ),
+    CommandSpec::new("component.paste_from_design", "Paste from Another Design", foreign::paste_from_design).icon("paste").params(
+        "component?: where it goes (default: the active one); component_path?: its placement (default: the active one, else its \
+         only one). Pastes what was copied in another design, at the same world coordinates: its bodies as imported bodies \
+         (no history) in one Import feature, or its components as independent copies with their history, appearances, \
+         joints and motion (as `component.paste_new`); the user parameters they use come along, renamed `w_2` when taken. \
+         A component that uses what isn't in it (another body, sketch or parameter) is refused, saying what. Returns \
+         `bodies` and `feature`, or the pasted components' `paths`",
     ),
     CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches).icon("move").params("sketches: [ids or names], component"),
     CommandSpec::new("occurrence.copy", "Paste (Instance)", copy_occurrence).icon("copy")
@@ -382,6 +392,9 @@ fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let doc = s.doc_mut();
     doc.assembly.joints.retain(|j| !gone.contains(&j.id));
+    for group in &mut doc.timeline_groups {
+        group.joints.retain(|id| !gone.contains(id));
+    }
     doc.assembly.links.retain(|l| !gone.contains(&l.a) && !gone.contains(&l.b));
     s.visibility.hidden_joints.retain(|h| !gone.contains(h));
     Ok(json!({"component": id, "joints": gone}))

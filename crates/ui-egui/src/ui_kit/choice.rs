@@ -58,7 +58,10 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
     let t = Tokens::get();
     let catalog = super::layout::in_catalog(ui);
     let font_size = if small || catalog { t.font_small } else { t.font_label };
-    let natural: Vec<_> = options
+    // Callers pass English source labels or text they translated; either way a segment shows it
+    // translated, as the dropdown it falls back to does. Handles keep the option as passed.
+    let shown: Vec<&str> = options.iter().map(|option| crate::i18n::tr_label(option)).collect();
+    let natural: Vec<_> = shown
         .iter()
         .enumerate()
         .map(|(index, option)| {
@@ -69,9 +72,9 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         .collect();
     let total = natural.iter().sum::<f32>();
     let segment_width = dimension(ui.available_width()) / options.len().max(1) as f32;
-    let widest = options
+    let widest = shown
         .iter()
-        .map(|option| ui.painter().layout_no_wrap(crate::i18n::tr_label(option).to_string(), crate::fonts::semibold(font_size), t.form_ink).size().x)
+        .map(|option| ui.painter().layout_no_wrap((*option).to_owned(), crate::fonts::semibold(font_size), t.form_ink).size().x)
         .fold(0.0, f32::max);
     // Judged on the whole row, which is what a scrollbar narrows, not on one segment.
     let need = if intrinsic { total } else { (widest + 2.0 * t.space_8) * options.len() as f32 };
@@ -107,7 +110,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
     let equal_width = rect.width() / options.len().max(1) as f32;
     let mut clicked = false;
     let mut x = rect.left();
-    for (index, option) in options.iter().enumerate() {
+    for (index, (option, text)) in options.iter().zip(&shown).enumerate() {
         let width =
             if (intrinsic || proportional) && total > 0.0 { natural.get(index).copied().unwrap_or(0.0) * rect.width() / total } else { equal_width };
         let segment = egui::Rect::from_min_size(egui::pos2(x, rect.top()), vec2(width, rect.height()));
@@ -149,7 +152,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             ui.painter().vline(segment.left(), segment.y_range(), t.control_border_stroke(t.control_border));
         }
         let font = if on { crate::fonts::semibold(font_size) } else { egui::FontId::proportional(font_size) };
-        let galley = ui.painter().layout_no_wrap((*option).to_string(), font.clone(), t.form_ink);
+        let galley = ui.painter().layout_no_wrap((*text).to_string(), font.clone(), t.form_ink);
         let icon_width = if icons.get(index).is_some() { t.space_14 + t.space_6 } else { 0.0 };
         let text_rect = egui::Rect::from_min_size(
             egui::pos2(segment.center().x - (galley.size().x + icon_width) / 2.0 + icon_width, segment.top()),
@@ -166,7 +169,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         paint_text(
             ui,
             text_rect,
-            option,
+            text,
             font,
             if !segment_enabled {
                 t.form_dim
@@ -182,7 +185,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             false,
         );
         t.button_bevel_with_radius(ui, &response, on, rounding);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, segment_enabled, on, *option));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, segment_enabled, on, *text));
         scenario::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
         if let Some(target) = targets.get(index) {
             let visible = segment.intersect(ui.clip_rect());
@@ -190,7 +193,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
                 scenario::publish_target(target, visible);
             }
         }
-        let response = if let Some(reason) = reason { response.on_disabled_hover_text(reason) } else { response.on_hover_text(*option) };
+        let response = if let Some(reason) = reason { response.on_disabled_hover_text(reason) } else { response.on_hover_text(*text) };
         if response.clicked() && segment_enabled {
             *selected = index;
             clicked = true;

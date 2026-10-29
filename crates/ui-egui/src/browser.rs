@@ -101,8 +101,6 @@ pub fn drawn_occurrences() -> Vec<(Vec<u64>, String, Rect, bool)> {
 /// Browser state kept between frames.
 #[derive(Default)]
 pub struct TreeState {
-    /// The floating browser card is folded to its header.
-    pub panel_collapsed: bool,
     /// Geometry and assembly queries, independent of the camera, selection and row visibility.
     model: Option<model::Model>,
     /// Folders closed by the user (keys like `c0/bodies`).
@@ -809,6 +807,53 @@ pub(crate) fn collapsed_width() -> f32 {
     t.space_24 + t.space_10
 }
 
+/// How the browser card shows (Preferences › Interface › Layout, #8692).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrowserShow {
+    /// Always on screen (folded to its header when the user folds it).
+    #[default]
+    Shown,
+    /// Out of sight until the pointer comes over its place or the strip at its left edge, as the
+    /// navigation bar's "Hide until hovered"; never folded, so the whole card is the target.
+    Hover,
+}
+
+/// Does the browser hide until hovered? Only its own card does: not the one sharing its column
+/// with History, nor the Render page's.
+pub(crate) fn reveals(app: &SolveApp) -> bool {
+    app.preferences.browser_show == BrowserShow::Hover && !crate::timeline_left::stacked(app) && !crate::render_workspace::active(app)
+}
+
+/// How much of the browser set to reveal on hover shows this frame (0 hidden, 1 shown). The
+/// pointer over last frame's card or the strip at its left edge shows it; a menu, popup, drag or
+/// text edit started while it showed keeps it shown. A drag started elsewhere (orbiting the view)
+/// passes over it without showing it.
+fn reveal_opacity(app: &SolveApp, ctx: &egui::Context, previous: Option<Rect>, edge: Rect) -> f32 {
+    let card = egui::Id::new("sc_browser_card");
+    let memory = card.with("reveal");
+    let was = ctx.data(|d| d.get_temp::<bool>(memory)).unwrap_or(false);
+    let over = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| {
+        let layer = ctx.layer_id_at(p);
+        let on_card = previous.is_some_and(|r| r.contains(p)) && layer.is_some_and(|l| l.id == card);
+        let on_edge = edge.contains(p) && layer.is_none_or(|l| l.order == egui::Order::Background);
+        on_card || on_edge
+    });
+    let dragging = ctx.dragged_id().is_some();
+    let busy = app.viewport.context_menu.is_some() || egui::Popup::is_any_open(ctx) || dragging || ctx.egui_wants_keyboard_input();
+    let shown = (over && (was || !dragging)) || (was && busy);
+    ctx.data_mut(|d| d.insert_temp(memory, shown));
+    ctx.animate_value_with_time(memory.with("opacity"), f32::from(u8::from(shown)), crate::ui_kit::NAV_FADE_SECONDS)
+}
+
+/// The thin tab at the hidden browser's left edge that says where it is.
+fn reveal_tab(ui: &egui::Ui, card: Rect, opacity: f32) {
+    let t = Tokens::get();
+    let x = card.left() + t.space_3;
+    let tab = Rect::from_min_max(pos2(x, card.top() + t.space_8), pos2(x + t.space_3, card.top() + t.space_8 + t.space_24 * 2.0));
+    ui.painter().rect_filled(tab, t.space_3 / 2.0, t.text_dim.gamma_multiply(opacity));
+}
+
 /// One content-hugging browser; the shared container supplies floating or flush compact chrome.
 pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let available = ui.available_rect_before_wrap();
@@ -839,12 +884,21 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         available.min.x = (history.right() + gap).min(available.right()) - gap;
     }
-    let collapsed = vertical && !stacked && app.preferences.timeline_left_browser_collapsed;
+    let reveals = reveals(app);
+    let collapsed = vertical && !stacked && !reveals && app.preferences.timeline_left_browser_collapsed;
     let bounds = if stacked {
         crate::timeline_left::stacked_rects(app, available).0
     } else {
         panel_bounds(available, if vertical { None } else { app.shell.history }, if collapsed { collapsed_width() } else { width }, gap)
     };
+    let opacity = if reveals {
+        let edge = Rect::from_min_max(pos2(available.left(), bounds.top()), pos2(bounds.left() + t.space_10, bounds.bottom()));
+        crate::scenario::publish_target("browser:edge", edge);
+        reveal_opacity(app, ui.ctx(), app.shell.browser, edge)
+    } else {
+        1.0
+    };
+    app.shell.browser_hidden = reveals && opacity < 0.5;
     app.shell.browser = None;
     let min_height = HEADER_H + 2.0 * (CARD_INSET + 1.0);
     // A dialog in the left column holds the browser's place (`dialog_column`).
@@ -855,19 +909,27 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);
         let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::new("sc_browser_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
             let limits = Rect::from_min_max(available.min, pos2(available.right(), bounds.bottom()));
-            let response = container.show_frame(ui, frame, limits, |ui| {
-                ui.set_width(inner_width);
-                ui.set_max_height(inner_height);
-                if stacked {
-                    ui.set_min_height(inner_height);
-                    ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, vec2(inner_width, inner_height))));
-                }
-                if collapsed {
-                    browser_collapsed_rail(app, ui);
-                } else {
-                    browser_contents(app, ui, &mut acts, true);
-                }
-            });
+            let response = ui
+                .scope(|ui| {
+                    ui.set_opacity(opacity);
+                    container.show_frame(ui, frame, limits, |ui| {
+                        ui.set_width(inner_width);
+                        ui.set_max_height(inner_height);
+                        if stacked {
+                            ui.set_min_height(inner_height);
+                            ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, vec2(inner_width, inner_height))));
+                        }
+                        if collapsed {
+                            browser_collapsed_rail(app, ui);
+                        } else {
+                            browser_contents(app, ui, &mut acts, true);
+                        }
+                    })
+                })
+                .inner;
+            if reveals && opacity < 1.0 {
+                reveal_tab(ui, response.response.rect, 1.0 - opacity);
+            }
             if !collapsed {
                 resize_column(app, ui, response.response.rect, width, "left-browser-rail");
             }
@@ -1010,7 +1072,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
             (app.preferences.timeline_left_browser_collapsed && app.shell.history_folding.is_none_or(|p| p[0] >= 1.0))
                 || ui.available_height() <= t.space_3
         } else {
-            app.tree.panel_collapsed && !(app.ui.show_timeline && app.preferences.timeline_left)
+            app.preferences.browser_collapsed && !reveals(app) && !(app.ui.show_timeline && app.preferences.timeline_left)
         })
     {
         return;
@@ -1031,15 +1093,18 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
 }
 
 /// The header: the title, the body count and (on the floating card) a chevron that folds the
-/// card to just this row. The whole row is the button.
+/// card to just this row. The whole row is the button. A browser that reveals on hover never
+/// folds: the whole card is what the pointer finds.
 fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
+    let collapsible = collapsible && !reveals(app);
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
     let response = ui.interact(rect, ui.id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
     crate::scenario::publish_target("browser:header", rect);
     let vertical = app.ui.show_timeline && app.preferences.timeline_left;
     let stacked = crate::timeline_left::stacked(app);
-    let collapsed = collapsible && if stacked { app.preferences.timeline_left_browser_collapsed } else { !vertical && app.tree.panel_collapsed };
+    let collapsed =
+        collapsible && if stacked { app.preferences.timeline_left_browser_collapsed } else { !vertical && app.preferences.browser_collapsed };
     if vertical {
         crate::scenario::publish_handle("left-browser-toggle", rect.center());
     }
@@ -1069,7 +1134,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
             } else if vertical {
                 app.preferences.timeline_left_browser_collapsed = true;
             } else {
-                app.tree.panel_collapsed = !app.tree.panel_collapsed;
+                app.preferences.browser_collapsed = !app.preferences.browser_collapsed;
             }
         }
     }

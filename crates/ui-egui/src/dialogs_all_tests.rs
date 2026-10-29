@@ -1139,3 +1139,37 @@ fn align_components_picks_the_placement_under_the_active_component_and_warns_whe
     h.frames(4);
     assert!(h.widget(ALIGN_SHARED_WARNING).is_some(), "the shared pick is called out");
 }
+
+/// OK on the editor of a pattern behind the history marker leaves it rolled back, so the view
+/// does not change: the status line says why, where the edit used to look as if it had silently
+/// failed (#8100).
+#[test]
+fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"})),
+        ("solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"})),
+        ("solid.pattern.circular", json!({"features":["Cut"],"axis":{"origin":[20,15,0],"dir":[0,0,1]},"count":2,"name":"Pattern"})),
+        ("timeline.roll_to", json!({"position":2})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let pattern = h.app.session.doc.features.last().unwrap().id;
+    h.app.edit_feature(pattern);
+    h.settle();
+    assert!(h.app.dialog.is_some(), "the pattern's editor opens");
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    for _ in 0..500 {
+        if h.app.dialog.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.app.dialog.is_none(), "the edit is applied");
+    assert_eq!(h.app.session.doc.marker, Some(2), "the pattern stays behind the marker");
+    let (text, _, error) = h.app.status.clone().unwrap();
+    assert!(!error, "{text}");
+    assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
+}

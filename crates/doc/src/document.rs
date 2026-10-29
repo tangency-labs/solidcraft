@@ -2854,7 +2854,7 @@ pub struct BrowserGroup {
     pub items: Vec<String>,
 }
 
-/// A saved feature-history folder. Folders may nest, and a feature can belong to at most one folder.
+/// A saved history folder. Folders may nest; each feature or joint belongs to at most one folder.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TimelineGroup {
     pub id: u64,
@@ -2864,6 +2864,9 @@ pub struct TimelineGroup {
     pub parent: Option<u64>,
     #[serde(default)]
     pub features: Vec<u64>,
+    /// Joints stored in this timeline folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub joints: Vec<u64>,
 }
 
 /// The first feature-history folder whose own and nested features do not form one
@@ -3710,7 +3713,7 @@ impl Document {
     }
 
     /// Add or change a parameter. Fails if the result would not evaluate. A new parameter
-    /// without a unit takes the unit of its value (mm, deg or none).
+    /// without a unit takes the unit of its value (a length in the design's units, deg or none).
     pub fn set_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {
         // A text parameter: one with the text unit, or an existing one when no unit is given.
         match (unit.map(crate::text_params::is_text_unit), self.text_param(name).is_some()) {
@@ -3894,10 +3897,11 @@ impl Document {
         }
     }
 
-    /// Apply parameter values to every dimension in a sketch, and to its points placed by
-    /// parameters (in place).
+    /// Apply parameter values to every dimension in a sketch, to its points placed by parameters
+    /// and to its equation curves (in place).
     pub fn apply_dimension_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
         self.apply_point_values(vals, sk)?;
+        self.apply_equation_values(vals, sk)?;
         self.apply_pattern_values(vals, sk)?;
         for c in &mut sk.constraints {
             if let Some(p) = &c.param {

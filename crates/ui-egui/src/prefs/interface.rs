@@ -208,6 +208,20 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             }
                         });
                     });
+                    // Out of sight until the pointer comes to it (#8692); the browser sharing its
+                    // column with History keeps its place.
+                    ui_kit::row(ui, "", |ui| {
+                        use crate::browser::BrowserShow;
+                        ui.add_enabled_ui(!crate::timeline_left::stacked(app), |ui| {
+                            let mut selected = usize::from(app.preferences.browser_show == BrowserShow::Hover);
+                            let options = [app.tr("prefs.browser_shown"), app.tr("prefs.browser_reveal_on_hover")];
+                            let segments = ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &options, Default::default()));
+                            segments.response.on_hover_text(app.tr("prefs.browser_show_note"));
+                            if segments.inner {
+                                app.preferences.browser_show = if selected == 1 { BrowserShow::Hover } else { BrowserShow::Shown };
+                            }
+                        });
+                    });
                     // Where command dialogs open (#6707).
                     ui_kit::row(ui, app.tr("prefs.dialogs"), |ui| {
                         use crate::dialog_column::DialogPlace;

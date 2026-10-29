@@ -730,6 +730,9 @@ pub struct Sketch {
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
+    /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub equations: Vec<crate::equation::EquationCurve>,
     /// Next number per id prefix (`l` → l1, l2…).
     #[serde(default)]
     counters: std::collections::BTreeMap<String, u64>,
@@ -759,6 +762,7 @@ impl Sketch {
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
+            equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
         }
@@ -832,7 +836,7 @@ impl Sketch {
         self.points.get(i).map(|p| p.pos)
     }
 
-    fn check_pos(p: Vec2) -> Result<Vec2> {
+    pub(crate) fn check_pos(p: Vec2) -> Result<Vec2> {
         if in_range(p) { Ok(p) } else { Err(SketchError::Invalid(format!("point {:?}", [p.x, p.y]))) }
     }
 
@@ -1724,6 +1728,8 @@ impl Sketch {
     /// Remove curves only (points stay), remapping constraints.
     fn drop_curves(&mut self, which: &[usize]) {
         self.prune_offsets_for_removed_curves(which);
+        let removed: std::collections::BTreeSet<String> = which.iter().filter_map(|i| self.curves.get(*i).map(|c| c.id.clone())).collect();
+        self.prune_equations(&removed);
         let mut cmap = vec![None; self.curves.len()];
         let mut n = 0;
         for (i, slot) in cmap.iter_mut().enumerate() {

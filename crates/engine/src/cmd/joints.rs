@@ -1393,11 +1393,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(f) = bool_(p, "flip") {
         j.flip = f;
     }
-    if let Some(x) = bool_(p, "suppressed") {
-        j.suppressed = x;
-    }
     if let Some(n) = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128) {
         j.name = n.to_string();
+    }
+    if let Some(x) = bool_(p, "suppressed") {
+        suppress_joints(s.doc_mut(), &[id], x);
     }
     // A relation whose type, offset, tilt or flip changes starts again from where its parts are.
     let reseat = kind.is_some() || offset.is_some() || angle.is_some() || p.get("flip").is_some();
@@ -1411,6 +1411,25 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let sol = resolve(s);
     Ok(sol_json(&sol, p))
+}
+
+/// Shared mutation for individual joints and timeline folders; the caller resolves once.
+pub(super) fn suppress_joints(doc: &mut solidcraft_doc::Document, ids: &[u64], suppressed: bool) {
+    let ids: std::collections::BTreeSet<_> = ids.iter().copied().collect();
+    for joint in &mut doc.assembly.joints {
+        if ids.contains(&joint.id) {
+            joint.suppressed = suppressed;
+        }
+    }
+}
+
+pub(super) fn delete_joints(doc: &mut solidcraft_doc::Document, ids: &[u64]) {
+    let ids: std::collections::BTreeSet<_> = ids.iter().copied().collect();
+    doc.assembly.joints.retain(|joint| !ids.contains(&joint.id));
+    doc.assembly.links.retain(|link| !ids.contains(&link.a) && !ids.contains(&link.b));
+    for group in &mut doc.timeline_groups {
+        group.joints.retain(|id| !ids.contains(id));
+    }
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1435,9 +1454,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"deleted_link": i}));
     }
     let id = joint_id(s, p.get("joint"), cmd)?;
-    let doc = s.doc_mut();
-    doc.assembly.joints.retain(|j| j.id != id);
-    doc.assembly.links.retain(|l| l.a != id && l.b != id);
+    delete_joints(s.doc_mut(), &[id]);
     let sol = resolve(s);
     let mut out = sol_json(&sol, p);
     out["deleted"] = json!(id);

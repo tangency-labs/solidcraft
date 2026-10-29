@@ -139,6 +139,7 @@
   selects it, and while the marker sits between a sketch and its feature, or the two are in
   different folders, the sketch keeps a row of its own. The timeline along the bottom always lists
   features in creation order.
+  Feature Folders can contain joints as well as features; closing a folder hides both behind one tile.
 - **Status bar** (off by default: Preferences › Interface › **Status bar**). A thin bar along
   the window's bottom edge, below the timeline. From the right: the design's units (click them
   to change the design's units, one undo step), the open sketch's state in its colour (under
@@ -159,6 +160,10 @@ Preferences (File › Preferences) hold the theme, workspace layout, the units o
 visual style and autosave. Graphics › Colour vision gives the colours that carry a meaning (sketch
 states, axes, bends, analyses, icons) values for a weak red, green or blue sense: Protan, Deutan or
 Tritan. In a mode, the faces Draft and Accessibility Analysis mark as failing are striped too.
+Graphics › Viewport › **Perspective view** draws the view with perspective, and its **Field of view**
+(15° to 90°, about 34° by default) sets how strong the perspective is. The model keeps its size in the
+view when the angle changes: a wider angle brings the camera closer. A sketch you are editing is always
+drawn without perspective.
 Command messages and errors show for a few seconds in the status chip at the bottom left of the view. Click the chip, or choose Help › **Messages…**, for every message of the session: newest first, errors in red, each line selectable, with **Copy all** for a bug report.
 Help › Keyboard Shortcuts lists every key, and File › Keyboard
 Shortcuts changes them.

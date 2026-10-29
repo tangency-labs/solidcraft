@@ -150,7 +150,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
     if draft.driven {
         PLACEMENT.with(|preview| *preview.borrow_mut() = None);
         app.run("sketch.dimension", json!({"entities": draft.entities, "text_at": [at.x, at.y], "driven": true}))?;
-        app.set_status("The sketch already determines that dimension, so it was added as a driven (reference) dimension", false);
+        app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
         return Ok(());
     }
     EDIT.with(|edit| {
@@ -952,12 +952,14 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
                 Ok(reply) => {
                     clear_picks(app);
                     // A new dimension defines its parameter; an edited one renames its own (#4071).
+                    // The sentence comes from the catalog, so it reads in the interface language (#8863).
                     let named = reply.get("renamed").and_then(|r| r.get("to")).and_then(serde_json::Value::as_str);
-                    match (reply.get("defined").and_then(serde_json::Value::as_str), named) {
-                        (Some(name), _) => app.set_status(format!("Dimension applied; parameter `{name}` defined"), false),
-                        (None, Some(name)) => app.set_status(format!("Dimension applied; parameter named `{name}`"), false),
-                        (None, None) => app.set_status("Dimension applied", false),
-                    }
+                    let status = match (reply.get("defined").and_then(serde_json::Value::as_str), named) {
+                        (Some(name), _) => crate::i18n::format("sketch.dimension_applied_defined", &[("name", name)]),
+                        (None, Some(name)) => crate::i18n::format("sketch.dimension_applied_renamed", &[("name", name)]),
+                        (None, None) => crate::i18n::tr("sketch.dimension_applied").to_string(),
+                    };
+                    app.set_status(status, false);
                 }
             }
         }

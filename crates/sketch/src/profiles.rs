@@ -428,6 +428,38 @@ fn close_graph_joints(mut segs: Vec<Seg2>, edge_nodes: &[(usize, usize)], edge_a
     segs
 }
 
+/// Close the joints a line leaves open: the graph joins ends within `tol` into one node, but a
+/// free-form curve's polyline pieces keep their own ends, so two near-coincident curves can leave
+/// a loop open by more than the closing tolerance. A line meeting a line moves both ends to their
+/// middle; a line meeting another segment moves its end onto that segment's.
+fn close_line_joints(mut segs: Vec<Seg2>, tol: f64) -> Vec<Seg2> {
+    let n = segs.len();
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let (Some(a), Some(b)) = (segs.get(i).copied(), segs.get(j).copied()) else { continue };
+        let gap = a.end().dist(b.start());
+        if gap <= 1e-12 || gap > tol {
+            continue;
+        }
+        let (a, b) = match (a, b) {
+            (Seg2::Line { .. }, Seg2::Line { .. }) => {
+                let p = (a.end() + b.start()) * 0.5;
+                (with_end(a, p), set_start(b, p))
+            }
+            (Seg2::Line { .. }, _) => (with_end(a, b.start()), b),
+            (_, Seg2::Line { .. }) => (a, set_start(b, a.end())),
+            _ => continue,
+        };
+        if let Some(slot) = segs.get_mut(i) {
+            *slot = a;
+        }
+        if let Some(slot) = segs.get_mut(j) {
+            *slot = b;
+        }
+    }
+    segs
+}
+
 fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mut [usize], max_edges: usize) {
     let tol = ENDPOINT_JOIN_TOL;
     let cell = |p: Vec2| ((p.x / tol).floor() as i64, (p.y / tol).floor() as i64);
@@ -608,9 +640,11 @@ pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
     if sk.links.iter().all(|l| l.kind == crate::LinkKind::Text) {
         return find_profiles(sk);
     }
+    let intersect_links: std::collections::HashSet<&str> =
+        sk.links.iter().filter(|link| link.kind == crate::LinkKind::Intersect).map(|link| link.id.as_str()).collect();
     let mut d = sk.clone();
     for (ci, c) in d.curves.iter_mut().enumerate() {
-        if c.link.is_some() && !sk.is_text_curve(ci) {
+        if c.link.as_ref().is_some_and(|link| !intersect_links.contains(link.as_str())) && !sk.is_text_curve(ci) {
             c.construction = true;
         }
     }
@@ -1176,7 +1210,7 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
             continue;
         }
         let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, ENDPOINT_JOIN_TOL);
-        let lp = Loop2 { segs: restore_exact(segs, &ptags, &exact) };
+        let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
         if lp.signed_area() > 1e-9 {
             let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);
             loops.push((lp, ids, c, whole_graph_complete.then(|| complete_loop(&coverage_tags, &expected, sk)).flatten()));

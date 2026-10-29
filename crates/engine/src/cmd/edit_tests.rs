@@ -1354,3 +1354,86 @@ fn a_move_before_a_long_history_of_one_body_fits_a_window_threads_stack() {
         .join();
     assert!(moved.is_ok());
 }
+
+#[test]
+fn timeline_joint_folders_are_mixed_saved_and_undoable() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Profile"}));
+    run(&mut s, "component.create", json!({"name":"Part"}));
+    let joint = run(&mut s, "joint.as_built", json!({"type":"revolute", "a":0, "b":"Part", "name":"Hinge"}))["joint"].as_u64().unwrap();
+    let folder = run(&mut s, "timeline.group", json!({"name":"Mixed", "features":["Profile"], "joints":["Hinge", joint]}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups[0].joints, [joint]);
+    assert_eq!(s.doc.timeline_groups[0].features.len(), 1);
+    assert_eq!(run(&mut s, "timeline.inspect", json!({"group":folder}))["joints"], json!([joint]));
+    let saved = s.doc.to_json();
+    let reopened = solidcraft_doc::Document::from_json(&saved).unwrap();
+    assert_eq!(reopened.to_json(), saved);
+    let mut damaged: Value = serde_json::from_str(&saved).unwrap();
+    damaged["timeline_groups"][0]["joints"] = json!([u64::MAX]);
+    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).is_err());
+    damaged["timeline_groups"][0]["joints"] = json!([joint, joint]);
+    assert!(solidcraft_doc::Document::from_json(&damaged.to_string()).is_err());
+    let destination = run(&mut s, "timeline.group", json!({"name":"Destination"}))["group"].as_u64().unwrap();
+    run(&mut s, "timeline.move_to_group", json!({"joints":[joint], "group":destination}));
+    assert!(s.doc.timeline_groups[0].joints.is_empty());
+    assert_eq!(s.doc.timeline_groups[1].joints, [joint]);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.timeline_groups[0].joints, [joint]);
+    // Both contents of a nested folder participate in the same toggle and undo.
+    run(&mut s, "timeline.move_to_group", json!({"groups":[folder], "group":destination}));
+    let before = s.doc.clone();
+    run(&mut s, "timeline.suppress", json!({"groups":[destination]}));
+    assert!(s.doc.features[0].suppressed && s.doc.assembly.joints[0].suppressed);
+    run(&mut s, "timeline.suppress", json!({"groups":[destination]}));
+    assert!(!s.doc.features[0].suppressed && !s.doc.assembly.joints[0].suppressed);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.features[0].suppressed && s.doc.assembly.joints[0].suppressed);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(*s.doc, *before);
+    run(&mut s, "timeline.delete", json!({"groups":[destination]}));
+    assert!(s.doc.features.is_empty() && s.doc.assembly.joints.is_empty() && s.doc.timeline_groups.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(*s.doc, *before);
+    run(&mut s, "timeline.ungroup", json!({"group":folder}));
+    assert_eq!(s.doc.timeline_groups[0].joints, [joint], "contents promote to the surviving parent");
+    run(&mut s, "timeline.ungroup", json!({"group":destination}));
+    assert!(s.doc.timeline_groups.is_empty());
+    assert_eq!(s.doc.assembly.joints[0].id, joint);
+    let folder = run(&mut s, "timeline.group", json!({"joints":vec![joint; 10_000]}))["group"].as_u64().unwrap();
+    assert_eq!(s.doc.timeline_groups[0].joints, [joint], "the 10000-entry cap is inclusive and deduplicated");
+    run(&mut s, "timeline.move_to_group", json!({"joints":["Hinge"], "group":null}));
+    assert!(s.doc.timeline_groups[0].joints.is_empty());
+    run(&mut s, "timeline.move_to_group", json!({"joints":["Hinge"], "group":folder}));
+    run(&mut s, "timeline.suppress", json!({"groups":[folder]}));
+    assert!(s.doc.assembly.joints[0].suppressed, "joint-only folders suppress too");
+    run(&mut s, "joint.delete", json!({"joint":joint}));
+    assert!(s.doc.timeline_groups[0].joints.is_empty());
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.timeline_groups[0].joints, [joint]);
+    run(&mut s, "component.delete", json!({"component":"Part"}));
+    assert!(s.doc.assembly.joints.is_empty());
+    assert!(s.doc.timeline_groups[0].joints.is_empty());
+    assert!(solidcraft_doc::Document::from_json(&s.doc.to_json()).is_ok());
+}
+
+#[test]
+fn timeline_joint_folders_reject_hostile_joint_references_atomically() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name":"Part"}));
+    let joint = run(&mut s, "joint.as_built", json!({"type":"rigid", "a":0, "b":"Part"}))["joint"].as_u64().unwrap();
+    let folder = run(&mut s, "timeline.group", json!({}))["group"].as_u64().unwrap();
+    for command in ["timeline.group", "timeline.move_to_group"] {
+        for joints in
+            [json!([u64::MAX]), json!([-1]), json!([1e100]), json!(["missing"]), json!([{}]), json!([null]), json!("bad"), json!(vec![joint; 10_001])]
+        {
+            let before = s.doc.to_json();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| s.execute(command, &json!({"joints":joints, "group":folder}))));
+            let error = result.unwrap().unwrap_err();
+            assert!(
+                matches!(&error, crate::EngineError::BadParams { .. }),
+                "{command} must reject invalid joint references without an internal panic: {error}"
+            );
+            assert_eq!(s.doc.to_json(), before);
+        }
+    }
+}

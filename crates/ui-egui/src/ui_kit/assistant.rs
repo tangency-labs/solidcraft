@@ -232,7 +232,7 @@ pub(crate) fn assistant_approval<R>(ui: &mut Ui, title: &str, body: impl FnOnce(
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_input(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
     let t = Tokens::get();
-    ui.add(
+    let mut response = ui.add(
         super::fields::text_input(egui::TextEdit::multiline(value))
             .id(id)
             .frame(egui::Frame::NONE)
@@ -242,7 +242,9 @@ pub(crate) fn assistant_input(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             .desired_width(f32::INFINITY)
             .min_size(vec2(0.0, t.control_height + t.space_8))
             .font(egui::FontId::proportional(t.font_label)),
-    )
+    );
+    super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINES);
+    response
 }
 
 /// Compact right-aligned approval actions; wrapping grows by control rows, not the remaining card height.

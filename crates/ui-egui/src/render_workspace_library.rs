@@ -321,7 +321,7 @@ pub(super) fn open_category(app: &mut SolveApp, kind: &str) {
     };
     app.ui.show_browser = true;
     let _ = app.run("view.render_browser", json!({"open":true}));
-    app.tree.panel_collapsed = false;
+    app.preferences.browser_collapsed = false;
 }
 pub(super) fn choose(app: &mut SolveApp, view: &mut View, kind: &str, id: &str) -> Result<(), String> {
     switch_kind(view, kind);

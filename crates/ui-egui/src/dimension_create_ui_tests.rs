@@ -1299,3 +1299,53 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
     let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("width") && c.kind.value().is_some_and(|v| (v - 30.0).abs() < 1e-6)));
 }
+
+/// The status line after a dimension is applied reads in the interface language (#8863): a
+/// new parameter (`w = 40/2`), a plain value, a renamed parameter and a driven dimension, with
+/// the parameter name kept as typed.
+#[test]
+fn the_status_after_a_dimension_is_in_the_interface_language() {
+    let pl = crate::i18n::Locale::for_language("pl");
+    let en = crate::i18n::Locale::for_language("en");
+    let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
+    let polish = |mut h: Harness| {
+        h.app.preferences.language = "pl".into();
+        h.frames(2);
+        h
+    };
+    // A new parameter.
+    let mut h = polish(line([25., 0.]));
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    type_value(&mut h, "w = 40/2");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.session.doc.param("w").is_some(), "{:?}", h.app.status);
+    assert_eq!(status(&h), Some(("Wymiar zastosowany; zdefiniowano parametr `w`".to_string(), false)));
+    // A plain value, then the same dimension renamed to `width = 30`.
+    let mut h = polish(line([25., 0.]));
+    place(&mut h, &[[12.5, 0.]], [12.5, 8.]);
+    type_value(&mut h, "25");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(status(&h), Some((pl.text("sketch.dimension_applied").to_string(), false)));
+    h.settle();
+    crate::dim_view::edit_param(&h.app, "d1");
+    h.settle();
+    type_value(&mut h, "width = 30");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.session.doc.param("width").is_some(), "{:?}", h.app.status);
+    assert_eq!(status(&h), Some((pl.format("sketch.dimension_applied_renamed", &[("name", "width")]), false)));
+    // A dimension the sketch already determines is added as a driven one.
+    let mut h = polish(line([20., 0.]));
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,6,0]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
+    assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
+    assert_eq!(status(&h), Some((pl.text("sketch.dimension_added_driven").to_string(), false)));
+    for id in ["sketch.dimension_applied", "sketch.dimension_applied_defined", "sketch.dimension_applied_renamed", "sketch.dimension_added_driven"] {
+        assert_ne!(pl.text(id), en.text(id), "{id}: the Polish catalog translates it");
+    }
+    crate::dim_view::cancel();
+}

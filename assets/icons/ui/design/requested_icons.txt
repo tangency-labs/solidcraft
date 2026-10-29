@@ -95,6 +95,7 @@ edit	false
 ellipse	false
 emboss	false
 environment_map	false
+equation_curve	false
 error	false
 explode	false
 export	false

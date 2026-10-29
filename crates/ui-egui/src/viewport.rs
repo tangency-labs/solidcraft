@@ -55,11 +55,16 @@ pub struct ViewportState {
     pub(crate) transform_drag: Option<crate::sketch_transform_ui::Drag>,
     /// The arrow turning the view that is still down (`navigation::step_key_hold`).
     pub(crate) key_hold: Option<crate::navigation::KeyHold>,
-    /// A two-point drawing tool's first point was placed by a press (here) that became a drag:
-    /// the release places the second (#1630), unless it lands within [`DRAW_DRAG_MIN`] of the
-    /// press. Such a drag was a click that moved on the way (#2448): the release places the
-    /// first point instead and the shape goes on by clicks, rather than a sliver of a shape.
+    /// A two-point drawing tool's (by preference also the Line tool's, #7247) first point was
+    /// placed by a press (here) that became a drag: the release places the second (#1630), unless
+    /// it lands within [`DRAW_DRAG_MIN`] of the press. Such a drag was a click that moved on the
+    /// way (#2448): the release places the first point instead and the shape goes on by clicks,
+    /// rather than a sliver of a shape.
     pub(crate) draw_drag: Option<Pos2>,
+    /// The draw-drag release above already placed or kept the tool's point this frame: ignore
+    /// egui's ordinary `clicked` for the same release so a second on-click cannot finish the
+    /// shape (or wipe its Diameter box) when the centre is an existing sketch point (#8899).
+    pub(crate) draw_drag_handled: bool,
     /// A tool's click moved on the way (#2448): egui takes a press that moves past its
     /// click distance, or is held past its click time, as a drag, so its release is the click.
     pub(crate) tool_click: bool,
@@ -179,6 +184,9 @@ pub struct ViewportState {
     /// A device app's motion since the page last took it (`space_mouse::bridge_frame`), applied
     /// the same way.
     pub bridge_motion: Option<crate::space_mouse::BridgeMotion>,
+    /// The model point the 3D mouse turns the view around: chosen when the cap leaves rest and
+    /// kept until it comes back (`navigation::device`, `space_mouse::navigate_frame`).
+    pub device_pivot: Option<Vec3>,
     /// After immediate zoom, ignore egui's outstanding smoothing until the gesture ends.
     pub(crate) wheel_zoom_raw_until_idle: bool,
     /// While trackpad scrolling runs, ignore egui's smoothing tail for zoom so
@@ -474,7 +482,7 @@ pub fn projection(app: &SolveApp, rect: Rect) -> Proj {
     let mut cam = app.cam;
     // Render owns an explicit product camera, including its saved/custom FOV.
     if !crate::render_workspace::active(app) {
-        cam.fov = if app.perspective_view() { 0.6 } else { 0.0 };
+        cam.fov = app.view_fov();
     }
     let aspect = rect.width() as f64 / rect.height().max(1.0) as f64;
     Proj { cam, vp: cam.view_proj_bounds(aspect, &scene_bounds(app)), rect }
@@ -2225,7 +2233,7 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     origin_point_shown(app).hash(&mut h);
-    app.perspective_view().hash(&mut h);
+    app.view_fov().to_bits().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     let key = h.finish();
@@ -4170,13 +4178,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // events. Testing delta made the highlight reappear whenever a held drag paused.
     // Resolve it before rendering so the GPU scene and screen overlays use the same hit.
     // A 3D mouse moving the view is not such a gesture: the pointer hand is free, and hover
-    // and clicks keep picking while the other hand turns the view.
+    // and clicks keep picking while the other hand turns the view. Nor is a left press held
+    // still under a mode lit in the navigation bar or a held Space: they own drags, and the
+    // press may be opening Select Other (#8864); once it drags, `mode` says so. A preset's
+    // left-button binding or Ctrl+left orbit navigates from the press on.
     let navigating = scroll != 0.0
         || pinch != 1.0
         || pan != egui::Vec2::ZERO
         || middle
         || secondary_down
-        || (primary_nav.is_some() && primary_down)
+        || (app.viewport.primary_nav.is_some() && primary_down)
         || mode.is_some()
         || app.viewport.axis_drag.is_some()
         || app.viewport.spin
@@ -4332,6 +4343,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     // A two-point shape being dragged out (#1630) follows the pointer and ends where it is let go,
     // even over the shape's own dimension box, which rides along beside the pointer.
+    app.viewport.draw_drag_handled = false;
     if let Some(from) = app.viewport.draw_drag {
         let at = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p) && !crate::shell::covered(app, *p));
         if resp.drag_stopped() || !primary_down {
@@ -4339,17 +4351,31 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let Some(p) = at
                 && app.tool.as_ref().is_some_and(|t| t.pts.len() == 1)
             {
-                // Let go close to the press, it was a click that moved on the way (#2448): the
-                // first point goes where it was let go, as for the other tools, and the shape
-                // goes on by clicks.
-                if p.distance(from) < DRAW_DRAG_MIN
-                    && let Some(t) = app.tool.as_mut()
+                crate::tools::on_hover(app, &proj, p, mods.shift);
+                let release = sketch_point_at(app, &proj, p);
+                let first = app.tool.as_ref().and_then(|t| t.pts.first().map(|pt| pt.0));
+                // Same sketch point as the press (a second circle on an existing centre, #8899),
+                // or let go close to the press (#2448): keep a single first point and its value
+                // boxes. Clearing and re-clicking used to wipe the Diameter box on release.
+                let keep_first = p.distance(from) < DRAW_DRAG_MIN || matches!((first, release.as_ref()), (Some(a), Some((b, _))) if a == *b);
+                if keep_first {
+                    if let Some(pt) = release
+                        && let Some(t) = app.tool.as_mut()
+                    {
+                        t.pts = vec![pt];
+                        crate::sketch_dims::keep_stage_one(t);
+                    }
+                } else {
+                    crate::tools::on_click(app, &proj, p, mods.shift);
+                }
+                // A line dragged out is that one line: no chain goes on from its end (#7247).
+                if p.distance(from) >= DRAW_DRAG_MIN
+                    && let Some(t) = app.tool.as_mut().filter(|t| t.cmd == "sketch.line")
                 {
                     t.pts.clear();
                     crate::sketch_dims::reset(t);
                 }
-                crate::tools::on_hover(app, &proj, p, mods.shift);
-                crate::tools::on_click(app, &proj, p, mods.shift);
+                app.viewport.draw_drag_handled = true;
             }
         } else if let Some(p) = at {
             crate::tools::on_hover(app, &proj, p, mods.shift);
@@ -4395,8 +4421,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         // Rectangles, circles and polygons also draw by press, drag and release (#1630): the press
-        // places the first point as a click there would, the release the second.
-        let two_point_start = app.tool.as_ref().is_some_and(|t| matches!(t.kind, crate::tools::Kind::Draw(2)) && t.pts.is_empty());
+        // places the first point as a click there would, the release the second. So does a line
+        // with Preferences › Sketch › "Press and drag draws one line" (#7247).
+        let line_drag = app.preferences.line_drag_draws_one;
+        let two_point_start = app
+            .tool
+            .as_ref()
+            .is_some_and(|t| t.pts.is_empty() && (matches!(t.kind, crate::tools::Kind::Draw(2)) || (line_drag && t.cmd == "sketch.line")));
         if two_point_start
             && !held
             && primary_nav.is_none()
@@ -4437,7 +4468,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             dialog.restore_value_focus = true;
         }
-        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer {
+        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !app.viewport.draw_drag_handled {
             if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
@@ -4818,6 +4849,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::joint_handles::show(app, ui, &painter, &proj);
     overlays(app, &painter, &proj);
+    paint_device_pivot(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);
     crate::sketch_text_handles::show(app, ui, &painter, &proj, hover);
     crate::sketch3d::show(app, &painter, &proj);
@@ -5809,6 +5841,16 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
 }
 
 /// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
+/// The point the 3D mouse is turning the view around, as a faint ball, so the user sees what the
+/// turn holds still (#7435). Lighter, smaller discs stacked toward the top left give it its shading.
+fn paint_device_pivot(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let Some(p) = app.viewport.device_pivot.and_then(|p| proj.to_screen(p)) else { return };
+    let t = Tokens::get();
+    painter.circle(p, 8.0, t.accent.gamma_multiply(0.18), Stroke::new(1.0, t.accent.gamma_multiply(0.5)));
+    painter.circle_filled(p + vec2(-1.5, -1.5), 5.0, t.accent.gamma_multiply(0.2));
+    painter.circle_filled(p + vec2(-2.5, -2.5), 2.5, t.accent.gamma_multiply(0.3));
+}
+
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let st = crate::open_meshing::shown_world(app);
@@ -8554,8 +8596,16 @@ mod tests {
                 hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p)]);
                 assert!(app.viewport.hover.is_some());
                 hover_frame(&mut app, &ctx, vec![egui::Event::PointerButton { pos: p, button, pressed: true, modifiers: Default::default() }]);
-                assert!(app.viewport.hover.is_none(), "hover on navigation press");
-                for offset in [1.0, 2.0, 3.0] {
+                // The lit mode owns drags, not a press held still (which may be opening Select
+                // Other, #8864): the highlight stays until the press drags.
+                let lit = button == egui::PointerButton::Primary;
+                assert_eq!(app.viewport.hover.is_some(), lit, "hover on a {button:?} press");
+                if lit {
+                    hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p + vec2(1.0, 0.0))]);
+                    assert!(app.viewport.hover.is_some(), "a press within click distance is still");
+                }
+                let offsets = if lit { [20.0, 21.0, 22.0] } else { [1.0, 2.0, 3.0] };
+                for offset in offsets {
                     hover_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(p + vec2(offset, 0.0))]);
                     assert!(app.viewport.hover.is_none(), "hover while moving");
                     for _ in 0..3 {
@@ -11332,6 +11382,33 @@ mod grid_plane_tests {
                 assert_eq!(h.app.perspective_view(), perspective, "finishing restores the original projection");
                 crate::test_support::click(&mut h, "nav:slot:projection");
                 assert_eq!(h.app.perspective_view(), !perspective, "the toggle works again outside sketch editing");
+            }
+        }
+    }
+
+    /// The Field of view preference (#5364) is the angle the view draws with: the default draws as
+    /// before (0.6), and at both ends of its range a framed box is wholly in front of the near plane
+    /// and inside the view.
+    #[test]
+    fn the_field_of_view_preference_drives_the_projection() {
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        assert_eq!(projection(&app, rect).cam.fov, 0.0, "Perspective view off: parallel");
+        app.ui.perspective = true;
+        assert_eq!(projection(&app, rect).cam.fov, 0.6, "the default draws as before");
+        for fov in [15f64.to_radians(), 90f64.to_radians()] {
+            app.preferences.perspective_fov = fov;
+            app.cam = app.fitted_bounds(app.cam, &model_bounds(&app));
+            let p = projection(&app, rect);
+            assert_eq!(p.cam.fov, fov);
+            let b = model_bounds(&app);
+            for corner in [b.min, b.max, Vec3::new(b.min.x, b.max.y, b.min.z), Vec3::new(b.max.x, b.min.y, b.max.z)] {
+                let (x, y, depth) = p.cam.to_screen(corner, 800.0, 600.0, scene_radius(&app)).expect("in front of the eye");
+                assert!(
+                    (0.0..=1.0).contains(&depth) && (0.0..=800.0).contains(&x) && (0.0..=600.0).contains(&y),
+                    "{fov}: {corner:?} at {x}, {y}, {depth}"
+                );
             }
         }
     }

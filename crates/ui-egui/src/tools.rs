@@ -94,6 +94,9 @@ pub struct Tool {
     /// How far (radians, signed) the cursor has gone round a centre-point arc's centre since its
     /// start was placed: its sign is the way the arc runs (#6645).
     pub arc_turn: f64,
+    /// Where each point was placed and the sketch points the snap lined it up with (#7828):
+    /// constrained to them once the shape is made.
+    pub lined: Vec<(Vec2, Vec<crate::sketch_tools::Lined>)>,
 }
 
 impl Tool {
@@ -145,6 +148,7 @@ impl Tool {
             dims_stage: usize::MAX,
             dims_focus: false,
             arc_turn: 0.0,
+            lined: Vec::new(),
         })
     }
 }
@@ -496,7 +500,9 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
         app.tool = Some(tool);
         return;
     }
+    tool.lined.push((p.0, crate::sketch_tools::lined_at(p.0)));
     tool.pts.push(p);
+    let before = crate::sketch_tools::point_ids(app);
     if tool.cmd == "sketch.line" {
         if tool.pts.len() >= 2 {
             let (a, b) = (tool.pts[tool.pts.len() - 2].clone(), tool.pts[tool.pts.len() - 1].clone());
@@ -508,11 +514,13 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                 if let Some(id) = curves.first() {
                     if angled {
                         crate::inference::clear();
+                        tool.lined.clear();
                     } else {
                         // Endpoint inference is part of this drawing. Preserve its original
                         // undo history even when the history is already at the engine's cap.
                         let history = dimensioned.then(|| std::mem::take(&mut app.session.undo));
                         crate::inference::commit(app, id, b.0);
+                        crate::sketch_tools::constrain_lined(app, &mut tool, &[a.0, b.0], &before);
                         if let Some(history) = history {
                             app.session.undo = history;
                         }
@@ -525,17 +533,21 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                 crate::sketch_dims::reset(&mut tool);
             } else {
                 tool.pts.pop();
+                tool.lined.pop();
             }
         }
     } else if n > 0 && tool.pts.len() >= n {
         match run_shape(app, &tool) {
             Ok(_) => {
+                let placed: Vec<Vec2> = tool.pts.iter().map(|p| p.0).collect();
+                crate::sketch_tools::constrain_lined(app, &mut tool, &placed, &before);
                 tool.pts.clear();
                 crate::sketch_dims::reset(&mut tool);
             }
             Err(error) => {
                 app.set_status(error, true);
                 tool.pts.pop();
+                tool.lined.pop();
             }
         }
     }

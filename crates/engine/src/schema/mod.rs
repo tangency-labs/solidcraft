@@ -65,6 +65,7 @@ pub mod render_ui;
 pub mod sheet;
 pub mod sketch_constraints;
 pub mod sketch_create;
+pub mod sketch_equation;
 pub mod view_navigation;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, output_schema_for, run_checked, run_checked_as};

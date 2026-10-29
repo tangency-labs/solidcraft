@@ -746,6 +746,36 @@ pub fn apply_file_limits(p: &Prefs) {
     }
 }
 
+/// Perspective view's default field of view (about 34°), in radians.
+const PERSPECTIVE_FOV: f64 = 0.6;
+
+/// The field of view Perspective view draws with: the preference, or the default when a saved
+/// value is outside the accepted range (a hand edit).
+pub fn perspective_fov(p: &Prefs) -> f64 {
+    if accepted::perspective_fov(p) { p.perspective_fov } else { PERSPECTIVE_FOV }
+}
+
+/// Perspective view keeps the target's size when its angle changes (#5364): the distance scales by
+/// tan(old/2) / tan(new/2), so the angle changes the depth, not the zoom. Called every frame and
+/// after `ui.prefs`, so every way the angle changes (the slider, Cancel, Restore Defaults, a script)
+/// goes through it. A parallel view keeps the last perspective angle, and while Render is open the
+/// camera is Render's own, so the change waits until the design view is back.
+pub(crate) fn follow_view_fov(app: &mut SolveApp) {
+    let fov = app.view_fov();
+    if fov <= 0.0 || crate::render_workspace::active(app) {
+        return;
+    }
+    let old = std::mem::replace(&mut app.prefs_window.drawn_fov, fov);
+    if old > 0.0 && old != fov {
+        let k = (old * 0.5).tan() / (fov * 0.5).tan();
+        app.cam.distance *= k;
+        if let Some(anim) = &mut app.cam_anim {
+            anim.from.distance *= k;
+            anim.to.distance *= k;
+        }
+    }
+}
+
 /// The browser sidebar's first width, and the width [`Prefs::default`] restores; the panel
 /// itself clamps what the user drags to its own range.
 pub const DEFAULT_BROWSER_WIDTH: f32 = 250.0;
@@ -878,6 +908,10 @@ preference_settings! {
     /// Whether a picture of the connected 3D mouse, moving as it does, sits in the 3D view's lower
     /// left corner. Off by default.
     space_mouse_in_view: bool = false, PAGE_NAVIGATION => check_id("ui.3d_mouse_show_in_view");
+    /// 3D mouse orbit: traced (on) turns the view around the model in the middle of the view when
+    /// the turn begins (else the middle of the bodies in view), marked by a faint ball; classic
+    /// (off, the default) turns it around the view's centre, as it did before.
+    space_mouse_model_pivot: bool = false, PAGE_NAVIGATION;
     /// Speed multiplier for 3D mouse navigation.
     space_mouse_speed: f32 = 1.0, PAGE_NAVIGATION;
     /// Per physical axis of the cap (push X, Y, Z, then tilt X, Y, Z), whether it moves the view
@@ -920,6 +954,8 @@ preference_settings! {
     nav_bridge_port: u16 = 8765, PAGE_NAVIGATION;
     /// Anti-aliasing samples (applies on restart).
     msaa: u32 = 4, PAGE_GRAPHICS;
+    /// Share shading and Continuity; false preserves their independent legacy behavior.
+    single_surface_analysis: bool = true, PAGE_GRAPHICS => check_id("prefs.single_surface_analysis");
     /// Linux: the window system the app opens with at its next start (#3083): `auto` (XWayland
     /// whenever there is an X display, native Wayland on niri), `wayland` or `x11`.
     window_system: String = "auto".into(), PAGE_GRAPHICS;
@@ -959,6 +995,9 @@ preference_settings! {
     show_view_angles: bool = false, PAGE_GRAPHICS;
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
     measure_axis_distances: bool = true, PAGE_GRAPHICS => check_id("settings.measure_axis_distances");
+    /// Perspective view's vertical field of view in radians (#5364), 15° to 90°. The view reads a
+    /// saved value outside that range as the default ([`perspective_fov`]).
+    perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
     /// Decimals shown for lengths and angles.
     length_decimals: u8 = 2, PAGE_DESIGN;
     angle_decimals: u8 = 1, PAGE_DESIGN;
@@ -973,6 +1012,9 @@ preference_settings! {
     /// a double-click in the browser activates every component and one in the view does nothing,
     /// as before.
     double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
+    /// Insert Design lists the designs open in other tabs, each inserted with one click, then
+    /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
+    insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
@@ -1073,6 +1115,12 @@ preference_settings! {
     /// Draw the parts browser on a translucent card over the 3D view instead of a column of its
     /// own, so the workspace keeps the whole window width.
     browser_float: bool = false, PAGE_INTERFACE;
+    /// The browser card folded to its header with the chevron in that header, kept from one run
+    /// to the next like the toolbar's pins (#8692).
+    browser_collapsed: bool = false, PAGE_INTERFACE;
+    /// Whether the browser card is always shown or kept out of sight until the pointer comes to
+    /// it, as the navigation bar's "Hide until hovered" does (#8692).
+    browser_show: crate::browser::BrowserShow = Default::default(), PAGE_INTERFACE;
     /// Where command dialogs open: at the view's edge, or in the left column in place of the
     /// browser and the History there (#6707).
     dialog_place: crate::dialog_column::DialogPlace = Default::default(), PAGE_INTERFACE;
@@ -1084,6 +1132,9 @@ preference_settings! {
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's centre)");
     /// Speed multiplier for wheel zoom, independent of the 3D mouse.
     wheel_zoom_speed: f32 = 1.0, PAGE_NAVIGATION, accept(0.25..=4.0) => slider("ui.wheel_zoom_speed", 0.25..=4.0, 0.05, |v| format!("{v:.2}×"), "prefs:wheel_zoom_speed");
+    /// Opt-in surface anchoring for the 3D mouse, navigation bridge and drag-zoom. The wheel
+    /// and pinch retain their independent `zoom_to_cursor` preference.
+    zoom_stop_at_model: bool = false, PAGE_NAVIGATION => check_id("prefs.zoom_stop_at_model");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
     smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
     /// Two-finger trackpad scroll pans (off: it zooms like the wheel); pinch always zooms.
@@ -1221,6 +1272,12 @@ preference_settings! {
     suppress_sketch_snap: ModifierCombo = ModifierCombo::CTRL_ALT, PAGE_SKETCH;
     /// Temporary horizontal/vertical guides from hovered centres and edge midpoints.
     sketch_tracking_guides: bool = true, PAGE_SKETCH;
+    /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
+    /// horizontal or vertical snap to the previous point, and the click adds the alignments
+    /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
+    sketch_align_points: bool = false, PAGE_SKETCH;
+    /// Open Project's options before picking; off restores its previous direct-pick workflow.
+    project_options_dialog: bool = true, PAGE_SKETCH;
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
     manipulator_free_alt: bool = true, PAGE_SKETCH;
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
@@ -1248,6 +1305,10 @@ preference_settings! {
     /// A centre-point arc runs the way the cursor goes round its centre from the start (#6645).
     /// Off: it always runs counter-clockwise from the start, as it did before.
     center_arc_follows_cursor: bool = true, PAGE_SKETCH;
+    /// In the Line tool, a press, a drag and the release draw one line from the press to the
+    /// release and end there (#7247); clicks still draw a chain. Off (the default): a drag is a
+    /// click that moved on the way, placing a point where it is let go (#2448).
+    line_drag_draws_one: bool = false, PAGE_SKETCH => check_id("prefs.line_drag_draws_one");
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -1303,6 +1364,8 @@ pub struct PrefsWindow {
     snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
+    /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
+    drawn_fov: f64,
     /// The search text of the interface font list.
     font_filter: String,
     /// Search text on the Plugins page.
@@ -1443,6 +1506,7 @@ impl Snapshot {
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
         let update = std::mem::take(&mut app.preferences.update);
         app.preferences = self.prefs;
+        sync_surface_analysis(app);
         app.preferences.update = update;
         if units_changed {
             default_units_changed(app);
@@ -1734,6 +1798,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     let (msaa, window_system, adapter) = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
+    sync_surface_analysis(app);
     if app.preferences.default_units != units {
         default_units_changed(app);
     }
@@ -1772,6 +1837,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// Settings that follow the preferences every frame: the theme when it follows the system, and
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
+    sync_surface_analysis(app);
     apply_network(&app.preferences);
     apply_file_limits(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
@@ -1782,6 +1848,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if app.prefs_window.applied_up.as_deref() != Some(app.preferences.up_axis.as_str()) {
         up_axis_changed(app);
     }
+    follow_view_fov(app);
     if app.preferences.theme == "system"
         && let Some(t) = ctx.system_theme()
     {
@@ -1820,6 +1887,15 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     let z = app.preferences.ui_scale.clamp(0.5, 2.5);
     if z.is_finite() && !ctx.input(|i| i.pointer.any_down()) && (ctx.zoom_factor() - z).abs() > 1e-3 {
         ctx.set_zoom_factor(z);
+    }
+}
+
+/// The user's analysis policy applies immediately to every open design, without document edits.
+pub(crate) fn sync_surface_analysis(app: &mut SolveApp) {
+    let single = app.preferences.single_surface_analysis;
+    app.session.set_single_surface_analysis(single);
+    for slot in app.docs.background_mut() {
+        slot.session.set_single_surface_analysis(single);
     }
 }
 
@@ -2327,7 +2403,20 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     ]
     .map(|(position, key)| (position, app.tr(key).to_owned()))
     .into();
+    let orbits = [app.tr("ui.3d_mouse_orbit_traced").to_owned(), app.tr("ui.3d_mouse_orbit_classic").to_owned()];
     ui_kit::settings_form(ui, FORM_LABEL_WIDTH, |ui| {
+        // Traced or classic orbit: a choice between two named ways rather than a checkbox.
+        ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_orbit"), |ui| {
+            let mut selected = usize::from(!app.preferences.space_mouse_model_pivot);
+            let response = ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &orbits.each_ref().map(String::as_str), ui_kit::Segments::default()));
+            if response.inner {
+                app.preferences.space_mouse_model_pivot = selected == 0;
+            }
+            let rect = response.response.rect;
+            crate::scenario::publish_handle("prefs:3d_mouse_orbit_traced", egui::pos2(rect.left() + rect.width() * 0.25, rect.center().y));
+            crate::scenario::publish_handle("prefs:3d_mouse_orbit_classic", egui::pos2(rect.left() + rect.width() * 0.75, rect.center().y));
+            response.response.on_hover_text(crate::i18n::tr("ui.3d_mouse_orbit_tip"));
+        });
         ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_ghost_position"), |ui| {
             let (in_view, position) = (app.preferences.space_mouse_in_view, &mut app.preferences.space_mouse_ghost_position);
             ui.add_enabled_ui(in_view, |ui| {
@@ -2641,9 +2730,9 @@ fn found_but_not_allowed(drivers: Option<crate::space_mouse::DriversPresent>) ->
 }
 
 /// Puts this section's settings back: the driver choice, the speed, each axis's invert and speed and
-/// assignment, where the picture goes and whether it shows. Not the calibration (it has its own
-/// Forget), the button mapping, the offered set, "never show again", "Navigate with the 3D mouse" or
-/// the test model.
+/// assignment, where the picture goes and whether it shows, and what the view turns around. Not
+/// the calibration (it has its own Forget), the button mapping, the offered set, "never show
+/// again", "Navigate with the 3D mouse" or the test model.
 pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     let d = Prefs::default();
     let p = &mut app.preferences;
@@ -2654,6 +2743,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_axis_source = d.space_mouse_axis_source;
     p.space_mouse_ghost_position = d.space_mouse_ghost_position;
     p.space_mouse_in_view = d.space_mouse_in_view;
+    p.space_mouse_model_pivot = d.space_mouse_model_pivot;
 }
 
 /// The device's picture with the coordinate circles under it, and a box with a small model that
@@ -2855,6 +2945,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         None => {}
     }
     if button.is_some() {
+        // Cancel and Restore Defaults can change the angle too.
+        follow_view_fov(app);
         out = serde_json::to_value(&app.preferences).map_err(|e| e.to_string())?;
     }
     if let Some(o) = out.as_object_mut() {
@@ -3275,6 +3367,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if !accepted::print_face_highlight(&new) {
         return Err("`print_face_highlight` must be 0…1".into());
     }
+    if !accepted::perspective_fov(&new) {
+        return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
+    }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
     }
@@ -3296,6 +3391,7 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
         app.ui.layout = new.layout;
     }
     app.preferences = new;
+    sync_surface_analysis(app);
     apply_file_limits(&app.preferences);
     if units_changed {
         default_units_changed(app);
@@ -3306,6 +3402,7 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if up_changed {
         up_axis_changed(app);
     }
+    follow_view_fov(app);
     serde_json::to_value(&app.preferences).map_err(|e| e.to_string())
 }
 
@@ -4041,6 +4138,7 @@ mod tests {
         p.space_mouse_axis_source = [1, 0, 2, 3, 4, 5];
         p.space_mouse_ghost_position = SpaceMouseGhost::LeftWindow;
         p.space_mouse_in_view = true;
+        p.space_mouse_model_pivot = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
         restore_space_mouse_defaults(&mut h.app);
@@ -4052,6 +4150,7 @@ mod tests {
         );
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
+        assert_eq!(p.space_mouse_model_pivot, d.space_mouse_model_pivot);
         // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
@@ -4061,6 +4160,50 @@ mod tests {
         assert_eq!(h.app.cam, camera);
         // And it asks first: the real button only arms it (see cancelling_the_restore_question_changes_nothing).
         assert!(!h.app.space_mouse.restore_pending);
+    }
+
+    /// The 3D mouse's orbit is a choice of two: Classic turns around the view's centre, Traced
+    /// around the model in the middle of the view.
+    #[test]
+    fn the_3d_mouse_orbit_is_traced_or_classic() {
+        let mut h = changed_3d_mouse_settings(None);
+        assert!(!h.app.preferences.space_mouse_model_pivot, "classic is the default");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_traced");
+        assert!(h.app.preferences.space_mouse_model_pivot, "traced is opt-in");
+        scroll_to_and_click(&mut h, "prefs:3d_mouse_orbit_classic");
+        assert!(!h.app.preferences.space_mouse_model_pivot, "classic again");
+        assert!(!h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is off by default");
+        scroll_to_and_click(&mut h, "prefs:zoom_stop_at_model");
+        assert!(h.app.preferences.zoom_stop_at_model, "stop-at-model zoom is opt-in");
+        assert!(h.app.preferences.zoom_to_cursor, "the wheel preference is unchanged");
+    }
+
+    #[test]
+    fn model_navigation_is_opt_in_and_persists() {
+        for to_cursor in [false, true] {
+            let old = serde_json::from_value::<Prefs>(json!({"zoom_to_cursor": to_cursor})).unwrap();
+            assert!(!old.zoom_stop_at_model && !old.space_mouse_model_pivot, "older saved preferences keep legacy navigation");
+            assert_eq!(old.zoom_to_cursor, to_cursor);
+        }
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        let enabled = json!({"open": "Navigation", "zoom_stop_at_model": true, "space_mouse_model_pivot": true});
+        control(&mut app, &enabled).unwrap();
+        control(&mut app, &json!({"button": "cancel"})).unwrap();
+        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        let reply = control(&mut app, &enabled).unwrap();
+        assert_eq!(reply["zoom_stop_at_model"], true);
+        assert_eq!(reply["space_mouse_model_pivot"], true);
+        control(&mut app, &json!({"button": "apply"})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&app.prefs());
+        assert!(other.preferences.zoom_stop_at_model && other.preferences.space_mouse_model_pivot);
+        assert!(other.preferences.zoom_to_cursor, "enabling model navigation leaves wheel zoom alone");
+        control(&mut app, &json!({"button": "defaults"})).unwrap();
+        assert!(!app.preferences.zoom_stop_at_model && !app.preferences.space_mouse_model_pivot);
+        assert!(app.preferences.zoom_to_cursor, "Navigation defaults still anchor the wheel");
+        control(&mut app, &json!({"button": "cancel"})).unwrap();
+        assert!(app.preferences.zoom_stop_at_model && app.preferences.space_mouse_model_pivot, "Cancel restores the last Apply");
     }
 
     /// Opens Preferences on the Navigation page with the 3D mouse section open and these settings
@@ -4767,6 +4910,8 @@ mod tests {
             ("history_sketches", json!("under_feature"), PAGE_INTERFACE),
             ("history_play_button", json!(false), PAGE_INTERFACE),
             ("browser_float", json!(true), PAGE_INTERFACE),
+            ("browser_collapsed", json!(true), PAGE_INTERFACE),
+            ("browser_show", json!("hover"), PAGE_INTERFACE),
             ("dialog_place", json!("left_column"), PAGE_INTERFACE),
             ("color_vision", json!("protan"), PAGE_INTERFACE),
             ("viewport_theme", json!("light"), PAGE_INTERFACE),
@@ -4780,7 +4925,9 @@ mod tests {
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
+            ("sketch_align_points", json!(true), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
+            ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -5965,6 +6112,135 @@ mod tests {
     }
 
     #[test]
+    fn single_surface_analysis_live_cancel_restores_policy_without_restarting_effects() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        super::control(&mut app, &json!({"single_surface_analysis":false})).unwrap();
+        for (command, params) in [
+            ("solid.box", json!({"length":10,"width":10,"height":10})),
+            ("inspect.zebra", json!({"stripes":14.5})),
+            ("inspect.section", json!({"plane":"XY"})),
+            ("inspect.continuity", json!({"edges":[[5,0,0]],"samples":5})),
+        ] {
+            app.run(command, params).unwrap();
+        }
+        app.session.mark_saved();
+        let doc = app.session.doc.clone();
+        let undo = app.session.undo.len();
+        assert_eq!(app.session.status_items().len(), 3);
+        super::control(&mut app, &json!({"open":"Graphics"})).unwrap();
+        super::control(&mut app, &json!({"single_surface_analysis":true})).unwrap();
+        assert!(app.session.single_surface_analysis());
+        assert_eq!(app.session.analysis, None, "turning on applies immediately and ends older shading");
+        assert_eq!(app.session.status_items()[0].command, "inspect.continuity");
+        super::control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert!(!app.preferences.single_surface_analysis && !app.session.single_surface_analysis());
+        assert_eq!(app.session.analysis, None, "Cancel restores the policy, not ended view effects");
+        assert_eq!(app.session.continuity.len(), 1);
+        assert_eq!(app.session.status_items().len(), 2);
+        app.run("inspect.zebra", json!({"stripes":14.5})).unwrap();
+        assert!(app.session.analysis.is_some() && !app.session.continuity.is_empty());
+        assert_eq!(app.session.status_items().len(), 3, "the restored legacy policy permits reactivation");
+        assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
+        assert!(!app.session.is_dirty());
+        assert_eq!(app.session.undo.len(), undo);
+    }
+
+    #[test]
+    fn single_surface_analysis_preference_checkbox_persists_cancels_and_resets() {
+        assert!(Prefs::default().single_surface_analysis);
+        let old: Prefs = serde_json::from_value(json!({"theme":"light"})).unwrap();
+        assert!(old.single_surface_analysis);
+        assert!(lenient(&json!({"single_surface_analysis":"no"})).single_surface_analysis);
+        let mut h = crate::scenario::Harness::new();
+        let design = h.app.session.doc.to_json();
+        let revision = h.app.session.revision;
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:single_surface_analysis");
+        let checkbox = crate::scenario::handle_at("prefs:single_surface_analysis").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(!h.app.preferences.single_surface_analysis);
+        assert!(!h.app.session.single_surface_analysis());
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.single_surface_analysis);
+        assert!(!restored.session.single_surface_analysis(), "loaded settings apply before any command");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.single_surface_analysis && h.app.session.single_surface_analysis());
+        h.call("ui.prefs", json!({"open":"Graphics","single_surface_analysis":false,"button":"apply"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.single_surface_analysis && h.app.session.single_surface_analysis());
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.single_surface_analysis && !h.app.session.single_surface_analysis());
+        for malformed in [json!("false"), json!(null), json!(0), json!([])] {
+            assert!(super::set(&mut h.app, &json!({"single_surface_analysis":malformed})).is_err());
+            assert!(!h.app.preferences.single_surface_analysis && !h.app.session.single_surface_analysis());
+        }
+        assert_eq!(h.app.session.revision, revision, "policy-only edits with no effects need no view revision");
+        assert_eq!(h.app.session.doc.to_json(), design);
+        assert!(!h.app.session.is_dirty());
+        assert!(h.app.session.undo.is_empty());
+    }
+
+    #[test]
+    fn single_surface_analysis_preference_syncs_background_designs_and_resets_effects() {
+        fn legacy_session() -> solidcraft_engine::Session {
+            let mut s = solidcraft_engine::Session::default();
+            s.set_single_surface_analysis(false);
+            s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+            s.execute("inspect.zebra", &json!({"stripes":14.5})).unwrap();
+            s.execute("inspect.section", &json!({"plane":"XY"})).unwrap();
+            s.execute("inspect.continuity", &json!({"edges":[[5,0,0]],"samples":5})).unwrap();
+            s.mark_saved();
+            s
+        }
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        super::set(&mut app, &json!({"single_surface_analysis":false})).unwrap();
+        app.session = legacy_session();
+        crate::documents::open_tab(&mut app, legacy_session()).unwrap();
+        assert_eq!(app.docs.count(), 2);
+        assert!(!app.session.single_surface_analysis());
+        assert_eq!(app.session.status_items().len(), 3);
+        assert!(app.docs.background().all(|s| !s.single_surface_analysis() && s.status_items().len() == 3));
+        let doc = app.session.doc.clone();
+        let undo = app.session.undo.len();
+        let declarations = app.session.status_items();
+        let revision = app.session.revision;
+        app.preferences.single_surface_analysis = true;
+        app.run("view.status_items", json!({})).unwrap();
+        assert!(!app.session.single_surface_analysis(), "a raw query cannot apply a desynchronised preference");
+        assert_eq!(app.session.status_items(), declarations);
+        assert_eq!(app.session.revision, revision);
+        assert!(app.session.analysis.is_some() && !app.session.continuity.is_empty());
+        assert!(app.docs.background().all(|s| !s.single_surface_analysis() && s.status_items().len() == 3));
+        app.preferences.single_surface_analysis = false;
+        super::defaults(&mut app, super::PAGE_GENERAL);
+        assert!(!app.session.single_surface_analysis(), "another page leaves the policy alone");
+        super::defaults(&mut app, super::PAGE_GRAPHICS);
+        for s in std::iter::once(&app.session).chain(app.docs.background()) {
+            assert!(s.single_surface_analysis());
+            assert_eq!(s.analysis, None, "latest Continuity wins on reset");
+            assert_eq!(s.continuity.len(), 1);
+            assert_eq!(s.status_items().len(), 2);
+            assert_eq!(s.status_items()[0].command, "inspect.continuity");
+            assert!(s.section.is_some());
+            assert!(!s.is_dirty());
+        }
+        assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
+        assert_eq!(app.session.undo.len(), undo);
+        // Query entry never applies a pending policy change; the explicit frame hook does.
+        app.preferences.single_surface_analysis = false;
+        app.run("view.status_items", json!({})).unwrap();
+        assert!(app.session.single_surface_analysis());
+        super::apply(&mut app, &egui::Context::default());
+        assert!(!app.session.single_surface_analysis());
+        assert!(app.docs.background().all(|s| !s.single_surface_analysis()));
+        app.preferences.single_surface_analysis = true;
+        super::apply(&mut app, &egui::Context::default());
+        assert!(app.session.single_surface_analysis());
+        assert!(app.docs.background().all(|s| s.single_surface_analysis()));
+    }
+
+    #[test]
     fn cosmetic_threads_default_off_and_follow_preferences_transactions() {
         assert!(!Prefs::default().cosmetic_threads);
         let old: Prefs = serde_json::from_value(json!({"theme":"light","msaa":4})).unwrap();
@@ -6762,5 +7038,202 @@ mod graphics_preset_tests {
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod perspective_fov_tests {
+    use super::*;
+    use egui::{Event, Key, Modifiers, PointerButton, pos2};
+
+    fn press(h: &mut crate::scenario::Harness, at: egui::Pos2, pressed: bool) {
+        h.app.synthetic.push(Event::PointerMoved(at));
+        h.app.synthetic.push(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        h.frames(3);
+    }
+
+    fn graphics_slider(h: &mut crate::scenario::Harness) -> egui::Rect {
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        let label = crate::i18n::tr("prefs.perspective_fov");
+        reveal_preference(h, &format!("dialog:slider:{label}"));
+        crate::scenario::rect_of(&format!("dialog:slider_track:{label}")).expect("the Field of view slider")
+    }
+
+    /// Graphics › Field of view (#5364): the kit slider in whole degrees, dragged or typed, written
+    /// back in radians. While the view can't draw in perspective (Perspective view off, and no
+    /// perspective-while-orbiting mode, #2682) it changes nothing, and Cancel puts it back.
+    #[test]
+    fn the_field_of_view_slider_drags_and_types_whole_degrees() {
+        let mut h = crate::scenario::Harness::new();
+        for (perspective, auto_ortho) in [(false, false), (true, false), (false, true)] {
+            h.call("ui.set", json!({"perspective": perspective}));
+            h.app.ui.auto_ortho_faces = auto_ortho;
+            let track = graphics_slider(&mut h);
+            press(&mut h, pos2(track.left() + 4.0, track.center().y), true);
+            h.app.synthetic.push(Event::PointerMoved(pos2(track.left() + track.width() * 0.75, track.center().y)));
+            h.frames(3);
+            press(&mut h, pos2(track.left() + track.width() * 0.75, track.center().y), false);
+            let degrees = h.app.preferences.perspective_fov.to_degrees();
+            if perspective || auto_ortho {
+                assert!((degrees - degrees.round()).abs() < 1e-9 && (35.0..=90.0).contains(&degrees), "{degrees}");
+            } else {
+                assert_eq!(h.app.preferences.perspective_fov, PERSPECTIVE_FOV, "disabled while Perspective view is off");
+            }
+            h.call("ui.prefs", json!({"button": "cancel"}));
+            assert_eq!(h.app.preferences.perspective_fov, PERSPECTIVE_FOV, "Cancel restores the angle");
+        }
+        let track = graphics_slider(&mut h);
+        press(&mut h, pos2(track.right() + 30.0, track.center().y), true);
+        press(&mut h, pos2(track.right() + 30.0, track.center().y), false);
+        h.app.synthetic.push(Event::Text("40.4".into()));
+        h.app.synthetic.push(Event::Key { key: Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE });
+        h.frames(3);
+        assert!(
+            (h.app.preferences.perspective_fov - 40f64.to_radians()).abs() < 1e-9,
+            "typed 40.4 keeps to 40°: {}",
+            h.app.preferences.perspective_fov
+        );
+        h.call("ui.prefs", json!({"button": "ok"}));
+    }
+
+    /// `ui.prefs {perspective_fov}` takes 15° to 90° in radians and refuses anything else, changing
+    /// nothing; a saved value the view can't use (a hand edit) draws at the default, never a broken view.
+    #[test]
+    fn hostile_angles_are_refused_or_drawn_at_the_default() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        for fine in [15f64.to_radians(), 90f64.to_radians(), 1.0] {
+            assert_eq!(h.call("ui.prefs", json!({"perspective_fov": fine}))["ok"], true, "{fine}");
+            assert_eq!(h.app.view_fov(), fine);
+        }
+        let before = (h.app.preferences.clone(), h.app.cam);
+        for bad in [
+            json!(-1.0),
+            json!(0.0),
+            json!(14.9f64.to_radians()),
+            json!(90.1f64.to_radians()),
+            json!(std::f64::consts::PI),
+            json!(1e308),
+            json!(-1e308),
+            json!("x"),
+            json!(null),
+            json!([1]),
+        ] {
+            let r = h.call("ui.prefs", json!({"perspective_fov": bad}));
+            assert_eq!(r["ok"], false, "{bad}: {r}");
+            assert_eq!((h.app.preferences.clone(), h.app.cam), before, "{bad} changes nothing");
+        }
+        for saved in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, 0.1, 2.0, std::f64::consts::PI, 1e308] {
+            h.app.preferences.perspective_fov = saved;
+            h.frames(2);
+            assert_eq!(h.app.view_fov(), PERSPECTIVE_FOV, "{saved} draws at the default");
+            assert!(h.app.cam.is_valid(), "{saved}: {:?}", h.app.cam);
+        }
+        // A fuzz pass: any bit pattern, and values spread over -1…3 rad, through `ui.prefs` and saved.
+        let range = 15f64.to_radians()..=90f64.to_radians();
+        let mut x: u64 = 0x5364;
+        for i in 0..2000 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let v = if i % 2 == 0 { f64::from_bits(x) } else { (x >> 11) as f64 / (1u64 << 53) as f64 * 4.0 - 1.0 };
+            let accepted = set(&mut h.app, &json!({"perspective_fov": v})).is_ok();
+            assert_eq!(accepted, range.contains(&v), "{v}");
+            h.app.preferences.perspective_fov = v;
+            follow_view_fov(&mut h.app);
+            assert!(range.contains(&h.app.view_fov()) && h.app.cam.is_valid(), "{v}: {:?}", h.app.cam);
+        }
+        let read = lenient(&json!({"perspective_fov": "wide", "ui_scale": 1.5}));
+        assert_eq!((read.perspective_fov, read.ui_scale), (PERSPECTIVE_FOV, 1.5), "an unreadable angle costs that setting only");
+    }
+
+    /// The target keeps its size when the angle changes, by every path (`ui.prefs`, Cancel, Restore
+    /// Defaults), and a parallel view or a sketch keeps the last perspective angle until it's back.
+    #[test]
+    fn the_view_keeps_its_size_when_the_angle_changes() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(3);
+        let half = |h: &crate::scenario::Harness| {
+            let mut cam = h.app.cam;
+            cam.fov = h.app.view_fov();
+            cam.half_height()
+        };
+        let (size, distance) = (half(&h), h.app.cam.distance);
+        h.call("ui.prefs", json!({"open": "Graphics"}));
+        for fov in [15f64.to_radians(), 1.0, 90f64.to_radians()] {
+            h.call("ui.prefs", json!({"perspective_fov": fov}));
+            assert!((half(&h) / size - 1.0).abs() < 1e-9, "{fov}: {} vs {size}", half(&h));
+        }
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!((h.app.cam.distance / distance - 1.0).abs() < 1e-9, "Cancel restores the angle and the size");
+        h.call("ui.prefs", json!({"perspective_fov": 1.2}));
+        h.call("ui.prefs", json!({"open": "Graphics", "button": "defaults"}));
+        h.call("ui.prefs", json!({"button": "ok"}));
+        assert_eq!(h.app.preferences.perspective_fov, PERSPECTIVE_FOV);
+        assert!(!h.app.ui.perspective, "the page's Restore Defaults turns Perspective view off too");
+        // A parallel view keeps the last perspective angle: back in perspective, the default angle
+        // draws at the first size, and an angle changed while it's off is followed once it's on.
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        assert!((h.app.cam.distance / distance - 1.0).abs() < 1e-9, "Restore Defaults restores the size");
+        h.call("ui.set", json!({"perspective": false}));
+        h.frames(2);
+        let parallel = h.app.cam.distance;
+        h.call("ui.prefs", json!({"perspective_fov": 1.2}));
+        assert_eq!(h.app.cam.distance, parallel, "parallel: nothing to rescale yet");
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        assert!((half(&h) / size - 1.0).abs() < 1e-9);
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.call("ui.prefs", json!({"perspective_fov": 0.6}));
+        h.app.finish_sketch();
+        h.frames(2);
+        assert!((half(&h) / size - 1.0).abs() < 1e-9);
+    }
+
+    /// A view change that is animating when the angle changes ends at the same size too: both its
+    /// ends are rescaled with the camera.
+    #[test]
+    fn an_animating_view_change_is_rescaled_too() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        let to = solidcraft_engine::render::Camera { distance: 300.0, ..h.app.cam };
+        h.app.cam_anim = Some(solidcraft_engine::render::CameraAnim::new(h.app.cam, to, h.app.now));
+        let from = h.app.cam;
+        set(&mut h.app, &json!({"perspective_fov": 1.0})).unwrap();
+        let k = (0.6f64 * 0.5).tan() / 0.5f64.tan();
+        let anim = h.app.cam_anim.as_ref().expect("still animating");
+        assert!((anim.to.distance - 300.0 * k).abs() < 1e-9 && (anim.from.distance - from.distance * k).abs() < 1e-9, "{:?}", (anim.from, anim.to));
+    }
+
+    /// A script's Cancel puts the view's size back at once, before any frame runs, so a `ui.camera`
+    /// read straight after it gives the restored view.
+    #[test]
+    fn cancel_restores_the_size_before_the_next_frame() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        h.frames(2);
+        let distance = h.app.cam.distance;
+        let mut raw = |method: &str, params: serde_json::Value| {
+            let (req, _rx) = crate::control::ControlRequest::new(method, params);
+            match crate::control::handle(&mut h.app, &h.ctx, &req) {
+                crate::control::Outcome::Done(v) => v,
+                _ => serde_json::Value::Null,
+            }
+        };
+        raw("ui.prefs", json!({"open": "Graphics", "perspective_fov": 1.2}));
+        raw("ui.prefs", json!({"button": "cancel"}));
+        let cam = raw("ui.camera", serde_json::Value::Null);
+        assert!((cam["result"]["distance"].as_f64().unwrap() / distance - 1.0).abs() < 1e-9, "{cam}");
+    }
+
+    /// The angle is kept between runs.
+    #[test]
+    fn the_angle_is_kept_across_a_restart() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"perspective_fov": 1.1}));
+        h.step(&json!({"restart": "close"})).unwrap();
+        assert_eq!(h.app.preferences.perspective_fov, 1.1);
     }
 }

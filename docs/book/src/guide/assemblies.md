@@ -373,7 +373,12 @@ leaves the design as it was unless `apply` is true.
 
 **Insert Design** (`component.insert_design {path, translate?}`, on the **ASSEMBLE** panel and
 in the **File** menu) adds a component linked to another saved design, so each part can live in
-its own document. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
+its own document. When other designs are open in tabs, the button first lists them under
+**Open designs**. One click inserts that design; a design not saved yet is greyed out, as it has no
+file to link; one with unsaved changes inserts its saved file, and the status line says so.
+**Browse…** at the end opens the file picker, as the button does when no other design is open.
+Preferences › Design › **Insert Design lists the designs open in other tabs first** turns the list
+off. A STEP or mesh file picked there is inserted as **Insert STEP** or **Insert
 Mesh** would. The part's solid bodies come
 in as they sit in that design, and they are kept in the assembly, so it opens even without the
 part file. The link is stored relative to the assembly's folder once the assembly is saved.

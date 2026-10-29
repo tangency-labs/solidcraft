@@ -619,6 +619,18 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
         }
+        // The list Help and Home open looks like the Shortcuts page of Preferences: say it can't
+        // be changed here, and lead to the page where it can (#7409).
+        if !filtering && app.keymap.read_only {
+            ui.horizontal_wrapped(|ui| {
+                ui_kit::text(ui, app.tr_label("Read-only list: shortcuts can't be changed here."), ui_kit::Text::Note("shortcut_read_only"));
+                let edit = ui_kit::button(ui, app.tr_label("Edit shortcuts"), ui_kit::Button::Normal);
+                crate::scenario::publish_target("keymap:edit", edit.rect);
+                if edit.clicked() {
+                    app.keymap.read_only = false;
+                }
+            });
+        }
         if !filtering && !app.keymap.read_only {
             ui_kit::text(ui, app.tr("ui.shortcut_capture_hint"), ui_kit::Text::Note("shortcut_capture_help"));
             if app.keymap.capturing.is_some() {
@@ -1466,6 +1478,36 @@ mod card_tests {
                 assert!(message.as_deref().is_some_and(|m| m.contains("outside the folders this agent may use")), "{message:?}");
                 assert_eq!(effective(&h.app, "solid.extrude").as_deref(), Some("E"), "nothing imported");
             }
+        }
+    }
+
+    /// #7409: the read-only list (Home › Keyboard shortcuts, Help › Keyboard Shortcuts) looked
+    /// like the editable page with Import… missing. It says it is read-only, and Edit shortcuts
+    /// turns the same page into the editable one: Import…, Reset All and recording are there.
+    #[test]
+    fn read_only_shortcuts_say_so_and_edit_shortcuts_unlocks_them() {
+        for open in ["home", "help"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.keymap.filter = "solid.extrude".into();
+            if open == "home" {
+                h.app.keymap.open = true;
+                h.app.keymap.read_only = true;
+            } else {
+                h.call("ui.help", json!({"item":"shortcuts"}));
+            }
+            h.frames(4);
+            assert!(h.app.keymap.read_only, "{open}");
+            assert!(h.widget("Read-only list: shortcuts can't be changed here.").is_some(), "{open}");
+            assert!(h.widget("Import…").is_none(), "{open}: no Import… while read-only");
+            assert!(scenario::handle_at("keymap:capture:solid.extrude").is_none());
+            h.step(&json!({"widget":"Edit shortcuts"})).unwrap();
+            h.frames(4);
+            assert!(!h.app.keymap.read_only, "{open}: editable after Edit shortcuts");
+            assert!(h.widget("Read-only list: shortcuts can't be changed here.").is_none(), "{open}");
+            assert!(h.widget("Edit shortcuts").is_none(), "{open}");
+            assert!(h.widget("Import…").is_some() && h.widget("Reset All").is_some(), "{open}");
+            assert!(scenario::handle_at("keymap:capture:solid.extrude").is_some(), "{open}: a binding can be recorded");
         }
     }
 }

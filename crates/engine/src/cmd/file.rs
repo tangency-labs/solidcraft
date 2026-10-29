@@ -470,6 +470,14 @@ impl Session {
         super::component_link::resolve_design_links(&mut doc, path);
         let mut session = Self::opened(doc, saved);
         session.path = path.map(str::to_owned);
+        // A design saved before body names were pinned (#6403) is pinned now, as its first
+        // command would pin it: that command pinned them as part of itself, so undoing it went
+        // back to the unpinned design, whose fingerprints no evaluated result matched, and the
+        // first undo after opening evaluated the whole timeline again (82-93 s in a
+        // 5,484-feature design). The pinned names are the ones the file's bodies have, so
+        // opening is no change: the pinned design is the saved one.
+        session.pin_body_names();
+        session.saved = session.doc.clone();
         session
     }
 

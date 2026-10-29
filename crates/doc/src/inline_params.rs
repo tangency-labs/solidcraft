@@ -191,7 +191,11 @@ impl Document {
         }
         let mut out = Vec::with_capacity(found.defs.len());
         for d in found.defs {
-            next.add_user_param(&d.name, &d.expression, d.unit.as_deref(), None)
+            // A value of no fixed kind (a joint's) is evaluated without the design's units, so
+            // its bare number stays a millimetre length whatever they are (#8865): `w = 5` is
+            // what `5` is there.
+            let unit = d.unit.unwrap_or_else(|| Self::infer_unit_in(&next.param_values().0, &d.expression, "mm"));
+            next.add_user_param(&d.name, &d.expression, Some(&unit), None)
                 .map_err(|e| DocError::Invalid(format!("`{} = {}`: {e}", d.name, d.expression)))?;
             let unit = next.param(&d.name).map(|p| p.unit.clone()).unwrap_or_default();
             out.push(Defined { name: d.name, expression: d.expression, unit });

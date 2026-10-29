@@ -182,6 +182,41 @@ changed it meanwhile. Compare both values, and export when either differs from t
 answer. The same answer comes from `engine.execute` `document.revision` (and so from scripts and
 MCP `execute`), which waits its turn behind design changes like any command.
 
+`engine.execute` with `view.status_items` and `{}` reads the persistent viewport effects without
+evaluating the model or changing the design, undo history or view revision. It returns
+`{items: [...]}` in oldest activation order. Each item contains a stable slot `id`
+(`surface_analysis`, `section`, or the legacy independent `continuity`), `kind`, source `command`, structured `setting`, `has_key`
+and a `clear: {command, params}` request that can be executed unchanged. Settings retain numbers:
+lengths use millimetres, Draft's `angle_deg` uses degrees, directions are normalised, and
+Continuity's `edge_count` counts the seams currently kept for shading. Labels and units are
+formatted by clients. `engine.describe {command: "view.status_items"}` exposes both schemas.
+
+By default, surface analyses, including Continuity, share one slot; successful replacement keeps that
+slot's position and ends the previous analysis. Section stacks independently. Clearing and
+re-enabling a slot makes it newest. Ordering metadata belongs only to the running session;
+effects and ordering are not saved in the design. Existing analysis clear semantics apply:
+any surface-shading command with `{clear: true}` clears the active surface shading, whereas
+Continuity clears its seam records. Section clear never clears an analysis.
+
+The standard **Graphics → Viewport → Use a single surface analysis** preference is
+`single_surface_analysis` (default `true`). `ui.prefs {"single_surface_analysis": false}` restores
+the legacy behavior: surface shading and Continuity remain independently active and clearable,
+and `view.status_items` faithfully lists both, using a separate stable `continuity` ID. Together
+with Section there are at most three slots. Turning the preference back on keeps the last
+successfully started or changed analysis at the oldest analysis-group position beside Section.
+Queries never normalize state. Graphics Restore Defaults restores `true`; other page resets
+leave it alone. It applies immediately to all open designs without document edits or undo.
+Cancel restores the opening preference value, but does not restart an analysis already stopped
+by switching to single mode. Run that analysis again to restore coexistence after cancelling.
+Successful Continuity measurements with no seams create no item: legacy mode keeps existing
+surface shading; single mode ends the previous analysis as for other successful replacements.
+
+Headless SDK clients use `Session::set_single_surface_analysis(bool)` and
+`Session::single_surface_analysis()`. Configuration survives scratch/new/open session lifecycle;
+effects and chronology still follow their existing transient lifecycle. The policy is an
+application preference/session setting, never saved design-format data. Policy changes update
+the view revision only when visible effects or their declarations change.
+
 A client need not ask again and again: after `control.subscribe` on its connection, the app
 sends it a line whenever the active design changes (#6985):
 
@@ -291,7 +326,7 @@ labels; `prefs:measure_axis_distances` identifies the checkbox.
 | `ui.inspect` | — | UI state, pending file picker (`file_picker_busy`; compatibility alias `file_dialog_open`, no path), what is hidden (`visibility`: bodies, origin and construction items, sketches, joints (`hidden_joints`, joint ids); set it with the `browser.visibility` command), viewport rect, camera, active tool/dialog, the status line (`status`: text and whether it is an error), hover, renderer, timings, what the GPU drew last frame (`draw`: `draw_calls`, `triangles`, `line_segments`, `supersampled`; null without a GPU) and the graphics `adapter`, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for) |
 | `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `dark`, `layout`, …), and the browser's view of the design, saved with it: `showOrigin` (the Origin folder's eye), `showSketches` (the design's Sketches folder, `c0/sketches` in `hiddenFolders`), `hiddenBodies`, `hiddenOrigin`, `hiddenSketches`, `shownSketches`, `hiddenJoints`, `hiddenFolders`, `hiddenProfiles`, `shownDims`, `lockedBodies` (whole lists; `browser.visibility` changes single items) | `dark: false` switches to the light theme; `layout: "floating"` (default) or `"compact"` (`"docked"` is also accepted) selects the transient shell layout without saving a preference. Scenarios use `{"call":"ui.set","params":{"layout":"docked"}}` |
 | `ui.view` | `view`: `front`, `back`, `top`, `bottom`, `left`, `right`, `iso`, `home`, `fit`; `animate` (bool, default false: snap) | |
-| `ui.camera` | `target?`: `[x, y, z]` (mm), `yaw?`, `pitch?`, `roll?` (radians), `distance?` (mm), `fov?`, `up?`; `fit?`: `true`, `false` or `[occurrence id or name…]` (`root`: the bodies outside every component) | the viewport's orbit camera: it looks at `target` from `distance` away; `yaw` 0 looks along +Y (from the front), `pitch` is the elevation (±π/2: straight down or up), `roll` turns the image. Fields given are set first (the others keep their values), then `fit` frames the listed occurrences (or everything), keeping the direction. The reply, passed back, sets the same view again, so a framing can be stored and replayed. `fov` and `up` follow the perspective setting (`ui.set`) and the up axis preference (`ui.prefs`) and can't change here; a refused field changes nothing |
+| `ui.camera` | `target?`: `[x, y, z]` (mm), `yaw?`, `pitch?`, `roll?` (radians), `distance?` (mm), `fov?`, `up?`; `fit?`: `true`, `false` or `[occurrence id or name…]` (`root`: the bodies outside every component) | the viewport's orbit camera: it looks at `target` from `distance` away; `yaw` 0 looks along +Y (from the front), `pitch` is the elevation (±π/2: straight down or up), `roll` turns the image. Fields given are set first (the others keep their values), then `fit` frames the listed occurrences (or everything), keeping the direction. The reply, passed back, sets the same view again, so a framing can be stored and replayed. `fov` is the angle the view is drawn with: 0 (parallel) with Perspective view off or while a sketch is open, else `perspective_fov`; in Render, the Render camera's own. `fov` and `up` follow the perspective setting (`ui.set`), its angle (`ui.prefs {perspective_fov}`) and the up axis preference (`ui.prefs`) and can't change here; a refused field changes nothing |
 | `ui.start` | `command`, `params?` | like a toolbar click: starts the sketch tool or dialog for the command. `params` sets what the dialog opens on, and nothing runs until OK: `joint.drive` takes `joint` (id or name; without it, the joint picked in the browser, else the first joint that moves; a rigid joint opens to say why it has nothing to drive, with an Edit Joint button, handle `drive:edit_joint`) and `values` (numbers in degrees or millimetres, or expressions); `motion.study` takes `study` (id or name), which opens that study to edit and chart. A command that takes no params is refused before it starts; a param the dialog doesn't take is refused and the dialog closes |
 | `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?`, `double?` | real pointer input |
 | `ui.move` | `x`, `y`, `shift?`, `alt?`, `ctrl?`, `cmd?` | pointer movement without a button; modifiers apply until the next synthetic move/click; a move with omitted modifiers releases them. With `nav: "touchpad"`, Shift pans and Alt/Option orbits. |
@@ -361,6 +396,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))
 - `length_decimals`
+- `line_drag_draws_one` (default false: in the Line tool, a press, a drag and the release draw one line from the press to the release and end there, snapping as clicks do; clicks still chain, and a drag under 24 points is a click; off, a drag places a point where it is let go, #7247)
 - `logo_accent` (bool, default false: the application bar's logo in shades of the theme's accent instead of the theme's logo colours)
 - `look_at_anim`
 - `look_at_speed`
@@ -376,6 +412,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)
 - `pan_reverse_y` (default false: vertical scrolling pans the other way)
+- `perspective_fov` (Perspective view's vertical field of view in radians, 0.2618…1.5708 (15°…90°), default 0.6; when it changes, the camera's distance scales so the view keeps its size)
 - `placement_handles` (default false: handles on the preview of a Rest, Boss or Snap Fit that move it across the model and turn it)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
@@ -387,6 +424,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_state_icons` (default true: a sketch's icon in History and the browser takes the colour of its solve state, `sketch` under constrained, `sketch_fixed` fully constrained, `error` while its constraints conflict, and its tooltip names the state; false: every sketch row's icon and tooltip as before, #7245)
 - `sketch_tab_always` (default false: the SKETCH tab stays in the ribbon right after MODEL while no sketch is open; a tool in its CREATE or REFERENCE section then opens Create Sketch, on the selected plane or planar face or else on the plane picked next, and starts in the new sketch, #7904)
 - `smooth_wheel_zoom` (default true)
+- `space_mouse_model_pivot` (default false: Classic orbit around the view's centre; true opts into Traced orbit around the model for the 3D mouse and navigation bridge)
 - `stand_up_unknown` (`note` (default: a file whose header names no program known to save Y up and whose bodies seem to lie on their back (their flat area across Y outweighs their flat area facing down Z) gets a small note over the view, "Did this part open the wrong way up?", with Stand it up, Don't ask again and Close as the handles `stand_up:stand`, `stand_up:never` and `stand_up:dismiss`; it goes by itself after 10 seconds and never blocks input), `ask` (the "Stand this part up?" dialog for every file from another program, SolidWorks too, without looking at how it rests, as before #7717), `off` (no offer); otherwise a SolidWorks file gets the dialog, or the note when its bodies clearly stand on Z already)
 - `status_bar` (default false: a thin bar along the window's bottom edge, below History, handle `status:bar`: what is being edited (`status:editing`), the open sketch's state in its colour (`status:sketch`) and the design's units (`status:units`, a click opens the Units menu, whose rows run `document.units`); the sketch's state then leaves the view's top-left corner, #7243)
 - `step_values` (default false: Up/Down and the wheel step a plain number in a focused value field)
@@ -407,6 +445,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `wheel_zoom_speed` (0.25 to 4, default 1: how far each wheel step zooms; the 3D mouse keeps its own speed)
 - `window_system` (Linux: `auto` (default: XWayland whenever there is an X display, native Wayland on niri), `wayland`, `x11`; saved in `graphics.json`, applies at the next start; `SOLIDCRAFT_WAYLAND` overrides it)
 - `zoom_reverse`
+- `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`
 
 Other `ui.prefs` parameters:

@@ -4062,6 +4062,7 @@
   "ui.select": "Вибрати",
   "ui.selectOther": "Вибрати інше…",
   "ui.selectTangentChain": "Вибрати дотичний ланцюг",
+  "ui.select_all": "Виділити все",
   "ui.selection": "Виділення",
   "ui.selection_modifiers": "Модифікатори вибору",
   "ui.selection_shift_add_only": "Shift+клацання додає без вилучення",

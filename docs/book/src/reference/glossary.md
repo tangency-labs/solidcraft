@@ -206,6 +206,19 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### equation curve
+
+A sketch curve whose shape comes from formulas over a range of one variable.
+
+It is a fit point spline through fixed points that the formulas place, and they place them again
+when the design's parameters change. Compare *spline*, whose points are placed by hand.
+
+- **In SolidCraft:** `sketch.equation_curve`, `sketch.equation_curve.edit`; the `equations`
+  design-file key of a sketch.
+- **Don't use:** formula curve, function curve, parametric curve (for the command).
+- **Elsewhere:** equation-driven curve, curve from equation, function plot.
+- **For translators:** "equation" is a mathematical formula, not a balance or an equality constraint.
+
 ### feature
 
 One step in the timeline that creates or changes geometry, such as an extrude, a fillet or a

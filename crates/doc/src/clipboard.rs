@@ -253,6 +253,12 @@ impl crate::Feature {
                 for e in sketch.text_exprs_mut() {
                     *e = clone_expression(e, parameters);
                 }
+                // An equation curve's variable is its own: a parameter of that name is not renamed in it.
+                for (variable, e) in sketch.equation_exprs_mut() {
+                    let others: BTreeMap<String, String> =
+                        parameters.iter().filter(|(old, _)| old.as_str() != variable).map(|(o, n)| (o.clone(), n.clone())).collect();
+                    *e = clone_expression(e, &others);
+                }
                 for link in &mut sketch.links {
                     remap_link(&mut link.source, ids, names, bodies, 0);
                     for n in link.face_name.iter_mut().chain(&mut link.edge_name) {

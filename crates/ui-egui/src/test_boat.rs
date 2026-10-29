@@ -119,7 +119,7 @@ pub(crate) fn step(
     reverse_zoom: bool,
     free_orbit: bool,
 ) {
-    crate::navigation::device_camera(cam, motion, seconds, height, true, reverse_zoom, free_orbit);
+    crate::navigation::device_camera(cam, motion, seconds, height, true, reverse_zoom, free_orbit, None, None);
     cam.fov = FOV;
     // Zoom within limits: the nearest still shows the whole boat in the shorter side of the box.
     let shorter = aspect.min(1.0);

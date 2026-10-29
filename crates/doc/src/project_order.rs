@@ -207,6 +207,35 @@ mod tests {
     }
 
     #[test]
+    fn coarsely_tessellated_round_silhouette_fits_an_arc() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let on = |deg: f64| Vec2::new(5. + 5. * deg.to_radians().cos(), 5. + 5. * deg.to_radians().sin());
+        let mut chain = vec![Vec2::new(0., -20.)];
+        chain.extend([180., 169.5, 135., 100.5, 90.].map(on));
+        chain.push(Vec2::new(45., 10.));
+        let mut out = Vec::new();
+        super::super::fit_chain_with_arcs(&chain, Some(0.05), &mut out, true);
+        assert!(out.iter().any(|g| matches!(g, LinkGeom::Arc { .. })), "{out:?}");
+    }
+
+    #[test]
+    fn tangent_snapping_leaves_unrelated_collinear_lines_alone() {
+        use solidcraft_geom::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // A rounded corner of radius 2 meeting the top edge, and an unrelated collinear edge.
+        let mut out = vec![
+            LinkGeom::Line(v(21., 8.), v(25., 8.)),
+            LinkGeom::Arc { c: v(2.0008, 5.9992), a: v(2.2808, 8.0), b: v(0., 6.0) },
+            LinkGeom::Line(v(2.0668, 8.), v(48., 8.)),
+        ];
+        super::super::snap_tangent_arcs(&mut out, 0.05);
+        assert_eq!(out.first(), Some(&LinkGeom::Line(v(21., 8.), v(25., 8.))));
+        let (Some(LinkGeom::Arc { a, .. }), Some(LinkGeom::Line(p, _))) = (out.get(1), out.get(2)) else { panic!("{out:?}") };
+        assert!(a.dist(*p) < 1e-9, "{out:?}");
+    }
+    #[test]
     fn boundaries_touching_at_a_vertex_project() {
         // Two squares of one face family meet only at the corner (1, 1): four boundary edges meet
         // there (a pinch), and the walk keeps each square's loop on its own face.

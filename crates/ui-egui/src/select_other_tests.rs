@@ -520,6 +520,31 @@ fn holding_still_opens_the_list_while_a_navigation_mode_is_lit() {
     }
 }
 
+/// A press held still on a line keeps the line lit until the list opens, with Orbit, Pan or
+/// Zoom lit as with none: the press is not navigating yet (#8864).
+#[test]
+fn a_press_held_still_keeps_the_highlight_while_a_navigation_mode_is_lit() {
+    for slot in [None, Some("orbit"), Some("pan"), Some("zoom")] {
+        let (mut h, at) = two_lines();
+        if let Some(slot) = slot {
+            h.step(&json!({"click": {"handle": format!("nav:slot:{slot}")}})).unwrap();
+        }
+        h.step(&json!({"move": at})).unwrap();
+        h.frames(2);
+        assert!(hovered_curve(&h).is_some(), "{slot:?}: the line under the pointer is lit");
+        let pos = egui::pos2(at[0].as_f64().unwrap_or_default() as f32, at[1].as_f64().unwrap_or_default() as f32);
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        h.app.synthetic.push(button(true));
+        h.frames(10);
+        assert!(!crate::select_other::is_open(&h.app), "{slot:?}: not open yet");
+        assert!(hovered_curve(&h).is_some(), "{slot:?}: still lit while the press is held");
+        h.frames(40);
+        assert!(crate::select_other::is_open(&h.app), "{slot:?}: the hold opened the list");
+        h.app.synthetic.push(button(false));
+        h.frames(2);
+    }
+}
+
 /// A drag under a lit mode still moves the view and does not open the list, whether it starts
 /// at once or after the press was held still for longer than egui waits to call it a drag.
 #[test]
@@ -614,4 +639,23 @@ fn a_small_body_on_a_large_one_is_not_picked_through() {
         };
         assert!(point.x > 0.9, "at {distance} mm away the pick is behind the near face: {first:?}");
     }
+}
+
+#[test]
+fn a_curve_from_intersect_is_labelled_intersected_and_one_from_project_projected() {
+    use solidcraft_engine::sketch::LinkKind;
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":10,"height":10,"body_name":"Block"})).unwrap();
+    let label = |h: &Harness, kind: LinkKind| {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let c = sk.curves.iter().find(|c| c.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| l.kind == kind)).unwrap();
+        crate::select_other::curve_label(sk, &c.id)
+    };
+    h.app.run("sketch.create", json!({"plane":"XY","offset":5,"project_edges":false})).unwrap();
+    h.app.run("sketch.intersect", json!({"refs":[{"body":"Block"}]})).unwrap();
+    assert!(label(&h, LinkKind::Intersect).ends_with("(intersected)"));
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":20,"project_edges":false})).unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Block"}]})).unwrap();
+    assert!(label(&h, LinkKind::Project).ends_with("(projected)"));
 }

@@ -585,7 +585,7 @@ impl Document {
                 }
                 let unit = match unit {
                     Some(u) => u.trim().to_string(),
-                    None => Self::infer_unit_in(vals, expr_s),
+                    None => Self::infer_unit_in(vals, expr_s, &self.units),
                 };
                 self.params.push(crate::Param {
                     name: name.into(),
@@ -696,18 +696,19 @@ impl Document {
     }
 
     /// The unit for a new parameter with this expression: that of its value; a bare number is
-    /// a length (mm).
+    /// a length in the design's units, as a typed length reads it (#8865).
     pub(crate) fn infer_unit(&self, e: &str) -> String {
-        Self::infer_unit_in(&self.param_values().0, e)
+        Self::infer_unit_in(&self.param_values().0, e, &self.units)
     }
 
-    /// [`Document::infer_unit`] against parameter values already worked out.
-    fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str) -> String {
+    /// [`Document::infer_unit`] against parameter values already worked out, a length taking
+    /// `units` (the design's, or `mm` where a bare number reads as millimetres).
+    pub(crate) fn infer_unit_in(vals: &BTreeMap<String, Value>, e: &str, units: &str) -> String {
         let v = expr::eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))));
         match v.ok().and_then(|v| v.kind()) {
             Some(Kind::Unitless) if !expr::references(e).is_empty() => String::new(),
             Some(Kind::Angle) => "deg".into(),
-            _ => "mm".into(),
+            _ => expr::length_unit_or_mm(units).to_string(),
         }
     }
 
@@ -890,6 +891,18 @@ impl Document {
                     }
                 }
                 for e in sketch.text_exprs_mut() {
+                    let r = expr::rename_reference(e, old, new);
+                    if r != *e {
+                        *e = r;
+                        n += 1;
+                    }
+                }
+                // An equation curve's variable hides a parameter of its name: such a parameter is
+                // not what its formulas refer to.
+                for (variable, e) in sketch.equation_exprs_mut() {
+                    if variable == old {
+                        continue;
+                    }
                     let r = expr::rename_reference(e, old, new);
                     if r != *e {
                         *e = r;

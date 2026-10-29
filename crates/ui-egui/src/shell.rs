@@ -99,6 +99,9 @@ pub(crate) struct State {
     /// Actual floating workspace surfaces and their optional canvas reservation.
     pub workspace_panels: std::collections::BTreeMap<&'static str, (Rect, Option<crate::ui_kit::Edge>)>,
     pub browser: Option<Rect>,
+    /// The browser set to reveal on hover is out of sight this frame (#8692); its place stays
+    /// in `browser`, which the pointer reveals.
+    pub browser_hidden: bool,
     pub history: Option<Rect>,
     /// In-memory seam drag width, never serialized as a preference.
     pub history_drag_width: Option<f32>,

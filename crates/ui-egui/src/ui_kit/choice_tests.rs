@@ -101,6 +101,25 @@ fn segmented_click_changes_selection_and_keeps_all_choices_visible() {
     }
 }
 
+/// A segment shows its option in the user's language, as the dropdown it falls back to does, and
+/// keeps the option as passed in its handle.
+#[test]
+fn segments_show_their_options_translated() {
+    let ctx = crate::fonts::test_context();
+    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 120.0));
+    let _japanese = crate::i18n::scope("ja");
+    let mut selected = 0;
+    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+        row(ui, "Section", |ui| segmented(ui, &mut selected, &["Circular", "Square"], Default::default()));
+    });
+    output.textures_delta.clear();
+    let painted = |text: &str| output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == text));
+    for (option, shown) in [("Circular", "円形"), ("Square", "正方形")] {
+        assert!(painted(shown) && !painted(option), "{option} shows as {shown}");
+        assert!(scenario::handle_at(&format!("dialog:Section:{option}")).is_some(), "{option} keeps its handle");
+    }
+}
+
 #[test]
 fn optional_field_keeps_empty_default_and_options_use_two_columns() {
     let ctx = crate::fonts::test_context();

@@ -63,6 +63,8 @@ pub enum Target {
     Origin,
     /// Document Settings › Units.
     Units,
+    /// Insert › Insert Design: the designs open in other tabs, and Browse… (#8570).
+    InsertDesign,
     /// The mouse mappings (Preferences › Navigation), from the status bar (#7023).
     Navigation,
     /// An assembly joint.
@@ -428,6 +430,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             })
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
+        Target::InsertDesign => insert_design_items(app),
     };
     if !crate::render_workspace::active(app) {
         v.extend(crate::browser::folded_folder_items(app, target));
@@ -1128,6 +1131,9 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));
         v.extend(explode_text(app));
     }
+    if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
+        v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
+    }
     v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
     v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     if !curves.is_empty() {
@@ -1246,6 +1252,30 @@ fn menu_sketch_point(app: &SolveApp, plane: &solidcraft_engine::geom::Plane) -> 
     Some(plane.to_local(plane.intersect_ray(o, d)?))
 }
 
+/// Insert Design's list (#8570): each design open in another tab, inserted with one click (its
+/// file name beside it; one not saved yet greyed out, as there is no file to link), then
+/// Browse… for a file, as the button did before.
+fn insert_design_items(app: &SolveApp) -> Vec<Item> {
+    let mut v = vec![Item::heading("Open designs")];
+    for d in crate::documents::other_designs(app) {
+        let file = d.path.as_deref().map(|p| std::path::Path::new(p).file_name().map_or(p.to_string(), |f| f.to_string_lossy().into_owned()));
+        let note = match (&file, d.unsaved) {
+            (None, _) => "Not saved yet".to_string(),
+            (Some(_), true) => "Unsaved changes".to_string(),
+            (Some(file), false) => file.clone(),
+        };
+        v.push(
+            act("ui.insertOpenDesign", &d.name, "component")
+                .key(&note)
+                .on(d.path.is_some())
+                .with(json!({"path": d.path, "name": d.name, "unsaved": d.unsaved})),
+        );
+    }
+    v.push(Item::sep());
+    v.push(act("ui.insertBrowse", "Browse…", "open"));
+    v
+}
+
 // ---------------------------------------------------------------------------------------------
 // Running an item
 // ---------------------------------------------------------------------------------------------
@@ -1329,6 +1359,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 None => drop(crate::edit_clipboard::paste_into(app, Some(at), item.id == "ui.pasteNew", into)),
             }
         }
+        "ui.editEquationCurve" => {
+            if let Some(id) = p.get("curve").and_then(Value::as_str) {
+                crate::sketch_modify_ui::edit_equation(app, id);
+            }
+        }
         "ui.editSketchPattern" => {
             if let Some(id) = p.get("pattern").and_then(Value::as_str) {
                 crate::sketch_modify_ui::edit_pattern(app, id);
@@ -1404,6 +1439,21 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             crate::design_properties::open_object(app, command, &params, fallback);
         }
         "ui.designProperties" => app.start("document.metadata"),
+        "ui.insertOpenDesign" => {
+            let (Some(path), name) = (p.get("path").and_then(Value::as_str), p.get("name").and_then(Value::as_str).unwrap_or_default()) else {
+                return;
+            };
+            // The design is open here, so its file's place is already the user's choice.
+            let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(path).into_iter().collect();
+            let inserted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
+            if inserted.is_ok() {
+                app.fit_view();
+                if p.get("unsaved").and_then(Value::as_bool) == Some(true) {
+                    app.set_status(crate::i18n::format("ui.insert_design.saved_file", &[("name", name)]), false);
+                }
+            }
+        }
+        "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
             let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
             app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));

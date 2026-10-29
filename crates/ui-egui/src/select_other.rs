@@ -267,13 +267,14 @@ fn sketch_name(app: &SolveApp, sketch: u64) -> String {
 }
 
 /// "Line 3" (its kind and number), with what kind of geometry it is when that matters.
-fn curve_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
+pub(crate) fn curve_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
     if let Some((i, c)) = sk.curves.iter().enumerate().find(|(_, c)| c.id == id) {
         let kind = curve_kind_name(&c.kind);
         let n = id_number(id).unwrap_or_else(|| sk.curves.iter().take(i + 1).filter(|x| curve_kind_name(&x.kind) == kind).count() as u64);
         let mut s = format!("{kind} {n}");
-        if c.link.is_some() {
-            s.push_str(" (projected)");
+        if let Some(link) = &c.link {
+            let kind = sk.links.iter().find(|l| &l.id == link).map(|l| l.kind);
+            s.push_str(if kind == Some(solidcraft_engine::sketch::LinkKind::Intersect) { " (intersected)" } else { " (projected)" });
         } else if c.construction {
             s.push_str(" (construction)");
         }

@@ -333,10 +333,40 @@ fn settle(strict: bool, rep: SolveReport, sk: &mut Sketch, unsolved: Sketch) -> 
     if strict && !rep.keeps_orientation() {
         return Err(EngineError::Other(rep.failure(|f| format!("that would over-constrain the sketch (conflicts with {f})"))));
     }
-    if !rep.keeps_orientation() {
+    // A solve that throws points far beyond the sketch found a far solution of its constraints,
+    // not the one the edit means (a line squeezed to a point under a direction constraint, an
+    // angle between sides that can't take it): it counts as one that fails.
+    let far = flung(&unsolved, sk);
+    if strict && far {
+        return Err(EngineError::Other(
+            "that would throw points of the sketch far away: its constraints have no solution near the sketch as it is".into(),
+        ));
+    }
+    if !rep.keeps_orientation() || far {
         *sk = unsolved;
     }
     Ok(rep)
+}
+
+/// A solve moving some point further than this many times the sketch's size (and its largest
+/// dimension value) has thrown the geometry to a far solution.
+const FLUNG: f64 = 1000.0;
+
+/// Did solving `before` into `after` throw some point further than [`FLUNG`] times the sketch's
+/// size, or to no number at all?
+fn flung(before: &Sketch, after: &Sketch) -> bool {
+    let (lo, hi) = before
+        .points
+        .iter()
+        .map(|p| p.pos)
+        .filter(|p| p.x.is_finite() && p.y.is_finite())
+        .fold((Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)), |(lo, hi), p| {
+            (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)))
+        });
+    let size = if lo.x <= hi.x { lo.dist(hi) } else { 0.0 };
+    let longest = after.driving_values().values().map(|v| v.abs()).filter(|v| v.is_finite()).fold(0.0, f64::max);
+    let reach = FLUNG * (size + longest).max(1.0);
+    after.points.iter().zip(&before.points).any(|(a, b)| !(a.pos.dist(b.pos) <= reach))
 }
 
 /// The sketch solves of `edit` and drags, counted in tests (see [`solve_with`]).
@@ -1736,7 +1766,7 @@ pub(super) fn apply_in_order(sk: &mut Sketch, rep: &SolveReport, first: &[Ent], 
         }));
         let ok = solve_with(&mut trial, &h, None, Analysis::StatusOnly, None).ok();
         trial.constraints.retain(|c| c.id != TEMP);
-        if ok && !collapsed(sk, &trial) {
+        if ok && !collapsed(sk, &trial) && !flung(sk, &trial) {
             *sk = trial;
             return Ok(());
         }
@@ -1748,6 +1778,9 @@ pub(super) fn apply_in_order(sk: &mut Sketch, rep: &SolveReport, first: &[Ent], 
     if first_movable && !second_locked {
         let mut trial = sk.clone();
         if solve_with(&mut trial, &Hold::default(), None, Analysis::StatusOnly, None).ok() {
+            if flung(sk, &trial) {
+                return Err(bad(cmd, "that would throw points of the sketch far away: its constraints have no solution near the sketch as it is"));
+            }
             *sk = trial;
             return Ok(());
         }

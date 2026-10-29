@@ -51,6 +51,12 @@ fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
 and all go when you let go, in one undo step (`sketch.trim.path`).
 
+Line draws a chain: each click adds a segment from the last point, and a right-click or Esc
+ends the chain. To draw one separate line with a press, a drag and the release instead, turn on
+**Preferences › Sketch › Press and drag draws one line**: the line runs from where you press to
+where you let go, snapping and lining up as clicks do, and ends there; clicks still draw a
+chain, and a drag shorter than about 24 points is still a click.
+
 Tools with several variants (line and midpoint line; two-point, three-point, centre and rounded
 rectangle; the circle, arc, slot, polygon and spline variants) share one toolbar button with a
 drop-down. The button and the family's shortcut start the variant you picked last, so a
@@ -181,6 +187,18 @@ While drawing a fit spline, click its starting point after three distinct sample
 it smoothly. Right-click finishes an ordinary natural fit. Offset accepts both ellipse
 handles and dense fitted curves; the second click sets the side and distance from the curve.
 
+**Equation Curve** draws a curve from formulas instead of clicks: x(t) and y(t) over a range of
+t, or y = f(x) over a range of x. The formulas use the expression language and the design's
+parameters, so `x = r * (cos(t) + t * sin(t))`, `y = r * (sin(t) - t * cos(t))` with t from 0 to
+1 is the involute of a base circle of radius `r`. The variable is a plain number: `sin(t)` takes
+it in radians, and a result without a unit is in the design's unit. The curve is a fit point
+spline through points worked out from the formulas, as many as keep it within the tolerance
+(0.01 mm unless you set another), up to 500; a curve that ends where it starts closes smoothly.
+Its points are fixed, so other curves can start at its ends and close a profile for Extrude or
+Revolve, and it can be a sweep path. When a parameter it uses changes, the points follow.
+Right-click the curve and choose **Edit Equation Curve** to change the formulas
+(`sketch.equation_curve` and `sketch.equation_curve.edit` from scripts and agents).
+
 While drawing in a planar sketch, **Construction** (X) changes the line type without
 ending the tool or losing picked points and inline values. The preview and hover feedback
 keep construction dashes and centerline dash-dot patterns visible. With curves selected,
@@ -192,6 +210,17 @@ hint shows **X**. The new point stays on both curves when either one moves. Hold
 to prefer a line midpoint instead; hold Ctrl/Cmd or Alt/Option (the default suppress chord)
 to stop snapping for that gesture. Scripts pass `"x:<curve>+<curve>:x,y"` as a point
 argument, the same way `"mid:<line>"` and `"on:<curve>:x,y"` work.
+
+With Preferences › Sketch › **Line up with other sketch points while drawing** turned on (it's
+off by default), the pointer also **lines up** while drawing with the sketch's points on screen:
+line ends, centres, standalone points and the origin, and the shape's own earlier points. It
+lines up on both axes at once, level with one point and plumb with another, so a rectangle drawn
+beside another can take its height from one and its width from a point below. A line kept
+horizontal or vertical from its start can still end under or beside another point. A dotted guide
+runs from each point it lines up with, and the snap hint shows **H**, **V** or **H+V**. The click
+keeps the alignment: the new point gets a Horizontal or Vertical constraint with each sketch
+point it lined up with, in the shape's undo step, unless the sketch already sets it. With the
+preference off, drawing lines up only with the previous point, one axis at a time.
 
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
 While placing these points, you can snap to points on other visible sketches. For a bridge

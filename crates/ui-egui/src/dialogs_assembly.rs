@@ -1283,12 +1283,31 @@ fn joint_menu(
     }
 }
 
+/// Membership is indexed once so a collapsed folder with hundreds of joints stays cheap.
+fn timeline_joint_items(app: &SolveApp, ids: Option<&[u64]>) -> Vec<(u64, String, JointKind, bool)> {
+    let members: std::collections::BTreeSet<u64> = match ids {
+        Some(ids) => ids.iter().copied().collect(),
+        None => app.session.doc.timeline_groups.iter().flat_map(|group| group.joints.iter().copied()).collect(),
+    };
+    app.session
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .filter(|joint| members.contains(&joint.id) == ids.is_some())
+        .map(|joint| (joint.id, joint.name.clone(), joint.kind, joint.suppressed))
+        .collect()
+}
+
 /// Joints after the features in the timeline: double-click edits, the menu drives, suppresses
 /// or deletes. Returns the x after them.
-pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect) -> f32 {
+pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect) -> f32 {
+    timeline_joint_tiles(app, ui, p, x, r, None)
+}
+
+pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: Option<&[u64]>) -> f32 {
     let t = Tokens::get();
-    let joints: Vec<(u64, String, JointKind, bool)> =
-        app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
+    let joints = timeline_joint_items(app, ids);
     if joints.is_empty() {
         return x;
     }
@@ -1339,14 +1358,19 @@ pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter,
 
 /// Named joint rows for the vertical feature-history layout.
 pub fn timeline_joints_vertical(app: &mut SolveApp, ui: &mut egui::Ui) {
+    timeline_joint_rows(app, ui, None);
+}
+
+pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Option<&[u64]>) {
     let t = Tokens::get();
-    let joints: Vec<(u64, String, JointKind, bool)> =
-        app.session.doc.assembly.joints.iter().map(|joint| (joint.id, joint.name.clone(), joint.kind, joint.suppressed)).collect();
+    let joints = timeline_joint_items(app, ids);
     if joints.is_empty() {
         return;
     }
-    ui.add_space(4.0);
-    ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+    if ids.is_none() {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+    }
     let mut open = None;
     let mut run = None;
     for (id, name, kind, suppressed) in joints {

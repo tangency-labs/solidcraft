@@ -1638,3 +1638,59 @@ fn occurrence_align_keeps_every_pick_and_reports_shared_definitions() {
     let r = run(&mut s, "occurrence.align", json!({"paths": [[b]], "from": [0, 0, 0], "to": [1, 0, 0]}));
     assert!(r.get("shared").is_none(), "{r}");
 }
+
+/// A body copied in another design pastes here as an imported body: at the world coordinates it
+/// had there, into the component asked for (placed elsewhere), named as it was or numbered when
+/// that name is taken, from one Import feature named as any import is, as one step to undo.
+#[test]
+fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
+    let mut source = Session::default();
+    source.doc_mut().name = "Bracket".into();
+    let (_, holder) = created(&mut source, "Holder");
+    run(&mut source, "occurrence.move", json!({"occurrence": holder, "translate": [0,50,0]}));
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let was = source.world_state().body("Cube").unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new());
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Cube"}));
+    let (a, a_at) = created(&mut s, "A");
+    run(&mut s, "occurrence.move", json!({"occurrence": a_at, "translate": [100,0,0]}));
+    s.foreign_copy = Some(std::sync::Arc::new(copy));
+    let undo = s.undo.len();
+    let out = run(&mut s, "component.paste_from_design", json!({"component": a, "component_path": [a_at]}));
+    assert_eq!(out["bodies"], json!(["Cube (2)"]));
+    assert_eq!(out["feature"], "Import1");
+    assert_eq!(s.undo.len(), undo + 1);
+    let is = s.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+    let state = s.model.state();
+    assert_eq!(s.doc.model_body_component(state.body("Cube (2)").unwrap()), a);
+    assert!(matches!(&s.doc.find_feature("Import1").unwrap().kind, solidcraft_doc::FeatureKind::Import { file, .. } if file == "Bracket (pasted)"));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().body("Cube (2)").is_none());
+}
+
+/// A body seen in another placement of its component ("Cube (Holder:2)") pastes into another
+/// design under its own name, at that placement's position.
+#[test]
+fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_name() {
+    let mut source = Session::default();
+    source.doc_mut().name = "Bracket".into();
+    let (holder, first) = created(&mut source, "Holder");
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    run(&mut source, "component.activate", json!({"component": 0}));
+    let second = run(&mut source, "occurrence.copy", json!({"occurrence": first}))["occurrence"].as_u64().unwrap();
+    run(&mut source, "occurrence.move", json!({"occurrence": second, "translate": [0,40,0]}));
+    let seen = source.placed_document().world_body_name(&source.model.state(), "Cube", holder, &[second]);
+    assert_ne!(seen, "Cube");
+    let was = source.world_state().body(&seen).unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec![seen], Vec::new());
+    assert_eq!(copy.names, vec!["Cube".to_string()]);
+
+    let mut s = Session { foreign_copy: Some(std::sync::Arc::new(copy)), ..Default::default() };
+    let out = run(&mut s, "component.paste_from_design", json!({}));
+    assert_eq!(out["bodies"], json!(["Cube"]));
+    let is = s.world_state().body("Cube").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+}

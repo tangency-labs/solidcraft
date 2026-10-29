@@ -472,6 +472,7 @@ mod tests {
     fn part_size_round_trips_all_builtin_families_without_adding_a_length_to_rings() {
         for (family, size, length) in [
             ("socket_head_cap_screw", "M5", Some(20.0)),
+            ("button_head_cap_screw", "M5", Some(20.0)),
             ("hex_bolt", "M5", Some(20.0)),
             ("hex_nut", "M5", None),
             ("washer", "M5", None),

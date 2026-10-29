@@ -1810,3 +1810,84 @@ mod browser_rows {
         assert!(h.app.viewport.context_menu.is_none(), "a click outside the menu closes it");
     }
 }
+
+/// #8570: Insert Design lists the designs open in other tabs. One click inserts a saved one; one
+/// with unsaved changes inserts its saved file and says so; one never saved is greyed out, as there
+/// is no file to link. Browse… opens the file picker. Alone, or with the preference off, the
+/// button goes straight to the picker, as before.
+#[test]
+fn insert_design_offers_the_other_open_designs_then_browse() {
+    let mut h = crate::scenario::Harness::new();
+    let open = |dir: &std::path::Path, file: &str, size: f64| {
+        let path = dir.join(file);
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": size, "width": size, "height": size})).unwrap();
+        s.execute("file.save", &json!({"path": path})).unwrap();
+        let mut opened = Session::default();
+        opened.execute("doc.open", &json!({"path": path})).unwrap();
+        opened
+    };
+    let linked = |app: &SolveApp, file: &str| app.session.doc.links.values().filter(|l| l.path.ends_with(file)).count();
+    let menu_open = |app: &SolveApp| app.viewport.context_menu.is_some() && app.menu.target == Target::InsertDesign;
+
+    // Alone: the picker, as before.
+    h.step(&json!({"choose_file": "none.solidcraft"})).unwrap();
+    h.app.start("component.insert_design");
+    assert!(!menu_open(&h.app));
+    h.frames(3);
+    context_menu::close(&mut h.app);
+
+    let dir = h.dir.clone();
+    crate::documents::open_tab(&mut h.app, open(&dir, "bracket.solidcraft", 10.0)).unwrap();
+    crate::documents::open_tab(&mut h.app, open(&dir, "plate.solidcraft", 20.0)).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0]})).unwrap();
+    crate::documents::open_tab(&mut h.app, Session::default()).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    crate::documents::open_tab(&mut h.app, Session::default()).unwrap();
+    crate::documents::switch(&mut h.app, 0);
+    h.app.run("solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Base"})).unwrap();
+
+    h.app.start("component.insert_design");
+    assert!(menu_open(&h.app));
+    let items = context_menu::items(&h.app, &Target::InsertDesign);
+    let rows: Vec<(&str, &str, bool)> = items.iter().map(|i| (i.label.as_str(), i.shortcut.as_str(), i.enabled)).collect();
+    let names: Vec<String> = h.app.docs.background().map(|s| s.doc.name.clone()).collect();
+    assert_eq!(
+        rows,
+        [
+            ("Open designs", "", false),
+            (names[0].as_str(), "bracket.solidcraft", true),
+            (names[1].as_str(), "Unsaved changes", true),
+            (names[2].as_str(), "Not saved yet", false),
+            ("", "", false),
+            ("Browse…", "", true),
+        ],
+        "a saved design, one with unsaved changes, one never saved; not the blank new tab"
+    );
+
+    act(&mut h.app, &Target::InsertDesign, &names[0]);
+    assert_eq!(linked(&h.app, "bracket.solidcraft"), 1);
+    assert!(h.app.status.as_ref().is_none_or(|(s, _, _)| !s.contains("unsaved")), "{:?}", h.app.status);
+    act(&mut h.app, &Target::InsertDesign, &names[1]);
+    assert_eq!(linked(&h.app, "plate.solidcraft"), 1);
+    assert!(
+        h.app.status.as_ref().is_some_and(|(s, _, error)| !*error && s.contains("unsaved changes") && s.contains("Update Links")),
+        "{:?}",
+        h.app.status
+    );
+
+    // Browse…: the picker, for any file on disk.
+    h.step(&json!({"choose_file": "bracket.solidcraft"})).unwrap();
+    act(&mut h.app, &Target::InsertDesign, "Browse…");
+    h.frames(3);
+    assert_eq!(linked(&h.app, "bracket.solidcraft"), 2);
+
+    // The preference off: straight to the picker.
+    h.app.preferences.insert_lists_open_designs = false;
+    context_menu::close(&mut h.app);
+    h.step(&json!({"choose_file": "plate.solidcraft"})).unwrap();
+    h.app.start("component.insert_design");
+    assert!(!menu_open(&h.app));
+    h.frames(3);
+    assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
+}

@@ -359,6 +359,21 @@ pub fn reset(t: &mut Tool) {
     t.dims_focus = false;
 }
 
+/// After a draw-drag press that only placed the first point, a short release (or one that lands
+/// on the same sketch point, #8899) must keep the stage-1 value boxes rather than wiping them
+/// with [`reset`] and waiting for the next frame to rebuild them.
+pub fn keep_stage_one(t: &mut Tool) {
+    if t.pts.len() != 1 {
+        return;
+    }
+    if t.dims_stage != 1 || t.dims.is_empty() {
+        t.dim_history.clear();
+        t.dims = boxes_for(t.cmd, 1);
+        t.dims_stage = 1;
+    }
+    t.dims_focus = !t.dims.is_empty();
+}
+
 pub fn has_locked(t: &Tool, label: &str) -> bool {
     t.dims.iter().chain(&t.dim_history).any(|dimension| dimension.locked && dimension.label == label)
 }
@@ -477,7 +492,10 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let sid = app.session.active_sketch?;
     let st = app.session.world_state();
     let plane = st.sketch(sid)?.plane;
-    let e = shown(app, t, t.hover.as_ref()?);
+    // When the pointer is over the value box itself after releasing on a shared centre (#8899),
+    // the tool may have no hover for a frame: still show the boxes from the first point.
+    let hover = t.hover.clone().or_else(|| t.pts.last().map(|(p, id)| (*p + Vec2::X, id.clone())));
+    let e = shown(app, t, hover.as_ref()?);
     let px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));
     let lv = live(app, t, e, px);
     let focus = std::mem::take(&mut t.dims_focus);

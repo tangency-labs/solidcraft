@@ -188,7 +188,7 @@ surface = [
 sketch = [
   "arc3", "arc_center", "arc_slot", "arc_slot_center", "arc_tangent",
   "blend", "circle", "circle2", "circle3", "circle_tt",
-  "circle_ttt", "conic", "constrainer", "dimension", "ellipse",
+  "circle_ttt", "conic", "constrainer", "dimension", "ellipse", "equation_curve",
   "extend", "finish", "fit_section", "include",
   "intersect", "intersection_curve", "iso_curve", "line", "line_mid",
   "offset", "offset_two_sides", "offset_symmetric", "point", "polygon", "polygon_circumscribed", "polygon_edge",

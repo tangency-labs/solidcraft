@@ -357,8 +357,6 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     for g in &mut part.timeline_groups {
         g.features.retain(|f| sc.inside.contains(f));
     }
-    let parents: BTreeSet<u64> = part.timeline_groups.iter().filter_map(|g| g.parent).collect();
-    part.timeline_groups.retain(|g| !g.features.is_empty() || parents.contains(&g.id));
     part.named_views.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
@@ -371,7 +369,14 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
     scope.assembly.origins.retain(|o| mapped(&o.origin.occurrence));
     scope.assembly.contact_sets.retain(|c| c.occurrences.iter().all(mapped));
     scope.assembly.exploded.retain(|v| v.moves.iter().all(|(o, _)| mapped(o)));
-    let mut notices = super::super::component_clone_assembly::clone_assembly(&mut part, &scope, &sc.occurrences, &features, &body_map)?;
+    let (mut notices, joints) =
+        super::super::component_clone_assembly::clone_assembly_with_joint_ids(&mut part, &scope, &sc.occurrences, &features, &body_map)?;
+    // Extracted joints receive new ids. References to joints outside the extracted part go away.
+    for group in &mut part.timeline_groups {
+        group.joints = group.joints.iter().filter_map(|id| joints.get(id).copied()).collect();
+    }
+    let parents: BTreeSet<u64> = part.timeline_groups.iter().filter_map(|g| g.parent).collect();
+    part.timeline_groups.retain(|g| !g.features.is_empty() || !g.joints.is_empty() || parents.contains(&g.id));
     prune_params(&mut part);
     if !source.configs.is_empty() {
         notices.push(format!("the configurations stay in this design; {stem} has none"));
@@ -785,6 +790,7 @@ mod tests {
     fn extract_moves_the_history_to_its_own_design_and_links_it() {
         let dir = folder("basic");
         let (mut s, plate, other) = assembly();
+        run(&mut s, "timeline.group", json!({"name":"Internal joints", "joints":["PinHold"]}));
         run(&mut s, "file.save", json!({"path": dir.join("asm.solidcraft")}));
         let (vol, cen) = (volumes(&s), centroids(&s));
         let other_features: Vec<u64> = s.doc.features.iter().filter(|f| f.component == other).map(|f| f.id).collect();
@@ -815,6 +821,7 @@ mod tests {
         assert_eq!(part.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Pin"]);
         assert_eq!(part.doc.occurrences.len(), 1);
         assert_eq!(part.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect::<Vec<_>>(), ["PinHold"]);
+        assert_eq!(part.doc.timeline_groups[0].joints, [part.doc.assembly.joints[0].id], "joint folders follow the extracted ids");
         assert!(part.doc.param("plate_h").is_some() && part.doc.param("unused").is_none());
         assert!(part.model.results.iter().all(|r| r.error.is_none()));
         let part_vol = volumes(&part);

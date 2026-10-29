@@ -812,6 +812,69 @@ fn a_defined_length_takes_the_design_unit() {
     assert!(rel(volume(&mut s), 50.8 * 25.4 * 25.4) < 1e-9);
 }
 
+/// A parameter added without a unit takes the unit of its value, a length in the design's units
+/// as a typed length would be (#8865): `40/2` in an inch design is 20 in, as the Parameters
+/// dialog makes it. A unit given, an angle and a unit-less value keep their own.
+#[test]
+fn a_parameter_added_without_a_unit_takes_the_design_unit() {
+    let added = |s: &mut Session, p: Value| {
+        let r = run(s, "parameters.add", p);
+        (r["unit"].as_str().unwrap_or("?").to_string(), r["value"].as_f64().unwrap_or(f64::NAN), r["display_value"].as_f64().unwrap_or(f64::NAN))
+    };
+    let close = |got: (String, f64, f64), unit: &str, mm: f64, shown: f64| {
+        assert!(got.0 == unit && rel(got.1, mm) < 1e-9 && rel(got.2, shown) < 1e-9, "{got:?}, expected {unit} {mm} mm ({shown})");
+    };
+    // A millimetre design is as it was.
+    let mut s = Session::default();
+    close(added(&mut s, json!({"name": "v", "expression": "40/2"})), "mm", 20.0, 20.0);
+    close(added(&mut s, json!({"name": "w", "expression": "v + 1"})), "mm", 21.0, 21.0);
+
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    close(added(&mut s, json!({"name": "v", "expression": "40/2"})), "in", 508.0, 20.0);
+    close(added(&mut s, json!({"name": "given", "expression": "40/2", "unit": "in"})), "in", 508.0, 20.0);
+    close(added(&mut s, json!({"name": "metric", "expression": "40/2", "unit": "mm"})), "mm", 20.0, 20.0);
+    // A value with a unit keeps its size and shows in the design's units.
+    close(added(&mut s, json!({"name": "plate", "expression": "25.4 mm"})), "in", 25.4, 1.0);
+    // One that refers to another parameter: its bare number is an inch too.
+    close(added(&mut s, json!({"name": "more", "expression": "v + 1"})), "in", 533.4, 21.0);
+    close(added(&mut s, json!({"name": "half", "expression": "v / 2"})), "in", 254.0, 10.0);
+    // An angle stays in degrees, a unit-less count stays unit-less.
+    close(added(&mut s, json!({"name": "turn", "expression": "30 deg"})), "deg", 30f64.to_radians(), 30.0);
+    close(added(&mut s, json!({"name": "n", "expression": "4", "unit": ""})), "", 4.0, 4.0);
+    close(added(&mut s, json!({"name": "twice", "expression": "n * 2"})), "", 8.0, 8.0);
+    // parameters.change and parameters.import make a new parameter the same way.
+    run(&mut s, "parameters.change", json!({"name": "c", "expression": "3"}));
+    assert_eq!(s.doc.param("c").map(|p| p.unit.as_str()), Some("in"));
+    run(&mut s, "parameters.import", json!({"text": "name,expression\nimported,2\n"}));
+    assert_eq!(s.doc.param("imported").map(|p| p.unit.as_str()), Some("in"));
+    let (vals, _) = s.doc.param_values();
+    assert!(vals.get("imported").is_some_and(|v| rel(v.v, 50.8) < 1e-9), "{:?}", vals.get("imported"));
+    // An existing parameter changed without a unit keeps its own.
+    run(&mut s, "parameters.change", json!({"name": "metric", "expression": "30"}));
+    assert_eq!(s.doc.param("metric").map(|p| p.unit.as_str()), Some("mm"));
+    // A centimetre design works the same way.
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "cm"}));
+    close(added(&mut s, json!({"name": "v", "expression": "3"})), "cm", 30.0, 3.0);
+}
+
+/// Hostile parameters.add input in an inch design is refused with a reason and adds nothing.
+#[test]
+fn a_hostile_parameter_in_an_inch_design_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "document.units", json!({"units": "in"}));
+    // 1e308 inches is past any finite millimetre value.
+    for (name, e) in [("huge", "1e308"), ("inf", "1e308 * 1e308"), ("nan", "0/0"), ("bad", "2 furlong"), ("empty", " "), ("self_ref", "self_ref + 1")]
+    {
+        let why = err(&mut s, "parameters.add", json!({"name": name, "expression": e}));
+        assert!(!why.is_empty() && s.doc.param(name).is_none(), "{name}: {why}");
+    }
+    let why = err(&mut s, "parameters.add", json!({"name": "u", "expression": "1", "unit": "furlong"}));
+    assert!(why.contains("unknown unit"), "{why}");
+    assert!(s.doc.params.is_empty());
+}
+
 /// A definition that cannot be made fails the command and leaves the design as it was: a taken,
 /// reserved or malformed name, no value, a value that names itself, two different values for one
 /// name, and a parameter's or configuration cell's own expression.

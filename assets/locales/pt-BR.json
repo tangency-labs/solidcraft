@@ -2244,6 +2244,7 @@
   "ui.select": "Selecionar",
   "ui.selectOther": "Selecionar outro…",
   "ui.selectTangentChain": "Selecionar cadeia tangente",
+  "ui.select_all": "Selecionar tudo",
   "ui.selection": "Seleção",
   "ui.selection_modifiers": "Modificadores de seleção",
   "ui.selection_shift_add_only": "Shift+clique adiciona sem remover",

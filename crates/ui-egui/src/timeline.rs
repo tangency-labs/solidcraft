@@ -257,11 +257,6 @@ fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
     best.0
 }
 
-/// Ask before deleting a feature others depend on; delete right away otherwise.
-pub(crate) fn delete_feature(app: &mut SolveApp, id: u64) {
-    delete_features(app, vec![id]);
-}
-
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
 /// while, #2678), then delete them or ask first.
 pub(crate) fn delete_features(app: &mut SolveApp, ids: Vec<u64>) {
@@ -329,21 +324,38 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
     if selected.contains(&id) { selected } else { vec![id] }
 }
 
-/// The features from timeline position `from` to the end.
-fn features_from(app: &SolveApp, from: usize) -> Vec<u64> {
-    app.session.doc.features.iter().skip(from).map(|f| f.id).collect()
+/// Delete in a feature's menu, in both timelines: the selected features when the right-clicked
+/// one is among them, labelled with how many, else that feature alone (#5005).
+pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
+    let targets = menu_targets(app, id);
+    let label = match targets.len() {
+        1 => crate::i18n::tr_label("Delete").to_string(),
+        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
+    };
+    if crate::context_menu::button(ui, &label, "delete").clicked() {
+        delete_features(app, targets);
+        ui.close();
+    }
 }
 
-/// In the menu of a feature after the history marker (feature `id` at timeline position
-/// `index`): delete every feature after the marker, labelled with how many, in one delete
-/// through [`delete_features`] so the confirmation still lists what would fail. Not offered
-/// before the marker, nor when the menu acts on several selected features: an entry that acts
-/// partly on the selection and partly beyond it is hard to read.
-pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize) {
+/// The features from design position `from` to the end, only the `shown` positions (ascending)
+/// when the timeline shows some of the design's features.
+fn features_from(app: &SolveApp, from: usize, shown: Option<&[usize]>) -> Vec<u64> {
+    let features = app.session.doc.features.iter().enumerate().skip(from);
+    features.filter(|(i, _)| shown.is_none_or(|shown| shown.binary_search(i).is_ok())).map(|(_, f)| f.id).collect()
+}
+
+/// In the menu of a feature after the history marker (feature `id` at design position
+/// `index`, `marker` a design position too): delete every feature after the marker, only the
+/// `shown` ones when the timeline is filtered to a component, labelled with how many, in one
+/// delete through [`delete_features`] so the confirmation still lists what would fail. Not
+/// offered before the marker, nor when the menu acts on several selected features: an entry
+/// that acts partly on the selection and partly beyond it is hard to read.
+pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
     if index < marker || menu_targets(app, id).len() > 1 {
         return;
     }
-    let ids = features_from(app, marker);
+    let ids = features_from(app, marker, shown);
     let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
     let label = crate::i18n::format(key, &[("count", &ids.len().to_string())]);
     if crate::context_menu::button(ui, &label, "delete").clicked() {
@@ -654,6 +666,109 @@ pub(crate) fn floating_rect(available: Rect) -> Rect {
     Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
 }
 
+#[derive(Clone, Debug)]
+enum FolderTile {
+    Feature(usize),
+    Folder(u64),
+    Joints(Vec<u64>),
+}
+
+/// Lay out each folder as a block, keeping feature order and placing its joints at its end.
+fn folder_tiles(app: &SolveApp, features: &[u64]) -> Vec<FolderTile> {
+    if app.session.doc.timeline_groups.is_empty() {
+        return (0..features.len()).map(FolderTile::Feature).collect();
+    }
+    fn entries(app: &SolveApp, features: &[u64], parent: Option<u64>) -> Vec<FolderTile> {
+        let groups = &app.session.doc.timeline_groups;
+        let mut entries: Vec<(usize, u64, FolderTile)> = features
+            .iter()
+            .enumerate()
+            .filter(|(_, id)| groups.iter().find(|group| group.features.contains(id)).map(|group| group.id) == parent)
+            .map(|(index, id)| (index, *id, FolderTile::Feature(index)))
+            .collect();
+        for group in groups.iter().filter(|group| group.parent == parent) {
+            let mut pending = vec![group.id];
+            let mut seen = std::collections::BTreeSet::new();
+            let mut first = features.len();
+            while let Some(id) = pending.pop() {
+                if !seen.insert(id) {
+                    continue;
+                }
+                if let Some(group) = groups.iter().find(|group| group.id == id) {
+                    first = first.min(features.iter().position(|id| group.features.contains(id)).unwrap_or(features.len()));
+                    pending.extend(groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id));
+                }
+            }
+            entries.push((first, group.id, FolderTile::Folder(group.id)));
+        }
+        entries.sort_by_key(|(index, id, _)| (*index, *id));
+        entries.into_iter().map(|(_, _, tile)| tile).collect()
+    }
+
+    let mut out = Vec::new();
+    let mut pending = entries(app, features, None);
+    pending.reverse();
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some(tile) = pending.pop() {
+        if let FolderTile::Folder(id) = tile {
+            if !visited.insert(id) {
+                continue;
+            }
+            out.push(FolderTile::Folder(id));
+            if !app.tree.collapsed.contains(&format!("timeline_group:{id}")) {
+                if let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id) {
+                    pending.push(FolderTile::Joints(group.joints.clone()));
+                }
+                pending.extend(entries(app, features, Some(id)).into_iter().rev());
+            }
+        } else {
+            out.push(tile);
+        }
+    }
+    out
+}
+
+fn folder_tile(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: Rect, id: u64) -> f32 {
+    let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id).cloned() else { return x };
+    let t = Tokens::get();
+    let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
+    let key = format!("timeline_group:{id}");
+    let open = !app.tree.collapsed.contains(&key);
+    let resp = ui.interact(br, ui.id().with(("folder", id)), Sense::click());
+    p.rect(
+        br,
+        t.radius_sm.saturating_sub(1),
+        if resp.hovered() { t.hover } else { t.timeline_item },
+        t.control_border_stroke(t.border),
+        egui::StrokeKind::Inside,
+    );
+    crate::icons::paint_icon(p, br.shrink(4.0), "folder", f32::from(t.icon.a()) / 255.0);
+    let mut pending = vec![id];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut count = 0;
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        if let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id) {
+            count += group.features.len() + group.joints.len();
+            pending.extend(app.session.doc.timeline_groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id));
+        }
+    }
+    p.text(br.right_bottom(), egui::Align2::RIGHT_BOTTOM, count.to_string(), egui::FontId::proportional(t.font_micro), t.text);
+    crate::scenario::publish_handle(&format!("timeline-folder:{}", group.name), br.center());
+    crate::scenario::publish_handle(&format!("timeline-folder-fold:{}", group.name), br.center());
+    if resp.clicked() {
+        if open {
+            app.tree.collapsed.insert(key);
+        } else {
+            app.tree.collapsed.remove(&key);
+        }
+    }
+    resp.on_hover_text(format!("{} ({count})", group.name));
+    x + 32.0
+}
+
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     let t = Tokens::get();
     let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
@@ -725,6 +840,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 }
                 x = br.right() + 8.0;
             }
+            let design_marker = marker;
             let marker = shown.iter().position(|i| *i >= marker).unwrap_or(shown.len());
             let feats: Vec<_> = shown
                 .iter()
@@ -739,7 +855,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let drag_id = ui.id().with("tl_drag");
             let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
             let pointer = ui.input(|i| i.pointer.hover_pos());
-            let mut xs: Vec<f32> = Vec::new();
+            let mut xs: Vec<f32> = vec![x; feats.len()];
             let mut hovered: Option<u64> = None;
             let mut edit: Option<u64> = None;
             let mut marker_rect: Option<Rect> = None;
@@ -748,13 +864,47 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // Each feature's result, found once for the strip: a search per chip made a long
             // timeline cost the square of its length every frame.
             let results = result_index(&app.session.model.results);
-            for (i, (id, name, icon, suppressed, ty, kind)) in feats.iter().enumerate() {
+            for tile in folder_tiles(app, &order) {
+                let i = match tile {
+                    FolderTile::Folder(id) => {
+                        if marker_rect.is_none() && app.tree.collapsed.contains(&format!("timeline_group:{id}")) {
+                            let mut pending = vec![id];
+                            let mut seen = std::collections::BTreeSet::new();
+                            let mut contains_marker = false;
+                            while let Some(id) = pending.pop() {
+                                if !seen.insert(id) {
+                                    continue;
+                                }
+                                if let Some(group) = app.session.doc.timeline_groups.iter().find(|group| group.id == id) {
+                                    contains_marker |= order.get(marker).is_some_and(|feature| group.features.contains(feature));
+                                    pending.extend(
+                                        app.session.doc.timeline_groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id),
+                                    );
+                                }
+                            }
+                            if contains_marker {
+                                marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
+                                x += t.space_16;
+                            }
+                        }
+                        x = folder_tile(app, ui, &p, x, r, id);
+                        continue;
+                    }
+                    FolderTile::Joints(ids) => {
+                        x = crate::dialogs_assembly::timeline_joint_tiles(app, ui, &p, x, r, Some(&ids));
+                        continue;
+                    }
+                    FolderTile::Feature(index) => index,
+                };
+                let Some((id, name, icon, suppressed, ty, kind)) = feats.get(i) else { continue };
                 let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
                 if i == marker {
                     marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
                     x += t.space_16;
                 }
-                xs.push(x);
+                if let Some(slot) = xs.get_mut(i) {
+                    *slot = x;
+                }
                 let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
                 if reveal == Some(*id) {
                     ui.scroll_to_rect(br, Some(egui::Align::Center));
@@ -793,6 +943,11 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
                 }
                 let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                // Greyed out says only "not shown": say why (#8100).
+                if rolled {
+                    tip.push('\n');
+                    tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
+                }
                 if let Some(state) = sketch_state {
                     tip.push('\n');
                     tip.push_str(&state.text());
@@ -855,18 +1010,15 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     clipboard_buttons(app, ui, *id);
                     message_button(app, ui, *id);
                     ui.separator();
-                    let targets = menu_targets(app, *id);
-                    let label = match targets.len() {
-                        1 => crate::i18n::tr_label("Delete").to_string(),
-                        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
-                    };
-                    if crate::context_menu::button(ui, &label, "delete").clicked() {
-                        delete_features(app, targets);
-                        ui.close();
-                    }
-                    delete_after_marker_button(app, ui, *id, i, marker);
+                    delete_button(app, ui, *id);
+                    delete_after_marker_button(app, ui, *id, design_position(&shown, i, n), design_marker, Some(&shown));
                 });
                 x += 32.0;
+            }
+            let mut previous = origin;
+            for slot in &mut xs {
+                *slot = (*slot).max(previous);
+                previous = *slot;
             }
             let end = x;
             if marker >= feats.len() {
@@ -972,6 +1124,45 @@ mod tests {
     use solidcraft_engine::doc::{FeatureKind, PlaneRef};
 
     use crate::scenario::Harness;
+
+    #[test]
+    fn joint_folder_hides_fifty_joint_tiles_in_both_history_layouts() {
+        use crate::scenario::handle_at;
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.timeline_left = left;
+            h.app.run("component.create", json!({"name":"Part"})).unwrap();
+            let mut joints = Vec::new();
+            for index in 0..50 {
+                joints.push(
+                    h.app.run("joint.as_built", json!({"type":"rigid", "a":0, "b":"Part", "name":format!("Hinge{index}")})).unwrap()["joint"]
+                        .as_u64()
+                        .unwrap(),
+                );
+            }
+            let folder = h.app.run("timeline.group", json!({"name":"Joints", "joints":joints})).unwrap()["group"].as_u64().unwrap();
+            h.app.tree.collapsed.insert(format!("timeline_group:{folder}"));
+            h.frames(4);
+            assert!(handle_at("timeline-folder:Joints").is_some());
+            assert_eq!(crate::scenario::handles("timeline-folder:").len(), 1);
+            assert!(crate::scenario::handles("timeline-joint:").is_empty());
+            for index in 0..50 {
+                assert!(handle_at(&format!("timeline-joint:Hinge{index}")).is_none());
+            }
+            h.step(&json!({"click":{"handle":"timeline-folder-fold:Joints"}})).unwrap();
+            h.frames(4);
+            for index in 0..50 {
+                assert!(handle_at(&format!("timeline-joint:Hinge{index}")).is_some(), "joint {index} missing, left={left}");
+            }
+            assert_eq!(crate::scenario::handles("timeline-joint:").len(), 50, "no trailing duplicates");
+            h.step(&json!({"click":{"handle":"timeline-joint:Hinge0"}})).unwrap();
+            assert_eq!(h.app.tree.picked_joints, [joints[0]]);
+            h.step(&json!({"click":{"handle":"timeline-folder-fold:Joints"}})).unwrap();
+            h.frames(4);
+            assert!(handle_at("timeline-joint:Hinge0").is_none());
+        }
+    }
 
     #[test]
     fn history_status_translates_prefixes_and_both_diagnostics() {
@@ -1708,23 +1899,28 @@ mod tests {
     }
 
     /// Delete in the menu of a selected feature deletes the whole selection in one undo step,
-    /// and says how many; on a feature outside the selection it deletes that one (#5005).
+    /// and says how many; on a feature outside the selection it deletes that one (#5005). The
+    /// same in both timelines, and the history beside the browser no longer adds its own Delete
+    /// Selected Features… to a feature's menu (#8861).
     #[test]
     fn the_feature_menu_deletes_the_selected_features() {
-        let mut h = three_boxes(false);
-        h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
-        assert!(h.widget("Delete").is_some());
-        h.step(&json!({"key": "Escape"})).unwrap();
+        for left in [false, true] {
+            let mut h = three_boxes(left);
+            h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
+            assert!(h.widget("Delete").is_some(), "left: {left}");
+            h.step(&json!({"key": "Escape"})).unwrap();
 
-        h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
-        h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
-        h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
-        h.settle();
-        assert!(h.app.dialog.is_none(), "nothing else depends on them");
-        assert_eq!(names(&h), ["Third"]);
-        h.app.run("edit.undo", json!({})).unwrap();
-        assert_eq!(names(&h), ["First", "Second", "Third"]);
+            h.step(&json!({"click": {"handle": "timeline:First"}})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "ctrl": true})).unwrap();
+            h.step(&json!({"click": {"handle": "timeline:Second"}, "button": "right"})).unwrap();
+            assert!(h.widget("Delete Selected Features…").is_none(), "left: {left}");
+            h.step(&json!({"widget": "Delete 2 Selected Features"})).unwrap();
+            h.settle();
+            assert!(h.app.dialog.is_none(), "nothing else depends on them");
+            assert_eq!(names(&h), ["Third"], "left: {left}");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
+        }
     }
 
     /// The menu of a feature after the history marker deletes every feature after the marker,
@@ -1742,8 +1938,7 @@ mod tests {
             h.step(&json!({"click": {"handle": "timeline:Second"}})).unwrap();
             h.step(&json!({"click": {"handle": "timeline:Third"}, "ctrl": true})).unwrap();
             h.step(&json!({"click": {"handle": "timeline:Third"}, "button": "right"})).unwrap();
-            // (The history beside the browser has its own Delete Selected Features….)
-            assert!(left || h.widget("Delete 2 Selected Features").is_some());
+            assert!(h.widget("Delete 2 Selected Features").is_some(), "left: {left}");
             assert!(h.widget("Delete 2 Features After History Marker").is_none(), "left: {left}");
             h.step(&json!({"key": "Escape"})).unwrap();
             h.app.run("select.clear", json!({})).unwrap();
@@ -1756,6 +1951,37 @@ mod tests {
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(names(&h), ["First", "Second", "Third"], "left: {left}");
         }
+    }
+
+    /// With the timeline showing one component's features, the entry counts and deletes that
+    /// component's features after the marker, found by their positions in the design: none of
+    /// another component's and none before the marker (#8860).
+    #[test]
+    fn after_the_marker_a_shown_component_deletes_only_its_features() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "C1"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "C2"})).unwrap();
+        for (k, name) in ["B1", "B2", "B3", "B4", "B5", "B6"].into_iter().enumerate() {
+            h.app.run("component.activate", json!({"component": if k % 2 == 0 { "C1" } else { "C2" }})).unwrap();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20 * k, 0, 0], "name": name})).unwrap();
+        }
+        let before = names(&h);
+        h.app.run("timeline.roll_to", json!({"feature": "B2"})).unwrap();
+        h.app.run("component.activate", json!({"component": "C1"})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.settle();
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "timeline:B1"}, "button": "right"})).unwrap();
+        assert!(h.widget("Delete 2 Features After History Marker").is_none(), "B1 is before the marker");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.step(&json!({"click": {"handle": "timeline:B3"}, "button": "right"})).unwrap();
+        h.step(&json!({"widget": "Delete 2 Features After History Marker"})).unwrap();
+        h.settle();
+        let kept: Vec<String> = before.iter().filter(|n| *n != "B3" && *n != "B5").cloned().collect();
+        assert_eq!(names(&h), kept, "B2 is before the marker, B4 and B6 are C2's");
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(names(&h), before);
     }
 
     /// Deleting a sketch together with the extrude that uses it asks nothing: the extrude is

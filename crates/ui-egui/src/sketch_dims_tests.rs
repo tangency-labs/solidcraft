@@ -556,6 +556,86 @@ fn a_box_typed_name_equals_value_defines_the_parameter_driving_the_dimension() {
     assert_eq!(h.app.status.as_ref().map(|(text, _, _)| text.as_str()), Some("Parameters `h`, `w` defined"));
 }
 
+/// #8899: after a centre-point circle is placed, another circle started on the same centre must
+/// keep its Diameter field after the button is released. A press places the centre for
+/// drag-to-draw (#1630); releasing on that same centre (a click, or a drag that ends there)
+/// must not clear the Diameter box (#2448 / #8899).
+#[test]
+fn a_second_circle_on_the_same_centre_keeps_its_diameter_box_after_release() {
+    for (label, drive) in [("short-drag", "short"), ("zero-move", "zero"), ("click", "click")] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.cam.distance = 120.0;
+        h.settle();
+        h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap();
+        h.settle();
+        h.step(&json!({"start": "sketch.circle.center"})).unwrap();
+
+        let p = h.call("ui.at", json!({"sketch": [0.0, 0.0]}))["result"].clone();
+        let (x, y) = (p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+        match drive {
+            "short" => {
+                h.call("ui.drag", json!({"x0": x - 12.0, "y0": y, "x1": x, "y1": y, "steps": 4}));
+            }
+            "zero" => {
+                h.call("ui.drag", json!({"x0": x, "y0": y, "x1": x, "y1": y, "steps": 1, "hold": 5}));
+            }
+            _ => {
+                h.call("ui.click", json!({"x": x, "y": y}));
+            }
+        }
+        h.settle();
+
+        let tool = h.app.tool.as_ref().unwrap_or_else(|| panic!("{label}: tool ended; status={:?}", h.app.status));
+        assert_eq!(tool.pts.len(), 1, "{label}: pts={:?} status={:?}", tool.pts, h.app.status);
+        assert_eq!(
+            tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(),
+            ["Diameter"],
+            "{label}: dims={:?} hover={:?} status={:?}",
+            tool.dims,
+            tool.hover,
+            h.app.status
+        );
+        assert!(
+            h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+            "{label}: Diameter field missing; focused={:?} hover={:?}",
+            h.ctx.memory(|m| m.focused()),
+            tool.hover
+        );
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert_eq!(sk.curves.len(), 1, "{label}: unexpected curves {}", sk.curves.len());
+    }
+}
+
+/// #8899: same as above, but the first circle was drawn with a typed Diameter (so egui's text
+/// edit for `sc_dim` still has state when the second centre is placed).
+#[test]
+fn a_typed_first_circle_then_same_centre_keeps_the_diameter_box() {
+    let mut h = drawing("sketch.circle.center");
+    type_value(&mut h, "20");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.circle.center"));
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
+
+    let p = h.call("ui.at", json!({"sketch": [0.0, 0.0]}))["result"].clone();
+    let (x, y) = (p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+    h.call("ui.drag", json!({"x0": x, "y0": y, "x1": x, "y1": y, "steps": 1, "hold": 8}));
+    h.settle();
+    // Do not move away: the Diameter field must remain with the keyboard at the shared centre.
+    let tool = h.app.tool.as_ref().expect("tool");
+    assert_eq!(tool.pts.len(), 1, "pts={:?} status={:?}", tool.pts, h.app.status);
+    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), ["Diameter"]);
+    assert!(
+        h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+        "Diameter field gone; focused={:?} hover={:?} dims={:?}",
+        h.ctx.memory(|m| m.focused()),
+        tool.hover,
+        tool.dims
+    );
+    assert_focus(&h, 0);
+}
+
 /// A box that is not a dimension (a polygon's sides, a rounded rectangle's corner radius) has
 /// nothing for a parameter to drive: `name = ...` there is refused, not quietly dropped.
 #[test]

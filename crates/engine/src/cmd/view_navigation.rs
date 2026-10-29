@@ -32,8 +32,13 @@ struct RenderBrowserControls {
 }
 
 const RENDER_SELECT: TypedContract<RenderSelect> = TypedContract::new();
+const STATUS_ITEMS_CONTRACT: TypedContract<crate::schema::view_navigation::StatusItemsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("view.status_items", status_items))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
+    .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
 CommandSpec::new("view.fit", "Fit", fit)
     .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
 CommandSpec::new("view.home", "Home view", home)
@@ -268,6 +273,15 @@ fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
     view_toggle(p, "view.navigation_bar", "visible")
+}
+
+fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
+    if !p.is_object() {
+        return Err(bad("view.status_items", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams =
+        serde_json::from_value(p.clone()).map_err(|e| bad("view.status_items", e.to_string()))?;
+    Ok(json!(crate::status_items::StatusItems { items: s.status_items() }))
 }
 
 fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {

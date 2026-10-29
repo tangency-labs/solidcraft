@@ -1403,6 +1403,7 @@ fn clicked_render_workspace_saves_one_setup_and_restores_design_view() {
     for language in ["en", "de", "ko", "ru"] {
         let mut h = Harness::new();
         h.app.preferences.language = language.into();
+        h.app.preferences.perspective_fov = 50f64.to_radians();
         h.app.run("solid.box", json!({"length":10,"width":20,"height":5})).unwrap();
         h.app.session.mark_saved();
         h.frames(3);
@@ -1421,6 +1422,7 @@ fn clicked_render_workspace_saves_one_setup_and_restores_design_view() {
         h.step(&json!({"click":{"handle":"render:scene:frame"}})).unwrap();
         assert_eq!(h.app.render_workspace.view.inspector.page, inspector::Page::Camera);
         h.step(&json!({"widget":perspective})).unwrap();
+        assert_eq!(h.app.cam.fov, 50f64.to_radians(), "{language}: Perspective takes the Field of view preference's angle (#5364)");
         assert!(!h.app.session.is_dirty(), "preview edits are staged");
         h.step(&json!({"widget":save})).unwrap();
         assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -3794,7 +3796,7 @@ fn render_workspace_focus_restores_docks_without_design_history_or_camera_change
         h.app.preferences.render_browser_width = 350.0;
         h.app.preferences.render_inspector_width = 390.0;
         h.app.preferences.render_shots_strip = shots;
-        h.app.tree.panel_collapsed = folded;
+        h.app.preferences.browser_collapsed = folded;
         h.app.shell.render_browser_open = folded;
         h.frames(3);
         let dock_preferences = h.app.prefs();
@@ -3829,7 +3831,7 @@ fn render_workspace_focus_restores_docks_without_design_history_or_camera_change
             assert_eq!(restored_edge.as_ref().map(std::mem::discriminant), edge.as_ref().map(std::mem::discriminant));
         }
         assert_eq!(h.app.prefs(), dock_preferences);
-        assert_eq!(h.app.tree.panel_collapsed, folded);
+        assert_eq!(h.app.preferences.browser_collapsed, folded);
         assert_eq!(h.app.shell.render_browser_open, folded);
         assert_eq!((h.app.cam, h.app.session.camera), camera);
         assert!(Arc::ptr_eq(&h.app.session.doc, &document));
@@ -6379,4 +6381,29 @@ fn geometry_budget_change_retries_cached_admission_without_document_changes() {
     state.prepare_preview((7, 123, 99, bytes), || Ok(scene)).unwrap();
     assert_eq!(state.preview_upload_bytes, Some(bytes as usize));
     assert!(state.scene_error.is_none());
+}
+
+/// The Field of view preference (#5364) rescales the design view only: navigating the result image
+/// turns Perspective view off and on around it without a rescale, and an angle changed while Render
+/// is open leaves Render's camera alone and reaches the design view when it's back.
+#[test]
+fn the_field_of_view_rescales_only_the_design_view() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":20,"height":5})).unwrap();
+    h.call("ui.set", json!({"perspective": true}));
+    h.frames(3);
+    let design = h.app.cam;
+    let size = |cam: Camera, fov: f64| Camera { fov, ..cam }.half_height();
+    enter(&mut h.app, true).unwrap();
+    h.frames(2);
+    with_result_camera(&mut h.app, |app| app.cam.distance *= 1.0);
+    h.frames(2);
+    let render = h.app.cam;
+    h.call("ui.prefs", json!({"perspective_fov": 1.2}));
+    h.frames(2);
+    assert_eq!(h.app.cam, render, "Render's camera is its own");
+    enter(&mut h.app, false).unwrap();
+    h.frames(2);
+    assert!(h.app.ui.perspective);
+    assert!((size(h.app.cam, 1.2) / size(design, 0.6) - 1.0).abs() < 1e-9, "the design view keeps its size: {:?}", h.app.cam);
 }

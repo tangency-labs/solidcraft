@@ -4081,6 +4081,7 @@
   "ui.select": "Seç",
   "ui.selectOther": "Diğerini seç…",
   "ui.selectTangentChain": "Teğet zinciri seç",
+  "ui.select_all": "Tümünü seç",
   "ui.selection": "Seçim",
   "ui.selection_modifiers": "Seçim değiştiricileri",
   "ui.selection_shift_add_only": "Shift+tıklama kaldırmadan ekler",

@@ -120,7 +120,10 @@ pub(super) fn drag_origin(cam: &Camera, centre: Pos2, pointer: Pos2, scale: f32)
 }
 
 fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec3>) {
-    let mut params = json!({"camera":app.cam});
+    // Same as arrow-key steps (#8912): turn from where a glide in flight is going, so rapid
+    // clicks add full turns instead of restarting from a mid-animation camera.
+    let from = app.cam_anim.map_or(app.cam, |a| a.to);
+    let mut params = json!({"camera": from});
     if let Some(action) = action {
         params["action"] = json!(action);
     }
@@ -534,11 +537,39 @@ mod tests {
             }
             h.app.cam = anim.sample(anim.start + anim.duration / 2.0).0;
             let intermediate = h.app.cam;
+            let first_to = anim.to;
             navigate(&mut h.app, Some("left"), None);
-            assert_eq!(h.app.cam_anim.unwrap().from, intermediate, "another click starts where the camera is");
-            h.app.cam = anim.to;
+            let next = h.app.cam_anim.expect("retargeted glide");
+            assert_eq!(next.from, intermediate, "the glide continues from the camera as it is");
+            assert_ne!(next.to.basis(), first_to.basis(), "the destination is a further turn from the in-flight target");
+            h.app.cam = next.to;
             h.app.cancel_view_animation();
         }
+    }
+
+    /// #8912: two quick Right clicks retarget from the first glide's destination, not from mid-flight.
+    #[test]
+    fn rapid_cube_turns_compose_from_the_in_flight_target() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube"}));
+        assert!(h.app.preferences.look_at_anim);
+        navigate(&mut h.app, Some("right"), None);
+        let first = h.app.cam_anim.expect("first turn");
+        let first_to = first.to;
+        let mid = first.sample(first.start + first.duration / 2.0).0;
+        h.app.cam = mid;
+        navigate(&mut h.app, Some("right"), None);
+        let second = h.app.cam_anim.expect("retargeted turn");
+        let composed: Camera = serde_json::from_value(
+            h.app.session.execute("view.navigate", &json!({"camera": first_to, "action": "right"})).unwrap()["camera"].clone(),
+        )
+        .unwrap();
+        let from_mid: Camera =
+            serde_json::from_value(h.app.session.execute("view.navigate", &json!({"camera": mid, "action": "right"})).unwrap()["camera"].clone())
+                .unwrap();
+        assert!(second.to.back().dist(composed.back()) < 1e-6, "second click turns from the in-flight target");
+        assert!(second.to.back().dist(from_mid.back()) > 1e-3, "not from the mid-glide camera");
+        assert!(second.from.back().dist(mid.back()) < 1e-6, "ease still starts where the camera is");
     }
 
     /// A view-cube click glides, but a mouse orbit started at once cancels the glide: the camera

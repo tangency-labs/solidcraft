@@ -15,6 +15,7 @@ pub const DOCUMENTED: &[&str] = &[
     "occurrence.move",
     "parameters.change",
     "pointcloud.insert",
+    "sketch.equation_curve",
     "solid.align",
     "solid.chamfer",
     "solid.combine",

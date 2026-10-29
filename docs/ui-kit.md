@@ -121,6 +121,14 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   including invalid and attached Library fields, without per-caller offsets.
   Canvas placement editors retain their native line-height plus `space_4` hit
   target so nearby sketch picks are not intercepted; alignment stays shared.
+- Every kit text field has one right-click menu, `text_menu::menu` (#8875): Cut,
+  Copy, Paste and Select All, disabled when there is nothing selected, the text is
+  read-only or a password, or the clipboard holds no text (always in the web app,
+  where Ctrl+V pastes). A kit helper calls it right after adding its `TextEdit`;
+  the edit marks the response changed and gives the focus back, so owners that
+  commit on lost focus keep the field. Filters inside menus and drop-downs have no
+  menu of their own. Rows publish `menu:text_cut`, `menu:text_copy`,
+  `menu:text_paste` and `menu:text_select_all`.
 - Scenario handles and accessible labels are API. Consolidated options preserve
   the former geometry, wrapping, native metadata and publication keys.
 

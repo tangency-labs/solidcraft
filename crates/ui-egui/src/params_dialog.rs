@@ -271,13 +271,22 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             || r.group.to_ascii_lowercase().contains(&filter)
                     })
                     .collect();
+                // One Name-column floor for every table in this dialog so Favorites, User and
+                // Model sections stay lined up when only some lists hold a long name (#8551 review).
+                let name_floor = visible
+                    .iter()
+                    .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
+                    .fold(crate::theme::Tokens::get().form_label_width, f32::max)
+                    .min(crate::theme::Tokens::get().form_card_width);
                 let favorites: Vec<_> = visible.iter().copied().filter(|r| r.favorite).collect();
                 if !favorites.is_empty() {
-                    ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| table(app, ui, &mut d, &favorites, "fav"));
+                    ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| {
+                        table(app, ui, &mut d, &favorites, "fav", name_floor)
+                    });
                 }
                 let users: Vec<_> = visible.iter().copied().filter(|r| r.source == "user").collect();
                 ui_kit::section_count(ui, "users", "User Parameters", true, Some(users.len()), |ui| {
-                    table(app, ui, &mut d, &users, "user");
+                    table(app, ui, &mut d, &users, "user", name_floor);
                 });
                 ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
                     // Group once, in listing order, rather than scanning every parameter for
@@ -315,7 +324,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 d.groups_drawn = 0;
                             }
                             for (group, members) in groups {
-                                model_group(app, ui, &mut d, group, &members);
+                                model_group(app, ui, &mut d, group, &members, name_floor);
                             }
                         });
                     });
@@ -340,7 +349,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-fn model_group(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, group: &str, rows: &[&Row]) {
+fn model_group(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, group: &str, rows: &[&Row], name_floor: f32) {
     // Focused editors and pending drafts must still receive focus-loss/commit events after
     // scrolling away. The measured size is used only while the group is idle.
     let active = ui.ctx().egui_wants_keyboard_input()
@@ -360,7 +369,7 @@ fn model_group(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, grou
         {
             d.groups_drawn += 1;
         }
-        ui_kit::section_count(ui, ("pgroup", group), group, true, Some(rows.len()), |ui| table(app, ui, d, rows, group));
+        ui_kit::section_count(ui, ("pgroup", group), group, true, Some(rows.len()), |ui| table(app, ui, d, rows, group, name_floor));
     });
     d.group_sizes.insert(group.to_owned(), response.response.rect.size());
 }
@@ -393,15 +402,10 @@ fn new_check(app: &mut SolveApp, d: &mut ParamsDialog, unit: &str) -> Result<Str
     r
 }
 
-fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str) {
+fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, name_floor: f32) {
     let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
-    // Name keeps a larger share and a content floor so long identifiers stay readable (#8533).
-    // Full window/column resize is #5097; hover still shows the whole name when clipped.
-    let name_floor = rows
-        .iter()
-        .map(|r| ui_kit::ContentWidth::name(ui, &r.name))
-        .fold(crate::theme::Tokens::get().form_label_width, f32::max)
-        .min(crate::theme::Tokens::get().form_card_width);
+    // Name keeps a larger share and a shared content floor so long identifiers stay readable
+    // and every section's columns line up (#8533, #8551 review). Full window/column resize is #5097.
     let columns = [
         Column::new("", 0.0).min_content_width(crate::theme::Tokens::get().space_24 * 3.0),
         Column::new("Name", 2.0).flex().min_content_width(name_floor),
@@ -1311,6 +1315,23 @@ mod tests {
         h.frames(2);
         let d = h.app.params.as_ref().unwrap();
         assert!(d.listed.as_ref().unwrap().1.iter().any(|r| r.name == "p1" && r.comment == "hello"));
+    }
+
+    /// #8551 review: Favorites and User Parameters share one Name-column floor, so a long name
+    /// only in User does not shift that section's Expression column relative to Favorites.
+    #[test]
+    fn parameter_tables_share_one_name_column_floor() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.app.run("parameters.add", json!({"name": "w", "expression": "1 mm"})).unwrap();
+        h.app.run("parameters.add", json!({"name": "Driver_MountHole_to_Cover_Shared_Base_Layout_Angle", "expression": "8 deg"})).unwrap();
+        h.app.run("parameters.favorite", json!({"name": "w", "favorite": true})).unwrap();
+        h.app.start("parameters.change");
+        h.frames(6);
+        let fav = crate::scenario::handle_at("param:favorite:w").expect("Favorites expression");
+        let user = crate::scenario::handle_at("param:w").expect("User Parameters expression");
+        assert!((fav.x - user.x).abs() < 1.0, "Expression columns lined up: favorites {fav:?} user {user:?}");
     }
 
     #[test]

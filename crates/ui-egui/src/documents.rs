@@ -42,11 +42,14 @@ pub struct DocSlot {
 struct DocView {
     render: crate::render_workspace::ViewState,
     /// Bodies and components copied or cut in this design: their names and paths mean nothing
-    /// in another one (copied features stay with the session the same way).
+    /// in another one (copied features stay with the session the same way). Another design
+    /// pastes them from `SolveApp::foreign_copy`.
     copied_bodies: Vec<String>,
     copied_placements: Vec<Vec<u64>>,
     cut_bodies: Vec<String>,
     cut_placements: Vec<Vec<u64>>,
+    /// `SolveApp::own_clipboard_stamp`.
+    own_clipboard_stamp: u64,
 }
 
 impl DocSlot {
@@ -116,6 +119,7 @@ fn take_view(app: &mut SolveApp) -> DocView {
         copied_placements: std::mem::take(&mut app.copied_placements),
         cut_bodies: std::mem::take(&mut app.cut_bodies),
         cut_placements: std::mem::take(&mut app.cut_placements),
+        own_clipboard_stamp: app.own_clipboard_stamp,
     }
 }
 
@@ -128,6 +132,8 @@ fn put_view(app: &mut SolveApp, v: DocView) {
     app.copied_placements = v.copied_placements;
     app.cut_bodies = v.cut_bodies;
     app.cut_placements = v.cut_placements;
+    app.own_clipboard_stamp = v.own_clipboard_stamp;
+    crate::edit_clipboard::drop_stale(app);
 }
 
 /// Put `slot` into the app and return what was there.
@@ -172,8 +178,11 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.session.crash_journal = out.session.crash_journal;
     out.session.crash_journal = false;
     put_view(app, slot.view);
+    // Components picked in the browser are the outgoing design's: Copy must not copy them here.
+    app.tree.picked_components.clear();
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
+    app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
     app.session.invalidate_view(out_rev);
@@ -607,6 +616,26 @@ pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
             Some(d) => (d.session.doc.name.clone(), d.session.is_dirty()),
             None => (app.session.doc.name.clone(), app.session.is_dirty()),
         })
+        .collect()
+}
+
+/// A design open in another tab, as Insert Design offers it (#8570): its name, its file (`None`:
+/// not saved yet, so there is nothing to link) and whether it has unsaved changes.
+pub(crate) struct OpenDesign {
+    pub name: String,
+    pub path: Option<String>,
+    pub unsaved: bool,
+}
+
+/// The designs open in the other tabs, in tab order: none on the shown design's file, and no
+/// blank one (an empty new design has nothing to insert).
+pub(crate) fn other_designs(app: &SolveApp) -> Vec<OpenDesign> {
+    let shown = app.session.path.as_deref();
+    app.docs
+        .background()
+        .filter(|s| s.path.is_some() || !s.doc.features.is_empty())
+        .filter(|s| !s.path.as_deref().zip(shown).is_some_and(|(a, b)| same_path(a, b)))
+        .map(|s| OpenDesign { name: s.doc.name.clone(), path: s.path.clone(), unsaved: s.is_dirty() })
         .collect()
 }
 

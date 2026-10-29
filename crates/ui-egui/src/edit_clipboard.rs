@@ -12,6 +12,12 @@
 //! the component (`component.move_bodies`, `occurrence.reparent`, where they are), and a copy or
 //! Esc before that leaves them be. A component placed more than once (an instance) isn't cut.
 //!
+//! Copied bodies paste into another design (tab) too, as imported bodies without their history,
+//! and copied components as independent copies with their history (Paste and Paste New alike),
+//! where they were in the world (`component.paste_from_design`); cut ones paste there as copies,
+//! the originals staying. The last copy or cut in any design is what pastes: a design's own
+//! clipboard empties when another design copied after it.
+//!
 //! The window system turns Ctrl+C / Ctrl+V into clipboard events, not key presses, and only sends
 //! the paste event while the system clipboard holds text. So a copy also puts a short line of
 //! text on the system clipboard (a menu's Copy leaves it for the next frame, which has the
@@ -50,15 +56,49 @@ fn body_selection(app: &SolveApp) -> Vec<String> {
     app.session.selection.iter().filter_map(|s| if let Sel::Body { name } = s { Some(name.clone()) } else { None }).collect()
 }
 
+/// Does Copy copy the whole design (its row picked in the browser)? Features, bodies or
+/// components selected since then are what was meant, so the design gives way to them.
+fn copying_design(app: &SolveApp) -> bool {
+    app.session.active_sketch.is_none()
+        && app.tree.picked_components == [0]
+        && crate::timeline::selected_feature_ids(app).is_empty()
+        && body_selection(app).is_empty()
+        && placement_selection(app).is_empty()
+}
+
 /// Is there something Copy would copy?
 pub fn something_to_copy(app: &SolveApp) -> bool {
     if app.session.active_sketch.is_some() {
         !sketch_selection(app).is_empty()
     } else {
-        app.tree.picked_components == [0]
+        copying_design(app)
             || !crate::timeline::selected_feature_ids(app).is_empty()
             || !body_selection(app).is_empty()
             || !placement_selection(app).is_empty()
+    }
+}
+
+/// What another design copied or cut last, when that is what pastes here (this design's own
+/// clipboard is older).
+fn foreign(app: &SolveApp) -> Option<&std::sync::Arc<solidcraft_engine::ForeignCopy>> {
+    app.foreign_copy.as_ref().filter(|_| app.own_clipboard_stamp != app.clipboard_stamp)
+}
+
+/// Bodies another design copied or cut last: they paste here as imported bodies.
+fn foreign_bodies(app: &SolveApp) -> bool {
+    foreign(app).is_some_and(|c| !c.bodies.is_empty())
+}
+
+/// This design's clipboard, when another design has copied or cut since (switching to this
+/// design): it empties, so the last copy is what pastes.
+pub(crate) fn drop_stale(app: &mut SolveApp) {
+    if app.own_clipboard_stamp != app.clipboard_stamp {
+        app.session.clipboard.clear();
+        app.session.sketch_clipboard = None;
+        app.copied_bodies.clear();
+        app.copied_placements.clear();
+        app.cut_bodies.clear();
+        app.cut_placements.clear();
     }
 }
 
@@ -70,7 +110,8 @@ pub fn can_paste(app: &SolveApp) -> bool {
         // A copied design is what pastes, and never into itself.
         !design_copied_here(app)
     } else {
-        !app.session.clipboard.is_empty()
+        foreign(app).is_some()
+            || !app.session.clipboard.is_empty()
             || !app.cut_bodies.is_empty()
             || !app.cut_placements.is_empty()
             || !app.copied_bodies.is_empty()
@@ -88,7 +129,7 @@ pub fn pasting_components(app: &SolveApp) -> bool {
     app.session.active_sketch.is_none()
         && app.session.clipboard.is_empty()
         && app.linked_design_clipboard.is_none()
-        && !app.copied_placements.is_empty()
+        && (!app.copied_placements.is_empty() || foreign(app).is_some_and(|c| !c.placed.is_empty()))
 }
 
 /// Whether copied features (sketches, …) are what Paste pastes now (a Sketches folder's menu
@@ -102,7 +143,7 @@ pub fn pasting_bodies(app: &SolveApp) -> bool {
     app.session.active_sketch.is_none()
         && app.session.clipboard.is_empty()
         && app.linked_design_clipboard.is_none()
-        && (!app.copied_bodies.is_empty() || !app.cut_bodies.is_empty())
+        && (!app.copied_bodies.is_empty() || !app.cut_bodies.is_empty() || foreign_bodies(app))
 }
 
 /// [`paste_into`], then what was pasted into `group` of the component's `folder`: a group's menu
@@ -162,8 +203,12 @@ fn clear_clipboard(app: &mut SolveApp) {
 }
 
 /// A new copy or cut replaces the copied bodies, components, cut bodies and design (copied
-/// features and sketch geometry are replaced by the commands that copy them).
+/// features and sketch geometry are replaced by the commands that copy them), in this design and
+/// for the others: it is the last one.
 fn replace_clipboard(app: &mut SolveApp) {
+    app.clipboard_stamp += 1;
+    app.own_clipboard_stamp = app.clipboard_stamp;
+    app.foreign_copy = None;
     app.copied_bodies.clear();
     app.copied_placements.clear();
     app.cut_bodies.clear();
@@ -171,8 +216,12 @@ fn replace_clipboard(app: &mut SolveApp) {
     app.linked_design_clipboard = None;
 }
 
-/// Leave bodies that were cut where they are (Esc, or another copy).
+/// Leave bodies that were cut where they are (Esc, or another copy): another design has nothing
+/// of them to paste either.
 pub fn drop_cut(app: &mut SolveApp) {
+    if !app.cut_bodies.is_empty() || !app.cut_placements.is_empty() {
+        app.foreign_copy = None;
+    }
     app.cut_bodies.clear();
     app.cut_placements.clear();
 }
@@ -200,7 +249,7 @@ pub fn copy_design(app: &mut SolveApp) -> bool {
 
 /// Copy the selection: sketch geometry in a sketch, otherwise timeline features.
 pub fn copy(app: &mut SolveApp) -> bool {
-    if app.session.active_sketch.is_none() && app.tree.picked_components == [0] {
+    if copying_design(app) {
         return copy_design(app);
     }
     if app.session.active_sketch.is_some() {
@@ -229,6 +278,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
         let names: Vec<String> = placements.iter().filter_map(|p| app.session.occurrence_placement(p).ok()).map(|p| p.name).collect();
         app.set_status(format!("Copied {} (Ctrl+V pastes an instance, Ctrl+Shift+V a new copy)", names.join(", ")), false);
         leave_text(app, format!("SolidCraft components: {}", names.join(", ")));
+        app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, Vec::new(), placements.clone())));
         app.copied_placements = placements;
         return true;
     }
@@ -238,6 +288,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
         replace_clipboard(app);
         app.set_status(format!("Copied {}", bodies.join(", ")), false);
         leave_text(app, format!("SolidCraft bodies: {}", bodies.join(", ")));
+        app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, bodies.clone(), Vec::new())));
         app.copied_bodies = bodies;
         return true;
     }
@@ -303,6 +354,7 @@ pub fn cut(app: &mut SolveApp) -> bool {
             let names: Vec<String> = placements.iter().filter_map(|p| app.session.occurrence_placement(p).ok()).map(|p| p.name).collect();
             app.set_status(format!("Cut {}: paste to move it into a component (Esc leaves it)", names.join(", ")), false);
             leave_text(app, format!("SolidCraft components: {}", names.join(", ")));
+            app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, Vec::new(), placements.clone())));
             app.cut_placements = placements;
             return true;
         }
@@ -313,6 +365,8 @@ pub fn cut(app: &mut SolveApp) -> bool {
         clear_clipboard(app);
         app.set_status(format!("Cut {}: paste to move it into a component (Esc leaves it)", bodies.join(", ")), false);
         leave_text(app, format!("SolidCraft bodies: {}", bodies.join(", ")));
+        // Another design pastes copies of them.
+        app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, bodies.clone(), Vec::new())));
         app.cut_bodies = bodies;
         return true;
     }
@@ -397,6 +451,9 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
         app.set_status("Pasted linked component: use Move/Copy to position it", false);
         return true;
     }
+    if let Some(copy) = foreign(app).cloned() {
+        return paste_from_design(app, copy, into);
+    }
     // Features copied later replace bodies and components (copying those empties the features).
     if app.session.clipboard.is_empty() && !app.cut_bodies.is_empty() {
         return paste_cut_bodies(app, into);
@@ -459,6 +516,27 @@ fn paste_placement(app: &SolveApp, at: Option<Pos2>) -> (Vec<u64>, [f64; 3]) {
     (path, [local.x, local.y, local.z])
 }
 
+/// The bodies another design copied or cut, into `into` (a component, placed by its placement)
+/// as imported bodies, or its components as independent copies, where they were in the world;
+/// they are selected.
+fn paste_from_design(app: &mut SolveApp, copy: std::sync::Arc<solidcraft_engine::ForeignCopy>, (component, path): (u64, Vec<u64>)) -> bool {
+    let design = copy.design.clone();
+    app.session.foreign_copy = Some(copy);
+    let Ok(out) = app.run("component.paste_from_design", json!({ "component": component, "component_path": path })) else { return false };
+    if let Some(paths) = out.get("paths").and_then(Value::as_array) {
+        // Pasted components arrive folded.
+        for path in paths {
+            let path: Vec<u64> = path.as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+            crate::browser::close_placement(app, &path);
+        }
+        app.set_status(format!("Pasted independent copies of the components copied in {design}"), false);
+        return true;
+    }
+    let made: Vec<&str> = out.get("bodies").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    app.set_status(format!("Pasted {} as imported bodies (without their history)", made.join(", ")), false);
+    true
+}
+
 /// Move the cut bodies into `into` (a component, placed by its placement), where they are; they
 /// are selected and the clipboard empties. Bodies already in it stay as they are. A move that
 /// can't be done says why and keeps the cut, to paste somewhere else.
@@ -472,12 +550,14 @@ fn paste_cut_bodies(app: &mut SolveApp, (component, path): (u64, Vec<u64>)) -> b
         .collect();
     drop(state);
     let cut = std::mem::take(&mut app.cut_bodies);
+    let foreign = app.foreign_copy.take();
     if moving.is_empty() {
         app.set_status("Already in that component: nothing to move", false);
         return true;
     }
     if app.run("component.move_bodies", json!({ "bodies": moving, "component": component, "component_path": path })).is_err() {
         app.cut_bodies = cut;
+        app.foreign_copy = foreign;
         return false;
     }
     let _ = app.run("select.set", json!({ "items": moving.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>() }));
@@ -490,6 +570,7 @@ fn paste_cut_bodies(app: &mut SolveApp, (component, path): (u64, Vec<u64>)) -> b
 /// as they are. A move that can't be done (into itself) says why and keeps the cut.
 fn paste_cut_placements(app: &mut SolveApp, (component, path): (u64, Vec<u64>)) -> bool {
     let cut = std::mem::take(&mut app.cut_placements);
+    let foreign = app.foreign_copy.take();
     let mut moved = Vec::new();
     for from in &cut {
         let Some(&occurrence) = from.last() else { continue };
@@ -499,6 +580,7 @@ fn paste_cut_placements(app: &mut SolveApp, (component, path): (u64, Vec<u64>)) 
         let params = json!({ "occurrence": occurrence, "path": from, "parent": component, "parent_path": path });
         let Ok(out) = app.run("occurrence.reparent", params) else {
             app.cut_placements = cut;
+            app.foreign_copy = foreign;
             return false;
         };
         let to: Vec<u64> = out.get("path").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
