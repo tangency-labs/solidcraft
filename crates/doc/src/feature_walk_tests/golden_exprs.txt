@@ -305,6 +305,7 @@ sheet_path
   expressions: path.radius
 sheet_unfold
 sheet_convert
+sheet_skin_convert
 boss
   inputs:
     Diameter = boss.diameter (Length)

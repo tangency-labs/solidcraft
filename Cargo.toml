@@ -16,6 +16,7 @@ repository = "https://github.com/bherbruck/solidcraft"
 robust = "1.2"
 # internal
 solidcraft-geom = { path = "crates/geom" }
+solidcraft-develop = { path = "crates/develop" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }
 solidcraft-render = { path = "crates/render" }

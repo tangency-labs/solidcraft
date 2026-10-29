@@ -1,0 +1,26 @@
+{
+  "en": {
+    "Skip Faces": "Skip Faces",
+    "Through the skin": "Through the skin"
+  },
+  "ar": {
+    "Skip Faces": "الأوجه المتخطاة",
+    "Through the skin": "عبر الغلاف"
+  },
+  "he": {
+    "Skip Faces": "פאות לדילוג",
+    "Through the skin": "דרך המעטפת"
+  },
+  "ja": {
+    "Skip Faces": "スキップする面",
+    "Through the skin": "スキン経由"
+  },
+  "vi": {
+    "Skip Faces": "Bỏ qua bề mặt",
+    "Through the skin": "Qua lớp vỏ"
+  },
+  "zh": {
+    "Skip Faces": "跳过的面",
+    "Through the skin": "通过蒙皮"
+  }
+}

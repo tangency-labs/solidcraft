@@ -111,6 +111,12 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             Convert {
                 rule: usize,
+                /// Convert through the skin (#6748): no face is fixed; every face of the body
+                /// converts but the skipped ones, and sharp edges are cut open but the bends.
+                skin: bool,
+                /// Through the skin, the side of a solid's faces its material lies on (index into
+                /// `MATERIAL_SIDES`).
+                side: usize,
             },
             /// The rule manager: the rule shown (index into the rules, or past the end for a new one).
             Rules {
@@ -191,9 +197,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sheet.flange" => (new_flange(app, 0), vec![SelInput::new("Profile / Edges", PROFILES | EDGES | CURVES, true)]),
         "sheet.unfold" => (Sm::Unfold { refold: false }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
         "sheet.refold" => (Sm::Unfold { refold: true }, vec![SelInput::new("Body (last if none)", BODIES, false)]),
-        "sheet.convert" => {
-            (Sm::Convert { rule: 0 }, vec![SelInput::new("Fixed Face", PLANAR_FACES, false), SelInput::new("Bend Edges", EDGES, true)])
-        }
+        "sheet.convert" => (Sm::Convert { rule: 0, skin: false, side: 0 }, convert_inputs(false)),
         "sheet.manage_rules" => {
             let active = app.session.doc.sheet.active.clone();
             let rules = rule_list(app);
@@ -235,8 +239,37 @@ fn flange_type(inputs: &[SelInput]) -> usize {
     }
 }
 
+/// Through the skin, the sides of a solid's faces its material can lie on, and their labels.
+const MATERIAL_SIDES: [(&str, &str); 2] = [("inside", "Inside"), ("outside", "Outside")];
+
+/// Convert's inputs: a fixed face and the bend edges or, through the skin (#6748), the body, the
+/// bend edges and the faces left out.
+pub(crate) fn convert_inputs(skin: bool) -> Vec<SelInput> {
+    if skin {
+        vec![SelInput::new("Body", BODIES, false), SelInput::new("Bend Edges", EDGES, true), SelInput::new("Skip Faces", FACES, true)]
+    } else {
+        vec![SelInput::new("Fixed Face", PLANAR_FACES, false), SelInput::new("Bend Edges", EDGES, true)]
+    }
+}
+
+/// Switches Convert's inputs to or from the skin's, keeping the bend edges and the body.
+pub(crate) fn convert_switch(inputs: &mut Vec<SelInput>, skin: bool) {
+    let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| match x {
+        Sel::Face { body, .. } | Sel::Body { name: body } => Some(body.clone()),
+        _ => None,
+    });
+    let bends = inputs.get_mut(1).map(|i| std::mem::take(&mut i.items)).unwrap_or_default();
+    *inputs = convert_inputs(skin);
+    if let (true, Some(name), Some(i)) = (skin, body, inputs.first_mut()) {
+        i.items = vec![Sel::Body { name }];
+    }
+    if let Some(i) = inputs.get_mut(1) {
+        i.items = bends;
+    }
+}
+
 /// The dialog's own rows (after the selection inputs); true when Enter was pressed in a value.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [SelInput]) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut Vec<SelInput>) -> bool {
     let t = Tokens::get();
     let mut enter = false;
     match k {
@@ -367,7 +400,18 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
         }
         Sm::Unfold { .. } => {}
-        Sm::Convert { rule } => rule_combo(app, ui, "sm_conv_rule", rule),
+        Sm::Convert { rule, skin, side } => {
+            rule_combo(app, ui, "sm_conv_rule", rule);
+            if *skin {
+                let labels = MATERIAL_SIDES.map(|(_, label)| label);
+                choice_row(ui, "Material", "sm_conv_side", side, &labels);
+            }
+            let was = *skin;
+            crate::ui_kit::options(ui, "sm_conv_options", &mut [("Through the skin", skin)]);
+            if *skin != was {
+                convert_switch(inputs, *skin);
+            }
+        }
         Sm::Rules { pick, name, values, relief, angles, active, loaded } => {
             let rules = rule_list(app);
             crate::rule_editor::rule_editor! {
@@ -744,7 +788,37 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             }
             (if *refold { "sheet.refold" } else { "sheet.unfold" }, p)
         }
-        Sm::Convert { rule } => {
+        Sm::Convert { rule, skin: true, side } => {
+            // No face is fixed: the body picked, or the one its bend edges or skipped faces are on.
+            let picks = items(inputs, 0).iter().chain(items(inputs, 1)).chain(items(inputs, 2));
+            let Some(body) = picks
+                .filter_map(|x| match x {
+                    Sel::Body { name: body } | Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body.clone()),
+                    _ => None,
+                })
+                .next()
+            else {
+                return Err("select the body to convert first".into());
+            };
+            let mut p = json!({"body": body, "skin": true});
+            // Every sharp edge is cut open but these.
+            let bends: Vec<Value> = items(inputs, 1).edge_points().into_iter().map(pt).collect();
+            if !bends.is_empty() {
+                p["bends"] = json!(bends);
+            }
+            let skip: Vec<Value> = items(inputs, 2).face_points().into_iter().map(pt).collect();
+            if !skip.is_empty() {
+                p["skip"] = json!(skip);
+            }
+            if let Some((key, _)) = MATERIAL_SIDES.get(*side).filter(|_| *side > 0) {
+                p["direction"] = json!(key);
+            }
+            if let Some(r) = rule_value(app, *rule) {
+                p["rule"] = json!(r);
+            }
+            ("sheet.convert", p)
+        }
+        Sm::Convert { rule, .. } => {
             let Some(Sel::Face { body, point, .. }) = items(inputs, 0).first() else {
                 return Err("select the fixed face first (a plate's large face)".into());
             };
@@ -903,7 +977,21 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             if let Some(i) = ins.get_mut(1) {
                 i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
             }
-            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule) }), ins, extra));
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), skin: false, side: 0 }), ins, extra));
+        }
+        FeatureKind::SheetSkinConvert { body, rule, bends, skip, direction } => {
+            let mut ins = convert_inputs(true);
+            if let Some(i) = ins.first_mut() {
+                i.items = vec![Sel::Body { name: body.to_string() }];
+            }
+            if let Some(i) = ins.get_mut(1) {
+                i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
+            }
+            if let Some(i) = ins.get_mut(2) {
+                i.items = skip.iter().filter_map(|p| face_sel(s, p.0)).collect();
+            }
+            let side = MATERIAL_SIDES.iter().position(|(key, _)| key == direction).unwrap_or(0);
+            return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule), skin: true, side }), ins, extra));
         }
         _ => return None,
     };

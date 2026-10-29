@@ -1,0 +1,13 @@
+[package]
+name = "solidcraft-develop"
+description = "SolidCraft sheet development: a skin of panels and joints laid out into its flat pattern"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+thiserror = { workspace = true }

@@ -1169,7 +1169,8 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     // New bend edges for a conversion: the names of the body's edges there now.
-    if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
+    if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. })
+    | (FeatureKind::SheetSkinConvert { bends: a, body, .. }, FeatureKind::SheetSkinConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was)
     {
         nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));

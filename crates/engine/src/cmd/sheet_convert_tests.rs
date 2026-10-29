@@ -1777,3 +1777,6 @@ fn a_wall_on_part_of_an_edge_meets_a_wall_at_a_relieved_corner_and_is_relieved_a
     run(&mut s, "sheet.refold", json!({}));
     assert!((volume(&mut s) - v).abs() < 1e-6 * v);
 }
+
+#[path = "sheet_skin_convert_tests.rs"]
+mod skin;

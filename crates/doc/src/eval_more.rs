@@ -410,6 +410,29 @@ fn point_on_polyline(pts: &[Vec2], d: f64) -> Vec2 {
     pts.last().copied().unwrap_or_default()
 }
 
+/// The points of a feature's picked edges: by name first; a name that is gone keeps its point,
+/// with a warning.
+fn edge_picks(f: &Feature, mb: &ModelBody, picks: &[crate::Position], warning: &mut Option<String>) -> Vec<Vec3> {
+    let mut out = Vec::with_capacity(picks.len());
+    for (i, p) in picks.iter().enumerate() {
+        let name = f.edge_names.get(i).filter(|n| !n.is_empty());
+        out.push(match name.map(|n| (n, crate::naming::locate_edge(mb, n, p.0))) {
+            Some((n, Ok(hit))) => {
+                if let Some(note) = hit.note(n) {
+                    append_warning(warning, note);
+                }
+                hit.point
+            }
+            Some((n, Err(_))) => {
+                append_warning(warning, format!("edge `{n}` no longer exists; using the edge at the picked point"));
+                p.0
+            }
+            None => p.0,
+        });
+    }
+    out
+}
+
 /// Rebuild a sheet body's solid from its model.
 fn replace_sheet_body(mb: &mut ModelBody, body: Body) {
     let mut next = ModelBody::new(mb.name.clone(), body, mb.feature);
@@ -763,29 +786,26 @@ pub(super) fn sheet_eval(
             }
             rebuild_sheet(st, i)
         }
+        // Through the skin (#6748): the body stays as modeled, and the model keeps its flat
+        // pattern.
+        FeatureKind::SheetSkinConvert { body, rule, bends, skip, direction } => {
+            let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let r = doc.sheet_rule(rule.as_deref());
+            let rv = doc.rule_values(vals, &r)?;
+            let picks = edge_picks(f, &mb, bends, warning);
+            let skip: Vec<Vec3> = skip.iter().map(|p| p.0).collect();
+            let rule = crate::SkinRule { thickness: rv.thickness, k_factor: rv.k_factor, bend_radius: rv.bend_radius, gap: rv.gap };
+            let flat = crate::convert_skin(&mb, &rule, &picks, &skip, direction == "outside")?.record(&mb.name, &r.name)?;
+            st.skins.retain(|s| s.body != flat.body);
+            st.skins.push(flat);
+            Ok(())
+        }
         // With bend edges: a solid or shelled body whose faces become the sheet.
         FeatureKind::SheetConvert { body, face, rule, bends } if !bends.is_empty() => {
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let r = doc.sheet_rule(rule.as_deref());
             let rv = doc.rule_values(vals, &r)?;
-            // The bend edges by name first; a name that is gone keeps its point, with a warning.
-            let mut picks = Vec::with_capacity(bends.len());
-            for (i, p) in bends.iter().enumerate() {
-                let name = f.edge_names.get(i).filter(|n| !n.is_empty());
-                picks.push(match name.map(|n| (n, crate::naming::locate_edge(&mb, n, p.0))) {
-                    Some((n, Ok(hit))) => {
-                        if let Some(note) = hit.note(n) {
-                            append_warning(warning, note);
-                        }
-                        hit.point
-                    }
-                    Some((n, Err(_))) => {
-                        append_warning(warning, format!("edge `{n}` no longer exists; using the edge at the picked point"));
-                        p.0
-                    }
-                    None => p.0,
-                });
-            }
+            let picks = edge_picks(f, &mb, bends, warning);
             let placement = doc.component_transform(doc.model_body_component(&mb));
             let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
             let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &rv, face.0, &picks, &body_to_world)?;
