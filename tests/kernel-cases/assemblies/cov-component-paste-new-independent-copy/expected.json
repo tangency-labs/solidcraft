@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "component.paste_new of the arm 30 mm along y",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); an independent copy of Arm moved by (0,30,0): centres (0,0,-5), (20,0,5), (20,30,5), 4000 each: total 12000, centre (13.333,10,1.667), box (-10,-10,-10)-(40,35,10)",
+ "body_count": 3,
+ "volume_mm3": 12000.0,
+ "center_of_mass": [
+  13.333333,
+  10,
+  1.666667
+ ],
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   -10
+  ],
+  "max": [
+   40,
+   35,
+   10
+  ]
+ }
+}

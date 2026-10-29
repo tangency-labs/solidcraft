@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "the hand-written design inserted twice, the second reusing the first's link",
+ "source": "analytic",
+ "method": "plate.solidcraft (box 30x20x10) at (0,0,0) and again with translate (0,50,0): 2 bodies, 12000 mm3, box (0,0,0)-(30,70,10)",
+ "body_count": 2,
+ "volume_mm3": 12000.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   30,
+   70,
+   10
+  ]
+ },
+ "center_of_mass": [
+  15,
+  35,
+  5
+ ]
+}
