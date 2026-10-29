@@ -125,7 +125,7 @@ const NUM_SPANS: u64 = 12;
 /// The handle of a curve inside this unit's own solves (upstream `this`): a curve with
 /// its natural interval.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct CurveHandle(Extent1d);
+pub(crate) struct CurveHandle(Extent1d);
 
 impl SolutionObject for CurveHandle {
     fn kind(&self) -> ObjectKind {
@@ -583,8 +583,8 @@ impl Curve {
 
     /// [`Curve::drop_point`] keeping the curve's cache for the global solve in
     /// `cache` across calls on this unchanged curve (upstream keeps it on the curve;
-    /// see [`Curve::global_point_solve_cached`]). The `SmCrvOnSurf` override keeps its
-    /// own approximation and does not use it.
+    /// see [`Curve::global_point_solve_cached`]). The `SmCrvOnSurf` override (also as
+    /// the base of an `SmTangentField`) passes it to its base-class drop.
     fn drop_point_cached(
         &self,
         k: &Kernel,
@@ -597,10 +597,19 @@ impl Curve {
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         match self.kind() {
-            // the SmCrvOnSurf override (its cache update is lost on this copy)
-            CurveKind::CrvOnSurf(c) => {
-                c.drop_point_ref(k, interval, point, vec_to_inside, dist_tol, guess, op)
-            }
+            // the SmCrvOnSurf override (its approximation and break updates are lost on
+            // this copy; the curve cache is the caller's)
+            CurveKind::CrvOnSurf(c) => c.drop_point_ref_as(
+                k,
+                interval,
+                point,
+                vec_to_inside,
+                dist_tol,
+                guess,
+                op,
+                None,
+                cache,
+            ),
             // the SmCrvOnSurf override on the derived object (its Evaluate)
             CurveKind::TangentField(c) => c.base().drop_point_ref_as(
                 k,
@@ -611,6 +620,7 @@ impl Curve {
                 guess,
                 op,
                 Some(c.members()),
+                cache,
             ),
             _ => self.drop_point_base_cached(
                 k,
@@ -654,7 +664,7 @@ impl Curve {
 
     /// [`Curve::drop_point_base`] with the global solve's curve cache kept in `cache`
     /// (see [`Curve::drop_point_cached`]).
-    fn drop_point_base_cached(
+    pub(crate) fn drop_point_base_cached(
         &self,
         k: &Kernel,
         interval: &Extent1d,

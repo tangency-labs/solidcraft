@@ -63,7 +63,10 @@
 //!   `SmCurve::CalculateBoundingBox` on `this` run on a [`Curve`] wrapping a copy of
 //!   this object ([`Curve::approximate_curve_base`], [`Curve::drop_point_base`],
 //!   [`calculate_bounding_box_base`]). The base drop's actual break-cache state is
-//!   copied back even on failure; local solves do not force a cache build. Where
+//!   copied back even on failure; local solves do not force a cache build. The base
+//!   drop's global solve reads the curve cache the caller keeps for this curve
+//!   ([`Curve::drop_point_in`] and `GlobalCoincidenceChecker`, as for every other kind;
+//!   upstream keeps it on the curve), not one built per drop on the copy. Where
 //!   upstream falls back to the base class
 //!   after a failed approximation (`CalculateBoundingBox`, `DropPoint`), a
 //!   [`SolidError::Unported`] failure is propagated instead.
@@ -117,7 +120,8 @@ use crate::curve::curve::p2::{
     at, evaluate_continuity, is_kind_of as curve_is_kind_of, knots_ignoring_status, Curve,
     CurveEvaluate, CurveKind, KnotsWithStatus, CRV_ON_SURF_TYPE,
 };
-use crate::curve::curve::p6::{calculate_bounding_box_base, DroppedPoint};
+use crate::curve::curve::p6::{calculate_bounding_box_base, CurveHandle, DroppedPoint};
+use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
 use crate::curve::tangent_field::{TangentFieldCurve, TangentFieldMembers};
 use crate::error::{ignored, Result, SolidError};
@@ -1392,11 +1396,22 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
     ) -> Result<DroppedPoint> {
-        self.drop_point_as(k, interval, point, vec_to_inside, dist_tol, guess, op, None)
+        self.drop_point_as(
+            k,
+            interval,
+            point,
+            vec_to_inside,
+            dist_tol,
+            guess,
+            op,
+            None,
+            &mut None,
+        )
     }
 
     /// [`Self::drop_point`] as the base of a derived object
-    /// ([`Self::get_or_create_bs_approx_as`]; the base-class drop evaluates it).
+    /// ([`Self::get_or_create_bs_approx_as`]; the base-class drop evaluates it), the
+    /// base drop's global solve reading the caller's curve `cache` for this curve.
     pub(crate) fn drop_point_as(
         &mut self,
         k: &Kernel,
@@ -1407,6 +1422,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         // check inputs (upstream warns and selects SM_SO_MINIMIZE)
         let op = if op != SolverOperation::Minimize
@@ -1428,6 +1444,7 @@ impl CrvOnSurf {
                 guess,
                 op,
                 derived,
+                cache,
             );
         }
 
@@ -1444,6 +1461,7 @@ impl CrvOnSurf {
                     guess,
                     op,
                     derived,
+                    cache,
                 )
             }
         };
@@ -1471,12 +1489,14 @@ impl CrvOnSurf {
             Some(min_param),
             op,
             derived,
+            cache,
         )
     }
 
     /// Run the base algorithm on an exact evaluation copy, then keep only the
     /// break-cache writes it actually made, including writes before an error.
     /// A successful local/fast solve may never request knots; do not force them.
+    /// The global solve reads (and on first use builds) the caller's curve `cache`.
     fn drop_point_base_preserving_breaks(
         &mut self,
         k: &Kernel,
@@ -1487,9 +1507,19 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         let curve = self.as_curve(derived);
-        let result = curve.drop_point_base(k, interval, point, vec_to_inside, dist_tol, guess, op);
+        let result = curve.drop_point_base_cached(
+            k,
+            interval,
+            point,
+            vec_to_inside,
+            dist_tol,
+            guess,
+            op,
+            cache,
+        );
         let base = match curve.into_kind() {
             CurveKind::CrvOnSurf(c) => Some(*c),
             CurveKind::TangentField(t) => Some(t.into_base()),
@@ -1522,10 +1552,22 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
     ) -> Result<DroppedPoint> {
-        self.drop_point_ref_as(k, interval, point, vec_to_inside, dist_tol, guess, op, None)
+        self.drop_point_ref_as(
+            k,
+            interval,
+            point,
+            vec_to_inside,
+            dist_tol,
+            guess,
+            op,
+            None,
+            &mut None,
+        )
     }
 
-    /// [`Self::drop_point_ref`] as the base of a derived object.
+    /// [`Self::drop_point_ref`] as the base of a derived object, the base drop's global
+    /// solve reading the caller's curve `cache` for this curve (see
+    /// [`Self::drop_point_as`]).
     pub(crate) fn drop_point_ref_as(
         &self,
         k: &Kernel,
@@ -1536,6 +1578,7 @@ impl CrvOnSurf {
         guess: Option<f64>,
         op: SolverOperation,
         derived: Option<TangentFieldMembers>,
+        cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
         self.clone().drop_point_as(
             k,
@@ -1546,6 +1589,7 @@ impl CrvOnSurf {
             guess,
             op,
             derived,
+            cache,
         )
     }
 
@@ -2147,10 +2191,45 @@ mod tests {
             None,
             SolverOperation::Normalize,
             None,
+            &mut None,
         )
         .unwrap();
         assert!(!c.need_breaks());
         assert_eq!(c.breaks(), vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn a_kept_curve_cache_drops_as_a_fresh_one() {
+        // The caller's curve cache, built by the first global solve, gives the drops
+        // of a cache built for each one.
+        let k = Kernel::default();
+        let c = CrvOnSurf::new(&k, uv(), patch().into(), None, 0).unwrap();
+        let ivl = c.natural_interval();
+        let mut kept = None;
+        for t in [0.25, 0.6, 0.9] {
+            let point = c.evaluate_point(&k, t).unwrap();
+            let drop = |cache: &mut Option<CurveCache<CurveHandle>>| {
+                c.clone()
+                    .drop_point_base_preserving_breaks(
+                        &k,
+                        &ivl,
+                        point,
+                        None,
+                        1e-6,
+                        None,
+                        SolverOperation::Normalize,
+                        None,
+                        cache,
+                    )
+                    .unwrap()
+            };
+            let fresh = drop(&mut None);
+            let reused = drop(&mut kept);
+            assert!(kept.is_some());
+            assert_eq!(reused.success, fresh.success);
+            assert_eq!(reused.parameter.to_bits(), fresh.parameter.to_bits());
+            assert_eq!(reused.distance.to_bits(), fresh.distance.to_bits());
+        }
     }
 
     #[test]
