@@ -79,7 +79,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("construct.plane.tangent", "Tangent Plane", plane_tangent)
         .at("SOLID", "CONSTRUCT")
         .icon("plane_tangent")
-        .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); name?"),
+        .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); reference?: plane or planar face ref (the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
     CommandSpec::new("construct.plane.along_path", "Plane Along Path", plane_along)
         .at("SOLID", "CONSTRUCT")
         .icon("plane_along_path")
@@ -256,7 +256,20 @@ fn plane_tangent(s: &mut Session, p: &Value) -> Result<Value> {
         (None, GeoRef::Face { at, .. }) => *at,
         _ => return Err(bad(cmd, "`at` is required: where the plane touches the face")),
     };
-    plane(s, p, PlaneRef::Tangent { face: Box::new(face), at })
+    let reference = match p.get("reference").filter(|v| !v.is_null()) {
+        Some(_) => Some(Box::new(geo(s, p.get("reference"), cmd, "reference")?)),
+        None => None,
+    };
+    let angle = match p.get("angle").filter(|v| !v.is_null()) {
+        Some(_) if reference.is_none() => return Err(bad(cmd, "`angle` turns the plane from a `reference`: give one")),
+        Some(_) => {
+            let angle = req_expr(cmd, p, "angle")?;
+            check_expr(s, &angle, solidcraft_doc::expr::Kind::Angle, cmd, "angle")?;
+            Some(angle)
+        }
+        None => None,
+    };
+    plane(s, p, PlaneRef::Tangent { face: Box::new(face), at, reference, angle })
 }
 
 fn plane_along(s: &mut Session, p: &Value) -> Result<Value> {

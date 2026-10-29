@@ -331,7 +331,12 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
             checked_geo(b, depth + 1)?;
             checked_geo(c, depth + 1)?;
         }
-        PlaneRef::Tangent { face, .. } => checked_geo(face, depth + 1)?,
+        PlaneRef::Tangent { face, reference, .. } => {
+            checked_geo(face, depth + 1)?;
+            if let Some(r) = reference {
+                checked_geo(r, depth + 1)?;
+            }
+        }
         PlaneRef::AlongPath { path, .. } => checked_geo(path, depth + 1)?,
         _ => {}
     }

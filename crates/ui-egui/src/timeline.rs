@@ -1271,7 +1271,7 @@ mod tests {
             ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
-            ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO }),
+            ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO, reference: None, angle: None }),
             ("along_path", PlaneRef::AlongPath { path: reference(), t: "0.5".into() }),
             ("perpendicular", PlaneRef::Perpendicular { plane: reference(), line: reference() }),
         ] {
