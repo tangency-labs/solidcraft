@@ -75,9 +75,10 @@ impl Default for Numbering {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RevisionRow {
+    #[serde(with = "crate::ids")]
     pub id: u64,
     /// Its sheet in a record kept per sheet (opaque here), else none.
-    #[serde(default)]
+    #[serde(default, with = "crate::ids::option")]
     pub sheet: Option<u64>,
     pub revision: String,
     #[serde(default)]
@@ -135,7 +136,9 @@ impl Field {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tag {
+    #[serde(with = "crate::ids")]
     pub id: u64,
+    #[serde(with = "crate::ids")]
     pub row: u64,
     /// The length of the triangle's side.
     pub size_mm: f64,
@@ -272,6 +275,11 @@ impl RevisionRecord {
             }
         }
         Ok(())
+    }
+
+    /// Every id the record holds: its rows', its issued copies' and its tags'.
+    pub fn ids(&self) -> impl Iterator<Item = u64> + '_ {
+        self.rows.iter().chain(&self.issued).map(|r| r.id).chain(self.tags.iter().map(|t| t.id))
     }
 
     /// Whether a row, an issued copy or a tag has `id`, or a tag is bound to it.

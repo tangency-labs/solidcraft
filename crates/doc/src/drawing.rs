@@ -21,6 +21,8 @@
 //! - **Dimensions** on its views, each measuring named corners or edges of the view's model
 //!   ([`dimension`]).
 //! - **Balloons** on its views, each pointing at a placed part by a named edge of it ([`balloon`]).
+//! - **Revisions**: one revision record for the whole drawing ([`RevisionRecord`]), its rows in the
+//!   order they were added, the newest last.
 //!
 //! The rules, which every later kind of record (views, annotations, tables) keeps too:
 //! - Every object has an id of [`crate::ids`]: random, so objects added side by side never take
@@ -47,6 +49,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile};
+use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::{Aabb2, Vec2};
 
 use crate::format::DRAWING;
@@ -118,6 +121,9 @@ pub struct Drawing {
     /// By id ([`Drawing::add_balloons`]), as the dimensions are.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub balloons: Vec<Arc<Balloon>>,
+    /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
+    #[serde(default, skip_serializing_if = "no_revisions")]
+    pub revisions: Arc<RevisionRecord>,
 }
 
 /// A design the drawing draws: the design the drawing is in. Views and sheets name it by its id,
@@ -245,6 +251,7 @@ impl Drawing {
             views: Vec::new(),
             dimensions: Vec::new(),
             balloons: Vec::new(),
+            revisions: Arc::default(),
         };
         drawing.validate()?;
         Ok(drawing)
@@ -335,6 +342,7 @@ impl Drawing {
             .chain(self.views.iter().map(|v| v.id))
             .chain(self.dimensions.iter().map(|d| d.id))
             .chain(self.balloons.iter().map(|b| b.id))
+            .chain(self.revisions.ids())
     }
 
     /// The record's rules (the module's notes): what reading a drawing checks, and what every edit
@@ -359,6 +367,9 @@ impl Drawing {
         for sheet in &self.sheets {
             self.check_sheet(sheet).map_err(|e| DocError::Invalid(format!("sheet {}: {e}", ids::encode(sheet.id))))?;
         }
+        // One record for the whole drawing until sheets keep their own (#3874).
+        require(!self.revisions.per_sheet, || "a drawing keeps one revision record for all its sheets".into())?;
+        self.revisions.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
         self.check_views()?;
         self.check_dimensions()?;
         self.check_balloons()
@@ -426,6 +437,10 @@ fn add_by_id<T>(records: &mut Vec<Arc<T>>, more: impl IntoIterator<Item = Arc<T>
 /// Whether `records` are in the order [`add_by_id`] keeps.
 fn in_id_order<T>(records: &[Arc<T>], id: impl Fn(&T) -> u64) -> bool {
     records.is_sorted_by_key(|r| id(r))
+}
+
+fn no_revisions(revisions: &Arc<RevisionRecord>) -> bool {
+    **revisions == RevisionRecord::default()
 }
 
 /// `Ok` when `ok`, else the rule `broken` names.

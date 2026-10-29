@@ -223,6 +223,12 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
     assert_eq!(record.issued().len(), 2, "a refused version issues nothing");
     let json = serde_json::to_value(&record).unwrap();
     assert_eq!(json["numbering"], json!("letters"));
+    let id = json!(crate::ids::encode(a));
+    assert_eq!(
+        (&json["rows"][0]["id"], &json["tags"][0]["row"], &json["rows"][0]["sheet"]),
+        (&id, &id, &json!(null)),
+        "ids as every drawing writes them"
+    );
     let back: RevisionRecord = serde_json::from_value(json.clone()).unwrap();
     assert_eq!(back, record);
     back.validate().unwrap();
@@ -245,16 +251,16 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
         ),
         (&|v| v["tags"][0]["id"] = v["rows"][0]["id"].clone(), ids),
         (&|v| v["rows"] = json!([v["rows"][0], v["rows"][0]]), ids),
-        (&|v| v["rows"][0]["sheet"] = json!(3), "a row has a sheet when the record is kept per sheet, and only then"),
+        (&|v| v["rows"][0]["sheet"] = json!(crate::ids::encode(3)), "a row has a sheet when the record is kept per sheet, and only then"),
         (&|v| v["tags"][0]["size_mm"] = json!(0.5), "a tag's side is 1 to 50 mm"),
         (&|v| v["tags"][0]["size_mm"] = json!(50.001), "a tag's side is 1 to 50 mm"),
-        (&|v| v["tags"][0]["row"] = json!(99), "a tag is bound to a row"),
+        (&|v| v["tags"][0]["row"] = json!(crate::ids::encode(99)), "a tag is bound to a row"),
         (&|v| v["rows"] = json!([]), "a tag is bound to a row"),
         (&|v| v["rows"][0]["revision"] = json!("A\nB"), "a label is one line of at most 4096 bytes"),
         (&|v| v["issued"][0]["date"] = json!("\u{1}"), "a cell's text has no control character but a line break"),
         (&|v| v["tags"][0]["text"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
         (&|v| v["issued"][1]["model_version"] = json!("x\ny"), "a label is one line of at most 4096 bytes"),
-        (&|v| v["rows"] = json!(vec![json!({"id": 0, "revision": "A"}); 1001]), "a record has at most 1000 rows"),
+        (&|v| v["rows"] = json!(vec![json!({"id": crate::ids::encode(1), "revision": "A"}); 1001]), "a record has at most 1000 rows"),
     ] {
         assert_eq!(damaged(change), Err(Invalid(message)), "{message}");
     }

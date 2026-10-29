@@ -26,6 +26,7 @@ pub mod fill;
 pub mod fill_general;
 mod grid;
 pub mod hlr;
+pub mod ids;
 mod mesh;
 pub mod mesh_distance;
 pub mod network;
