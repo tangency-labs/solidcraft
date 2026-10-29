@@ -242,14 +242,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         }
         None => s.dimension_values.get(&(d.id, id)).copied(),
     };
-    let (status, why, candidates) = match r.status {
-        Status::Ok => ("ok", None, Vec::new()),
-        Status::Overridden => ("overridden", None, Vec::new()),
-        Status::Ambiguous(found) => ("ambiguous", None, found.into_iter().map(candidate).collect()),
-        Status::Suppressed => ("suppressed", None, Vec::new()),
-        Status::Lost(why) => ("lost", Some(why), Vec::new()),
-        Status::Unmeasurable(why) => ("unmeasurable", Some(why), Vec::new()),
-    };
+    let (status, why, candidates) = status_words(r.status);
     let angle = matches!(dimension.kind, DimensionKind::Angle { .. });
     let shown = |value: f64| if angle { value.to_degrees() } else { value };
     let reply = DimensionResult {
@@ -267,6 +260,20 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// How a command's answer says where a reference stands with the model: the status's word, why
+/// it is lost or can't be measured, and the candidates when several things match. Balloons say it
+/// the same way.
+pub(super) fn status_words(status: Status) -> (&'static str, Option<String>, Vec<CandidateResult>) {
+    match status {
+        Status::Ok => ("ok", None, Vec::new()),
+        Status::Overridden => ("overridden", None, Vec::new()),
+        Status::Ambiguous(found) => ("ambiguous", None, found.into_iter().map(candidate).collect()),
+        Status::Suppressed => ("suppressed", None, Vec::new()),
+        Status::Lost(why) => ("lost", Some(why), Vec::new()),
+        Status::Unmeasurable(why) => ("unmeasurable", Some(why), Vec::new()),
+    }
 }
 
 fn candidate(c: Candidate) -> CandidateResult {

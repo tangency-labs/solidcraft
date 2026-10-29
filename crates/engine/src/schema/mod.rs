@@ -46,6 +46,7 @@ mod types;
 pub(crate) mod tests;
 
 // The contracts, by command file.
+pub mod drawing_balloon;
 pub mod drawing_dimension;
 pub mod drawing_sheet;
 pub mod drawing_view;
