@@ -494,6 +494,7 @@ fn options_of(o: Option<[bool; 5]>) -> Option<SweepOptions> {
         move_profile_center_to_path: c,
         orient_profile_perpendicular_to_path: d,
         move_to_profile: e,
+        profile_at_path_start: false,
     })
 }
 

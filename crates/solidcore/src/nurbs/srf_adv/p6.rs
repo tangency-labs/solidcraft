@@ -7,6 +7,7 @@
 //! | Rust                                         | Upstream               |
 //! |----------------------------------------------|------------------------|
 //! | [`create_sweep_scale`], [`SweepScaleOptions`] | `N_CreateSweepScale`   |
+//! | [`create_sweep_scale_with_placements`]       | `N_CreateSweepScale` with the fork's `placed` |
 //! | [`fill_n_sided_hole`], [`NSidedFill`]        | `N_FillNSidedHole`     |
 //!
 //! Deviations:
@@ -194,6 +195,41 @@ pub fn create_sweep_scale(
     z0: Vec3,
     opt: &SweepScaleOptions<'_>,
 ) -> Result<Surface> {
+    sweep_scale(cur_t, cur_c, z0, opt, None)
+}
+
+/// The local systems a sweep placed its cross section on (the SolidCraft fork's
+/// `placed` output of `N_CreateSweepScale`, tangency-labs/smlib 5d3939e): the frames
+/// `(OL, XL, YL, ZL)` of the first, the middle (of all placed, in order: index
+/// `n / 2` of `n`) and the last section.
+pub type SweepPlacements = [Frame; 3];
+
+/// [`create_sweep_scale`] that also reports where it placed the cross section
+/// ([`SweepPlacements`]; the SolidCraft fork's `placed` output, tangency-labs/smlib
+/// 5d3939e, #1450). The surface is the same as [`create_sweep_scale`]'s.
+///
+/// # Errors
+///
+/// Those of [`create_sweep_scale`].
+pub fn create_sweep_scale_with_placements(
+    cur_t: &Curve,
+    cur_c: &Curve,
+    z0: Vec3,
+    opt: &SweepScaleOptions<'_>,
+) -> Result<(Surface, SweepPlacements)> {
+    let mut placed = [Frame::default(); 3];
+    let surface = sweep_scale(cur_t, cur_c, z0, opt, Some(&mut placed))?;
+    Ok((surface, placed))
+}
+
+/// `N_CreateSweepScale` with the fork's optional `placed` output.
+fn sweep_scale(
+    cur_t: &Curve,
+    cur_c: &Curve,
+    z0: Vec3,
+    opt: &SweepScaleOptions<'_>,
+    mut placed: Option<&mut SweepPlacements>,
+) -> Result<Surface> {
     const OP: &str = OP_SWEEP;
     let SweepScaleOptions {
         cur_z,
@@ -380,6 +416,10 @@ pub fn create_sweep_scale(
 
     let mut result: Option<Surface> = None;
 
+    // SolidCraft fork (5d3939e): the sections placed so far, and in all (see `placed`).
+    let mut placed_at = 0usize;
+    let n_placed: usize = seg_pars.iter().map(Vec::len).sum();
+
     // The big loop over the trajectory segments.
     for (ii, seg) in segs.iter().enumerate() {
         let sp = rf(&seg_pars, ii, OP)?;
@@ -421,6 +461,18 @@ pub fn create_sweep_scale(
 
             let yl = zl.cross(xl);
             let rma = transform_matrix_from_axes(world, Frame::new(ol, xl, yl, zl))?;
+
+            // SolidCraft fork (5d3939e): the local systems of the first, middle and last
+            // sections.
+            if let Some(placed) = placed.as_deref_mut() {
+                let slots = [0, n_placed / 2, n_placed.saturating_sub(1)];
+                for (slot, frame) in slots.iter().zip(placed.iter_mut()) {
+                    if placed_at == *slot {
+                        *frame = Frame::new(ol, xl, yl, zl);
+                    }
+                }
+            }
+            placed_at += 1;
 
             if jj == 0 || jj == np {
                 let zsrc = match cur_z {

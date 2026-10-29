@@ -14,6 +14,7 @@
 //! | [`create_pipe_sweep`]                        | `SmApiCreatePipeSweep`                         |
 //! | [`create_sweep_along_planar_path`]           | `SmApiCreateSweepAlongPlanarPath`              |
 //! | [`create_curve_sweep`], [`CurveSweep`]       | `SmApiCreateCurveSweep`                        |
+//! | [`create_curve_sweep_with_placements`], [`PlacedCurveSweep`] | `SmApiCreateCurveSweep` with the SolidCraft fork's `pOptPlacements` |
 //! | [`create_curve_sweep_from_faces`]            | `SmApiCreateCurveSweepFromFaces`               |
 //! | [`create_curve_sweep_from_edges`]            | `SmApiCreateCurveSweepFromEdges`               |
 //! | [`create_taper_extrude`]                     | `SmApiCreateTaperExtrude`                      |
@@ -64,10 +65,16 @@
 //!   [`PrimitiveModel`]. Path and scale curves become their `SmBSplineCurve` part.
 //!   The faces and edges of the curve sweeps are `(&Brep, id)` pairs: upstream
 //!   objects reach their own B-rep.
+//! - **SolidCraft fork (tangency-labs/smlib 5d3939e, WR-523, #1450).** The fork's
+//!   optional `pOptPlacements` output of `SmApiCreateCurveSweep` is the sibling
+//!   [`create_curve_sweep_with_placements`], so [`create_curve_sweep`] keeps its
+//!   signature and does no extra work; the fork's `bProfileAtPathStart` is
+//!   [`SweepOptions::profile_at_path_start`] (WR-522), off by default.
 
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -127,6 +134,17 @@ pub struct CurveSweep {
     pub side_faces: Vec<FaceId>,
     /// `pOptEndFaces`: the end cap faces.
     pub end_faces: Vec<FaceId>,
+}
+
+/// A curve sweep and where it placed the profile (the outputs of
+/// [`create_curve_sweep_with_placements`]; the SolidCraft fork's `pOptPlacements`).
+#[derive(Debug, Clone)]
+pub struct PlacedCurveSweep {
+    /// The swept solid and its faces, as [`create_curve_sweep`] returns them.
+    pub sweep: CurveSweep,
+    /// `pOptPlacements`: the rigid motions carrying the profile curves as given onto
+    /// the sweep's first, middle and last sections.
+    pub placements: [Axis2Placement; 3],
 }
 
 /// Deep-copies the caller's profile curves for the consuming `SmPrimitiveCreation`
@@ -408,6 +426,60 @@ pub fn create_curve_sweep(
             &mut faces.2,
         )
     })
+}
+
+/// [`create_curve_sweep`] that also says where it placed the profile
+/// (`SmApiCreateCurveSweep` with the SolidCraft fork's `pOptPlacements`,
+/// tangency-labs/smlib 5d3939e, WR-523, #1450): the rigid motions carrying the profile
+/// curves as given onto the first, middle and last sections the sweep placed. Each
+/// placement maps the global system onto the motion's image (`transform_point` of a
+/// profile point is that point on the section). The solid and faces are the same as
+/// [`create_curve_sweep`]'s.
+///
+/// # Errors
+///
+/// Those of [`create_curve_sweep`]; `InvalidInput` with a scale curve (a scaled
+/// sweep's sections are no rigid images of the profile).
+pub fn create_curve_sweep_with_placements(
+    k: &mut Kernel,
+    profile_curves: &[Option<&Curve>],
+    path_curve: Option<&Curve>,
+    scale_reference: Option<&Curve>,
+    scale_curve: Option<&Curve>,
+    options: Option<&SweepOptions>,
+) -> Result<PlacedCurveSweep> {
+    let Some(path_curve) = path_curve.filter(|_| !profile_curves.is_empty()) else {
+        return Err(SolidError::invalid_input(
+            OP_CURVE_SWEEP,
+            "no profile curves or no path curve",
+        ));
+    };
+
+    let options = options.copied().unwrap_or_default();
+
+    let approx_tol = ZONE_TOL_3D;
+    let path = bspline_of(path_curve, OP_CURVE_SWEEP)?;
+    let scale = scale_curve
+        .map(|c| bspline_of(c, OP_CURVE_SWEEP))
+        .transpose()?;
+    let profiles: Vec<Option<Curve>> = profile_curves.iter().map(|c| c.cloned()).collect();
+    let (sweep, placements) = curve_sweep_with(k, |pc, model, faces| {
+        pc.create_curve_sweep_with_placements(
+            model,
+            PrimitiveModel::MAIN,
+            &profiles,
+            &path,
+            scale_reference,
+            scale.as_ref(),
+            approx_tol,
+            options,
+            true,
+            &mut faces.0,
+            &mut faces.1,
+            &mut faces.2,
+        )
+    })?;
+    Ok(PlacedCurveSweep { sweep, placements })
 }
 
 /// The solid swept by the boundaries of `faces` (each with its B-rep) along
@@ -867,20 +939,31 @@ fn curve_sweep(
     k: &mut Kernel,
     body: impl FnOnce(&mut PrimitiveCreation, &mut PrimitiveModel<'_>, &mut SweepFaces) -> Result<()>,
 ) -> Result<CurveSweep> {
-    let (mut brep, (start_faces, side_faces, end_faces)) =
+    curve_sweep_with(k, body).map(|(sweep, ())| sweep)
+}
+
+/// [`curve_sweep`] whose `body` also returns a value.
+fn curve_sweep_with<R>(
+    k: &mut Kernel,
+    body: impl FnOnce(&mut PrimitiveCreation, &mut PrimitiveModel<'_>, &mut SweepFaces) -> Result<R>,
+) -> Result<(CurveSweep, R)> {
+    let (mut brep, ((start_faces, side_faces, end_faces), extra)) =
         PrimitiveModel::build_new(k, |pc, model| {
             let mut faces = SweepFaces::default();
-            body(pc, model, &mut faces)?;
-            Ok(faces)
+            let extra = body(pc, model, &mut faces)?;
+            Ok((faces, extra))
         })?;
     // (not upstream: the port's cached topology fields, true for the caller)
     brep.refresh_cached_topology();
-    Ok(CurveSweep {
-        brep,
-        start_faces,
-        side_faces,
-        end_faces,
-    })
+    Ok((
+        CurveSweep {
+            brep,
+            start_faces,
+            side_faces,
+            end_faces,
+        },
+        extra,
+    ))
 }
 
 /// The `SmBSplineCurve` a path or scale curve is (upstream's parameter type): a

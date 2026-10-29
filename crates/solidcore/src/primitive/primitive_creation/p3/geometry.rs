@@ -13,6 +13,9 @@
 //! `Kernel::fixes.sweep_frame_on_planar_path_normal`, WR-407; SolidCraft change,
 //! tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434; see
 //! [`prepare_curve_sweep`]).
+//! **The profile can be swept where it lies** (`SweepOptions::profile_at_path_start`,
+//! the SolidCraft fork's `bProfileAtPathStart`, tangency-labs/smlib 2dd71a0, WR-522,
+//! #1450; off by default): the path's start is the profile's reference point.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p3::compute_crvs_normal;
@@ -70,6 +73,13 @@ pub struct PreparedCurveSweep {
     pub path_back: Axis2Placement,
     /// Return to the initial profile reference point.
     pub profile_back: Axis2Placement,
+    /// Move the profile's reference point to the origin (`sProfileToOrigin`).
+    pub profile_to_origin: Axis2Placement,
+    /// Turn the path's start tangent onto x (`sPathRot`).
+    pub rotation: Axis2Placement,
+    /// Orient the profile square to the path (`sProfileTrans`), only with
+    /// `orient_profile_perpendicular_to_path`.
+    pub orientation: Option<Axis2Placement>,
 }
 
 pub(super) fn split_profiles(k: &Kernel, curves: &mut Vec<BSplineCurve>) -> Result<()> {
@@ -196,7 +206,11 @@ pub fn prepare_curve_sweep(
     path_to_origin.translate(-start);
     ignore_status(path.transform(&path_to_origin, None))?;
     let mut reference = Vec3::ZERO;
-    if options.move_profile_center_to_path {
+    if options.profile_at_path_start {
+        // SolidCraft fork (tangency-labs/smlib 2dd71a0, WR-522, #1450): the profile moves
+        // with the path's start, so it keeps its place relative to the path.
+        reference = start;
+    } else if options.move_profile_center_to_path {
         let mut total = Extent3d::new();
         let mut bounds = Extent3d::new();
         for profile in &profiles {
@@ -280,6 +294,7 @@ pub fn prepare_curve_sweep(
     for profile in &mut profiles {
         ignore_status(profile.transform(&rotation, None))?;
     }
+    let mut orientation = None;
     if options.orient_profile_perpendicular_to_path {
         let as_curves: Vec<_> = profiles.iter().cloned().map(Curve::from).collect();
         let mut normal = match compute_crvs_normal(k, &as_curves) {
@@ -315,6 +330,7 @@ pub fn prepare_curve_sweep(
         for profile in &mut profiles {
             ignore_status(profile.transform(&placement, None))?;
         }
+        orientation = Some(placement);
     }
     Ok(PreparedCurveSweep {
         profiles,
@@ -323,6 +339,9 @@ pub fn prepare_curve_sweep(
         rotation_back: rotation.invert(),
         path_back: path_to_origin.invert(),
         profile_back: profile_to_origin.invert(),
+        profile_to_origin,
+        rotation,
+        orientation,
     })
 }
 
