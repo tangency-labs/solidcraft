@@ -16,7 +16,7 @@ use crate::bspline::{Dir, HPoint, NurbsSurface, Side, SplineError, SplineResult,
 /// Most loop points a fill takes.
 pub const MAX_LOOP_POINTS: usize = 8192;
 /// Most spans of the height field in each direction.
-pub const MAX_FILL_SPANS: usize = 32;
+pub const MAX_FILL_SPANS: usize = 64;
 /// How full a patch's middle may be made (`crown`): 0 the least-bending fill, positive fuller,
 /// negative flatter, in fractions of the loop's size. Outside this range the value is refused.
 pub const MIN_CROWN: f64 = -0.9;
@@ -89,7 +89,7 @@ pub struct LoopFill {
 ///   is free to turn at the rim (it is not the surface that made the rim). It does not depend
 ///   on the grid's directions. `λ = 10⁻⁷ ·` (fitted points) `/` (control points): just enough
 ///   to fix the inside, small enough not to pull the surface off the loop.
-/// - Grids of 4, 8, 16, 32 spans across the box's longer side are tried, with as many across
+/// - Grids of 4, 8, 16, 32, 64 spans across the box's longer side are tried, with as many across
 ///   the shorter side as keep the cells about square; a grid whose cells are under twice the
 ///   fitted points' largest step in a direction (cells between points would be left to the
 ///   energy alone) waits for denser sampling. The first grid within `tol` of every sampled
