@@ -377,7 +377,8 @@ fn an_explicit_sketch_plane_is_read_in_the_frame_asked_for() {
 #[test]
 fn a_combine_tool_stays_where_it_is_placed() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Part"}));
+    // The design's first part is grounded when it is made (#2804); this one is moved.
+    run(&mut s, "component.create", json!({"name": "Part", "grounded": false}));
     run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "Plate"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg"}));
