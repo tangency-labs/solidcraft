@@ -64,7 +64,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let row = label(ui).to_owned();
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
         let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.scope_id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let arrow = ui.interact(half, ui.scope_id().with(("sc_count_step", &row, name)), egui::Sense::CLICK);
         let enabled = ui.is_enabled() && next.is_some();
         // The arrows stand inside the editor, which claims the text cursor across its whole
         // rect: they are not text, so each one takes the ordinary cursor back after it. The
@@ -809,6 +809,17 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if response.has_focus() {
         crate::prefs_search::note_key_sink(ui.ctx());
+    }
+    // Keyboard focus selects a plain number without its unit, or the whole expression.
+    if completion
+        && response.gained_focus()
+        && !ui.input(|i| i.pointer.any_down() || i.pointer.any_released())
+        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id)
+    {
+        let range = crate::value_step::number_range(value).unwrap_or(0..value.chars().count());
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(range.start), egui::text::CCursor::new(range.end))));
+        state.store(ui.ctx(), response.id);
+        ui.ctx().request_repaint();
     }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
