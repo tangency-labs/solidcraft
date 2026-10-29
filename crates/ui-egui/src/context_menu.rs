@@ -991,6 +991,17 @@ fn turn_up_axis(occurrence: u64, enabled: bool) -> Vec<Item> {
     v
 }
 
+/// Show All Bodies would bring a body back: one hidden itself, a hidden placement, or a hidden
+/// Bodies folder or group of bodies. The name of a body that is gone does not count.
+fn bodies_hidden(app: &SolveApp) -> bool {
+    let s = &app.session;
+    let world = s.world_state();
+    let groups: Vec<String> = s.doc.browser_groups.iter().filter(|g| g.folder == "bodies").map(|g| format!("/g{}", g.id)).collect();
+    s.visibility.hidden_bodies.iter().any(|b| world.body(b).is_some())
+        || !s.visibility.hidden_occurrences.is_empty()
+        || s.visibility.hidden_folders.iter().any(|k| k.ends_with("/bodies") || groups.iter().any(|g| k.ends_with(g.as_str())))
+}
+
 /// A category row whose entries open in a flyout.
 fn group(label: &str, icon: &str, children: Vec<Item>) -> Item {
     let mut item = act(&format!("ui.group.{}", label.to_lowercase()), label, icon).on(children.iter().any(|c| c.enabled));
@@ -1110,7 +1121,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     v.push(Item::sep());
     v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(act("ui.showAll", "Show All Bodies", "eye"));
+    if bodies_hidden(app) {
+        v.push(act("ui.showAll", "Show All Bodies", "eye"));
+    }
     v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
     v.push(Item::sep());
     let mut browser = vec![act("ui.newGroup", "New Group", "folder").with(json!({ "component": id }))];

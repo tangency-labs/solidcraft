@@ -488,7 +488,11 @@ fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     let items = context_menu::items(&h.app, &target);
     let from = items.iter().find(|i| i.id == "component.from_bodies").unwrap();
     assert_eq!(from.params.as_ref().unwrap()["bodies"], json!(["Body1", "Second"]));
-    assert!(has(&h, "ui.newGroup") && has(&h, "ui.showAll"), "on every component's menu");
+    assert!(has(&h, "ui.newGroup"), "on every component's menu");
+    assert!(!has(&h, "ui.showAll"), "Show All Bodies only while something is hidden");
+    h.app.run("browser.visibility", json!({"items": ["Second"], "visible": false})).unwrap();
+    assert!(has(&h, "ui.showAll"), "a hidden body anywhere brings it back");
+    h.app.run("browser.visibility", json!({"items": ["Second"], "visible": true})).unwrap();
     assert!(!has(&h, "ui.groupSelected"), "nothing selected");
     h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Second".into() }];
     let group = context_menu::items(&h.app, &target).into_iter().find(|i| i.id == "ui.groupSelected").unwrap();
