@@ -79,6 +79,18 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
         index.entry(h).or_insert(u32::try_from(i).ok()?);
         handles.push(h);
     }
+    // How often the loops run along each side: a side run both ways (a slit, where a face's
+    // boundary goes out along a line its two sides share and back) bounds the face on neither.
+    let mut runs: HashMap<(FixedVertexHandle, FixedVertexHandle), usize> = HashMap::new();
+    for r in loops {
+        let n = r.len();
+        for k in 0..n {
+            let (a, b) = (*handles.get(r.start + k)?, *handles.get(r.start + (k + 1) % n)?);
+            if a != b {
+                *runs.entry(if a.index() < b.index() { (a, b) } else { (b, a) }).or_insert(0) += 1;
+            }
+        }
+    }
     for r in loops {
         let n = r.len();
         for k in 0..n {
@@ -125,7 +137,9 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
     }
     let mut uv: Vec<[f64; 2]> = boundary.to_vec();
     let mut tris = Vec::new();
-    let region = region(&cdt);
+    let slits: std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)> =
+        runs.into_iter().filter(|(_, n)| n % 2 == 0).map(|(e, _)| e).collect();
+    let region = region_without(&cdt, &slits);
     for face in cdt.inner_faces() {
         if !region.get(face.index()).copied().unwrap_or(false) {
             continue;
@@ -308,14 +322,23 @@ fn refine_sag(cdt: &mut Cdt, sag: &Sag, budget: usize, from: &dyn Fn(Point2<f64>
 /// outer face that flips parity each time it crosses a constraint edge (holes are out), linear
 /// in the number of triangles.
 fn region(cdt: &Cdt) -> Vec<bool> {
+    region_without(cdt, &std::collections::HashSet::new())
+}
+
+/// [`region`], the constraint sides in `slits` (run along both ways) crossed without counting.
+fn region_without(cdt: &Cdt, slits: &std::collections::HashSet<(FixedVertexHandle, FixedVertexHandle)>) -> Vec<bool> {
     use spade::handles::{FixedFaceHandle, InnerTag};
+    let counts = |e: spade::handles::DirectedEdgeHandle<'_, _, _, _, _>| {
+        let [a, b] = e.vertices().map(|v| v.fix());
+        e.is_constraint_edge() && !slits.contains(&if a.index() < b.index() { (a, b) } else { (b, a) })
+    };
     let mut parity: Vec<Option<bool>> = vec![None; cdt.num_all_faces()];
     let mut todo: Vec<(FixedFaceHandle<InnerTag>, bool)> = Vec::new();
     for e in cdt.convex_hull() {
         // Hull edges have the outer face on one side; the other side is an inner face.
         for side in [e, e.rev()] {
             if let Some(inner) = side.face().as_inner() {
-                todo.push((inner.fix(), e.is_constraint_edge()));
+                todo.push((inner.fix(), counts(e)));
             }
         }
     }
@@ -326,7 +349,7 @@ fn region(cdt: &Cdt) -> Vec<bool> {
         }
         for e in cdt.face(h).adjacent_edges() {
             if let Some(next) = e.rev().face().as_inner() {
-                todo.push((next.fix(), odd ^ e.is_constraint_edge()));
+                todo.push((next.fix(), odd ^ counts(e)));
             }
         }
     }
