@@ -468,10 +468,8 @@ fn dialog_tab_patterns_follow_display_order_in_both_directions() {
         if command == "sketch.pattern.rectangular" {
             step(&mut h, json!({"key":"Tab"}));
             assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
-            step(&mut h, json!({"key":"Tab"})); // First direction section header.
         }
         step(&mut h, json!({"key":"Tab"}));
-        step(&mut h, json!({"key":"A", "cmd":true}));
         step(&mut h, json!({"text":"4"}));
         let d = h.app.dialog.as_ref().unwrap();
         match &d.kind {
@@ -479,7 +477,6 @@ fn dialog_tab_patterns_follow_display_order_in_both_directions() {
             _ => panic!("pattern dialog"),
         }
         if command == "sketch.pattern.rectangular" {
-            step(&mut h, json!({"key":"Tab", "shift":true})); // First direction section header.
             step(&mut h, json!({"key":"Tab", "shift":true}));
             assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
         }
@@ -488,13 +485,12 @@ fn dialog_tab_patterns_follow_display_order_in_both_directions() {
         step(&mut h, json!({"key":"Tab", "shift":true}));
         assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
         if command == "sketch.pattern.rectangular" {
-            // Entities, both directions, then each section header and its values.
-            for _ in 0..6 {
+            // Entities, both directions, Quantity, and Spacing; headers and arrows are skipped.
+            for _ in 0..4 {
                 step(&mut h, json!({"key":"Tab"}));
             }
             assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
             step(&mut h, json!({"key":"Tab"}));
-            step(&mut h, json!({"key":"A", "cmd":true}));
             step(&mut h, json!({"text":"2"}));
             let crate::dialogs::Kind::SketchModify(Mod::PatternRect { count2, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
                 panic!("rectangular pattern dialog");
@@ -502,9 +498,7 @@ fn dialog_tab_patterns_follow_display_order_in_both_directions() {
             assert_eq!(count2, "2");
             step(&mut h, json!({"key":"Tab", "shift":true}));
             assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
-            step(&mut h, json!({"key":"Tab", "shift":true}));
-            step(&mut h, json!({"key":"A", "cmd":true}));
-            step(&mut h, json!({"text":"25 mm"}));
+            step(&mut h, json!({"text":"25"}));
             let crate::dialogs::Kind::SketchModify(Mod::PatternRect { spacing, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
                 panic!("rectangular pattern dialog");
             };

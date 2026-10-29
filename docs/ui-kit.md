@@ -216,7 +216,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `linear_color_field` | Linear RGB swatch with precise channel fields; clips only the preview to display gamut and preserves HDR values until edited | `control_height`, `space_4`, shared colour popover |
 | `section`, `section_count`, `section_method`, `search_fold`, `divider` | Persisted small-caps disclosure with chevron, optional count or method tag and trailing hairline; `search_fold` is that row for shortcut matches during Preferences search, closed until opened; full-width rule | `control_height`, `dialog_rule`, `font_caption`, tracking, spacing |
 | `icon_action` | Icon-only action with an accessible name, tooltip, enabled state and danger variant | Shared icon-label action geometry and ink tokens |
-| `list_row` | Picked item with a remove target | `control_height`, `font_label`, icon/spacing tokens |
+| `list_row`, `list_row_with_sense` | Picked item with a remove target | `control_height`, `font_label`, icon/spacing tokens |
 | `text`, `Text` | Hint, note, report, inline or cell text; see variants below | `font_small/label`, `text/dim/error`, `control_height`, `space_4` |
 | `text_lines` | Virtualized read-only licence/report lines, horizontal overflow | `font_small`, `text`, `control_height` |
 | fields: `field`, `hint_field`, `focused_field` | Expression editors, optional empty hint or retained focus; returns accepted Enter | `control_height/fill`, `form_inset`, `font_label` |
@@ -231,7 +231,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `text_area` | Bounded multiline JSON/data editor | field tokens |
 | `dropdown`, `dropdown_menu`, `compact_dropdown_menu` | Indexed choices or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |
 | `searchable_dropdown`, `SearchOption` | Filtered choices, custom-value action and pending message | dropdown tokens |
-| `selection_field`, `Selection` | Selection chip with explicit `active` and `filled` state, in three looks: the active input (where the next pick goes) has a `form_primary` border and `selected_bg` tint; a filled inactive one a quiet neutral tint, a stronger neutral border and its count in `form_ink`; an empty inactive one the plain control with a dim prompt | `selected_bg/ink`, `form_primary/ink/dim`, `control_*`, `form_inset`, `space_2/8/24` |
+| `selection_field`, `selection_field_with_sense`, `Selection` | Selection chip with explicit `active` and `filled` state, in three looks: the active input (where the next pick goes) has a `form_primary` border and `selected_bg` tint; a filled inactive one a quiet neutral tint, a stronger neutral border and its count in `form_ink`; an empty inactive one the plain control with a dim prompt | `selected_bg/ink`, `form_primary/ink/dim`, `control_*`, `form_inset`, `space_2/8/24` |
 | `value_pair` | Paired captions/expressions; optional independent field names | row/field tokens, `space_8` |
 | `fraction_field`, `scalar_field`, `mixed_scalar_field` | Locale-aware bounded dimensionless values; scalar fields fill their control column; the mixed variant accepts a translated placeholder | form control/font tokens |
 | `number_field` | Integer/decimal field with caller range, drag speed and suffix | form control/font tokens |
@@ -260,7 +260,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | navigation_settings: `navigation_stage`, `navigation_tile`, `navigation_drag_ghost` | Custom preview stage, draggable slot tiles and drag feedback. Ordinary preferences reuse `settings_section`, `settings_form`, `row`, default `segmented`, `checkbox`, `button`, `divider` and text hints | `dialog_border`, `control_border`, `form_ink/dim`, `nav_field/hover/viewport` |
 | `settings_card` | Full-width settings detail group; uses Container chrome and preserves its width with empty or changing content | `dialog_footer`, `border`, `radius_md`, `space_12/10` |
 | `mirrored_icon_button_at` | Directional counterpart of an existing icon master, sharing icon-button presentation and accessible label | Shared icon-button tokens |
-| `icon_button_at` | Icon action inside a supplied rectangle | `form_icon_inset`, `text/dim`, icon palette |
+| `icon_button_at`, `icon_button_at_with_sense` | Icon action inside a supplied rectangle | `form_icon_inset`, `text/dim`, icon palette |
 | `button_pair`, `PairButton` | Equal secondary actions, optional icons and selected state | `form_button_height`, control/selection/icon tokens |
 | `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |
@@ -272,6 +272,8 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `label_actions` | Clipped row name beside compact actions | `control_height`, form font/spacing tokens |
 | status: `status_header`, `StatusHeader` | Supplied icon/name/status and constraint meter | `font_label`, `text/dim`, `accent`, sketch/header tokens |
 | `progress` | Clamped determinate progress | `space_3/6`, `dialog_rule`, `accent` |
+
+Pattern/Mirror use the `*_with_sense` variants to include selection fields in Tab order and keep auxiliary clear/remove actions pointer-only. Default controls keep their existing focus behavior, visuals, and accessibility labels.
 
 History contents are selected from measured panel width. A 56 pt thin strip shows icons
 and four vertical transport controls: beginning, back, forward and end. The minimum named
@@ -470,7 +472,6 @@ Configuration drafts publish `config:new:name`; existing `config:cell:ROW:COLUMN
 activation, rule and preview handles remain. The header plus retains
 `dialog:menu:Add Column`, including the existing menu nesting. The old separate
 Add forms and column-removal band have been removed.
-
 
 Crash Reports uses `report_list` (bordered bounded scroll), `report_header` (kind,
 count pill and mono UTC time), `path_chip` (clipped mono path and adjacent action),
@@ -694,7 +695,6 @@ stable identity, enabled state and exact caller-owned geometry. Recovery actions
 use this component rather than custom button painters. The recovery well renders
 the existing restore artwork through its construction accent ramp.
 
-
 ### Theme corner radii
 
 Theme files may override `radius_sm`, `radius_md`, `radius_lg`, `radius_xl`,
@@ -843,8 +843,6 @@ shared token paint and hit targets. All are exercised in the kit gallery.
 | vector3_field | Three bounded number fields divide the row's control column evenly, retaining the shared parser, focus and bevels. Used for RGB absorption and world-space origin/repeat vectors. |
 | sphere_preview_with_source | Sample card with an interactive source tag, retaining the sphere, name, usage badge and trailing action. Appearance uses the tag to inspect its inheritance chain. |
 
-
-Selection fields default to pointer-only `Sense::CLICK`; icon buttons and list remove actions default to focusable `Sense::click()`. The `selection_field_with_sense`, `icon_button_at_with_sense`, and `list_row_with_sense` variants let Pattern/Mirror include selection fields in Tab order while excluding auxiliary remove actions, preserving the same visuals and accessibility labels.
 
 The compact `settings_choice_row` variant reuses the shared settings radio-card painter
 for preset lists: 40 pt rows, right-aligned summaries and the active workspace accent.

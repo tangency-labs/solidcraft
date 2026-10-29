@@ -1355,14 +1355,14 @@ const ELEMENTS: &[Element] = &[
         row(ui, "Gallery", |ui| {
             selection_field_with_sense(ui, "Select", Selection { active: true, filled: false }, egui::Sense::click());
         });
-    });
+    }),
     element!("icon_button_at_with_sense", |ui, _| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(row_height(), row_height()), egui::Sense::hover());
         icon_button_at_with_sense(ui, rect, "close", "Close", egui::Sense::CLICK);
-    });
+    }),
     element!("list_row_with_sense", "dialog:list:picked", Some("dialog:list:picked:remove"), |ui, _| {
         list_row_with_sense(ui, "picked", "Point 1", egui::Sense::CLICK);
-    });
+    }),
     element!("selection_field_empty", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, _| {
         row(ui, "Gallery", |ui| {
             selection_field(ui, "Select", Selection { active: false, filled: false });
