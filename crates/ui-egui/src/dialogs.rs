@@ -116,11 +116,11 @@ crate::dialog_descriptor::dialog_descriptors! {
         // A point picked as well puts the plane through it instead of at the distance.
         OffsetPlane("construct.plane.offset", "OFFSET PLANE", [("Plane", PLANES | PLANAR_FACES, false), ("Through point", selection::VERTICES | selection::POINTS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Offset { distance, .. } }) {
-            offset: String = "0 mm".into() => distance.to_string(),
+            offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
-            angle: String = "45 deg".into() => angle.to_string(),
+            angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
         Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
             FeatureKind::Scale { factor, .. }) {
@@ -128,21 +128,21 @@ crate::dialog_descriptor::dialog_descriptors! {
         } => json!({"factor": factor});
         OffsetFaces("solid.offset_face", "OFFSET FACE", [("Faces", FACES, true)],
             FeatureKind::OffsetFace { distance, .. }) {
-            distance: String = "2 mm".into() => distance.to_string(),
+            distance: String = "2 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"distance": distance});
         Stock("solid.bounding_solid", "STOCK", [("Bodies (all if none)", BODIES, true)],
             FeatureKind::BoundingSolid { margin, .. }) {
-            margin: String = "2 mm".into() => margin.to_string(),
+            margin: String = "2 mm".into() => shown_expr(margin, ValueKind::Length),
         } => json!({"margin": margin});
         Pipe("solid.pipe", "PIPE", [("Path", CURVES, true)],
             FeatureKind::Pipe { diameter, wall, operation, .. }) {
-            diameter: String = "5 mm".into() => diameter.to_string(),
-            wall: String = String::new() => wall.as_deref().map(str::to_string).unwrap_or_default(),
+            diameter: String = "5 mm".into() => shown_expr(diameter, ValueKind::Length),
+            wall: String = String::new() => wall.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
             operation: usize = 0 => op_index(operation),
         } => json!({"diameter": diameter, "operation": OPS.get(*operation).copied().unwrap_or("new")});
         Emboss("solid.emboss", "EMBOSS", [("Profiles", PROFILES, true), ("Target Face (optional)", FACES, false)],
             FeatureKind::Emboss { depth, deboss, .. }) {
-            depth: String = "1 mm".into() => depth.to_string(),
+            depth: String = "1 mm".into() => shown_expr(depth, ValueKind::Length),
             deboss: bool = false => *deboss,
         } => json!({"depth": depth, "mode": if *deboss { "deboss" } else { "emboss" }});
         ; custom {

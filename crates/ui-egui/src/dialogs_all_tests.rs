@@ -1245,16 +1245,20 @@ fn pattern_says_why_a_clicked_sketch_is_not_taken() {
 }
 
 /// Features stored with bare numbers edit with their units written out, as the Plastic ones do
-/// (#1936): Fillet, Chamfer, Shell and Draft. OK in the editor keeps the feature in place.
+/// (#1936): Fillet, Chamfer, Shell, Draft, Offset Face, Stock and Offset Plane among them. OK in
+/// the editor keeps the feature in place.
 #[test]
 fn stored_bare_numbers_edit_with_their_units() {
     use serde_json::{Value, json};
-    let cases: [(&str, Value, &[&str]); 5] = [
+    let cases: [(&str, Value, &[&str]); 8] = [
         ("solid.fillet", json!({"edges": [[20, 0, 20]], "radius": 2}), &["2 mm"]),
         ("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "distance2": 1.5}), &["1 mm", "1.5 mm"]),
         ("solid.chamfer", json!({"edges": [[20, 0, 20]], "distance": 1, "angle": 30}), &["1 mm", "30 deg"]),
         ("solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2}), &["2 mm"]),
         ("solid.draft", json!({"faces": [[0, 15, 10]], "angle": 3, "neutral": "XY"}), &["3 deg"]),
+        ("solid.offset_face", json!({"faces": [[20, 15, 20]], "distance": 2}), &["2 mm"]),
+        ("solid.bounding_solid", json!({"margin": 2}), &["2 mm"]),
+        ("construct.plane.offset", json!({"base": "XY", "offset": 5}), &["5 mm"]),
     ];
     for (command, params, expected) in cases {
         let mut h = Harness::new();
@@ -1272,6 +1276,9 @@ fn stored_bare_numbers_edit_with_their_units() {
             Kind::Fillet { radius, angle, ctype: 2, .. } => vec![radius.clone(), angle.clone()],
             Kind::Shell { thickness } => vec![thickness.clone()],
             Kind::Draft { angle } => vec![angle.clone()],
+            Kind::OffsetFaces { distance } => vec![distance.clone()],
+            Kind::Stock { margin } => vec![margin.clone()],
+            Kind::OffsetPlane { offset } => vec![offset.clone()],
             other => panic!("{command}: {other:?}"),
         };
         assert_eq!(shown, expected, "{command}");
