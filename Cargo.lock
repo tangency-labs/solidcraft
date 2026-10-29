@@ -6242,6 +6242,7 @@ dependencies = [
  "solidcore-cadir",
  "solidcore-ops",
  "solidcore-record",
+ "solidcore-step",
  "solidcore-tess",
  "solidcraft-color",
  "solidcraft-doc",
