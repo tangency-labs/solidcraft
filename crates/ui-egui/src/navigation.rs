@@ -590,6 +590,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // go (kept through the release frame, so the end of the drag doesn't select either).
     if primary_pressed && inside {
         let empty_space = |app: &SolveApp| {
+            if hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p)) {
+                return false;
+            }
             app.viewport.context_menu.is_none()
                 && hover.is_some_and(|p| {
                     if !picking {
@@ -626,7 +629,6 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         ui.ctx().set_cursor_icon(if primary_down { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
     }
     // The fixed navigation mode (navigation bar), a held Space, or the preset's left-button binding.
-    let primary_nav = if space_pan { Some(NavMode::Pan) } else { app.viewport.nav.or(app.viewport.primary_nav) };
     // The right button also clicks (the context menu), so it navigates only once the press can no
     // longer be a click: a Magic Mouse moves the pointer a fraction of a point as it is clicked (#5517).
     // On that frame the drag catches up with the whole way from the press, so none of it is lost.
@@ -639,6 +641,19 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         _ => delta,
     };
     app.viewport.right_drag = right_drag;
+    let forms_shift = mods.shift
+        && !mods.alt
+        && !mods.ctrl
+        && !mods.command
+        && (crate::forms_prototype::shift_dragging(app)
+            || hover.is_some_and(|p| crate::forms_prototype::owns_pointer(app, &projection(app, rect), p)));
+    let primary_nav = if forms_shift {
+        None
+    } else if space_pan {
+        Some(NavMode::Pan)
+    } else {
+        app.viewport.nav.or(app.viewport.primary_nav)
+    };
     let button = if middle {
         Some(crate::prefs::NavButton::Middle)
     } else if right_drag {

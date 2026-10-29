@@ -19,6 +19,8 @@ solidcraft-doc = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 zip = { workspace = true }
+flate2 = { workspace = true }
+ruzstd = { workspace = true }
 quick-xml = { workspace = true }
 gltf = { workspace = true }
 serde = { workspace = true }

@@ -32,6 +32,7 @@ mod feature_refs;
 pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
 pub mod format;
 mod format_offsets;
+pub mod forms;
 pub mod frame;
 mod history_names;
 pub mod hole_reference;

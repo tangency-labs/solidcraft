@@ -14,6 +14,9 @@
 use crate::bspline::MAX_SPLINE_DEGREE;
 use crate::{Mesh, Vec3};
 
+mod differential;
+pub use differential::{CurveJet, SurfaceJet};
+
 /// Most knots in one evaluable knot vector (bounds the shader's span search).
 pub const MAX_EVAL_KNOTS: usize = 1 << 12;
 /// Most control points in one evaluable surface.
@@ -449,6 +452,81 @@ mod tests {
 
     const IDENTITY: [[f64; 4]; 3] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
 
+    #[test]
+    fn analytic_surface_jets_recover_polynomial_mixed_derivatives() {
+        let mut ctrl = Vec::new();
+        for j in 0..3 {
+            for i in 0..3 {
+                let (x, y) = (i as f64 / 2.0, j as f64 / 2.0);
+                let z = if i == 2 { 0.4 } else { 0.0 } - if j == 2 { 0.2 } else { 0.0 } + 0.1 * x * y;
+                ctrl.push([x, y, z, 1.0]);
+            }
+        }
+        let s = EvalSurface::Nurbs {
+            degree: [2, 2],
+            knots: [vec![0., 0., 0., 1., 1., 1.], vec![0., 0., 0., 1., 1., 1.]],
+            count: [3, 3],
+            ctrl,
+            closed: [false, false],
+        };
+        for (u, v) in [(0., 0.), (0.23, 0.71), (1., 1.)] {
+            let jet = s.jet(u, v).unwrap();
+            assert!(close(jet.point, Vec3::new(u, v, 0.4 * u * u - 0.2 * v * v + 0.1 * u * v), 1e-12));
+            assert!(close(jet.du, Vec3::new(1., 0., 0.8 * u + 0.1 * v), 1e-12));
+            assert!(close(jet.dv, Vec3::new(0., 1., -0.4 * v + 0.1 * u), 1e-12));
+            assert!(close(jet.duu, Vec3::Z * 0.8, 1e-12));
+            assert!(close(jet.duv, Vec3::Z * 0.1, 1e-12));
+            assert!(close(jet.dvv, Vec3::Z * (-0.4), 1e-12));
+            let (p, du, dv) = s.derivs(u, v).unwrap();
+            assert!(close(jet.point, p, 1e-12) && close(jet.du, du, 1e-12) && close(jet.dv, dv, 1e-12));
+        }
+        assert!(s.jet(f64::NAN, 0.0).is_none());
+        let mut invalid = s.clone();
+        if let EvalSurface::Nurbs { count, .. } = &mut invalid {
+            *count = [usize::MAX, 2];
+        }
+        assert!(invalid.jet(0.0, 0.0).is_none());
+    }
+    #[test]
+    fn rational_and_revolved_jets_measure_the_full_cylinder_curvature_tensor() {
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let s = EvalSurface::Nurbs {
+            degree: [2, 1],
+            knots: [vec![0., 0., 0., 1., 1., 1.], vec![0., 0., 1., 1.]],
+            count: [3, 2],
+            ctrl: vec![[3., 0., 0., 1.], [3. * w, 3. * w, 0., w], [0., 3., 0., 1.], [3., 0., 5., 1.], [3. * w, 3. * w, 5. * w, w], [0., 3., 5., 1.]],
+            closed: [false, false],
+        };
+        for u in [0.0, 0.13, 0.56, 1.0] {
+            let jet = s.jet(u, 0.37).unwrap();
+            let around = jet.du.normalized().unwrap();
+            assert!((jet.curvature(around, around).unwrap() + 1.0 / 3.0).abs() < 1e-12);
+            assert!(jet.curvature(Vec3::Z, Vec3::Z).unwrap().abs() < 1e-12);
+            assert!(jet.curvature(around, Vec3::Z).unwrap().abs() < 1e-12);
+        }
+        for swap in [false, true] {
+            let s = EvalSurface::Revolved {
+                profile: line(Vec3::new(3., 0., 0.), Vec3::new(3., 0., 5.)),
+                origin: Vec3::ZERO,
+                axis: Vec3::Z,
+                transform: IDENTITY,
+                swap,
+            };
+            let (u, v) = if swap { (0.8, 0.4) } else { (0.4, 0.8) };
+            let jet = s.jet(u, v).unwrap();
+            let around = Vec3::new(-0.8_f64.sin(), 0.8_f64.cos(), 0.);
+            assert!((jet.curvature(around, around).unwrap().abs() - 1.0 / 3.0).abs() < 1e-12);
+            assert!(jet.curvature(around, Vec3::Z).unwrap().abs() < 1e-12);
+            let (p, du, dv) = s.derivs(u, v).unwrap();
+            assert!(close(jet.point, p, 1e-12) && close(jet.du, du, 1e-12) && close(jet.dv, dv, 1e-12));
+        }
+        let curve = line(Vec3::new(1., 2., 3.), Vec3::new(3., 5., 7.));
+        for t in [-0.2, 0., 0.5, 1., 1.3] {
+            let jet = curve.jet(t).unwrap();
+            assert!(close(jet.point, Vec3::new(1., 2., 3.) + Vec3::new(2., 3., 4.) * t, 1e-12));
+            assert!(close(jet.second, Vec3::ZERO, 1e-12));
+        }
+    }
     #[test]
     fn plane_point_and_normal() {
         let s = EvalSurface::Plane { origin: Vec3::new(1.0, 2.0, 3.0), du: Vec3::X, dv: Vec3::Y };

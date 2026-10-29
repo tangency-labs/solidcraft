@@ -58,6 +58,10 @@ rayon = "1.12"
 
 # packages (3MF)
 zip = { version = "9", default-features = false, features = ["deflate"] }
+# Blender documents use gzip or Zstandard framing. Both pure-Rust decoders are
+# already transitive dependencies; flate2 is MIT/Apache-2.0, ruzstd MIT.
+flate2 = "1.1"
+ruzstd = "0.9"
 quick-xml = "0.41"
 # STEP text in a legacy encoding (GBK, Shift_JIS, …) instead of Part 21 escapes (#2344): detect
 # and decode it. Both MIT OR Apache-2.0 (encoding_rs adds BSD-3-Clause data); encoding_rs is

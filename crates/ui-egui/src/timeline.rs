@@ -138,6 +138,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Chamfer { .. } => "chamfer",
         FeatureKind::Box { .. } => "box",
         FeatureKind::Cylinder { .. } => "cylinder",
+        FeatureKind::Form { .. } => "surface_patch",
         FeatureKind::Sphere { .. } => "sphere",
         FeatureKind::Torus { .. } => "torus",
         FeatureKind::Cone { .. } => "cone",

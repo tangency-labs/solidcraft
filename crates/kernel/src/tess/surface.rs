@@ -178,6 +178,133 @@ mod tests {
     }
 
     #[test]
+    fn public_exact_face_and_edge_adapters_preserve_boundaries_and_parameters() {
+        for body in [crate::box_solid(Vec3::ZERO, Vec3::new(4.0, 6.0, 8.0)).unwrap(), crate::cylinder(Vec3::ZERO, Vec3::Z, 3.0, 5.0).unwrap()] {
+            for index in 0..body.face_count() {
+                let face = crate::face_geometry(&body, index).unwrap();
+                let adjacency = crate::face_boundaries(&body, index).unwrap();
+                assert_eq!(adjacency.len(), face.loops.len());
+                for (edges, wire) in adjacency.iter().zip(&face.loops) {
+                    assert_eq!(edges.len(), wire.len());
+                    for (edge, curve) in edges.iter().zip(wire) {
+                        assert!(edge.neighbor.is_none_or(|neighbor| neighbor != index && neighbor < body.face_count()));
+                        if body.face_count() == 6 {
+                            assert!(edge.neighbor.is_some());
+                        }
+                        let exact = crate::edge_geometry(&body, &[edge.edge]).unwrap().remove(0);
+                        let point = curve.at(0.0).unwrap().0;
+                        assert!(point.dist(exact.at(0.0).unwrap().0).min(point.dist(exact.at(1.0).unwrap().0)) < 1e-8);
+                    }
+                }
+                assert!(face.outer < face.loops.len());
+                for wire in &face.loops {
+                    for (edge, next) in wire.iter().zip(wire.iter().cycle().skip(1)) {
+                        assert!(edge.at(1.0).unwrap().0.dist(next.at(0.0).unwrap().0) < 1e-9);
+                        for fraction in [0.0, 0.21, 0.67, 1.0] {
+                            let (point, tangent) = edge.at(fraction).unwrap();
+                            assert!(tangent.is_finite());
+                            let uv = face.parameters(point, None, 1e-7).unwrap();
+                            assert!(face.surface.eval(uv[0], uv[1]).0.dist(point) < 1e-7);
+                        }
+                    }
+                }
+                assert!(face.parameters(Vec3::ZERO, None, f64::NAN).is_err());
+            }
+            let mesh = body.tessellate(0.01).unwrap();
+            let ids: Vec<_> = (0..mesh.edges.len()).collect();
+            let curves = crate::edge_geometry(&body, &ids).unwrap();
+            for (curve, polyline) in curves.iter().zip(&mesh.edges) {
+                assert!(curve.at(0.0).unwrap().0.dist(*polyline.first().unwrap()) < 1e-7);
+                assert!(curve.at(1.0).unwrap().0.dist(*polyline.last().unwrap()) < 1e-7);
+                assert!(curve.at(f64::NAN).is_none());
+            }
+            assert!(crate::face_geometry(&body, usize::MAX).is_err());
+            assert!(crate::face_boundaries(&body, usize::MAX).is_err());
+            assert!(crate::edge_geometry(&body, &[usize::MAX]).is_err());
+        }
+    }
+    #[test]
+    fn oblique_parameter_trims_stay_on_the_exact_surface_and_split_sewing_keeps_rim_history() {
+        use solidcraft_geom::bspline::NurbsSurface;
+        let points: Vec<_> = (0..3)
+            .flat_map(|j| {
+                (0..3).map(move |i| Vec3::new(i as f64 / 2.0, j as f64 / 2.0, (if i == 2 { 1.0 } else { 0.0 }) + (if j == 2 { 1.0 } else { 0.0 })))
+            })
+            .collect();
+        let surface = NurbsSurface::new([2, 2], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]), &points, &[1.0; 9]).unwrap();
+        let diamond = vec![[0.5, 0.0], [1.0, 0.5], [0.5, 1.0], [0.0, 0.5]];
+        let trimmed = crate::nurbs_region_sheet(&surface, &[diamond]).unwrap();
+        assert!(trimmed.is_surface());
+        for edge in crate::face_geometry(&trimmed, 0).unwrap().loops.into_iter().flatten() {
+            for t in [0.0, 0.13, 0.57, 0.91, 1.0] {
+                let p = edge.at(t).unwrap().0;
+                assert!((p.z - p.x * p.x - p.y * p.y).abs() < 1e-10);
+            }
+        }
+        assert!(!trimmed.tessellate(0.005).unwrap().triangles.is_empty());
+        let base = crate::box_solid(Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let top = (0..base.face_count()).find(|&i| base.planar_face(i).is_some_and(|p| p.normal().z > 0.99)).unwrap();
+        let open = crate::remove_faces(&base, &[top]).unwrap();
+        let surface = NurbsSurface::new(
+            [1, 1],
+            std::array::from_fn(|_| vec![0.0, 0.0, 1.0, 1.0]),
+            &[Vec3::new(0.0, 0.0, 2.0), Vec3::new(2.0, 0.0, 2.0), Vec3::new(0.0, 2.0, 2.0), Vec3::new(2.0, 2.0, 2.0)],
+            &[1.0; 4],
+        )
+        .unwrap();
+        let sheets: Vec<_> = (0..2)
+            .flat_map(|j| (0..2).map(move |i| (i, j)))
+            .map(|(i, j)| {
+                let (u, v) = (i as f64 / 2.0, j as f64 / 2.0);
+                crate::nurbs_region_sheet(&surface, &[vec![[u, v], [u + 0.5, v], [u + 0.5, v + 0.5], [u, v + 0.5]]]).unwrap()
+            })
+            .collect();
+        let skin = crate::stitch(&sheets.iter().collect::<Vec<_>>(), 1e-6).unwrap();
+        let result = crate::stitch_split(&[&open, &skin], 1e-6).unwrap();
+        assert!(!result.is_surface() && result.validity().is_empty());
+        assert_eq!(result.face_count(), 9);
+        assert!((crate::measure(&result).unwrap().volume - 8.0).abs() < 1e-8);
+        result.history().unwrap().check(&result, &[&open, &skin]).unwrap();
+        assert!(crate::stitch_split(&[], 1e-6).is_err());
+        assert!(crate::stitch_split(&[&skin], f64::NAN).is_err());
+    }
+    #[test]
+    fn matched_face_replacement_qualifies_half_spaces_and_keeps_history() {
+        use solidcraft_geom::bspline::{HPoint, NurbsSurface};
+        let base = crate::box_solid(Vec3::new(-1.0, -1.0, -2.0), Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        let top = (0..base.face_count()).find(|&i| base.planar_face(i).unwrap().normal().z > 0.99).unwrap();
+        for cut in [false, true] {
+            let ctrl = (0..4)
+                .flat_map(|j| {
+                    (0..4).map(move |i| {
+                        let z = if (1..3).contains(&i) && (1..3).contains(&j) { if cut { -1.0 } else { 1.0 } } else { 0.0 };
+                        HPoint::weighted(Vec3::new(-1.0 + 2.0 * i as f64 / 3.0, -1.0 + 2.0 * j as f64 / 3.0, z), 1.0)
+                    })
+                })
+                .collect();
+            let surface =
+                NurbsSurface::from_homogeneous([3, 3], std::array::from_fn(|_| vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]), ctrl).unwrap();
+            let skin = crate::nurbs_sheet(&surface).unwrap();
+            let result = crate::replace_matched_face(&base, top, &skin, cut, 1e-6).unwrap().unwrap_or_else(|| panic!("qualified cut={cut}"));
+            assert!(!result.is_surface() && result.validity().is_empty());
+            // Mass properties are tessellated (about 3e-4 relative), rather than
+            // the exact integral of this bicubic height field.
+            let volume = crate::measure(&result).unwrap().volume;
+            assert!((volume - if cut { 7.0 } else { 9.0 }).abs() < 0.003, "cut={cut}, volume={volume}");
+            result.history().unwrap().check(&result, &[&base, &skin]).unwrap();
+            assert!(crate::replace_matched_face(&base, top, &skin, !cut, 1e-6).unwrap().is_none());
+            assert!(crate::replace_matched_face(&base, top, &skin, cut, f64::NAN).unwrap().is_none());
+        }
+        let tool = crate::box_solid(Vec3::new(-1.0, -1.0, -3.0), Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        let cap = (0..tool.face_count()).find(|&i| tool.planar_face(i).unwrap().normal().z > 0.99).unwrap();
+        let skin = crate::remove_faces(&tool, &[cap]).unwrap();
+        assert!(crate::replace_matched_face(&base, top, &skin, true, 1e-6).unwrap().is_none());
+        let tool = crate::box_solid(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 0.0)).unwrap();
+        let cap = (0..tool.face_count()).find(|&i| tool.planar_face(i).unwrap().normal().z > 0.99).unwrap();
+        let skin = crate::remove_faces(&tool, &[cap]).unwrap();
+        assert!(crate::replace_matched_face(&base, top, &skin, true, 1e-6).unwrap().is_none(), "coincident walls require trimming");
+    }
+    #[test]
     fn transformed_and_mirrored_bodies_evaluate_like_truck() {
         let Ok(cyl) = crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0) else { panic!("cylinder") };
         // Column-major: x → 3 − x, z → z + 1.

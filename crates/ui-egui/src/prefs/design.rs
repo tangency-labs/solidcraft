@@ -107,6 +107,17 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         setting::update_changed_links(app, ui);
         setting::double_click_components(app, ui);
     });
+    ui_kit::settings_section(ui, "forms", app.tr("prefs.forms"), |ui| {
+        setting::forms_greedy_selection(app, ui);
+        setting::forms_match_adjacent(app, ui);
+        setting::forms_surface_partition(app, ui);
+        let response = setting::forms_mesh_while_dragging(app, ui).on_hover_text(app.tr("prefs.forms_mesh_while_dragging_help"));
+        crate::scenario::publish_handle("prefs:forms_mesh_while_dragging", response.rect.center());
+        ui_kit::row(ui, app.tr("prefs.forms_cad_tolerance"), |ui| {
+            let r = ui_kit::settings_number(ui, &mut app.preferences.forms_cad_tolerance, 0.000001..=1.0, 0.001);
+            r.on_hover_text(app.tr("prefs.forms_cad_tolerance_help"));
+        });
+    });
     // Where the files a design names may be: never a network location the user hasn't allowed.
     ui_kit::settings_section(ui, "network_locations", app.tr("prefs.network_locations_section"), |ui| {
         setting::network_locations(app, ui);

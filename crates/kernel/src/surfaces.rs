@@ -518,6 +518,70 @@ pub fn copy_faces(body: &Body, at: &[Vec3]) -> Result<Body> {
     Ok(rebuilt_body(copied, &[&body.solid], &Rebuild::default()))
 }
 
+/// Close one rim on an existing exact support surface. The new face uses the
+/// rim's own edges, including every subdivision of a support edge.
+pub fn patch_edges_on_face(body: &Body, at: &[Vec3], support: &Body, face: usize, tolerance: f64) -> Result<Body> {
+    body.require_brep("supported cap")?;
+    support.require_brep("supported cap")?;
+    if at.is_empty() || at.len() > 4096 || at.iter().any(|p| !p.is_finite()) || !tolerance.is_finite() || !(1e-9..=1.0).contains(&tolerance) {
+        return Err(KernelError::Invalid("a supported cap needs 1..4096 finite edge picks and a bounded tolerance".into()));
+    }
+    guard("supported cap", || {
+        let original = support.solid.face_iter().nth(face).ok_or_else(|| KernelError::Invalid("support face index is outside the body".into()))?;
+        let geometry = crate::face_geometry(support, face)?;
+        let mut chain = picked_loop(body, at)?;
+        // A face's absolute wire must run in the support surface's sense. The
+        // open shell supplies either direction, depending on which end is open.
+        let probe = chain.first().ok_or_else(|| KernelError::Invalid("the cap rim is empty".into()))?.oriented_curve();
+        let (a, b) = probe.range_tuple();
+        if !a.is_finite() || !b.is_finite() || a == b {
+            return Err(KernelError::Invalid("the cap rim has no finite parameter interval".into()));
+        }
+        let t = (a + b) * 0.5;
+        let point = probe.subs(t);
+        let direction = probe.der(t);
+        if !from_p3(point).is_finite() || !direction.magnitude2().is_finite() || direction.magnitude2() < 1e-24 {
+            return Err(KernelError::Invalid("the cap rim has no regular finite tangent".into()));
+        }
+        let wires = original.absolute_boundaries();
+        let boundary = wires.get(geometry.outer).ok_or_else(|| KernelError::Invalid("support outer wire is missing".into()))?;
+        let orientation = boundary
+            .edge_iter()
+            .filter_map(|edge| {
+                let curve = edge.oriented_curve();
+                let t = curve.search_nearest_parameter(point, None, 50)?;
+                let (a, b) = curve.range_tuple();
+                if !t.is_finite() || !a.is_finite() || !b.is_finite() {
+                    return None;
+                }
+                let t = t.clamp(a.min(b), a.max(b));
+                Some((curve.subs(t).distance(point), curve.der(t).dot(direction)))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let (gap, orientation) = orientation.ok_or_else(|| KernelError::Invalid("cannot orient the cap against its support boundary".into()))?;
+        if gap > tolerance || !orientation.is_finite() || orientation.abs() < 1e-20 {
+            return Err(KernelError::Invalid("the cap rim does not follow the support boundary".into()));
+        }
+        if orientation < 0.0 {
+            chain = chain.iter().rev().map(|edge| edge.inverse()).collect();
+        }
+        let mut seed = None;
+        for edge in &chain {
+            let curve = edge.oriented_curve();
+            let (a, b) = curve.range_tuple();
+            for i in 0..=32 {
+                let point = from_p3(curve.subs(a + (b - a) * i as f64 / 32.0));
+                seed = Some(geometry.parameters(point, seed, tolerance)?);
+            }
+        }
+        let cap = mt::Face::new_unchecked(vec![mt::Wire::from(chain)], original.surface());
+        let mut history = Rebuild::default();
+        history.whole(&cap, original);
+        let made = surface_body(vec![cap]);
+        Ok(rebuilt_body(made, &[&body.solid, &support.solid], &history))
+    })
+}
+
 /// The faces picked by points on them (each once, in the order picked); every face when no
 /// point is given.
 fn picked_faces(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {

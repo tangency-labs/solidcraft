@@ -17,6 +17,7 @@ pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
 pub mod easyprint;
+pub mod forms_prototype;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
@@ -330,6 +331,8 @@ impl ComputedCommands {
 pub type EasyPrintUpload = Arc<dyn Fn(&str, Vec<u8>) -> std::result::Result<(), String> + Send + Sync>;
 
 pub struct Session {
+    /// Local Forms experiment, separate from the CAD document and its history.
+    pub forms_prototype: Option<forms_prototype::Form>,
     pub doc: Arc<Document>,
     pub model: Model,
     pub undo: Vec<Snapshot>,
@@ -553,6 +556,7 @@ impl Session {
         });
         Session {
             saved: doc.clone(),
+            forms_prototype: None,
             doc,
             model,
             undo: Vec::new(),
@@ -641,7 +645,9 @@ impl Session {
 
     /// The design has changes not in its file: in the document, or in what is hidden.
     pub fn is_dirty(&self) -> bool {
-        (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved) || self.visibility != self.saved_visibility
+        self.forms_prototype.is_some()
+            || (!Arc::ptr_eq(&self.doc, &self.saved) && *self.doc != *self.saved)
+            || self.visibility != self.saved_visibility
     }
     pub fn mark_saved(&mut self) {
         self.saved = self.doc.clone();
@@ -1393,6 +1399,7 @@ impl Session {
     /// commands on without touching this one.
     pub fn scratch(&self) -> Session {
         Session {
+            forms_prototype: self.forms_prototype.clone(),
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),
@@ -1537,6 +1544,11 @@ impl Session {
             && self.active_component == source.active_component
             && self.active_occurrence_path == source.active_occurrence_path
             && self.pending_moves == source.pending_moves
+            && match (&self.forms_prototype, &source.forms_prototype) {
+                (None, None) => true,
+                (Some(a), Some(b)) => a.same_authoring_source(b),
+                _ => false,
+            }
     }
 
     /// Cancel an unchanged feature editor by restoring its original evaluated model, even
@@ -1597,6 +1609,7 @@ impl Session {
         self.doc = computed.doc;
         self.model = computed.model;
         self.world_cache = computed.world_cache;
+        self.forms_prototype = computed.forms_prototype;
         self.undo.append(&mut computed.undo);
         if self.undo.len() > MAX_UNDO {
             self.undo.drain(..self.undo.len() - MAX_UNDO);

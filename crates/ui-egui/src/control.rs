@@ -251,6 +251,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
                 | "browser.expand_all"
                 | "browser.collapse_all"
         )
+        && app.session.forms_prototype.is_none()
         && app.session.active_sketch.is_none()
         && app.session.world_state().bodies.len() == 1
         && app.session.undo.len() <= 2
@@ -532,6 +533,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
+            "forms_prototype": crate::forms_prototype::inspect(app),
             "render": crate::render_workspace::inspect_state(app),
             "ui": ui_state(app),
             "visibility": app.session.visibility,
@@ -2118,6 +2120,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    #[test]
+    fn forms_inspection_keeps_the_editor_camera_in_a_single_body_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":2})).unwrap();
+        h.app.run("form.prototype.create", json!({"size":40,"segments":[1,1,1]})).unwrap();
+        h.frames(2);
+        h.call("ui.camera", json!({"target":[1,2,3],"distance":120,"yaw":0.3,"pitch":0.7}));
+        let before = json!(h.app.cam);
+        for _ in 0..3 {
+            let reply = h.call("engine.execute", json!({"command":"form.prototype.inspect"}));
+            assert_eq!(reply["ok"], true);
+            h.frames(2);
+            assert_eq!(json!(h.app.cam), before, "inspecting Forms must not refit the preceding CAD body");
+        }
+    }
     /// `ui.camera` reads the camera and sets it; its reply, passed back, sets the same view
     /// again. Fields left out keep their values, `fit` frames occurrences, and a refused field
     /// changes nothing.

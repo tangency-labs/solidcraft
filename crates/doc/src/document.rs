@@ -578,6 +578,16 @@ impl<'de> Deserialize<'de> for FlangeEdge {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FeatureKind {
+    /// Editable subdivision source and its fitted CAD result.
+    Form {
+        definition: Box<crate::forms::Definition>,
+        #[walk(length = "Fit tolerance")]
+        tolerance: Expr,
+        #[serde(default)]
+        operation: Operation,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        targets: Vec<BodyName>,
+    },
     /// A recorded timeline ownership boundary. Geometry is converted from its
     /// current local frame into the destination component frame exactly once.
     BodyTransfer {
@@ -2329,6 +2339,7 @@ impl FeatureKind {
         match self {
             FeatureKind::BodyTransfer { .. } => "BodyTransferFeature",
             FeatureKind::Sketch { .. } => "Sketch",
+            FeatureKind::Form { .. } => "FormFeature",
             FeatureKind::Extrude { .. } => "ExtrudeFeature",
             FeatureKind::Revolve { .. } => "RevolveFeature",
             FeatureKind::Fillet { .. } => "FilletFeature",
@@ -2487,6 +2498,7 @@ impl FeatureKind {
             FeatureKind::SurfaceUntrim { .. } => "Untrim",
             FeatureKind::Import { .. } => "Import",
             FeatureKind::MeshImport { .. } => "Mesh",
+            FeatureKind::Form { .. } => "Form",
             FeatureKind::MeshConvert { .. } => "ConvertMesh",
         }
     }

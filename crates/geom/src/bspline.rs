@@ -15,6 +15,8 @@ use std::ops::{Add, AddAssign, Mul, Sub};
 
 use crate::Vec3;
 
+mod parameter_line;
+
 /// Highest polynomial degree accepted in either direction.
 pub const MAX_SPLINE_DEGREE: usize = 7;
 /// Most knots accepted in one knot vector.
@@ -571,6 +573,29 @@ impl NurbsSurface {
         acc.project().ok_or_else(|| SplineError::Invalid("the surface's weights vanish there".into()))
     }
 
+    /// An exact rational isoparametric curve segment. `dir` is its varying
+    /// parameter; the other parameter is fixed. The returned ends are clamped.
+    pub fn iso_curve_segment(&self, dir: Dir, fixed: f64, range: [f64; 2]) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+        let along = dir.pick(0, 1);
+        let across = 1 - along;
+        let p = self.degree[across];
+        let knots = &self.knots[across];
+        let span =
+            find_span(knots, p, self.count[across], fixed).ok_or_else(|| SplineError::Invalid("isocurve parameter is outside the surface".into()))?;
+        let side = if fixed >= self.domain()[across][1] { Side::Left } else { Side::Right };
+        let basis: Vec<_> = (span - p..=span).map(|i| knots.get(i..i + p + 2).map_or(0.0, |k| local_basis(k, fixed, side, 0)[0])).collect();
+        let mut ctrl = Vec::with_capacity(self.count[along]);
+        for i in 0..self.count[along] {
+            let mut point = HPoint::ZERO;
+            for (j, weight) in basis.iter().enumerate() {
+                let k = span - p + j;
+                point += if along == 0 { self.point(i, k) } else { self.point(k, i) } * *weight;
+            }
+            ctrl.push(point);
+        }
+        restrict_row(self.degree[along], &self.knots[along], &ctrl, range)
+    }
+
     /// The same surface with the knot `x` inserted once in direction `dir` ([`Dir::S`] = u).
     pub fn insert_knot(&self, dir: Dir, x: f64) -> SplineResult<NurbsSurface> {
         let d = dir.pick(0, 1);
@@ -636,6 +661,27 @@ impl NurbsSurface {
         }
         Ok(s)
     }
+}
+
+fn restrict_row(p: usize, knots: &[f64], ctrl: &[HPoint], [lo, hi]: [f64; 2]) -> SplineResult<(Vec<f64>, Vec<HPoint>)> {
+    let (Some(&start), Some(&end)) = (knots.get(p), knots.get(ctrl.len())) else { return invalid("invalid curve domain") };
+    if !lo.is_finite() || !hi.is_finite() || lo < start || hi > end || lo >= hi {
+        return invalid("curve restriction must be a nonempty interval inside its domain");
+    }
+    let (mut knots, mut ctrl) = (knots.to_vec(), ctrl.to_vec());
+    for x in [lo, hi] {
+        for _ in 0..=p {
+            if knots.iter().filter(|&&k| k == x).count() > p {
+                break;
+            }
+            (knots, ctrl) = insert_knot(p, &knots, &ctrl, x)?;
+        }
+    }
+    let first = knots.iter().position(|&k| k == lo).ok_or_else(|| SplineError::Invalid("missing curve restriction start".into()))?;
+    let last = knots.iter().rposition(|&k| k == hi).ok_or_else(|| SplineError::Invalid("missing curve restriction end".into()))? + 1;
+    let count = (last - first).checked_sub(p + 1).ok_or_else(|| SplineError::Invalid("invalid restricted knot count".into()))?;
+    let row = ctrl.get(first..first + count).ok_or_else(|| SplineError::Invalid("invalid restricted control count".into()))?.to_vec();
+    Ok((knots[first..last].to_vec(), row))
 }
 
 #[cfg(test)]
@@ -768,6 +814,55 @@ pub(crate) mod tests {
             acc += *c * local_basis(&knots[i..i + p + 2], u, side, 0)[0];
         }
         acc.project().unwrap()
+    }
+
+    #[test]
+    fn arbitrary_parameter_lines_retain_rational_surface_positions_in_both_directions() {
+        let surface = random_surface(117, KNOTS.to_vec(), KNOTS.to_vec(), [3, 3]);
+        for (a, b) in [
+            ([0.0, 0.0], [1.0, 1.0]),
+            ([0.0, 4e-14], [1.0, 1.0 - 4e-14]),
+            ([0.0, 0.0], [1.0, 1.0 - 4e-13]),
+            ([0.11, 0.17], [0.93, 0.81]),
+            ([0.9, 0.13], [0.07, 0.87]),
+            ([0.7, 1.0], [0.7, 0.0]),
+            ([1.0, 0.2], [0.0, 0.2]),
+        ] {
+            for (a, b) in [(a, b), (b, a)] {
+                let (knots, ctrl) = surface.parameter_line(a, b).unwrap();
+                let degree = knots.len() - ctrl.len() - 1;
+                for i in 0..=100 {
+                    let t = i as f64 / 100.0;
+                    let want = surface.eval(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t).unwrap();
+                    assert!(curve(degree, &knots, &ctrl, t).dist(want) < 1e-9, "{a:?}->{b:?}, {t}");
+                }
+            }
+        }
+        for (a, b) in [([0.5, 0.5], [0.5, 0.5]), ([f64::NAN, 0.0], [1.0, 1.0]), ([-0.1, 0.0], [1.0, 1.0])] {
+            assert!(surface.parameter_line(a, b).is_err());
+        }
+    }
+    #[test]
+    fn trimmed_isocurves_retain_rational_surface_positions() {
+        let surface = random_surface(91, KNOTS.to_vec(), KNOTS.to_vec(), [3, 3]);
+        for dir in [Dir::S, Dir::T] {
+            for fixed in [0.0, 0.17, 0.5, 1.0] {
+                for range in [[0.0, 1.0], [0.125, 0.7], [0.3, 0.9]] {
+                    let (knots, ctrl) = surface.iso_curve_segment(dir, fixed, range).unwrap();
+                    assert!(knots[..4].iter().all(|&k| k == range[0]));
+                    assert!(knots[knots.len() - 4..].iter().all(|&k| k == range[1]));
+                    for i in 0..=20 {
+                        let t = if i == 20 { range[1] } else { range[0] + (range[1] - range[0]) * i as f64 / 20.0 };
+                        let (u, v) = if dir == Dir::S { (t, fixed) } else { (fixed, t) };
+                        assert!(curve(3, &knots, &ctrl, t).dist(surface.eval(u, v).unwrap()) < 1e-11);
+                    }
+                }
+            }
+        }
+        for range in [[0.8, 0.2], [-0.1, 1.0], [0.0, f64::NAN]] {
+            assert!(surface.iso_curve_segment(Dir::S, 0.5, range).is_err());
+        }
+        assert!(surface.iso_curve_segment(Dir::S, f64::INFINITY, [0.0, 1.0]).is_err());
     }
 
     #[test]

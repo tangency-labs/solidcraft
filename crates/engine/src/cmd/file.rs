@@ -405,6 +405,9 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
 }
 
 fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: bool, cache: bool, overwrite: bool) -> Result<Value> {
+    if s.forms_prototype.is_some() {
+        return Err(bad("file.save", "finish or cancel the active Form before saving the design"));
+    }
     solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
     if s.path.as_deref() == Some(path) {
         if s.read_only {

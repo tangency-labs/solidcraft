@@ -777,6 +777,10 @@ pub fn design_shown(app: &SolveApp) -> bool {
 }
 
 pub fn save(app: &mut SolveApp) {
+    if app.session.forms_prototype.is_some() {
+        app.set_status(app.tr("forms.prototype.finish_before_save").to_owned(), true);
+        return;
+    }
     if crate::browser::needs_capture(app, crate::browser::SAVE) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
@@ -2269,6 +2273,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     for (k, repeat) in keys {
         use egui::Key;
+        if crate::forms_prototype::shortcut(app, k, mods) {
+            continue;
+        }
+        if mods.is_none() && crate::forms_prototype::owns_key(app, k) {
+            continue;
+        }
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
         if k != Key::Escape {
             app.last_escape = None;

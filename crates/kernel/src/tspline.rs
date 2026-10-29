@@ -27,6 +27,66 @@ pub fn tspline_sheet(ts: &TSpline) -> Result<Body> {
     Ok(crate::surfaces::surface_body(faces))
 }
 
+/// A tensor NURBS surface as an open sheet, using the same guarded face constructor.
+/// Callers with fitted NURBS data need not rebuild an intermediate T-spline control mesh.
+pub fn nurbs_sheet(surface: &NurbsSurface) -> Result<Body> {
+    let surface = surface.clamped().map_err(spline_err)?;
+    guard("NURBS sheet", || Ok(crate::surfaces::surface_body(vec![tensor_face(&surface)?])))
+}
+
+/// Trim one tensor surface by closed straight wires in its parameter plane.
+/// Each edge is an exact rational restriction of that surface, including
+/// isoparametric seams and oblique guide edges.
+pub fn nurbs_region_sheet(surface: &NurbsSurface, boundaries: &[Vec<[f64; 2]>]) -> Result<Body> {
+    if boundaries.is_empty() || boundaries.len() > 128 || boundaries.iter().any(|w| !(3..=1024).contains(&w.len())) {
+        return Err(fail("a trimmed region requires bounded closed wires"));
+    }
+    guard("NURBS region", || {
+        let mut vertices: HashMap<Key, mt::Vertex> = HashMap::new();
+        let mut wires = Vec::with_capacity(boundaries.len());
+        for boundary in boundaries {
+            let mut edges = Vec::with_capacity(boundary.len());
+            for (&a, &b) in boundary.iter().zip(boundary.iter().cycle().skip(1)).take(boundary.len()) {
+                let varying = if a[1] == b[1] && a[0] != b[0] {
+                    Some(0)
+                } else if a[0] == b[0] && a[1] != b[1] {
+                    Some(1)
+                } else {
+                    None
+                };
+                let (knots, ctrl) = if let Some(varying) = varying {
+                    let dir = if varying == 0 { solidcraft_geom::bspline::Dir::S } else { solidcraft_geom::bspline::Dir::T };
+                    let range = [a[varying].min(b[varying]), a[varying].max(b[varying])];
+                    surface.iso_curve_segment(dir, a[1 - varying], range).map_err(spline_err)?
+                } else {
+                    surface.parameter_line(a, b).map_err(spline_err)?
+                };
+                let mut corner = |uv: [f64; 2]| -> Result<mt::Vertex> {
+                    let k = key(uv[0], uv[1]);
+                    if let Some(v) = vertices.get(&k) {
+                        return Ok(v.clone());
+                    }
+                    let p = surface.eval(uv[0], uv[1]).map_err(spline_err)?;
+                    let v = mt::builder::vertex(crate::body::p3(p));
+                    vertices.insert(k, v.clone());
+                    Ok(v)
+                };
+                let (va, vb) = (corner(a)?, corner(b)?);
+                let curve = nurbs_curve(mt::KnotVec::from(knots), &ctrl)?;
+                let edge = if varying.is_none_or(|varying| a[varying] < b[varying]) {
+                    mt::Edge::try_new(&va, &vb, curve).map_err(fail)?
+                } else {
+                    mt::Edge::try_new(&vb, &va, curve).map_err(fail)?.inverse()
+                };
+                edges.push(edge);
+            }
+            wires.push(edges.into());
+        }
+        let face = mt::Face::try_new(wires, crate::spline_conv::surface(surface)?).map_err(fail)?;
+        Ok(crate::surfaces::surface_body(vec![face]))
+    })
+}
+
 fn spline_err(e: SplineError) -> KernelError {
     KernelError::Invalid(format!("t-spline: {e}"))
 }
