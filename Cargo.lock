@@ -4397,7 +4397,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web-folder"
-version = "0.22.1"
+version = "0.26.0"
 dependencies = [
  "serde_json",
  "sha2 0.10.9",
