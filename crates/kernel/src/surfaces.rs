@@ -1858,20 +1858,22 @@ mod tests {
         assert!(remove_faces(&b, &[]).is_err());
     }
 
-    /// Faces that are not planes or cylinders thicken onto fitted surfaces. A sixth of a sphere
-    /// (one of its six patches) thickened out by 1 is a sixth of the shell between radii 10 and
-    /// 11; a torus patch (a symmetric share of the torus, by its area) thickened out by 1 is that
+    /// Faces that are not planes or cylinders thicken onto fitted surfaces. A sphere's cap above
+    /// z = 5 (polar angles to 60°: solid angle π) thickened out by 1 is that sector of the shell
+    /// between radii 10 and 11, π/3·(11³ − 10³); a torus patch (a symmetric share of the torus, by its area) thickened out by 1 is that
     /// share of the shell 2π²R((r+1)² − r²); thickened in past the sphere's centre, refused.
     #[test]
     fn thicken_curved_faces_onto_fitted_surfaces() {
         use crate::{sphere, torus};
         use std::f64::consts::PI;
         let ball = sphere(Vec3::ZERO, 10.0).unwrap();
-        let patch = copy_faces(&ball, &[Vec3::new(0.0, 0.0, 10.0)]).unwrap();
-        assert!(rel(measure(&patch).unwrap().area, 4.0 * PI * 100.0 / 6.0) < 2e-3, "one sixth");
+        let caps = crate::split_by_plane(&ball, &Plane::from_normal(Vec3::new(0.0, 0.0, 5.0), Vec3::Z).unwrap()).unwrap();
+        let cap = caps.into_iter().find(|b| measure(b).unwrap().bbox.min.z > 5.0 - 1e-6).unwrap();
+        let patch = copy_faces(&cap, &[Vec3::new(0.0, 0.0, 10.0)]).unwrap();
+        assert!(rel(measure(&patch).unwrap().area, 2.0 * PI * 10.0 * 5.0) < 2e-3, "the cap");
         let shell = thicken(&patch, 1.0, false).unwrap();
         assert!(!shell.is_surface());
-        let want = 4.0 / 3.0 * PI * (1331.0 - 1000.0) / 6.0;
+        let want = PI / 3.0 * (1331.0 - 1000.0);
         let v = measure(&shell).unwrap().volume;
         assert!(rel(v, want) < 3e-3, "{v} vs {want}"); // (measured on meshes)
         assert!(thicken(&patch, -10.0, false).is_err());
@@ -1971,15 +1973,19 @@ mod tests {
     #[test]
     fn thicken_a_cylinder_side_and_a_box_top() {
         let c = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();
-        // One half of the side, offset outward by 1: half of a ring.
-        let half = copy_faces(&c, &[Vec3::new(7.0, 7.0, 10.0)]).unwrap();
+        // The side of the cylinder cut in half at x = 0, offset outward by 1: half of a ring.
+        let halves = crate::split_by_plane(&c, &Plane::from_normal(Vec3::ZERO, Vec3::X).unwrap()).unwrap();
+        let cut = halves.into_iter().find(|b| measure(b).unwrap().bbox.min.x > -1e-6).unwrap();
+        // (It comes in pieces round the axis: picked all the way round.)
+        let round: Vec<Vec3> = (-4..=4).map(|k| f64::from(k) * 0.35).map(|a| Vec3::new(10.0 * a.cos(), 10.0 * a.sin(), 10.0)).collect();
+        let half = copy_faces(&cut, &round).unwrap();
+        assert!(rel(measure(&half).unwrap().area, std::f64::consts::PI * 10.0 * 20.0) < 1e-3, "the half side");
         let v = measure(&thicken(&half, 1.0, false).unwrap()).unwrap().volume;
         let want = std::f64::consts::PI * (121.0 - 100.0) / 2.0 * 20.0;
         assert!(rel(v, want) < 3e-4, "{v} vs {want}"); // (measured on meshes)
-        // Both halves (meeting smoothly): the whole ring, inward.
-        let d = 10.0 / 2f64.sqrt();
-        let side = copy_faces(&c, &[Vec3::new(d, d, 10.0), Vec3::new(-d, -d, 10.0)]).unwrap();
-        assert_eq!(side.face_count(), 2);
+        // The whole side (one face, closed round its seam): the whole ring, inward.
+        let side = copy_faces(&c, &[Vec3::new(7.0, 7.0, 10.0)]).unwrap();
+        assert_eq!(side.face_count(), 1);
         let v = measure(&thicken(&side, -1.0, false).unwrap()).unwrap().volume;
         let want = std::f64::consts::PI * (100.0 - 81.0) * 20.0;
         assert!(rel(v, want) < 3e-4, "{v} vs {want}"); // (measured on meshes)
