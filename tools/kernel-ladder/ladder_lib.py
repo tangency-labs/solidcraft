@@ -182,3 +182,62 @@ def cyclic_spline(P):
                           (P[j][k] - P[i][k]) / h[i] + (-(3 * a * a - 1) * M[k][i] + (3 * c * c - 1) * M[k][j]) * h[i] / 6) for k in range(2))
         return h[i], f
     return [span(i) for i in range(n)]
+
+def clip_half(poly, a, b, c):
+    """The part of a convex polygon [(x, y)] where a x + b y + c <= 0 (Sutherland-Hodgman)."""
+    out = []
+    n = len(poly)
+    for i in range(n):
+        p, q = poly[i], poly[(i + 1) % n]
+        fp, fq = a * p[0] + b * p[1] + c, a * q[0] + b * q[1] + c
+        if fp <= 0:
+            out.append(p)
+        if (fp < 0 < fq) or (fq < 0 < fp):
+            s = fp / (fp - fq)
+            out.append((p[0] + s * (q[0] - p[0]), p[1] + s * (q[1] - p[1])))
+    return out
+
+def moment_r(poly):
+    """int int r dA over a polygon in the (r, z) half-plane: what a ring of that section holds, over 2 pi."""
+    m = 0.0
+    for i in range(len(poly)):
+        (x0, y0), (x1, y1) = poly[i], poly[(i + 1) % len(poly)]
+        m += (x0 + x1) * (x0 * y1 - x1 * y0)
+    return abs(m) / 6
+
+def sweep_removed(section, z0, lead, turns, rate, regions, panels_per_turn=400):
+    """What a screw sweep removes from an axisymmetric solid: `section` [(r, dz)] (convex, about the
+    axial position z0), carried `turns` turns rising `lead` a turn and moving `rate` mm a turn off
+    the axis (a taper); the solid is the union of disjoint convex `regions`, each a list of
+    half-planes (a, b, c): a r + b z + c <= 0. A point (rho, zeta) of the section at turn t is at
+    r = rho + rate t, z = z0 + zeta + lead t, so the volume element is 2 pi r dA dt (the map's
+    Jacobian), and V = 2 pi int_0^turns (int int_{section_t within the solid} r dA) dt, exact while
+    successive turns don't overlap (the groove is narrower than the lead). Gauss-Legendre on
+    panels: the integrand is piecewise polynomial in t."""
+    def at(t):
+        placed = [(r + rate * t, z0 + dz + lead * t) for r, dz in section]
+        total = 0.0
+        for hp in regions:
+            p = placed
+            for a, b, c in hp:
+                p = clip_half(p, a, b, c)
+                if len(p) < 3:
+                    break
+            if len(p) >= 3:
+                total += moment_r(p)
+        return total
+    pieces = max(1, int(math.ceil(turns * panels_per_turn)))
+    return 2 * PI * quad_split(at, 0.0, turns, pieces, 6)
+
+def groove_section(P, flat, crest, flank_lo, flank_hi, r_root, r_far, internal=False):
+    """A thread groove's axial section [(r, dz)] between r_root (its root) and r_far (past the crest,
+    out of the material), its root flat centred on dz = 0: the tooth is `flat` wide at the crest
+    radius and both walls are straight flanks (flank_lo toward -z, flank_hi toward +z, degrees
+    from the radial)."""
+    tl, th = math.tan(math.radians(flank_lo)), math.tan(math.radians(flank_hi))
+    w_root = P - flat - abs(crest - r_root) * (tl + th)
+    def ext(r):
+        d = abs(r - r_root)
+        return w_root / 2 + d * tl, w_root / 2 + d * th
+    (l0, h0), (l1, h1) = ext(r_root), ext(r_far)
+    return [(r_root, -l0), (r_far, -l1), (r_far, h1), (r_root, h0)]

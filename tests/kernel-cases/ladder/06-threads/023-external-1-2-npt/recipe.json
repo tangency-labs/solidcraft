@@ -1,0 +1,34 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10.668,
+    "height": 25,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     10.668,
+     0,
+     12.5
+    ],
+    "modeled": true,
+    "designation": "1/2-14 NPT",
+    "from": [
+     0,
+     0,
+     25
+    ]
+   }
+  }
+ ]
+}

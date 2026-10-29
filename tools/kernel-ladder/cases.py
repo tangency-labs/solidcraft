@@ -791,6 +791,133 @@ case(T6, "017-external-m10-chamfered-tip", "001's modelled M10 thread with ISO 4
      "; the chamfer is axisymmetric and cut after the groove, so it only lowers the stock's outer radius: r <= d_f/2 + distance from the end (45 deg), d_f the external minor diameter d3 = d - 1.226869 P = 8.160 "
      "(ISO 724; ISO 4753 chamfered end: the end's diameter at most the minor diameter), below the modelled root d1")
 
+# Pipe threads (crates/doc/src/thread_forms.rs, pipe_thread_sizes.rs): ISO 228-1 / ISO 7-1, 55 deg,
+# the triangle H truncated to the depth h, equally at crest and root, flats where the standard has
+# rounds; ASME B1.20.1 NPT, 60 deg, H = 0.866025 P truncated to h = 0.8 P.
+P14 = INCH / 14
+H_PAR, H_TAP, H55 = 0.960491 * P14, 0.960237 * P14, 0.640327 * P14
+t275 = math.tan(math.radians(27.5))
+G12 = 20.955
+PIPE = ("the space between the teeth is a groove of straight flanks, its tooth (H - h) tan(half angle) wide at the crest and its groove as wide at the root (the truncations "
+        "split equally); the standard's crest and root rounds are flats here. ")
+shaft_form("020-external-g-1-2", "a modelled G 1/2 parallel pipe thread (ISO 228-1, 55 deg) on a d20.955 shaft, six turns", "bspp", "G 1/2", G12, P14,
+           (H_PAR - H55) * t275, 27.5, 27.5, G12 / 2 - H55,
+           PIPE + "ISO 228-1 G 1/2: d = 20.955, 14 threads per inch, H = 0.960491 P, h = 0.640327 P, so the crest flat (H - h) tan27.5 = 0.16667 P and the minor d1 = d - 2h = 18.631")
+r1rp = G12 / 2 - H55
+vrp = 6 * form_turn(P14, (H_PAR - H55) * t275, r1rp, 27.5, 27.5, r1rp, G12 / 2, internal=True)
+case(T6, "021-internal-rp-1-2", "a modelled Rp 1/2 parallel internal pipe thread (ISO 7-1) in a d18.631 (its minor) bore through a 40x40 block six turns thick",
+     [box([-20, -20, 0], 40, 40, 6 * P14, body_name="Part"), cyl([0, 0, -1], r1rp, 6 * P14 + 2, body_name="Bore"), C("solid.combine", target="Part", tools=["Bore"], operation="cut"),
+      thr([r1rp, 0, 3 * P14], designation="Rp 1/2")],
+     {"body_count": 1, "volume_mm3": 1600 * 6 * P14 - PI * r1rp ** 2 * 6 * P14 - vrp, "tolerance": TOL_F},
+     FMETH.replace("between free ends", "through the block, both ends free") + PIPE + "ISO 7-1 Rp 1/2, the parallel internal thread an R screws into: the ISO 228-1 profile "
+     "(H = 0.960491 P, h = 0.640327 P) at the gauge diameters, d = 20.955, D1 = d - 2h = 18.631, the bore; the groove from the bore wall out to r 10.4775, "
+     "w(r) = P - 0.16667 P - (r - 9.3155) 2 tan27.5")
+
+# Taper pipe threads: a screw sweep whose section moves off the axis 1/32 of its rise (1 in 16 on
+# the diameter), the crests cut by the major cone (external) or minor cone (internal) as a die or tap
+# cuts them. What a moving section removes is exact by the sweep's Jacobian (sweep_removed).
+TAPER = ("ISO 7-1 / ASME B1.20.1 taper 1 in 16 on the diameter. The thread starts at its free end with the standard's diameter there and its diameters grow into the material "
+         "(the external major d0 + y/16 at y mm in; the internal minor d1 - y/16). The crests are the cone's: the material outside the external major cone (inside the internal "
+         "minor cone) along the thread is cut as the die (tap) cuts it. The groove is the sweep of the profile's section, rising P a turn and moving P/32 a turn off the axis, so "
+         "a point (rho, zeta) of the section at turn t lies at r = rho + c t, z = z0 + zeta + P t, the volume element is 2 pi r dA dt, and the groove removes "
+         "2 pi int_0^T (int int r dA over the section within the material) dt, exact while turns don't overlap (Gauss on 400 panels a turn: the integrand is piecewise polynomial in t). ")
+def taper_ext(name, what, desig, d0, L, P, flat, half, h, Rcyl, Ls, extra):
+    a = Ls - L
+    cone = lambda z: d0 / 2 + (Ls - z) / 32
+    crest_a = cone(a)
+    sec = groove_section(P, flat, crest_a, half, half, crest_a - h, max(crest_a, Rcyl) + 0.1)
+    A = [(0, -1, a), (0, 1, -Ls), (1, 1 / 32, -(d0 / 2 + Ls / 32)), (1, 0, -Rcyl)]
+    B = [(0, 1, -a), (0, -1, 0), (1, 0, -Rcyl)]
+    turns = (L + P) / P
+    groove_v = sweep_removed(sec, a, P, turns, -P / 32, [A, B])
+    env = PI * quad_split(lambda z: max(0.0, Rcyl ** 2 - cone(z) ** 2), a, Ls, 200, 8)
+    v = PI * Rcyl ** 2 * Ls - env - groove_v
+    case(T6, name, what, [cyl([0, 0, 0], Rcyl, Ls, body_name="Part"), thr([Rcyl, 0, Ls / 2], designation=desig, **{"from": [0, 0, Ls]})],
+         {"body_count": 1, "volume_mm3": v, "bbox": {"min": [-Rcyl, -Rcyl, 0], "max": [Rcyl, Rcyl, Ls]}, "tolerance": TOL_F},
+         TAPER + extra + " It starts at the free top end z = %g and runs the standard length L = %.4f down to z = %.4f, where it stops square inside the face (the groove's section centred "
+         "there, the cut below it bounded by the pipe's surface only). V = pi R^2 %g - the ring outside the cone (pi int (R^2 - r_cone^2) where the cone is inside the pipe) "
+         "- the groove (%.6f). Bbox: the pipe's" % (Ls, L, a, Ls, groove_v))
+taper_ext("022-external-r-1-2-taper", "a modelled R 1/2 taper pipe thread (ISO 7-1, 55 deg, 1 in 16) on a 21.3 mm pipe (ISO 65), its standard 13.2 mm from the pipe's end",
+          "R 1/2", G12 - 8.2 / 16, 13.2, P14, (H_TAP - H55) * t275, 27.5, H55, 21.3 / 2, 25,
+          PIPE + "ISO 7-1 R 1/2 (Table 1): gauge diameter d = 20.955 a basic gauge length 8.2 from the small end, so d0 = 20.955 - 8.2/16 = 20.4425 at the pipe's end; "
+          "14 threads per inch, H = 0.960237 P, h = 0.640327 P; useful thread 13.2. The pipe is ISO 65's 21.3 OD, outside the major cone over the whole thread (21.2675 at its end).")
+E0, L1, L2 = 0.75843, 0.320, 0.5337
+taper_ext("023-external-1-2-npt", "a modelled 1/2-14 NPT taper pipe thread (ASME B1.20.1, 60 deg, 1 in 16) on its 0.840 in pipe, its effective thread L2 from the end",
+          "1/2-14 NPT", (E0 + 0.8 / 14) * INCH, L2 * INCH, P14, (0.866025 - 0.8) * P14 * math.tan(math.radians(30)), 30.0, 0.8 * P14, 0.840 * INCH / 2, 25,
+          "ASME B1.20.1 (H28 Table VII.2) 1/2-14 NPT: pipe OD D = 0.840 in, E0 = 0.75843 in the pitch diameter at the small end, h = 0.8 P truncated equally at crest and root "
+          "(0.033 P each, a 0.038 P flat), so the major at the end is E0 + h = 20.7156 mm, growing 1/16; L2 = 0.5337 in = 13.556. The major cone passes the pipe's OD "
+          "(10.668) 9.93 mm in, so from there to L2 the crests are the pipe's surface, as the standard's imperfect threads are.")
+# Rc internal: the minor cone shrinks into the hole from the face (the gauge plane, ISO 7-1: the
+# internal thread's reference diameter is at its face).
+Lrc, rb = 13.2, 8.8
+m0 = (G12 - 2 * H55) / 2
+rm = lambda z: m0 - (Lrc - z) / 32
+sec_rc = groove_section(P14, (H_TAP - H55) * t275, rm(-P14), 27.5, 27.5, rm(-P14) + H55, rb - 0.2, internal=True)
+g_rc = sweep_removed(sec_rc, -P14, P14, (Lrc + 2 * P14) / P14, P14 / 32, [[(0, -1, 0), (0, 1, -Lrc), (-1, 1 / 32, m0 - Lrc / 32), (1, 0, -19)]])
+env_rc = PI * quad_split(lambda z: rm(z) ** 2 - rb ** 2, 0, Lrc, 200, 8)
+case(T6, "024-internal-rc-1-2-taper", "a modelled Rc 1/2 internal taper pipe thread (ISO 7-1) in a d17.6 hole (the tap maker's) through a 13.2 mm plate, from its top face",
+     [box([-20, -20, 0], 40, 40, Lrc, body_name="Part"), cyl([0, 0, -1], rb, Lrc + 2, body_name="Bore"), C("solid.combine", target="Part", tools=["Bore"], operation="cut"),
+      thr([rb, 0, Lrc / 2], designation="Rc 1/2", **{"from": [0, 0, Lrc]})],
+     {"body_count": 1, "volume_mm3": 1600 * Lrc - PI * rb ** 2 * Lrc - env_rc - g_rc, "bbox": {"min": [-20, -20, 0], "max": [20, 20, Lrc]}, "tolerance": TOL_F},
+     TAPER + PIPE + "ISO 7-1 Rc 1/2: the gauge diameter d = 20.955 at the face (z = 13.2), so the minor there is d1 = d - 2h = 18.631, shrinking 1/16 per mm down; "
+     "the plate is the useful thread 13.2 thick, so the minor cone stays outside the 17.6 hole (17.806 at the bottom). Both faces are free ends, the groove running a pitch "
+     "past each. V = 40^2 13.2 - pi 8.8^2 13.2 - the ring inside the minor cone (pi int (r_m^2 - 8.8^2), %.6f) - the groove (%.6f)" % (env_rc, g_rc))
+
+# A buttress thread's steep flank (DIN 513-1, 3 deg): which way it faces decides how near the shoulder
+# the groove may come, since it stops with its whole section clear of it (004's rule): the section's
+# extent toward the shoulder at the tool's outer edge (0.05 P past the crest) is the 3 deg flank's or
+# the 30 deg one's.
+PS, dS = 4.0, 20.0
+tS3, tS30 = math.tan(math.radians(3)), math.tan(math.radians(30))
+flatS = (PS - 0.75 * PS * (tS3 + tS30)) / 2
+r3S = dS / 2 - 0.86777 * PS
+for name, steep, lo, hi, what in [("025-external-s20x4-steep-flank-end-to-shoulder", "end", 3, 30, "the steep flank toward the thread's end (up, the default): the 3 deg wall faces the shoulder"),
+                                  ("026-external-s20x4-steep-flank-start-to-shoulder", "start", 30, 3, "the steep flank toward the thread's start (down): the 30 deg wall faces the shoulder")]:
+    sec = groove_section(PS, flatS, dS / 2, lo, hi, r3S, dS / 2 + 0.05 * PS)
+    w_lo = -min(z for _, z in sec)
+    s0 = 10 + w_lo
+    g = sweep_removed(sec, s0, PS, (40 + PS - s0) / PS, 0.0, [[(0, -1, 10), (0, 1, -40), (1, 0, -10)], [(0, 1, -10), (0, -1, 0), (1, 0, -15)]])
+    case(T6, name, "a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, " + what,
+         [cyl([0, 0, 0], 15, 10, body_name="Part"), cyl([0, 0, 10], 10, 30, operation="join", targets=["Part"]), thr([10, 0, 25], designation="S20x4", steep_flank=steep)],
+         {"body_count": 1, "volume_mm3": PI * 225 * 10 + PI * 100 * 30 - g, "bbox": {"min": [-15, -15, 0], "max": [15, 15, 40]}, "tolerance": TOL_F},
+         "DIN 513-1 S20x4: 3 deg load flank, 30 deg clearance flank, flats (P - 0.75 P (tan3 + tan30))/2 = 0.26384 P, external minor d3 = d - 2 x 0.86777 P = 13.058. "
+         "steep_flank %s puts the %d deg wall on the groove's side toward the shoulder (z = 10); the groove stops with its section clear of the shoulder, its centre "
+         "%.6f above it (the section's extent that way at r = 10.2, 0.05 P past the crest, the tool's outer edge), and runs out a pitch past the free top end. "
+         "V = pi 15^2 10 + pi 10^2 30 - the groove 2 pi int_0^T (int int r dA of the section within the shaft) dt (%.6f; a straight screw sweep, Pappus turn by turn, "
+         "with the free end's partial turn integrated). 025 and 026 differ by where the groove stops" % (steep, lo, w_lo, g), base=None)
+
+# The tip options (ISO 4753 chamfered end): none is 001, both is 017.
+case(T6, "027-external-m10-chamfered-start", "001's modelled M10 thread with ISO 4753's chamfered end at the end it starts from only (`tip: start`, from the top)",
+     cylT + [thr([5, 0, 15], designation="M10", tip="start", **{"from": [0, 0, 30]})],
+     {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 25 + rf10, lambda z: 5), (25 + rf10, 30, lambda z: rf10 + 30 - z)]), "tolerance": {"rel": 1e-4}},
+     TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
+     "; as 017 at the top end only: the 45 deg cone down to d3 = d - 2 (17/24) H = 8.160 (ISO 724) at z = 30, cut after the groove, lowers the stock's radius to r_f + (30 - z); "
+     "the bottom end stays as cut, the groove running out past it")
+cT = 2.5 / math.tan(math.radians(30))
+def tr_volume(sections, P=4.0, crest=10.0, r3=7.75):
+    flat = P / 2 * (1 - t15)
+    m = lambda r: 1.0 if r <= r3 else 1 - (P - flat - (crest - r) * 2 * t15) / P
+    def ring(R):
+        return quad(lambda r: r, 0, min(R, r3)) + (quad(lambda r: r * m(r), r3, R, 64) if R > r3 else 0.0)
+    return 2 * PI * sum(quad(lambda z: ring(f(z)), z0, z1, 64) for z0, z1, f in sections)
+trS = [cyl([0, 0, 0], 10, 24, body_name="Part")]
+case(T6, "028-external-tr20x4-chamfer-30-deg-2.5-deep", "011's modelled Tr20x4 thread with chamfered ends at its own angle and depth: 30 deg to the axis, 2.5 mm in from the major diameter",
+     trS + [thr([10, 0, 12], designation="Tr20x4", tip="both", chamfer_angle="30 deg", chamfer_depth="2.5 mm")],
+     {"body_count": 1, "volume_mm3": tr_volume([(0, cT, lambda z: 7.5 + z * math.tan(math.radians(30))), (cT, 24 - cT, lambda z: 10.0),
+                                                   (24 - cT, 24, lambda z: 7.5 + (24 - z) * math.tan(math.radians(30)))]), "tolerance": TOL_F},
+     "ISO 2904 Tr20x4 (011): crest flat 0.366 P, minor d3 = 15.5. Averaged over the turn every meridian half-plane holds the same sections (a screw motion), so "
+     "V = 2 pi int int r m(r) dr dz over the stock's section, m = 1 - w(r)/P the tooth's share of a pitch (1 below the root r 7.75). Both ends are free: the chamfer, "
+     "axisymmetric and cut after the groove, lowers the stock's radius to 7.5 + y tan30 at y mm from each end (the cone at 30 deg to the axis through d_f = d - 2 x 2.5 = 15, "
+     "below the root, so a whole ring is left on the end), reaching the major 4.330 mm in")
+case(T6, "029-external-tr20x4-chamfer-needs-depth", "011's Tr20x4 thread with a chamfered tip and no depth: refused, ISO 4753 is for metric threads",
+     trS + [thr([10, 0, 12], designation="Tr20x4", tip="both")], {"outcome": "refused", "refusal": "ISO 4753's chamfered end is for ISO metric threads"},
+     "ISO 4753's chamfered end (d_f at most the external minor diameter, ISO 724's d3) is defined for ISO metric threads only: a trapezoidal thread has no standard chamfer depth, "
+     "so without `chamfer_depth` there is no right answer and the thread must be refused, naming the depth to give", source="invariants")
+case(T6, "030-square-thread-refused", "a square thread on a d10 x 30 cylinder: refused, no current standard defines one",
+     cylT + [thr([5, 0, 15], form="square")], {"outcome": "refused", "refusal": "no current standard defines a square thread"},
+     "ISO, ASME and DIN define no square thread (Machinery's Handbook gives only historical proportions), so no dimension of it can be taken from a standard: the right answer "
+     "is a refusal pointing to trapezoidal (ISO 2904) or acme (ASME B1.5)", source="invariants")
+
 # ---------------------------------------------------------------- 07 fillets
 F = lambda edges, r, **p: C("solid.fillet", edges=edges, radius=r, **p)
 case(T7, "001-single-edge-r5", "an r5 round on the stock's top front edge", [F([[30, 0, 20]], 5)],

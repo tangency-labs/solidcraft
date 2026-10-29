@@ -1,0 +1,58 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -20,
+     -20,
+     0
+    ],
+    "length": 40,
+    "width": 40,
+    "height": 13.2,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     -1
+    ],
+    "radius": 8.8,
+    "height": 15.2,
+    "body_name": "Bore"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Part",
+    "tools": [
+     "Bore"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     8.8,
+     0,
+     6.6
+    ],
+    "modeled": true,
+    "designation": "Rc 1/2",
+    "from": [
+     0,
+     0,
+     13.2
+    ]
+   }
+  }
+ ]
+}

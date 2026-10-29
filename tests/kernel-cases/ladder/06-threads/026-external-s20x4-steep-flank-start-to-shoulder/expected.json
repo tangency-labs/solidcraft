@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, the steep flank toward the thread's start (down): the 30 deg wall faces the shoulder",
+ "source": "analytic",
+ "method": "DIN 513-1 S20x4: 3 deg load flank, 30 deg clearance flank, flats (P - 0.75 P (tan3 + tan30))/2 = 0.26384 P, external minor d3 = d - 2 x 0.86777 P = 13.058. steep_flank start puts the 30 deg wall on the groove's side toward the shoulder (z = 10); the groove stops with its section clear of the shoulder, its centre 2.498847 above it (the section's extent that way at r = 10.2, 0.05 P past the crest, the tool's outer edge), and runs out a pitch past the free top end. V = pi 15^2 10 + pi 10^2 30 - the groove 2 pi int_0^T (int int r dA of the section within the shaft) dt (2439.158513; a straight screw sweep, Pappus turn by turn, with the free end's partial turn integrated). 025 and 026 differ by where the groove stops",
+ "body_count": 1,
+ "volume_mm3": 14054.202918026,
+ "bbox": {
+  "min": [
+   -15,
+   -15,
+   0
+  ],
+  "max": [
+   15,
+   15,
+   40
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}
