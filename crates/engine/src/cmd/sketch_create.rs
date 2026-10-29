@@ -1104,6 +1104,11 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         let oc = sk.add_point(o, None)?;
         let ps = sk.add_point(at(t0, r), None)?;
         let pe = sk.add_point(at(t1, r), None)?;
+        // The middle comes before the side ends: the rank analysis then takes its two
+        // constraints on its own coordinates before the cap tangencies (which hold only to the
+        // solve's accuracy) and counts the slot's freedom as without it. After the centre-line
+        // ends, so `locate` still places the slot by its centre, start and end.
+        let mid = sk.add_point(at(t0 + sweep / 2.0, r), None)?;
         let (os, is) = (sk.add_point(at(t0, r + h), None)?, sk.add_point(at(t0, r - h), None)?);
         let (oe, ie) = (sk.add_point(at(t1, r + h), None)?, sk.add_point(at(t1, r - h), None)?);
         let outer = sk.add_arc(o, at(t0, r + h), at(t1, r + h), [Some(oc), Some(os), Some(oe)], None)?;
@@ -1121,7 +1126,6 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         for (a, b) in [(outer, cap_e), (inner, cap_e), (outer, cap_s), (inner, cap_s)] {
             cons.push(add_c(sk, ConstraintKind::Tangent { a, b })?);
         }
-        let mid = sk.add_point(at(t0 + sweep / 2.0, r), None)?;
         cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: mid, c: centre })?);
         let (to_s, to_e) = (sk.add_line_pts(mid, ps, None)?, sk.add_line_pts(mid, pe, None)?);
         for l in [to_s, to_e] {

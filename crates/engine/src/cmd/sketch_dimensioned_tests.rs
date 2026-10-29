@@ -220,14 +220,11 @@ fn point_at(s: &Session, id: &Value) -> solidcraft_geom::Vec2 {
     sk.point(sk.resolve_point(id.as_str().unwrap()).unwrap()).unwrap()
 }
 
-/// The solve of the active sketch: no conflict, and nothing redundant but an arc slot's equal
-/// caps (which its tangencies to two concentric arcs already imply).
+/// The solve of the active sketch: no conflict, nothing redundant.
 fn clean_solve(s: &Session) -> solidcraft_sketch::SolveReport {
     let mut sk = sketch(s);
     let rep = solidcraft_sketch::solve(&mut sk);
-    let arcs = |a: usize, b: usize| [a, b].iter().all(|c| matches!(sk.curves[*c].kind, solidcraft_sketch::CurveKind::Arc { .. }));
-    let caps = |id: &String| sk.constraints.iter().any(|c| &c.id == id && matches!(c.kind, ConstraintKind::Equal { a, b } if arcs(a, b)));
-    assert!(rep.ok() && rep.redundant.iter().all(caps), "{rep:?} {:?}", sk.constraints);
+    assert!(rep.ok() && rep.redundant.is_empty(), "{rep:?} {:?}", sk.constraints);
     rep
 }
 
@@ -299,6 +296,7 @@ fn every_slot_keeps_a_middle_point_in_the_middle() {
         assert_eq!(run(&mut s, "parameters.change", json!({"name":name,"expression":value}))["errors"], json!([]));
     }
     halfway(&s, &out, 25.0, 120f64.to_radians());
+    assert_eq!(clean_solve(&s).dof, 3);
 
     let mut s = session();
     let out = run(&mut s, "sketch.slot.arc_three_point", json!({"start":[0,0],"through":[10,5],"end":[20,0],"width":3}));
@@ -312,6 +310,17 @@ fn every_slot_keeps_a_middle_point_in_the_middle() {
     halfway(&s, &out, o.dist(a), ((b - o).angle() - (a - o).angle()).rem_euclid(std::f64::consts::TAU));
     // The centre, radius, start and sweep of the centre arc, and the width.
     assert_eq!(clean_solve(&s).dof, 6);
+    // A radius takes one of them away whatever it is: the middle never takes another.
+    let d = run(&mut s, "sketch.dimension", json!({"entities":[out["centre_arc"]],"type":"radius","value":22}));
+    for radius in [22, 8, 12, 40] {
+        assert_eq!(run(&mut s, "parameters.change", json!({"name":d["param"],"expression":radius}))["errors"], json!([]));
+        assert_eq!(clean_solve(&s).dof, 5, "radius {radius}");
+        let sk = sketch(&s);
+        let centre = sk.curve_index(out["centre_arc"].as_str().unwrap()).unwrap();
+        let solidcraft_sketch::CurveKind::Arc { c, a, b } = sk.curves[centre].kind else { panic!("an arc") };
+        let (o, a, b) = (sk.point(c).unwrap(), sk.point(a).unwrap(), sk.point(b).unwrap());
+        halfway(&s, &out, f64::from(radius), ((b - o).angle() - (a - o).angle()).rem_euclid(std::f64::consts::TAU));
+    }
 }
 
 #[test]
