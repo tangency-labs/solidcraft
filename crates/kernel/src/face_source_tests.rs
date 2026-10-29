@@ -100,7 +100,14 @@ fn construction_planes_follow_reflected_and_sheared_affine_images() {
         [[-1., 0., 0., 0.], [0.4, 2., 0., 0.], [0., 0.3, 1., 0.], [8., 9., 10., 1.]],
     ] {
         let placed = transform_matrix(&body, m).unwrap();
-        for (original, transformed) in body.face_sources().unwrap().iter().zip(placed.face_sources().unwrap()) {
+        // SMLib numbers the placed faces afresh: each is matched with the face its history names.
+        let history = placed.history().unwrap();
+        let originals = body.face_sources().unwrap();
+        for (f, transformed) in placed.face_sources().unwrap().iter().enumerate() {
+            let [crate::history::FaceOrigin::Face { operand: 0, face }] = history.faces[f].origins.as_slice() else {
+                panic!("face {f} has no one origin")
+            };
+            let original = &originals[*face];
             let (
                 Some(FaceSource::Box { producer: a, axis: aa, high: ah, plane: ap }),
                 Some(FaceSource::Box { producer: b, axis: ba, high: bh, plane: bp }),
