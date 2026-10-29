@@ -19,6 +19,8 @@
 //! | [`has_seam_problem`], [`SeamCheck`], [`HasSeamProblemOptions`] | `SmFace::HasSeamProblem`  |
 //! | [`BrepSeamObjects`], `merge_seam_intervals` (crate) | the `SmObject`s of `HasSeamProblem` / `SplitAtSeam`'s `MergeIntervals` |
 //! | [`ClassifyProblem`]                          | `SmClassifyProblem` (`SmCurveClass.h`)       |
+//! | [`assert_test_face37`]                       | `sm_AssertTestFace37` (file static)          |
+//! | `loop_sample_uv_point` (private)             | `sm_GetLoopSampleUVPoint` (file static)      |
 //!
 //! Deviations:
 //! - **Object model.** As [`super::p1`]: free functions over the [`Brep`]'s arenas,
@@ -2601,6 +2603,104 @@ pub(crate) fn has_seam_problem_in_brep_cached<O: LoopObject>(
 ) -> Result<SeamCheck<O>> {
     let objects = BrepSeamObjects::new(k, b, f)?;
     has_seam_problem_cached(k, b, f, &objects, opts, cache)
+}
+
+// ---- AssertValid helpers (sm_GetLoopSampleUVPoint, sm_AssertTestFace37) -------------------
+
+/// `sm_GetLoopSampleUVPoint(pLoop, rUVPoint)` (file static of `SmFace.cpp`): the UV
+/// point at the middle (`NormalizedEvaluate(0.5, TRUE, ..)`) of the first edge use of
+/// the loop that evaluates; `None` for a vertex loop and a loop whose edge uses all
+/// fail (a missing UV trim curve is made, as upstream).
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the loop's edge-use walk;
+/// [`SolidError::Unported`] from the evaluation (its other failures move on to the next
+/// edge use, as upstream).
+fn loop_sample_uv_point(k: &Kernel, b: &mut Brep, l: LoopId) -> Result<Option<Point2>> {
+    let edgeuses = match b.loop_(l)?.loopuse {
+        Some(lu) => eu1::loopuse_edgeuses(b, lu)?,
+        None => Vec::new(),
+    };
+    for eu in edgeuses {
+        match eu3::normalized_evaluate(k, b, eu, 0.5, true, false, true) {
+            Ok(e) => return Ok(Some(Point2::new(e.point.x, e.point.y))),
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => (),
+        }
+    }
+
+    // arrive here for VertexLoops and Loops with no usable UVTrimCurve
+    Ok(None)
+}
+
+/// `sm_AssertTestFace37(pFace)` (`SmFace::AssertValid` test 37): whether every inner
+/// loop of the face lies inside its outer loop (the first loop) and outside every other
+/// inner loop, judged at one sample UV point per inner loop ([`loop_sample_uv_point`])
+/// with `SmLoop::ContainsUVPoint` to the face tolerance mapped to UV. An inner loop
+/// outside or on the boundary of the outer loop, or inside another inner loop, fails;
+/// a face with fewer than two loops, an inner loop without a sample point and an
+/// unknown containment pass.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for a face
+/// without surface that has a sampled inner loop (upstream dereferences null); those
+/// of [`crate::query::loop::contains_uv_point`] and `MapTo2d`.
+pub fn assert_test_face37(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> {
+    use crate::geom::point_set::PointContainment;
+    use crate::query::r#loop::contains_uv_point;
+
+    // locals
+    let loops = super::p2::loops(b, f, false, None)?;
+    let num_loops = loops.len();
+
+    // no work - a Face with fewer than 2 Loops has no nesting to check
+    if num_loops < 2 {
+        return Ok(true);
+    }
+
+    // the OuterLoop is the first Loop in the Faceuse Loopuse list
+    let Some(&outer_loop) = loops.first() else {
+        return Ok(true);
+    };
+
+    let zone_tol_3d = super::p2::tolerance(b, f)?;
+
+    // for every InnerLoop
+    for (ii, &inner_loop) in loops.iter().enumerate().skip(1) {
+        let Some(sample_uv) = loop_sample_uv_point(k, b, inner_loop)? else {
+            continue; // inconclusive - nothing to classify
+        };
+
+        let uv_tol = {
+            let surface = b.face(f)?.surface.as_ref().ok_or_else(|| {
+                SolidError::invalid_input(OP, "AssertTestFace37: face without surface")
+            })?;
+            crate::surface::surface::p1::map_to_2d(k, zone_tol_3d, sample_uv, surface)?
+        };
+
+        // every InnerLoop must lie inside the OuterLoop
+        let containment = contains_uv_point(k, b, outer_loop, None, sample_uv, uv_tol)?.containment;
+        if containment == PointContainment::Outside || containment == PointContainment::OnBoundary {
+            return Ok(false);
+        }
+
+        // no InnerLoop may lie inside another InnerLoop
+        for (jj, &other) in loops.iter().enumerate().skip(1) {
+            if jj == ii {
+                continue;
+            }
+            if contains_uv_point(k, b, other, None, sample_uv, uv_tol)?.containment
+                == PointContainment::Inside
+            {
+                return Ok(false);
+            }
+        }
+    }
+
+    // arrive here when all InnerLoops are properly nested
+    Ok(true)
 }
 
 #[cfg(test)]

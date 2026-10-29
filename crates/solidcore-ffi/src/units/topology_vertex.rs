@@ -482,3 +482,51 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     rd.done()?;
     raw(op, path, input)
 }
+
+mod sys_topology_vertex_check_pointers {
+    extern "C" {
+        pub fn sc_topology_vertex_check_pointers(
+            path: *const std::ffi::c_char,
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+    }
+}
+
+/// `SmVertex::CheckPointers` of every vertex of the B-rep built from `block` (shim
+/// `topology_vertex_check_pointers.cpp`): `0 n flag*n` in traversal order, or `-1 status`.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed argument or B-rep block (the checks of
+/// [`super::topology_vertexuse::validate_block`], the whole input consumed);
+/// [`FfiError::Status`] for a shim failure.
+pub fn check_pointers(path: &str, block: &[f64]) -> Result<Vec<f64>, FfiError> {
+    super::topology_vertexuse::validate_block(path, block)?;
+    if super::topology_vertexuse::brep_block_at(block, path)? != block.len() {
+        return Err(FfiError::InvalidArgument("trailing values after the B-rep block".into()));
+    }
+    let mut input: Vec<f64> = vec![];
+    input.extend_from_slice(block);
+    let cpath = std::ffi::CString::new(path)
+        .map_err(|_| FfiError::InvalidArgument("path has a NUL byte".into()))?;
+    call_with_buffer(4096, |buf, len| {
+        // SAFETY: cpath is a valid NUL-terminated string; input is valid for input.len()
+        // reads and holds the validated arguments then a validated B-rep block (exactly
+        // what the shim reads); buf is valid for buf.len() writes and the shim honours
+        // the capacity; len is valid.
+        unsafe {
+            sys_topology_vertex_check_pointers::sc_topology_vertex_check_pointers(
+                cpath.as_ptr(),
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}

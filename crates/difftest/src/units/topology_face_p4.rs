@@ -71,7 +71,7 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 const NULL_DEREF: f64 = -2.0;
 
 /// The `.smb` files the systematic cases run on (those of unit `topology.vertexuse`).
-const FILES: [&str; 15] = [
+pub(super) const FILES: [&str; 15] = [
     "Mouse.smb",
     "Endcap.smb",
     "box_with_large_fillet.smb",
@@ -88,6 +88,18 @@ const FILES: [&str; 15] = [
     "toruswvy.smb",
     "vase_rev.smb",
 ];
+
+/// Further `.smb` files with faces of several loops, for `sm_AssertTestFace37`.
+pub(super) const FACE37_FILES: [&str; 5] = [
+    "Boolean/extrudeHoles1.smb",
+    "Boolean/BoltMBox1.smb",
+    "Fillet/cyl_on_box_w_hole.smb",
+    "Fillet/ext_w_hole.smb",
+    "Solids/l_shape_with_boss.smb",
+];
+
+#[path = "topology_face_p4/level0.rs"]
+pub(super) mod level0;
 
 // ---- inputs -----------------------------------------------------------------------------
 
@@ -147,6 +159,8 @@ enum OpIn {
         periodic_u: i64,
         periodic_v: i64,
     },
+    /// `sm_AssertTestFace37` (the `SmFace::AssertValid` rule 37 loop nesting test).
+    Face37,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,7 +180,7 @@ fn flag(b: bool) -> f64 {
 }
 
 /// The B-rep block (`validate_only` and `init_gaps` off).
-fn brep_block(b: &BrepIn) -> Result<Vec<f64>, HarnessError> {
+pub(super) fn brep_block(b: &BrepIn) -> Result<Vec<f64>, HarnessError> {
     let mut out = Vec::new();
     match b {
         BrepIn::File { rebuild, .. } => out.extend([0.0, flag(*rebuild)]),
@@ -247,6 +261,7 @@ fn op_args(op: &OpIn) -> (Op, Vec<f64>) {
                 flag(tol.is_none()),
             ],
         ),
+        OpIn::Face37 => (Op::Face37, vec![]),
         OpIn::Seam {
             outer,
             periodic_u,
@@ -896,6 +911,19 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
             put_class(&mut o, &s.class_u);
             put_class(&mut o, &s.class_v);
         }
+        OpIn::Face37 => {
+            let no_surface = b.face(f).map_err(|e| fail(&e))?.surface.is_none();
+            let n_loops = solidcore::topology::face::p2::loops(&b, f, false, None)
+                .map_err(|e| fail(&e))?
+                .len();
+            if no_surface && n_loops >= 2 {
+                o.push(NULL_DEREF);
+            } else {
+                o.push(flag(
+                    fp4::assert_test_face37(&k, &mut b, f).map_err(|e| fail(&e))?,
+                ));
+            }
+        }
     }
     Ok(o)
 }
@@ -1094,6 +1122,56 @@ impl UnitDiff for Runner {
                     }
                 }
             }
+        }
+        // sm_AssertTestFace37 on the first faces of every upstream file and of bodies with
+        // holed faces (the AssertValid level-0 helpers, #1419)
+        for file in FILES.iter().chain(FACE37_FILES.iter()) {
+            for rebuild in [false, true] {
+                for s in 0..10i64 {
+                    let inputs = Inputs {
+                        brep: BrepIn::File {
+                            file: (*file).to_string(),
+                            rebuild,
+                        },
+                        face: s,
+                        op: OpIn::Face37,
+                    };
+                    v.push(Case {
+                        unit: self.id().to_string(),
+                        name: format!("{file}_{}_f{s}_face37", u8::from(rebuild)),
+                        source: crate::CaseSource::Fixture {
+                            path: "built-in: sm_AssertTestFace37 cases".to_string(),
+                            index: v.len(),
+                            upstream_ref: None,
+                        },
+                        inputs: serde_json::to_value(inputs).map_err(|e| harness(e.to_string()))?,
+                    });
+                }
+            }
+        }
+        let mut rng = Rng::new(0x1419_0037);
+        for j in 0..24 {
+            let brep = loop {
+                let b = shared::gen_brep(&mut rng);
+                if matches!(b, BrepIn::Face { .. }) {
+                    break b;
+                }
+            };
+            v.push(Case {
+                unit: self.id().to_string(),
+                name: format!("gen_face37_{j:02}"),
+                source: crate::CaseSource::Fixture {
+                    path: "built-in: sm_AssertTestFace37 cases".to_string(),
+                    index: v.len(),
+                    upstream_ref: None,
+                },
+                inputs: serde_json::to_value(Inputs {
+                    brep,
+                    face: 0,
+                    op: OpIn::Face37,
+                })
+                .map_err(|e| harness(e.to_string()))?,
+            });
         }
         Ok(v)
     }

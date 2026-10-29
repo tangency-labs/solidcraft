@@ -28,6 +28,7 @@
 //! curves reaches a Newton intersection (`SmCurve::GlobalCurveIntersect` through
 //! `SmCCIntersectENFO::Evaluate`, `curve.curve_p5`) and `AssertValid` past its
 //! knot checks (`SmCurve::AssertValid`, `curve.curve_p4`; `SmTol::IsDegenerate`).
+//! `AssertNoPeriodicJump` runs on built-in cases (`jump_*`, see [`jump_cases`]).
 //! Every run has at least [`MIN_GENERATED`] generated cases; generated inputs the ffi
 //! wrapper rejects are redrawn.
 
@@ -37,6 +38,8 @@ use serde_json::Value;
 use solidcore::geom::assert_array::{AssertArray, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::extent2d::Extent2d;
+use solidcore::geom::vector2d::Point2;
 use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
@@ -169,6 +172,12 @@ enum OpIn {
     Assert {
         given: bool,
     },
+    Jump {
+        closed_u: bool,
+        closed_v: bool,
+        /// `u0 v0 u1 v1`: `SmExtent2d(SmPoint2d(u0, v0), SmPoint2d(u1, v1))`.
+        dom: [f64; 4],
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,6 +199,7 @@ impl OpIn {
             OpIn::Subdivide { .. } => Op::Subdivide,
             OpIn::Gap { .. } => Op::Gap,
             OpIn::Assert { .. } => Op::Assert,
+            OpIn::Jump { .. } => Op::Jump,
         }
     }
 }
@@ -315,6 +325,14 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             o.extend([f64::from(*fix), *dmin]);
         }
         OpIn::Assert { given } => o.push(flag(*given)),
+        OpIn::Jump {
+            closed_u,
+            closed_v,
+            dom,
+        } => {
+            o.extend([flag(*closed_u), flag(*closed_v)]);
+            o.extend_from_slice(dom);
+        }
     }
     Ok(o)
 }
@@ -408,7 +426,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
                     s.state("new_")?;
                 }
             }
-            OpIn::Pole { .. } | OpIn::Gap { .. } => s.vals("flag", 1)?,
+            OpIn::Pole { .. } | OpIn::Gap { .. } | OpIn::Jump { .. } => s.vals("flag", 1)?,
             OpIn::Segment { .. } => {
                 s.vals("flag", 1)?;
                 s.vals("line", 6)?;
@@ -608,6 +626,15 @@ fn rust_op(
         OpIn::Gap { fix, dmin, .. } => {
             let other = other.ok_or_else(|| harness("gap without other curve"))?;
             o.push(flag(c.trim_gap(&k, other, fix_of(*fix)?, *dmin)?));
+        }
+        OpIn::Jump {
+            closed_u,
+            closed_v,
+            dom,
+        } => {
+            let [u0, v0, u1, v1] = *dom;
+            let d = Extent2d::from_points(Point2::new(u0, v0), Point2::new(u1, v1));
+            o.push(flag(c.assert_no_periodic_jump(*closed_u, *closed_v, &d)?));
         }
         OpIn::Assert { given } => {
             let mut list = AssertArray::new();
@@ -1057,6 +1084,73 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     Inputs { this, op }
 }
 
+/// `AssertNoPeriodicJump` cases (systematic, fixed seed): 2D and 3D curves of degree 1
+/// to 3 against domains from a twentieth to twice the polygon's extent (so that the
+/// 0.9-period threshold falls on both sides of the control point steps, including
+/// tiny and huge scales), closed in U, V, both or neither; and 2-point lines.
+fn jump_cases(unit: &str) -> Result<Vec<Case>, HarnessError> {
+    let mut rng = Rng::new(0x1419_0002);
+    let mut out = Vec::new();
+    let mut n = 0;
+    while out.len() < 240 && n < 2000 {
+        n += 1;
+        let p = 1 + rng.below(3) as usize;
+        let three_d = rng.chance(0.15);
+        let scale = *rng.choose(&[1e-3, 1.0, 1.0, 1e3]).unwrap_or(&1.0);
+        let mut c = if rng.chance(0.1) {
+            gen_crv_full(&mut rng, 1, 0, 1, false, three_d)
+        } else {
+            let extra = rng.below(5) as usize;
+            gen_crv_full(&mut rng, p, extra, 1, false, three_d)
+        };
+        for cp in &mut c.cpts {
+            cp[0] *= scale;
+            cp[1] *= scale;
+        }
+        let (lo, hi) = c.cpts.iter().fold(
+            ([f64::MAX; 2], [f64::MIN; 2]),
+            |(l, h), cp| {
+                (
+                    [l[0].min(cp[0]), l[1].min(cp[1])],
+                    [h[0].max(cp[0]), h[1].max(cp[1])],
+                )
+            },
+        );
+        let f = *rng.choose(&[0.05, 0.3, 0.6, 1.0, 1.05, 1.11, 2.0]).unwrap_or(&1.0);
+        let ext_u = ((hi[0] - lo[0]) * f).max(1e-9 * scale);
+        let ext_v = ((hi[1] - lo[1]) * f).max(1e-9 * scale);
+        let dom = [lo[0], lo[1], lo[0] + ext_u, lo[1] + ext_v];
+        let closed = rng.below(4);
+        let i = Inputs {
+            this: This {
+                dim: if three_d { 3 } else { 2 },
+                oob: false,
+                crv: Some(CrvIn::Inline(c)),
+            },
+            op: OpIn::Jump {
+                closed_u: closed & 1 != 0,
+                closed_v: closed & 2 != 0,
+                dom,
+            },
+        };
+        let ok = cpp_input(&i).is_ok_and(|input| ffi::validate(i.op.ffi(), &input).is_ok());
+        if !ok {
+            continue;
+        }
+        out.push(Case {
+            unit: unit.to_string(),
+            name: format!("jump_{:03}", out.len()),
+            source: crate::CaseSource::Fixture {
+                path: "built-in: AssertNoPeriodicJump cases".to_string(),
+                index: out.len(),
+                upstream_ref: None,
+            },
+            inputs: serde_json::to_value(&i).map_err(|e| harness(e.to_string()))?,
+        });
+    }
+    Ok(out)
+}
+
 /// A generated case the ffi wrapper accepts (redrawn up to 64 times).
 fn gen_valid(rng: &mut Rng) -> Option<Inputs> {
     for _ in 0..64 {
@@ -1083,7 +1177,9 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &ctx)?;
+        v.extend(jump_cases(self.id())?);
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

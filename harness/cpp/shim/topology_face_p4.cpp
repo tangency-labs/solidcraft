@@ -12,11 +12,15 @@
 //
 // Output: `0` (or `-1 status` when the B-rep build failed), then the op record. A slot of
 // `-2` marks a call the shim skips because upstream would dereference null.
+// Op 11 (`Face37`) runs sm_AssertTestFace37 on the face.
 #include "sc_topology_fixture.h"
 
 #include <SmCurveClass.h>
 #include <SmFaceProps.h>
 #include <SmSolutionArray.h>
+
+// SmFace.cpp: the AssertValid rule 37 helper (external linkage, not declared in a header).
+SmBoolean sm_AssertTestFace37(const SmFace* pFace);
 
 namespace
 {
@@ -32,6 +36,7 @@ enum : int32_t
     FP4_OP_LINE = 8,
     FP4_OP_SECTOR = 9,
     FP4_OP_SEAM = 10,
+    FP4_OP_FACE37 = 11,
 };
 
 const double FP4_NULL_DEREF = -2.0;
@@ -307,6 +312,20 @@ void fp4_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back((double)near);
         fp4_put_class(o, cu);
         fp4_put_class(o, cv);
+        break;
+    }
+    case FP4_OP_FACE37:
+    {
+        // sm_AssertTestFace37 dereferences the face's surface once an inner loop has a
+        // sample point
+        SmTArray<SmLoop*> loops;
+        f->GetLoops(loops);
+        if (f->GetSurface() == NULL && loops.GetSize() >= 2)
+        {
+            o.push_back(FP4_NULL_DEREF);
+            break;
+        }
+        o.push_back(flg(sm_AssertTestFace37(f)));
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

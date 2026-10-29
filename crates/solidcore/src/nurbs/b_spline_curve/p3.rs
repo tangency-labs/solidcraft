@@ -16,6 +16,7 @@
 //! | [`BSplineCurve::subdivide_at_discontinuity`]      | `SubdivideAtDiscontinuity`             |
 //! | [`BSplineCurve::trim_gap`], [`GapFix`]            | `TrimGap`                              |
 //! | [`BSplineCurve::assert_valid`]                    | `AssertValid`                          |
+//! | [`BSplineCurve::assert_no_periodic_jump`], [`assert_no_periodic_jump_of`] | `AssertNoPeriodicJump` |
 //!
 //! The other members of the file belong to `nurbs.b_spline_curve_p1`, `_p2` and
 //! `nurbs.b_spline_curve_n_lib`.
@@ -79,6 +80,7 @@ use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{
     line_closest_point, line_point_distance, plane_point_distance, point_project_to_plane,
     segment_point_distance,
@@ -1419,6 +1421,98 @@ impl BSplineCurve {
 
         Ok(rtn)
     }
+
+    /// Whether the control polygon of this 2D (UV trim) curve stays clear of a jump
+    /// across a periodic boundary of the surface domain `surface_uv_domain`
+    /// (`AssertNoPeriodicJump`): `false` when two consecutive control points differ by
+    /// at least nine tenths of the domain length in a direction the surface is closed
+    /// in (`surface_closed_u` / `surface_closed_v`). A curve that is not 2D, a surface
+    /// closed in neither direction and a two-point polygon are `true`.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB (upstream makes one or dereferences `NULL`; a plain
+    /// B-spline cannot make one); those of [`BSplineCurve::polygon`].
+    pub fn assert_no_periodic_jump(
+        &self,
+        surface_closed_u: bool,
+        surface_closed_v: bool,
+        surface_uv_domain: &Extent2d,
+    ) -> Result<bool> {
+        // return value
+        let mut rtn = true;
+
+        // no work - not 2d, not periodic
+        if self.dim() != 2 || (!surface_closed_u && !surface_closed_v) {
+            return Ok(true);
+        }
+
+        // get curve control points in 2d euclidean space (the NURB is made by the
+        // caller, `assert_no_periodic_jump_of`, for the kinds that can make one)
+        let ivl = self.natural_interval();
+        let polygon = self.polygon(&ivl)?;
+
+        // no work - single pair control point curves are assumed to not jump boundaries
+        if polygon.len() == 2 {
+            return Ok(true);
+        }
+
+        // get slightly shortened surface periods
+        let period_u = 0.9 * surface_uv_domain.x_length();
+        let period_v = 0.9 * surface_uv_domain.y_length();
+
+        // for every pair of control Points
+        for pair in polygon.windows(2) {
+            let (Some(a), Some(b)) = (pair.first(), pair.get(1)) else {
+                continue;
+            };
+            let jump_u = (b.x - a.x).abs();
+            let jump_v = (b.y - a.y).abs();
+
+            // look for a potential bad U Jump
+            if surface_closed_u && jump_u >= period_u {
+                rtn = false;
+            }
+            if surface_closed_v && jump_v >= period_v {
+                rtn = false;
+            }
+        }
+
+        // all done
+        Ok(rtn)
+    }
+}
+
+/// `pUVTrimCurve->AssertNoPeriodicJump(bClosedU, bClosedV, rSurfaceUVDomain)` for a
+/// curve of any B-spline kind: [`BSplineCurve::assert_no_periodic_jump`] of its
+/// `SmBSplineCurve` part, a line's NURB made on a copy first (`GetPolygon`'s
+/// `GetOrCreateGwNurbPointer`; upstream makes it on the curve itself).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a curve that is not an `SmBSplineCurve` (upstream's
+/// UV trim curves always are); those of [`BSplineCurve::assert_no_periodic_jump`].
+pub fn assert_no_periodic_jump_of(
+    curve: &Curve,
+    surface_closed_u: bool,
+    surface_closed_v: bool,
+    surface_uv_domain: &Extent2d,
+) -> Result<bool> {
+    use crate::curve::curve::p2::CurveKind;
+    let base = match curve.kind() {
+        CurveKind::BSpline(c) => std::borrow::Cow::Borrowed(c),
+        CurveKind::Line(c) => c.base_with_nurb()?,
+        CurveKind::Ellipse(c) => std::borrow::Cow::Borrowed(c.base()),
+        CurveKind::Parabola(c) => std::borrow::Cow::Borrowed(c.base()),
+        CurveKind::Hyperbola(c) => std::borrow::Cow::Borrowed(c.base()),
+        _ => {
+            return Err(SolidError::invalid_input(
+                "nurbs::b_spline_curve::p3::assert_no_periodic_jump",
+                "the curve is not an SmBSplineCurve",
+            ))
+        }
+    };
+    base.assert_no_periodic_jump(surface_closed_u, surface_closed_v, surface_uv_domain)
 }
 
 #[cfg(test)]

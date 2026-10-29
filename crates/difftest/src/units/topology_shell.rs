@@ -8,6 +8,9 @@
 //! Setup failures fail the harness; topology and native integer flags compare exactly.
 
 use super::topology_edgeuse_p1::{fixture_input, import};
+
+#[path = "topology_shell/inner.rs"]
+mod inner;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -789,6 +792,9 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        if inner::is_inner(case) {
+            return inner::run_cpp(case);
+        }
         let inputs: Inputs = case.parse()?;
         let (path, block) = fixture_input(inputs.brep)?;
         if let Some(filter) = inputs.region_filter {
@@ -939,7 +945,16 @@ impl UnitDiff for Runner {
         ))
     }
 
+    fn cases(&self, ctx: &crate::CaseContext) -> Result<Vec<Case>, HarnessError> {
+        let mut v = crate::runner::default_cases(self, ctx)?;
+        v.extend(inner::cases(self.id()));
+        Ok(v)
+    }
+
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        if inner::is_inner(case) {
+            return inner::run_rust(case);
+        }
         let inputs: Inputs = case.parse()?;
         let mut brep = match own_brep(&inputs.brep)? {
             Ok(b) => b,

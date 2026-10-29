@@ -1034,10 +1034,16 @@ impl UnitDiff for Runner {
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
+        if super::topology_face_p4::level0::is_level0(case) {
+            return super::topology_face_p4::level0::run_cpp(case);
+        }
         run_cpp(&case.parse::<Inputs>()?)
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
+        if super::topology_face_p4::level0::is_level0(case) {
+            return super::topology_face_p4::level0::run_rust(case);
+        }
         run_rust(&case.parse::<Inputs>()?)
     }
 
@@ -1057,6 +1063,15 @@ impl UnitDiff for Runner {
                 source: crate::CaseSource::Generated { seed: 0x100B_05E0 },
                 inputs,
             });
+        }
+        {
+            use super::topology_face_p4::level0::Level0Op;
+            let ops: Vec<Level0Op> = vec![
+            Level0Op::LoopuseSide { periodic_u: -1, periodic_v: -1 },
+            Level0Op::LoopuseSide { periodic_u: 1, periodic_v: 0 },
+            Level0Op::LoopuseSide { periodic_u: 0, periodic_v: 1 },
+        ];
+            v.extend(super::topology_face_p4::level0::cases(self.id(), &ops, 0x1419_0102, 36)?);
         }
         Ok(v)
     }

@@ -2,7 +2,8 @@
 // difftest shim for unit `nurbs.b_spline_curve_p3`.
 // Wraps the SmBSplineCurve members owned by the unit (source/SMLib/src/SmBSplineCurve.cpp,
 // source/SMLib/inc/SmBSplineCurve.h): CreateByScaleTransRot, HasInternalPole, IsSegmentLine,
-// GetControlPoint, IsOnPlane, JoinWith, SubdivideAtDiscontinuity, TrimGap and AssertValid.
+// GetControlPoint, IsOnPlane, JoinWith, SubdivideAtDiscontinuity, TrimGap, AssertValid and
+// AssertNoPeriodicJump.
 //
 // One entry point, sc_nurbs_b_spline_curve_p3_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/nurbs_b_spline_curve_p3.rs, which validates every
@@ -48,6 +49,7 @@ enum : int32_t
     OP_SUBDIVIDE = 6,
     OP_GAP = 7,
     OP_ASSERT = 8,
+    OP_JUMP = 9,
 };
 
 const double NaN = std::numeric_limits<double>::quiet_NaN();
@@ -239,6 +241,20 @@ void curve_op(int32_t op, Rd& rd, const SmContext& ctx, SmBSplineCurve* c, std::
             o.push_back(r->GetOwnerParam().x);
             o.push_back(r->GetOwnerParam().y);
         }
+        break;
+    }
+    case OP_JUMP:
+    {
+        bool closed_u = rd.flag();
+        bool closed_v = rd.flag();
+        double u0 = rd.num();
+        double v0 = rd.num();
+        double u1 = rd.num();
+        double v1 = rd.num();
+        SmExtent2d dom(SmPoint2d(u0, v0), SmPoint2d(u1, v1));
+        SmBoolean ok = c->AssertNoPeriodicJump(closed_u ? TRUE : FALSE, closed_v ? TRUE : FALSE, dom);
+        o.push_back(0.0);
+        o.push_back(ok ? 1.0 : 0.0);
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

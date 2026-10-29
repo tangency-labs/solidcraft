@@ -27,6 +27,7 @@
 //! | [`is_shell_vertex`], [`is_loop_vertex`]     | `SmVertex::IsShellVertex`, `IsLoopVertex`        |
 //! | [`max_up_dim_gap_3d`], [`max_gap_3d`], [`VertexGap`], [`HeldGap`] | `SmVertex::GetMaxUpDimGap3d`, `GetMaxGap3d` (the `SmGap*` results) |
 //! | [`notify`]                                  | `SmVertex::Notify`                               |
+//! | [`check_pointers`]                          | `SmVertex::CheckPointers`                        |
 //! | [`edge_start_vertex`], [`edge_vertex_pair`], [`edge_vertices`], [`edge_end_tangent`] | `SmEdge::GetStartVertex`, `GetVertices(SmVertex*&, SmVertex*&)`, `GetVertices(SmTArray&)`, `GetEndTangent` (CO-PORTED, `topology.edge`) |
 //! | [`loopuse_vertices`], [`loop_vertices`]     | `SmLoopuse::GetVertices`, `SmLoop::GetVertices` (CO-PORTED, `topology.loopuse`) |
 //!
@@ -80,7 +81,7 @@
 //! - `CalcCornerFromFaces`, `IsZoneTol3dConsistent`, `GetLoopOfFace`,
 //!   `GetVertexuseOfEdge`, `GetVertexNumberInBrep`, the `Has*` / `IsEdgeVertex` /
 //!   `IsOnSeam` / `IsConnectedToEdge` / `IsConnectedToFace` predicates,
-//!   `IsWithinXSectTol3dOf*`, `IsOnFaceCorner`, `HasParallelFaces`, `CheckPointers`,
+//!   `IsWithinXSectTol3dOf*`, `IsOnFaceCorner`, `HasParallelFaces`,
 //!   `IsComplexCornerMember`, `RefineGeometry`, `FindAndRemoveVertexuseByEdge`,
 //!   `GetMemoryUsed`, `AssertValid`, the graphics and the `Dump`s are not part of this
 //!   unit.
@@ -1253,6 +1254,349 @@ pub fn set_point(
     )?;
     b.vertex_mut(v)?.point = new_point;
     Ok(())
+}
+
+// ---- pointer check (SmVertex::CheckPointers) ------------------------------------------------
+
+/// `SmVertex::CheckPointers()`: whether the topology around `v` is linked consistently,
+/// through each of its vertex uses in list order (stopping at the first failure): a
+/// shell vertex use is the vertex's only use and its shell's sole list member; a loop
+/// vertex use and the one of its mate loop use name this vertex, one loop, one face
+/// and mated loop uses and face uses that point back; an edge vertex use of a wire
+/// edge has mated shell edge uses of one shell; one of a loop edge has, with its mate
+/// and the corner neighbour at this vertex and its mate, one loop, one face, mated
+/// edge, loop and face uses that point back and consistent use types. Any other vertex
+/// use or edge use type fails.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where the
+/// accessors upstream calls dereference null (an edge use without edge or primary edge
+/// use in `GetMate`, an edge use without vertex use or mate in
+/// `GetCornerMateEdgeuse`).
+pub fn check_pointers(b: &Brep, v: VertexId) -> Result<bool> {
+    use crate::topology::shell::ShellMembers;
+    use crate::topology::EdgeuseOwner;
+
+    // locals
+    let mut rtn = true;
+    let vertexuses = vertexuses(b, v)?;
+    let lu_mate = |lu: LoopuseId| -> Result<Option<LoopuseId>> { Ok(b.loopuse(lu)?.mate) };
+    let lu_vertexuse = |lu: LoopuseId| -> Result<Option<VertexuseId>> {
+        Ok(match b.loopuse(lu)?.start {
+            LoopuseStart::Vertexuse(vu) => vu,
+            _ => None,
+        })
+    };
+    let lu_loop = |lu: LoopuseId| -> Result<Option<LoopId>> { Ok(b.loopuse(lu)?.loop_) };
+    let lu_faceuse = |lu: LoopuseId| -> Result<Option<FaceuseId>> { Ok(b.loopuse(lu)?.faceuse) };
+    let lu_is = |lu: LoopuseId, edge_type: bool| -> Result<bool> {
+        Ok(match b.loopuse(lu)?.start {
+            LoopuseStart::Edgeuse(_) => edge_type,
+            LoopuseStart::Vertexuse(_) => !edge_type,
+            LoopuseStart::Unknown => false,
+        })
+    };
+    let fu_face = |fu: FaceuseId| -> Result<Option<FaceId>> { Ok(b.faceuse(fu)?.face) };
+    let fu_mate = |fu: FaceuseId| -> Result<Option<FaceuseId>> { Ok(b.faceuse(fu)?.mate) };
+    let fu_has = |fu: FaceuseId, lu: LoopuseId| -> Result<bool> {
+        Ok(b.faceuse(fu)?.loopuses.contains(&lu))
+    };
+    let face_fu = |f: FaceId| -> Result<Option<FaceuseId>> { Ok(b.face(f)?.faceuse) };
+    let loop_lu = |l: LoopId| -> Result<Option<LoopuseId>> { Ok(b.loop_(l)?.loopuse) };
+    let vu_vertex = |vu: VertexuseId| -> Result<Option<VertexId>> { Ok(b.vertexuse(vu)?.vertex) };
+    let vu_is_edge = |vu: VertexuseId| -> Result<bool> {
+        Ok(matches!(b.vertexuse(vu)?.owner, VertexuseOwner::Edgeuse(_)))
+    };
+    let eu_is_loop = |eu: EdgeuseId| -> Result<bool> {
+        Ok(matches!(b.edgeuse(eu)?.owner, EdgeuseOwner::Loopuse(_)))
+    };
+    let eu_is_shell = |eu: EdgeuseId| -> Result<bool> {
+        Ok(matches!(b.edgeuse(eu)?.owner, EdgeuseOwner::Shell(_)))
+    };
+    let some_eq = |a: Option<VertexId>| a == Some(v);
+
+    // For every Face - find all the Vertexuses
+    let mut ii = 0;
+    while rtn && ii < vertexuses.len() {
+        let Some(&vui) = vertexuses.get(ii) else {
+            break;
+        };
+        ii += 1;
+
+        // switch on Vertexuse Type
+        match b.vertexuse(vui)?.owner {
+            VertexuseOwner::Shell(shell) => {
+                // ShellVertex checks
+                rtn &= shell.is_some();
+                if let (true, Some(shell)) = (rtn, shell) {
+                    let members = &b.shell(shell)?.members;
+                    /* 1 */
+                    rtn &= vertexuses.len() == 1;
+                    /* 2 */
+                    rtn &= *members == ShellMembers::Vertexuse(vui);
+                    /* 3 (GetSize() == 1: the list of a vertex shell holds its one use) */
+                    rtn &= matches!(members, ShellMembers::Vertexuse(_));
+                }
+            }
+            VertexuseOwner::Loopuse(lu1) => {
+                let lu2 = match lu1 {
+                    Some(l) => lu_mate(l)?,
+                    None => None,
+                };
+                let vuj = match lu2 {
+                    Some(l) => lu_vertexuse(l)?,
+                    None => None,
+                };
+                let v1 = b.vertexuse(vui)?.vertex;
+                let v2 = match vuj {
+                    Some(u) => vu_vertex(u)?,
+                    None => None,
+                };
+                let loop1 = match lu1 {
+                    Some(l) => lu_loop(l)?,
+                    None => None,
+                };
+                let loop2 = match lu2 {
+                    Some(l) => lu_loop(l)?,
+                    None => None,
+                };
+                let fu1 = match lu1 {
+                    Some(l) => lu_faceuse(l)?,
+                    None => None,
+                };
+                let fu2 = match lu2 {
+                    Some(l) => lu_faceuse(l)?,
+                    None => None,
+                };
+                let face1 = match fu1 {
+                    Some(f) => fu_face(f)?,
+                    None => None,
+                };
+                let face2 = match fu2 {
+                    Some(f) => fu_face(f)?,
+                    None => None,
+                };
+
+                // LoopVertex checks
+                let all = (lu1, lu2, vuj, v1, v2, loop1, loop2, fu1, fu2, face1, face2);
+                rtn &= matches!(
+                    all,
+                    (
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_),
+                        Some(_)
+                    )
+                );
+                if let (
+                    true,
+                    (
+                        Some(lu1),
+                        Some(lu2),
+                        Some(vuj),
+                        Some(_),
+                        Some(_),
+                        Some(loop1),
+                        Some(_),
+                        Some(fu1),
+                        Some(fu2),
+                        Some(face1),
+                        Some(_),
+                    ),
+                ) = (rtn, all)
+                {
+                    /*  1 */
+                    rtn &= some_eq(v1) && some_eq(v2);
+                    /*  2 */
+                    rtn &= all.5 == all.6;
+                    /*  3 */
+                    rtn &= all.9 == all.10;
+                    /*  4 */
+                    rtn &= lu_mate(lu1)? == Some(lu2) && lu_mate(lu2)? == Some(lu1);
+                    /*  5 */
+                    rtn &= fu_mate(fu1)? == Some(fu2) && fu_mate(fu2)? == Some(fu1);
+                    /*  6 */
+                    let up = face_fu(face1)?;
+                    rtn &= up == Some(fu1) || up == Some(fu2);
+                    /*  7 */
+                    let l = loop_lu(loop1)?;
+                    rtn &= l == Some(lu1) || l == Some(lu2);
+                    /*  8 */
+                    rtn &= fu_has(fu1, lu1)?;
+                    /*  9 */
+                    rtn &= fu_has(fu2, lu2)?;
+                    /* 10 */
+                    rtn &= lu_vertexuse(lu1)? == Some(vui);
+                    /* 11 */
+                    rtn &= lu_vertexuse(lu2)? == Some(vuj);
+                    /* 12 */
+                    rtn &= some_eq(vu_vertex(vui)?) && some_eq(vu_vertex(vuj)?);
+                    /* 13 */
+                    rtn &= lu_is(lu1, false)? && lu_is(lu2, false)?;
+                }
+            }
+            VertexuseOwner::Edgeuse(eu1_) => {
+                let eu2_ = match eu1_ {
+                    Some(e) => eu1::mate(b, e)?,
+                    None => None,
+                };
+                let eu1_owner = match eu1_ {
+                    Some(e) => Some(b.edgeuse(e)?.owner),
+                    None => None,
+                };
+
+                // switch on Edgeuse TYpe
+                match eu1_owner {
+                    Some(EdgeuseOwner::Shell(_)) => {
+                        // EdgeVertex Part of a Shell
+                        let shell = match eu1_ {
+                            Some(e) => eu1::shell(b, e)?,
+                            None => None,
+                        };
+                        rtn &= eu1_.is_some() && eu2_.is_some() && shell.is_some();
+                        if let (true, Some(e1), Some(e2), Some(_)) = (rtn, eu1_, eu2_, shell) {
+                            /*  1 */
+                            rtn &= shell == eu1::shell(b, e1)? && shell == eu1::shell(b, e2)?;
+                            /*  2 */
+                            rtn &= eu1::mate(b, e1)? == Some(e2) && eu1::mate(b, e2)? == Some(e1);
+                            /*  3 */
+                            rtn &= eu1::vertexuse(b, e1)? == Some(vui);
+                            /*  4 */
+                            rtn &= eu_is_shell(e1)? && eu_is_shell(e2)?;
+                        }
+                    }
+                    Some(EdgeuseOwner::Loopuse(_)) => {
+                        // EdgeVertex Part of an Loopuse
+                        let eu3_ = match eu1_ {
+                            Some(e) => eu1::corner_mate_edgeuse(b, e, Some(v))?,
+                            None => None,
+                        };
+                        let eu4_ = match eu3_ {
+                            Some(e) => eu1::mate(b, e)?,
+                            None => None,
+                        };
+                        let eus = [eu1_, eu2_, eu3_, eu4_];
+                        let mut lus = [None; 4];
+                        let mut loops = [None; 4];
+                        let mut fus = [None; 4];
+                        let mut faces = [None; 4];
+                        let mut vus = [Some(vui), None, None, None];
+                        let mut vs = [None; 4];
+                        for (i, eu) in eus.iter().enumerate() {
+                            if let Some(e) = *eu {
+                                if let Some(slot) = lus.get_mut(i) {
+                                    *slot = eu1::loopuse(b, e)?;
+                                }
+                                if let Some(slot) = fus.get_mut(i) {
+                                    *slot = eu1::faceuse(b, e)?;
+                                }
+                                if i > 0 {
+                                    if let Some(slot) = vus.get_mut(i) {
+                                        *slot = eu1::vertexuse(b, e)?;
+                                    }
+                                }
+                            }
+                        }
+                        for i in 0..4 {
+                            if let (Some(slot), Some(Some(l))) = (loops.get_mut(i), lus.get(i)) {
+                                *slot = lu_loop(*l)?;
+                            }
+                            if let (Some(slot), Some(Some(f))) = (faces.get_mut(i), fus.get(i)) {
+                                *slot = fu_face(*f)?;
+                            }
+                            if let (Some(slot), Some(Some(u))) = (vs.get_mut(i), vus.get(i)) {
+                                *slot = vu_vertex(*u)?;
+                            }
+                        }
+
+                        // Vertex->LoopEdge checks
+                        let present = eus.iter().all(Option::is_some)
+                            && lus.iter().all(Option::is_some)
+                            && loops.iter().all(Option::is_some)
+                            && fus.iter().all(Option::is_some)
+                            && faces.iter().all(Option::is_some)
+                            && vus.iter().all(Option::is_some)
+                            && vs.iter().all(Option::is_some);
+                        rtn &= present;
+                        if let (
+                            true,
+                            [Some(e1), Some(e2), Some(e3), Some(e4)],
+                            [Some(l1), Some(l2), Some(l3), Some(l4)],
+                            [Some(f1), Some(f2), _, _],
+                            [Some(loop1), _, _, _],
+                            [Some(face1), _, _, _],
+                            [Some(u1), Some(u2), Some(u3), Some(u4)],
+                        ) = (rtn, eus, lus, fus, loops, faces, vus)
+                        {
+                            let [vi, _, _, vl] = vs;
+                            /*  1 */
+                            rtn &= some_eq(vi) && some_eq(vl);
+                            /*  2 */
+                            rtn &= loops.first() == loops.get(1)
+                                && loops.first() == loops.get(2)
+                                && loops.first() == loops.get(3);
+                            /*  3 */
+                            rtn &= faces.first() == faces.get(1)
+                                && faces.first() == faces.get(2)
+                                && faces.first() == faces.get(3);
+                            /*  4 */
+                            rtn &= eu1::mate(b, e1)? == Some(e2)
+                                && eu1::mate(b, e2)? == Some(e1)
+                                && eu1::mate(b, e3)? == Some(e4)
+                                && eu1::mate(b, e4)? == Some(e3);
+                            /*  5 */
+                            rtn &= lu_mate(l1)? == Some(l2) && lu_mate(l2)? == Some(l1);
+                            /*  6 */
+                            rtn &= fu_mate(f1)? == Some(f2) && fu_mate(f2)? == Some(f1);
+                            /*  7 */
+                            let up = face_fu(face1)?;
+                            rtn &= up == Some(f1) || up == Some(f2);
+                            /*  8 */
+                            let l = loop_lu(loop1)?;
+                            rtn &= l == Some(l1) || l == Some(l2);
+                            /*  9 */
+                            rtn &= fu_has(f1, l1)?;
+                            /* 10 */
+                            rtn &= fu_has(f2, l2)?;
+                            /* 11 */
+                            rtn &= eu1::vertexuse(b, e1)? == Some(u1)
+                                && eu1::vertexuse(b, e2)? == Some(u2)
+                                && eu1::vertexuse(b, e3)? == Some(u3)
+                                && eu1::vertexuse(b, e4)? == Some(u4);
+                            /* 12 */
+                            rtn &= vu_is_edge(u1)?
+                                && vu_is_edge(u2)?
+                                && vu_is_edge(u3)?
+                                && vu_is_edge(u4)?;
+                            /* 13 */
+                            rtn &= eu_is_loop(e1)?
+                                && eu_is_loop(e2)?
+                                && eu_is_loop(e3)?
+                                && eu_is_loop(e4)?;
+                            /* 14 */
+                            rtn &= lu_is(l1, true)?
+                                && lu_is(l2, true)?
+                                && lu_is(l3, true)?
+                                && lu_is(l4, true)?;
+                        }
+                    }
+                    _ => rtn = false,
+                }
+            }
+            VertexuseOwner::Unknown => rtn = false,
+        }
+    }
+
+    // all done
+    Ok(rtn)
 }
 
 #[cfg(test)]

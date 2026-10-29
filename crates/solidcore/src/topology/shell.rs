@@ -33,6 +33,7 @@
 //! | [`region_post_insert_shell`] | `SmOwningTopology::PostInsert` of a shell into a region (CO-PORTED, `topology.brep_p3`) |
 //! | [`shell_remove_faceuse`], [`shell_post_insert_faceuse`] | `SmOwningTopology::Remove` / `PostInsert` of one face use (CO-PORTED, `topology.brep_p3`) |
 //! | [`shell_list_size`] | `SmShell::GetSize` (`m_lListSize`; CO-PORTED, `topology.brep_p3`) |
+//! | [`is_inner_shell_of`], [`SM_TRUE`], [`SM_FALSE`], [`SM_UNSURE`] | `SmShell::IsInnerShellOf` (its `SmBoolean`) |
 //!
 //! Deviations: circular lists are typed vectors in head-first order, as in the
 //! shared Brep arena model. `GetWireEdges`, `GetMatedShells` and `RayFire` claim and
@@ -1349,6 +1350,570 @@ pub trait RegionLookup {
     /// # Errors
     /// An unknown object, wrong object class or dangling topology key.
     fn resolve_region(&self, object: crate::geom::attribute::ObjectKey) -> Result<RegionRef<'_>>;
+}
+
+// ---- SmShell::IsInnerShellOf ------------------------------------------------------------
+
+/// `TRUE` of an `SmBoolean`.
+pub const SM_TRUE: i32 = 1;
+/// `FALSE` of an `SmBoolean`.
+pub const SM_FALSE: i32 = 0;
+/// `UNSURE` (`2`) of an `SmBoolean`.
+pub const SM_UNSURE: i32 = 2;
+
+/// The geometry behind the handles of [`is_inner_shell_of`]'s ray classification: the
+/// ray line (`CacheObject::Other`) and the B-rep's edges, faces and vertices.
+struct RayGeometry<'a> {
+    b: &'a Brep,
+    line: &'a crate::curve::curve::Curve,
+}
+
+impl crate::intersect::point_class::ClassGeometry<crate::topology::brep_cache::CacheObject>
+    for RayGeometry<'_>
+{
+    fn curve(
+        &self,
+        o: crate::topology::brep_cache::CacheObject,
+    ) -> Option<&crate::curve::curve::Curve> {
+        use crate::topology::brep_cache::CacheObject;
+        match o {
+            CacheObject::Other(_) => Some(self.line),
+            CacheObject::Edge(e) | CacheObject::Curve(e) => self.b.edge(e).ok()?.curve.as_ref(),
+            _ => None,
+        }
+    }
+    fn surface(
+        &self,
+        o: crate::topology::brep_cache::CacheObject,
+    ) -> Option<&crate::surface::surface::Surface> {
+        use crate::topology::brep_cache::CacheObject;
+        match o {
+            CacheObject::Face(f) | CacheObject::Surface(f) => self.b.face(f).ok()?.surface.as_ref(),
+            _ => None,
+        }
+    }
+    fn volume(
+        &self,
+        _o: crate::topology::brep_cache::CacheObject,
+    ) -> Option<&crate::surface::volume::Volume> {
+        None
+    }
+    fn point(&self, o: crate::topology::brep_cache::CacheObject) -> Option<crate::math::Point3> {
+        match o {
+            crate::topology::brep_cache::CacheObject::Vertex(v) => {
+                Some(self.b.vertex(v).ok()?.point)
+            }
+            _ => None,
+        }
+    }
+    fn classification_vertex_point(
+        &self,
+        vertex: crate::topology::brep_cache::CacheObject,
+    ) -> Option<crate::math::Point3> {
+        self.point(vertex)
+    }
+    fn topology_zone_tol_3d(
+        &self,
+        object: crate::topology::brep_cache::CacheObject,
+    ) -> Option<f64> {
+        use crate::topology::brep_cache::CacheObject;
+        match object {
+            CacheObject::Vertex(v) => Some(self.b.vertex(v).ok()?.tolerance),
+            CacheObject::Edge(e) => Some(self.b.edge(e).ok()?.tolerance),
+            CacheObject::Face(f) => Some(self.b.face(f).ok()?.tolerance),
+            _ => None,
+        }
+    }
+    fn topology_entity(
+        &self,
+        object: crate::topology::brep_cache::CacheObject,
+    ) -> Option<(&Brep, crate::error::EntityRef)> {
+        use crate::error::EntityRef;
+        use crate::topology::brep_cache::CacheObject;
+        match object {
+            CacheObject::Vertex(v) => Some((self.b, EntityRef::Vertex(v))),
+            CacheObject::Edge(e) => Some((self.b, EntityRef::Edge(e))),
+            CacheObject::Face(f) => Some((self.b, EntityRef::Face(f))),
+            _ => None,
+        }
+    }
+    fn topology_handle(
+        &self,
+        entity: crate::error::EntityRef,
+    ) -> Option<crate::topology::brep_cache::CacheObject> {
+        use crate::error::EntityRef;
+        use crate::topology::brep_cache::CacheObject;
+        match entity {
+            EntityRef::Vertex(v) => Some(CacheObject::Vertex(v)),
+            EntityRef::Edge(e) => Some(CacheObject::Edge(e)),
+            EntityRef::Face(f) => Some(CacheObject::Face(f)),
+            _ => None,
+        }
+    }
+}
+
+/// `SmTopologySolver::BrepCurveSolve(pBrep, line, line.GetNaturalInterval(),
+/// SM_SO_INTERSECT, SM_SR_ALL, tol, 0.0, NULL, solutions)` on the B-rep's own cache.
+fn ray_brep_solve(
+    k: &Kernel,
+    b: &mut Brep,
+    line: &crate::curve::curve::Curve,
+    tol: f64,
+) -> Result<crate::geom::solution_array::SolutionArray<crate::topology::brep_cache::CacheObject>> {
+    use crate::geom::attribute::ObjectKey;
+    use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+    use crate::geom::object::ObjectRef;
+    use crate::intersect::topology_solver::p1::{CurveRef, TopologySolver};
+    use crate::intersect::topology_solver::p2::TopologySolveOptions;
+    use crate::topology::brep_cache::CacheObject;
+    let query = crate::query::brep::BrepQuery::of_brep(b);
+    let cache = query.cache(k, b)?;
+    let identity = query.effective_identity();
+    let objects = crate::query::brep::LiveBrepObjects::new(b, &identity, Some(cache))?;
+    TopologySolver::brep_curve_solve(
+        k,
+        &objects,
+        Some(CacheObject::Brep),
+        CurveRef {
+            curve: line,
+            handle: CacheObject::Other(ObjectRef {
+                type_code: crate::curve::line::Line::TYPE,
+                key: ObjectKey(0),
+            }),
+        },
+        &line.natural_interval(),
+        TopologySolveOptions {
+            operation: SolverOperation::Intersect,
+            requested: SolutionRequested::All,
+            tolerance_3d: tol,
+            best_answer_so_far_sq: 0.0,
+            opt_vectors: &[],
+        },
+    )
+}
+
+/// The outcome of a call whose status upstream ignores (see [`checked`]).
+enum Checked<T> {
+    /// It succeeded.
+    Value(T),
+    /// It failed and the status is ignored, as upstream.
+    Ignored,
+    /// It failed and, with
+    /// [`crate::kernel::UpstreamFixes::shell_inner_shell_of_statuses`], decides.
+    Decides,
+}
+
+/// The status-checked variant of an ignored upstream call: with
+/// [`crate::kernel::UpstreamFixes::shell_inner_shell_of_statuses`] an `Err` decides;
+/// without it the error is ignored, except [`SolidError::Unported`].
+fn checked<T>(k: &Kernel, r: Result<T>) -> Result<Checked<T>> {
+    match r {
+        Ok(v) => Ok(Checked::Value(v)),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) if k.fixes.shell_inner_shell_of_statuses => Ok(Checked::Decides),
+        Err(_) => Ok(Checked::Ignored),
+    }
+}
+
+/// `SmShell::IsInnerShellOf(pOptOuterShell)`: whether shell `id` lies directly inside
+/// `outer` (simple parent-child containment, not nested deeper), or with `outer`
+/// `None` is an inner shell of the infinite region. `outer` must be a closed face-use
+/// shell (`ClosureTraversal` of its first face use; else [`SM_FALSE`]). Rays are cast
+/// from three sample points of each face use of the shell (along its normal), or from
+/// a wire shell's first edge or a vertex shell's vertex in random directions
+/// (`kernel.rng`, ND-1), against the whole B-rep; the first ray whose crossings are
+/// all simple face crossings decides, by the stack of shells it exits and enters.
+/// Returns [`SM_TRUE`], [`SM_FALSE`] or [`SM_UNSURE`] (no ray decided).
+///
+/// Upstream ignores the statuses of the closure traversal, the bounding box, the
+/// sample points, the ray solve, the classification insert and the crossing face's
+/// evaluations; the opt-in
+/// [`crate::kernel::UpstreamFixes::shell_inner_shell_of_statuses`] (fork 4038552)
+/// returns [`SM_UNSURE`] when the closure, the box, the sample points or a crossing
+/// face's point or normal cannot be computed, and goes on to the next ray when the ray
+/// cannot be solved or classified.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
+/// upstream dereferences null (a wire shell without edge or edge curve, a vertex shell
+/// without vertex, a crossing face without surface or face uses); the errors upstream
+/// does not ignore (default) or every error of the classification walk
+/// ([`SolidError::Unported`] always propagates).
+#[allow(clippy::too_many_lines)] // one upstream routine
+pub fn is_inner_shell_of(
+    k: &mut Kernel,
+    b: &mut Brep,
+    id: ShellId,
+    outer: Option<ShellId>,
+) -> Result<i32> {
+    use crate::curve::curve::Curve;
+    use crate::curve::line::{BoundedLineOptions, Line};
+    use crate::geom::extent1d::Extent1d;
+    use crate::geom::extent3d::Extent3d;
+    use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
+    use crate::intersect::curve_class::p1::CurveClassification;
+    use crate::intersect::curve_class::p4::ClassificationInit;
+    use crate::math::{Point3, Vec3, EFF_ZERO};
+    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use crate::nurbs::knots::Side;
+    use crate::topology::brep_cache::CacheObject;
+    const OP_ISO: &str = "topology::shell::is_inner_shell_of";
+    let null = |reason: &'static str| SolidError::invalid_input(OP_ISO, reason);
+
+    // check state - if given pOptOuterShell needs to be a Faceuse_TYPE shell that is
+    // closed
+    if let Some(outer) = outer {
+        let mut is_closed = false;
+        let outer_shell = b.shell(outer)?;
+        if outer_shell.is_faceuse_shell() {
+            let first = outer_shell.first_faceuse()?;
+            // increment and lock any unlocked mark
+            let lock = crate::geom::context::MarkLock::new(
+                std::slice::from_mut(&mut k.context),
+                0,
+                ALL_MARKS,
+            )?;
+            let mut marks = Marks::default();
+            let r = match first {
+                Some(fu) => crate::topology::topology_traverser::closure_traversal(
+                    k, b, &mut marks, fu, &lock, None,
+                ),
+                None => Err(SolidError::null_pointer(OP_ISO)),
+            };
+            let mut lock = lock;
+            lock.release(std::slice::from_mut(&mut k.context))?;
+            match checked(k, r)? {
+                Checked::Value(c) => is_closed = c,
+                Checked::Ignored => (),
+                Checked::Decides => return Ok(SM_UNSURE),
+            }
+        }
+        if !is_closed {
+            return Ok(SM_FALSE);
+        }
+    }
+
+    // get size based on Approx Brep bounding box
+    let bbox = checked(
+        k,
+        qbrep::calculate_bounding_box(
+            k,
+            &mut *b,
+            BoundingBoxOptions {
+                approx: true,
+                ..BoundingBoxOptions::default()
+            },
+        ),
+    )?;
+    let mut bbox = match bbox {
+        Checked::Value(x) => x,
+        Checked::Ignored => Extent3d::new(),
+        Checked::Decides => return Ok(SM_UNSURE),
+    };
+    bbox.expand_absolute(1.0);
+    let size = 2.0 * bbox.size().length();
+    let tol = EFF_ZERO * (1.0 + size);
+
+    // search the faceuses of the shells for likely ray casts (those that hit only faces)
+    let smp_cnt = 3u64;
+    let shell = b.shell(id)?.clone();
+    let inner_vertex = shell.vertex(b)?;
+    let inner_faceuses = shell.get_faceuses()?;
+    let inner_wire_edges = wire_edges(k, b, id)?;
+    let is_fu_shell = shell.is_faceuse_shell();
+    let is_wire_shell = shell.is_wire_shell();
+    let is_vertex_shell = shell.is_vertex_shell();
+
+    let mut found_solution = false;
+    let cnt = if is_fu_shell { inner_faceuses.len() } else { 1 };
+    let mut smp_pv: Vec<Vec3> = Vec::new();
+    let mut ii = 0;
+    while ii < cnt && !found_solution {
+        // sPV[0,2,4,...] = point to start ray for each SmpPoint,
+        // sPV[1,3,5,...] = direction to run ray for each SmpPoint
+        if is_fu_shell {
+            let fu = *inner_faceuses
+                .get(ii)
+                .ok_or_else(|| null("face use index"))?;
+            let fu_rec = b.faceuse(fu)?;
+            let (f, orientation) = (
+                fu_rec.face.ok_or_else(|| null("face use without face"))?,
+                fu_rec.orientation,
+            );
+            // SmFaceuse::GetPointsInFace (which resets its outputs first; a failure
+            // here leaves them empty)
+            let r = crate::topology::face::p2::points_in_face(k, b, f, smp_cnt);
+            match checked(k, r)? {
+                Checked::Value(points) => {
+                    let mut pv = points.pv;
+                    if orientation == OrientType::Opposite {
+                        for n in pv.iter_mut().skip(1).step_by(2) {
+                            *n = -*n;
+                        }
+                    }
+                    smp_pv = pv;
+                }
+                Checked::Ignored => smp_pv.clear(),
+                Checked::Decides => return Ok(SM_UNSURE),
+            }
+        } else if is_wire_shell {
+            let e = *inner_wire_edges
+                .first()
+                .ok_or_else(|| null("wire shell without edge"))?;
+            let edge = b.edge(e)?;
+            let ivl = edge.interval;
+            let curve = edge
+                .curve
+                .clone()
+                .ok_or_else(|| null("wire edge without curve"))?;
+            let mut point = Point3::UNDEF;
+            for jj in 0..smp_cnt {
+                // sample the curve and pick varying directions for the vector
+                match checked(
+                    k,
+                    curve.evaluate_point(k, ivl.evaluate((jj + 1) as f64 / (smp_cnt + 1) as f64)),
+                )? {
+                    Checked::Value(p) => point = p,
+                    Checked::Ignored => (),
+                    Checked::Decides => return Ok(SM_UNSURE),
+                }
+                let mut dir = Vec3::new(
+                    k.rng.next_signed_unit(),
+                    k.rng.next_signed_unit(),
+                    k.rng.next_signed_unit(),
+                );
+                dir = dir.unitize_or_z();
+                smp_pv.push(point);
+                smp_pv.push(dir);
+            }
+        } else if is_vertex_shell {
+            let v = inner_vertex.ok_or_else(|| null("vertex shell without vertex"))?;
+            let point = b.vertex(v)?.point;
+            for _ in 0..smp_cnt {
+                // pick varying directions for the vector
+                let mut dir = Vec3::new(
+                    k.rng.next_signed_unit(),
+                    k.rng.next_signed_unit(),
+                    k.rng.next_signed_unit(),
+                );
+                dir = dir.unitize_or_z();
+                smp_pv.push(point);
+                smp_pv.push(dir);
+            }
+        } else {
+            break;
+        }
+
+        // for every sample point (a position and a direction vector)
+        let mut jj = 0;
+        while jj < smp_pv.len() {
+            found_solution = true;
+            let line_pnt = *smp_pv.get(jj).ok_or_else(|| null("sample point"))?;
+            let line_vec = *smp_pv.get(jj + 1).ok_or_else(|| null("sample direction"))?;
+            jj += 2;
+
+            // build a ray line
+            let line = Curve::from(Line::bounded(
+                line_pnt,
+                line_vec,
+                &Extent1d::from_min_max(0.0, size),
+                &BoundedLineOptions {
+                    scale: 1.0,
+                    dim: 3,
+                    ..BoundedLineOptions::default()
+                },
+            ));
+
+            // intersect line with Brep
+            let mut solutions = match checked(k, ray_brep_solve(k, b, &line, tol))? {
+                Checked::Value(s) => s,
+                Checked::Ignored => crate::geom::solution_array::SolutionArray::new(),
+                Checked::Decides => continue,
+            };
+
+            // keep things simple - only use classifications which have point
+            // intersections with faces
+            let mut kk = 0;
+            while kk < solutions.len() {
+                let sol = *solutions.get(kk).ok_or_else(|| null("solution index"))?;
+                let object = sol.objects.get(1).copied().flatten();
+                let is_kind = |kind: ObjectKind| object.is_some_and(|o| o.kind() == kind);
+
+                // keep the first solution - but ignore (by removing from the solutions
+                // array) any subseqent wireedge or vertexshell intersections
+                let ignore = sol.solution_type == SolutionType::SingleValue
+                    && match object {
+                        Some(CacheObject::Edge(e)) => crate::topology::edge::is_wire(b, e)?,
+                        Some(CacheObject::Vertex(v)) => {
+                            crate::topology::vertex::is_shell_vertex(b, v)?
+                                || crate::topology::vertex::is_wire_vertex(b, v)?
+                        }
+                        _ => false,
+                    };
+                if ignore {
+                    // remove this solution (upstream's `continue` then also steps past
+                    // the solution that moves into its slot)
+                    solutions.remove_at(kk, 1);
+                    kk += 1;
+                    continue;
+                }
+
+                // skip range solutions and intersections with anything but faces
+                if sol.solution_type == SolutionType::RangeOfValues
+                    || (kk == 0 && is_fu_shell && !is_kind(ObjectKind::Face))
+                    || (kk == 0 && is_wire_shell && !is_kind(ObjectKind::Edge))
+                    || (kk == 0 && is_vertex_shell && !is_kind(ObjectKind::Vertex))
+                    || (kk > 0 && !is_kind(ObjectKind::Face))
+                {
+                    // skip this solution
+                    found_solution = false;
+                    break;
+                }
+                kk += 1;
+            }
+
+            // try again
+            if !found_solution {
+                continue;
+            }
+
+            // load solution into a CurveClassification
+            let line_handle = CacheObject::Other(crate::geom::object::ObjectRef {
+                type_code: Line::TYPE,
+                key: crate::geom::attribute::ObjectKey(0),
+            });
+            let mut curve_class = CurveClassification::with_curve(
+                k,
+                &ClassificationInit {
+                    curve: Some(line_handle),
+                    interval: line.natural_interval(),
+                    uv_curve: None,
+                    src_zone_tol_3d: crate::geom::tol::zone_tol3d(k, tol),
+                    opt_data_size: 0,
+                    is_curve_owned: false,
+                    is_curve_current: true,
+                    surface1: None,
+                    surface2: None,
+                    uv_curve2: None,
+                    ti: None,
+                },
+            )?;
+            {
+                let geometry = RayGeometry { b, line: &line };
+                let r = curve_class.insert_topology_intersections(
+                    k,
+                    &geometry,
+                    solutions.as_slice(),
+                    0,
+                );
+                if matches!(checked(k, r)?, Checked::Decides) {
+                    continue;
+                }
+            }
+
+            // when the CurveClassification has only one interval then the ray moved into
+            // the infinite region and sailed on out into space - we're done
+            if curve_class.size() == 1 {
+                // shell is an inner shell of the infinite region
+                return Ok(if outer.is_none() { SM_TRUE } else { SM_FALSE });
+            }
+
+            // classify by the unbalanced ray/shell crossings
+            let mut shell_stack: Vec<Option<ShellId>> = Vec::new();
+
+            // for every classification but the first - it starts on the current faceuse
+            for i in 1..curve_class.size() {
+                let interval = curve_class.at(i)?;
+
+                // get the face intersection point
+                let face = match interval.start.face_object() {
+                    Some(CacheObject::Face(f) | CacheObject::Surface(f)) => Some(f),
+                    _ => None,
+                };
+                let uv = interval.start.uv_param();
+                let Some(face) = face else {
+                    // pFace->GetUpwardFaceuse() on NULL
+                    return Err(null("crossing without face"));
+                };
+                let up = b
+                    .face(face)?
+                    .faceuse
+                    .ok_or_else(|| null("face without face use"))?;
+                let down = b
+                    .faceuse(up)?
+                    .mate
+                    .ok_or_else(|| null("face use without mate"))?;
+                let up_shell = b.faceuse(up)?.shell;
+                let down_shell = b.faceuse(down)?.shell;
+
+                // skip faces which are interior to a single shell
+                if up_shell == down_shell {
+                    continue;
+                }
+
+                // Evaluate the pFace->Surface
+                let surface = b
+                    .face(face)?
+                    .surface
+                    .as_ref()
+                    .ok_or_else(|| null("crossing face without surface"))?;
+                let pv0 = checked(k, surface.evaluate_point(k, uv))?;
+                if matches!(pv0, Checked::Decides) {
+                    return Ok(SM_UNSURE);
+                }
+                let normal =
+                    match checked(k, surface.evaluate_normal(k, uv, Side::Left, Side::Left))? {
+                        Checked::Value(n) => n,
+                        Checked::Ignored => Vec3::UNDEF,
+                        Checked::Decides => return Ok(SM_UNSURE),
+                    };
+
+                // figure out which shell is being exited and which shell is being
+                // entered
+                let ordered = if normal.dot(line_vec) < 0.0 {
+                    [up_shell, down_shell]
+                } else {
+                    [down_shell, up_shell]
+                };
+
+                // parse the ordered shells into the shell stack
+                for s in ordered {
+                    if shell_stack.last().is_some_and(|last| *last == s) {
+                        // this is a balanced intersection - remove the last stack member
+                        shell_stack.pop();
+                    } else {
+                        // this is an unbalanced intersection - add it to the stack
+                        shell_stack.push(s);
+                    }
+                }
+            }
+
+            // check the stack to pick the return value
+            if shell_stack.is_empty() {
+                // this is an inner shell of the infinite region
+                return Ok(if outer.is_none() { SM_TRUE } else { SM_FALSE });
+            }
+
+            // when pOptOuterShell == NULL we were testing for an infinite region inner
+            // shell
+            let Some(outer) = outer else {
+                return Ok(SM_FALSE);
+            };
+
+            // when pOptOuterShell == sShellStack[0] then this was an inner shell of the
+            // given outer shell
+            return Ok(if shell_stack.first().copied().flatten() == Some(outer) {
+                SM_TRUE
+            } else {
+                SM_FALSE
+            });
+        }
+        ii += 1;
+    }
+
+    // arrive here when no candidate ray produced a simple set of intersections
+    Ok(SM_UNSURE)
 }
 
 #[cfg(test)]

@@ -26505,6 +26505,13 @@
     "lines": 500,
     "name": "SmBSplineCurve::AssertValid",
     "usr": "c:@S@SmBSplineCurve@F@AssertValid#*$@S@SmAssertArray#$@E@SmAssertTestLevel#$@E@SmAssertWalking#*$@S@SmTArray>#l#1"
+   },
+   {
+    "file": "source/SMLib/src/SmBSplineCurve.cpp",
+    "line": 8231,
+    "lines": 69,
+    "name": "SmBSplineCurve::AssertNoPeriodicJump",
+    "usr": "c:@S@SmBSplineCurve@F@AssertNoPeriodicJump#c#c#&$@S@SmExtent2d#"
    }
   ],
   "module": "nurbs",
@@ -40027,6 +40034,20 @@
     "lines": 60,
     "name": "SmEdgeuse::Notify",
     "usr": "c:@S@SmEdgeuse@F@Notify#$@E@SmNotifyOperation#*$@S@SmObject#S1_#S1_#"
+   },
+   {
+    "file": "source/SMLib/src/SmEdgeuse.cpp",
+    "line": 871,
+    "lines": 180,
+    "name": "SmEdgeuse::IsEdgeuseSideInSurface",
+    "usr": "c:@S@SmEdgeuse@F@IsEdgeuseSideInSurface#l#*c#S1_#S1_#1"
+   },
+   {
+    "file": "source/SMLib/src/SmEdgeuse.cpp",
+    "line": 3663,
+    "lines": 233,
+    "name": "SmEdgeuse::HasDogLegNearPole",
+    "usr": "c:@S@SmEdgeuse@F@HasDogLegNearPole#*c#1"
    }
   ],
   "module": "topology",
@@ -40598,6 +40619,20 @@
     "lines": 865,
     "name": "SmFace::HasSeamProblem",
     "usr": "c:@S@SmFace@F@HasSeamProblem#&$@S@SmCurveClassification#S0_#&$@E@SmSurfParamType#S2_#S2_#I#*I#S4_#*$@S@SmFaceProps#1"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20175,
+    "lines": 25,
+    "name": "sm_GetLoopSampleUVPoint",
+    "usr": "c:SmFace.cpp@F@sm_GetLoopSampleUVPoint#*1$@S@SmLoop#&$@S@SmVector2d#"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20226,
+    "lines": 55,
+    "name": "sm_AssertTestFace37",
+    "usr": "c:@F@sm_AssertTestFace37#*1$@S@SmFace#"
    }
   ],
   "module": "topology",
@@ -40943,6 +40978,13 @@
     "lines": 4,
     "name": "SmLoopuse::IsKindOf",
     "usr": "c:@S@SmLoopuse@F@IsKindOf#L#1"
+   },
+   {
+    "file": "source/SMLib/src/SmLoopuse.cpp",
+    "line": 1034,
+    "lines": 66,
+    "name": "SmLoopuse::IsLoopuseSideInSurface",
+    "usr": "c:@S@SmLoopuse@F@IsLoopuseSideInSurface#*c#S0_#S0_#*l#1"
    }
   ],
   "module": "topology",
@@ -42700,6 +42742,13 @@
     "lines": 4,
     "name": "SmShell::IsKindOf",
     "usr": "c:@S@SmShell@F@IsKindOf#L#1"
+   },
+   {
+    "file": "source/SMLib/src/SmShell.cpp",
+    "line": 827,
+    "lines": 335,
+    "name": "SmShell::IsInnerShellOf",
+    "usr": "c:@S@SmShell@F@IsInnerShellOf#*1$@S@SmShell#1"
    }
   ],
   "module": "topology",
@@ -43675,6 +43724,13 @@
     "lines": 4,
     "name": "SmVertex::IsKindOf",
     "usr": "c:@S@SmVertex@F@IsKindOf#L#1"
+   },
+   {
+    "file": "source/SMLib/src/SmVertex.cpp",
+    "line": 1446,
+    "lines": 262,
+    "name": "SmVertex::CheckPointers",
+    "usr": "c:@S@SmVertex@F@CheckPointers#1"
    }
   ],
   "module": "topology",

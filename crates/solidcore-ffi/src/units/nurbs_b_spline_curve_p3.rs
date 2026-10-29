@@ -18,6 +18,7 @@
 //! | `Subdivide` | `SubdivideAtDiscontinuity`  | `continuity angle_tol`                       |
 //! | `Gap`       | `TrimGap`                   | curve block `fix dmin`                       |
 //! | `Assert`    | `AssertValid`               | `level_given`                                |
+//! | `Jump`      | `AssertNoPeriodicJump`      | `closed_u closed_v u0 v0 u1 v1` (`SmExtent2d(SmPoint2d(u0, v0), SmPoint2d(u1, v1))`) |
 //!
 //! Intervals `a b` are `SmExtent1d(a, b)` (swapped when `a > b`). The output is the op
 //! status (`0` = `SM_SUCCESS`, else the `SmStatus`; `0` for the predicates), the op's
@@ -31,6 +32,7 @@
 //!   state of the other curve.
 //! - `Subdivide`: the count and the state of every piece.
 //! - `Assert`: the flag, the report count and per report `test tol3d value u v`.
+//! - `Jump`: the flag.
 //!
 //! A state is `dim oob borrowed knot_type form has_nurb [n p m cpts knots]`.
 //!
@@ -72,6 +74,7 @@ pub enum Op {
     Subdivide,
     Gap,
     Assert,
+    Jump,
 }
 
 impl Op {
@@ -86,6 +89,7 @@ impl Op {
             Op::Subdivide => 6,
             Op::Gap => 7,
             Op::Assert => 8,
+            Op::Jump => 9,
         }
     }
 
@@ -349,6 +353,13 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &CurveInfo) -> Result<(), FfiErro
         }
         Op::Assert => {
             rd.flag()?;
+        }
+        Op::Jump => {
+            rd.flag()?;
+            rd.flag()?;
+            for _ in 0..4 {
+                rd.finite()?;
+            }
         }
     }
     Ok(())

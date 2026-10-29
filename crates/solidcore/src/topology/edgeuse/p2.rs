@@ -15,6 +15,9 @@
 //! | [`rebuild_uv_trim_curve`]              | `SmEdgeuse::RebuildUVTrimCurve`                  |
 //! | [`check_and_set_uv_trim_curve`], [`CheckAndSetUvTrimCurve`] | `SmEdgeuse::CheckAndSetUVTrimCurve` |
 //! | [`notify`]                             | `SmEdgeuse::Notify`                              |
+//! | [`is_edgeuse_side_in_surface`], [`EdgeuseSide`] | `SmEdgeuse::IsEdgeuseSideInSurface`     |
+//! | [`has_dog_leg_near_pole`], [`DogLeg`]  | `SmEdgeuse::HasDogLegNearPole`                   |
+//! | `is_contained` (private)               | `SM_IS_CONTAINED` (`SmMath.h`)                   |
 //!
 //! Deviations:
 //! - **Object model.** As [`super::p1`]: an edge use is a record in the [`Brep`]'s
@@ -70,15 +73,15 @@ use crate::geom::local_solve_nd::{BoundaryHandler, LocalSolveNd};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::SolutionEnd;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::DropCurveFail;
 use crate::surface::surface::p7::drop_points_to_tangent_plane;
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1::{
-    brep_handle, drop_curve_fail, edge, edge_brep, edge_is_lamina, face, faceuse, mate, radial,
-    set_uv_trim_curve, uv_trim_curve, FindStepOff, UvTrimCurveArg,
+    brep_handle, drop_curve_fail, edge, edge_brep, edge_is_lamina, face, faceuse, mate,
+    orientation, radial, set_uv_trim_curve, uv_trim_curve, FindStepOff, UvTrimCurveArg,
 };
 use crate::topology::edgeuse::p3::{create_uv_trim_curve, evaluate_binormal, BinormalOptions};
 use crate::topology::topology::{self as topo, TopologyRecords};
@@ -864,6 +867,470 @@ pub fn notify<R: TopologyRecords + ?Sized>(
     topo::notify(
         records, attributes, context, operation, this, data1, data2, data3,
     )
+}
+
+// ---- side and pole checks (SmEdgeuse::IsEdgeuseSideInSurface, HasDogLegNearPole) ----------
+
+/// `SM_IS_CONTAINED(c, a, b)` (`SmMath.h`): `c` inside or on `[a, b]` (either order),
+/// widened by `SmTol::GetScaledZero(a, b)`.
+fn is_contained(c: f64, a: f64, b: f64) -> bool {
+    let tz = crate::geom::tol::scaled_zero2(&a, &b);
+    ((a <= c + tz) && (c - tz <= b)) || ((b <= c + tz) && (c - tz <= a))
+}
+
+/// `SM_DEG2RAD(adeg)` = `adeg * (SM_PI / 180.0)`.
+fn deg_to_rad(deg: f64) -> f64 {
+    deg * (PI / 180.0)
+}
+
+/// The result of [`is_edgeuse_side_in_surface`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EdgeuseSide {
+    /// The return value: `true` when the inside side of the edge use lies in the
+    /// surface's domain.
+    pub in_surface: bool,
+    /// `*pOptOnNaturalBoundary`: `true` unless a sample point off every natural boundary
+    /// was found.
+    pub on_natural_boundary: bool,
+}
+
+/// `SmEdgeuse::IsEdgeuseSideInSurface(lSmpCount, pOptPeriodicU, pOptPeriodicV,
+/// pOptOnNaturalBoundary)`: drops `smp_count` points of the edge curve (in edge use
+/// order) onto the face's surface and classifies them against the natural UV domain's
+/// sides (to twice the surface zone tolerance mapped to UV in U and in V). A sample off
+/// every side answers `true` at once. Otherwise the edge use runs along a side: a
+/// degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
+/// the UV steps must run the way that side's inside requires (all but one of them;
+/// for a periodic side without UV trim curve either way). An edge use without face,
+/// surface or edge is `true`. `periodic_u` / `periodic_v` override
+/// `SmSurface::IsPeriodic`.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for an edge
+/// without curve (upstream dereferences null); those of `IsPeriodic`, the curve and
+/// surface evaluations and `MapTo2d` that upstream does not ignore. The statuses of
+/// the evaluations and of `DropPoint` are ignored, as upstream ([`SolidError::Unported`]
+/// still propagates).
+pub fn is_edgeuse_side_in_surface(
+    k: &Kernel,
+    b: &Brep,
+    eu: EdgeuseId,
+    smp_count: u64,
+    periodic_u: Option<bool>,
+    periodic_v: Option<bool>,
+) -> Result<EdgeuseSide> {
+    use crate::geom::extent2d::{SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+    use crate::geom::extent3d::Extent3d;
+    use crate::nurbs::b_spline_surface::SurfParamType;
+    use crate::surface::surface::p1::{map_to_2d_dir, zone_tol_3d};
+    use crate::surface::surface::p5::DropPointOptions;
+
+    // init return and ouput vals
+    let mut rtn = true;
+    let mut out = EdgeuseSide {
+        in_surface: true,
+        on_natural_boundary: true,
+    };
+
+    // locals
+    let f = face(b, eu)?;
+    let surface = match f {
+        Some(f) => b.face(f)?.surface.as_ref(),
+        None => None,
+    };
+    let e = edge(b, eu)?;
+
+    // no work - missing Face, Surface, or Edge
+    let (Some(surface), Some(e)) = (surface, e) else {
+        return Ok(out);
+    };
+
+    // classify periodic surface
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
+    let periodic_u = match periodic_u {
+        Some(p) => p,
+        None => surface.is_periodic(k, &uv_domain, SurfParamType::U)?,
+    };
+    let periodic_v = match periodic_v {
+        Some(p) => p,
+        None => surface.is_periodic(k, &uv_domain, SurfParamType::V)?,
+    };
+
+    // locals
+    let edge_rec = b.edge(e)?;
+    let edge_curve = edge_rec
+        .curve
+        .as_ref()
+        .ok_or_else(|| null("IsEdgeuseSideInSurface: edge without curve"))?;
+    let edge_interval = edge_rec.interval;
+    let same = orientation(b, eu)? == OrientType::Same;
+    let mut uv_drop_points: Vec<Point2> = Vec::new();
+    let mut uv_classify = SS_UMIN | SS_VMIN | SS_UMAX | SS_VMAX;
+    // `SmPoint2d` / `SmPoint3d` default to undefined coordinates
+    let mut uv_drop_point = Point2::UNDEF;
+    let mut uv_trim_curve_3d = Point3::UNDEF;
+    let mut edge_point = Point3::UNDEF;
+    let u_dir = Vec2::new(1.0, 0.0);
+    let v_dir = Vec2::new(0.0, 1.0);
+    let (mut up_u, mut down_u, mut up_v, mut down_v) = (0_u64, 0_u64, 0_u64, 0_u64);
+    let mut edge_box_3d = Extent3d::default();
+    let uv_trim_curve = uv_trim_curve(b, eu)?.0;
+
+    // Tol = 3d Surface Zone Tol mapped for each sample point to 2d through the surface
+    // function
+    let surf_zone_tol_3d = zone_tol_3d(k, surface)?;
+
+    // for every sample point - check for Edgeuse point on Surface boundary whose inside
+    // direction points out of the Surface domain
+    for ii in 0..smp_count {
+        // param
+        let last = smp_count.wrapping_sub(1);
+        let norm_param = if same {
+            if ii == 0 {
+                0.0
+            } else if ii == last {
+                1.0
+            } else {
+                ii as f64 / last as f64
+            }
+        } else if ii == 0 {
+            1.0
+        } else if ii == last {
+            0.0
+        } else {
+            1.0 - (ii as f64 / last as f64)
+        };
+        let param = edge_interval.evaluate(norm_param);
+
+        // Edge->3d Point (status ignored: a failed evaluation leaves the last point)
+        if let Some(p) = ignored(edge_curve.evaluate_point(k, param))? {
+            edge_point = p;
+        }
+
+        // next Drop GuessUV = UVTrimCurve(dParam) or last Drop point
+        let mut guess = None;
+        if let Some(trim) = uv_trim_curve {
+            if let Some(p) = ignored(trim.evaluate_point(k, param))? {
+                uv_trim_curve_3d = p;
+            }
+            guess = Some(Point2::new(uv_trim_curve_3d.x, uv_trim_curve_3d.y));
+        } else if ii > 0 {
+            guess = uv_drop_points.last().copied();
+        }
+
+        // Drop Point (status ignored)
+        let opts = DropPointOptions {
+            guess_uv: guess,
+            operation: SolverOperation::Minimize,
+            ..DropPointOptions::default()
+        };
+        let drop = surface
+            .drop_point::<crate::surface::surface::p4::NoObject>(k, edge_point, &uv_domain, &opts);
+        match ignored(drop)? {
+            // with a guess `rResultUV` starts as the guess; without one it is written
+            // only by a successful drop
+            Some(d) if d.success || guess.is_some() => uv_drop_point = d.result_uv,
+            Some(_) => (),
+            None => {
+                if let Some(g) = guess {
+                    uv_drop_point = g;
+                }
+            }
+        }
+
+        // Tol  2d mapping of Surface ZoneTol3d
+        let tol_2d_u = map_to_2d_dir(k, surf_zone_tol_3d, uv_drop_point, u_dir, surface)?;
+        let tol_2d_v = map_to_2d_dir(k, surf_zone_tol_3d, uv_drop_point, v_dir, surface)?;
+
+        // classify sUVPoint - to XSectTol3d numerical tolerances mapped to 2d (diff in U
+        // and V directions)
+        let uv_loc_u =
+            uv_domain.point_boundaries(uv_drop_point, 2.0 * tol_2d_u) & (SS_UMIN | SS_UMAX);
+        let uv_loc_v =
+            uv_domain.point_boundaries(uv_drop_point, 2.0 * tol_2d_v) & (SS_VMIN | SS_VMAX);
+        let uv_loc = uv_loc_u | uv_loc_v;
+
+        // save the drop and classify data per sample point
+        edge_box_3d.add_point(edge_point);
+        uv_drop_points.push(uv_drop_point);
+
+        // accumulate the classifications and the UV incremental step directions
+        uv_classify &= uv_loc;
+        if let (Some(prev), Some(cur)) = (uv_drop_points.iter().rev().nth(1), uv_drop_points.last())
+        {
+            if prev.x < cur.x {
+                up_u += 1;
+            }
+            if prev.x > cur.x {
+                down_u += 1;
+            }
+            if prev.y < cur.y {
+                up_v += 1;
+            }
+            if prev.y > cur.y {
+                down_v += 1;
+            }
+        }
+
+        // low work - found a classify point not on a boundary
+        if uv_classify == 0 {
+            // both sides of this edgeuse are inside at this point, so return TRUE
+            out.on_natural_boundary = false;
+            return Ok(out);
+        }
+    }
+
+    // any Edgeuse with an Edge which is degenerate (a database problem to be healed) is
+    // classified as having a side inside the surface
+    if edge_box_3d.max_dimension() < 2.0 * surf_zone_tol_3d {
+        return Ok(out);
+    }
+
+    // check direction for edges running a natural boundary (all but one of the
+    // increments in the right direction; either way for a periodic side without UV trim
+    // curve, as upstream)
+    let need = smp_count.wrapping_sub(2);
+    let no_trim = uv_trim_curve.is_none();
+    if uv_classify & SS_UMIN != 0 {
+        rtn = down_v >= need || (no_trim && periodic_u && up_v >= need);
+    } else if uv_classify & SS_UMAX != 0 {
+        rtn = up_v >= need || (no_trim && periodic_u && down_v >= need);
+    } else if uv_classify & SS_VMIN != 0 {
+        rtn = up_u >= need || (no_trim && periodic_v && down_u >= need);
+    } else if uv_classify & SS_VMAX != 0 {
+        rtn = down_u >= need || (no_trim && periodic_v && up_u >= need);
+    }
+
+    // all done
+    out.in_surface = rtn;
+    Ok(out)
+}
+
+/// The result of [`has_dog_leg_near_pole`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DogLeg {
+    /// The return value: `true` (a problem) when the UV trim curve's control polygon
+    /// turns to follow a singular side of the surface domain.
+    pub has_dog_leg: bool,
+    /// `*pOptIndx`: the control point index at the first turn (unset upstream when there
+    /// is none).
+    pub index: Option<usize>,
+}
+
+/// `SmEdgeuse::HasDogLegNearPole(pOptIndx)`: whether the UV trim curve of the edge use
+/// (its own or its mate's) has a control polygon that turns near a singular side of the
+/// face surface's natural domain (within a fiftieth of the domain). A curve of the
+/// intersectors' form (cubic, piecewise C0) is tested only at its first and last
+/// Bezier segments with `smgu_IsDogLeg` (35 / 45 degrees); any other curve at every
+/// interior control point near a singular side, by the polygon's bend there (over 50
+/// degrees) with one leg within 10 degrees of the U direction and the other at 35 to
+/// 145 degrees to it. No UV trim curve, no face surface or no singular side is `false`.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of `GetSingularities` and of the
+/// curve's NURB (`SM_ERR` without one; upstream dereferences `NULL`);
+/// [`SolidError::InvalidInput`] for an intersector-form polygon of fewer than four
+/// points (upstream reads before the array) or a UV trim curve that is not an
+/// `SmBSplineCurve`.
+pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogLeg> {
+    use crate::curve::curve::CurveKind;
+    use crate::geom::extent2d::{SS_NONE, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+    use crate::geom::geom_utility::p1::is_dog_leg;
+    use crate::math::rad_to_deg;
+    use std::borrow::Cow;
+
+    let mut out = DogLeg {
+        has_dog_leg: false,
+        index: None,
+    };
+
+    // no work - no UVTrimCurve to check
+    let Some(uv_trim_curve) = uv_trim_curve(b, eu)?.0 else {
+        return Ok(out);
+    };
+
+    // no work - no Surface to check
+    let Some(f) = face(b, eu)? else {
+        return Ok(out);
+    };
+    let Some(surface) = b.face(f)?.surface.as_ref() else {
+        return Ok(out);
+    };
+
+    // rtn: SM_SS_NONE or an orof: SM_SS_UMIN, SM_SS_VMIN, SM_SS_UMAX, SM_SS_VMAX
+    let sing = surface
+        .get_singularities_of_face(k, crate::topology::face::p2::tolerance(b, f)?, false, false)?
+        .singular;
+
+    // no work - no Singularities to check
+    if sing == SS_NONE {
+        return Ok(out);
+    }
+
+    // locals
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
+    let tol_dist_u = uv_domain.x_length() / 50.0;
+    let tol_dist_v = uv_domain.y_length() / 50.0;
+    let u_min = uv_domain.u_min();
+    let u_max = uv_domain.u_max();
+    let v_min = uv_domain.v_min();
+    let v_max = uv_domain.v_max();
+
+    // BSpline Control Points (GetPolygon makes a missing NURB)
+    let base: Cow<'_, crate::nurbs::b_spline_curve::BSplineCurve> = match uv_trim_curve.kind() {
+        CurveKind::BSpline(c) => Cow::Borrowed(c),
+        CurveKind::Line(c) => c.base_with_nurb()?,
+        CurveKind::Ellipse(c) => Cow::Borrowed(c.base()),
+        CurveKind::Parabola(c) => Cow::Borrowed(c.base()),
+        CurveKind::Hyperbola(c) => Cow::Borrowed(c.base()),
+        _ => {
+            return Err(null(
+                "HasDogLegNearPole: UV trim curve is not an SmBSplineCurve",
+            ))
+        }
+    };
+    let control_points = base.polygon(&base.natural_interval())?;
+    let num = control_points.len();
+    let uv = |i: usize| -> Result<Vec2> {
+        control_points
+            .get(i)
+            .map(|p| Vec2::new(p.x, p.y))
+            .ok_or_else(|| null("HasDogLegNearPole: control point index out of range"))
+    };
+    let on_sing = |p: &Point3| {
+        let on_u = ((sing & SS_UMIN) != 0 && (p.x - u_min).abs() < tol_dist_u)
+            || ((sing & SS_UMAX) != 0 && (p.x - u_max).abs() < tol_dist_u);
+        let on_v = ((sing & SS_VMIN) != 0 && (p.y - v_min).abs() < tol_dist_v)
+            || ((sing & SS_VMAX) != 0 && (p.y - v_max).abs() < tol_dist_v);
+        (on_u, on_v)
+    };
+
+    // Special case curves built by the intersectors and DropCurve (expected to be the
+    // common case for UVTrimCurves)
+    if base.is_intersector_approx()? {
+        // tunable locals
+        let perp_vec_deg = 35.0;
+        let parallel_vec_deg = 45.0;
+
+        // see if start/end is on a singularity
+        for ii in 0..2usize {
+            // iter 0=Start Seg, 1=End Seg (`lNum - 4` is unsigned upstream)
+            let indx = if ii == 0 {
+                0
+            } else {
+                num.checked_sub(4)
+                    .ok_or_else(|| null("HasDogLegNearPole: fewer than four control points"))?
+            };
+
+            // beg/end ControlPoint
+            let cpt = control_points
+                .get(indx + ii * 3)
+                .ok_or_else(|| null("HasDogLegNearPole: control point index out of range"))?;
+
+            // check for control points near constant U / V Singularity boundaries
+            let (on_sing_u, on_sing_v) = on_sing(cpt);
+
+            // when start/end UVTrimCurve segment starts/ends on Pole and has a dog-leg shape
+            if (on_sing_u || on_sing_v)
+                && is_dog_leg(
+                    uv(indx)?,
+                    uv(indx + 1)?,
+                    uv(indx + 2)?,
+                    uv(indx + 3)?,
+                    perp_vec_deg,
+                    parallel_vec_deg,
+                )
+            {
+                // set optional output
+                out.index = Some(indx + 1);
+                out.has_dog_leg = true;
+                break;
+            }
+        }
+    } else {
+        // UVTrimCurve was not created by an intersector or dropCurve
+
+        // for every control point - see if its near the singularity boundary
+        let mut ii = 0usize;
+        while ii < num && !out.has_dog_leg {
+            let cpt = *control_points
+                .get(ii)
+                .ok_or_else(|| null("HasDogLegNearPole: control point index out of range"))?;
+
+            // check for control points near constant U / V Singularity boundaries
+            let (do_u_check, do_v_check) = on_sing(&cpt);
+
+            // when control point is near singularity boundary
+            if do_u_check || do_v_check {
+                // for U and V checks
+                for jj in 0..2 {
+                    // skip check when control point is not near constant U / V poles
+                    if jj == 0 && !do_u_check {
+                        continue;
+                    }
+                    if jj == 1 && !do_v_check {
+                        continue;
+                    }
+
+                    // when control point is an interior control point
+                    if ii != 0 && ii + 1 < num {
+                        let last_cpt = *control_points.get(ii - 1).ok_or_else(|| {
+                            null("HasDogLegNearPole: control point index out of range")
+                        })?;
+                        let next_cpt = *control_points.get(ii + 1).ok_or_else(|| {
+                            null("HasDogLegNearPole: control point index out of range")
+                        })?;
+                        let last_vec = cpt - last_cpt;
+                        let next_vec = next_cpt - cpt;
+
+                        // Angle in Control Polygon at target ControlPoint (a zero vector
+                        // gives 0, as upstream)
+                        let ang_vec_rad = last_vec.angle_between(next_vec).unwrap_or(0.0);
+
+                        // Angles between ControlPolygon Next/Last Vecs and the
+                        // singularity direction (upstream sets [1 0 0] for both checks)
+                        let sing_vec = Vec3::new(1.0, 0.0, 0.0);
+                        let ang_last_pole_rad = last_vec.angle_between(sing_vec).unwrap_or(0.0);
+                        let ang_next_pole_rad = next_vec.angle_between(sing_vec).unwrap_or(0.0);
+
+                        let ang_last_pole_deg = rad_to_deg(ang_last_pole_rad);
+                        let ang_next_pole_deg = rad_to_deg(ang_next_pole_rad);
+
+                        // when ControlPolygon turns and one CtrlPolygon segment runs along
+                        // the singularity and one does not
+                        if ang_vec_rad > deg_to_rad(50.0)
+                            && (((is_contained(ang_last_pole_deg, 0.0, 10.0)
+                                || is_contained(ang_last_pole_deg, 170.0, 180.0))
+                                && is_contained(ang_next_pole_deg, 35.0, 145.0))
+                                || ((is_contained(ang_next_pole_deg, 0.0, 10.0)
+                                    || is_contained(ang_next_pole_deg, 170.0, 180.0))
+                                    && is_contained(ang_last_pole_deg, 35.0, 145.0)))
+                        {
+                            // call it a turn and quit
+                            out.has_dog_leg = true;
+                            out.index = Some(ii);
+                            break;
+                        }
+                    }
+                }
+            }
+            ii += 1;
+        }
+    }
+
+    // all done
+    Ok(out)
+}
+
+/// Ignores a status upstream ignores ([`SolidError::Unported`] still propagates).
+fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(None),
+    }
 }
 
 #[cfg(test)]

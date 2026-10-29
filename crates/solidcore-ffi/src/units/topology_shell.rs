@@ -453,3 +453,73 @@ mod sys {
         ) -> i32;
     }
 }
+
+/// Most steps of an [`inner_shell_of`] body.
+pub const MAX_INNER_SHELL_STEPS: usize = 6;
+
+/// `SmShell::IsInnerShellOf` of every pair of shells of a body built from `steps`
+/// (shim `topology_shell_inner.cpp`): `n_steps (op kind x y z a b c)*n_steps`, a box
+/// (`kind` 1, `SmApiCreateBox(origin, a, b, c)`) or a sphere (`kind` 2,
+/// `SmApiCreateSphere(center, a)`) per step, combined into the body by
+/// `SmApiBoolean(body, primitive, op)` with `op` union (1), intersection (2) or
+/// difference (3) (`op` of the first step ignored). The record is
+/// `n_regions (n_shells)*n_regions`, then per shell `IsInnerShellOf(NULL)` and
+/// `IsInnerShellOf(other)` for every other shell, in region and shell list order.
+///
+/// # Errors
+/// [`FfiError::InvalidArgument`] for a malformed step list (sizes and coordinates must
+/// be finite, sizes in `[1e-3, 1e4]`, coordinates within `1e4`); [`FfiError::Status`]
+/// when a primitive or Boolean fails in the shim.
+pub fn inner_shell_of(steps: &[f64]) -> Result<Vec<f64>, FfiError> {
+    let (&n, rest) = steps.split_first().ok_or_else(|| invalid("no steps"))?;
+    if n.fract() != 0.0 || !(1.0..=MAX_INNER_SHELL_STEPS as f64).contains(&n) {
+        return Err(invalid("step count"));
+    }
+    if rest.len() != 8 * n as usize {
+        return Err(invalid("step list length"));
+    }
+    for (i, s) in rest.as_chunks::<8>().0.iter().enumerate() {
+        if s.iter().any(|x| !x.is_finite()) {
+            return Err(invalid("step not finite"));
+        }
+        let &[op, kind, x, y, z, a, b, c] = s;
+        if i > 0 && op != 1.0 && op != 2.0 && op != 3.0 {
+            return Err(invalid("step operation"));
+        }
+        let sizes: &[f64] = match kind {
+            1.0 => &[a, b, c],
+            2.0 => &[a],
+            _ => return Err(invalid("step kind")),
+        };
+        if sizes.iter().any(|d| !(1e-3..=1e4).contains(d)) || [x, y, z].iter().any(|v| v.abs() > 1e4)
+        {
+            return Err(invalid("step size or position"));
+        }
+    }
+    call_with_buffer(4096, |buffer, len| {
+        // SAFETY: steps is valid for steps.len() reads and holds a validated step list
+        // (exactly what the shim reads); buffer is valid for buffer.len() writes and the
+        // shim honours the capacity; len is valid.
+        unsafe {
+            sys_inner::sc_topology_shell_inner_shell_of(
+                steps.as_ptr(),
+                steps.len() as i64,
+                buffer.as_mut_ptr(),
+                buffer.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+mod sys_inner {
+    unsafe extern "C" {
+        pub fn sc_topology_shell_inner_shell_of(
+            input: *const f64,
+            count: i64,
+            output: *mut f64,
+            capacity: i64,
+            output_len: *mut i64,
+        ) -> i32;
+    }
+}

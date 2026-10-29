@@ -204,3 +204,57 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     rd.done()?;
     raw(op, path, input)
 }
+
+mod sys_topology_loopuse_side_in_surface {
+    extern "C" {
+        pub fn sc_topology_loopuse_side_in_surface(
+            path: *const std::ffi::c_char,
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+    }
+}
+
+/// `SmLoopuse::IsLoopuseSideInSurface(periodic_u, periodic_v)` (`-1`: NULL) of every loop
+/// use of the B-rep built from `block` (shim `topology_loopuse_side.cpp`):
+/// `0 n (side on_boundary index)*n`, `-2 -2 -2` where upstream dereferences null.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed argument or B-rep block (the checks of
+/// [`super::topology_vertexuse::validate_block`], the whole input consumed);
+/// [`FfiError::Status`] for a shim failure.
+pub fn side_in_surface(path: &str, periodic_u: f64, periodic_v: f64, block: &[f64]) -> Result<Vec<f64>, FfiError> {
+    for p in [periodic_u, periodic_v] {
+        if p != -1.0 && p != 0.0 && p != 1.0 {
+            return Err(FfiError::InvalidArgument("periodic flag must be -1, 0 or 1".into()));
+        }
+    }
+    super::topology_vertexuse::validate_block(path, block)?;
+    if super::topology_vertexuse::brep_block_at(block, path)? != block.len() {
+        return Err(FfiError::InvalidArgument("trailing values after the B-rep block".into()));
+    }
+    let mut input: Vec<f64> = vec![periodic_u, periodic_v];
+    input.extend_from_slice(block);
+    let cpath = std::ffi::CString::new(path)
+        .map_err(|_| FfiError::InvalidArgument("path has a NUL byte".into()))?;
+    call_with_buffer(4096, |buf, len| {
+        // SAFETY: cpath is a valid NUL-terminated string; input is valid for input.len()
+        // reads and holds the validated arguments then a validated B-rep block (exactly
+        // what the shim reads); buf is valid for buf.len() writes and the shim honours
+        // the capacity; len is valid.
+        unsafe {
+            sys_topology_loopuse_side_in_surface::sc_topology_loopuse_side_in_surface(
+                cpath.as_ptr(),
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}

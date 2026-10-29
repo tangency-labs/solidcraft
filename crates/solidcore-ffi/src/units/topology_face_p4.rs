@@ -21,6 +21,7 @@
 //! | `Connected`      | `kind index` (`kind` an export slot `0..=9`, `-1`: NULL) | `-2 \| connected` (`IsConnectedTo`) |
 //! | `Line`           | `p(3) v(3) has_ivl t0 t1 fire face_tol tol` | `-2 \| status n (type s(3) e(3))*n` (`GlobalLineIntersect` over the face's UV domain; `face_tol`: the face's tolerance) |
 //! | `Sector`         | `vertex edge use_uv at_start opposite tol validate uv_ok face_tol` | `-2 \| status vertexuse problem cause` (`FindVertexSector` of the edge's curve from its start or end, the primary edge use's UV trim curve with `use_uv`) |
+//! | `Face37`         | - | `-2 \| flag` (`sm_AssertTestFace37`; `-2` for a face without surface with two or more loops) |
 //! | `Seam`           | `outer periodic_u periodic_v` (`-1`: no known periodicity) | `has crossed missing near_miss class_u class_v` (`HasSeamProblem` without face properties; a class is `tgt_only n (start mid end)*n` point classes) |
 
 use super::topology_vertexuse as fixture;
@@ -40,6 +41,7 @@ pub enum Op {
     Line = 8,
     Sector = 9,
     Seam = 10,
+    Face37 = 11,
 }
 
 impl Op {
@@ -53,7 +55,7 @@ impl Op {
     #[must_use]
     pub fn n_args(self) -> usize {
         match self {
-            Self::Brep => 0,
+            Self::Brep | Self::Face37 => 0,
             Self::Edges
             | Self::Vertices
             | Self::UpLoopuses
@@ -140,7 +142,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     entity(*face, c[3], false, "face")?;
     let n_l = c[5];
     match (op, args) {
-        (Op::Brep, []) => {}
+        (Op::Brep | Op::Face37, []) => {}
         (
             Op::Edges | Op::Vertices | Op::UpLoopuses | Op::UpVertexuses | Op::UpEdgeuses,
             [tgt_only, l],
