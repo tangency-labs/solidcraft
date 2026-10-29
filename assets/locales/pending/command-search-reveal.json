@@ -6,5 +6,25 @@
   "de": {
     "prefs.ribbon_reveal": "Suchergebnisse im Menüband zeigen",
     "prefs.ribbon_reveal_note": "Steht der Zeiger über einem Ergebnis in Befehle suchen, zeigt das Menüband, wo der Befehl liegt: seine Registerkarte, seine Schaltfläche oder seine Zeile im Aufklappmenü eines Panels. Ein aus der Suche gestarteter Befehl blinkt dort, und ein laufender Befehl aus einem Aufklappmenü markiert sein Panel."
+  },
+  "ar": {
+    "prefs.ribbon_reveal": "إظهار نتائج البحث في الشريط",
+    "prefs.ribbon_reveal_note": "يؤدي تمرير المؤشر فوق نتيجة في البحث عن الأوامر إلى إظهار مكان الأمر في الشريط: علامة التبويب أو الزر أو صفه في القائمة المنسدلة للوحة. يومض الأمر الذي بدأ من البحث هناك، ويضع الأمر الجاري من قائمة منسدلة علامة على لوحته."
+  },
+  "he": {
+    "prefs.ribbon_reveal": "הצגת תוצאות חיפוש בסרט",
+    "prefs.ribbon_reveal_note": "מעבר עם הסמן מעל תוצאה בחיפוש פקודות מראה היכן הפקודה נמצאת בסרט: הלשונית, הכפתור או השורה שלה בתפריט הנפתח של לוח. פקודה שהופעלה מהחיפוש מהבהבת שם, ופקודה פעילה מתפריט נפתח מסמנת את הלוח שלה."
+  },
+  "ja": {
+    "prefs.ribbon_reveal": "検索結果をリボンに表示",
+    "prefs.ribbon_reveal_note": "コマンド検索で結果にポインターを合わせると、そのコマンドがリボンのどこにあるか（タブ、ボタン、またはパネルのドロップダウン内の行）を表示します。検索から開始したコマンドはそこで点滅し、ドロップダウンから実行中のコマンドはそのパネルに印が付きます。"
+  },
+  "vi": {
+    "prefs.ribbon_reveal": "Hiện kết quả tìm kiếm trên ribbon",
+    "prefs.ribbon_reveal_note": "Khi rê chuột lên một kết quả trong Tìm lệnh, ribbon cho biết lệnh nằm ở đâu: tab, nút hoặc dòng của nó trong menu thả xuống của một bảng. Lệnh bắt đầu từ tìm kiếm sẽ nhấp nháy ở đó, và lệnh đang chạy từ menu thả xuống sẽ đánh dấu bảng của nó."
+  },
+  "zh": {
+    "prefs.ribbon_reveal": "在功能区中显示搜索结果",
+    "prefs.ribbon_reveal_note": "将指针悬停在“搜索命令”的结果上时，会显示该命令在功能区中的位置：其选项卡、按钮或面板下拉菜单中的行。从搜索启动的命令会在那里闪烁，从下拉菜单运行的命令会标记其面板。"
   }
 }
