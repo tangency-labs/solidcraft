@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the same study played at step 2.5",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); step 2.5 of 10 is 22.5 degrees: Arm centre (20 cos22.5, 20 sin22.5, 5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      18.477591,
+      7.653669,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

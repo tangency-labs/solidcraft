@@ -1,0 +1,111 @@
+{
+ "sources": [],
+ "what": "motion.plot of a crank-slider's slider over a full turn of the crank, every 30 degrees",
+ "source": "analytic",
+ "method": "a crank-slider: crank r 10 about z through the origin, rod l 30 from the crank pin (10,0) to the slider's pin (40,0), slider on +x; the slider sits at x = r cos \u03b8 + \u221a(l\u00b2 - r\u00b2 sin\u00b2 \u03b8); the guide's value is x - 40",
+ "body_count": 4,
+ "volume_mm3": 2720,
+ "results": [
+  {
+   "step": 17,
+   "json": {
+    "conflicts": []
+   }
+  },
+  {
+   "step": 19,
+   "json": {
+    "samples": 13,
+    "stopped_at": null,
+    "joints": [
+     {
+      "value": [
+       0.0,
+       -1.759347,
+       -6.277187,
+       -11.715729,
+       -16.277187,
+       -19.079855,
+       -20.0,
+       -19.079855,
+       -16.277187,
+       -11.715729,
+       -6.277187,
+       -1.759347,
+       0.0
+      ]
+     }
+    ],
+    "point": {
+     "position": [
+      [
+       40.0,
+       0.0,
+       5.0
+      ],
+      [
+       38.240653,
+       0.0,
+       5.0
+      ],
+      [
+       33.722813,
+       0.0,
+       5.0
+      ],
+      [
+       28.284271,
+       0.0,
+       5.0
+      ],
+      [
+       23.722813,
+       0.0,
+       5.0
+      ],
+      [
+       20.920145,
+       0.0,
+       5.0
+      ],
+      [
+       20.0,
+       0.0,
+       5.0
+      ],
+      [
+       20.920145,
+       0.0,
+       5.0
+      ],
+      [
+       23.722813,
+       0.0,
+       5.0
+      ],
+      [
+       28.284271,
+       0.0,
+       5.0
+      ],
+      [
+       33.722813,
+       0.0,
+       5.0
+      ],
+      [
+       38.240653,
+       0.0,
+       5.0
+      ],
+      [
+       40.0,
+       0.0,
+       5.0
+      ]
+     ]
+    }
+   }
+  }
+ ]
+}
