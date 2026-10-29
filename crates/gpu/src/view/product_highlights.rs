@@ -114,35 +114,34 @@ impl DepthPipelines {
 impl Renderer {
     /// Shared product upload and camera setup for ordinary colour and transparent feedback.
     pub(super) fn prepare_product_geometry(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &Frame) -> bool {
-        let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation]
-            .map(|filter| device.push_error_scope(filter));
-        self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false);
-        let mut failed = None;
-        for scope in scopes.into_iter().rev() {
-            if let Some(error) = crate::popped(scope.pop()) {
-                failed.get_or_insert(error.to_string());
-            }
-        }
-        if let Some(error) = failed {
+        // A large product scene can exceed what the device will allocate. Its upload runs under
+        // its own error scopes, so the failure reaches the preview instead of the device's
+        // uncaptured-error handler, and nothing half-uploaded is drawn.
+        let scopes = crate::error_scopes(device);
+        let refused = self.product.take(device, queue, &self.uniform, &self.uniform_bgl, frame.key, &frame.slot, None, false).err();
+        let caught = crate::caught(scopes);
+        let highlight_refused = self.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false).err();
+        let failed = caught.or(refused).or(highlight_refused);
+        if let Some(error) = &failed {
             log::error!("product preview upload failed: {error}");
             self.product = Batches { key: Some(frame.key), ..Batches::default() };
+            self.refused_upload = Some(error.clone());
             if let Some(Ok(mut sink)) = frame.upload_error.as_ref().map(|sink| sink.lock()) {
-                *sink = Some(error);
+                *sink = Some(error.clone());
             }
-            return false;
         }
-        self.highlight.take(device, queue, &self.uniform, &self.uniform_bgl, frame.hl_key, &frame.hl_slot, None, false);
         queue.write_buffer(
             &self.uniform,
             0,
             &uniform_bytes(frame, frame.size_px[0], frame.size_px[1], self.linear_out, self.target.reversed_depth()),
         );
-        true
+        failed.is_none()
     }
 
     /// Prepare a transparent product selection/hover image with its own depth and MSAA.
     /// Emit this instead of the ordinary product callback when live pixels are displayed.
     pub fn prepare_product_highlights(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &Frame) {
+        self.refused_upload = None;
         let key = frame_key(frame);
         if self.product_highlights && can_reuse(self.ss_ready && self.ss.is_some(), self.ss_key, key) {
             let filter = self.ss_scaled && self.cached.is_none();
