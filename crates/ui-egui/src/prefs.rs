@@ -1158,6 +1158,9 @@ preference_settings! {
     send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).
     slicer_single_instance: bool = true, 0;
+    /// How strongly a print face stands out in the viewport (#8429): the share of the section
+    /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
+    print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
     /// The line about sending again replacing the slicer's file has been shown.
     slicer_resend_hint_seen: bool = false;
     /// The user has agreed to Open with EasyPrint uploading a model to Printables' servers.
@@ -3268,6 +3271,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     }
     if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());
+    }
+    if !accepted::print_face_highlight(&new) {
+        return Err("`print_face_highlight` must be 0…1".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

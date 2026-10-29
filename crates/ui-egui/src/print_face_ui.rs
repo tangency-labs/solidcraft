@@ -91,4 +91,14 @@ mod tests {
         app.start("body.print_face");
         assert!(app.session.doc.print_faces.is_empty());
     }
+
+    #[test]
+    fn the_highlight_strength_defaults_to_a_fifth_and_ui_prefs_keeps_it_in_range() {
+        let mut app = app();
+        assert!((app.preferences.print_face_highlight - 0.2).abs() < 1e-6);
+        crate::prefs::set(&mut app, &json!({"print_face_highlight": 0.5})).unwrap();
+        assert!((app.preferences.print_face_highlight - 0.5).abs() < 1e-6);
+        assert!(crate::prefs::set(&mut app, &json!({"print_face_highlight": 1.5})).is_err());
+        assert!((app.preferences.print_face_highlight - 0.5).abs() < 1e-6);
+    }
 }

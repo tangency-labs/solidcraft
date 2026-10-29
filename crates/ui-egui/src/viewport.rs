@@ -3362,6 +3362,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.session.visibility.hidden_bodies.hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     app.session.visibility.hidden_folders.hash(&mut h);
+    // How strongly print faces are tinted (Preferences › General › Slicer).
+    app.preferences.print_face_highlight.to_bits().hash(&mut h);
     h.finish()
 }
 
@@ -3719,6 +3721,32 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         (EdgeColours::new(&mut feedback, t.hover_edge, t.hover_edge_halo), EdgeColours::new(&mut feedback, t.sel_edge, t.sel_edge_rim));
     let mut hover_instances = HighlightInstances::default();
     let mut selected_instances = HighlightInstances::default();
+    // Print faces (#8429): tinted towards the colour section views give cut faces, and outlined,
+    // so the face a slicer export lays its body on shows at a glance. Drawn before the selection,
+    // which lights over it.
+    // The share of that colour is the user's (Preferences › General › Slicer, default a fifth); the
+    // outline takes a little over twice it, so the face reads as marked without outshouting the model.
+    let strength = app.preferences.print_face_highlight.clamp(0.0, 1.0);
+    if !product && strength > 0.0 {
+        let cap = t.section_cap;
+        let blend = |from: u8, to: u8, k: f32| (f32::from(from) + (f32::from(to) - f32::from(from)) * k).round().clamp(0.0, 255.0) as u8;
+        let mix = |body: u8, tint: u8| blend(body, tint, strength);
+        let edge = t.body_edge;
+        let k = (strength * 2.25).min(1.0);
+        let rim = Color32::from_rgb(blend(edge.r(), cap.r(), k), blend(edge.g(), cap.g(), k), blend(edge.b(), cap.b(), k));
+        let outline = EdgeColours::new(&mut feedback, rim, rim);
+        for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+            let Some(Ok(face)) = s.doc.print_face(&st, b) else { continue };
+            let (r, g, bl) = body_rgb(app, &b.name);
+            face_tris(&mut feedback, &shown(b), face.index, [mix(r, cap.r()), mix(g, cap.g()), mix(bl, cap.b()), 255], true);
+            let m = drawn_mesh(app, b);
+            for (ei, e) in m.edges.iter().enumerate() {
+                if m.edge_pickable(ei) && m.edge_faces.get(ei).is_some_and(|fs| fs.iter().any(|f| *f as usize == face.index)) {
+                    edge_lines(&mut feedback, e, outline, 2.0, &[]);
+                }
+            }
+        }
+    }
     // Selected things.
     for x in &sel {
         match x {

@@ -55,6 +55,17 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());
             ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).on_hover_text(tip);
         });
+        ui_kit::settings_block(ui, app.tr("prefs.print_face_highlight"), labels, |ui| {
+            let tip = app.tr("prefs.print_face_highlight_tip").to_string();
+            let response = ui_kit::slider(
+                ui,
+                &mut app.preferences.print_face_highlight,
+                0.0..=1.0,
+                ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+            );
+            crate::scenario::publish_target("prefs:print_face_highlight", response.rect);
+            response.on_hover_text(tip);
+        });
     });
     ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
         ui_kit::settings_block(ui, app.tr("update.prefs_label"), labels, |ui| crate::update::prefs_rows(app, ui));
