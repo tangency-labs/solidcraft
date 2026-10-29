@@ -7,6 +7,7 @@
 #include "sc_edgeuse_graph.h"
 #include <SmApiQueries.h>
 #include <SmApiPrimitives.h>
+#include <SmApiBrep.h>
 #include <SmCircle.h>
 #include <SmEllipse.h>
 #include <SmSurfOfRevolution.h>
@@ -129,7 +130,7 @@ namespace
 }
 SC_EXPORT int32_t sc_query_api_queries_eval(int32_t op, const double* a, int64_t n, double* out, int64_t cap, int64_t* len)
 {
-    if (!a || (n != 22 && !(n == 26 && (op == 7 || op == 8))) || op<0 || op>26)return SC_ERR_ARG;
+    if (!a || (n != 22 && !(n == 26 && (op == 7 || op == 8))) || op<0 || op>27)return SC_ERR_ARG;
     SC_TRY
     const auto& ctx = the_context();
     std::vector<double> o;
@@ -237,6 +238,30 @@ SC_EXPORT int32_t sc_query_api_queries_eval(int32_t op, const double* a, int64_t
             if (status != SM_SUCCESS)
                 for (ULONG i = 0; i < curves.GetSize(); ++i)
                     if (!curves[i]->GetOwner())delete curves[i];
+        }
+        else if (kind >= 14 && kind <= 16)
+        {
+            // Nested and disjoint boxes for the material census: 14 a box minus an inner
+            // box (a void cavity), 15 two disjoint boxes merged, 16 an inner box merged
+            // into an outer one.
+            delete b.brep;
+            b.brep = nullptr;
+            SmBrep* second = nullptr;
+            status = SmApiCreateBox(SmPoint3d(a[0], a[1], a[2]), a[6], a[6], a[6], b.brep);
+            if (status == SM_SUCCESS)
+            {
+                const SmPoint3d at = kind == 15?SmPoint3d(a[0]+2*a[6], a[1], a[2])
+                                               :SmPoint3d(a[0]+0.25*a[6], a[1]+0.25*a[6], a[2]+0.25*a[6]);
+                const double size = kind == 15?a[6]:0.5*a[6];
+                status = SmApiCreateBox(at, size, size, size, second);
+            }
+            if (status == SM_SUCCESS)
+            {
+                SmBrep* result = nullptr;
+                status = kind == 14?SmApiBooleanDifference(b.brep, second, result)
+                                   :SmApiBooleanMerge(b.brep, second, result);
+                if (status == SM_SUCCESS)b.brep = result;
+            }
         }
         if (status != SM_SUCCESS || !b.brep)return SC_ERR_ARG;
         Graph g;
@@ -416,6 +441,28 @@ SC_EXPORT int32_t sc_query_api_queries_eval(int32_t op, const double* a, int64_t
                     status = SmApiBrepIsManifoldSolid(bp, yes);
                     o.push_back(st(status));
                     if (status == SM_SUCCESS)o.push_back(yes?1:0);
+                    break;
+                }
+                case 27:
+                {
+                    // a[18] != 0 rewrites the void flags (FALSE, TRUE, UNSURE in turn,
+                    // starting at a[20]) along the region list before the census
+                    if (a[18] != 0)
+                    {
+                        SmTArray<SmRegion*> rs;
+                        bp->GetRegions(rs);
+                        const SmBoolean flags[3] = {FALSE, TRUE, UNSURE};
+                        for (ULONG i = 0;i<rs.GetSize();++i)
+                            rs[i]->SetIsVoid(flags[(i+(size_t)a[20])%3]);
+                    }
+                    long solids = -1, voids = -1;
+                    status = SmApiBrepMaterialCensus(bp, solids, voids);
+                    o.push_back(st(status));
+                    if (status == SM_SUCCESS)
+                    {
+                        o.push_back((double)solids);
+                        o.push_back((double)voids);
+                    }
                     break;
                 }
                 case 15:case 16:case 20:status = op == 15?SmApiBrepBoundingBox(bp, a[15]?TRUE:FALSE, lo, hi):op == 16?SmApiFaceBoundingBox(f, a[15]?TRUE:FALSE, lo, hi):SmApiEdgeBoundingBox(e, a[15]?TRUE:FALSE, lo, hi);
