@@ -82,6 +82,25 @@ pub(crate) fn refine(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: 
             Some((sag, _, e)) if sag > 0.25 * tol && off(centroid, (pa + pb + pc) * (1.0 / 3.0)) > tol => e,
             _ => continue,
         };
+        // Splitting a triangle's shorter side leaves a child with its long side and a wider
+        // angle, and where the long side's middle lies on the surface (a section with an
+        // inflection) the children flatten toward it without end. So a triangle flattened onto its
+        // longest side (its widest angle past 150 degrees) splits that side, and a split never
+        // goes across an obtuse triangle's shorter side: that triangle's longest side is split
+        // first, and so on along the path (Rivara's longest-edge propagation, its lengths growing,
+        // so it ends). Only sides inside the face are split.
+        let mut split = flat_long_side(&t, &pos, &sides, shortest, 150.0).unwrap_or(split);
+        let mut from = ti;
+        while let Some(&across) = sides.get(&split).and_then(|ts| ts.iter().find(|&&o| o != from)) {
+            match tris.get(across as usize).and_then(|o| flat_long_side(o, &pos, &sides, shortest, 90.0)) {
+                Some(long) if long != split => (split, from) = (long, across),
+                _ => break,
+            }
+        }
+        // The triangle is looked at again when the split was another's, on its way.
+        if from != ti {
+            queue.push(ti);
+        }
         let (Some(ua), Some(ub)) = (q(split.0), q(split.1)) else { continue };
         let m = mean(&[ua, ub]);
         let mi = uv.len() as u32;
@@ -103,6 +122,20 @@ fn mean(s: &EvalSurface, dom: &super::uv::Domain, reach: f64, qs: &[[f64; 2]]) -
         *slot = pick.iter().sum::<f64>() / pick.len().max(1) as f64;
     }
     out
+}
+
+/// The longest side of triangle `t` when the angle opposite it is past `degrees` and the side lies
+/// inside the face (two triangles on it) and is long enough to split.
+fn flat_long_side(t: &[u32; 3], pos: &[Vec3], sides: &HashMap<(u32, u32), Vec<u32>>, shortest: f64, degrees: f64) -> Option<(u32, u32)> {
+    let p = |i: u32| pos.get(i as usize).copied();
+    let len = |k: usize| p(t[k]).zip(p(t[(k + 1) % 3])).map(|(a, b)| a.dist(b));
+    let lengths = [len(0)?, len(1)?, len(2)?];
+    let k = (0..3).max_by(|&i, &j| lengths[i].total_cmp(&lengths[j]))?;
+    let (l, a, b) = (lengths[k], lengths[(k + 1) % 3], lengths[(k + 2) % 3]);
+    let side = key(t[k], t[(k + 1) % 3]);
+    let inside = sides.get(&side).is_some_and(|ts| ts.len() == 2) && l > shortest;
+    let flat = a > 0.0 && b > 0.0 && (a * a + b * b - l * l) / (2.0 * a * b) < degrees.to_radians().cos();
+    (inside && flat).then_some(side)
 }
 
 fn key(a: u32, b: u32) -> (u32, u32) {

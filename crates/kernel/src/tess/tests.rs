@@ -903,3 +903,59 @@ fn a_small_sphere_void_in_a_large_block_meshes() {
     assert_watertight(&m, "block with a sphere void");
     assert_eq!(hollow.unmeshed_faces(), 0);
 }
+
+/// A sheet whose section is an S (a cubic 30 long, 1.5 off its chord each way, its middle on the
+/// chord), straight across, meshed as fans with one triangle flat on the chord across its middle
+/// (A, B at the sides, C a hair above the chord a third along). The chord's middle lies on the
+/// surface while the triangle's short sides sag: splitting those left a child with the chord and
+/// its vertex nearer to it, without end (a loft side of a bike frame refined to slivers until the
+/// point budget ran out, its area counted three times). The flat triangle now splits the chord,
+/// and refinement ends within its budget with no sliver.
+#[test]
+fn sag_refinement_across_an_inflection_ends_without_slivers() {
+    let mut ctrl = Vec::new();
+    for j in 0..2 {
+        for (i, z) in [0.0, 4.0, -4.0, 0.0].into_iter().enumerate() {
+            ctrl.push([10.0 * i as f64, 10.0 * f64::from(j), z, 1.0]);
+        }
+    }
+    let s = EvalSurface::Nurbs {
+        degree: [3, 1],
+        knots: [vec![0., 0., 0., 0., 1., 1., 1., 1.], vec![0., 0., 1., 1.]],
+        count: [4, 2],
+        ctrl,
+        closed: [false, false],
+    };
+    // Boundary: bottom and top rows of n + 1 nodes (their sides within the tolerance, 0.5), A and
+    // B halfway up the ends. Inside: C. Bottom fan from A, the triangle A B C, top fan from C.
+    let n = 6u32;
+    let mut uv: Vec<[f64; 2]> = Vec::new();
+    for i in 0..=n {
+        uv.push([f64::from(i) / f64::from(n), 0.0]);
+    }
+    for i in 0..=n {
+        uv.push([f64::from(i) / f64::from(n), 1.0]);
+    }
+    let (bottom, top) = (0u32, n + 1);
+    let (a, b, c) = (2 * n + 2, 2 * n + 3, 2 * n + 4);
+    uv.extend([[0.0, 0.5], [1.0, 0.5], [1.0 / 3.0, 0.5 + 1e-3]]);
+    let mut tris: Vec<[u32; 3]> = vec![[a, bottom, bottom + 1]];
+    tris.extend((1..n).map(|i| [a, bottom + i, bottom + i + 1]));
+    tris.push([a, bottom + n, b]);
+    tris.push([a, b, c]);
+    tris.push([c, b, top + n]);
+    tris.extend((0..n).rev().map(|i| [c, top + i + 1, top + i]));
+    tris.push([c, top, a]);
+    // The sides along the ends are straight.
+    let fixed: Vec<Vec3> = Vec::new();
+    let tol = 0.5;
+    let start = uv.len();
+    super::sag::refine(&s, tol, 1e-9, &fixed, &mut uv, &mut tris, 20_000);
+    assert!(uv.len() - start < 1_000, "{} points added: refinement ran to its budget", uv.len() - start);
+    for t in &tris {
+        let [p, q, r] = t.map(|i| uv[i as usize]);
+        let area = (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+        let longest = [(p, q), (q, r), (r, p)].iter().map(|(x, y)| (x[0] - y[0]).hypot(x[1] - y[1])).fold(0.0, f64::max);
+        assert!(area > 1e-6 * longest * longest, "a sliver {t:?}: {p:?} {q:?} {r:?}");
+    }
+}
