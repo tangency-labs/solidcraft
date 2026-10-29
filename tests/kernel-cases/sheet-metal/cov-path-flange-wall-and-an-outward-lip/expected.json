@@ -1,0 +1,39 @@
+{
+ "sources": [],
+ "what": "sheet.path_flange along a two-line path across the y = 0 edge of a 100 x 60 x 2 base: 20 up, then 10 out away from the base (a Z section)",
+ "source": "analytic",
+ "method": "T = 2, R = 2, K = 0.5, setback R + T = 4 at each 90 degree bend. Line 1 (up, 20) is a wall 20 to its outer face (y = 0): straight 20 - 4 - 4 = 12; line 2 turns away from the sheet (a bend down), a lip 10 to its outer face from the virtual sharp at (y 2, z 20): straight 10 - 4 = 6, its far edge at y = 2 - 10 = -8, its top face at z 20. Base 100 x 56. V = 2*100*(56 + 12 + 6) + 2*(pi/2)((R+T)^2 - R^2)/2*100 = 16684.955592; the bends turn up, then down",
+ "body_count": 1,
+ "volume_mm3": 16684.955592153878,
+ "bbox": {
+  "min": [
+   0,
+   -8,
+   0
+  ],
+  "max": [
+   100,
+   60,
+   20
+  ]
+ },
+ "results": [
+  {
+   "step": 10,
+   "json": {
+    "bends": [
+     {
+      "angle_deg": 90.0,
+      "direction": "up",
+      "radius": 2.0
+     },
+     {
+      "angle_deg": 90.0,
+      "direction": "down",
+      "radius": 2.0
+     }
+    ]
+   }
+  }
+ ]
+}
