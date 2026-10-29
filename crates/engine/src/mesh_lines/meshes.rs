@@ -162,8 +162,8 @@ pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, ask: Ask, shown: i
             // These are owned export buffers, not the document's cached mesh. Picking and
             // shading data are unused by vector occlusion; edge choices were captured above.
             // The faces stay (4 bytes a triangle, counted below): they name a silhouette's face,
-            // and tell a silhouette along a drawn edge from one across a face.
-            mesh.normals = Vec::new();
+            // and tell a silhouette along a drawn edge from one across a face. So do the normals
+            // (a position's size again): they tell a surface seen edge on from a facet's lean.
             mesh.seams = Vec::new();
             mesh.smooth_edges = Vec::new();
             mesh.sharp_edges = Vec::new();

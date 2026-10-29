@@ -228,30 +228,34 @@ fn view_dxf_draws_a_holes_rim_once() {
     }
 }
 
-/// A bend seen end on draws each of its arcs once. The plate is 2 mm sheet, bent up 60° on its x = 60 edge
-/// with an inner radius of its thickness, and seen from the front: every triangle of the bend's surface is
-/// seen edge on, whatever facing the mesh's rounding gives it, so its rows draw no chords beside the arcs.
-/// The lines on each bend circle add up to its arc, less only what sampling takes off.
+/// A bend seen end on draws each of its arcs once. The plate is 2 mm sheet, bent up 60° or 90° on its x = 60
+/// edge with an inner radius of its thickness, and seen from the front: every triangle of the bend's surface
+/// is seen edge on, whatever facing the mesh's rounding gives it, so its rows draw no chords beside the arcs.
+/// At 90° the thin triangles that join the bend's edge samples to its first rows lean past 1e-3; the
+/// surface's own normals still see them edge on. The lines on each bend circle add up to its arc, less only
+/// what sampling takes off.
 #[test]
 fn view_dxf_draws_a_bends_arcs_once() {
-    let mut s = Session::default();
-    run(&mut s, "sheet.manage_rules", json!({"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "Thickness", "active": true}));
-    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 40]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
-    run(&mut s, "sheet.flange", json!({"edges": [[60, 20, 2]], "height": 20, "angle": "60 deg"}));
-    let mut c = Camera { target: Vec3::new(30., 20., 5.), fov: 0., distance: 200., ..Default::default() };
-    c.set_view(StandardView::Front);
-    let lines = lines(&export(&mut s, c, "omit"));
-    // The bend's axis, 4 mm (radius and thickness) above the plate's underside, where the flange's
-    // outside meets the edge flanged: on the view, less the camera's target.
-    let axis = Vec2::new(60. - 4. * 30f64.to_radians().tan() - 30., 4. - 5.);
-    for radius in [2., 4.] {
-        let on = |p: Vec2| (p.dist(axis) - radius).abs() < 1e-3;
-        let drawn: f64 = lines.iter().filter(|&&(a, b)| on(a) && on(b)).map(|(a, b)| a.dist(*b)).sum();
-        let arc = radius * 60f64.to_radians();
-        assert!(drawn > 0.99 * arc && drawn <= arc, "radius {radius}: {drawn} mm of lines on a {arc} mm arc");
+    for degrees in [60f64, 90.] {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "Thickness", "active": true}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 40]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+        run(&mut s, "sheet.flange", json!({"edges": [[60, 20, 2]], "height": 20, "angle": format!("{degrees} deg")}));
+        let mut c = Camera { target: Vec3::new(30., 20., 5.), fov: 0., distance: 200., ..Default::default() };
+        c.set_view(StandardView::Front);
+        let lines = lines(&export(&mut s, c, "omit"));
+        // The bend's axis, 4 mm (radius and thickness) above the plate's underside, where the flange's
+        // outside meets the edge flanged: on the view, less the camera's target.
+        let axis = Vec2::new(60. - 4. * (degrees / 2.).to_radians().tan() - 30., 4. - 5.);
+        for radius in [2., 4.] {
+            let on = |p: Vec2| (p.dist(axis) - radius).abs() < 1e-3;
+            let drawn: f64 = lines.iter().filter(|&&(a, b)| on(a) && on(b)).map(|(a, b)| a.dist(*b)).sum();
+            let arc = radius * degrees.to_radians();
+            assert!(drawn > 0.99 * arc && drawn <= arc, "{degrees}°, radius {radius}: {drawn} mm of lines on a {arc} mm arc");
+        }
     }
 }
 

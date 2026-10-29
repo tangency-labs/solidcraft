@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use solidcraft_doc::apply_point;
+use solidcraft_doc::{apply_point, apply_vector};
 use solidcraft_geom::{Aabb3, Mesh, Vec3};
 
 use super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
@@ -179,6 +179,22 @@ fn triangle(view: &View, shared: &Shared, placed: &Placement, id: usize) -> Resu
     ])
 }
 
+/// Whether placed triangle `id`'s surface is seen edge on at each of its corners: the mesh's normal
+/// there at most 1e-3 (cosine) toward the view. A mesh without normals keeps its facets' facing.
+fn surface_edge_on(view: &View, shared: &Shared, placed: &Placement, id: usize) -> bool {
+    shared.mesh.triangles.get(id).is_some_and(|indices| {
+        indices.iter().all(|i| {
+            let (Some(p), Some(n)) = (shared.mesh.positions.get(*i as usize), shared.mesh.normals.get(*i as usize)) else {
+                return false;
+            };
+            let n = apply_vector(&placed.transform, *n);
+            let toward = view.toward(apply_point(&placed.transform, *p));
+            let length = n.len() * toward.len();
+            length > 0. && n.dot(toward).abs() <= 1e-3 * length
+        })
+    })
+}
+
 struct Projected {
     nodes: Vec<Aabb3>,
     segments: Vec<(Vec3, Vec3, Option<Owner>)>,
@@ -213,9 +229,11 @@ impl Projected {
                     if let Some(f) = front.get_mut(*id) {
                         // A positive projective scale preserves the projected winding. A triangle seen
                         // edge on, its normal at most 1e-3 (cosine) toward the view, faces away whatever
-                        // sign the mesh's own error gives it: no silhouette lies between two of them.
+                        // sign the mesh's own error gives it: no silhouette lies between two of them. So
+                        // does one whose surface is edge on at each corner: a thin triangle's facet leans
+                        // by the mesh's chord error over its own width, which can be far past 1e-3.
                         let n = (p[1] - p[0]).cross(p[2] - p[0]);
-                        *f = n.z > 1e-3 * n.len();
+                        *f = n.z > 1e-3 * n.len() && !surface_edge_on(view, shared, placed, *id);
                     }
                 }
             }

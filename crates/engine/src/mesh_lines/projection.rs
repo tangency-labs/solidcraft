@@ -79,6 +79,11 @@ impl View {
         Ok(projected)
     }
 
+    /// The direction from `p` toward the eye: `back` itself in an orthographic view.
+    pub(super) fn toward(&self, p: Vec3) -> Vec3 {
+        self.perspective.map_or(self.back, |distance| self.origin + self.back * distance - p)
+    }
+
     /// How far behind a surface a line must be to count as covered, in the depth `project` gives.
     pub(super) fn depth_eps(&self, eps: f64) -> f64 {
         self.perspective.map_or(eps, |distance| 1e-8 / distance)
