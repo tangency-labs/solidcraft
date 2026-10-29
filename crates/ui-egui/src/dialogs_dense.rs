@@ -1020,6 +1020,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.emboss_wrap_note")).wrap());
         }
+        Kind::Lighten { thickness, tool_radius, depth, trim, through_all } => {
+            enter |= expr_row(ui, "Wall thickness", thickness);
+            enter |= expr_row(ui, "Tool radius", tool_radius);
+            enter |= expr_row(ui, "Depth", depth);
+            ui_kit::options(ui, "feature_options", &mut [("Trim to part", trim), ("Through all", through_all)]);
+        }
         Kind::Align { flip, components, axes: [ax, ay, az], angle } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
             // the other, an edge at its middle), its center, a round one's center, or, for bodies,

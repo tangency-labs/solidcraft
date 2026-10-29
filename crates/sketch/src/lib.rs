@@ -34,6 +34,7 @@ mod offset;
 mod offset_topology;
 mod pattern;
 mod periodic;
+mod pocket_profile;
 pub mod pierce;
 mod profiles;
 #[cfg(feature = "solver-profiling")]
@@ -68,6 +69,7 @@ pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
+pub use pocket_profile::{inset_region, round_convex_corners};
 pub use profiles::{
     CurvePick, ENDPOINT_JOIN_TOL, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles,
     find_profiles_checked, merge_regions, profile_at_point, profile_by_curves, without_text_counters,
