@@ -176,3 +176,150 @@ fn split_side(tris: &mut Vec<[u32; 3]>, sides: &mut HashMap<(u32, u32), Vec<u32>
     }
     touched
 }
+
+/// The sharpest corner (radians) a flip may make.
+const MIN_FLIP_ANGLE: f64 = 1e-3;
+
+/// Flip the sides inside a face's triangulation (as [`refine`] takes it) where the two triangles
+/// on a side lie closer along the surface the other way: their facets turn less from the surface
+/// normal. A layout can leave
+/// slivers standing on their long side across the surface (their corners on it, their plane across
+/// it), which count several times the area under them and which no split repairs; the flip lays
+/// them down. A side is flipped only when both new triangles keep the orientation of the old ones
+/// in (u, v) and against the surface normal (nothing folds), and the new side and the new
+/// triangles' middles stay within `tol` of the surface, or no farther than the old side's middle.
+/// Sides with one triangle (the face's boundary) are never flipped.
+pub(crate) fn flip(s: &EvalSurface, tol: f64, reach: f64, fixed: &[Vec3], uv: &[[f64; 2]], tris: &mut [[u32; 3]]) {
+    if !(tol.is_finite() && tol > 0.0) || tris.len() < 2 {
+        return;
+    }
+    let dom = super::uv::domain(s);
+    let mean = |qs: &[[f64; 2]]| mean(s, &dom, reach, qs);
+    let pos: Vec<Vec3> = uv.iter().enumerate().map(|(i, q)| fixed.get(i).copied().unwrap_or_else(|| s.eval(q[0], q[1]).0)).collect();
+    let p = |i: u32| pos.get(i as usize).copied();
+    let q = |i: u32| uv.get(i as usize).copied();
+    let off = |m: [f64; 2], c: Vec3| match s.derivs(m[0], m[1]) {
+        Some((x, su, sv)) => su.cross(sv).normalized().map_or_else(|| x.dist(c), |n| (x - c).dot(n).abs()),
+        None => s.eval(m[0], m[1]).0.dist(c),
+    };
+    // Twice the signed area in (u, v).
+    let area_uv = |t: [u32; 3]| match (q(t[0]), q(t[1]), q(t[2])) {
+        (Some(a), Some(b), Some(c)) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]),
+        _ => 0.0,
+    };
+    // The triangle's smallest angle in 3D.
+    let min_angle = |t: [u32; 3]| -> f64 {
+        let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) else { return 0.0 };
+        let angle = |o: Vec3, x: Vec3, y: Vec3| match ((x - o).normalized(), (y - o).normalized()) {
+            (Some(u), Some(v)) => u.dot(v).clamp(-1.0, 1.0).acos(),
+            _ => 0.0,
+        };
+        angle(a, b, c).min(angle(b, c, a)).min(angle(c, a, b))
+    };
+    // How far a facet's normal turns from the surface normal at its middle (radians, 0 to pi/2).
+    let deviation = |t: [u32; 3]| -> f64 {
+        let (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) = (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2])) else { return 0.0 };
+        let m = mean(&[qa, qb, qc]);
+        let facet = (b - a).cross(c - a).normalized();
+        match (facet, s.derivs(m[0], m[1]).and_then(|(_, su, sv)| su.cross(sv).normalized())) {
+            (Some(f), Some(n)) => f.dot(n).abs().clamp(0.0, 1.0).acos(),
+            _ => 0.0,
+        }
+    };
+    // Whether the facet's normal lies on the side of the surface normal that its (u, v)
+    // orientation `sign` says.
+    let upright = |t: [u32; 3], sign: f64| -> bool {
+        let (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) = (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2])) else { return false };
+        let m = mean(&[qa, qb, qc]);
+        match s.derivs(m[0], m[1]) {
+            Some((_, su, sv)) => (b - a).cross(c - a).dot(su.cross(sv)) * sign > 0.0,
+            None => true,
+        }
+    };
+    let centroid_off = |t: [u32; 3]| match (p(t[0]), p(t[1]), p(t[2]), q(t[0]), q(t[1]), q(t[2])) {
+        (Some(a), Some(b), Some(c), Some(qa), Some(qb), Some(qc)) => off(mean(&[qa, qb, qc]), (a + b + c) * (1.0 / 3.0)),
+        _ => f64::INFINITY,
+    };
+    let mut sides: HashMap<(u32, u32), Vec<u32>> = HashMap::with_capacity(tris.len() * 2);
+    for (ti, t) in tris.iter().enumerate() {
+        for k in 0..3 {
+            sides.entry(key(t[k], t[(k + 1) % 3])).or_default().push(ti as u32);
+        }
+    }
+    let mut queue: Vec<(u32, u32)> = sides.iter().filter(|(_, ts)| ts.len() == 2).map(|(e, _)| *e).collect();
+    queue.sort_unstable();
+    let mut budget = tris.len().saturating_mul(8);
+    // Each triangle's deviation, until it is flipped.
+    let mut dev_of: Vec<Option<f64>> = vec![None; tris.len()];
+    while let Some(e) = queue.pop() {
+        if budget == 0 {
+            break;
+        }
+        let Some(&[t1, t2]) = sides.get(&e).map(|v| v.as_slice()) else { continue };
+        let (Some(&ta), Some(&tb)) = (tris.get(t1 as usize), tris.get(t2 as usize)) else { continue };
+        // [a, b, c] on one side of a -> b, [b, a, d] on the other.
+        let Some(k) = (0..3).find(|&k| key(ta[k], ta[(k + 1) % 3]) == e) else { continue };
+        let (a, b, c) = (ta[k], ta[(k + 1) % 3], ta[(k + 2) % 3]);
+        let Some(d) = tb.iter().copied().find(|&v| v != a && v != b) else { continue };
+        if c == d || sides.contains_key(&key(c, d)) {
+            continue;
+        }
+        let (n1, n2) = ([a, d, c], [d, b, c]);
+        let sign = area_uv(ta).signum();
+        if sign == 0.0 || area_uv(tb).signum() != sign || area_uv(n1) * sign <= 0.0 || area_uv(n2) * sign <= 0.0 {
+            continue;
+        }
+        // The pair the other way must lie closer along the surface (its facets turn less from
+        // the surface normal), by more than a degree: a pair within a degree of the surface is
+        // left as the layout made it.
+        let mut cached = |ti: u32, t: [u32; 3]| match dev_of.get(ti as usize).copied().flatten() {
+            Some(d) => d,
+            None => {
+                let d = deviation(t);
+                if let Some(slot) = dev_of.get_mut(ti as usize) {
+                    *slot = Some(d);
+                }
+                d
+            }
+        };
+        let worse = cached(t1, ta).max(cached(t2, tb));
+        let degree = 1f64.to_radians();
+        if worse < degree || deviation(n1).max(deviation(n2)) >= worse - degree {
+            continue;
+        }
+        // ... and have area in 3D (three corners on one line of a cone have none, however they
+        // lie in (u, v)).
+        if min_angle(n1).min(min_angle(n2)) < MIN_FLIP_ANGLE {
+            continue;
+        }
+        if !(upright(n1, sign) && upright(n2, sign)) {
+            continue;
+        }
+        let (Some(pa), Some(pb), Some(pc), Some(pd), Some(qa), Some(qb), Some(qc), Some(qd)) = (p(a), p(b), p(c), p(d), q(a), q(b), q(c), q(d))
+        else {
+            continue;
+        };
+        let allowed = tol.max(off(mean(&[qa, qb]), (pa + pb) * 0.5)).max(centroid_off(ta)).max(centroid_off(tb));
+        if off(mean(&[qc, qd]), (pc + pd) * 0.5) > allowed || centroid_off(n1) > allowed || centroid_off(n2) > allowed {
+            continue;
+        }
+        budget -= 1;
+        for ti in [t1, t2] {
+            if let Some(slot) = dev_of.get_mut(ti as usize) {
+                *slot = None;
+            }
+        }
+        if let Some(slot) = tris.get_mut(t1 as usize) {
+            *slot = n1;
+        }
+        if let Some(slot) = tris.get_mut(t2 as usize) {
+            *slot = n2;
+        }
+        sides.remove(&e);
+        sides.insert(key(c, d), vec![t1, t2]);
+        // a-d moves from t2 to t1, b-c from t1 to t2.
+        retag(&mut sides, a, d, t2, t1);
+        retag(&mut sides, b, c, t1, t2);
+        queue.extend([key(a, d), key(d, b), key(b, c), key(c, a)].into_iter().filter(|s| sides.get(s).is_some_and(|ts| ts.len() == 2)));
+    }
+}

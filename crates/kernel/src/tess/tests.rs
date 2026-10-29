@@ -959,3 +959,40 @@ fn sag_refinement_across_an_inflection_ends_without_slivers() {
         assert!(area > 1e-6 * longest * longest, "a sliver {t:?}: {p:?} {q:?} {r:?}");
     }
 }
+
+/// A sheet curved across (a parabola 20 wide, 3.2 high at a tenth in from either side) and two
+/// triangles standing on a chord across the curve: their corners on the surface, their planes
+/// across it, so they count far more than the area under them. The flip lays them along the
+/// sheet, on the straight side along it.
+#[test]
+fn triangles_standing_across_a_curved_sheet_are_flipped_along_it() {
+    let mut ctrl = Vec::new();
+    for j in 0..2 {
+        for (i, z) in [5.0, -5.0, 5.0].into_iter().enumerate() {
+            ctrl.push([10.0 * i as f64 - 10.0, 10.0 * f64::from(j), z, 1.0]);
+        }
+    }
+    let s = EvalSurface::Nurbs {
+        degree: [2, 1],
+        knots: [vec![0., 0., 0., 1., 1., 1.], vec![0., 0., 1., 1.]],
+        count: [3, 2],
+        ctrl,
+        closed: [false, false],
+    };
+    let uv = vec![[0.1, 0.5], [0.9, 0.5], [0.5, 0.52], [0.5, 0.48]];
+    let mut tris = vec![[0, 1, 2], [1, 0, 3]];
+    let area = |tris: &[[u32; 3]]| -> f64 {
+        tris.iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|i| s.eval(uv[i as usize][0], uv[i as usize][1]).0);
+                (b - a).cross(c - a).len() / 2.0
+            })
+            .sum()
+    };
+    let before = area(&tris);
+    super::sag::flip(&s, 0.1, 1e-9, &[], &uv, &mut tris);
+    let after = area(&tris);
+    let sides: Vec<(u32, u32)> = tris.iter().flat_map(|t| (0..3).map(move |k| (t[k].min(t[(k + 1) % 3]), t[k].max(t[(k + 1) % 3])))).collect();
+    assert!(sides.contains(&(2, 3)) && !sides.contains(&(0, 1)), "{tris:?}");
+    assert!(after < 0.5 * before, "{before} -> {after}");
+}
