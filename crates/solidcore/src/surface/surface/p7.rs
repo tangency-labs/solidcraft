@@ -925,6 +925,9 @@ impl Surface {
             return Ok(None);
         }
         // UNPORTED(topology.face_p4): SmFace::GetBrep
+        // Proof (unreachable): no library caller; a surface's owner is an `ObjectRef`
+        // key, which cannot reach the face's arena. Code holding the face holds its
+        // `Brep` (the arena is the B-rep), so it never asks the surface.
         Err(SolidError::unported("SmFace::GetBrep", "topology.face_p4"))
     }
 

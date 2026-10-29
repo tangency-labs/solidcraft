@@ -159,7 +159,8 @@
 //! - **Callees in units not ported yet** return [`SolidError::Unported`](crate::SolidError):
 //!   `SmBrep::GetTolerance` (`topology.brep_p1`) in the manager's fallback tolerance,
 //!   `SmFace::GetEdges` (`topology.face_p4`) for edges sharing a face in
-//!   `sm_FindEDOnDegenFace`, and part 5's `SmBrep::Transform` reaches `SmBrep::Notify` (`topology.brep_p2`).
+//!   `sm_FindEDOnDegenFace` (unreachable, see the degenerate-face branch above), and
+//!   part 5's `SmBrep::Transform` reaches `SmBrep::Notify` (`topology.brep_p2`).
 //!   `SmProtoVertex::ContainsPoint` / `DistanceTo` (unit `query.face_p2`) are
 //!   [`crate::query::face::p2`]'s.
 //! - **Copy map.** `SetAt` takes two objects and `GetAt` of an object without an entry

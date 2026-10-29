@@ -767,7 +767,14 @@ pub fn find_ed_on_degen_face<O: Copy + PartialEq>(
     // Degenerate face has 2 edges within tol of edge on other brep
     if let Some(face) = common.first() {
         let _ = face;
-        // UNPORTED(topology.face_p4): SmFace::GetEdges
+        // UNPORTED(topology.face_p4): SmFace::GetEdges, then SmBrep::DeleteFace(pFace,
+        // FALSE, TRUE, &sTopos)
+        // Proof (unreachable): the only caller, `CanCombineEdgeDefinitions`, gets here
+        // with two different edges of one B-rep, which `sm_AreConnected` (no edge-edge
+        // case, upstream and `are_connected`) reports unconnected, so it has already
+        // returned 0. Upstream's `DeleteFace` without `bDeleteEdgesVertices` also leaves
+        // `sTopos` empty, so even a reached call would answer 0 (its only effect being
+        // the face deletion).
         return Err(SolidError::unported("SmFace::GetEdges", "topology.face_p4"));
     }
 
