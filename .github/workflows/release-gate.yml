@@ -1,0 +1,70 @@
+# The release gate: everything, in full and in parallel, on one branch's head, before that branch
+# replaces main as a release (develop, rebased onto main). Run it by hand:
+#   gh workflow run release-gate.yml --ref develop
+# It calls the workflows that own each check instead of copying their jobs:
+# - ci.yml as Run workflow with cross-compilation: every native suite in full (not scoped), the
+#   reference tests, the doc tests, the GPU path tests, the action matrix (all 16 shards) and its
+#   determinism check, the property tests, the repository checks (web-offline among them),
+#   WebAssembly and RISC-V, Windows D3D12 FXC and Windows app startup;
+# - kernel-rig.yml: every rig area against its KNOWN_FAILING and the ladder against its golden;
+# - release.yml as a dry run (draft false): the Linux, Flatpak, Snap, FreeBSD, macOS, Windows and
+#   web packages with their smoke tests and package checks.
+# The gate passes only when all three pass. Before main is replaced, tag the old main
+# (main-before-develop-<date>) and push the tag.
+name: Release gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      # Select checks reads this commit's other runs.
+      actions: read
+    with:
+      cross_compile: true
+
+  kernel-rig:
+    name: Kernel rig
+    uses: ./.github/workflows/kernel-rig.yml
+    permissions:
+      contents: read
+
+  packages:
+    name: Packages
+    uses: ./.github/workflows/release.yml
+    # release.yml's last job asks for contents: write (it creates releases); a dry run only keeps
+    # the files as an artifact.
+    permissions:
+      contents: write
+      actions: read
+    secrets: inherit
+    with:
+      draft: false
+
+  release-gate:
+    name: release-gate
+    needs: [ci, kernel-rig, packages]
+    if: always()
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Every part passed
+        env:
+          CI: ${{ needs.ci.result }}
+          KERNEL_RIG: ${{ needs.kernel-rig.result }}
+          PACKAGES: ${{ needs.packages.result }}
+        run: |
+          echo "ci=$CI kernel-rig=$KERNEL_RIG packages=$PACKAGES"
+          test "$CI" = success
+          test "$KERNEL_RIG" = success
+          test "$PACKAGES" = success
