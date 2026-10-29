@@ -1,0 +1,32 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     60,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 10,
+    "body_name": "Cyl",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "inspect.center_of_mass",
+   "params": {}
+  }
+ ]
+}
