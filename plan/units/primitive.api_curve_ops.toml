@@ -1,0 +1,12 @@
+id = "primitive.api_curve_ops"
+upstream = ["source/SM_API/src/SmApiCurves.cpp"]
+rust_module = "primitive::api_curve_ops"
+depends_on = ["curve.curve_p2", "curve.curve_p3", "nurbs.b_spline_curve_n_lib", "nurbs.b_spline_curve_p2", "primitive.api_curves", "topology.trimming_tools"]
+soft_depends_on = ["curve.ellipse_p1", "curve.line", "geom.tol"]
+est_lines = 190
+layer = 42
+tests = ["SM_API_test:TestSmOffsetCurve", "SM_API_test:TestSmMakeCurvesCompatible", "SM_API_test:TestSmOrderCurves", "SM_API_test:TestSmErrorCodes"]
+status = "green"
+claimed_by = "fixer-3 (PR #1538)"
+claimed_at = "2026-10-29T00:00:00Z"
+notes = "GREEN: difftest 638 cases, 638 pass, 0 failed, 0 deferred (local integration run on bb06099f1). NOT IN callgraph/units.json: wrapper-only SM_API functions of SmApiCurves.cpp (1.0.1 parity batch 3, curves): SmApiCreateCurveInterpPoints, SmApiOffsetCurve, SmApiEvaluateContinuity, SmApiMakeCurvesCompatible, SmApiOrderCurves; every callee is ported (CreateInterpolatingCurve, ComputeCrvsNormal, CreateSimpleOffset of SmBSplineCurve/SmLine/SmEllipse, SmCurve::EvaluateContinuity, MakeCurvesCompatible, OrderCurvesIntoLoops). Input curves are made by the SM_API constructors of primitive.api_curves on both sides. Status set by the gate."
