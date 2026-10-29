@@ -272,7 +272,17 @@ mod imp {
         let m = body.mesh(&crate::MeshTolerance::chord(mesh_tol))?;
         let faces = face_tris(&m);
         let n = body.face_count();
-        let flat_tol = size * 1e-5 + 1e-9;
+        // A cap's points lie on its plane to the evaluation's precision. Sized to the body, the
+        // flatness tolerance can exceed the gap between parallel start and end planes (a box
+        // 0.1 µm thick in a 14 mm body), which would put each cap in both: it stays under a
+        // quarter of that gap. Planes that coincide (the ends of a half turn) are told apart by
+        // the profile's edges instead.
+        let gap = end
+            .filter(|e| e.normal().cross(start.normal()).len() < 1e-9)
+            .map(|e| start.height(e.origin).abs())
+            .filter(|g| *g > size * 1e-9)
+            .unwrap_or(f64::INFINITY);
+        let flat_tol = (size * 1e-5 + 1e-9).min(0.25 * gap);
         let near = 3.0 * mesh_tol + flat_tol;
         let flat = |f: usize, pl: &Plane| {
             faces.get(f).is_some_and(|ft| !ft.tris.is_empty() && ft.tris.iter().all(|(t, _)| t.iter().all(|q| pl.height(*q).abs() <= flat_tol)))
@@ -289,12 +299,22 @@ mod imp {
         let end_cap: Vec<bool> = (0..n).map(|f| end.is_some_and(|e| flat(f, e))).collect();
         let cap = |f: usize| start_cap.get(f).copied().unwrap_or(false) || end_cap.get(f).copied().unwrap_or(false);
         let mut swept: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
-        for (poly, fs) in m.edges.iter().zip(&m.edge_faces) {
-            if poly.len() < 2 || !poly.iter().all(|q| start.height(*q).abs() <= flat_tol) {
-                continue;
-            }
-            for s in edges {
-                if poly.windows(2).any(|w| s.at.dist_to_segment(w[0], w[1]) <= near) {
+        // Each seed lies on its own piece's edge (within the mesh's sag on a curve); `near` is
+        // sized to the body, so on a side shorter than it (a 0.3 mm wall of a 1 m label) the
+        // neighbours' edges are near too. The seed marks only the edges nearest it: the one it
+        // lies on, or both pieces of an edge split at its middle.
+        let start_edges: Vec<(&Vec<Vec3>, &Vec<u32>)> = m
+            .edges
+            .iter()
+            .zip(&m.edge_faces)
+            .filter(|(poly, _)| poly.len() >= 2 && poly.iter().all(|q| start.height(*q).abs() <= flat_tol))
+            .collect();
+        for s in edges {
+            let dist = |poly: &[Vec3]| poly.windows(2).map(|w| s.at.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
+            let ds: Vec<f64> = start_edges.iter().map(|(poly, _)| dist(poly)).collect();
+            let nearest = ds.iter().copied().fold(f64::INFINITY, f64::min);
+            for ((_, fs), d) in start_edges.iter().zip(&ds) {
+                if *d <= near && *d <= nearest + flat_tol {
                     for f in fs.iter().map(|f| *f as usize).filter(|f| !cap(*f)) {
                         if let Some(set) = swept.get_mut(f) {
                             set.insert(s.piece);

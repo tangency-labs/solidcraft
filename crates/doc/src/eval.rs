@@ -3226,7 +3226,8 @@ pub fn edge_refs(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) 
 }
 
 /// Persistent names of the edges picked at `pts`, each on the body it lies on (see
-/// [`picked_bodies`]).
+/// [`picked_bodies`]): of the edge a blend takes at each pick (at a vertex where a seam meets a
+/// rim, the rim), else of the nearest edge.
 pub fn edge_names_for(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Vec3]) -> Vec<String> {
     let Some(on) = picked_bodies(st, body, pts) else { return Vec::new() };
     let mut out = vec![String::new(); pts.len()];
@@ -3240,7 +3241,14 @@ pub fn edge_names_for(st: &ModelState, body: &Option<crate::BodyName>, pts: &[Ve
         // The body's names are worked out once for all its picks.
         let idx: Vec<usize> = on.iter().enumerate().filter(|(_, t)| **t == ti).map(|(i, _)| i).collect();
         let at: Vec<Vec3> = idx.iter().filter_map(|i| pts.get(*i).copied()).collect();
-        for (i, n) in idx.into_iter().zip(crate::naming::edge_names_at(b, &at)) {
+        let names = match kernel::blend_edges(&b.body, &at) {
+            Ok(edges) => {
+                let all = crate::naming::edge_names(b);
+                edges.iter().map(|e| all.get(*e).cloned().unwrap_or_default()).collect()
+            }
+            Err(_) => crate::naming::edge_names_at(b, &at),
+        };
+        for (i, n) in idx.into_iter().zip(names) {
             if let Some(slot) = out.get_mut(i) {
                 *slot = n;
             }
