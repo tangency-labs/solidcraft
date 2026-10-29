@@ -201,10 +201,10 @@ mod tests {
     }
 
     /// A revolved face: the cone frustum swept by the line from radius 5 at z = 0 to radius 10
-    /// at z = −10 (slant √125), its first face (angles 0…½), trimmed by the plane z = −8 + y/2.
+    /// at z = −10 (slant √125), one face over angles 0…1, trimmed by the plane z = −8 + y/2.
     /// The cut reaches lowest (profile parameter 0.8) at angle 0, so the face's own span is
-    /// angles 0…½ by parameters 0…0.8, restored with arcs about the axis and straight sides:
-    /// ½ · √125 · ∫₀^0.8 (5 + 5t) dt = ½ · √125 · 5.6.
+    /// angles 0…1 by parameters 0…0.8, restored with arcs about the axis and straight sides:
+    /// 1 · √125 · ∫₀^0.8 (5 + 5t) dt = √125 · 5.6.
     #[test]
     fn a_trimmed_cone_face_is_restored_to_its_span() {
         let line = vec![Seg2::Line { a: Vec2::new(5.0, 0.0), b: Vec2::new(10.0, 10.0) }];
@@ -214,7 +214,7 @@ mod tests {
         let cut = crate::trim(&sheet, &tool, Vec3::new(5.0 * c, 5.0 * s, 0.0)).unwrap();
         let face = face_at(&cut, Vec3::new(5.5 * c, 5.5 * s, -1.0));
         let restored = untrim(&cut, face, UntrimHoles::All, true, false).unwrap();
-        let want = 0.5 * 125f64.sqrt() * 5.6;
+        let want = 125f64.sqrt() * 5.6;
         let a = measure(&restored).unwrap().area;
         assert!(rel(a, want) < 1e-3, "{a} vs {want}"); // (measured on meshes)
         let bb = measure(&restored).unwrap().bbox;
