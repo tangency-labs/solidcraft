@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "the combs of a sketch circle and a line",
+ "source": "analytic",
+ "method": "circle r 7: curvature 1/7 everywhere, radius 7; a line: straight, no radius",
+ "results": [
+  {
+   "command": 4,
+   "pointer": "/combs/0/min_radius",
+   "value": 7.0
+  },
+  {
+   "command": 4,
+   "pointer": "/combs/0/max_curvature",
+   "value": 0.14285714285714285
+  },
+  {
+   "command": 4,
+   "pointer": "/combs/1/min_radius",
+   "value": null
+  },
+  {
+   "command": 4,
+   "pointer": "/combs/1/max_curvature",
+   "value": 0.0
+  }
+ ]
+}

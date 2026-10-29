@@ -1,0 +1,18 @@
+{
+ "sources": [],
+ "what": "the comb along a cylinder's top edge",
+ "source": "analytic",
+ "method": "a cylinder r 5 on (60,0,0): its top edge is a circle of r 5, curvature 1/5",
+ "results": [
+  {
+   "command": 1,
+   "pointer": "/combs/0/min_radius",
+   "value": 5.0
+  },
+  {
+   "command": 1,
+   "pointer": "/combs/0/max_curvature",
+   "value": 0.2
+  }
+ ]
+}
