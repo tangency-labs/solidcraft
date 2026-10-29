@@ -12,6 +12,6 @@
   <path d="M26.00 21.20L37.78 28.00L26.00 34.80L14.22 28.00Z" fill="#b9ddf8"/>
   <path d="M26.00 21.20L37.78 28.00L37.78 35.00L26.00 41.80L14.22 35.00L14.22 28.00Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
   <path d="M14.22 28.00L26.00 34.80L37.78 28.00M26.00 34.80L26.00 41.80" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
-  <path d="M53.0 9.0L53.0 28.0" fill="none" stroke="#236ead" stroke-width="3.2" stroke-linecap="round"/>
-  <path d="M47.5 26.0L53.0 33.0L58.5 26.0Z" fill="#236ead" stroke="#236ead" stroke-width="1.6" stroke-linejoin="round"/>
+  <path d="M53.0 9.0L53.0 28.0" fill="none" stroke="#236ead" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47.5 26.0L53.0 33.0L58.5 26.0Z" fill="#236ead" stroke="#236ead" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
 </svg>
