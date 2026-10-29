@@ -1409,32 +1409,53 @@ impl Cone {
         hv: usize,
         flags: EvaluateFlags,
     ) -> Result<Vec<Vec3>> {
+        let rows = self.evaluate_rows(k, uv, hu, hv, flags)?;
+        let mut d = Vec::with_capacity((hu + 1) * (hv + 1));
+        for row in rows {
+            d.extend(row);
+        }
+        Ok(d)
+    }
+
+    /// [`Self::evaluate`] as `D[i][j]` rows: exactly `hu + 1` rows of `hv + 1` entries
+    /// (the base evaluation's rows, zero-padded), so a caller wanting rows does not
+    /// flatten and re-split them.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::evaluate`].
+    pub fn evaluate_rows(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        hu: usize,
+        hv: usize,
+        flags: EvaluateFlags,
+    ) -> Result<Vec<Vec<Vec3>>> {
         // when asked for derivatives - pass the call along to base class (which
         // rejects orders above NL_MAXDER before anything is allocated here)
         let mut d = if hu > 0 || hv > 0 {
             match self.rev.base.evaluate(uv, hu, hv, flags) {
-                Ok(rows) => {
-                    let mut d = vec![Vec3::ZERO; (hu + 1) * (hv + 1)];
-                    for (i, row) in rows.iter().enumerate().take(hu + 1) {
-                        for (j, v) in row.iter().enumerate().take(hv + 1) {
-                            if let Some(slot) = d.get_mut(i * (hv + 1) + j) {
-                                *slot = *v;
-                            }
-                        }
+                Ok(mut rows) => {
+                    rows.truncate(hu + 1);
+                    rows.resize_with(hu + 1, Vec::new);
+                    for row in &mut rows {
+                        row.truncate(hv + 1);
+                        row.resize(hv + 1, Vec3::ZERO);
                     }
-                    d
+                    rows
                 }
                 Err(e) if e.is_unported() => return Err(e),
                 Err(_) => return Err(SolidError::sm_err(OP_EVAL)),
             }
         } else {
-            vec![Vec3::ZERO]
+            vec![vec![Vec3::ZERO]]
         };
 
         // use the step position for tighter tolerances (statuses only select it)
         if let Some(step_uv) = ignored(self.convert_uv_from_nurbs_to_step(k, uv))? {
             if let Some(p) = ignored(self.evaluate_step_point(step_uv))? {
-                if let Some(slot) = d.first_mut() {
+                if let Some(slot) = d.first_mut().and_then(|row| row.first_mut()) {
                     *slot = p;
                 }
             }

@@ -1801,11 +1801,7 @@ impl Surface {
                 s.evaluate(uv, highest_u_deriv, highest_v_deriv, flags.only_upper_half)
             }
             // Preserve the cone's analytic position correction and inherited NURB derivatives.
-            SurfaceKind::Cone(s) => Ok(s
-                .evaluate(k, uv, highest_u_deriv, highest_v_deriv, flags)?
-                .chunks(highest_v_deriv + 1)
-                .map(<[Vec3]>::to_vec)
-                .collect()),
+            SurfaceKind::Cone(s) => s.evaluate_rows(k, uv, highest_u_deriv, highest_v_deriv, flags),
             SurfaceKind::SurfOfRevolution(s) => {
                 s.base()
                     .evaluate(uv, highest_u_deriv, highest_v_deriv, flags)

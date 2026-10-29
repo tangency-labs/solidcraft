@@ -876,6 +876,30 @@ impl Surface {
         udr: usize,
         vdr: usize,
     ) -> Result<Vec<Vec<Vec3>>> {
+        let (pu, qu) = self.degrees();
+        // first derivatives (the common order): the stack evaluation, the same
+        // products in the same order, so the same bits
+        // (`first_derivs_into_matches_derivs_bit_for_bit`)
+        if udr == 1 && vdr == 1 && pu <= MAX_DEGREE && qu <= MAX_DEGREE {
+            let mut sd = [[Vec3::ZERO; 2]; 2];
+            self.first_derivs_into(u, v, ufl, vfl, upper, &mut sd)?;
+            let [d0, d1] = sd;
+            return Ok(vec![d0.to_vec(), d1.to_vec()]);
+        }
+        self.derivs_general(u, v, ufl, vfl, upper, udr, vdr)
+    }
+
+    /// [`Surface::derivs`] through the heap [`BasisDerivs`] table, for every order.
+    fn derivs_general(
+        &self,
+        u: f64,
+        v: f64,
+        ufl: Side,
+        vfl: Side,
+        upper: bool,
+        udr: usize,
+        vdr: usize,
+    ) -> Result<Vec<Vec<Vec3>>> {
         const OP: &str = "nurbs::srf_nurb::Surface::derivs";
         let (pu, qu) = self.degrees();
 
@@ -934,7 +958,7 @@ impl Surface {
         *sd = [[Vec3::ZERO; 2]; 2];
         if pu > MAX_DEGREE || qu > MAX_DEGREE {
             // (the degree error of `basis_derivs`)
-            let full = self.derivs(u, v, ufl, vfl, upper, 1, 1)?;
+            let full = self.derivs_general(u, v, ufl, vfl, upper, 1, 1)?;
             for (out, row) in sd.iter_mut().zip(&full) {
                 for (o, x) in out.iter_mut().zip(row) {
                     *o = *x;
@@ -2394,7 +2418,9 @@ mod tests {
                     for &ufl in &sides {
                         for &vfl in &sides {
                             for upper in [false, true] {
-                                let full = s.derivs(u, v, ufl, vfl, upper, 1, 1);
+                                // against the general (BasisDerivs) path, which `derivs`
+                                // no longer takes for first derivatives
+                                let full = s.derivs_general(u, v, ufl, vfl, upper, 1, 1);
                                 let mut block = [[Vec3::new(9.0, 9.0, 9.0); 2]; 2];
                                 let r = s.first_derivs_into(u, v, ufl, vfl, upper, &mut block);
                                 match full {
