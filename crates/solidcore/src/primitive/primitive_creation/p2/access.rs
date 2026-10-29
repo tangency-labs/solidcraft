@@ -14,11 +14,15 @@
 
 use crate::curve::composite_curve::OffsetMapAttribute;
 use crate::error::{Result, SolidError};
+use crate::geom::extent2d::Extent2d;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::primitive::primitive_creation::p3::PrimitiveAccess;
+use crate::surface::surface::Surface;
 use crate::sweep::topology_sweep::access::FaceRef;
 use crate::topology::brep::p10::TrimType;
+use crate::topology::brep::p7::FaceCurvesInput;
 use crate::topology::{BrepId, FaceId};
 
 /// Topology adapters used by the p2 primitives, on top of [`PrimitiveAccess`].
@@ -99,6 +103,38 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
                 let mut marks = crate::topology::topology_traverser::Marks::default();
                 brep_p3::delete_face(k, b, env, &mut marks, face.1, options).map(drop)
             })
+        })
+    }
+    /// Make a face on `surface` (over `domain`) from one or more loops of 3D curves
+    /// with their UV curves (`SmBrep::MakeFaceWithCurves(NULL, loops, &3d, &uv,
+    /// orientations, no points, surface, domain, orientation, ...)`), returning the new
+    /// face. Implementations call `topology::brep::p7::make_face_with_curves` on the
+    /// B-rep with its face identities and notification records.
+    fn face_with_curves(
+        &mut self,
+        brep: BrepId,
+        curves: FaceCurvesInput,
+        surface: Surface,
+        domain: Extent2d,
+        orientation: OrientType,
+    ) -> Result<Option<FaceId>>
+    where
+        Self: Sized,
+    {
+        self.with_brep_mut(brep, |k, b, this_face, env| {
+            crate::topology::brep::p7::make_face_with_curves(
+                k,
+                b,
+                None,
+                curves,
+                surface,
+                &domain,
+                orientation,
+                None,
+                this_face,
+                env,
+            )
+            .map(|made| made.face)
         })
     }
     /// Glue coincident boundary topology of the B-rep's faces within `tolerance`

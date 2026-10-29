@@ -17,6 +17,7 @@
 //! | [`create_curve_sweep_from_faces`]            | `SmApiCreateCurveSweepFromFaces`               |
 //! | [`create_curve_sweep_from_edges`]            | `SmApiCreateCurveSweepFromEdges`               |
 //! | [`create_taper_extrude`]                     | `SmApiCreateTaperExtrude`                      |
+//! | [`create_taper_extrude_with_corner`], [`TaperExtrude`] | `SmApiCreateTaperExtrude` (fork: `eCorner`, `pOptRefusal`, `pOptRefusedCorner`) |
 //! | [`create_linear_sweep_with_repetitions`]     | `SmApiCreateLinearSweepWithRepetitions`        |
 //! | [`create_rotational_sweep_with_repetitions`] | `SmApiCreateRotationalSweepWithRepetitions`    |
 //! | `selection_is_owned_by` (private)            | `smApiSweepSelectionIsOwnedBy` (static template) |
@@ -98,6 +99,22 @@ const OP_NON_MANIFOLD: &str = "sweep::api_brep::non_manifold_sweep";
 /// How the gaps between offset profile curves are filled by a draft sweep or taper
 /// extrusion (`SmOffsetCornerType`).
 pub use crate::curve::composite_curve::OffsetCornerType;
+
+/// Why a draft corner was refused, and where (`SmTaperCornerRefusal`,
+/// `pOptRefusedCorner`; SolidCraft change).
+pub use crate::primitive::primitive_creation::p2::{CornerRefusal, TaperCornerRefusal};
+
+/// The result of [`create_taper_extrude_with_corner`]: the solid, or the corner the
+/// draft could not close (the fork's `SM_ERR_INVALID_INPUT` with `pOptRefusal` set;
+/// no B-rep is returned then).
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)] // returned once, by value, like the `Brep` of `create_taper_extrude`
+pub enum TaperExtrude {
+    /// `rpResult`: the drafted solid.
+    Solid(Brep),
+    /// `pOptRefusal` and `pOptRefusedCorner`: the refused corner.
+    Refused(CornerRefusal),
+}
 
 /// A swept solid and its faces (the outputs of the curve sweeps).
 #[derive(Debug, Clone, Default)]
@@ -498,9 +515,10 @@ pub fn create_curve_sweep_from_edges(
 ///
 /// # Errors
 ///
-/// `InvalidInput` for no curves or a `None` curve; the error of a failing curve
-/// copy; [`SolidError::Unported`] otherwise
-/// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
+/// `InvalidInput` for no curves or a `None` curve, or for a corner refused under
+/// `fixes.taper_tangent_corner_planes` (WR-521; [`create_taper_extrude_with_corner`]
+/// reports why and where); the error of a failing curve copy; [`SolidError::Unported`]
+/// otherwise (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_taper_extrude(
     k: &mut Kernel,
     curves: &[Option<&Curve>],
@@ -509,6 +527,48 @@ pub fn create_taper_extrude(
     end_caps: i32,
     fillet_corner: bool,
 ) -> Result<Brep> {
+    let corner = if fillet_corner {
+        OffsetCornerType::FilletCorner
+    } else {
+        OffsetCornerType::LinearExtension
+    };
+    match create_taper_extrude_with_corner(k, curves, height, draft_angle_deg, end_caps, corner)? {
+        TaperExtrude::Solid(brep) => Ok(brep),
+        TaperExtrude::Refused(_) => {
+            Err(SolidError::invalid_input(OP_TAPER, "draft corner refused"))
+        }
+    }
+}
+
+/// [`create_taper_extrude`] with the corner rule as an argument and a refused corner
+/// as part of the result (SolidCraft change, tangency-labs/smlib 54148db: the fork's
+/// `SmApiCreateTaperExtrude(..., eCorner, rpResult, pOptRefusal, pOptRefusedCorner)`).
+///
+/// - [`OffsetCornerType::LinearExtension`]: tangent lines across a corner's gap; with
+///   `fixes.taper_tangent_corner_planes` (WR-521, off by default) a profile of lines
+///   and circular arcs with a sharp corner continues its walls as their tangent planes
+///   instead (two lines meet at a corner edge) and may be refused.
+/// - [`OffsetCornerType::FilletCorner`]: an arc about the corner.
+/// - [`OffsetCornerType::CurveExtension`]: each wall continues as itself (a line's
+///   plane, an arc's cone) to meet its neighbour along their exact seam; a profile with
+///   a curve that is neither a line nor an arc is refused at a sharp corner
+///   ([`TaperCornerRefusal::NotExact`]), and so is a corner whose walls do not meet or
+///   a wall that closes before the far end. Without a sharp corner it is
+///   `LinearExtension`.
+/// - [`OffsetCornerType::LinearChamfer`]: as the C++ passes it on to the offsetter.
+///
+/// # Errors
+///
+/// As [`create_taper_extrude`], except a refusal, which is
+/// [`TaperExtrude::Refused`].
+pub fn create_taper_extrude_with_corner(
+    k: &mut Kernel,
+    curves: &[Option<&Curve>],
+    height: f64,
+    draft_angle_deg: f64,
+    end_caps: i32,
+    corner: OffsetCornerType,
+) -> Result<TaperExtrude> {
     if curves.is_empty() {
         return Err(SolidError::invalid_input(OP_TAPER, "no curves"));
     }
@@ -516,16 +576,9 @@ pub fn create_taper_extrude(
     // Sweep copies of the inputs: CreateTaperExtrude consumes the curves.
     let curve_copies = copy_curves_for_consuming_sweep(k, curves)?;
 
-    let normal = Vec3::new(0.0, 0.0, 0.0);
-    let corner = if fillet_corner {
-        OffsetCornerType::FilletCorner
-    } else {
-        OffsetCornerType::LinearExtension
-    };
-
-    let mut normal = normal;
-    build(k, |pc, model| {
-        pc.create_taper_extrude(
+    let mut normal = Vec3::new(0.0, 0.0, 0.0);
+    let (mut brep, refusal) = PrimitiveModel::build_new(k, |pc, model| {
+        pc.create_taper_extrude_with_refusal(
             model,
             PrimitiveModel::MAIN,
             curve_copies,
@@ -535,7 +588,13 @@ pub fn create_taper_extrude(
             &mut normal,
             corner,
         )
-    })
+    })?;
+    if let Some(refusal) = refusal {
+        return Ok(TaperExtrude::Refused(refusal));
+    }
+    // (not upstream: the port's cached topology fields, true for the caller)
+    brep.refresh_cached_topology();
+    Ok(TaperExtrude::Solid(brep))
 }
 
 /// The solid swept by `curves_to_sweep` along `sweep_dir` over `sweep_dist`,

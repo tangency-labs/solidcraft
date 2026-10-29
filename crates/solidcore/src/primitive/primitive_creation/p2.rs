@@ -35,9 +35,11 @@ mod planar_path;
 mod rotational;
 mod skin;
 mod taper;
+mod taper_walls;
 
 pub use super::p1::PrimitiveCreation;
 pub use access::PrimitiveCreationAccess;
+pub use taper_walls::{CornerRefusal, TaperCornerRefusal};
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;

@@ -886,6 +886,16 @@ impl CompositeCurve {
     ) -> Result<TrimmedOffsets> {
         let mut p = *params;
 
+        // SolidCraft change (tangency-labs/smlib 54148db): corners that keep the curves'
+        // curvature are made by CreateTaperExtrude only so far; here they would get no
+        // corner curves at all.
+        if p.corner == OffsetCornerType::CurveExtension {
+            return Err(SolidError::invalid_input(
+                OP_OFFSETS,
+                "SM_OC_CURVE_EXTENSION is for CreateTaperExtrude only",
+            ));
+        }
+
         // Offset distance must be positive.
         let mut flip = false;
         if p.offset_distance < 0.0 {

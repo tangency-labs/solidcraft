@@ -5,6 +5,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`PrimitiveCreation::create_taper_extrude`] | `CreateTaperExtrude` |
+//! | [`PrimitiveCreation::create_taper_extrude_with_refusal`] | `CreateTaperExtrude` (fork: `pOptRefusal`, `pOptRefusedCorner`) |
 //!
 //! Deviations: the input curves are consumed, as upstream on success. Upstream's
 //! curve objects are shared between the split input list, the composite and the
@@ -17,8 +18,16 @@
 //! map attributes travel with their curves through the chain and gap steps by
 //! their input indices, and sit in the access's attribute store on faces. An
 //! analytic offset continues as its B-spline after its ruled surface is built.
-//! Ignored statuses keep their outputs. No recursion.
+//! Ignored statuses keep their outputs. No recursion. SolidCraft changes
+//! (tangency-labs/smlib 54148db, e8f23e0, in `taper_walls`):
+//! [`OffsetCornerType::CurveExtension`] and, under opt-in
+//! `fixes.taper_tangent_corner_planes` (WR-521), linear-extension corners of a profile
+//! of lines and arcs build their walls exactly and may refuse a corner; the refusal
+//! is a return value, not out-params.
 
+use super::taper_walls::{
+    curvature_keeping_walls, has_corner, lines_and_arcs, CornerRefusal, WallsInput,
+};
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::composite_curve::{
     CompositeCurve, OffsetCornerType, OffsetDirection, OffsetMapAttribute, OffsetParams,
@@ -142,7 +151,10 @@ impl PrimitiveCreation {
     /// A null pointer for no target region; `InvalidInput` for a curve that is not
     /// a B-spline; `SM_ERR` when the curves form no composite or the surface
     /// intersection fallback finds no offsets; those of the chaining, merge and
-    /// topology steps that upstream does not ignore.
+    /// topology steps that upstream does not ignore; `InvalidInput` for a corner
+    /// refused under [`OffsetCornerType::CurveExtension`] or
+    /// `fixes.taper_tangent_corner_planes` (see
+    /// [`Self::create_taper_extrude_with_refusal`]).
     pub fn create_taper_extrude(
         &mut self,
         a: &mut impl PrimitiveCreationAccess,
@@ -154,6 +166,45 @@ impl PrimitiveCreation {
         normal: &mut Vec3,
         corner: OffsetCornerType,
     ) -> Result<()> {
+        match self.create_taper_extrude_with_refusal(
+            a,
+            brep,
+            curves,
+            height,
+            draft_angle_deg,
+            end_caps,
+            normal,
+            corner,
+        )? {
+            None => Ok(()),
+            Some(_) => Err(SolidError::invalid_input(OP, "draft corner refused")),
+        }
+    }
+
+    /// [`Self::create_taper_extrude`] reporting a refused corner: `Ok(Some(refusal))`
+    /// is the fork's `SM_ERR_INVALID_INPUT` with `pOptRefusal` and
+    /// `pOptRefusedCorner` set (SolidCraft change, tangency-labs/smlib 54148db): with
+    /// [`OffsetCornerType::CurveExtension`], or linear-extension corners under
+    /// `fixes.taper_tangent_corner_planes` (WR-521), a profile of lines and circular
+    /// arcs with a sharp corner gets walls that continue as themselves (or as their
+    /// tangent planes) to meet along their exact seams, and a corner they cannot
+    /// close is refused, the target left as it was. `CurveExtension` on a profile
+    /// without a sharp corner is `LinearExtension`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::create_taper_extrude`], except a refusal.
+    pub fn create_taper_extrude_with_refusal(
+        &mut self,
+        a: &mut impl PrimitiveCreationAccess,
+        brep: BrepId,
+        curves: Vec<Curve>,
+        height: f64,
+        draft_angle_deg: f64,
+        end_caps: i32,
+        normal: &mut Vec3,
+        corner: OffsetCornerType,
+    ) -> Result<Option<CornerRefusal>> {
         // init SmPrimitiveCreation memory
         self.init_entity_maps();
         if self.region().is_none() {
@@ -198,7 +249,7 @@ fn taper(
     end_caps: i32,
     normal: &mut Vec3,
     corner: OffsetCornerType,
-) -> Result<()> {
+) -> Result<Option<CornerRefusal>> {
     a.set_editing(scratch, true)?;
 
     // Local tolerance uses: the B-rep's own tolerance (SmTol::GetZoneTol3d)
@@ -320,121 +371,168 @@ fn taper(
         missing_faces: false,
     };
 
-    // offset the composite curve - extend convex joints and intersect concave ones
-    let params = OffsetParams {
-        xsect_tol_3d: 2.0 * zone_tol,
-        approx_tol_3d: approx_tol,
-        plane_normal: *normal,
-        corner,
-        trim_results: true,
-        offset_distance: offset,
-        match_parameterization: false,
-    };
-    let trimmed = ignored(composite.create_trimmed_offsets(a.kernel(brep)?, direction, &params))?
-        .unwrap_or_default();
-
-    let rule_options = |surface_intersection| OffsetRuleOptions {
-        tolerance: zone_tol,
-        same_point_tolerance: same_point_tol,
-        offset,
-        movement,
-        surface_intersection,
-    };
+    // SolidCraft change (tangency-labs/smlib 54148db, e8f23e0): walls that keep their
+    // curvature at the corners. Without a sharp corner the three corner rules give the
+    // same walls, which the offset method builds. The tangent rule too, for lines and
+    // arcs (opt-in `fixes.taper_tangent_corner_planes`, WR-521): their walls continue
+    // exactly as their tangent planes. Other curves keep the offset method.
+    let mut corner = corner;
+    let tangent_rule = a.kernel(brep)?.fixes.taper_tangent_corner_planes
+        && corner == OffsetCornerType::LinearExtension;
+    let has_corner = (corner == OffsetCornerType::CurveExtension || tangent_rule)
+        && has_corner(a.kernel(brep)?, &composite, *normal);
+    let mut exact = false;
+    if has_corner && tangent_rule {
+        exact = lines_and_arcs(a.kernel(brep)?, &composite, &input, brep_tol)?;
+    }
+    let keep_curvature = has_corner && corner == OffsetCornerType::CurveExtension;
+    let tangent_planes = exact && corner == OffsetCornerType::LinearExtension;
+    if corner == OffsetCornerType::CurveExtension {
+        corner = OffsetCornerType::LinearExtension;
+    }
 
     let mut empty_offsets = false;
     let mut trim_curves: Vec<Curve> = Vec::new();
-    if trimmed.is_empty() {
-        state.missing_faces = true;
-        empty_offsets = true;
-    } else {
-        // reorder the trimmed offset curves back into a chain; their maps follow them
-        let (curves, mut maps): (Vec<_>, Vec<_>) = trimmed
-            .into_iter()
-            .map(|piece| (Some(piece.curve), piece.attribute))
-            .unzip();
-        let chained = fix_chain_curves_list(a.kernel(brep)?, curves, 2.0 * zone_tol, true)?;
-        let mut chain_maps: Vec<Option<OffsetMapAttribute>> = chained
-            .origin
-            .iter()
-            .map(|&i| maps.get_mut(i).and_then(Option::take))
-            .collect();
 
-        // move end points to close small gaps in the head to toe curve sequence
-        let fixed = crvs_fix_gaps(a.kernel(brep)?, chained.curves, 2.0 * zone_tol)?;
-        let fixed_maps: Vec<Option<OffsetMapAttribute>> = fixed
-            .chained
-            .origin
-            .iter()
-            .map(|&i| chain_maps.get_mut(i).and_then(Option::take))
-            .collect();
-        trim_curves = fixed.chained.curves;
-
-        // for every offset curve - find its original partner and build a ruled surface
-        for (curve, map) in trim_curves.iter_mut().zip(fixed_maps) {
-            let mut offset_curve = as_bspline(curve)
-                .ok_or_else(|| SolidError::invalid_input(OP, "offset is not a B-spline"))?;
-            let result = ruled(
-                a.kernel(brep)?,
-                &mut offset_curve,
-                map,
-                &mut state,
-                rule_options(false),
-            );
-            *curve = Curve::from(offset_curve);
-            match result {
-                Err(e) if e.is_unported() => return Err(e),
-                // no ruled surface: skip this offset curve
-                Err(_) => {}
-                Ok((surface, _)) => {
-                    // create a face from the ruled surface in the scratch B-rep
-                    let surface = Surface::from(surface);
-                    // (a B-spline surface just made: never lazy)
-                    let domain = surface.natural_uv_domain_if_built();
-                    let mut face = None;
-                    ignore_status(a.surface_face(scratch, surface, domain, &mut face))?;
-                }
-            }
-        }
-
-        // unmarried curves exist when the offset curve was completely trimmed away
-        if !state.missing_faces {
-            state.missing_faces = state.unmarried.iter().any(|&unpaired| unpaired);
-        }
-
-        // Stitch the potential result to get the topology
-        ignore_status(a.stitch_faces(scratch, brep_tol))?;
-
-        // Each face should be lamina along input curve and offset curve, manifold otherwise
-        for face in a.faces(scratch)? {
-            if state.missing_faces {
-                break;
-            }
-            state.missing_faces = a.has_consecutive_lamina_edges((scratch, face))?;
-        }
-    }
-
-    if state.missing_faces {
-        // redo with the surface intersection method
-        let surfaces = a.new_brep(brep)?;
-        let intersections = a.new_brep(brep)?;
-        let result = surface_intersection_method(
+    if keep_curvature || tangent_planes {
+        let walls = curvature_keeping_walls(
             a,
             brep,
-            [surfaces, intersections],
-            &mut composite,
-            &mut state,
-            direction,
-            params,
-            &rule_options(true),
-            brep_tol,
-            same_point_tol,
-        );
-        a.delete_brep(surfaces);
-        result?;
-    } else {
+            scratch,
+            &WallsInput {
+                tangent: tangent_planes,
+                composite: &composite,
+                inputs: &input,
+                normal: *normal,
+                height,
+                offset,
+                side: direction,
+                tol: brep_tol,
+            },
+        )?;
+        match walls {
+            Err(refusal) => return Ok(Some(refusal)),
+            Ok(far_curves) => trim_curves = far_curves,
+        }
+        a.stitch_faces(scratch, brep_tol)?;
         let faces = a.faces(scratch)?;
-        ignore_status(a.copy_faces_into(scratch, &faces, brep))?;
-    }
+        a.copy_faces_into(scratch, &faces, brep)?;
+    } else {
+        // offset the composite curve - extend convex joints and intersect concave ones
+        let params = OffsetParams {
+            xsect_tol_3d: 2.0 * zone_tol,
+            approx_tol_3d: approx_tol,
+            plane_normal: *normal,
+            corner,
+            trim_results: true,
+            offset_distance: offset,
+            match_parameterization: false,
+        };
+        let trimmed =
+            ignored(composite.create_trimmed_offsets(a.kernel(brep)?, direction, &params))?
+                .unwrap_or_default();
+
+        let rule_options = |surface_intersection| OffsetRuleOptions {
+            tolerance: zone_tol,
+            same_point_tolerance: same_point_tol,
+            offset,
+            movement,
+            surface_intersection,
+        };
+
+        if trimmed.is_empty() {
+            state.missing_faces = true;
+            empty_offsets = true;
+        } else {
+            // reorder the trimmed offset curves back into a chain; their maps follow them
+            let (curves, mut maps): (Vec<_>, Vec<_>) = trimmed
+                .into_iter()
+                .map(|piece| (Some(piece.curve), piece.attribute))
+                .unzip();
+            let chained = fix_chain_curves_list(a.kernel(brep)?, curves, 2.0 * zone_tol, true)?;
+            let mut chain_maps: Vec<Option<OffsetMapAttribute>> = chained
+                .origin
+                .iter()
+                .map(|&i| maps.get_mut(i).and_then(Option::take))
+                .collect();
+
+            // move end points to close small gaps in the head to toe curve sequence
+            let fixed = crvs_fix_gaps(a.kernel(brep)?, chained.curves, 2.0 * zone_tol)?;
+            let fixed_maps: Vec<Option<OffsetMapAttribute>> = fixed
+                .chained
+                .origin
+                .iter()
+                .map(|&i| chain_maps.get_mut(i).and_then(Option::take))
+                .collect();
+            trim_curves = fixed.chained.curves;
+
+            // for every offset curve - find its original partner and build a ruled surface
+            for (curve, map) in trim_curves.iter_mut().zip(fixed_maps) {
+                let mut offset_curve = as_bspline(curve)
+                    .ok_or_else(|| SolidError::invalid_input(OP, "offset is not a B-spline"))?;
+                let result = ruled(
+                    a.kernel(brep)?,
+                    &mut offset_curve,
+                    map,
+                    &mut state,
+                    rule_options(false),
+                );
+                *curve = Curve::from(offset_curve);
+                match result {
+                    Err(e) if e.is_unported() => return Err(e),
+                    // no ruled surface: skip this offset curve
+                    Err(_) => {}
+                    Ok((surface, _)) => {
+                        // create a face from the ruled surface in the scratch B-rep
+                        let surface = Surface::from(surface);
+                        // (a B-spline surface just made: never lazy)
+                        let domain = surface.natural_uv_domain_if_built();
+                        let mut face = None;
+                        ignore_status(a.surface_face(scratch, surface, domain, &mut face))?;
+                    }
+                }
+            }
+
+            // unmarried curves exist when the offset curve was completely trimmed away
+            if !state.missing_faces {
+                state.missing_faces = state.unmarried.iter().any(|&unpaired| unpaired);
+            }
+
+            // Stitch the potential result to get the topology
+            ignore_status(a.stitch_faces(scratch, brep_tol))?;
+
+            // Each face should be lamina along input curve and offset curve, manifold otherwise
+            for face in a.faces(scratch)? {
+                if state.missing_faces {
+                    break;
+                }
+                state.missing_faces = a.has_consecutive_lamina_edges((scratch, face))?;
+            }
+        }
+
+        if state.missing_faces {
+            // redo with the surface intersection method
+            let surfaces = a.new_brep(brep)?;
+            let intersections = a.new_brep(brep)?;
+            let result = surface_intersection_method(
+                a,
+                brep,
+                [surfaces, intersections],
+                &mut composite,
+                &mut state,
+                direction,
+                params,
+                &rule_options(true),
+                brep_tol,
+                same_point_tol,
+            );
+            a.delete_brep(surfaces);
+            result?;
+        } else {
+            let faces = a.faces(scratch)?;
+            ignore_status(a.copy_faces_into(scratch, &faces, brep))?;
+        }
+    } // end the offset method
 
     // Optional end caps: cap construction fails for curves that are not planar and closed
     let region = (brep, a.infinite_region(brep)?);
@@ -472,7 +570,8 @@ fn taper(
 
     // clean up the Brep
     ignore_status(a.shrink_geometry(brep))?;
-    ignore_status(a.stitch_and_orient(brep))
+    ignore_status(a.stitch_and_orient(brep))?;
+    Ok(None)
 }
 
 /// The missing-face fallback: ruled surfaces of the untrimmed offsets in
