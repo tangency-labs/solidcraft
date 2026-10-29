@@ -33,11 +33,13 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+use solidcore::nurbs::crv_basic::Curve as NurbCurve;
+use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_ellipse_p1::{self as ffi};
 
-use crate::case::CaseContext;
+use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
@@ -162,6 +164,22 @@ enum OtherJ {
     BsplineOfA,
 }
 
+/// The curve tested by `SmCircle::IsNurbCurveCircle`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SourceJ {
+    /// A itself.
+    A,
+    /// A plain B-spline with A's NURB.
+    BsplineOfA,
+    /// A raw 3D NURB: homogeneous `x y z w` points (`w` = `NOW` when non-rational).
+    Raw {
+        degree: usize,
+        cpts: Vec<[f64; 4]>,
+        knots: Vec<f64>,
+    },
+}
+
 fn full() -> [f64; 2] {
     [0.0, 1.0]
 }
@@ -239,6 +257,11 @@ enum OpJ {
         post: bool,
     },
     IsArc,
+    IsNurbCircle {
+        source: SourceJ,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scale: Option<f64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,6 +445,22 @@ fn ffi_op(op: &OpJ) -> ffi::Op {
         },
         OpJ::Notify { post } => F::Notify { post: *post },
         OpJ::IsArc => F::IsArc,
+        OpJ::IsNurbCircle { source, scale } => F::IsNurbCircle {
+            source: match source {
+                SourceJ::A => ffi::NurbSource::A,
+                SourceJ::BsplineOfA => ffi::NurbSource::BSplineOfA,
+                SourceJ::Raw {
+                    degree,
+                    cpts,
+                    knots,
+                } => ffi::NurbSource::Raw {
+                    degree: *degree,
+                    cpts: cpts.clone(),
+                    knots: knots.clone(),
+                },
+            },
+            scale: *scale,
+        },
     }
 }
 
@@ -975,6 +1014,36 @@ fn run_op(k: &Kernel, a: &mut Ellipse, op: &OpJ, o: &mut Vec<f64>) -> Result<(),
                 o.extend([r, s0, s1]);
             }
         }
+        OpJ::IsNurbCircle { source, scale } => {
+            let test = match source {
+                SourceJ::A => Curve::from(a.clone()),
+                SourceJ::BsplineOfA => match a.base().gw_nurb() {
+                    Some(n) => Curve::from(BSplineCurve::from_gw_nurb(3, n)),
+                    None => return Err(harness("A without NURB").into()),
+                },
+                SourceJ::Raw {
+                    degree,
+                    cpts,
+                    knots,
+                } => {
+                    let pw = cpts
+                        .iter()
+                        .map(|&[x, y, z, w]| CPoint::new(x, y, z, w))
+                        .collect();
+                    let cur = NurbCurve::new(pw, *degree, knots.clone())
+                        .map_err(|e| harness(format!("raw NURB: {e}")))?;
+                    Curve::from(BSplineCurve::from_nurb(cur, 3, false))
+                }
+            };
+            if let Some(got) = st(o, Ellipse::is_nurb_curve_circle(k, &test, *scale))? {
+                o.push(b(got.is_some()));
+                if let Some(c) = got {
+                    o.push(b(c.kind_of(CIRCLE_TYPE)));
+                    o.push(c.radius());
+                    put_state(o, &c);
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1001,6 +1070,7 @@ fn op_code(op: &OpJ) -> f64 {
         OpJ::EditParam { .. } => 18.0,
         OpJ::Notify { .. } => 19.0,
         OpJ::IsArc => 20.0,
+        OpJ::IsNurbCircle { .. } => 21.0,
     }
 }
 
@@ -1484,6 +1554,442 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
     Some(Inputs { build: bj, ops })
 }
 
+// ---- SmCircle::IsNurbCurveCircle cases ----------------------------------------------
+
+/// Generated `IsNurbCurveCircle` cases (inline, fixed seed, independent of `--seeds`
+/// so that the main generated set keeps its seeds).
+const NURB_CIRCLE_GENERATED: usize = 400;
+/// Seed of the generated `IsNurbCurveCircle` cases.
+const NURB_CIRCLE_SEED: u64 = 0x1432_0c1c;
+
+fn inc(source: SourceJ, scale: Option<f64>) -> OpJ {
+    OpJ::IsNurbCircle { source, scale }
+}
+
+fn unit_frame() -> [[f64; 3]; 3] {
+    [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+}
+
+/// The unit canonical circle: the host of raw-NURB ops (and the issue's repro).
+fn host() -> BuildJ {
+    BuildJ::CircleCanonical {
+        frame: unit_frame(),
+        r: 1.0,
+        interval: None,
+        inside_out: None,
+    }
+}
+
+fn circle_j(c: [f64; 3], x: [f64; 3], y: [f64; 3], domain: [f64; 2], r: f64) -> BuildJ {
+    BuildJ::Circle(CircleJ {
+        c,
+        x,
+        y,
+        domain,
+        r,
+        dim: 3,
+        inside_out: false,
+        nurb_from: None,
+    })
+}
+
+fn ellipse_j(c: [f64; 3], domain: [f64; 2], radii: [f64; 2]) -> BuildJ {
+    BuildJ::Ellipse(EllipseJ {
+        c,
+        x: [1.0, 0.0, 0.0],
+        y: [0.0, 1.0, 0.0],
+        domain,
+        radii,
+        dim: 3,
+        inside_out: false,
+        nurb_from: None,
+    })
+}
+
+fn add3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+fn scale3(a: [f64; 3], s: f64) -> [f64; 3] {
+    [a[0] * s, a[1] * s, a[2] * s]
+}
+
+/// An orthonormal pair spanning a plane (from two directions, Gram-Schmidt).
+fn plane(a: [f64; 3], b: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+    let u = v3(a).unitize_or_z();
+    let bv = v3(b);
+    let mut w = Vec3::new(
+        bv.x - u.x * u.dot(bv),
+        bv.y - u.y * u.dot(bv),
+        bv.z - u.z * u.dot(bv),
+    );
+    if w.length() < 1e-3 {
+        w = u.cross(Vec3::new(0.3, -0.5, 0.8));
+    }
+    let w = w.unitize_or_z();
+    ([u.x, u.y, u.z], [w.x, w.y, w.z])
+}
+
+/// The rational quadratic NURB of the arc of radius `r` about `c` in the plane of
+/// the orthonormal `u`, `v` from angle `a0` to `a1` (radians) in `spans` equal spans
+/// (each below half a turn), weights times `wscale`, over `[t0, t0 + len]`.
+#[allow(clippy::too_many_arguments)]
+fn raw_arc(
+    c: [f64; 3],
+    (u, v): ([f64; 3], [f64; 3]),
+    r: f64,
+    [a0, a1]: [f64; 2],
+    spans: usize,
+    wscale: f64,
+    [t0, len]: [f64; 2],
+) -> SourceJ {
+    let d = (a1 - a0) / spans as f64;
+    let pt = |a: f64, rr: f64| add3(c, add3(scale3(u, rr * a.cos()), scale3(v, rr * a.sin())));
+    let hw = |p: [f64; 3], w: f64| {
+        let w = w * wscale;
+        [p[0] * w, p[1] * w, p[2] * w, w]
+    };
+    let w1 = (0.5 * d).cos();
+    let mut cpts = vec![hw(pt(a0, r), 1.0)];
+    let mut knots = vec![t0; 3];
+    for i in 0..spans {
+        let s0 = a0 + d * i as f64;
+        cpts.push(hw(pt(s0 + 0.5 * d, r / w1), w1));
+        cpts.push(hw(pt(s0 + d, r), 1.0));
+        let t = t0 + len * (i + 1) as f64 / spans as f64;
+        if i + 1 < spans {
+            knots.extend([t, t]);
+        }
+    }
+    knots.extend([t0 + len; 3]);
+    SourceJ::Raw {
+        degree: 2,
+        cpts,
+        knots,
+    }
+}
+
+/// `raw_arc` in the XY plane about the origin over `[0, 1]`.
+fn raw_xy(r: f64, angles: [f64; 2], spans: usize, wscale: f64) -> SourceJ {
+    raw_arc(
+        [0.0; 3],
+        ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        r,
+        angles,
+        spans,
+        wscale,
+        [0.0, 1.0],
+    )
+}
+
+/// `src` with control point `i` changed by `f` (homogeneous).
+fn tweak(src: SourceJ, i: usize, f: impl Fn([f64; 4]) -> [f64; 4]) -> SourceJ {
+    match src {
+        SourceJ::Raw {
+            degree,
+            mut cpts,
+            knots,
+        } => {
+            if let Some(p) = cpts.get_mut(i) {
+                *p = f(*p);
+            }
+            SourceJ::Raw {
+                degree,
+                cpts,
+                knots,
+            }
+        }
+        other => other,
+    }
+}
+
+/// The weight of control point `i` times `1 + e` (the Euclidean point kept).
+fn tweak_weight(src: SourceJ, i: usize, e: f64) -> SourceJ {
+    tweak(src, i, |[x, y, z, w]| {
+        let s = 1.0 + e;
+        [x * s, y * s, z * s, w * s]
+    })
+}
+
+/// Control point `i` moved by `d` (Euclidean, the weight kept).
+fn tweak_point(src: SourceJ, i: usize, d: [f64; 3]) -> SourceJ {
+    tweak(src, i, |[x, y, z, w]| {
+        [x + d[0] * w, y + d[1] * w, z + d[2] * w, w]
+    })
+}
+
+fn nurb_circle_fixed() -> Vec<(String, Inputs)> {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let mut v: Vec<(String, Inputs)> = Vec::new();
+    let mut push = |name: &str, build: BuildJ, ops: Vec<OpJ>| {
+        v.push((format!("inc_{name}"), Inputs { build, ops }));
+    };
+    let both = |scale: Option<f64>| {
+        vec![
+            inc(SourceJ::BsplineOfA, scale),
+            inc(SourceJ::A, scale),
+        ]
+    };
+    // #1432: the NURB form of the full unit canonical circle as a plain B-spline
+    push("issue_unit_circle", host(), both(None));
+    push(
+        "unit_circle_scales",
+        host(),
+        [0.0, 1e-3, 10.0, 1e4, -1.0]
+            .iter()
+            .map(|&s| inc(SourceJ::BsplineOfA, Some(s)))
+            .collect(),
+    );
+    // arcs of every span count
+    let tilted = plane([0.3, -0.4, 0.8], [0.9, 0.1, -0.2]);
+    for (i, dom) in [
+        [0.0, 90.0],
+        [30.0, 200.0],
+        [-90.0, 45.0],
+        [0.0, 359.9],
+        [0.0, 1e-3],
+        [0.0, 180.0],
+        [-180.0, 180.0],
+        [100.0, 370.0],
+    ]
+    .iter()
+    .enumerate()
+    {
+        push(
+            &format!("circle_arc_{i}"),
+            circle_j([1.0, 2.0, 3.0], tilted.0, tilted.1, *dom, 2.5),
+            both(None),
+        );
+    }
+    // huge and tiny scales
+    for (i, (c, r)) in [
+        ([1e5, -1e5, 5e4], 1e5),
+        ([4e5, 0.0, 0.0], 5e5),
+        ([0.0; 3], 1e-5),
+        ([1.0, 1.0, 1.0], 1e-7),
+        ([1e3, 0.0, 0.0], 1e-6),
+        ([0.0; 3], 1e-9),
+    ]
+    .iter()
+    .enumerate()
+    {
+        push(
+            &format!("circle_scale_{i}"),
+            circle_j(*c, [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 360.0], *r),
+            both(None),
+        );
+        push(
+            &format!("circle_scale_arc_{i}"),
+            circle_j(*c, [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [10.0, 75.0], *r),
+            both(Some(1e-2)),
+        );
+    }
+    // SmEllipse (not SmCircle): equal radii is an arc, unequal is not
+    push(
+        "ellipse_equal_radii",
+        ellipse_j([1.0, 0.0, 0.0], [0.0, 360.0], [2.0, 2.0]),
+        both(None),
+    );
+    push(
+        "ellipse_equal_radii_arc",
+        ellipse_j([1.0, 0.0, 0.0], [10.0, 100.0], [2.0, 2.0]),
+        both(None),
+    );
+    push(
+        "ellipse_near_equal_radii",
+        ellipse_j([0.0; 3], [0.0, 360.0], [2.0, 2.0 * (1.0 + 1e-9)]),
+        both(None),
+    );
+    push(
+        "ellipse_unequal_radii",
+        ellipse_j([0.0; 3], [0.0, 360.0], [2.0, 1.0]),
+        both(None),
+    );
+    // raw NURBs
+    let raw = |name: &str, src: SourceJ, scale: Option<f64>| -> (String, Inputs) {
+        (
+            format!("inc_raw_{name}"),
+            Inputs {
+                build: host(),
+                ops: vec![inc(src, scale)],
+            },
+        )
+    };
+    let quarter = raw_xy(1.0, [0.0, FRAC_PI_2], 1, 1.0);
+    v.push(raw("quarter", quarter.clone(), None));
+    v.push(raw("quarter_weights_x2", raw_xy(1.0, [0.0, FRAC_PI_2], 1, 2.0), None));
+    v.push(raw("quarter_weights_x0.01", raw_xy(1.0, [0.0, FRAC_PI_2], 1, 0.01), None));
+    v.push(raw("semicircle_2span", raw_xy(3.0, [0.0, PI], 2, 1.0), None));
+    v.push(raw("full_4span", raw_xy(3.0, [0.0, 2.0 * PI], 4, 1.0), None));
+    v.push(raw("full_3span", raw_xy(0.5, [-PI, PI], 3, 1.0), None));
+    v.push(raw(
+        "tilted_120",
+        raw_arc([5.0, -2.0, 1.0], tilted, 0.75, [0.2, 0.2 + 2.0 * PI / 3.0], 1, 1.0, [2.0, 3.5]),
+        None,
+    ));
+    v.push(raw("wide_170", raw_xy(1.0, [0.0, 170f64.to_radians()], 1, 1.0), None));
+    v.push(raw("tiny_angle", raw_xy(1.0, [0.0, 1e-6], 1, 1.0), None));
+    for (i, e) in [1e-14, 1e-12, 1e-10, 1e-8, 1e-6, 1e-4].iter().enumerate() {
+        v.push(raw(&format!("weight_perturbed_{i}"), tweak(quarter.clone(), 1, |[x, y, z, w]| [x, y, z, w * (1.0 + e)]), None));
+        v.push(raw(&format!("point_perturbed_{i}"), tweak_point(quarter.clone(), 1, [*e, -*e, 0.0]), None));
+        v.push(raw(&format!("point_out_of_plane_{i}"), tweak_point(quarter.clone(), 2, [0.0, 0.0, *e]), None));
+        v.push(raw(&format!("end_weight_{i}"), tweak_weight(quarter.clone(), 0, *e), None));
+    }
+    // scaled tolerance at the limit: the same near-circle accepted or not by the scale
+    for (i, s) in [1e-3, 1.0, 1e3, 1e6].iter().enumerate() {
+        v.push(raw(&format!("tol_scale_{i}"), tweak_point(quarter.clone(), 1, [1e-9, 0.0, 0.0]), Some(*s)));
+    }
+    // not circles
+    v.push(raw("hyperbola_weight", tweak(quarter.clone(), 1, |[x, y, z, w]| [x / w * 2.0, y / w * 2.0, z / w * 2.0, 2.0]), None));
+    v.push(raw("ellipse_weight", tweak(quarter.clone(), 1, |[x, y, z, w]| [x / w * 0.3, y / w * 0.3, z / w * 0.3, 0.3]), None));
+    v.push(raw("unit_weights", tweak(quarter.clone(), 1, |[x, y, z, w]| [x / w, y / w, z / w, 1.0]), None));
+    v.push(raw(
+        "non_rational",
+        SourceJ::Raw {
+            degree: 2,
+            cpts: vec![[1.0, 0.0, 0.0, NOW], [1.0, 1.0, 0.0, NOW], [0.0, 1.0, 0.0, NOW]],
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        },
+        None,
+    ));
+    v.push(raw(
+        "rational_cubic",
+        SourceJ::Raw {
+            degree: 3,
+            cpts: vec![
+                [1.0, 0.0, 0.0, 1.0],
+                [0.5, 0.25, 0.0, 0.5],
+                [0.25, 0.5, 0.0, 0.5],
+                [0.0, 1.0, 0.0, 1.0],
+            ],
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        },
+        None,
+    ));
+    v.push(raw(
+        "rational_linear",
+        SourceJ::Raw {
+            degree: 1,
+            cpts: vec![[1.0, 0.0, 0.0, 1.0], [0.0, 0.5, 0.0, 0.5]],
+            knots: vec![0.0, 0.0, 1.0, 1.0],
+        },
+        None,
+    ));
+    v.push(raw(
+        "degenerate_point",
+        SourceJ::Raw {
+            degree: 2,
+            cpts: vec![[1.0, 2.0, 3.0, 1.0], [0.5, 1.0, 1.5, 0.5], [1.0, 2.0, 3.0, 1.0]],
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        },
+        None,
+    ));
+    v.push(raw("degenerate_tiny_radius", raw_xy(1e-12, [0.0, FRAC_PI_2], 1, 1.0), None));
+    v.push(raw("tiny_radius_1e-8", raw_xy(1e-8, [0.0, FRAC_PI_2], 1, 1.0), None));
+    v.push(raw("huge_radius", raw_xy(1e5, [0.0, FRAC_PI_2], 1, 1.0), None));
+    v.push(raw(
+        "huge_offset_small_radius",
+        raw_arc([5e5, 5e5, 0.0], ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), 1e-2, [0.0, 1.0], 1, 1.0, [0.0, 1.0]),
+        None,
+    ));
+    v.push(raw(
+        "collinear",
+        SourceJ::Raw {
+            degree: 2,
+            cpts: vec![[0.0, 0.0, 0.0, 1.0], [0.5, 0.0, 0.0, 0.5], [2.0, 0.0, 0.0, 1.0]],
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        },
+        None,
+    ));
+    v.push(raw(
+        "s_curve_2span",
+        tweak_point(raw_xy(1.0, [0.0, PI], 2, 1.0), 3, [0.0, 0.0, 0.5]),
+        None,
+    ));
+    v
+}
+
+/// A generated `IsNurbCurveCircle` case.
+fn gen_nurb_circle(rng: &mut Rng) -> Inputs {
+    use std::f64::consts::PI;
+    let scale = if rng.chance(0.25) {
+        Some(*rng.choose(&[0.0, 1e-3, 0.5, 2.0, 1e3, 1e6]).unwrap_or(&1.0))
+    } else {
+        None
+    };
+    let r = 10f64.powf(rng.uniform(-6.0, 5.0));
+    let c = scale3(rng.point3(-1.0, 1.0), 10f64.powf(rng.uniform(-3.0, 5.0)));
+    match rng.below(4) {
+        0 => {
+            let f = gen_frame(rng);
+            Inputs {
+                build: circle_j(c, f[1], f[2], gen_domain(rng), r),
+                ops: vec![inc(SourceJ::BsplineOfA, scale), inc(SourceJ::A, scale)],
+            }
+        }
+        1 => {
+            let rr = 2.0 * (1.0 + if rng.chance(0.5) { 10f64.powf(rng.uniform(-14.0, -2.0)) } else { 0.0 });
+            Inputs {
+                build: ellipse_j(c, gen_domain(rng), [2.0, rr]),
+                ops: vec![inc(SourceJ::A, scale), inc(SourceJ::BsplineOfA, scale)],
+            }
+        }
+        _ => {
+            let total = rng.uniform(1e-3, 2.0 * PI);
+            let min_spans = (total / (0.9 * PI)).ceil() as usize;
+            let spans = min_spans.max(1) + rng.below(2) as usize;
+            let a0 = rng.uniform(-PI, PI);
+            let pl = plane(gen_dir(rng), gen_dir(rng));
+            let wscale = 10f64.powf(rng.uniform(-1.0, 1.0));
+            let t0 = rng.uniform(-10.0, 10.0);
+            let len = 10f64.powf(rng.uniform(-2.0, 2.0));
+            let mut src = raw_arc(c, pl, r, [a0, a0 + total], spans, wscale, [t0, len]);
+            let n = 2 * spans + 1;
+            let e = 10f64.powf(rng.uniform(-15.0, -2.0));
+            let i = rng.below(n as u64) as usize;
+            src = match rng.below(4) {
+                0 => tweak_weight(src, i, e),
+                1 => {
+                    let d = scale3(gen_dir(rng), e * r);
+                    tweak_point(src, i, d)
+                }
+                _ => src,
+            };
+            Inputs {
+                build: host(),
+                ops: vec![inc(src, scale)],
+            }
+        }
+    }
+}
+
+/// The inline `IsNurbCurveCircle` cases: fixed, then generated (encodable only).
+fn nurb_circle_cases(unit: &str) -> Vec<Case> {
+    let mut all = nurb_circle_fixed();
+    let mut rng = Rng::new(NURB_CIRCLE_SEED);
+    let mut made = 0;
+    let mut tries = 0;
+    while made < NURB_CIRCLE_GENERATED && tries < 8 * NURB_CIRCLE_GENERATED {
+        tries += 1;
+        let i = gen_nurb_circle(&mut rng);
+        let (b, ops) = ffi_program(&i);
+        if ffi::encode(&b, &ops).is_ok() {
+            all.push((format!("incgen{made:04}"), i));
+            made += 1;
+        }
+    }
+    all.into_iter()
+        .filter_map(|(name, i)| {
+            Some(Case {
+                unit: unit.to_string(),
+                name,
+                source: CaseSource::Inline,
+                inputs: serde_json::to_value(i).ok()?,
+            })
+        })
+        .collect()
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "curve.ellipse_p1"
@@ -1507,7 +2013,9 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &ctx)?;
+        v.extend(nurb_circle_cases(self.id()));
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -1516,5 +2024,58 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `IsNurbCurveCircle` flag of the first op of `case` (Rust side).
+    fn first_flag(case: &Case) -> f64 {
+        let i: Inputs = case.parse().unwrap();
+        let out = rust(&i).unwrap();
+        let rec = out.values.get("rec").unwrap();
+        // construction status, op code 21, op status 0, flag
+        assert_eq!(&rec[..3], &[0.0, 21.0, 0.0], "{}", case.name);
+        rec[3]
+    }
+
+    /// The inline `IsNurbCurveCircle` cases reach both outcomes (the circle is built
+    /// for the issue's repro and the clean raw arcs; not for non-circles).
+    #[test]
+    fn nurb_circle_cases_reach_both_outcomes() {
+        let cases = nurb_circle_cases("curve.ellipse_p1");
+        let flag = |name: &str| {
+            first_flag(cases.iter().find(|c| c.name == name).unwrap())
+        };
+        for yes in [
+            "inc_issue_unit_circle",
+            "inc_raw_quarter",
+            "inc_raw_quarter_weights_x2",
+            "inc_raw_full_4span",
+            "inc_raw_tilted_120",
+            "inc_circle_arc_1",
+            "inc_ellipse_equal_radii",
+        ] {
+            assert_eq!(flag(yes), 1.0, "{yes}");
+        }
+        for no in [
+            "inc_raw_non_rational",
+            "inc_raw_rational_cubic",
+            "inc_raw_hyperbola_weight",
+            "inc_raw_degenerate_point",
+            "inc_raw_collinear",
+            "inc_ellipse_unequal_radii",
+        ] {
+            assert_eq!(flag(no), 0.0, "{no}");
+        }
+        let gen: Vec<f64> = cases
+            .iter()
+            .filter(|c| c.name.starts_with("incgen"))
+            .map(first_flag)
+            .collect();
+        let yes = gen.iter().filter(|&&f| f == 1.0).count();
+        assert!(yes > gen.len() / 5 && gen.len() - yes > gen.len() / 10, "{yes} of {}", gen.len());
     }
 }

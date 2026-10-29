@@ -34,6 +34,7 @@
 //! | `EditParam`     | `EditParameterization(SmExtent1d(d0, d1), notify)`        | |
 //! | `Notify`        | `Notify(SM_NO_PRE_EDIT / SM_NO_POST_EDIT, this, NULL, NULL)` | |
 //! | `IsArc`         | `SmCircle::IsArc(5, 1e-6, ..)` (circles only)             | `flag O X Y r start end` |
+//! | `IsNurbCircle`  | `SmCircle::IsNurbCurveCircle(ctx, curve, circle, scale?)` on [`NurbSource`] | `flag` (`TRUE`: `IsKindOf(SmCircle_TYPE)`, `GetRadius`, state of the circle) |
 //!
 //! Intervals are normalised parameters `[f0, f1]` of A's natural interval
 //! (extrapolated outside `[0, 1]`); a NURB parameter is raw or normalised. Solutions are
@@ -45,7 +46,7 @@
 
 use std::fmt::Write as _;
 
-use crate::validate::bad;
+use crate::validate::{bad, check_knots, NOW};
 use crate::{call_with_buffer, FfiError};
 
 /// Largest magnitude of coordinates, lengths, parameters and tolerances.
@@ -56,6 +57,12 @@ pub const MAX_ANGLE: f64 = 720.0;
 pub const MAX_OPS: usize = 64;
 /// Most types of [`Op::State`].
 pub const MAX_TYPES: usize = 64;
+/// Most control points of a raw NURB of [`NurbSource::Raw`].
+pub const MAX_RAW_POINTS: usize = 65;
+/// Largest degree of a raw NURB of [`NurbSource::Raw`].
+pub const MAX_RAW_DEGREE: usize = 8;
+/// Weight range of a rational raw NURB of [`NurbSource::Raw`].
+pub const RAW_WEIGHTS: [f64; 2] = [1e-3, 1e3];
 /// Largest last control point index and polar table length of a database record.
 pub const MAX_DB_INDEX: i64 = 64;
 
@@ -220,6 +227,25 @@ pub enum JoinOther {
     BSplineOfA,
 }
 
+/// The curve tested by [`Op::IsNurbCircle`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum NurbSource {
+    /// A itself (an `SmCircle` is copied; an `SmEllipse` dispatches to its overrides).
+    A,
+    /// `SmBSplineCurve(3, A's NURB)`.
+    BSplineOfA,
+    /// `SmBSplineCurve(gw_CURVE, 3, FALSE)` of a clamped 3D NURB.
+    Raw {
+        /// Degree (`1..=MAX_RAW_DEGREE`).
+        degree: usize,
+        /// Homogeneous control points `x y z w` (`w` positive in [`RAW_WEIGHTS`] for
+        /// every point, or `NOW` for every point: non-rational).
+        cpts: Vec<[f64; 4]>,
+        /// Clamped knots (`cpts.len() + degree + 1`).
+        knots: Vec<f64>,
+    },
+}
+
 /// An operation on curve A (see the module docs).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
@@ -328,6 +354,13 @@ pub enum Op {
     },
     /// `SmCircle::IsArc` (circles only).
     IsArc,
+    /// `SmCircle::IsNurbCurveCircle` (static) of a curve.
+    IsNurbCircle {
+        /// The tested curve.
+        source: NurbSource,
+        /// `dToleranceScale` (`None`: the default `1.0`).
+        scale: Option<f64>,
+    },
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {
@@ -543,6 +576,55 @@ impl Enc {
             return Err(bad("negative tolerance"));
         }
         self.num(x)
+    }
+    /// `n p m cpts knots` of a clamped 3D NURB.
+    fn raw_nurb(
+        &mut self,
+        degree: usize,
+        cpts: &[[f64; 4]],
+        knots: &[f64],
+    ) -> Result<(), FfiError> {
+        if cpts.len() < 2 || cpts.len() > MAX_RAW_POINTS {
+            return Err(bad("raw NURB: control point count"));
+        }
+        let n = cpts.len() - 1;
+        if degree == 0 || degree > MAX_RAW_DEGREE || degree > n {
+            return Err(bad("raw NURB: need 1 <= p <= min(n, MAX_RAW_DEGREE)"));
+        }
+        if knots.len() != n + degree + 2 {
+            return Err(bad("raw NURB: need m = n + p + 1"));
+        }
+        if knots.iter().any(|k| !k.is_finite() || k.abs() > MAX_COORD) {
+            return Err(bad("raw NURB: non-finite or huge knot"));
+        }
+        check_knots(knots, degree, "raw NURB")?;
+        let rational = cpts.first().is_some_and(|p| p[3] != NOW);
+        for &[x, y, z, w] in cpts {
+            let w_e = if rational {
+                if !(RAW_WEIGHTS[0]..=RAW_WEIGHTS[1]).contains(&w) {
+                    return Err(bad("raw NURB: weight outside RAW_WEIGHTS or mixed rationality"));
+                }
+                w
+            } else {
+                if w != NOW {
+                    return Err(bad("raw NURB: mixed rationality"));
+                }
+                1.0
+            };
+            for c in [x, y, z] {
+                if !c.is_finite() || (c / w_e).abs() > MAX_COORD {
+                    return Err(bad("raw NURB: non-finite or huge point"));
+                }
+            }
+        }
+        self.int(n);
+        self.int(degree);
+        self.int(n + degree + 1);
+        for p in cpts {
+            self.0.extend_from_slice(p);
+        }
+        self.0.extend_from_slice(knots);
+        Ok(())
     }
     fn int(&mut self, x: usize) {
         self.0.push(x as f64);
@@ -873,6 +955,23 @@ impl Enc {
                 self.flag(*post);
             }
             Op::IsArc => self.int(20),
+            Op::IsNurbCircle { source, scale } => {
+                self.int(21);
+                match source {
+                    NurbSource::A => self.int(0),
+                    NurbSource::BSplineOfA => self.int(1),
+                    NurbSource::Raw {
+                        degree,
+                        cpts,
+                        knots,
+                    } => {
+                        self.int(2);
+                        self.raw_nurb(*degree, cpts, knots)?;
+                    }
+                }
+                self.flag(scale.is_some());
+                self.num(scale.unwrap_or(0.0))?;
+            }
         }
         Ok(())
     }

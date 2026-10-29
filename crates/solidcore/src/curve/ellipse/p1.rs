@@ -22,6 +22,7 @@
 //! | [`Ellipse::is_circle_class`], [`Ellipse::kind_of`] | `SmCircle_TYPE` objects, `SmCircle::IsKindOf`     |
 //! | [`Ellipse::type_code`], [`Ellipse::type_string`], [`Ellipse::class_string`] (in `p2`), [`CIRCLE_CLASS_TYPE`] | `SmCircle::GetType`, `GetTypeString`, `GetClassString`, `GetClassType` |
 //! | [`Ellipse::is_arc`]                                | `SmCircle::IsArc`                                 |
+//! | [`Ellipse::is_nurb_curve_circle`]                  | `SmCircle::IsNurbCurveCircle`                     |
 //! | [`Ellipse::create_simple_offset`]                  | `SmCircle::CreateSimpleOffset`                    |
 //! | [`Ellipse::assert_valid`]                          | `SmEllipse::AssertValid`, `SmCircle::AssertValid` |
 //! | [`Ellipse::read_from_db`]                          | `SmEllipse::ReadFromDB`, `SmCircle::ReadFromDB`   |
@@ -88,6 +89,11 @@
 //! - **Back-edges.** `SmCurve::IsArc` of a non-circular ellipse (inside
 //!   `SmBSplineCurve::CreateSimpleOffset`) is the base class of unit `curve.curve_p5`
 //!   ([`crate::curve::curve::p5::is_arc_base`]) on the ellipse's NURB.
+//! - **`IsNurbCurveCircle`.** The `SmCircle*&` out-param is the returned `Option`
+//!   (`None` for `FALSE`), the defaulted `dToleranceScale` an `Option` (`None`: `1.0`);
+//!   the `SmBSplineCurve*` is a [`Curve`] whose kind must derive from `SmBSplineCurve`
+//!   (B-spline, ellipse, circle, line, parabola, hyperbola), others are
+//!   [`SolidError::InvalidInput`]. The ignored `EvaluatePoint` status propagates.
 
 use core::ops::Div;
 
@@ -136,6 +142,9 @@ const OP_CANONICAL: &str = "curve::ellipse::p1::Ellipse::create_canonical";
 const OP_CIRCLE_CANONICAL: &str = "curve::ellipse::p1::Ellipse::create_canonical_circle";
 const OP_JOIN: &str = "curve::ellipse::p1::Ellipse::join_with";
 const OP_OFFSET: &str = "curve::ellipse::p1::Ellipse::create_simple_offset";
+const OP_IS_NURB_CURVE_CIRCLE: &str = "curve::ellipse::p1::Ellipse::is_nurb_curve_circle";
+/// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
+const ANALYTIC_TOL_SCALE: f64 = 100.0;
 
 /// `SmCircle_TYPE` (`CURV_BASE_TYPE + 21`), the class type of a circle.
 pub const CIRCLE_CLASS_TYPE: i64 = CIRCLE_TYPE;
@@ -1012,6 +1021,96 @@ impl Ellipse {
             num_samples,
             tol,
         )
+    }
+
+    /// The circle a B-spline curve is, when its geometry and representation are those
+    /// of a circle (`SmCircle::IsNurbCurveCircle`; `tolerance_scale` defaults to `1.0`):
+    /// a copy of a circle; `None` for a curve that is not of degree 2 and rational, is
+    /// degenerate (`IsDegenerate` to `scale * ANALYTIC_TOL_SCALE * SM_EFF_ZERO * (1 +
+    /// |P|max)`, `P` the point at 0.4567 of the natural interval) or is not an arc
+    /// (`IsArc(5, ..)` to the same tolerance); else the circle of the arc's frame,
+    /// radius and angular domain, dimension 3, with a copy of the curve's NURB
+    /// (`pOptNurb`).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a curve that is not an `SmBSplineCurve` (a
+    /// Hermite, composite, conic or procedural curve); those of the curve's
+    /// evaluator, [`Curve::is_degenerate`], [`Curve::is_arc`] and
+    /// [`Ellipse::new_circle`].
+    pub fn is_nurb_curve_circle(
+        k: &Kernel,
+        test_curve: &Curve,
+        tolerance_scale: Option<f64>,
+    ) -> Result<Option<Self>> {
+        let tolerance_scale = tolerance_scale.unwrap_or(1.0);
+        let line_base;
+        let test_base: &BSplineCurve = match test_curve.kind() {
+            CurveKind::BSpline(c) => c,
+            CurveKind::Ellipse(e) => {
+                // low work - already a circle
+                if e.is_circle_class() {
+                    // copy the circle
+                    return Ok(Some(e.copy(k)?));
+                }
+                e.base()
+            }
+            CurveKind::Parabola(c) => c.base(),
+            CurveKind::Hyperbola(c) => c.base(),
+            CurveKind::Line(l) => {
+                line_base = l.base_with_nurb()?;
+                &line_base
+            }
+            _ => {
+                return Err(SolidError::invalid_input(
+                    OP_IS_NURB_CURVE_CIRCLE,
+                    "the curve is not an SmBSplineCurve",
+                ))
+            }
+        };
+
+        // no work - not a degree 2 rational curve
+        let deg = test_curve.degree()?;
+        if deg != 2 || !test_curve.is_rational()? {
+            return Ok(None);
+        }
+
+        // scale zero value
+        let mid_point =
+            test_curve.evaluate_point(k, test_curve.natural_interval().evaluate(0.4567))?;
+        let scaled_zero =
+            tolerance_scale * ANALYTIC_TOL_SCALE * EFF_ZERO * (1.0 + mid_point.max_dimension());
+
+        // skip degenerate curves
+        if test_curve.is_degenerate(k, scaled_zero, None)? {
+            return Ok(None);
+        }
+
+        // Get circle reference frame, radius and angle extent
+        let Some((ref_frame, radius, start_ang_deg, end_ang_deg)) =
+            test_curve.is_arc(k, 5, scaled_zero)?
+        else {
+            // when isoParameterCurve is not a circular Arc
+            return Ok(None);
+        };
+        let anal_domain = Extent1d::from_min_max(start_ang_deg, end_ang_deg);
+
+        // make new circle
+        let circle = Self::new_circle(
+            k,
+            ref_frame.origin(),
+            ref_frame.x_axis(),
+            ref_frame.y_axis(),
+            anal_domain,
+            radius,
+            &EllipseOptions {
+                dim: 3,
+                nurb: Some(test_base),
+                inside_out: false,
+            },
+        )?;
+        // all done
+        Ok(Some(circle))
     }
 
     /// The offset of the curve by `offset_distance` in the plane with normal
@@ -2211,6 +2310,39 @@ mod tests {
         let mut t = Extent1d::from_min_max(ivl.evaluate(0.25), ivl.evaluate(0.75));
         c.trim(&k, &mut t, TrimMode::Notify).unwrap();
         assert!(c.polar_converter().is_polar_conversion_possible());
+    }
+
+    /// #1432: a full unit circle given as its rational quadratic NURBS (9 points,
+    /// weights `1, s, 1, s, ..`, a plain B-spline) is recognised as that circle.
+    #[test]
+    fn is_nurb_curve_circle_full_unit_circle() {
+        let k = kernel();
+        let circle =
+            Ellipse::create_canonical_circle(&k, &Axis2Placement::default(), 1.0, None, None)
+                .unwrap();
+        let nurbs = Curve::from(circle.base().copy());
+        assert!(matches!(nurbs.kind(), CurveKind::BSpline(_)));
+        let got = Ellipse::is_nurb_curve_circle(&k, &nurbs, None)
+            .unwrap()
+            .expect("a circle");
+        assert!(got.is_circle_class());
+        assert!((got.radius() - 1.0).abs() < 1e-12);
+        let dom = got.step_interval();
+        assert!((dom.max() - dom.min() - 360.0).abs() < 1e-9);
+        assert!(got.base().gw_nurb().is_some());
+
+        // already a circle: a copy
+        let same = Ellipse::is_nurb_curve_circle(&k, &Curve::from(circle.copy(&k).unwrap()), None)
+            .unwrap()
+            .expect("a copy");
+        assert!(same.is_circle_class());
+        assert_eq!(same.radius(), 1.0);
+
+        // a non-circular ellipse is rational degree 2 but not an arc
+        let ell = Ellipse::create_canonical(&k, &Axis2Placement::default(), 2.0, 1.0, None, None)
+            .unwrap();
+        let none = Ellipse::is_nurb_curve_circle(&k, &Curve::from(ell.base().copy()), None);
+        assert!(none.unwrap().is_none());
     }
 
     #[test]
