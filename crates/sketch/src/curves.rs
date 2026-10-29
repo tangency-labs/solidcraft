@@ -9,7 +9,7 @@ use solidcore_record::Vec2;
 
 /// Polyline samples per spline span / conic / ellipse quarter.
 const SPAN_SAMPLES: usize = 24;
-const TANGENT_HANDLE_LENGTH_SCALE: f64 = 4.55;
+pub(crate) const TANGENT_HANDLE_LENGTH_SCALE: f64 = 4.55;
 /// Most points a spline may have.
 pub const MAX_SPLINE_POINTS: usize = 500;
 

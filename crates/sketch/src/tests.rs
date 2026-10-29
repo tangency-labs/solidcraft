@@ -1636,7 +1636,7 @@ fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
         }
         let mut ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
         ids.push(ids[0]);
-        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     }
     let mut sk = Sketch::new();
     rounded(&mut sk, 0.55);
