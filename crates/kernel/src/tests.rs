@@ -1670,12 +1670,9 @@ fn fillet_an_open_curved_edge() {
         ],
     };
     let b = extrude(&Plane::XY, &[Region2 { outer: d, holes: vec![] }], 0.0, 15.0).unwrap().pop().unwrap();
-    let v0 = measure(&b).unwrap().volume;
     let f = fillet(&b, &[Vec3::new(0.0, 10.0, 15.0)], 2.0).unwrap();
-    // (A fine tessellation: the difference of two measured volumes magnifies their error.)
-    let _ = v0;
-    let fine = |x: &Body| x.mesh(&crate::MeshTolerance::chord(0.002)).unwrap().measure().volume;
-    let removed = fine(&b) - fine(&f);
+    // Exact volumes (SMLib's, to 1e-8): the difference of two mesh volumes magnifies their sag.
+    let removed = measure(&b).unwrap().volume - measure(&f).unwrap().volume;
     // Pappus: the corner's cross-section r²(1 − π/4), its centroid 0.2234 r in from the wall.
     let r = 2.0;
     let want = r * r * (1.0 - PI / 4.0) * (10.0 - r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI))) * PI;
@@ -1791,7 +1788,8 @@ fn fillet_sharp_arc_and_arc_loop() {
             (area(10.0) - area(10.0 - 0.5 * (1.0 - theta.cos()))) * 0.5 * theta.cos() * dt
         })
         .sum();
-    let removed = body.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume - mesh.measure().volume;
+    // Exact volumes (SMLib's, to 1e-8): the difference of two mesh volumes magnifies their sag.
+    let removed = measure(&body).unwrap().volume - measure(&blended).unwrap().volume;
     assert!(rel(removed, want) < 1e-3, "{removed} vs {want}");
 }
 
@@ -1907,9 +1905,9 @@ fn d_fillet_removed_reference(r: f64, steps: u32) -> f64 {
 #[test]
 fn fillet_mixed_arc_and_line_removed_volume_converges() {
     let body = mixed_arc_and_line_prism();
-    let source_exact = PI * 100.0 * 15.0 / 2.0;
     let tolerances = [1e-4, 2.5e-5];
     let source_volumes = tolerances.map(|tol| body.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
+    let source = measure(&body).unwrap();
     for r in [0.5, 0.25] {
         let want = d_fillet_removed_reference(r, 8192);
         assert!((want - d_fillet_removed_reference(r, 4096)).abs() < 1e-7, "reference quadrature must converge");
@@ -1917,23 +1915,18 @@ fn fillet_mixed_arc_and_line_removed_volume_converges() {
             assert!((want - 2.715578447526581).abs() < 1e-7, "{want}");
         }
         let blended = fillet(&body, &[Vec3::new(0.0, 10.0, 15.0), Vec3::new(5.0, 0.0, 15.0)], r).unwrap();
-        let mut previous = None;
-        for (tol, source) in tolerances.into_iter().zip(source_volumes) {
-            let volume = blended.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume;
-            // Equal chord tolerances reduce (not necessarily cancel) the error from the
-            // unchanged walls. The convergence and exact-source checks below guard this.
-            let removed = source - volume;
-            assert!(rel(removed, want) < 1e-3, "r={r}, tol={tol}: removed {removed}, expected {want}");
-            if let Some(coarser) = previous {
-                assert!(rel(removed, coarser) < 1e-3, "r={r}: removal has not converged: {coarser} -> {removed}");
-                let exact_removed = source_exact - volume;
-                // The source's inscribed semicylinder loses at most pi*R*H*tol.
-                // Do not charge its chord error to the much smaller fillet volume.
-                let source_error = (source_exact - source).abs();
-                assert!(source_error < PI * 10.0 * 15.0 * tol, "source chord error {source_error}");
-                assert!((exact_removed - want).abs() < source_error + want * 1e-3, "r={r}: exact-source removal {exact_removed}, expected {want}");
-            }
-            previous = Some(removed);
+        // The removal from the exact volumes (SMLib's, to 1e-8): the reference to a hundred
+        // thousandth (the blend's surfaces are SMLib's fits; their section error is
+        // fillet_mixed_arc_and_line_joint_preserves_both_section_radii's).
+        let done = measure(&blended).unwrap();
+        let exact = source.volume - done.volume;
+        assert!(rel(exact, want) < 1e-5, "r={r}: removed {exact}, expected {want}");
+        // From meshes, the removal converges on it: each mesh lies within its chord of its
+        // faces, so the two differ from the exact removal by at most their areas times it.
+        for (tol, source_mesh) in tolerances.into_iter().zip(source_volumes) {
+            let removed = source_mesh - blended.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume;
+            let bound = (source.area + done.area) * tol;
+            assert!((removed - exact).abs() <= bound, "r={r}, tol={tol}: mesh removal {removed}, exact {exact} (within {bound})");
         }
     }
 }
