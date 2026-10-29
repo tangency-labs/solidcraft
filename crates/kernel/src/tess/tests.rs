@@ -470,11 +470,16 @@ fn iso_groove(p: f64, d: f64, wall: f64, internal: bool) -> [(f64, f64); 4] {
 }
 
 /// Each face's triangles, in 3D, cover as much area as its surface over the triangles' own
-/// parameters, within 5% (a coarse tolerance on a small curved face, a few percent): nothing
-/// zigzags across the face, which multiplies its area. The surface's area by the midpoint rule
-/// on sixteen pieces of each parameter triangle.
+/// parameters, within 5% (a coarse tolerance on a small curved face, a few percent) and the
+/// sails along its boundary: nothing zigzags across the face, which multiplies its area. The
+/// surface's area by the midpoint rule on sixteen pieces of each parameter triangle. A face's
+/// boundary sides are its edges' chords, each up to the chord tolerance `tol` off its edge, and
+/// between a chord of length L and its edge lies a sail of surface of at most 2/3 L tol (a
+/// parabolic segment) that flat triangles bridge rather than follow: a face no wider than its
+/// chords sag (the thread's crest band where it runs out through the block's end, 0.06 mm sag
+/// at 0.1) takes up to that much more or less area however it is triangulated inside.
 #[cfg(feature = "smlib")]
-fn assert_faces_lie_flat(name: &str, plan: &solidcraft_geom::tess::TessPlan) {
+fn assert_faces_lie_flat(name: &str, plan: &solidcraft_geom::tess::TessPlan, tol: f64) {
     for fp in &plan.faces {
         let Some(s) = fp.surface.and_then(|i| plan.surfaces.get(i as usize)) else { continue };
         let at = |i: u32| {
@@ -504,7 +509,21 @@ fn assert_faces_lie_flat(name: &str, plan: &solidcraft_geom::tess::TessPlan) {
                 }
             }
         }
-        assert!((flat - surface).abs() <= 0.05 * surface, "{name}: face {} has {flat} mm² of triangles over {surface} mm² of surface", fp.face);
+        // The boundary: the sides of exactly one triangle.
+        let mut sides: HashMap<(u32, u32), u32> = HashMap::new();
+        for t in &fp.triangles {
+            for k in 0..3 {
+                let (a, b) = (t[k], t[(k + 1) % 3]);
+                *sides.entry((a.min(b), a.max(b))).or_default() += 1;
+            }
+        }
+        let boundary: f64 = sides.iter().filter(|(_, n)| **n == 1).map(|((a, b), _)| at(*a).dist(at(*b))).sum();
+        let sails = 2.0 / 3.0 * boundary * tol;
+        assert!(
+            (flat - surface).abs() <= 0.05 * surface + sails,
+            "{name}: face {} has {flat} mm² of triangles over {surface} mm² of surface (its boundary's sails {sails})",
+            fp.face
+        );
     }
 }
 
@@ -534,7 +553,7 @@ fn a_modelled_thread_in_a_bore_meshes_inside_its_block() {
         let m = closed_display_mesh("thread in a bore", &body, tol);
         let chord = max_chord(&body, &m);
         assert!(chord <= tol * 1.05, "thread in a bore at {tol}: chord {chord}");
-        assert_faces_lie_flat("thread in a bore", &ok(body.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(crate::DISPLAY_ANGLE) })));
+        assert_faces_lie_flat("thread in a bore", &ok(body.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(crate::DISPLAY_ANGLE) })), tol);
     }
 }
 
@@ -560,7 +579,7 @@ fn a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface() {
         let chord = max_chord(&body, &m);
         assert!(chord <= tol * 1.05, "thread run out at {tol}: chord {chord}");
         assert!(m.triangles.len() < 60_000, "thread run out at {tol}: {} triangles", m.triangles.len());
-        assert_faces_lie_flat("thread run out", &ok(body.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(crate::DISPLAY_ANGLE) })));
+        assert_faces_lie_flat("thread run out", &ok(body.mesh_plan(&crate::MeshTolerance { chord: tol, angle: Some(crate::DISPLAY_ANGLE) })), tol);
     }
 }
 
@@ -868,4 +887,24 @@ fn a_loop_corner_within_its_tolerance_of_a_pole_is_a_pole() {
     assert!((area - 3f64.sqrt()).abs() < 0.01 * 3f64.sqrt(), "area {area}");
     let Err(e) = plan(&pyramid_past_a_near_pole(1e-8), 0.01, None) else { panic!("no pole without the tolerance") };
     assert!(e.to_string().contains("winds around the surface"), "{e}");
+}
+
+/// A whole sphere as one face (its seam the only edge) in a body many times its size: at the
+/// body's chord the seam gets two segments, pole to equator to pole, and every node off the poles
+/// follows a pole. The loop used to start at a pole and close across the other, which unwrapped
+/// to a whole turn: "boundary winds around the surface", and the sphere was left out (a sealed
+/// void r 2 in a 60 mm block). It meshes closed.
+#[test]
+fn a_small_sphere_void_in_a_large_block_meshes() {
+    let block = ok(crate::box_solid(Vec3::new(-30.0, -30.0, 0.0), Vec3::new(30.0, 30.0, 60.0)));
+    let ball = ok(crate::sphere(Vec3::new(0.0, 0.0, 30.0), 2.0));
+    let hollow = cut(&block, &ball);
+    let tol = hollow.size() * 0.01;
+    let (m, stats) = match plan(&record(&hollow), tol, None) {
+        Ok((p, stats)) => (p.evaluate(), stats),
+        Err(e) => panic!("plan: {e}"),
+    };
+    assert!(stats.unmeshed.is_empty(), "{:?}", stats.unmeshed.iter().map(|u| &u.reason).collect::<Vec<_>>());
+    assert_watertight(&m, "block with a sphere void");
+    assert_eq!(hollow.unmeshed_faces(), 0);
 }
