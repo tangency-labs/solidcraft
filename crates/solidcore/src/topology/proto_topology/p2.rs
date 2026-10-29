@@ -812,7 +812,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         if k.fixes.imprint_trims_edge_to_proto_vertex
             || k.fixes.imprint_extends_edge_to_proto_vertex
         {
-            self.fit_edge_def_ends_to_proto_vertices(k, brep, ed, start_pv, end_pv)?;
+            self.fit_edge_def_ends_to_proto_vertices(
+                k,
+                brep,
+                ed,
+                start_pv,
+                end_pv,
+                [(start_vtx1, start_vtx2), (end_vtx1, end_vtx2)],
+            )?;
         }
 
         let d = self.ed_ref(ed)?;

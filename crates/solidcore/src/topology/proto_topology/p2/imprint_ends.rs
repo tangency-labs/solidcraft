@@ -12,7 +12,7 @@
 //!
 //! | Rust | Fork |
 //! |------|------|
-//! | [`ProtoTopologyManager::fit_edge_def_ends_to_proto_vertices`] | the block at the top of `SmEdgeDefinition::Imprint` (tangency-labs/smlib b43876f, a8caccd) |
+//! | [`ProtoTopologyManager::fit_edge_def_ends_to_proto_vertices`] | the block at the top of `SmEdgeDefinition::Imprint` (tangency-labs/smlib b43876f, a8caccd, ffaf4e8) |
 //! | `trim_end_to_proto_vertex` | b43876f: `Imprint` moves an interval end to the curve's point nearest its proto vertex |
 //! | `extend_end_to_proto_vertex` | a8caccd: `SmEdgeDefinition::ExtendEndToProtoVertex` |
 //! | `extended_curve` | a8caccd: `sm_CreateExactlyExtendedCurve` |
@@ -21,7 +21,9 @@
 //! the owner's store behind handles, none of them owned by an edge yet); replaced curves
 //! stay in that store, as the curves `ProtoTopologyManager::proto_edge_split` replaces do.
 //! WR-452 (trim, `Kernel::fixes.imprint_trims_edge_to_proto_vertex`), WR-453 (extend,
-//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex`).
+//! `Kernel::fixes.imprint_extends_edge_to_proto_vertex`); both flags carry the fork's
+//! correction ffaf4e8 (WR-498, #1480, #470): an end goes to its proto vertex's position
+//! only when the proto vertex is one vertex in each B-rep.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -48,6 +50,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// to the curve's point nearest the vertex (`imprint_trims_edge_to_proto_vertex`).
     /// Nothing changes for a closed proto edge or where no check passes.
     ///
+    /// The point an end goes to (ffaf4e8, WR-498) is the proto vertex's position when
+    /// every vertex definition in it was imprinted onto `final_vertices` (the end's
+    /// final vertex in B-rep 1 and in B-rep 2); otherwise it is B-rep 1's final vertex
+    /// when the two final vertices lie within the definition's tolerance, and the end is
+    /// left alone if not. A proto vertex that `Resolve` made several vertices of sits at
+    /// their mean, which is not the vertex an end belongs to.
+    ///
     /// # Errors
     ///
     /// [`crate::error::SolidError::InvalidInput`] for deleted objects or unknown handles;
@@ -59,16 +68,36 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         ed: EdgeDefId,
         start_pv: ProtoVertexId,
         end_pv: ProtoVertexId,
+        final_vertices: [(O, O); 2],
     ) -> Result<()> {
         if start_pv == end_pv {
             return Ok(());
         }
-        for at_end in [false, true] {
+        for (at_end, (vtx1, vtx2)) in [false, true].into_iter().zip(final_vertices) {
             let pv = if at_end { end_pv } else { start_pv };
-            let pv_pos = self
+            let proto = self
                 .proto_vertex(pv)
-                .ok_or(dangling("proto vertex is deleted"))?
-                .position();
+                .ok_or(dangling("proto vertex is deleted"))?;
+            let mut one_vertex = true;
+            for &vd in proto.vertex_definitions() {
+                if !one_vertex {
+                    break;
+                }
+                // A deleted definition is no vertex (the fork reads a live pointer).
+                one_vertex = self.vertex_def(vd).is_some_and(|v| {
+                    v.final_vertex(1) == Some(vtx1) && v.final_vertex(2) == Some(vtx2)
+                });
+            }
+            let pv_pos = if one_vertex {
+                proto.position()
+            } else {
+                let p1 = brep.vertex_point(vtx1)?;
+                let p2 = brep.vertex_point(vtx2)?;
+                if !(p1.distance(p2) <= self.ed_ref(ed)?.raw_tolerance()) {
+                    continue;
+                }
+                p1
+            };
             let d = self.ed_ref(ed)?;
             let interval = d.xsect_interval();
             let end_param = if at_end {
