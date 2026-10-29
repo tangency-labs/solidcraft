@@ -17,12 +17,12 @@
   {
    "step": 2,
    "pointer": "/faces/0/u_curves",
-   "json": 3
+   "json": 3.0
   },
   {
    "step": 2,
    "pointer": "/faces/0/v_curves",
-   "json": 3
+   "json": 3.0
   }
  ]
 }

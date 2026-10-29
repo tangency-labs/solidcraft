@@ -616,12 +616,7 @@ fn flat_pattern_checks(c: &mut Checks, want: &Value, results: &[Value], rel: f64
             let (a, b) = (v.get(0)?, v.get(1)?);
             Some([a.get(0)?.as_f64()?, a.get(1)?.as_f64()?, b.get(0)?.as_f64()?, b.get(1)?.as_f64()?])
         };
-        let mut left: Vec<[f64; 4]> = got["bends"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|b| line(&json!([b["start"], b["end"]])))
-            .collect();
+        let mut left: Vec<[f64; 4]> = got["bends"].as_array().into_iter().flatten().filter_map(|b| line(&json!([b["start"], b["end"]]))).collect();
         let got_lines = json!(left.iter().map(|l| [[l[0], l[1]], [l[2], l[3]]]).collect::<Vec<_>>());
         let near = |p: [f64; 4], q: [f64; 4]| (0..4).all(|k| (p[k] - q[k]).abs() <= abs);
         let mut ok = left.len() == w.len();

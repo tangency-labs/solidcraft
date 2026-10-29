@@ -1,4 +1,7 @@
 # The booleans cases that fail today, one a line: `<case> <why it fails today>`. Sorted. The kernel
 # rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
-# Baseline: not seeded yet; seeded from a develop run after the SMLib pin bump.
+# Baseline: develop 5ada4fc8a with SMLib 90aabff (the run on 60b1c6a, aarch64 Linux).
+3604-cut-with-g2-swept-tool-along-projected-edge step 12 (solid.sweep): the path curves are not connected end to end
+3830-split-cup-by-extended-spline-surface not supported yet: surface.extend of a surface of more than one face (this one has 3)
+5126-join-menger-sponge-level-3 step 561 (solid.combine): unknown planar source comparison budget exceeded

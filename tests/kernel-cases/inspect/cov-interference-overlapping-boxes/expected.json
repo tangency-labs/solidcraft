@@ -23,27 +23,27 @@
    "step": 3,
    "pointer": "/interferences/0/center",
    "json": [
-    35,
-    25,
-    15
+    35.0,
+    25.0,
+    15.0
    ]
   },
   {
    "step": 3,
    "pointer": "/interferences/0/bbox/min",
    "json": [
-    30,
-    20,
-    10
+    30.0,
+    20.0,
+    10.0
    ]
   },
   {
    "step": 3,
    "pointer": "/interferences/0/bbox/max",
    "json": [
-    40,
-    30,
-    20
+    40.0,
+    30.0,
+    20.0
    ]
   }
  ]
