@@ -247,9 +247,10 @@ picked in the browser, or on the first joint that moves when none is picked.
 grabbed follows the pointer in the plane through it that faces the view, the joints on the
 part's chain take the values that bring it nearest, within their limits, through motion links,
 and with closed loops kept closed, and a four-bar's rocker stops at the end of its swing. The
-whole drag is one undo step. A grounded part, or one its joints hold fixed, is not moved; a drag
-on it draws a selection box. Each frame runs `joint.reach`, which scripts and agents use
-directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
+whole drag is one undo step, and Escape puts the part back. A grounded part, or one its joints
+hold fixed, is not moved; a drag on it draws a selection box. While you drag, the part is only
+shown moving (the design, and what depends on where parts are, follow when you let go); the
+release runs `joint.reach` once, which scripts and agents use directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
 its chain from where they are to the nearest pose (the arm keeps its elbow up or down, and a
 linkage stays on its branch). `at` picks the part's point (the centre of its bodies by
 default), `z` with `axis` also turns one of its axes, and `joints` names the only joints to
