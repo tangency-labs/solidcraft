@@ -2903,10 +2903,10 @@ fn iso_curve(
         let max_ang_rad =
             ignored(circle_z_axis.ccw_angle_between(x_axis, nurb_max_vec))?.unwrap_or(0.0);
         let min_ang_deg = anal_domain
-            .contains_periodic_value(min_ang_rad * 180.0 / PI, 360.0, -1.0)
+            .contains_periodic_value_with(min_ang_rad * 180.0 / PI, 360.0, -1.0, &k.fixes)
             .periodic_value;
         let max_ang_deg = anal_domain
-            .contains_periodic_value(max_ang_rad * 180.0 / PI, 360.0, -1.0)
+            .contains_periodic_value_with(max_ang_rad * 180.0 / PI, 360.0, -1.0, &k.fixes)
             .periodic_value;
 
         // when both values are on a closed interval seam
@@ -2916,10 +2916,10 @@ fn iso_curve(
         let tol = EFF_ZERO * 100.0 * (1.0 + period);
         if anal_domain.is_closed(period)
             && anal_domain
-                .is_value_on_periodic_boundary(min_ang_deg, period, tol)
+                .is_value_on_periodic_boundary_with(min_ang_deg, period, tol, &k.fixes)
                 .0
             && anal_domain
-                .is_value_on_periodic_boundary(max_ang_deg, period, tol)
+                .is_value_on_periodic_boundary_with(max_ang_deg, period, tol, &k.fixes)
                 .0
         {
             // set interval to whole domain
