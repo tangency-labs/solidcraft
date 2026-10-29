@@ -92,7 +92,15 @@ pub fn rel_err(a: f64, b: f64) -> f64 {
     if a.is_infinite() || b.is_infinite() {
         return f64::INFINITY;
     }
-    (a - b).abs() / a.abs().max(b.abs())
+    let diff = (a - b).abs();
+    let scale = a.abs().max(b.abs());
+    if diff.is_infinite() {
+        // Both inputs are finite here. Scale before subtracting only when their
+        // difference overflows; retain the usual operation order otherwise.
+        (a / scale - b / scale).abs()
+    } else {
+        diff / scale
+    }
 }
 
 /// Whether `a` and `b` agree under the rule above (`floor` = documented abs floor).
@@ -283,6 +291,65 @@ fn union_keys<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finite_relative_error_does_not_overflow() {
+        for (a, b, expected) in [
+            (f64::MAX, -f64::MAX, 2.0),
+            (-f64::MAX, f64::MAX, 2.0),
+            (f64::MAX, -f64::MAX / 2.0, 1.5),
+            (-f64::MAX / 2.0, f64::MAX, 1.5),
+            (-f64::MAX, f64::MAX / 2.0, 1.5),
+            (f64::MAX / 2.0, -f64::MAX, 1.5),
+        ] {
+            assert_eq!(rel_err(a, b), expected, "a={a}, b={b}");
+            let d = compare(
+                &Output::new().scalar("v", a),
+                &Output::new().scalar("v", b),
+                &[],
+            );
+            assert!(!d.pass());
+            assert_eq!(d.mismatch_count, 1);
+            assert_eq!(d.values_compared, 1);
+            assert_eq!(d.max_rel_err, expected);
+            assert_eq!(d.mismatches[0].rel_err, Some(expected));
+            assert_eq!(crate::json::num(d.max_rel_err).as_f64(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn relative_error_preserves_ordinary_and_nonfinite_cases() {
+        for (a, b) in [
+            (1.0, 1.0 + 1e-8),
+            (f64::MAX, f64::MAX / 2.0),
+            (f64::MAX / 4.0, -f64::MAX / 4.0),
+            (0.0, f64::from_bits(1)),
+            (f64::from_bits(1), -f64::from_bits(1)),
+        ] {
+            assert_eq!(
+                rel_err(a, b).to_bits(),
+                ((a - b).abs() / a.abs().max(b.abs())).to_bits()
+            );
+        }
+        for (a, b) in [
+            (0.0, -0.0),
+            (f64::MAX, f64::MAX),
+            (f64::NAN, f64::NAN),
+            (f64::INFINITY, f64::INFINITY),
+            (f64::NEG_INFINITY, f64::NEG_INFINITY),
+        ] {
+            assert_eq!(rel_err(a, b), 0.0);
+        }
+        for (a, b) in [
+            (f64::NAN, 1.0),
+            (1.0, f64::NAN),
+            (f64::INFINITY, f64::MAX),
+            (f64::MAX, f64::NEG_INFINITY),
+            (f64::INFINITY, f64::NEG_INFINITY),
+        ] {
+            assert_eq!(rel_err(a, b), f64::INFINITY);
+        }
+    }
 
     #[test]
     fn rule() {
