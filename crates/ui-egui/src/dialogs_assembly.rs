@@ -1422,6 +1422,70 @@ fn timeline_joint_items(app: &SolveApp, ids: Option<&[u64]>) -> Vec<(u64, String
         .collect()
 }
 
+/// More joints than this (an imported assembly makes one per placed part) start grouped in the
+/// timeline as one button with their count, from the second joint on; clicking it shows each joint.
+const JOINT_GROUP_MIN: usize = 1;
+/// The grouped joints' arrow sits in a square well of its own at the button's right end.
+const JOINT_ARROW_WELL: f32 = 20.0;
+/// The browser-state key that remembers the timeline's joints were shown one by one.
+const JOINTS_KEY: &str = "timeline_joints";
+
+fn joints_open(app: &SolveApp, count: usize) -> bool {
+    count <= JOINT_GROUP_MIN || crate::browser::is_open(app, JOINTS_KEY, false)
+}
+
+fn toggle_joints(app: &mut SolveApp) {
+    crate::browser::toggle(app, JOINTS_KEY, false);
+}
+
+/// The button that stands for `count` grouped joints, its top left at `at`: the joint icon and the
+/// count, then, past a rule, the arrow in a well of its own. The well lights up under the pointer,
+/// and the whole button turns the accent colour while the joints are shown one by one. Returns
+/// its width and whether it was clicked.
+fn joint_group_button(ui: &mut egui::Ui, p: &egui::Painter, at: egui::Pos2, count: usize, open: bool) -> (f32, bool) {
+    let t = Tokens::get();
+    let label = p.layout_no_wrap(count.to_string(), egui::FontId::proportional(t.font_small), t.text);
+    let icon_side = 28.0;
+    let width = icon_side + 3.0 + label.size().x + 6.0 + 1.0 + 3.0 + JOINT_ARROW_WELL + 4.0;
+    let br = egui::Rect::from_min_size(at, vec2(width, icon_side));
+    let resp = ui.interact(br, ui.id().with("joint_group"), egui::Sense::click());
+    crate::scenario::publish_handle("timeline:joints", br.center());
+    let well =
+        egui::Rect::from_center_size(egui::pos2(br.right() - 4.0 - JOINT_ARROW_WELL / 2.0, br.center().y), vec2(JOINT_ARROW_WELL, JOINT_ARROW_WELL));
+    crate::scenario::publish_target("timeline:joints_arrow", well);
+    // The arrow's well answers the pointer from the rule to the button's end.
+    let on_arrow = resp.hover_pos().is_some_and(|q| q.x >= well.left() - 3.0);
+    crate::scenario::publish_count("timeline:joints_arrow_hot", f64::from(u8::from(on_arrow)));
+    let (fill, edge) = match (open, resp.hovered() && !on_arrow) {
+        (true, _) => (t.accent_soft, t.accent),
+        (false, true) => (t.hover, t.border),
+        (false, false) => (t.timeline_item, t.border),
+    };
+    let radius = t.radius_sm.saturating_sub(1);
+    p.rect(br, radius, fill, t.control_border_stroke(edge), egui::StrokeKind::Inside);
+    let icon = egui::Rect::from_min_size(br.min, vec2(icon_side, icon_side)).shrink(4.0);
+    crate::icons::paint_icon(p, icon, "joint", f32::from(t.icon.a()) / 255.0);
+    p.galley(egui::pos2(icon.right() + 3.0, br.center().y - label.size().y / 2.0), label, t.text);
+    let rule = well.left() - 3.0;
+    p.line_segment([egui::pos2(rule, br.top() + 6.0), egui::pos2(rule, br.bottom() - 6.0)], t.control_border_stroke(edge));
+    let ink = match (open, on_arrow) {
+        (true, true) => {
+            p.rect_filled(well, radius, t.accent);
+            t.on_accent
+        }
+        (false, true) => {
+            p.rect_filled(well, radius, t.control_border);
+            t.form_ink
+        }
+        (true, false) => t.form_ink,
+        (false, false) => t.form_dim,
+    };
+    crate::ui_kit::disclosure(p, well.center(), open, ink);
+    let tip = if open { "click to group them" } else { "click to show each one" };
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("{count} joints: {tip}"));
+    (width, resp.clicked())
+}
+
 /// Joints after the features in the timeline: double-click edits, the menu drives, suppresses
 /// or deletes. Returns the x after them.
 pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect) -> f32 {
@@ -1435,6 +1499,18 @@ pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &eg
         return x;
     }
     x += 8.0;
+    // Only the joints outside feature folders group here; a folder's own tile holds the rest.
+    if ids.is_none() && joints.len() > JOINT_GROUP_MIN {
+        let open = joints_open(app, joints.len());
+        let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open);
+        if clicked {
+            toggle_joints(app);
+        }
+        x += width + 4.0;
+        if !open {
+            return x;
+        }
+    }
     let mut open: Option<Dialog> = None;
     let mut run: Option<(&'static str, Value)> = None;
     for (id, name, kind, suppressed) in joints {
@@ -1492,7 +1568,30 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
     }
     if ids.is_none() {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+        if joints.len() > JOINT_GROUP_MIN {
+            let shown = joints_open(app, joints.len());
+            let header = format!("JOINTS ({})", joints.len());
+            let clicked = ui
+                .horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(t.form_section_icon_size, t.form_section_icon_size), egui::Sense::hover());
+                    let fold = crate::ui_kit::disclosure_button_at(ui, rect, shown, &header);
+                    let response = ui.add(
+                        egui::Label::new(egui::RichText::new(&header).size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim))
+                            .sense(egui::Sense::click()),
+                    );
+                    crate::scenario::publish_handle("timeline:joints", response.rect.center());
+                    fold.clicked() || response.clicked()
+                })
+                .inner;
+            if clicked {
+                toggle_joints(app);
+            }
+            if !shown {
+                return;
+            }
+        } else {
+            ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+        }
     }
     let mut open = None;
     let mut run = None;

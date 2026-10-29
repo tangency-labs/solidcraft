@@ -194,6 +194,8 @@ mod delete {
                 )
                 .unwrap();
         }
+        // Two joints start grouped in the History; shown one by one, each can be clicked.
+        crate::dialogs_assembly::toggle_joints(&mut h.app);
         h.frames(3);
         h
     }
