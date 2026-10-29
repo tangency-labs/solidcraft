@@ -22,11 +22,13 @@ fn plate(width: f64) -> Body {
 fn a_split_in_the_plane_of_a_face_keeps_all_of_the_body() {
     for width in [4.0, 5.0] {
         let b = plate(width);
-        let v = b.volume_at(1e-3).unwrap();
+        // Exact volumes (SMLib's, to 1e-8): a mesh's at a 1e-3 chord sags round the hole by more
+        // than the millionth the parts are held to.
+        let v = crate::measure(&b).unwrap().volume;
         let plane = Plane::from_normal(Vec3::new(0.0, 0.0, 1.5), Vec3::Z).unwrap();
         let parts = split_by_plane(&b, &plane).unwrap();
         assert_eq!(parts.len(), 2, "{width}");
-        let vs: Vec<f64> = parts.iter().map(|p| p.volume_at(1e-3).unwrap()).collect();
+        let vs: Vec<f64> = parts.iter().map(|p| crate::measure(p).unwrap().volume).collect();
         assert!((vs.iter().sum::<f64>() - v).abs() < 1e-6 * v, "{width}: {vs:?} against {v}");
         // Above: the plate from 1.5 to 2.5 less the hole; below: less the hole and the groove.
         let (r, h) = (2.5f64, width / 2.0);
