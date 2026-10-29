@@ -15,8 +15,10 @@ use std::ops::{Add, AddAssign, Mul, Sub};
 
 use crate::Vec3;
 
-/// Highest polynomial degree accepted in either direction.
-pub const MAX_SPLINE_DEGREE: usize = 7;
+/// Highest polynomial degree accepted in either direction: the B-rep record's own bound
+/// (`Brep::validate`), so every spline a record may hold can be evaluated. A G4 blend is of
+/// degree 9 (five conditions at each end).
+pub const MAX_SPLINE_DEGREE: usize = 16;
 /// Most knots accepted in one knot vector.
 pub const MAX_KNOTS: usize = 1 << 14;
 /// Most control points accepted in one tensor surface.
