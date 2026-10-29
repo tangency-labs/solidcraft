@@ -145,8 +145,9 @@ pub fn ruled_surface_with(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option
             return Err(KernelError::Invalid("the corners cut a strip away entirely: try a shorter distance".into()));
         }
         let edge = chain.get(j).map_or(0, |(e, _)| *e);
-        pieces
-            .push((s.face(&up_start, &up_end, top_start, top_end, tolerance)?, vec![record::generated(vec![FaceOrigin::Edge { operand: 0, edge }])]));
+        let face = s.face(&up_start, &up_end, top_start, top_end, tolerance)?;
+        let h = vec![record::generated(vec![FaceOrigin::Edge { operand: 0, edge }]); face.faces.len()];
+        pieces.push((face, h));
     }
     // Corner faces are made in place of the two edges meeting at the corner.
     for (j, jt) in joints.iter().enumerate() {
@@ -878,6 +879,9 @@ struct Strip {
     line: bool,
     /// The strip lies in a plane.
     planar: bool,
+    /// The axis (a point on it, its direction) of a strip that is a piece of a cone: the edge an
+    /// arc, its rulings keeping their angle to the arc's axis, leaning in or out.
+    cone: Option<(Vec3, Vec3)>,
     start: End,
     end: End,
 }
@@ -891,13 +895,25 @@ impl Strip {
         let line = sampled.planar && base.degree == 1 && base.ctrl.len() == 2 && sampled.affine.is_some();
         let tangent = |f: f64| point_tangent(&top, f).and_then(|(_, t)| t.normalized()).unwrap_or(first.1);
         let end = |(p, _, n, r): (Vec3, Vec3, Vec3, Vec3), tan: Vec3| End { at: p, ruling: r, top: p + r * d, tangent: tan, normal: n };
-        Strip { start: end(first, tangent(0.0)), end: end(last, tangent(1.0)), base, top, kind, line, planar: sampled.planar }
+        let cone = match sampled.affine {
+            Some(Affine::Radial { c, a, scale, .. }) if !sampled.planar && (scale - 1.0).abs() > 1e-12 => Some((c, a)),
+            _ => None,
+        };
+        Strip { start: end(first, tangent(0.0)), end: end(last, tangent(1.0)), base, top, kind, line, planar: sampled.planar, cone }
     }
 
     /// The strip's face on its own: the base edge, up the end side (`up_end`, points from the
     /// edge's end to `top_end`), back along the far edge, down the start side (`up_start`, from
     /// the edge's start to `top_start`).
     fn face(&self, up_start: &[Vec3], up_end: &[Vec3], top_start: Vec3, top_end: Vec3, tolerance: f64) -> Result<Brep> {
+        // A piece of a cone between straight rulings is the ruling at the start turned about the
+        // cone's axis through the arc's angle, by SMLib's revolve: a cone face, as a cone, where
+        // the ruled B-spline between the arc and its image is the same surface on no analytic.
+        if let (Some((c, axis)), [_, _], [_, _]) = (self.cone, up_start, up_end)
+            && let Some(f) = self.revolved(c, axis, top_start)?
+        {
+            return Ok(f);
+        }
         let fail = || KernelError::Failed("ruled surface: a strip".into());
         let mut parts = Parts { tolerance, ..Parts::default() };
         let vertex = |p: Vec3, parts: &mut Parts| -> Result<u32> {
@@ -954,6 +970,41 @@ impl Strip {
             }
         };
         face_of(parts, surface, uses)
+    }
+
+    /// [`Strip::face`] of a strip on a cone (`c`, `axis` its axis) bounded by straight rulings:
+    /// the start's ruling (from the edge's start to `top_start`) turned through the arc's angle,
+    /// right-handed about `axis` the way the edge runs; `None` where the edge's turn can't be read.
+    fn revolved(&self, c: Vec3, axis: Vec3, top_start: Vec3) -> Result<Option<Brep>> {
+        let (Some(bs), Some(be), Some((pm, _))) = (point(&self.base, 0.0), point(&self.base, 1.0), point_tangent(&self.base, 0.5)) else {
+            return Ok(None);
+        };
+        let flat = |p: Vec3| {
+            let q = p - c;
+            q - axis * q.dot(axis)
+        };
+        let angle_to = |p: Vec3| {
+            let (a, b) = (flat(bs), flat(p));
+            a.cross(b).dot(axis).atan2(a.dot(b))
+        };
+        // The turn to the end, the way the edge runs (through its middle); a closed arc is a turn.
+        let half = angle_to(pm);
+        let mut turn = angle_to(be);
+        if bs.dist(be) <= 1e-9 * (1.0 + flat(bs).len()) {
+            turn = std::f64::consts::TAU.copysign(half);
+        } else if half > 0.0 && turn < 0.0 {
+            turn += std::f64::consts::TAU;
+        } else if half < 0.0 && turn > 0.0 {
+            turn -= std::f64::consts::TAU;
+        }
+        let side = top_start - bs;
+        let Some(x) = side.normalized() else { return Ok(None) };
+        let Some(y) = (flat(bs) - x * flat(bs).dot(x)).normalized().or_else(|| (axis - x * axis.dot(x)).normalized()) else { return Ok(None) };
+        let plane = solidcraft_geom::Plane { origin: bs, x, y };
+        let line = solidcraft_geom::Seg2::Line { a: solidcraft_geom::Vec2::ZERO, b: solidcraft_geom::Vec2::new(side.len(), 0.0) };
+        // SMLib turns right-handed about the axis it is given.
+        let (axis, turn) = if turn < 0.0 { (axis * -1.0, -turn) } else { (axis, turn) };
+        Ok(Some(crate::surfaces::revolved_record(&plane, &[line], c, axis, turn)?))
     }
 }
 
