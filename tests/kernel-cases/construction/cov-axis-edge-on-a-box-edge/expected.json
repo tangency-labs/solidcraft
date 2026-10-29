@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "an axis on the straight top-back edge of a box",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): the edge at y 30, z 20 runs along X: the line through (0,30,20) along X",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     0,
+     30,
+     20
+    ],
+    "dir": [
+     1,
+     0,
+     0
+    ]
+   }
+  }
+ }
+}

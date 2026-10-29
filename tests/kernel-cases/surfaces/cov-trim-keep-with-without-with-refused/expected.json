@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a plane trim given keep_with, which only a mutual trim takes: refused",
+ "source": "invariants",
+ "method": "keep_with names what to keep of the other surface of a mutual trim; with no other surface it means nothing",
+ "outcome": "refused",
+ "refusal": "belong to a mutual trim"
+}

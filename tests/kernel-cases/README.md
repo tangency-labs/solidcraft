@@ -41,6 +41,8 @@ One directory per area, one per case: `tests/kernel-cases/<area>/<id>/`.
 | `frames` (frame members, inserted profiles) | tool coverage |
 | `plastic` (boss, lip and groove, rest, snap fit, plastic rules) | tool coverage rig |
 | `surfaces` (every `surface.*` tool: offset, ruled, untrim, unstitch, reverse normal, boundary, blend, match, fair, and a normal and an edge case of each of the others) | surfaces rig |
+| `construction` (construction planes, axes and points: `construct.*`) | tool coverage rig |
+| `inspect` (the inspect commands that return numbers) | tool coverage rig |
 
 Each area also has its gate files: `KNOWN_FAILING` and `PATHS` (see [the gate](#the-kernel-rig-gate)).
 
@@ -106,6 +108,8 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `tolerance` | Optional overrides: `rel`, `abs_mm`, `mesh_mm`, `weld_mm`. |
 | `files` | The files the case wrote to `$OUT`, each `{path, json \| csv \| dxf}`, matched as a part of what is there: every key the case gives, an array item by item and as long, a whole number exactly, any other number within `rel`. `json`: the file's JSON; `csv`: its rows, as objects keyed by the header row; `dxf`: per layer of its ENTITIES section, how many of each entity (`{"CUT": {"CIRCLE": 1, "ELLIPSE": 0, "length_mm": 31.416}}`; a count may be a range `[min, max]`) and `length_mm`, the total length of its lines, arcs, circles, ellipses and polylines. |
 | `results` | The commands' own answers, each `{step, json}`: the answer of the `step`th command (from 1) matched as `files` matches JSON (a flat pattern's bends, a rule's values). |
+| `construction` | `{name: spec}`, a spec being `{point: [x,y,z]}`, `{axis: {through, dir}}` or `{plane: {through, normal}}`: each named construction point, axis or plane as the timeline evaluated it. A point within the position tolerance (`tolerance.abs_mm`, else 1e-3 of the box diagonal, of 1 mm where there is no body); an axis whose direction is parallel to `dir` (either way, sine of the angle at most 1e-6) and whose line passes within it of `through`; a plane likewise with `normal`. An axis or plane is graded as the line or plane it is, not by the origin it keeps. |
+| `results` | `[{command, pointer, value, rel?, abs_mm?}]`: values in the commands' own replies (an inspect command's numbers). The reply of the script's `command`-th command (from 0, base commands included), at the JSON `pointer`, is `value`: a number within the relative tolerance, `[x, y, z]` within the position tolerance, anything else (a string, a bool, null, a list) equal. |
 | `missing` | A capability SolidCraft has no command or parameter for yet (`"solid.thread has no start count"`): the case is reported **not supported yet** without running, so the gap stays visible. |
 
 ## The kernel rig gate
