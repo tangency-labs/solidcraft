@@ -4,7 +4,9 @@
 //! Upstream: `source/SM_API/src/SmApiBrep.cpp` (`SmApiBoolean`, `SmApiBooleanUnion`,
 //! `SmApiBooleanDifference`, `SmApiBooleanIntersection`, `SmApiBooleanMerge`,
 //! `SmApiMergeBreps`, `SmApiBooleanWithOptions`, `SmApiBooleanLists`,
-//! `SmApiBooleanTrees`).
+//! `SmApiBooleanTrees`, `SmApiBooleanWithCurves`, `SmApiBoolean2d`,
+//! `SmApiNonManifoldBoolean`, `SmApiPiecewiseMerge`, `SmApiNonManifoldSweep`,
+//! `SmApiNonManifoldRotationalSweep`).
 //!
 //! A [`Call`] is encoded as `op args...`. An operand block ([`BrepSpec`]) is `kind`
 //! then its data: `1 O[3] length width height` (`SmApiCreateBox`), `2 C[3] radius`
@@ -15,8 +17,8 @@
 //! for `SmApiRotate` or `1 V[3]` for `SmApiTranslate`, at most [`MAX_STEPS`]) or
 //! `7 np counts... nc curves... degree cap` (`SmApiCreateSkinPrimitive` of `nc` NURB
 //! curves, each `p n+1 (n+1) x [x y z w] (n+p+2) knots`, built as
-//! `SmBSplineCurve(gw_CURVE*, 3, FALSE)`; at most [`MAX_SKIN_CURVES`]). Nested blocks are
-//! at most [`MAX_DEPTH`] deep.
+//! `SmBSplineCurve(gw_CURVE*, 3, FALSE)`; at most [`MAX_SKIN_CURVES`]) or `8 O[3] radius`
+//! (`SmApiCreatePlanarCircle`). Nested blocks are at most [`MAX_DEPTH`] deep.
 //!
 //! | [`Call`]        | op | args                                   | output after the status (on success)            |
 //! |-----------------|----|----------------------------------------|-------------------------------------------------|
@@ -30,6 +32,12 @@
 //! | `Lists`         | 8  | `n1`, breps, `n2`, breps, `operation`  | `nb`, `nb` x `has [brep]`, `ns`                 |
 //! | `Trees`         | 9  | `n`, breps, `t`, `t` nodes             | `nb`, `nb` x `has [brep]`                       |
 //! | `Measured`      | 10 | brep brep `operation` `post_process`   | two-B-rep record, then the measures             |
+//! | `WithCurves`    | 11 | brep brep `operation`                  | two-B-rep record, then `n` edge indices         |
+//! | `Boolean2d`     | 12 | brep brep `operation_2d` (0 to 4)      | `assigned`, the result or both operands         |
+//! | `NonManifold`   | 13 | brep brep `operation`                  | two-B-rep record                                |
+//! | `Piecewise`     | 14 | brep brep `create_new`                 | `has [is_first brep brep]`                      |
+//! | `Sweep`         | 15 | brep `D[3] dist stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)         |
+//! | `RotationalSweep` | 16 | brep `P[3] A[3] angle stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)  |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -44,6 +52,20 @@
 //! (`SmApiBrepComputeVolume` at [`VOLUME_ACCURACY`], then each face's `SmApiFaceComputeArea`
 //! at [`AREA_ACCURACY`] in ascending order, a failed face as minus its status) and the
 //! number of those values last ([`split_measures`]).
+//! `WithCurves` ends with each intersection edge's index in the result's `GetEdges` list
+//! (`-1` for one the result no longer has; matched by address, so a deleted edge whose
+//! address a new result edge reuses reads as that edge's index). `Boolean2d` writes
+//! `assigned`, then the result
+//! and its areas, or both operands unchanged when an operand without faces leaves
+//! `rpResult` unassigned. The areas tail is `faces`, each face's `SmApiFaceComputeArea` at
+//! [`AREA_ACCURACY`] in ascending order (a failed face as minus its status) and the number
+//! of those values last ([`split_measures`]); a successful sweep ends with it too.
+//! `Piecewise` writes the result then the second operand, which upstream keeps. A sweep's
+//! `region` is `pRegionBrep` ([`RegionArg`]: `0` NULL, `1` the swept B-rep, `2` another
+//! B-rep, `SmApiCreateBox(origin, 1, 1, 1)`, which upstream rejects). A sweep
+//! selection `sel` is three arrays (faces, edges, vertices), each `count` (`-1` for a NULL
+//! array, at most [`MAX_SELECTION`]) then entries, each an index into the operand's
+//! `GetFaces`/`GetEdges`/`GetVertices` list or `-1` for a NULL entry.
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite
 //! operand data with positive box and plane dimensions and a nonzero sphere radius (torus
@@ -54,6 +76,9 @@
 //! at most [`MAX_LIST`] B-reps per list and [`MAX_TREE`] tree nodes in -64..=64; tree
 //! executed B-rep nodes in range and binary operands non-null (`SmMerge::BooleanTrees`
 //! indexes unchecked and clears each leaf slot). Safe repeated leaves remain accepted.
+//! A disk radius is finite (`SmPrimitiveCreation::CreateCircle` fails cleanly otherwise);
+//! sweep vectors, distances and angles are finite. Selection indices past the operand's
+//! lists are `SC_ERR_ARG` from the shim.
 
 use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
@@ -70,6 +95,8 @@ pub const MAX_STEPS: usize = 8;
 pub const MAX_SKIN_CURVES: usize = 16;
 /// Largest control point count of one [`BrepSpec::Skin`] curve.
 pub const MAX_SKIN_POINTS: usize = 512;
+/// Most entries of one sweep selection array.
+pub const MAX_SELECTION: usize = 16;
 /// `dRelativeAccuracy` of the [`Call::Measured`] volume (`SmApiBrepComputeVolume`).
 pub const VOLUME_ACCURACY: f64 = 1e-6;
 /// `dRelativeAccuracy` of the [`Call::Measured`] face areas (`SmApiFaceComputeArea`).
@@ -147,6 +174,47 @@ pub enum BrepSpec {
         /// Cap the first and last profiles.
         cap: bool,
     },
+    /// `SmApiCreatePlanarCircle(origin, radius)`: a disk in the XY plane.
+    Disk {
+        /// Center.
+        origin: [f64; 3],
+        /// Radius.
+        radius: f64,
+    },
+}
+
+/// The `pRegionBrep` of a non-manifold sweep.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RegionArg {
+    /// `NULL`.
+    Null,
+    /// `pBrepToSweep` itself.
+    #[default]
+    Swept,
+    /// Another B-rep (`SmApiCreateBox(origin, 1, 1, 1)`).
+    Other,
+}
+
+impl RegionArg {
+    fn code(self) -> f64 {
+        match self {
+            Self::Null => 0.0,
+            Self::Swept => 1.0,
+            Self::Other => 2.0,
+        }
+    }
+}
+
+/// The optional selections of a non-manifold sweep: `None` is a NULL array, a `None`
+/// entry a NULL pointer, `Some(i)` the operand's `i`th face, edge or vertex.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Selection {
+    /// `pOptFaces`.
+    pub faces: Option<Vec<Option<usize>>>,
+    /// `pOptEdges`.
+    pub edges: Option<Vec<Option<usize>>>,
+    /// `pOptVertices`.
+    pub vertices: Option<Vec<Option<usize>>>,
 }
 
 /// A 3D NURB curve of a [`BrepSpec::Skin`] operand: degree, weighted control points
@@ -314,6 +382,78 @@ pub enum Call {
         /// `bBooleanPostProcess`.
         post_process: bool,
     },
+    /// `SmApiBooleanWithCurves`.
+    WithCurves {
+        /// First operand.
+        a: BrepSpec,
+        /// Second operand.
+        b: BrepSpec,
+        /// `SmBooleanOperationType` value.
+        operation: i32,
+    },
+    /// `SmApiBoolean2d`.
+    Boolean2d {
+        /// First operand.
+        a: BrepSpec,
+        /// Second operand.
+        b: BrepSpec,
+        /// `Sm2DBooleanOperationType` value (0 to 4).
+        operation: i32,
+    },
+    /// `SmApiNonManifoldBoolean`.
+    NonManifold {
+        /// First operand.
+        a: BrepSpec,
+        /// Second operand.
+        b: BrepSpec,
+        /// `SmBooleanOperationType` value.
+        operation: i32,
+    },
+    /// `SmApiPiecewiseMerge`.
+    Piecewise {
+        /// First operand.
+        a: BrepSpec,
+        /// Second operand.
+        b: BrepSpec,
+        /// `bCreateNewBrepsForFaces`.
+        create_new: bool,
+    },
+    /// `SmApiNonManifoldSweep(brep, region, ...)`.
+    Sweep {
+        /// The B-rep swept in place.
+        brep: BrepSpec,
+        /// `rSweepDir`.
+        dir: [f64; 3],
+        /// `dSweepDist`.
+        dist: f64,
+        /// `bDoStitching`.
+        stitch: bool,
+        /// `bDoMerge`.
+        merge: bool,
+        /// `pRegionBrep`.
+        region: RegionArg,
+        /// The optional selections.
+        selection: Selection,
+    },
+    /// `SmApiNonManifoldRotationalSweep(brep, region, ...)`.
+    RotationalSweep {
+        /// The B-rep swept in place.
+        brep: BrepSpec,
+        /// `rBasePt`.
+        base: [f64; 3],
+        /// `rAxis`.
+        axis: [f64; 3],
+        /// `dAngleDeg`.
+        angle_deg: f64,
+        /// `bDoStitching`.
+        stitch: bool,
+        /// `bDoMerge`.
+        merge: bool,
+        /// `pRegionBrep`.
+        region: RegionArg,
+        /// The optional selections.
+        selection: Selection,
+    },
 }
 
 fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
@@ -402,6 +542,11 @@ fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
             }
             for c in curves {
                 check_skin_curve(c)?;
+            }
+        }
+        BrepSpec::Disk { origin, radius } => {
+            if !origin.iter().all(|x| x.is_finite()) || !radius.is_finite() {
+                return Err(bad("disk: non-finite value"));
             }
         }
     }
@@ -497,7 +642,28 @@ fn push_checked(o: &mut Vec<f64>, s: &BrepSpec) {
             o.push(*degree as f64);
             o.push(f64::from(u8::from(*cap)));
         }
+        BrepSpec::Disk { origin, radius } => {
+            o.push(8.0);
+            o.extend_from_slice(origin);
+            o.push(*radius);
+        }
     }
+}
+
+fn push_selection(o: &mut Vec<f64>, sel: &Selection) -> Result<(), FfiError> {
+    for list in [&sel.faces, &sel.edges, &sel.vertices] {
+        match list {
+            None => o.push(-1.0),
+            Some(l) => {
+                if l.len() > MAX_SELECTION {
+                    return Err(bad(format!("more than {MAX_SELECTION} selected")));
+                }
+                o.push(l.len() as f64);
+                o.extend(l.iter().map(|e| e.map_or(-1.0, |i| i as f64)));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn push_list(o: &mut Vec<f64>, l: &[BrepSpec], max: usize) -> Result<(), FfiError> {
@@ -600,6 +766,72 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             push_spec(&mut o, b)?;
             o.push(f64::from(*operation));
             o.push(flag(*post_process));
+        }
+        Call::WithCurves { a, b, operation } | Call::NonManifold { a, b, operation } => {
+            check_op(*operation)?;
+            o.push(if matches!(call, Call::WithCurves { .. }) {
+                11.0
+            } else {
+                13.0
+            });
+            push_spec(&mut o, a)?;
+            push_spec(&mut o, b)?;
+            o.push(f64::from(*operation));
+        }
+        Call::Boolean2d { a, b, operation } => {
+            if !(0..=4).contains(operation) {
+                return Err(bad("operation is not an Sm2DBooleanOperationType value"));
+            }
+            o.push(12.0);
+            push_spec(&mut o, a)?;
+            push_spec(&mut o, b)?;
+            o.push(f64::from(*operation));
+        }
+        Call::Piecewise { a, b, create_new } => {
+            o.push(14.0);
+            push_spec(&mut o, a)?;
+            push_spec(&mut o, b)?;
+            o.push(flag(*create_new));
+        }
+        Call::Sweep {
+            brep,
+            dir,
+            dist,
+            stitch,
+            merge,
+            region,
+            selection,
+        } => {
+            if !dir.iter().all(|x| x.is_finite()) || !dist.is_finite() {
+                return Err(bad("sweep: non-finite value"));
+            }
+            o.push(15.0);
+            push_spec(&mut o, brep)?;
+            o.extend_from_slice(dir);
+            o.push(*dist);
+            o.extend([flag(*stitch), flag(*merge), region.code()]);
+            push_selection(&mut o, selection)?;
+        }
+        Call::RotationalSweep {
+            brep,
+            base,
+            axis,
+            angle_deg,
+            stitch,
+            merge,
+            region,
+            selection,
+        } => {
+            if !base.iter().chain(axis).all(|x| x.is_finite()) || !angle_deg.is_finite() {
+                return Err(bad("rotational sweep: non-finite value"));
+            }
+            o.push(16.0);
+            push_spec(&mut o, brep)?;
+            o.extend_from_slice(base);
+            o.extend_from_slice(axis);
+            o.push(*angle_deg);
+            o.extend([flag(*stitch), flag(*merge), region.code()]);
+            push_selection(&mut o, selection)?;
         }
     }
     Ok(o)

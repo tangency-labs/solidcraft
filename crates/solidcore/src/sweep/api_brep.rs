@@ -1,6 +1,7 @@
 //! High-level B-rep sweeps (`SM_API`): linear, rotational, draft (taper), pipe and
-//! curve sweeps of profile curves, faces or edges into solids, and sweeps along a
-//! planar path.
+//! curve sweeps of profile curves, faces or edges into solids, sweeps along a planar
+//! path, and non-manifold translational and rotational sweeps of a B-rep's own faces,
+//! edges and vertices.
 //!
 //! Upstream: `source/SM_API/src/SmApiBrep.cpp`, `source/SM_API/inc/SmApiBrep.h`.
 //!
@@ -18,6 +19,9 @@
 //! | [`create_taper_extrude`]                     | `SmApiCreateTaperExtrude`                      |
 //! | [`create_linear_sweep_with_repetitions`]     | `SmApiCreateLinearSweepWithRepetitions`        |
 //! | [`create_rotational_sweep_with_repetitions`] | `SmApiCreateRotationalSweepWithRepetitions`    |
+//! | `selection_is_owned_by` (private)            | `smApiSweepSelectionIsOwnedBy` (static template) |
+//! | [`non_manifold_sweep`], [`SweepSelection`], [`RegionBrep`] | `SmApiNonManifoldSweep`          |
+//! | [`non_manifold_rotational_sweep`]            | `SmApiNonManifoldRotationalSweep`              |
 //!
 //! Deviations:
 //! - **Out-params.** The created B-rep (and, for the curve sweeps, its start, side and
@@ -44,6 +48,16 @@
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; errors of
 //!   the curve copies pass through unchanged (`SM_ERR` for a curve kind without
 //!   `Copy`, e.g. a Hermite curve).
+//! - **Non-manifold sweeps.** [`non_manifold_sweep`] and
+//!   [`non_manifold_rotational_sweep`] sweep the caller's B-rep in place
+//!   (`pBrepToSweep`) through a [`PrimitiveModel`] over it, into its infinite region.
+//!   `pRegionBrep` is `region`: `None` is `NULL`, [`RegionBrep::Swept`] is
+//!   `pBrepToSweep` itself (`&mut` and `&` borrows of one B-rep cannot coexist) and
+//!   [`RegionBrep::Other`] another B-rep, which is `SM_ERR_INVALID_INPUT`
+//!   (`source/SM_API/src/SmApiBrep.cpp:1822`, `:1881`). The
+//!   selections are ids into it ([`SweepSelection`]); a `None` entry is a `NULL`
+//!   handle, and every entry must be live topology of the B-rep. On an error after
+//!   validation the B-rep keeps the sweep's partial edits, as upstream.
 //! - Every entry point validates and copies its inputs as upstream, then runs the
 //!   `SmPrimitiveCreation` method it wraps on a new B-rep through a
 //!   [`PrimitiveModel`]. Path and scale curves become their `SmBSplineCurve` part.
@@ -52,7 +66,7 @@
 
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -61,7 +75,13 @@ use crate::primitive::primitive_creation::model::PrimitiveModel;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
 use crate::primitive::primitive_creation::SweepOptions;
-use crate::topology::{Brep, EdgeId, FaceId};
+use crate::sweep::rotational_sweep_geometry::RotationalSweepGeometry;
+use crate::sweep::topology_sweep::engine::SweepTargets;
+use crate::sweep::topology_sweep::geometry::SweepGeometry;
+use crate::sweep::topology_sweep::{TopologySweep, TopologySweepOptions};
+use crate::sweep::trans_sweep_geometry::TranslationalSweepGeometry;
+use crate::topology::brep::p1::is_live_topology_member;
+use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
 const OP_COPY: &str = "sweep::api_brep::copy_curves_for_consuming_sweep";
 const OP_PIPE: &str = "sweep::api_brep::create_pipe_sweep";
@@ -73,6 +93,7 @@ const OP_FROM_EDGES: &str = "sweep::api_brep::create_curve_sweep_from_edges";
 const OP_TAPER: &str = "sweep::api_brep::create_taper_extrude";
 const OP_LINEAR_REPS: &str = "sweep::api_brep::create_linear_sweep_with_repetitions";
 const OP_ROTATIONAL_REPS: &str = "sweep::api_brep::create_rotational_sweep_with_repetitions";
+const OP_NON_MANIFOLD: &str = "sweep::api_brep::non_manifold_sweep";
 
 /// How the gaps between offset profile curves are filled by a draft sweep or taper
 /// extrusion (`SmOffsetCornerType`).
@@ -601,6 +622,170 @@ fn repeated(repetitions: u64, cap_ends: bool) -> RepeatedSweepOptions {
         cap_ends,
         test_continuity: true,
     }
+}
+
+/// The topology a non-manifold sweep sweeps one dimension higher (`pOptFaces`,
+/// `pOptEdges`, `pOptVertices`): ids into the swept B-rep. `None` is a `NULL` array and a
+/// `None` entry a `NULL` handle; with all three arrays `None` the whole B-rep is swept.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SweepSelection<'a> {
+    /// Faces to sweep into solids.
+    pub faces: Option<&'a [Option<FaceId>]>,
+    /// Edges to sweep into faces.
+    pub edges: Option<&'a [Option<EdgeId>]>,
+    /// Vertices to sweep into edges.
+    pub vertices: Option<&'a [Option<VertexId>]>,
+}
+
+/// The `pRegionBrep` argument of the non-manifold sweeps, when not `NULL`.
+#[derive(Debug, Clone, Copy)]
+pub enum RegionBrep<'a> {
+    /// `pRegionBrep == pBrepToSweep`.
+    Swept,
+    /// A B-rep other than the swept one (rejected).
+    Other(&'a Brep),
+}
+
+/// `if( pRegionBrep && pRegionBrep != pBrepToSweep ) return SM_ERR_INVALID_INPUT;`
+fn check_region_brep(region: Option<RegionBrep<'_>>) -> Result<()> {
+    match region {
+        None | Some(RegionBrep::Swept) => Ok(()),
+        Some(RegionBrep::Other(_)) => Err(SolidError::invalid_input(
+            OP_NON_MANIFOLD,
+            "region B-rep other than the swept B-rep",
+        )),
+    }
+}
+
+/// Whether every entry of `selection` is live topology of `brep`
+/// (`smApiSweepSelectionIsOwnedBy` of each array; a `NULL` array passes, a `NULL`
+/// entry does not: `IsLiveTopologyMember(NULL)` is false).
+fn selection_is_owned_by(brep: &Brep, selection: &SweepSelection<'_>) -> bool {
+    fn owned<T: Copy>(brep: &Brep, list: Option<&[Option<T>]>, e: fn(T) -> EntityRef) -> bool {
+        list.is_none_or(|l| l.iter().all(|x| is_live_topology_member(brep, x.map(e))))
+    }
+    owned(brep, selection.faces, EntityRef::Face)
+        && owned(brep, selection.edges, EntityRef::Edge)
+        && owned(brep, selection.vertices, EntityRef::Vertex)
+}
+
+/// `SmTopologySweep sSweep(sSweepGeom, bDoStitching, FALSE, FALSE, bDoMerge)` and
+/// `DoSweep(pBrepToSweep, pBrepToSweep->GetInfiniteRegion(), pOptFaces, pOptEdges,
+/// pOptVertices, NULL, NULL, NULL)` on `brep` in place.
+fn non_manifold_sweep_with(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    geometry: &SweepGeometry,
+    do_stitching: bool,
+    do_merge: bool,
+    selection: SweepSelection<'_>,
+) -> Result<()> {
+    const MAIN: crate::topology::BrepId = PrimitiveModel::MAIN;
+    let mut sweep = TopologySweep::new(TopologySweepOptions {
+        stitching: do_stitching,
+        merge: do_merge,
+        ..TopologySweepOptions::default()
+    });
+    let region = brep.infinite_region().map(|r| (MAIN, r));
+    let mut targets = SweepTargets {
+        faces_higher: selection
+            .faces
+            .map(|l| l.iter().map(|f| f.map(|f| (MAIN, f))).collect()),
+        edges_higher: selection
+            .edges
+            .map(|l| l.iter().map(|e| e.map(|e| (MAIN, e))).collect()),
+        vertices_higher: selection
+            .vertices
+            .map(|l| l.iter().map(|v| v.map(|v| (MAIN, v))).collect()),
+        ..SweepTargets::default()
+    };
+    let mut model = PrimitiveModel::new(k, core::mem::take(brep));
+    let result = sweep.do_sweep(&mut model, geometry, Some(MAIN), region, &mut targets);
+    // The caller gets its (swept or partly edited) B-rep back, as upstream's
+    // pBrepToSweep: `PrimitiveModel::delete_brep` refuses MAIN, and the sweep merges
+    // MAIN only as the destination, whose B-rep a merge keeps.
+    *brep = model.into_brep()?;
+    // (not upstream: the port's cached topology fields, true again for the caller)
+    brep.refresh_cached_topology();
+    result
+}
+
+/// Sweeps the selected faces, edges and vertices of `brep` (the whole B-rep when
+/// nothing is selected) along `sweep_dir` over `sweep_dist`, in place, into its
+/// infinite region (`SmApiNonManifoldSweep`; `region` is `pRegionBrep`): only
+/// `sweep_dir`'s direction is used. `do_stitching` stitches after the sweep; `do_merge`
+/// merges the swept topology (catching self-intersections).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] (`brep` unchanged) for a [`RegionBrep::Other`] region,
+/// a selection entry that is `None` or not live topology of `brep`, and for a
+/// zero-length `sweep_dir`; those of the sweep.
+#[allow(clippy::too_many_arguments)] // upstream's arguments
+pub fn non_manifold_sweep(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    region: Option<RegionBrep<'_>>,
+    sweep_dir: Vec3,
+    sweep_dist: f64,
+    do_stitching: bool,
+    do_merge: bool,
+    selection: SweepSelection<'_>,
+) -> Result<()> {
+    // Only pBrepToSweep is stitched, validated and returned: another region B-rep
+    // is rejected.
+    check_region_brep(region)?;
+    // A null, foreign or stale handle crashes or silently corrupts the B-rep below.
+    if !selection_is_owned_by(brep, &selection) {
+        return Err(SolidError::invalid_input(
+            OP_NON_MANIFOLD,
+            "selection entry not live topology of the B-rep",
+        ));
+    }
+    let sweep_vec = sweep_dir
+        .unitize()
+        .map_err(|_| SolidError::invalid_input(OP_NON_MANIFOLD, "zero sweep direction"))?
+        * sweep_dist;
+    let geometry = SweepGeometry::Translation(TranslationalSweepGeometry::new(sweep_vec));
+    non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
+}
+
+/// Sweeps the selected faces, edges and vertices of `brep` (the whole B-rep when
+/// nothing is selected) by `angle_deg` degrees about the axis through `base_pt` along
+/// `axis`, in place (`SmApiNonManifoldRotationalSweep`, tolerance `SM_ZONE_TOL_3D`).
+/// `region`, `do_stitching` and `do_merge` are those of [`non_manifold_sweep`].
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] (`brep` unchanged) for a [`RegionBrep::Other`] region
+/// or a selection entry that is `None` or not live topology of `brep`; those of the
+/// sweep.
+#[allow(clippy::too_many_arguments)] // upstream's arguments
+pub fn non_manifold_rotational_sweep(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    region: Option<RegionBrep<'_>>,
+    base_pt: Point3,
+    axis: Vec3,
+    angle_deg: f64,
+    do_stitching: bool,
+    do_merge: bool,
+    selection: SweepSelection<'_>,
+) -> Result<()> {
+    check_region_brep(region)?;
+    if !selection_is_owned_by(brep, &selection) {
+        return Err(SolidError::invalid_input(
+            OP_NON_MANIFOLD,
+            "selection entry not live topology of the B-rep",
+        ));
+    }
+    let geometry = SweepGeometry::Rotation(RotationalSweepGeometry::new(
+        base_pt,
+        axis,
+        angle_deg,
+        ZONE_TOL_3D,
+    ));
+    non_manifold_sweep_with(k, brep, &geometry, do_stitching, do_merge, selection)
 }
 
 /// A new B-rep filled by `body` (`new SmBrep()`, `SmPrimitiveCreation`, the call).

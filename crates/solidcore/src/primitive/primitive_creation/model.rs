@@ -15,10 +15,11 @@
 //! these objects. Tags and offset-map attributes live in the model (`SmAObject`
 //! attributes); topology marks use
 //! [`Marks`] per B-rep under the kernel context's mark locks. `SmMerge` objects are
-//! retained sessions over the model's B-reps (`merge`). Services the model does not
-//! resolve yet return [`SolidError::Unported`] naming the upstream call: retaining an
-//! HCR session (`SmHCR`); its unit is partial: the model, not the unit, lacks the
-//! bridge. No recursion.
+//! retained sessions over the model's B-reps (`merge`). A retained HCR session
+//! (`SmHCR`) is kept by the model: its scene B-rep moves into a model slot of its own
+//! (the scene's id), so merges, copies and queries reach it like any other B-rep, and
+//! the session itself keeps its silhouette tables, which are all the sweep reads from
+//! it afterwards (`silhouette_edges`). No recursion.
 
 use std::collections::BTreeMap;
 
@@ -64,6 +65,8 @@ pub struct PrimitiveModel<'k> {
     offset_maps: BTreeMap<FaceRef, OffsetMapAttribute>,
     locks: Vec<(MarkType, MarkLock)>,
     merges: Vec<Option<merge::Session>>,
+    /// Retained HCR sessions by scene id; each scene B-rep lives in its slot.
+    hcrs: BTreeMap<u32, Hcr>,
 }
 
 impl<'k> PrimitiveModel<'k> {
@@ -80,6 +83,7 @@ impl<'k> PrimitiveModel<'k> {
             offset_maps: BTreeMap::new(),
             locks: Vec::new(),
             merges: Vec::new(),
+            hcrs: BTreeMap::new(),
         }
     }
 
@@ -301,11 +305,17 @@ impl SweepAccess for PrimitiveModel<'_> {
         let mut env = state.env(Some(&mut self.k.context));
         body(b, &mut env)
     }
-    fn retain_hcr(&mut self, _: BrepId, _: Hcr) -> Result<BrepId> {
-        Err(SolidError::unported("SmHCR::SmHCR", "blend.hcr"))
+    fn retain_hcr(&mut self, _: BrepId, mut hcr: Hcr) -> Result<BrepId> {
+        // the scene, with its identities, becomes the session's model B-rep
+        let scene = core::mem::take(hcr.scene_brep_mut());
+        let id = self.add_brep(scene)?;
+        self.hcrs.insert(id.index(), hcr);
+        Ok(id)
     }
-    fn hcr_session(&self, _: BrepId) -> Result<&Hcr> {
-        Err(SolidError::unported("SmHCR::SmHCR", "blend.hcr"))
+    fn hcr_session(&self, scene: BrepId) -> Result<&Hcr> {
+        self.hcrs
+            .get(&scene.index())
+            .ok_or_else(|| SolidError::invalid_input(OP, "B-rep is not an HCR session"))
     }
     fn new_brep(&mut self, _: BrepId) -> Result<BrepId> {
         let b = crate::topology::brep::p3::new_brep(
@@ -316,10 +326,12 @@ impl SweepAccess for PrimitiveModel<'_> {
         self.add_brep(b)
     }
     fn delete_brep(&mut self, id: BrepId) {
+        // the caller's B-rep (MAIN) is never deleted: `into_brep` always returns it
         if id != Self::MAIN {
             if let Some(slot) = self.breps.get_mut(id.index() as usize) {
                 *slot = None;
             }
+            self.hcrs.remove(&id.index());
         }
     }
     fn delete_merge(&mut self, merge: SweepMergeId) {
@@ -591,6 +603,57 @@ mod tests {
             )
             .unwrap();
         face.unwrap()
+    }
+
+    #[test]
+    fn hcr_scene_is_a_model_brep_until_deleted() {
+        let mut kernel = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut kernel,
+            Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let mut model = PrimitiveModel::new(&mut kernel, brep);
+        let scene = SweepAccess::hcr(
+            &mut model,
+            PrimitiveModel::MAIN,
+            Axis2Placement::IDENTITY,
+            0.001,
+            5.0 * crate::math::PI / 180.0,
+            false,
+            false,
+            true,
+        )
+        .unwrap()
+        .brep;
+        assert_ne!(scene, PrimitiveModel::MAIN);
+        assert!(!SweepAccess::faces(&mut model, scene).unwrap().is_empty());
+        assert!(model.hcr_session(scene).is_ok());
+        assert!(model.hcr_session(PrimitiveModel::MAIN).is_err());
+        SweepAccess::delete_brep(&mut model, scene);
+        assert!(model.hcr_session(scene).is_err());
+        assert!(SweepAccess::brep(&model, scene).is_err());
+        assert!(model.into_brep().is_ok());
+    }
+
+    #[test]
+    fn delete_brep_refuses_the_main_brep() {
+        let mut kernel = Kernel::default();
+        let brep = crate::topology::brep::p3::new_brep(
+            &mut kernel,
+            crate::geom::tol::USE_DEFAULT,
+            crate::geom::tol::USE_DEFAULT,
+        )
+        .unwrap();
+        let mut model = PrimitiveModel::new(&mut kernel, brep);
+        let other = SweepAccess::new_brep(&mut model, PrimitiveModel::MAIN).unwrap();
+        SweepAccess::delete_brep(&mut model, PrimitiveModel::MAIN);
+        SweepAccess::delete_brep(&mut model, other);
+        assert!(model.take_brep(other).is_err());
+        assert!(model.into_brep().is_ok());
     }
 
     #[test]

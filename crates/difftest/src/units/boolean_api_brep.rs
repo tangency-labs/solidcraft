@@ -1,11 +1,14 @@
-//! Runner for unit `boolean.api_brep`: the `SM_API` boolean entry points.
+//! Runner for unit `boolean.api_brep`: the `SM_API` boolean entry points and the
+//! non-manifold sweeps of a B-rep (`SmApiNonManifoldSweep`,
+//! `SmApiNonManifoldRotationalSweep`, Rust `solidcore::sweep::api_brep`).
 //!
 //! C++: `solidcore_ffi::units::boolean_api_brep` (upstream
 //! `source/SM_API/src/SmApiBrep.cpp`). Rust: `solidcore::boolean::api_brep`.
 //!
 //! A case is one API call (`api` plus its arguments). Operands are boxes
 //! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); fixture cases also use sheets
-//! (`SmApiCreatePlane`), tori (`SmApiCreateTorus`), operands moved by `SmApiRotate` /
+//! (`SmApiCreatePlane`), disks (`SmApiCreatePlanarCircle`), tori (`SmApiCreateTorus`),
+//! operands moved by `SmApiRotate` /
 //! `SmApiTranslate` steps, skin solids (`SmApiCreateSkinPrimitive` of exact NURB curves)
 //! and the result of an `SmApiBoolean` of two operands. Both sides
 //! build them with the same constructors (`primitive::api_primitives`,
@@ -19,13 +22,32 @@
 //! `IsManifoldSolid`. A `measured` call (`SmApiBooleanWithOptions` with only the
 //! post-process flag chosen; fixtures only) also compares `measures`: the result's volume
 //! (`SmApiBrepComputeVolume`) and its face areas (`SmApiFaceComputeArea`) in ascending
-//! order, so a result with the right topology but a wrongly trimmed face shows.
+//! order, so a result with the right topology but a wrongly trimmed face shows. A
+//! `boolean_2d` result and a successful sweep likewise compare `areas`: the face areas in
+//! ascending order (no volume: those results are sheets or non-manifold).
+//!
+//! `with_curves` also compares each intersection edge's index in the result's edge list
+//! (`-1` when the result no longer has it). The shim matches the returned `SmEdge*`
+//! by address, the port by `EdgeId`, which is never reused: a mismatch confined to
+//! entries that are `-1` on the Rust side and an index on the C++ side means upstream
+//! returned a pointer to an edge the merge deleted, whose address a new result edge
+//! reuses (a dangling `SmEdge*`, against `SmApiBooleanWithCurves`' own contract);
+//! `boolean_2d` whether the result was assigned (an operand without faces leaves both
+//! unchanged); `piecewise_merge` the result and the imprinted second operand; the sweeps
+//! the B-rep after the call, also when it is rejected with `SM_ERR_INVALID_INPUT` (it must
+//! be untouched). A sweep `selection` lists indices into the operand's face, edge and
+//! vertex lists (`null` for a NULL entry; a missing list is a NULL array). A sweep's
+//! `region` is `pRegionBrep`: `swept` (the default) the swept B-rep, `null` NULL, `other`
+//! a second B-rep (`SmApiCreateBox(origin, 1, 1, 1)` on both sides), which upstream
+//! rejects (`SmApiBrep.cpp:1822`, `:1881`).
 //!
 //! Compared: the input validation (`SM_BO_EXTRACT_SEPARATE` for the two-B-rep entry
 //! points, short lists and operations other than union / intersection / difference /
 //! merge for `SmApiMergeBreps`, which must leave the list untouched) and the merges
 //! themselves. A Rust call that stops at an unported callee is deferred under that
-//! callee. Every run has at least [`MIN_GENERATED`] generated cases.
+//! callee. Every run has at least [`MIN_GENERATED`] generated cases, plus
+//! [`MIN_GENERATED_MORE`] cases of the entry points added later (`more0000`, ...: their
+//! own stream, so each `gen` case stays the one the baseline has).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,13 +57,16 @@ use solidcore::boolean::merge::MergeOptions;
 use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
-use solidcore::geom::vector3d::Point3;
+use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::sweep::api_brep::{
+    non_manifold_rotational_sweep, non_manifold_sweep, RegionBrep, SweepSelection,
+};
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::edgeuse::p1 as edgeuse_p1;
@@ -49,9 +74,11 @@ use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
 use solidcore::topology::shell::shell_region;
-use solidcore::topology::{Brep, FaceuseId, RegionId};
+use solidcore::topology::{Brep, EdgeId, FaceId, FaceuseId, RegionId, VertexId};
 use solidcore::SolidError;
-use solidcore_ffi::units::boolean_api_brep::{self as ffi, BrepSpec, Call, Flags};
+use solidcore_ffi::units::boolean_api_brep::{
+    self as ffi, BrepSpec, Call, Flags, RegionArg, Selection,
+};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -59,6 +86,9 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 240;
+/// Generated cases of the later entry points (with curves, 2D, non-manifold, piecewise
+/// and the sweeps) per run, whatever `--seeds` says.
+pub const MIN_GENERATED_MORE: usize = 160;
 
 /// `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: i64 = 1007;
@@ -105,6 +135,44 @@ enum BrepIn {
         #[serde(default = "yes")]
         cap_ends: bool,
     },
+    /// `SmApiCreatePlanarCircle` (a disk in the XY plane).
+    Disk { origin: P3, radius: f64 },
+}
+
+/// The `pRegionBrep` of a non-manifold sweep.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RegionIn {
+    /// `NULL`.
+    Null,
+    /// The swept B-rep.
+    #[default]
+    Swept,
+    /// A second B-rep, `SmApiCreateBox(origin, 1, 1, 1)`.
+    Other,
+}
+
+impl RegionIn {
+    const fn ffi(self) -> RegionArg {
+        match self {
+            Self::Null => RegionArg::Null,
+            Self::Swept => RegionArg::Swept,
+            Self::Other => RegionArg::Other,
+        }
+    }
+}
+
+/// The selections of a non-manifold sweep: indices into the operand's `GetFaces`,
+/// `GetEdges` and `GetVertices` lists, `null` for a NULL entry; a missing list is a NULL
+/// array.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SelectionIn {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    faces: Option<Vec<Option<usize>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    edges: Option<Vec<Option<usize>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vertices: Option<Vec<Option<usize>>>,
 }
 
 /// A 3D NURB curve of a skin operand, as its NURB stores it: degree, control points
@@ -220,6 +288,60 @@ enum Inputs {
         #[serde(default = "yes")]
         post_process: bool,
     },
+    /// `SmApiBooleanWithCurves`.
+    WithCurves {
+        a: BrepIn,
+        b: BrepIn,
+        operation: i32,
+    },
+    /// `SmApiBoolean2d` (`operation` an `Sm2DBooleanOperationType`, 0 to 4).
+    Boolean2d {
+        a: BrepIn,
+        b: BrepIn,
+        operation: i32,
+    },
+    /// `SmApiNonManifoldBoolean`.
+    NonManifold {
+        a: BrepIn,
+        b: BrepIn,
+        operation: i32,
+    },
+    /// `SmApiPiecewiseMerge`.
+    PiecewiseMerge {
+        a: BrepIn,
+        b: BrepIn,
+        #[serde(default)]
+        create_new: bool,
+    },
+    /// `SmApiNonManifoldSweep(brep, region, ...)`.
+    Sweep {
+        brep: BrepIn,
+        dir: P3,
+        dist: f64,
+        #[serde(default = "yes")]
+        stitch: bool,
+        #[serde(default)]
+        merge: bool,
+        #[serde(default)]
+        region: RegionIn,
+        #[serde(default)]
+        selection: SelectionIn,
+    },
+    /// `SmApiNonManifoldRotationalSweep(brep, region, ...)`.
+    RotationalSweep {
+        brep: BrepIn,
+        base: P3,
+        axis: P3,
+        angle_deg: f64,
+        #[serde(default = "yes")]
+        stitch: bool,
+        #[serde(default)]
+        merge: bool,
+        #[serde(default)]
+        region: RegionIn,
+        #[serde(default)]
+        selection: SelectionIn,
+    },
 }
 
 fn spec(b: &BrepIn) -> BrepSpec {
@@ -277,6 +399,15 @@ fn spec(b: &BrepIn) -> BrepSpec {
             a: Box::new(spec(a)),
             b: Box::new(spec(b)),
         },
+        &BrepIn::Disk { origin, radius } => BrepSpec::Disk { origin, radius },
+    }
+}
+
+fn selection(s: &SelectionIn) -> Selection {
+    Selection {
+        faces: s.faces.clone(),
+        edges: s.edges.clone(),
+        vertices: s.vertices.clone(),
     }
 }
 
@@ -352,6 +483,62 @@ fn to_call(i: &Inputs) -> Call {
             operation: *operation,
             post_process: *post_process,
         },
+        Inputs::WithCurves { a, b, operation } => Call::WithCurves {
+            a: spec(a),
+            b: spec(b),
+            operation: *operation,
+        },
+        Inputs::Boolean2d { a, b, operation } => Call::Boolean2d {
+            a: spec(a),
+            b: spec(b),
+            operation: *operation,
+        },
+        Inputs::NonManifold { a, b, operation } => Call::NonManifold {
+            a: spec(a),
+            b: spec(b),
+            operation: *operation,
+        },
+        Inputs::PiecewiseMerge { a, b, create_new } => Call::Piecewise {
+            a: spec(a),
+            b: spec(b),
+            create_new: *create_new,
+        },
+        Inputs::Sweep {
+            brep,
+            dir,
+            dist,
+            stitch,
+            merge,
+            region,
+            selection: sel,
+        } => Call::Sweep {
+            brep: spec(brep),
+            dir: *dir,
+            dist: *dist,
+            stitch: *stitch,
+            merge: *merge,
+            region: region.ffi(),
+            selection: selection(sel),
+        },
+        Inputs::RotationalSweep {
+            brep,
+            base,
+            axis,
+            angle_deg,
+            stitch,
+            merge,
+            region,
+            selection: sel,
+        } => Call::RotationalSweep {
+            brep: spec(brep),
+            base: *base,
+            axis: *axis,
+            angle_deg: *angle_deg,
+            stitch: *stitch,
+            merge: *merge,
+            region: region.ffi(),
+            selection: selection(sel),
+        },
     }
 }
 
@@ -384,6 +571,12 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     match ffi::run(&to_call(i)) {
         Ok(o) => match i {
             Inputs::Measured { .. } => measured_output(&o),
+            Inputs::Boolean2d { .. } => {
+                areas_output(&o, o.first() == Some(&0.0) && o.get(1) == Some(&1.0))
+            }
+            Inputs::Sweep { .. } | Inputs::RotationalSweep { .. } => {
+                areas_output(&o, o.first() == Some(&0.0))
+            }
             _ => to_output(&o),
         },
         Err(e) => Err(harness(format!("cpp: {e}"))),
@@ -400,6 +593,17 @@ fn measured_output(o: &[f64]) -> Result<Output, HarnessError> {
     let (head, measures) =
         ffi::split_measures(o).ok_or_else(|| harness("cpp: measured record too short"))?;
     Ok(to_output(head)?.values("measures", measures.to_vec()))
+}
+
+/// A record that ends, when `has_areas`, with the shim's `put_areas` tail (split off as
+/// `areas`, the same way as [`measured_output`]).
+fn areas_output(o: &[f64], has_areas: bool) -> Result<Output, HarnessError> {
+    if !has_areas {
+        return to_output(o);
+    }
+    let (head, areas) =
+        ffi::split_measures(o).ok_or_else(|| harness("cpp: areas record too short"))?;
+    Ok(to_output(head)?.values("areas", areas.to_vec()))
 }
 
 /// Whether the Boolean reaches UB-242 (`plan/upstream-issues/`): an imprint in
@@ -549,6 +753,7 @@ fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
             let counts: Vec<usize> = counts.iter().map(|&c| c as usize).collect();
             create_skin_primitive(k, &counts, &refs, *degree as usize, *cap_ends).map(|s| s.brep)
         }
+        &BrepIn::Disk { origin, radius } => primitives::create_planar_circle(k, p3(origin), radius),
     };
     r.map_err(|e| stop("operand constructor", &e))
 }
@@ -655,6 +860,127 @@ fn measures(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
     Ok(o)
 }
 
+/// The shim's `put_areas`: `faces` and the face areas in ascending order (a failed face
+/// as minus its status). An unported callee defers.
+fn areas(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
+    let faces = brep_p1::faces(b, None).map_err(|e| stop("GetFaces", &e))?;
+    let mut o = vec![faces.len() as f64];
+    let mut areas = Vec::new();
+    for f in faces {
+        areas.push(match face_area(k, b, f, ffi::AREA_ACCURACY) {
+            Ok(a) => a,
+            Err(e) => match Output::unported(&e) {
+                Some(d) => return Err(Stop::Deferred(Box::new(d))),
+                None => -(status(&e) as f64),
+            },
+        });
+    }
+    areas.sort_by(f64::total_cmp);
+    o.extend(areas);
+    Ok(o)
+}
+
+/// `Sm2DBooleanOperationType` (`SmPrimitiveCreation.h`).
+fn op_2d(code: i32) -> Result<api::Boolean2d, HarnessError> {
+    Ok(match code {
+        0 => api::Boolean2d::Union,
+        1 => api::Boolean2d::Intersection,
+        2 => api::Boolean2d::Difference,
+        3 => api::Boolean2d::ExclusiveOr,
+        4 => api::Boolean2d::Merge,
+        _ => return Err(harness(format!("2D operation {code}"))),
+    })
+}
+
+/// The ids `sel` names in `b` (the shim's `read_selection`; an index past the list is a
+/// harness error, as the shim's `SC_ERR_ARG`).
+fn pick_ids<T: Copy>(
+    sel: Option<&[Option<usize>]>,
+    all: &[T],
+) -> Result<Option<Vec<Option<T>>>, Stop> {
+    let Some(sel) = sel else { return Ok(None) };
+    if sel.len() > ffi::MAX_SELECTION {
+        return Err(Stop::Harness(harness("selection too long")));
+    }
+    sel.iter()
+        .map(|e| match e {
+            None => Ok(None),
+            Some(i) => all
+                .get(*i)
+                .copied()
+                .map(Some)
+                .ok_or_else(|| Stop::Harness(harness(format!("selection index {i}")))),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// The selected faces, edges and vertices of `b`.
+type Picked = (
+    Option<Vec<Option<FaceId>>>,
+    Option<Vec<Option<EdgeId>>>,
+    Option<Vec<Option<VertexId>>>,
+);
+
+fn picked(b: &Brep, s: &SelectionIn) -> Result<Picked, Stop> {
+    let faces = brep_p1::faces(b, None).map_err(|e| stop("GetFaces", &e))?;
+    let edges = brep_p1::edges(b, None).map_err(|e| stop("GetEdges", &e))?;
+    let vertices = brep_p1::vertices(b, None).map_err(|e| stop("GetVertices", &e))?;
+    Ok((
+        pick_ids(s.faces.as_deref(), &faces)?,
+        pick_ids(s.edges.as_deref(), &edges)?,
+        pick_ids(s.vertices.as_deref(), &vertices)?,
+    ))
+}
+
+/// The second B-rep of an `other` region (the shim's `SmApiCreateBox(origin, 1, 1, 1)`;
+/// a failing constructor is a harness error, as the shim's `SC_ERR_ARG`).
+fn region_other(k: &mut Kernel, region: RegionIn) -> Result<Option<Brep>, Stop> {
+    match region {
+        RegionIn::Other => primitives::create_box(k, Point3::new(0.0, 0.0, 0.0), 1.0, 1.0, 1.0)
+            .map(Some)
+            .map_err(|e| stop("region B-rep", &e)),
+        RegionIn::Null | RegionIn::Swept => Ok(None),
+    }
+}
+
+/// The `pRegionBrep` argument of `region`, `other` its second B-rep.
+fn region_arg(region: RegionIn, other: Option<&Brep>) -> Option<RegionBrep<'_>> {
+    match (region, other) {
+        (RegionIn::Null, _) => None,
+        (RegionIn::Other, Some(b)) => Some(RegionBrep::Other(b)),
+        _ => Some(RegionBrep::Swept),
+    }
+}
+
+/// A sweep's record: the status, then the B-rep on success or `SM_ERR_INVALID_INPUT`
+/// and its areas on success (the shim's `run_sweep`).
+fn sweep_record(
+    k: &Kernel,
+    r: solidcore::Result<()>,
+    b: &mut Brep,
+    seen: &dyn Fn(&SolidError),
+) -> Result<Output, Stop> {
+    match r {
+        Ok(()) => {
+            let mut o = Vec::new();
+            put_brep(&mut o, b)?;
+            let a = areas(k, b)?;
+            Ok(record(0, o).values("areas", a))
+        }
+        Err(e) if matches!(e, SolidError::InvalidInput { .. }) => {
+            seen(&e);
+            let mut o = Vec::new();
+            put_brep(&mut o, b)?;
+            Ok(record(status(&e), o))
+        }
+        Err(e) => {
+            seen(&e);
+            Ok(err_output(&e))
+        }
+    }
+}
+
 /// Whether upstream keeps the second operand of a successful two-B-rep boolean
 /// (`source/SM_API/inc/SmApiBrep.h`; the shim's `keeps_other`).
 fn keeps_other(operation: i32, keep_option: bool) -> bool {
@@ -667,6 +993,11 @@ fn keeps_other(operation: i32, keep_option: bool) -> bool {
 /// The two-B-rep record `has is_first kept brep [brep]`. The Rust result is the first
 /// operand modified in place ([`api::BooleanOutcome::result`]), so `is_first` is 1.
 fn two_record(out: &api::BooleanOutcome, kept: bool) -> Result<Output, Stop> {
+    Ok(record(0, two_ints(out, kept)?))
+}
+
+/// The integers of [`two_record`].
+fn two_ints(out: &api::BooleanOutcome, kept: bool) -> Result<Vec<i64>, Stop> {
     let mut o = vec![1, 1, i64::from(kept)];
     put_brep(&mut o, &out.result)?;
     if kept {
@@ -676,7 +1007,7 @@ fn two_record(out: &api::BooleanOutcome, kept: bool) -> Result<Output, Stop> {
             .ok_or_else(|| harness("rust: kept operand missing"))?;
         put_brep(&mut o, other)?;
     }
-    Ok(record(0, o))
+    Ok(o)
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
@@ -802,6 +1133,120 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
                 }
                 Err(e) => Ok(err_output(&e)),
             }
+        }
+        Inputs::WithCurves { a, b, operation } => {
+            let (a, b) = (build(k, a)?, build(k, b)?);
+            match api::boolean_with_curves(k, a, b, op(*operation)?) {
+                Ok(out) => {
+                    // `n` and each intersection edge's index in the result's edges, -1
+                    // when the result no longer has it (the shim's `edge_index`)
+                    let mut o = two_ints(&out.outcome, keeps_other(*operation, false))?;
+                    let edges = brep_p1::edges(&out.outcome.result, None)
+                        .map_err(|e| stop("GetEdges", &e))?;
+                    o.push(count(out.intersection_edges.len())?);
+                    for e in &out.intersection_edges {
+                        o.push(match edges.iter().position(|x| x == e) {
+                            Some(i) => count(i)?,
+                            None => -1,
+                        });
+                    }
+                    Ok(record(0, o))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        Inputs::NonManifold { a, b, operation } => {
+            let (a, b) = (build(k, a)?, build(k, b)?);
+            two(
+                api::non_manifold_boolean(k, a, b, op(*operation)?),
+                keeps_other(*operation, false),
+            )
+        }
+        Inputs::Boolean2d { a, b, operation } => {
+            let operation = op_2d(*operation)?;
+            let (a, b) = (build(k, a)?, build(k, b)?);
+            match api::boolean_2d(k, a, b, operation) {
+                Ok(api::Boolean2dOutcome::Result(mut res)) => {
+                    let mut o = vec![1];
+                    put_brep(&mut o, &res)?;
+                    let a = areas(k, &mut res)?;
+                    Ok(record(0, o).values("areas", a))
+                }
+                Ok(api::Boolean2dOutcome::Unassigned { brep1, brep2 }) => {
+                    let mut o = vec![0];
+                    put_brep(&mut o, &brep1)?;
+                    put_brep(&mut o, &brep2)?;
+                    Ok(record(0, o))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        Inputs::PiecewiseMerge { a, b, create_new } => {
+            let (a, b) = (build(k, a)?, build(k, b)?);
+            match api::piecewise_merge(k, a, b, *create_new) {
+                Ok(out) => {
+                    let mut o = vec![1, 1];
+                    put_brep(&mut o, &out.result)?;
+                    put_brep(&mut o, &out.other)?;
+                    Ok(record(0, o))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        Inputs::Sweep {
+            brep,
+            dir,
+            dist,
+            stitch,
+            merge,
+            region,
+            selection: sel,
+        } => {
+            let mut b = build(k, brep)?;
+            let (f, e, v) = picked(&b, sel)?;
+            let other = region_other(k, *region)?;
+            let selection = SweepSelection {
+                faces: f.as_deref(),
+                edges: e.as_deref(),
+                vertices: v.as_deref(),
+            };
+            let dir = Vec3::new(dir[0], dir[1], dir[2]);
+            let region = region_arg(*region, other.as_ref());
+            let r = non_manifold_sweep(k, &mut b, region, dir, *dist, *stitch, *merge, selection);
+            sweep_record(k, r, &mut b, seen)
+        }
+        Inputs::RotationalSweep {
+            brep,
+            base,
+            axis,
+            angle_deg,
+            stitch,
+            merge,
+            region,
+            selection: sel,
+        } => {
+            let mut b = build(k, brep)?;
+            let (f, e, v) = picked(&b, sel)?;
+            let other = region_other(k, *region)?;
+            let selection = SweepSelection {
+                faces: f.as_deref(),
+                edges: e.as_deref(),
+                vertices: v.as_deref(),
+            };
+            let axis = Vec3::new(axis[0], axis[1], axis[2]);
+            let region = region_arg(*region, other.as_ref());
+            let r = non_manifold_rotational_sweep(
+                k,
+                &mut b,
+                region,
+                p3(*base),
+                axis,
+                *angle_deg,
+                *stitch,
+                *merge,
+                selection,
+            );
+            sweep_record(k, r, &mut b, seen)
         }
         Inputs::Trees { breps: list, tree } => {
             let mut v: Vec<Option<Brep>> = build_all(k, list)?.into_iter().map(Some).collect();
@@ -980,6 +1425,192 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
     }
 }
 
+/// A flat operand of the 2D boolean at scale `s` near `center`, in the plane `z`: a
+/// rectangular sheet or a disk.
+fn gen_flat(rng: &mut Rng, s: f64, center: P3, z: f64) -> BrepIn {
+    let j = rng.point3(-0.6 * s, 0.6 * s);
+    let origin = [center[0] + j[0], center[1] + j[1], z];
+    if rng.chance(0.6) {
+        BrepIn::Plane {
+            origin,
+            size: [s * rng.uniform(0.3, 1.5), s * rng.uniform(0.3, 1.5)],
+        }
+    } else {
+        BrepIn::Disk {
+            origin,
+            radius: s * rng.uniform(0.2, 0.9),
+        }
+    }
+}
+
+/// A selection list of `n` of an operand's `len` entities, sometimes with a NULL entry.
+fn gen_pick(rng: &mut Rng, len: usize) -> Option<Vec<Option<usize>>> {
+    if len == 0 || rng.chance(0.5) {
+        return None;
+    }
+    let n = 1 + rng.below(len.min(3) as u64) as usize;
+    let mut l: Vec<Option<usize>> = (0..n)
+        .map(|_| Some(rng.below(len as u64) as usize))
+        .collect();
+    if rng.chance(0.1) {
+        l.push(None);
+    }
+    Some(l)
+}
+
+/// A sweep operand at scale `s` and its selection: a box (6 faces, 12 edges, 8 vertices)
+/// or a sheet (1, 4, 4) with indexed selections, or a disk or sphere swept whole.
+fn gen_swept(rng: &mut Rng, s: f64) -> (BrepIn, SelectionIn) {
+    let c = rng.point3(-s, s);
+    let (brep, counts) = match rng.below(6) {
+        0..=2 => (
+            BrepIn::Box {
+                origin: c,
+                size: [
+                    s * rng.uniform(0.3, 1.5),
+                    s * rng.uniform(0.3, 1.5),
+                    s * rng.uniform(0.3, 1.5),
+                ],
+            },
+            Some([6, 12, 8]),
+        ),
+        3 | 4 => (
+            BrepIn::Plane {
+                origin: c,
+                size: [s * rng.uniform(0.3, 1.5), s * rng.uniform(0.3, 1.5)],
+            },
+            Some([1, 4, 4]),
+        ),
+        _ => (
+            BrepIn::Disk {
+                origin: c,
+                radius: s * rng.uniform(0.2, 0.9),
+            },
+            None,
+        ),
+    };
+    let sel = match counts {
+        Some([f, e, v]) => SelectionIn {
+            faces: gen_pick(rng, f),
+            edges: gen_pick(rng, e),
+            vertices: gen_pick(rng, v),
+        },
+        None => SelectionIn::default(),
+    };
+    (brep, sel)
+}
+
+/// A `pRegionBrep`: mostly the swept B-rep, sometimes `NULL`, rarely another B-rep.
+fn gen_region(rng: &mut Rng) -> RegionIn {
+    match rng.below(10) {
+        0 | 1 => RegionIn::Null,
+        2 => RegionIn::Other,
+        _ => RegionIn::Swept,
+    }
+}
+
+/// A unit-ish direction, sometimes axis-aligned, sometimes long or zero.
+fn gen_dir(rng: &mut Rng) -> P3 {
+    match rng.below(10) {
+        0 => [0.0, 0.0, 0.0],
+        1..=3 => {
+            let mut d = [0.0; 3];
+            if let Some(x) = d.get_mut(rng.below(3) as usize) {
+                *x = if rng.chance(0.5) { 1.0 } else { -3.0 };
+            }
+            d
+        }
+        _ => rng.point3(-1.0, 1.0),
+    }
+}
+
+/// A case of the entry points added after the first set (the `more` stream).
+fn gen_more(rng: &mut Rng) -> Inputs {
+    let s = gen_scale(rng);
+    let two = |rng: &mut Rng| {
+        let c = rng.point3(-2.0 * s, 2.0 * s);
+        (gen_brep(rng, s, c), gen_brep(rng, s, c))
+    };
+    match rng.below(16) {
+        0..=2 => {
+            let (a, b) = two(rng);
+            let operation = if rng.chance(0.1) {
+                9
+            } else {
+                pick(rng, &TWO_OPS)
+            };
+            Inputs::WithCurves { a, b, operation }
+        }
+        3..=5 => {
+            let (a, b) = two(rng);
+            let operation = if rng.chance(0.1) {
+                9
+            } else {
+                pick(rng, &TWO_OPS)
+            };
+            Inputs::NonManifold { a, b, operation }
+        }
+        6..=8 => {
+            let c = rng.point3(-2.0 * s, 2.0 * s);
+            let z = c[2];
+            let a = gen_flat(rng, s, c, z);
+            // sometimes on another plane: SmPrimitiveCreation::Boolean2D rejects it
+            let zb = if rng.chance(0.15) { z + s } else { z };
+            let b = gen_flat(rng, s, c, zb);
+            Inputs::Boolean2d {
+                a,
+                b,
+                operation: rng.below(5) as i32,
+            }
+        }
+        9 | 10 => {
+            let (a, b) = two(rng);
+            Inputs::PiecewiseMerge {
+                a,
+                b,
+                create_new: rng.chance(0.5),
+            }
+        }
+        11..=13 => {
+            let (brep, selection) = gen_swept(rng, s);
+            Inputs::Sweep {
+                brep,
+                dir: gen_dir(rng),
+                dist: s * rng.uniform(0.2, 1.5) * if rng.chance(0.15) { -1.0 } else { 1.0 },
+                stitch: rng.chance(0.7),
+                merge: rng.chance(0.3),
+                region: gen_region(rng),
+                selection,
+            }
+        }
+        _ => {
+            let (brep, selection) = gen_swept(rng, s);
+            let mut axis = gen_dir(rng);
+            if axis == [0.0; 3] {
+                axis = [0.0, 0.0, 1.0];
+            }
+            // the axis off the operand, so the swept body does not cross it
+            let base = [-3.0 * s, -3.0 * s, rng.uniform(-s, s)];
+            let angle_deg = match rng.below(5) {
+                0 => 90.0,
+                1 => 180.0,
+                2 => -45.0,
+                _ => rng.uniform(5.0, 300.0),
+            };
+            Inputs::RotationalSweep {
+                brep,
+                base,
+                axis,
+                angle_deg,
+                stitch: rng.chance(0.7),
+                merge: rng.chance(0.3),
+                region: gen_region(rng),
+                selection,
+            }
+        }
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "boolean.api_brep"
@@ -990,11 +1621,25 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let gen_ctx = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &gen_ctx)?;
+        // the later entry points under their own names and seeds, so that each `gen` case
+        // stays the one the baseline has
+        let more_ctx = CaseContext {
+            seeds: ctx.seeds.max(MIN_GENERATED_MORE),
+            ..ctx.clone()
+        };
+        for mut c in more_ctx.generated_cases("boolean.api_brep:more", |rng| {
+            serde_json::to_value(gen_more(rng)).ok()
+        }) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "more", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
