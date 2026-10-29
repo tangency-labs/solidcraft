@@ -43,10 +43,11 @@ pub struct MassMeasure {
     pub notes: Vec<String>,
 }
 
-/// The relative accuracy SMLib integrates at: the finest of SmApiBrepComputeMassProperties'
-/// documented range ("clamped to [1e-4, 1e-1]", SmApiQueries.h). Its cost is "governed by
-/// dRelativeAccuracy".
-const ACCURACY: f64 = 1e-4;
+/// The relative accuracy SMLib integrates at: the finest the C API takes
+/// ([`solidcraft_smlib::MEASURE_ACCURACY`], 1e-8). `smlib_brep_mass_properties` calls the
+/// kernel's integration directly because SmApiBrepComputeMassProperties clamps to [1e-4, 1e-1],
+/// which leaves curved faces off by 1e-5 to 1e-3; asking 1e-4 here threw that away.
+const ACCURACY: f64 = solidcraft_smlib::MEASURE_ACCURACY;
 
 /// Measure a body. A B-rep body's volume, area and centre are SMLib's, integrated on its exact
 /// surfaces over its material regions (a sheet's: its faces' area and their centre, volume 0),
