@@ -1,0 +1,26 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.axis.through_cylinder",
+   "params": {
+    "face": {
+     "face": [
+      20,
+      15,
+      20
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}

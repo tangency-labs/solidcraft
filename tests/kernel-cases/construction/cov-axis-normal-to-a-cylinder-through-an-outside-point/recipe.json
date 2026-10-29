@@ -1,0 +1,38 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     60,
+     0,
+     0
+    ],
+    "radius": 5,
+    "height": 10,
+    "body_name": "Cyl",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "construct.axis.normal_to_face",
+   "params": {
+    "face": {
+     "face": [
+      65,
+      0,
+      5
+     ]
+    },
+    "point": {
+     "point": [
+      66,
+      8,
+      5
+     ]
+    },
+    "name": "A"
+   }
+  }
+ ]
+}

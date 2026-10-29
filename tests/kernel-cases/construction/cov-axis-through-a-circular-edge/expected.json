@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the axis through a circular edge",
+ "source": "analytic",
+ "method": "cylinder r 5, h 10 on (60,0,0) along +Z: its top edge is the circle r 5 about (60,0,10) in z = 10: the line through its centre along its normal Z",
+ "construction": {
+  "A": {
+   "axis": {
+    "through": [
+     60,
+     0,
+     10
+    ],
+    "dir": [
+     0,
+     0,
+     1
+    ]
+   }
+  }
+ }
+}
