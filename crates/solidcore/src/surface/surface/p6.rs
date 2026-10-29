@@ -224,6 +224,23 @@ impl Surface {
         k: &Kernel,
         surf_param: SurfParamType,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
+        self.calculate_continuities_reached(k, surf_param, &mut None)
+    }
+
+    /// [`Surface::calculate_continuities`], also storing in `reached` the minimum
+    /// continuity output (`reMinContinuityInSurfaceKnot`) as it stands whenever upstream
+    /// writes it, so that a caller ignoring a failed status reads what upstream leaves
+    /// there (`None`: never written, upstream's uninitialised value).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::calculate_continuities`].
+    pub(crate) fn calculate_continuities_reached(
+        &self,
+        k: &Kernel,
+        surf_param: SurfParamType,
+        reached: &mut Option<ContinuityType>,
+    ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         // Get unique knot values for eSurfParam direction
         let (other_knots, _) = self.knots_with_nurb(k, surf_param, None)?;
 
@@ -235,6 +252,7 @@ impl Surface {
         // init output continuities to [Discontinuous, G1, ... G1, Discontinuous]
         let mut conts_at_knots = vec![ContinuityType::G1; other_knots.len()];
         let mut min_continuity = ContinuityType::G1;
+        *reached = Some(min_continuity);
         if let Some(c) = conts_at_knots.first_mut() {
             *c = ContinuityType::Discontinuous;
         }
@@ -363,10 +381,12 @@ impl Surface {
                     }
                 }
                 min_continuity = tmp_min;
+                *reached = Some(min_continuity);
             } else {
                 // save minimum continuity values
                 if code(tmp_min) < code(min_continuity) {
                     min_continuity = tmp_min;
+                    *reached = Some(min_continuity);
                 }
 
                 // for every knot

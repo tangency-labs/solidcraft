@@ -425,6 +425,38 @@ impl AssertArray {
     pub fn set_last_add(&mut self, last_add: bool) {
         self.last_add = last_add;
     }
+
+    /// `SmAssertArray::FindReport`: the index of the first report from `reporter` of
+    /// check `test_index` of reporting type `test_class` about `owner` and `other`
+    /// (`SmAssertReport::IsThisReport`), `None` when there is none.
+    #[must_use]
+    pub fn find_report(
+        &self,
+        reporter: Option<ObjectKey>,
+        test_index: u64,
+        test_class: i64,
+        owner: Option<ObjectKey>,
+        other: Option<ObjectKey>,
+    ) -> Option<usize> {
+        self.reports.iter().position(|r| {
+            r.reporter == reporter
+                && r.test_index == test_index
+                && r.reporting_type == test_class
+                && r.owner == owner
+                && r.other == other
+        })
+    }
+
+    /// `SmAssertArray::RemoveAt`: removes and returns report `index` (`None` past the
+    /// end).
+    pub fn remove_at(&mut self, index: usize) -> Option<AssertReport> {
+        if index >= self.reports.len() {
+            return None;
+        }
+        let r = self.reports.remove(index);
+        self.identities.remove(&report_identity(&r));
+        Some(r)
+    }
 }
 
 #[cfg(test)]
