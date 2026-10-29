@@ -384,8 +384,23 @@ impl Seg2 {
             _ => {}
         }
         let n = 64;
-        let mut t =
-            (0..=n).map(|i| i as f64 / n as f64).min_by(|x, y| self.point_at(*x).dist(p).total_cmp(&self.point_at(*y).dist(p))).unwrap_or(0.0);
+        let t = (0..=n).map(|i| i as f64 / n as f64).min_by(|x, y| self.point_at(*x).dist(p).total_cmp(&self.point_at(*y).dist(p))).unwrap_or(0.0);
+        let t = self.newton_closest(p, t);
+        // A closed segment (a full circle) starts where it ends: a point just before its start is
+        // nearest just before its end, which Newton from the start (held there by the clamp)
+        // never reaches. Try from the other end too.
+        let (a, b) = (self.point_at(0.0), self.point_at(1.0));
+        if (t == 0.0 || t == 1.0) && a.dist(b) <= 1e-12 * (1.0 + a.len()) {
+            let other = self.newton_closest(p, 1.0 - t);
+            if self.point_at(other).dist(p) < self.point_at(t).dist(p) {
+                return other;
+            }
+        }
+        t
+    }
+
+    /// Newton's method for the parameter of the point nearest `p`, from `t`, within [0, 1].
+    fn newton_closest(&self, p: Vec2, mut t: f64) -> f64 {
         for _ in 0..30 {
             let (q, d) = (self.point_at(t), self.derivative(t));
             let (d2, h) = ((self.derivative((t + 1e-6).min(1.0)) - self.derivative((t - 1e-6).max(0.0))) / 2e-6, q - p);
@@ -403,6 +418,7 @@ impl Seg2 {
         }
         t
     }
+
     /// The two halves of the segment (same kind, exact).
     pub fn split_half(&self) -> (Seg2, Seg2) {
         match *self {
@@ -963,6 +979,16 @@ mod tests {
                 assert!(s.point_at(new).dist(p) <= s.point_at(old).dist(p) + 1e-10);
                 let on_curve = s.point_at(k as f64 / 100.0);
                 assert!(s.point_at(s.closest_param(on_curve)).dist(on_curve) < 1e-9);
+            }
+        }
+        // A full circle's points just before its start, either way round: nearest just before
+        // its end, not at its start (Newton from the start stays held there).
+        for sweep in [TAU, -TAU] {
+            let circle = Seg2::Arc { center: Vec2::new(1.0, 2.0), radius: 5.0, start: 0.6131, sweep };
+            for delta in [1e-4, 0.01, 0.04] {
+                let before = 0.6131 - delta * sweep.signum();
+                let p = Vec2::new(1.0, 2.0) + Vec2::from_angle(before) * 4.99;
+                assert!((circle.point_at(circle.closest_param(p)).dist(p) - 0.01).abs() < 1e-9, "sweep {sweep}, {delta}");
             }
         }
     }
