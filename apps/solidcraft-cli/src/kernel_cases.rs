@@ -450,6 +450,70 @@ fn output_checks(c: &mut Checks, want: &Value, out: &str, results: &[Value], rel
     }
 }
 
+/// The word a `surface_types` check names a face's surface by, as the record holds it: an
+/// analytic kind, `bspline` (a B-spline or NURBS surface) or `revolution` (a revolved curve).
+fn surface_word(s: &solidcraft_engine::geom::brep::Surface) -> &'static str {
+    use solidcraft_engine::geom::brep::Surface as S;
+    match s {
+        S::Plane { .. } | S::PlaneThrough { .. } => "plane",
+        S::Cylinder { .. } => "cylinder",
+        S::Cone { .. } => "cone",
+        S::Sphere { .. } => "sphere",
+        S::Torus { .. } => "torus",
+        S::Spline { .. } | S::RationalSpline { .. } => "bspline",
+        S::PlacedRevolution { .. } => "revolution",
+    }
+}
+
+/// A B-spline face's two directions as `[degree, spans]` (spans: the distinct knot intervals of
+/// the modelled range), the lower first, so a surface parameterised the other way round reads the
+/// same. `None` for a surface that is not a B-spline.
+fn spline_shape(s: &solidcraft_engine::geom::brep::Surface) -> Option<[[u64; 2]; 2]> {
+    use solidcraft_engine::geom::brep::Surface as S;
+    let (u, v, nu, nv) = match s {
+        S::Spline { u_knots, v_knots, points } => (u_knots, v_knots, points.len(), points.first().map_or(0, Vec::len)),
+        S::RationalSpline { u_knots, v_knots, homogeneous } => (u_knots, v_knots, homogeneous.len(), homogeneous.first().map_or(0, Vec::len)),
+        _ => return None,
+    };
+    let dir = |k: &[f64], n: usize| -> Option<[u64; 2]> {
+        let p = k.len().checked_sub(n + 1)?;
+        let inner = k.get(p..=n)?;
+        let spans = inner.windows(2).filter(|w| w[1] > w[0]).count();
+        Some([p as u64, spans as u64])
+    };
+    let (a, b) = (dir(u, nu)?, dir(v, nv)?);
+    Some(if a <= b { [a, b] } else { [b, a] })
+}
+
+/// The `splines` check: every B-spline face of the bodies matches one entry of `want` and every
+/// entry one face (`{degree: [p, q], spans?: [m, n]}`, in either order of directions; without
+/// `spans` only the degrees are graded). `Ok(got)` with what the faces are, `ok` when they match.
+fn splines_match(faces: &[[[u64; 2]; 2]], want: &Value) -> Result<(Value, bool), String> {
+    let list = want.as_array().ok_or("`splines` must be a list of {degree: [p, q], spans?: [m, n]}")?;
+    let pair = |v: &Value| -> Option<[u64; 2]> { Some([v.get(0)?.as_u64()?, v.get(1)?.as_u64()?]) };
+    let mut left: Vec<[[u64; 2]; 2]> = faces.to_vec();
+    let mut ok = true;
+    for w in list {
+        let degree = w.get("degree").and_then(pair).ok_or("each `splines` entry needs `degree: [p, q]`")?;
+        let spans = match w.get("spans").filter(|s| !s.is_null()) {
+            Some(s) => Some(pair(s).ok_or("`spans` must be [m, n]")?),
+            None => None,
+        };
+        let fits = |f: &[[u64; 2]; 2]| {
+            let mine = |d: [u64; 2], s: Option<[u64; 2]>| f[0][0] == d[0] && f[1][0] == d[1] && s.is_none_or(|s| f[0][1] == s[0] && f[1][1] == s[1]);
+            mine(degree, spans) || mine([degree[1], degree[0]], spans.map(|s| [s[1], s[0]]))
+        };
+        match left.iter().position(fits) {
+            Some(i) => {
+                left.remove(i);
+            }
+            None => ok = false,
+        }
+    }
+    let got: Vec<Value> = faces.iter().map(|f| json!({"degree": [f[0][0], f[1][0]], "spans": [f[0][1], f[1][1]]})).collect();
+    Ok((json!(got), ok && left.is_empty()))
+}
+
 fn unsupported(e: &str) -> bool {
     e.contains("not supported yet")
 }
@@ -583,6 +647,17 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
     // body), else one per body.
     let want_shells = want["shells"].as_u64();
     let mut shells = 0u64;
+    // What the faces lie on and the edges only one face uses, over every body, as the records
+    // hold them: for `surface_types`, `splines` and `boundary_edges`.
+    let (mut kinds, mut spline_faces, mut boundary) = (std::collections::BTreeSet::new(), Vec::new(), 0u64);
+    for b in &world.bodies {
+        let record = b.body.record();
+        for f in &record.faces {
+            kinds.insert(surface_word(&f.surface));
+            spline_faces.extend(spline_shape(&f.surface));
+        }
+        boundary += record.edges.iter().filter(|e| e.uses.len() == 1).count() as u64;
+    }
     for b in &world.bodies {
         let m = match solidcraft_engine::kernel::measure(&b.body) {
             Ok(m) => m,
@@ -705,6 +780,19 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
         c.vec("bbox.max", got.bbox.1, want_bbox.map(|b| b.1), abs);
     }
     output_checks(&mut c, &want, &scratch_dir, &answers, rel);
+    count(&mut c, "boundary_edges", boundary);
+    if has("surface_types") {
+        // The set of surface kinds the faces lie on, exactly: none missing, none extra.
+        let want_kinds: std::collections::BTreeSet<&str> = want["surface_types"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        let ok = want_kinds == kinds.iter().copied().collect();
+        c.push("surface_types", json!(kinds), want["surface_types"].clone(), ok);
+    }
+    if has("splines") {
+        match splines_match(&spline_faces, &want["splines"]) {
+            Ok((got, ok)) => c.push("splines", got, want["splines"].clone(), ok),
+            Err(e) => c.push("splines", json!(e), want["splines"].clone(), false),
+        }
+    }
     out["status"] = json!(if c.pass { "pass" } else { "fail" });
     out["checks"] = json!(c.list);
     out
@@ -782,6 +870,35 @@ mod tests {
         // `$OUT` is the running case's scratch directory, in its bases too.
         assert_eq!(s["commands"][0]["params"]["file"], json!("/scratch/a.step"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A bicubic face of 4 × 3 spans and a bilinear one of one span: degrees and spans graded in
+    /// either order of directions, spans only where given, and every face must be accounted for.
+    #[test]
+    fn splines_match_degrees_and_spans_in_either_order() {
+        use solidcraft_engine::geom::brep::Surface;
+        let knots = |p: usize, spans: usize| -> Vec<f64> {
+            let mut k = vec![0.0; p + 1];
+            k.extend((1..spans).map(|i| i as f64));
+            k.extend(vec![spans as f64; p + 1]);
+            k
+        };
+        let face = |pu: usize, su: usize, pv: usize, sv: usize| Surface::Spline {
+            u_knots: knots(pu, su),
+            v_knots: knots(pv, sv),
+            points: vec![vec![[0.0; 3]; pv + sv]; pu + su],
+        };
+        let faces: Vec<_> = [face(3, 4, 3, 3), face(1, 1, 1, 1)].iter().filter_map(spline_shape).collect();
+        assert_eq!(faces[0], [[3, 3], [3, 4]]);
+        let ok = |w: Value| splines_match(&faces, &w).unwrap().1;
+        assert!(ok(json!([{"degree": [1, 1], "spans": [1, 1]}, {"degree": [3, 3], "spans": [4, 3]}])));
+        assert!(ok(json!([{"degree": [3, 3]}, {"degree": [1, 1]}])));
+        assert!(!ok(json!([{"degree": [3, 3], "spans": [4, 4]}, {"degree": [1, 1]}])), "wrong spans");
+        assert!(!ok(json!([{"degree": [3, 3]}])), "a face left over");
+        assert!(!ok(json!([{"degree": [3, 3]}, {"degree": [1, 1]}, {"degree": [1, 1]}])), "an entry with no face");
+        assert!(splines_match(&faces, &json!([{"spans": [1, 1]}])).is_err());
+        assert_eq!(spline_shape(&Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] }), None);
+        assert_eq!(surface_word(&face(1, 1, 1, 1)), "bspline");
     }
 
     #[test]

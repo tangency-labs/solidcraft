@@ -1,0 +1,34 @@
+{
+ "commands": [
+  {
+   "command": "solid.sphere",
+   "params": {
+    "radius": 10,
+    "body_name": "Ball"
+   }
+  },
+  {
+   "command": "surface.offset",
+   "params": {
+    "faces": [
+     [
+      10,
+      0,
+      0
+     ]
+    ],
+    "chain": true,
+    "distance": -4,
+    "body_name": "Core"
+   }
+  },
+  {
+   "command": "solid.remove",
+   "params": {
+    "bodies": [
+     "Ball"
+    ]
+   }
+  }
+ ]
+}

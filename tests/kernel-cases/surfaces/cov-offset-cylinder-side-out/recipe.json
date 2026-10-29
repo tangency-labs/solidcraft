@@ -1,0 +1,34 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 20,
+    "body_name": "Post"
+   }
+  },
+  {
+   "command": "surface.offset",
+   "params": {
+    "faces": [
+     [
+      10,
+      0,
+      10
+     ]
+    ],
+    "distance": 2,
+    "body_name": "Sleeve"
+   }
+  },
+  {
+   "command": "solid.remove",
+   "params": {
+    "bodies": [
+     "Post"
+    ]
+   }
+  }
+ ]
+}

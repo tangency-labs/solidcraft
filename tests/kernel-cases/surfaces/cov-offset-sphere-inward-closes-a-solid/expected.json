@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "every face of a sphere r 10 (its smooth chain) offset 4 inward: the sphere r 6, closed, so a solid",
+ "source": "analytic",
+ "method": "the offset of a sphere by -4 along its outward normal is the concentric sphere r 6: A = 4 pi 36 = 452.389, V = 4/3 pi 216 = 904.779; its faces meet smoothly, so their offsets still share every edge and close up into a solid",
+ "body_count": 1,
+ "area_mm2": 452.3893421169302,
+ "volume_mm3": 904.7786842338603,
+ "boundary_edges": 0,
+ "bbox": {
+  "min": [
+   -6,
+   -6,
+   -6
+  ],
+  "max": [
+   6,
+   6,
+   6
+  ]
+ }
+}

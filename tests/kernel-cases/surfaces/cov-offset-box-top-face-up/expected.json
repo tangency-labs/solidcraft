@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "the top face of a 20 x 10 x 10 box offset 5 up: a plane moves exactly",
+ "source": "analytic",
+ "method": "the top (z = 10) along its outward normal +z by 5: the square 20 x 10 at z = 15, area 200, one plane face with its 4 edges free; the box is removed so only the offset is graded",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 4,
+ "area_mm2": 200.0,
+ "surface_types": [
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   15
+  ],
+  "max": [
+   20,
+   10,
+   15
+  ]
+ }
+}

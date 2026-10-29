@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "the side of a cylinder r 10, 20 high, offset 2 outward: the cylinder r 12",
+ "source": "analytic",
+ "method": "a cylinder's offset along its outward normal is the coaxial cylinder r + d = 12: A = 2 pi 12 20 = 1507.96; one face closed on its seam, its two circles free",
+ "valid": false,
+ "body_count": 1,
+ "faces": 1,
+ "boundary_edges": 2,
+ "area_mm2": 1507.9644737231006,
+ "surface_types": [
+  "cylinder"
+ ],
+ "bbox": {
+  "min": [
+   -12,
+   -12,
+   0
+  ],
+  "max": [
+   12,
+   12,
+   20
+  ]
+ }
+}
