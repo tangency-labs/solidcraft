@@ -1,7 +1,7 @@
 use serde_json::json;
 use solidcraft_doc::drawing_view::ViewSettings;
 
-use super::{CopyParams, EditParams, InspectParams, MoveParams, SnapshotParams, ViewSet};
+use super::{BaseParams, CopyParams, EditParams, InspectParams, MoveParams, ProjectedParams, SnapshotParams, ViewSet};
 use crate::schema::input_schema_for;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors};
 
@@ -24,10 +24,12 @@ fn schemas_and_the_key_check_agree() {
         "view",
     ];
     assert_keys(input_schema_for::<SnapshotParams>(), &keys);
+    assert_keys(input_schema_for::<BaseParams>(), &keys);
     assert_keys(input_schema_for::<InspectParams>(), &["view"]);
     assert_keys(input_schema_for::<EditParams>(), &["set", "view"]);
     assert_keys(input_schema_for::<MoveParams>(), &["break_alignment", "position_mm", "sheet", "view"]);
     assert_keys(input_schema_for::<CopyParams>(), &["position_mm", "sheet", "view", "with_linked"]);
+    assert_keys(input_schema_for::<ProjectedParams>(), &["parent", "place", "side"]);
 }
 
 /// `drawing.view.edit` changes what a saved view sets itself, field for field, and its direction,
