@@ -1398,6 +1398,7 @@ pub(crate) const CONVENTIONS: crate::own_builder::Conventions<'static> =
         skip_edge_list: false,
         face_owner: &face_owner,
         edge_owner: &edge_owner,
+        edgeuse_owner: &crate::own_builder::notify_edgeuse_owner,
     };
 
 fn face_owner(f: FaceId) -> ObjectRef {

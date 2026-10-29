@@ -90,6 +90,8 @@ pub(crate) struct Conventions<'a> {
     pub(crate) face_owner: &'a dyn Fn(FaceId) -> ObjectRef,
     /// The owner identity (and its B-rep's) of edge `e`'s curve (when it has an owner).
     pub(crate) edge_owner: &'a dyn Fn(EdgeId) -> (ObjectRef, ObjectRef),
+    /// The owner identity of edge use `eu`'s UV trim curve (when it has an owner).
+    pub(crate) edgeuse_owner: &'a dyn Fn(EdgeuseId) -> ObjectRef,
 }
 
 fn arena_face_owner(f: FaceId) -> ObjectRef {
@@ -103,6 +105,16 @@ fn arena_edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
     )
 }
 
+/// The identity [`ArenaNotifyState`] binds an edge use's UV trim curve owner under
+/// (`loopuse::notify_ref`: its type code and arena index), the naming of the B-reps
+/// the builders here make.
+pub(crate) fn notify_edgeuse_owner(eu: EdgeuseId) -> ObjectRef {
+    ObjectRef {
+        type_code: eu1::TYPE,
+        key: solidcore::geom::attribute::ObjectKey(1 + (7 << 32) + u64::from(eu.index())),
+    }
+}
+
 impl Conventions<'static> {
     /// `sc_edgeuse_graph.h`: the traversal alone, geometry owned under the kernel's
     /// arena identities (as the `topology.brep_p1` import names them).
@@ -113,6 +125,7 @@ impl Conventions<'static> {
         skip_edge_list: false,
         face_owner: &arena_face_owner,
         edge_owner: &arena_edge_owner,
+        edgeuse_owner: &notify_edgeuse_owner,
     };
 
     /// `sc_topology_fixture.h` (`build`, then `walk` for the export of its
@@ -126,6 +139,7 @@ impl Conventions<'static> {
         skip_edge_list: false,
         face_owner: &fixture_face_owner,
         edge_owner: &fixture_edge_owner,
+        edgeuse_owner: &fixture_edgeuse_owner,
     };
 }
 
@@ -149,6 +163,10 @@ pub(crate) fn fixture_key(type_code: i64, index: u32) -> ObjectRef {
 
 fn fixture_face_owner(f: FaceId) -> ObjectRef {
     fixture_key(solidcore::topology::face::p2::TYPE, f.index())
+}
+
+fn fixture_edgeuse_owner(eu: EdgeuseId) -> ObjectRef {
+    fixture_key(eu1::TYPE, eu.index())
 }
 
 fn fixture_edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
@@ -1519,6 +1537,12 @@ pub(crate) fn renumber_with(src: &Brep, conv: &Conventions<'_>) -> Result<Brep, 
     }
     for &id in &g.edgeuses.items {
         let e = src.edgeuse(id).map_err(solid)?;
+        // `SetUVTrimCurve`'s `SetOwner(holder)`: an owned UV trim curve is relabelled
+        // to its edge use's new id, as the face and edge geometry above
+        let mut uv_trim_curve = e.uv_trim_curve.clone();
+        if let Some(c) = uv_trim_curve.as_mut().filter(|c| c.owner().is_some()) {
+            let _ = c.set_owner(Some((conv.edgeuse_owner)(m.edgeuse(id)?)), None);
+        }
         let mut max_edge_face_gap = e.max_edge_face_gap;
         max_edge_face_gap.edgeuse = opt(max_edge_face_gap.edgeuse, |x| m.edgeuse(x))?;
         let mut edge_ccw_edge_gap = e.edge_ccw_edge_gap;
@@ -1536,7 +1560,7 @@ pub(crate) fn renumber_with(src: &Brep, conv: &Conventions<'_>) -> Result<Brep, 
             cw: opt(e.cw, |x| m.edgeuse(x))?,
             vertexuse: opt(e.vertexuse, |x| m.vertexuse(x))?,
             orientation: e.orientation,
-            uv_trim_curve: e.uv_trim_curve.clone(),
+            uv_trim_curve,
             max_edge_face_gap,
             edge_ccw_edge_gap,
             drop_curve_fail: e.drop_curve_fail.clone(),

@@ -254,6 +254,9 @@ fn imported(export: &[f64]) -> Result<Brep, HarnessError> {
 fn own_face_owner(f: FaceId) -> ObjectRef {
     key(EntityRef::Face(f))
 }
+fn own_edgeuse_owner(eu: EdgeuseId) -> ObjectRef {
+    key(EntityRef::Edgeuse(eu))
+}
 fn own_edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
     (
         key(EntityRef::Edge(e)),
@@ -269,6 +272,7 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     skip_edge_list: false,
     face_owner: &own_face_owner,
     edge_owner: &own_edge_owner,
+    edgeuse_owner: &own_edgeuse_owner,
 };
 /// The Rust B-rep of a [`BrepIn`] source built by the Rust kernel
 /// ([`crate::own_builder`]: native lists, face uses and geometry owners, `Notify`

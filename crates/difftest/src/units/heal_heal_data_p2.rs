@@ -1321,6 +1321,7 @@ const CONV: Conventions<'static> = Conventions {
     skip_edge_list: false,
     face_owner: &arena_face_owner,
     edge_owner: &arena_edge_owner,
+    edgeuse_owner: &crate::own_builder::notify_edgeuse_owner,
 };
 
 /// `new (ctx) SmBrep()`, then `SmPrimitiveCreation(brep->GetInfiniteRegion())

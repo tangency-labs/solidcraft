@@ -107,6 +107,9 @@ fn key(e: EntityRef) -> ObjectRef {
 fn own_face_owner(f: FaceId) -> ObjectRef {
     key(EntityRef::Face(f))
 }
+fn own_edgeuse_owner(eu: EdgeuseId) -> ObjectRef {
+    key(EntityRef::Edgeuse(eu))
+}
 fn own_edge_owner(e: EdgeId) -> (ObjectRef, ObjectRef) {
     (
         key(EntityRef::Edge(e)),
@@ -121,6 +124,7 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     skip_edge_list: false,
     face_owner: &own_face_owner,
     edge_owner: &own_edge_owner,
+    edgeuse_owner: &own_edgeuse_owner,
 };
 fn block(src: &Src) -> Result<(String, Vec<f64>), HarnessError> {
     Ok(match src {
