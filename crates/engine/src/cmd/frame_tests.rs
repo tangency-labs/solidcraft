@@ -838,6 +838,37 @@ fn bad_trims_are_refused_with_the_reason() {
 }
 
 #[test]
+fn a_short_member_keeps_material_between_parallel_slanted_ends() {
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [30.0, 0.0, 0.0])]);
+    // x + y = 0 and x + y = 30 leave 30 mm along every line through the section,
+    // even though the first cut's farthest point is beyond the second cut's nearest.
+    run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [0, 0, 0], "normal": [1, 1, 0]}}, "end": "start"}));
+    run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [30, 0, 0], "normal": [1, 1, 0]}}, "end": "end"}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    let doc = s.doc.to_json();
+    for mut session in [
+        s,
+        Session::new(solidcraft_doc::Document::from_json(&doc).unwrap()),
+        Session::opened(solidcraft_doc::Document::from_json(&doc).unwrap(), Some(&saved)),
+    ] {
+        let b = &bodies(&mut session)[0];
+        assert!(rel(b.1, BAR45 * 30.0) < MEASURED, "{b:?}");
+        assert!(near3(b.2, [-22.5, -22.5, -22.5]) && near3(b.3, [52.5, 22.5, 22.5]), "{b:?}");
+        let before = session.doc.to_json();
+        // These planes really cross in the section: x + y = 0 and x - y = 30
+        // leave a negative length at y = -22.5. Keep the valid member unchanged.
+        let err = session
+            .execute("frame.trim", &json!({"members": m, "to": {"plane": {"origin": [30, 0, 0], "normal": [1, -1, 0]}}, "end": "end"}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ends cross"), "{err}");
+        assert_eq!(session.doc.to_json(), before);
+        assert!(rel(total_volume(&mut session), BAR45 * 30.0) < MEASURED);
+    }
+}
+
+#[test]
 fn a_rotated_square_member_is_not_rebuilt_even_when_its_bounds_match() {
     let mut s = Session::default();
     let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);

@@ -108,30 +108,36 @@ pub(super) fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature
 /// its plane (`ends`, normals out of the member).
 pub(super) fn build(m: &Laid, lay: &Layout, ends: &[Option<Plane>; 2], feature: u64) -> Result<Traced> {
     let corners = [lay.lo, Vec2::new(lay.hi.x, lay.lo.y), lay.hi, Vec2::new(lay.lo.x, lay.hi.y)].map(|c| m.plane.to_world(c));
-    // How far along the line an end plane is at the section's corners (nearest, farthest), and
-    // whether it slants across the section.
-    let reach = |end: &Option<Plane>, default: f64, start: bool| -> Result<(f64, f64, bool)> {
-        let Some(pl) = end else { return Ok((default, default, false)) };
+    // How far along the line an end plane is at each section corner, in the same order for
+    // both ends so their separation is measured along the same line through the section.
+    let reach = |end: &Option<Plane>, default: f64, start: bool| -> Result<[f64; 4]> {
+        let Some(pl) = end else { return Ok([default; 4]) };
         let n = pl.normal();
         let nd = n.dot(m.d);
         // A start's normal points back along the line, an end's on along it.
         if !(n.is_finite() && pl.origin.is_finite() && nd.abs() >= MIN_CROSSING) || (nd < 0.0) != start {
             return Err(DocError::Invalid(format!("the member on line `{}`: an end plane faces the wrong way", m.id)));
         }
-        let (lo, hi) =
-            corners.iter().map(|c| n.dot(pl.origin - *c) / nd).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| (lo.min(t), hi.max(t)));
-        let slants = hi - lo > 1e-9 * (1.0 + lo.abs());
-        Ok(if slants { (lo, hi, true) } else { (lo, lo, false) })
+        Ok(corners.map(|c| n.dot(pl.origin - c) / nd))
     };
-    let (s_lo, s_hi, s_cut) = reach(&ends[0], 0.0, true)?;
-    let (e_lo, e_hi, e_cut) = reach(&ends[1], m.len, false)?;
-    if ![s_lo, s_hi, e_lo, e_hi].iter().all(|t| t.is_finite() && t.abs() <= MAX_REACH) {
+    let start = reach(&ends[0], 0.0, true)?;
+    let end = reach(&ends[1], m.len, false)?;
+    if !start.iter().chain(&end).all(|t| t.is_finite() && t.abs() <= MAX_REACH) {
         return Err(DocError::Invalid(format!("the member on line `{}` would reach more than {MAX_REACH} mm", m.id)));
     }
-    // The ends must leave the whole section between them.
-    if !(e_lo - s_hi > MIN_LENGTH) {
+    // The ends must leave the whole section between them. Their separation is affine over
+    // the section, so checking corresponding bounding corners suffices. Independent extrema
+    // may overlap along the axis even when two slanted ends leave material everywhere.
+    if !start.iter().zip(&end).all(|(s, e)| e - s > MIN_LENGTH) {
         return Err(DocError::Invalid(format!("trimming leaves nothing of the member on line `{}` (its ends cross)", m.id)));
     }
+    let extent = |ts: &[f64; 4]| {
+        let (lo, hi) = ts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &t| (lo.min(t), hi.max(t)));
+        let slants = hi - lo > 1e-9 * (1.0 + lo.abs());
+        if slants { (lo, hi, true) } else { (lo, lo, false) }
+    };
+    let (s_lo, s_hi, s_cut) = extent(&start);
+    let (e_lo, e_hi, e_cut) = extent(&end);
     // An end cut at a slant: run the section past it, then cut it there.
     let from = if s_cut { s_lo - (s_hi - s_lo) - 1.0 } else { s_lo };
     let to = if e_cut { e_hi + (e_hi - e_lo) + 1.0 } else { e_hi };
