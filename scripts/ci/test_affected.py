@@ -110,8 +110,8 @@ class RealWorkspace(unittest.TestCase):
     def test_docs_only_selects_nothing(self):
         self.assertEqual(affected.select(self.meta, ["docs/book/src/dev/testing.md", "CONTRIBUTING.md"]), (False, []))
 
-    def test_goldens_select_the_engine_and_its_dependents_not_the_kernel(self):
-        full, pk = affected.select(self.meta, ["tests/robustness/goldens.json"])
+    def test_engine_test_data_selects_the_engine_and_its_dependents_not_the_kernel(self):
+        full, pk = affected.select(self.meta, ["tests/hole_matrix/known_failures.txt"])
         self.assertFalse(full)
         self.assertIn("solidcraft-engine", pk)
         self.assertNotIn("solidcraft-kernel", pk)

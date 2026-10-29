@@ -1,4 +1,4 @@
-//! Shell regressions found by the robustness fuzzer (tests/robustness/goldens.json).
+//! Shell regressions found by the robustness fuzzer (docs/robustness.md).
 //!
 //! The box-on-box designs below have a saddle corner: where the top box's left face meets the
 //! lower box's back face, four planar faces meet with convex and concave edges in turn (the

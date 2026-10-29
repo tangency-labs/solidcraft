@@ -12,7 +12,6 @@ not (
     (package(solidcraft-engine) & (
         test(=tests::hostile_params_never_panic)
         | test(/^tests::robustness::/)
-        | test(/^tests::robustness_goldens::seed_/)
         | test(=pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen)
         | test(=pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs)
         | test(=cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall)
@@ -44,13 +43,12 @@ threads-required = 12
 priority = 100
 
 # The slowest tests start first, so a shard does not end with one of them running alone on a
-# core while the others sit idle (seed_81 alone takes about 20 minutes under CI load). Medians
-# from the CI test timings (the junit artifacts), slowest first; a test over ~100 s belongs here.
+# core while the others sit idle. Medians from the CI test timings (the junit artifacts), slowest
+# first; a test over ~100 s belongs here.
 [[profile.ci.overrides]]
 filter = """
 (package(solidcraft-engine) & (
-    test(/^tests::robustness_goldens::seed_(81|45|20|24|95|02|57|40|18|48|32|46|85|61)$/)
-    | test(/^tests::robustness::/)
+    test(/^tests::robustness::/)
     | test(=tests::hostile_params_never_panic)
     | test(=cmd::clearance::tests::distances_are_exact_on_edges_and_curved_faces)
     | test(=cmd::clipboard::tests::a_pasted_coil_joins_the_pasted_body)
@@ -92,14 +90,13 @@ threads-required = "num-cpus"
 priority = 100
 
 [[profile.local-ci.overrides]]
-filter = "(package(solidcraft-engine) & test(=tests::robustness_goldens::seed_81)) | (package(solidcraft-kernel) & test(=tspline::tests::hostile_tsplines_never_panic))"
+filter = "package(solidcraft-kernel) & test(=tspline::tests::hostile_tsplines_never_panic)"
 priority = 99
 
 [[profile.local-ci.overrides]]
 filter = """
 (package(solidcraft-engine) & (
-    test(/^tests::robustness_goldens::seed_(81|45|20|24|95|02|57|40|18|48|32|46|85|61)$/)
-    | test(/^tests::robustness::/)
+    test(/^tests::robustness::/)
     | test(=tests::hostile_params_never_panic)
     | test(=cmd::clearance::tests::distances_are_exact_on_edges_and_curved_faces)
     | test(=cmd::clipboard::tests::a_pasted_coil_joins_the_pasted_body)
