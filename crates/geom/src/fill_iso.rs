@@ -1648,19 +1648,37 @@ fn nearest(quilt: &Quilt, p: Vec3) -> (usize, [f64; 2]) {
     (k, [u, v])
 }
 
-/// Whether a patch folds back on itself: its normal turns against the middle's somewhere on a
-/// grid (clear of a three-sided patch's pole at u = 0, where the normal is undefined).
+/// Whether a patch folds back on itself: on a grid of its parameters, its normal reverses between
+/// neighbouring points (the surface turns back over itself), or vanishes inside it. A patch may
+/// turn its normal through more than a right angle overall (a dome meeting a tube's wall, a
+/// window round more than half a cylinder): only a reversal between neighbours is a fold. The
+/// normal may vanish at a corner (where two sides run on straight, as on a closed loop's pieces)
+/// and on a three-sided patch's pole at u = 0.
 fn folds(patch: &Patch) -> bool {
-    let Some(mid) = patch.normal(0.5, 0.5) else { return true };
-    for i in 0..=FOLD_SAMPLES {
-        if patch.pole && i == 0 {
-            continue;
+    let n = FOLD_SAMPLES;
+    if patch.normal(0.5, 0.5).is_none() {
+        return true;
+    }
+    let at = |i: usize, j: usize| patch.normal(i as f64 / n as f64, j as f64 / n as f64);
+    let mut grid: Vec<Option<Vec3>> = Vec::with_capacity((n + 1) * (n + 1));
+    for i in 0..=n {
+        for j in 0..=n {
+            let normal = at(i, j);
+            let excused = (patch.pole && i == 0) || ((i == 0 || i == n) && (j == 0 || j == n));
+            if normal.is_none() && !excused {
+                return true;
+            }
+            grid.push(normal);
         }
-        for j in 0..=FOLD_SAMPLES {
-            let (u, v) = (i as f64 / FOLD_SAMPLES as f64, j as f64 / FOLD_SAMPLES as f64);
-            match patch.normal(u, v) {
-                Some(n) if n.dot(mid) > 0.0 => {}
-                _ => return true,
+    }
+    let get = |i: usize, j: usize| grid.get(i * (n + 1) + j).copied().flatten();
+    for i in 0..=n {
+        for j in 0..=n {
+            let Some(a) = get(i, j) else { continue };
+            for (k, l) in [(i + 1, j), (i, j + 1)] {
+                if k <= n && l <= n && get(k, l).is_some_and(|b| a.dot(b) <= 0.0) {
+                    return true;
+                }
             }
         }
     }
