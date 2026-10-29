@@ -24,6 +24,9 @@
 //! | [`AssertArray::last_add`]              | `SmAssertArray::GetLastAdd`                      |
 //! | [`AssertArray::set_last_add`]          | `SmAssertArray::SetLastAdd`                      |
 //! | [`AssertArray::len`], [`AssertArray::get`], [`AssertArray::reports`] | `SmTArray<SmAssertReport*>::GetSize`, `GetAt`, `GetReports` |
+//! | [`AssertReport::format_log_message`]   | `SmAssertReport::FormatLogMessage`               |
+//! | [`obj_type_string`]                    | `SM_GetObjTypeString`                            |
+//! | `c_general` (private)                  | `smos_sprintf("%W.Plg")`                         |
 //!
 //! Deviations:
 //! - Object pointers become [`ObjectKey`]s (`None` = `NULL`); reports compare them by
@@ -41,6 +44,8 @@
 //!   as upstream deletes it.
 //! - `SM_DEBUG_CODE` members (`m_file_name`, `m_line_num`, the debug drawing in the
 //!   constructor) are not ported; the reference build does not define it.
+//! - `FormatLogMessage` returns an owned string instead of filling a caller buffer
+//!   (no truncation); `%lg` is formatted as glibc does (`inf`, `nan`).
 //! - Report membership uses a call-owned ordered index over exactly the fields
 //!   compared by `operator==`; the report vector retains insertion order. This
 //!   avoids quadratic duplicate searches when validating a large invalid B-rep.
@@ -312,6 +317,149 @@ impl AssertReport {
     pub fn set_owner_param(&mut self, owner_param: Point2) {
         self.owner_param = owner_param;
     }
+
+    /// `SmAssertReport::FormatLogMessage`: the message (`"?"` without one) with the
+    /// stored value and tolerance when defined:
+    /// `"%s (offset=%6.8lg, tolerance=%6.8lg)"`, `"%s (offset=%6.8lg)"` or
+    /// `"%s (tolerance=%6.8lg)"`.
+    #[must_use]
+    pub fn format_log_message(&self) -> String {
+        let base = self.message.as_deref().unwrap_or("?");
+        let has_tol = self.tol3d != UNDEF_DOUBLE;
+        let has_val = self.value != UNDEF_DOUBLE;
+        match (has_tol, has_val) {
+            (true, true) => format!(
+                "{base} (offset={}, tolerance={})",
+                c_general(self.value, 6, 8),
+                c_general(self.tol3d, 6, 8)
+            ),
+            (false, true) => format!("{base} (offset={})", c_general(self.value, 6, 8)),
+            (true, false) => format!("{base} (tolerance={})", c_general(self.tol3d, 6, 8)),
+            (false, false) => base.to_string(),
+        }
+    }
+}
+
+/// `printf("%W.Plg", x)` as glibc formats it: the shorter of fixed and exponent
+/// notation for `precision` significant digits (exponent form when the decimal
+/// exponent is below -4 or at least `precision`), trailing zeros removed, right-aligned
+/// in `width`.
+fn c_general(x: f64, width: usize, precision: usize) -> String {
+    let p = precision.max(1);
+    let body = if x.is_nan() {
+        if x.is_sign_negative() { "-nan" } else { "nan" }.to_string()
+    } else if x.is_infinite() {
+        if x < 0.0 { "-inf" } else { "inf" }.to_string()
+    } else {
+        // the decimal exponent after rounding to p significant digits
+        let sci = format!("{:.*e}", p - 1, x);
+        let (mantissa, exponent) = sci.split_once('e').unwrap_or((sci.as_str(), "0"));
+        let exp: i64 = exponent.parse().unwrap_or(0);
+        let p_i = i64::try_from(p).unwrap_or(i64::MAX);
+        if exp < -4 || exp >= p_i {
+            let mantissa = strip_zeros(mantissa);
+            let sign = if exp < 0 { '-' } else { '+' };
+            format!("{mantissa}e{sign}{:02}", exp.unsigned_abs())
+        } else {
+            let decimals = usize::try_from(p_i - 1 - exp).unwrap_or(0);
+            strip_zeros(&format!("{x:.decimals$}")).to_string()
+        }
+    };
+    format!("{body:>width$}")
+}
+
+/// Removes trailing fractional zeros and a trailing decimal point (`%g` without `#`).
+fn strip_zeros(s: &str) -> &str {
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        s
+    }
+}
+
+/// `SM_GetObjTypeString`: the class name of an `AssertValid` reporting type, or
+/// `"SmDefault"` for a type it does not list.
+#[must_use]
+pub fn obj_type_string(type_code: i64) -> &'static str {
+    use labels as l;
+    match type_code {
+        l::AXIS2_PLACEMENT_TYPE => "SmAxis2Placement",
+        l::POLAR_CONVERSION_TYPE => "SmPolarConversion",
+        l::CIRCLE_TYPE => "SmCircle",
+        l::ELLIPSE_TYPE => "SmEllipse",
+        l::ATTRIBUTE_TYPE => "SmAttribute",
+        l::B_SPLINE_CURVE_TYPE => "SmBSplineCurve",
+        l::CURVE_TYPE => "SmCurve",
+        l::A_OBJECT_TYPE => "SmAObject",
+        l::LINE_TYPE => "SmLine",
+        l::TREE_TYPE => "SmTree",
+        l::SOLUTION_ARRAY_TYPE => "SmSolutionArray",
+        l::B_SPLINE_SURFACE_TYPE => "SmBSplineSurface",
+        l::PLANE_TYPE => "SmPlane",
+        l::CONE_TYPE => "SmCone",
+        l::SPHERE_TYPE => "SmSphere",
+        l::CYLINDER_TYPE => "SmCylinder",
+        l::TORUS_TYPE => "SmTorus",
+        l::SURF_OF_REVOLUTION_TYPE => "SmSurfOfRevolution",
+        l::EXTENT1D_TYPE => "SmExtent1d",
+        l::EXTENT2D_TYPE => "SmExtent2d",
+        l::EXTENT3D_TYPE => "SmExtent3d",
+        l::PERIODIC_EXTENT1D_TYPE => "SmPeriodicExtent1d",
+        l::POLAR_BOX_TYPE => "SmPolarBox",
+        l::PSEUDO_BOX_TYPE => "SmPseudoBox",
+        l::DERIV_SURF_DEFINITION_TYPE => "SmDerivSurfDefinition",
+        l::SURFACE_CACHE_TYPE => "SmSurfaceCache",
+        l::SURF_OF_EXTRUSION_TYPE => "SmSurfOfExtrusion",
+        l::SURFACE_TYPE => "SmSurface",
+        l::CRV_ON_SURF_TYPE => "SmCrvOnSurf",
+        l::PROJECTED_CURVE_TYPE => "SmProjectedCurve",
+        l::CRV_IN_VOLUME_TYPE => "SmCrvInVolume",
+        l::SRF_IN_VOLUME_TYPE => "SmSrfInVolume",
+        l::FILLET_EDGE_TYPE => "SmFilletEdge",
+        l::FILLET_BREP_TYPE => "SmFilletBrep",
+        l::FILLET_VERTEX_TYPE => "SmFilletVertex",
+        l::FILLET_VERTEXUSE_TYPE => "SmFilletVertexuse",
+        l::FILLET_EDGEUSE_TYPE => "SmFilletEdgeuse",
+        l::SPACE_BEND_TYPE => "SmSpaceBend",
+        l::SPACE_UNBEND_TYPE => "SmSpaceUnbend",
+        l::OFFSET_SURFACE_TYPE => "SmOffsetSurface",
+        l::OFFSET_CURVE_TYPE => "SmOffsetCurve",
+        l::ASSEMBLY_TYPE => "SmAssembly",
+        l::ASSEMBLY_INSTANCE_TYPE => "SmAssemblyInstance",
+        l::SAG_OBJECT_TYPE => "SmSAGObject",
+        l::BREP_TYPE => "SmBrep",
+        l::VOLUME_TYPE => "SmVolume",
+        l::BEND_VOLUME_TYPE => "SmBendVolume",
+        l::UNBEND_VOLUME_TYPE => "SmUnbendVolume",
+        l::TRANSFORM_TYPE => "SmTransform",
+        l::B_SPLINE_VOLUME_TYPE => "SmBSplineVolume",
+        l::TWIST_VOLUME_TYPE => "SmTwistVolume",
+        l::EDGE_TYPE => "SmEdge",
+        l::FACE_TYPE => "SmFace",
+        l::CURVE_CLASSIFICATION_TYPE => "SmCurveClassification",
+        l::CURVE_INTERVAL_TYPE => "SmCurveInterval",
+        l::POINT_CLASSIFICATION_TYPE => "SmPointClassification",
+        l::TOPOLOGY_TYPE => "SmTopology",
+        l::OWNING_TOPOLOGY_TYPE => "SmOwningTopology",
+        l::EDGEUSE_TYPE => "SmEdgeuse",
+        l::FACEUSE_TYPE => "SmFaceuse",
+        l::VERTEXUSE_TYPE => "SmVertexuse",
+        l::VERTEX_TYPE => "SmVertex",
+        l::LOOP_TYPE => "SmLoop",
+        l::LOOPUSE_TYPE => "SmLoopuse",
+        l::REGION_TYPE => "SmRegion",
+        l::SHELL_TYPE => "SmShell",
+        l::POLY_FACE_TYPE => "SmPolyFace",
+        l::C_POLY_FACE_TYPE => "SmCPolyFace",
+        l::POLY_LOOP_TYPE => "SmPolyLoop",
+        l::POLY_VERTEX_TYPE => "SmPolyVertex",
+        l::POLY_EDGE_TYPE => "SmPolyEdge",
+        l::POLY_REGION_TYPE => "SmPolyRegion",
+        l::POLY_SHELL_TYPE => "SmPolyShell",
+        l::POLY_BREP_TYPE => "SmPolyBrep",
+        l::TRIMMING_TOOLS_TYPE => "SmTrimmingTools",
+        _ => "SmDefault",
+    }
 }
 
 /// `SmAssertReport::operator==`: same reporting type, list index, test index, category,
@@ -534,6 +682,40 @@ mod tests {
             .unwrap();
         let r = AssertReport::new(spec(labels::POLY_LOOP_TYPE, i as u64, 1)).unwrap();
         assert_eq!(r.message, None);
+    }
+
+    #[test]
+    fn general_format_matches_printf() {
+        assert_eq!(c_general(0.0, 6, 8), "     0");
+        assert_eq!(c_general(1e-5, 6, 8), " 1e-05");
+        assert_eq!(c_general(1.0e-12, 6, 8), " 1e-12");
+        assert_eq!(c_general(0.0001, 6, 8), "0.0001");
+        assert_eq!(c_general(123_456_789.0, 6, 8), "1.2345679e+08");
+        assert_eq!(c_general(12_345_678.0, 6, 8), "12345678");
+        assert_eq!(c_general(-2.5, 6, 8), "  -2.5");
+        assert_eq!(c_general(1.0 / 3.0, 6, 8), "0.33333333");
+        assert_eq!(c_general(f64::INFINITY, 6, 8), "   inf");
+        assert_eq!(c_general(1.23456e-61, 6, 8), "1.23456e-61");
+    }
+
+    #[test]
+    fn log_message_and_type_strings() {
+        let mut r = AssertReport::new(spec(labels::CIRCLE_TYPE, 0, 5)).unwrap();
+        assert_eq!(
+            r.format_log_message(),
+            "m_dRadiusAtXAxis and m_dRadiusAtYAxis are equal"
+        );
+        r.value = 0.5;
+        r.tol3d = 1e-6;
+        assert_eq!(
+            r.format_log_message(),
+            "m_dRadiusAtXAxis and m_dRadiusAtYAxis are equal (offset=   0.5, tolerance= 1e-06)"
+        );
+        r.message = None;
+        r.tol3d = UNDEF_DOUBLE;
+        assert_eq!(r.format_log_message(), "? (offset=   0.5)");
+        assert_eq!(obj_type_string(labels::LOOPUSE_TYPE), "SmLoopuse");
+        assert_eq!(obj_type_string(-7), "SmDefault");
     }
 
     #[test]

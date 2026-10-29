@@ -88,7 +88,9 @@
 //!   `MakeFaceTopology` names the face by the notification environment's identity
 //!   and builds it on a copy of the surface (with no surface identity: its owner
 //!   changes are not notified), which `MakeFace` then replaces with its own
-//!   (upstream: one shared surface whose owner `MakeFace` restores). It claims its
+//!   (upstream: one shared surface whose owner `MakeFace` restores). The copy shares
+//!   the original's cache slot, so a surface cache built while making the face stays
+//!   with the installed surface as upstream's does. It claims its
 //!   marks through a fresh [`Marks`] record per call, as each call takes a new mark.
 //! - **Original-surface transfer ownership (#894).** Deliberately correcting pinned
 //!   C++ `SmBrep.cpp:18859-18889`, the original-transfer path never restores the old
@@ -906,7 +908,10 @@ fn make_face_transfer_attempt_with_state(
         surface_key: None,
     };
     let attempt = if legacy {
-        let mut copy = p6::FaceSurfaceTransfer::new(transfer.owned_surface()?.clone());
+        // The copy shares the original's caches: upstream builds the face on the one
+        // surface `MakeFace` keeps, so a cache made while building it stays with it.
+        let mut copy =
+            p6::FaceSurfaceTransfer::new(transfer.owned_surface()?.clone_sharing_cache());
         p6::make_face_topology_transfer_attempt_with_state(
             k,
             b,

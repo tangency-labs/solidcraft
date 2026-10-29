@@ -1,0 +1,12 @@
+id = "topology.assert_valid"
+upstream = ["source/SMLib/src/SmAssertArray.cpp", "source/SMLib/src/SmBrep.cpp", "source/SMLib/src/SmEdge.cpp", "source/SMLib/src/SmEdgeuse.cpp", "source/SMLib/src/SmFace.cpp", "source/SMLib/src/SmFaceuse.cpp", "source/SMLib/src/SmLoop.cpp", "source/SMLib/src/SmLoopuse.cpp", "source/SMLib/src/SmOwningTopology.cpp", "source/SMLib/src/SmRegion.cpp", "source/SMLib/src/SmSAGObject.cpp", "source/SMLib/src/SmShell.cpp", "source/SMLib/src/SmTopology.cpp", "source/SMLib/src/SmVertex.cpp", "source/SMLib/src/SmVertexuse.cpp"]
+rust_module = "topology::brep::validation::assert_valid"
+depends_on = ["geom.assert_array", "topology.brep_validation"]
+soft_depends_on = []
+est_lines = 2700
+layer = 36
+tests = ["prog_test:my_test_topology"]
+status = "partial"
+claimed_by = "Claude Code"
+claimed_at = "2026-10-29"
+notes = "PR #1459, issue #1419 (WP1): SmBrep::AssertValid whole-body walk (Brep, Region, Shell, Face, Faceuse, Loop, Loopuse, Edge, Edgeuse, Vertex, Vertexuse level-0 bodies; SmTopology/SmOwningTopology/SmSAGObject base checks; validate-only tolerance pass; SmCurve::AssertValid dispatch), FormatLogMessage, SM_GetObjTypeString, public check_brep -> BrepCheck (capi smlib_brep_check). PARTIAL: 532 cases (516 fixtures: 14 primitive/constructed bodies + 14 upstream .smb files at levels 0-4, no-walk and capi levels 0-2, 10 mutation kinds on 6 bodies; 16 generated), 154 pass, 378 deferred (all on WP4 seams of #1478 except 8: topology.face_p4 201 sm_AssertTestFace32; topology.vertex 91 sm_AssertTestVertex1; topology.edge 78 sm_AssertTestEdge13; surface.surf_of_extrusion_p1 8 SmSurfOfExtrusion::AssertValid), 0 known mismatches, max_rel_err 0. sphere_mutation6_capi fixed: the legacy MakeFace copy now shares the surface's cache slot, so the trimmed cache built during creation persists as upstream's does (plan/findings/topology.assert_valid--sphere-moved-pole-lazy-trim--addendum-2026-10-29-fixed.md). Seams in assert_valid/seams.rs: WP2 helpers wired to #1472, SmSurface::AssertValid wired to #1460; WP3b curve checks and WP4 tests remain stubs (UNPORTED tags; sm_AssertTestFace32/33/37/38, sm_AssertTestEdge13 and sm_AssertTestVertex1 are not in units.json and are tagged with the topology units WP2/WP4 extend; SmSurface::AssertValid wired to surface.surface_assert_valid (PR #1460); SmPlane placement reports are named by the surface key on both sides). Regression tests: crates/solidcore/tests/issue_1419_brep_check.rs."

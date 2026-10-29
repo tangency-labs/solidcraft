@@ -18,10 +18,12 @@
 //! candidates; results retain native traversal order. Release builds ignore test
 //! requests and run tests whose level is at most the requested level, as upstream.
 
+mod assert_valid;
 mod coincidence;
 mod pointers;
 mod spatial;
 
+pub use assert_valid::{assert_valid, check_brep, check_brep_with_keys, BrepCheck, CheckLevel};
 pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub use pointers::validate_pointers;
 
