@@ -14,7 +14,7 @@
 //!
 //! | [`Op`]         | parameters after `eu`                  | outputs |
 //! |----------------|----------------------------------------|---------|
-//! | `Create`       | `want_dev has_fail`                    | `-2`, or `status`; without a wire edge use also `dist dev` (`-1` without a curve), the curve's full UV trim curve record, the record's path type (`-1` without record) and B-rep flag, then the states |
+//! | `Create`       | `want_dev has_fail sample_lift`        | `-2`, or `status`; without a wire edge use also `dist dev` (`-1` without a curve), the curve's full UV trim curve record, optional lift samples, the record's path type (`-1` without record) and B-rep flag, then the states |
 //! | `Binormal`     | `frac use_3d want_uv_vector`           | `-2`, or `status` and, on success, `P[3] B[3] T[3] N[3] u v du dv`, then the states (`CreateUVTrimCurve` may attach a curve) |
 //! | `Normalized`   | `t parameter_space want_deriv ok_make` | `-2`, or `status` and, on success, `P[3] D[3]`, then the states |
 //! | `ExportGaps` | no selector or arguments | `n (edgeuse_index gap edge_t u v)*`, initial cached fields in traversal order, without gap calculation |
@@ -22,6 +22,11 @@
 //!
 //! [`eval`] accepts what [`super::topology_edgeuse_p1::eval`] accepts for the block, an
 //! edge use index inside the export and finite parameters.
+//!
+//! Requested lift samples are `0` without a returned curve, `-2` for missing
+//! geometry, or `5 curve_type` followed by five rows at edge-interval fractions
+//! `0, .25, .5, .75, 1`: `status`, and on success `t xyz[3] uv[2] lifted_xyz[3]`.
+//! These evaluate the new curve without attaching it to the edge use.
 
 use super::topology_edgeuse_p1::{self as p1, bad, brep_block, Reader};
 use crate::{call_with_buffer, FfiError};
@@ -54,7 +59,8 @@ mod sys {
 fn args(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
     match op {
         Op::ExportGaps => {}
-        Op::Create => {
+        Op::Create | Op::GetOrCreate => {
+            rd.flag()?;
             rd.flag()?;
             rd.flag()?;
         }
@@ -65,11 +71,6 @@ fn args(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
         }
         Op::Normalized => {
             rd.finite()?;
-            rd.flag()?;
-            rd.flag()?;
-            rd.flag()?;
-        }
-        Op::GetOrCreate => {
             rd.flag()?;
             rd.flag()?;
             rd.flag()?;

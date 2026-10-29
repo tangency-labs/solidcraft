@@ -300,6 +300,9 @@ pub(crate) fn build_with(
                 },
             )
         })?,
+        BrepIn::HermiteSheetFace { scale, edge_tol } => {
+            in_new_brep(k, |k, b| hermite_sheet_face(k, b, *scale, *edge_tol))?
+        }
     };
     finish(k, raw, validate_only, init_gaps, conv).map(Some)
 }
@@ -800,6 +803,146 @@ fn ellipse_face(k: &mut Kernel, b: &mut Brep, i: &EllipseIn) -> Result<(), Solid
     } else {
         Err(SolidError::sm_err("own_builder::ellipse_face"))
     }
+}
+
+/// The four boundary segments of the kind-15 sheet in loop order as their UV corner
+/// pairs, the native fixture's `u`/`v` arrays: edge 0 is the diagonal
+/// `(0.2, 0.2)`-`(0.8, 0.7)`, edge 1 the `u = 0.8` isoparametric curve, edge 2 the
+/// diagonal back and edge 3 the `u = 0.2` isoparametric curve.
+const HERMITE_SHEET_EDGES: [[[f64; 2]; 2]; 4] = [
+    [[0.2, 0.2], [0.8, 0.7]],
+    [[0.8, 0.7], [0.8, 0.9]],
+    [[0.8, 0.9], [0.2, 0.4]],
+    [[0.2, 0.4], [0.2, 0.2]],
+];
+
+/// The kind-15 face's Hermite data for `scale`: the start point and tangent, the end
+/// point and tangent, and the extrusion vector (`Shape` in
+/// `harness/cpp/shim/support/hermite_sheet_fixture.h`).
+fn hermite_shape(scale: f64) -> (Vec3, Vec3, Vec3, Vec3, Vec3) {
+    (
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(scale, 0.2 * scale, 0.1 * scale),
+        Vec3::new(0.6 * scale, 1.2 * scale, 0.7 * scale),
+        Vec3::new(1.2 * scale, -0.8 * scale, -0.4 * scale),
+        Vec3::new(0.0, 0.0, scale),
+    )
+}
+
+/// `Shape::at`: the shape curve's point at `u` (Hermite basis, the native fixture's
+/// operation order).
+fn hermite_shape_at(scale: f64, u: f64) -> Vec3 {
+    let (p0, p1, d0, d1, _) = hermite_shape(scale);
+    let u2 = u * u;
+    let u3 = u2 * u;
+    p0 * (2.0 * u3 - 3.0 * u2 + 1.0)
+        + d0 * (u3 - 2.0 * u2 + u)
+        + p1 * (-2.0 * u3 + 3.0 * u2)
+        + d1 * (u3 - u2)
+}
+
+/// `Shape::tangent`: the shape curve's derivative at `u`.
+fn hermite_shape_tangent(scale: f64, u: f64) -> Vec3 {
+    let (p0, p1, d0, d1, _) = hermite_shape(scale);
+    let u2 = u * u;
+    p0 * (6.0 * u2 - 6.0 * u)
+        + d0 * (3.0 * u2 - 4.0 * u + 1.0)
+        + p1 * (-6.0 * u2 + 6.0 * u)
+        + d1 * (3.0 * u2 - 2.0 * u)
+}
+
+/// Kind 15: the unit-domain sheet face on the cubic Hermite shape surface
+/// `S(u, v) = C(u) + v * extrusion` (degree 3 x 1, clamped, rational weights 1),
+/// bounded by four cubic `HermiteCurve`s of the affine UV segments of
+/// [`HERMITE_SHEET_EDGES`]: one loop, every orientation `Same`, no UV trims, the
+/// face tolerance `1e-7` and each edge's exactly `edge_tol`.
+///
+/// The surface, the curves and the tolerances come from the raw scalars here, never from
+/// a native export; `finish` renumbers the result into the shim's traversal order as for
+/// every other source.
+fn hermite_sheet_face(
+    k: &mut Kernel,
+    b: &mut Brep,
+    scale: f64,
+    edge_tol: f64,
+) -> Result<(), SolidError> {
+    use solidcore::curve::hermite_curve::HermiteCurve;
+    use solidcore::nurbs::b_spline_surface::BSplineSurface;
+    use solidcore::nurbs::math::CPoint;
+    use solidcore::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+
+    let (p0, p1, d0, d1, extrusion) = hermite_shape(scale);
+    let control = [p0, p0 + d0 / 3.0, p1 - d1 / 3.0, p1];
+    let mut net: Vec<Vec<CPoint>> = Vec::new();
+    for c in &control {
+        let mut row = Vec::new();
+        for j in [0.0, 1.0] {
+            let p = *c + extrusion * j;
+            row.push(CPoint::new(p.x, p.y, p.z, 1.0));
+        }
+        net.push(row);
+    }
+    let u_knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let v_knots = [0.0, 0.0, 1.0, 1.0];
+    let nurb = BSplineSurface::from_data(3, 1, 3, 1, 7, 3, &net, &u_knots, &v_knots)?;
+    let surface = Surface::from(nurb);
+    let mut curves = Vec::new();
+    for &[[ua, va], [ub, vb]] in &HERMITE_SHEET_EDGES {
+        let du = ub - ua;
+        let dv = vb - va;
+        let start = hermite_shape_at(scale, ua) + extrusion * va;
+        let end = hermite_shape_at(scale, ub) + extrusion * vb;
+        let start_tangent = hermite_shape_tangent(scale, ua) * du + extrusion * dv;
+        let end_tangent = hermite_shape_tangent(scale, ub) * du + extrusion * dv;
+        let curve = HermiteCurve::new(start, start_tangent, end, end_tangent, 3);
+        curves.push(Some(Curve::from(curve)));
+    }
+    let input = FaceCurvesInput {
+        loops: vec![curves.len()],
+        curves_3d: Some(curves),
+        uv_curves: None,
+        orientations: vec![OrientType::Same; HERMITE_SHEET_EDGES.len()],
+        loop_points: Vec::new(),
+    };
+    let dom = Extent2d::from_points(Point2::new(0.0, 0.0), Point2::new(1.0, 1.0));
+    let mut state = ArenaNotifyState::new(b);
+    let this_face = |face| arena_identity(CacheObject::Face(face));
+    let made = {
+        let mut env = state.env(None);
+        let region = b.infinite_region();
+        make_face_with_curves(
+            k,
+            b,
+            region,
+            input,
+            surface,
+            &dom,
+            OrientType::Same,
+            None,
+            &this_face,
+            &mut env,
+        )?
+    };
+    let face = made
+        .face
+        .ok_or_else(|| SolidError::sm_err("own_builder::hermite_sheet_face"))?;
+    let edges = solidcore::topology::face::p4::edges(b, face, None, false, None)?;
+    if edges.len() != 4 {
+        return Err(SolidError::sm_err("own_builder::hermite_sheet_face"));
+    }
+    for edge in edges {
+        if !b
+            .edge(edge)?
+            .curve
+            .as_ref()
+            .is_some_and(|curve| matches!(curve.kind(), CurveKind::Hermite(_)))
+        {
+            return Err(SolidError::sm_err("own_builder::hermite_sheet_face"));
+        }
+        solidcore::topology::edge::set_tolerance(b, edge, edge_tol, false, false)?;
+    }
+    solidcore::topology::face::p3::set_tolerance(b, face, 1e-7, false, false)?;
+    Ok(())
 }
 
 /// The shim's `init_gaps` walk: `GetVertexFaceGap` on loop and edge vertex uses of a

@@ -13,6 +13,7 @@
 #include "sc_exact_curve_export.h"
 #include "support/topology_fixture.h"
 #include "support/ellipse_face_fixture.h"
+#include "support/hermite_sheet_fixture.h"
 #include <algorithm>
 #include <memory>
 
@@ -661,6 +662,17 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
     else if (kind == 9)
     {
         status = sc_topology_fixture::ellipse_face(brep, rd, ctx);
+    }
+    else if (kind == 15)
+    {
+        // `15 scale edge_tol`: a native sheet face with four real Hermite edges.
+        status = sc_topology_fixture::hermite_sheet_face(brep, rd, ctx);
+    }
+    else if (kind >= 10 && kind <= 14)
+    {
+        // Reserved for other fixtures (kind 14 in particular is not ours): reject
+        // explicitly instead of building the wire network of the wildcard branch.
+        status = SM_ERR_INVALID_INPUT;
     }
     else if (kind == 1)
     {

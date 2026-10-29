@@ -94,6 +94,47 @@ void put_states(std::vector<double>& o, Graph& g, SmEdgeuse* p, SmEdgeuse* mate)
     sc_trim_curve::put_trim_curve(o, mate ? mate->*EuPeek::uv() : nullptr);
 }
 
+// Evaluate the newly returned curve without attaching it or changing topology.
+void put_created_lift(std::vector<double>& o, SmEdgeuse* p, SmBSplineCurve* trim)
+{
+    if (trim == nullptr)
+    {
+        o.push_back(0.0);
+        return;
+    }
+    SmEdge* edge = p->GetEdge();
+    SmFace* face = p->GetFace();
+    SmCurve* curve = edge ? edge->GetCurve() : nullptr;
+    SmSurface* surface = face ? face->GetSurface() : nullptr;
+    if (curve == nullptr || surface == nullptr)
+    {
+        o.push_back(ST_NULL_DEREF);
+        return;
+    }
+    o.push_back(5.0);
+    o.push_back((double)curve->GetType());
+    const SmExtent1d interval = edge->GetInterval();
+    for (int i = 0; i <= 4; ++i)
+    {
+        const double t = interval.Evaluate(i / 4.0);
+        SmPoint3d xyz, uv, lifted;
+        SmStatus status = curve->EvaluatePoint(t, xyz);
+        if (status == SM_SUCCESS)
+            status = trim->EvaluatePoint(t, uv);
+        if (status == SM_SUCCESS)
+            status = surface->EvaluatePoint(SmPoint2d(uv.x, uv.y), lifted);
+        o.push_back(st(status));
+        if (status == SM_SUCCESS)
+        {
+            o.push_back(t);
+            put_vec(o, xyz);
+            o.push_back(uv.x);
+            o.push_back(uv.y);
+            put_vec(o, lifted);
+        }
+    }
+}
+
 int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 {
     SmStatus bst;
@@ -135,6 +176,7 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     {
         SmBoolean want_dev = rd.bflag();
         bool has_fail = rd.flag();
+        bool sample_lift = rd.flag();
         // CreateUVTrimCurve starts with GetBrep() and NER(GetFaceuse()); a wire edgeuse
         // returns SM_ERR_NULL_POINTER before anything else is touched.
         if (p->GetFaceuse() == nullptr)
@@ -160,6 +202,8 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back(c ? dist : -1.0);
         o.push_back(want_dev && c ? dev : -1.0);
         sc_trim_curve::put_trim_curve(o, c);
+        if (sample_lift)
+            put_created_lift(o, p, c);
         o.push_back(has_fail ? (double)fail.m_eCreatePathType : -1.0);
         o.push_back(has_fail && fail.m_pBrep ? 1.0 : 0.0);
         put_states(o, g, p, mate);

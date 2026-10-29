@@ -17,12 +17,24 @@
 //! | `6 surface u0 v0 u1 v1 validate_only init_gaps` | as kind 2 on a B-spline surface, every edge curve then an `SmCrvOnSurf` over its UV trim curve |
 //! | `7 origin(x y z) length width height validate_only init_gaps` | the closed box solid of `SmApiCreateBox` (`SmPrimitiveCreation::CreateBox`; origin coordinates up to `1e4`, sizes in `1e-3..=1e4`) |
 //! | `8 nv (x y z tol)*nv ne (x0 y0 z0 x1 y1 z1 tol)*ne validate_only init_gaps` | `MakeShellVertex` points and `CreateWireEdgeFromCurve` line segments, each with `SetTolerance(tol, FALSE, FALSE)` (up to [`MAX_POINTS`] vertices and [`MAX_LINES`] segments, tolerances in `0..=1e3`, segments longer than `1e-9`) |
+//! | `15 scale edge_tol validate_only init_gaps` | a native sheet face on an exact cubic B-spline surface, its four edges real `SmHermiteCurve` segments of the surface's affine UV loop (see below) |
 //!
 //! Kind `9` builds a native planar ellipse/circle face with exact rational UV trims:
 //! `9 circle origin[3] axis rx ry angles[2] natural[2] inside_out oob validate_only init_gaps`.
 //! An arc closes with a chord; `axis` is the omitted coordinate (0, 1 or 2).
 //! Radii are `1e-3..=1e4`, origin magnitudes at most `1e4`, angular spans `1..=360`
 //! degrees and NURB bounds within `[-1e4, 1e4]` with span at least `1e-3`.
+//!
+//! Kind `15` builds a native sheet face whose four edges are real `SmHermiteCurve`
+//! segments of the sheet's affine UV loop: `15 scale edge_tol validate_only init_gaps`.
+//! The surface is the exact degree 3x1 clamped non-rational sheet
+//! `S(u, v) = C(u) + v * extrusion` over the unit domain, for the cubic Hermite `C` of
+//! `P0 = (0, 0, 0)`, `P1 = (s, .2s, .1s)`, `D0 = (.6s, 1.2s, .7s)`,
+//! `D1 = (1.2s, -.8s, -.4s)` and `extrusion = (0, 0, s)`. The UV loop runs
+//! `[.2,.2] [.8,.7] [.8,.9] [.2,.4]`; `MakeFaceWithCurves` builds one loop with no UV
+//! trims, the face tolerance is `1e-7` and every edge keeps exactly `edge_tol`.
+//! `scale` must be finite and positive, `edge_tol` finite and non-negative (zero is
+//! kept). Kinds `10` to `14` are reserved for other fixtures and rejected.
 //!
 //! A surface block is `0 oob form n m p q r s cpts(x y z w) u v` (`SmBSplineSurface`) or
 //! `1 O[3] N[3]` (`SmPlane(O, N)`); a curve block `dim n p m cpts(x y z w) knots`
@@ -392,8 +404,23 @@ pub(crate) fn ellipse_face_block(input: &[f64]) -> Result<usize, FfiError> {
     Ok(rd.at)
 }
 
+/// Validates the fixed-size native Hermite sheet face block (after kind 15): the
+/// physical `scale` and the exact edge tolerance.
+pub(crate) fn hermite_sheet_face_block(input: &[f64]) -> Result<usize, FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    let scale = rd.finite()?;
+    if scale <= 0.0 {
+        return Err(bad("Hermite sheet face: scale must be positive"));
+    }
+    let edge_tol = rd.finite()?;
+    if edge_tol < 0.0 {
+        return Err(bad("Hermite sheet face: negative edge tolerance"));
+    }
+    Ok(rd.at)
+}
+
 fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_limit: f64) -> Result<(), FfiError> {
-    match rd.index(9)? {
+    match rd.index(15)? {
         0 => {
             let p = Path::new(path);
             if p.extension().and_then(|e| e.to_str()) != Some("smb") || !p.is_file() {
@@ -454,6 +481,11 @@ fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_lim
         9 => {
             rd.at += ellipse_face_block(rd.input.get(rd.at..).ok_or_else(|| bad("short ellipse face"))?)?;
         }
+        15 => {
+            rd.at += hermite_sheet_face_block(
+                rd.input.get(rd.at..).ok_or_else(|| bad("short Hermite sheet face"))?,
+            )?;
+        }
         7 => {
             for _ in 0..3 {
                 if rd.finite()?.abs() > 1e4 {
@@ -466,6 +498,7 @@ fn brep_block_with_plane_limit(rd: &mut Reader<'_>, path: &str, plane_domain_lim
                 }
             }
         }
+        10..=14 => return Err(bad("reserved B-rep kind")),
         _ => {}
     }
     rd.flag()?;
@@ -957,5 +990,65 @@ mod prepared_tests {
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
         std::fs::remove_file(file).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod hermite_sheet_tests {
+    use super::*;
+
+    #[test]
+    fn hermite_sheet_face_block_guards_physical_input() {
+        let valid = [1.0, 1e-4];
+        assert_eq!(hermite_sheet_face_block(&valid).unwrap(), valid.len());
+        for end in 0..valid.len() {
+            assert!(hermite_sheet_face_block(&valid[..end]).is_err(), "truncated at {end}");
+        }
+        for i in 0..valid.len() {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut bad = valid;
+                bad[i] = value;
+                assert!(hermite_sheet_face_block(&bad).is_err(), "slot {i} = {value}");
+            }
+        }
+        for (i, value) in [(0, 0.0), (0, -1.0), (0, 1e301), (1, -1e-9)] {
+            let mut bad = valid;
+            bad[i] = value;
+            assert!(hermite_sheet_face_block(&bad).is_err(), "slot {i} = {value}");
+        }
+        // A zero edge tolerance is physical (the native setter always writes it) and
+        // the shared finite bound is the only scale cap.
+        assert_eq!(hermite_sheet_face_block(&[1.0, 0.0]).unwrap(), 2);
+        assert_eq!(hermite_sheet_face_block(&[1e300, 1e300]).unwrap(), 2);
+        // Only the two fixture values belong to this block; trailing values are the
+        // caller's flags (and are rejected there, not silently swallowed here).
+        assert_eq!(hermite_sheet_face_block(&[1.0, 1e-4, 5.0]).unwrap(), 2);
+    }
+
+    #[test]
+    fn brep_block_accepts_the_five_value_hermite_sheet_block() {
+        let block = [15.0, 1.0, 1e-4, 0.0, 1.0];
+        let mut rd = Reader { input: &block, at: 0 };
+        assert!(brep_block_with_plane_limit(&mut rd, "", 1e4).is_ok());
+        assert_eq!(rd.at, block.len());
+        for end in 0..block.len() {
+            let mut rd = Reader { input: &block[..end], at: 0 };
+            assert!(
+                brep_block_with_plane_limit(&mut rd, "", 1e4).is_err(),
+                "truncated at {end}"
+            );
+        }
+    }
+
+    #[test]
+    fn brep_block_rejects_reserved_kinds() {
+        for kind in 10..=14 {
+            let input = [f64::from(kind)];
+            let mut rd = Reader { input: &input, at: 0 };
+            assert!(
+                brep_block_with_plane_limit(&mut rd, "", 1e4).is_err(),
+                "kind {kind}"
+            );
+        }
     }
 }

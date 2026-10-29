@@ -52,6 +52,7 @@
 #include "support/topology_fixture.h"
 #include "support/ellipse_face_fixture.h"
 #include "support/edge_loop_face_fixture.h"
+#include "support/hermite_sheet_fixture.h"
 
 
 #include "StdAfx.h"
@@ -790,6 +791,10 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
     else if (kind == 9)
     {
         status = sc_topology_fixture::ellipse_face(brep, rd, ctx);
+    }
+    else if (kind == 15)
+    {
+        status = sc_topology_fixture::hermite_sheet_face(brep, rd, ctx);
     }
     else if (kind == 1)
     {

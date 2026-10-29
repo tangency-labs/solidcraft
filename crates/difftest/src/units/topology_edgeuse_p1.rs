@@ -155,6 +155,14 @@ pub(crate) enum BrepIn {
         inside_out: bool,
         oob: bool,
     },
+    /// Native sheet face on the cubic Hermite shape `S(u, v) = C(u) + v * (0, 0, scale)`
+    /// over the unit domain: its four edges are cubic Hermite curves of the affine UV
+    /// segments of that sheet, with the edge tolerance `edge_tol` (kind 15; `scale` is
+    /// the sheet's physical size).
+    HermiteSheetFace {
+        scale: f64,
+        edge_tol: f64,
+    },
     Network,
     Vertices {
         points: Vec<[f64; 3]>,
@@ -394,6 +402,9 @@ pub(crate) fn brep_block_of(
             v.extend(angles);
             v.extend(natural);
             v.extend([flag(*inside_out), flag(*oob)]);
+        }
+        BrepIn::HermiteSheetFace { scale, edge_tol } => {
+            v.extend([15.0, *scale, *edge_tol]);
         }
         BrepIn::Network => v.push(3.0),
         BrepIn::Vertices { points } => {
