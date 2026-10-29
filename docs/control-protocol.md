@@ -421,6 +421,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_auto_locate` (default false; with `sketch_auto_dimensions`, new shapes are also placed from the sketch origin until fully constrained, as `sketch.draw.dimensioned` with `locate`)
 - `sketch_conflict_colour` (default true: while the open sketch's constraints conflict, the curves and points a failing constraint holds are drawn in the theme's `sketch_conflict` colour too, not only its glyph or dimension; false: only the glyphs and dimensions are red, in `error`, as before, #7244)
 - `sketch_exit_view` (`keep` (default: the view stays where it is when a sketch ends), `previous` (back to the view from before the sketch), `unless_rotated` (back unless the sketch view was turned))
+- `sketch_recent_snap` (default false: while drawing, the cursor snaps where the horizontal guide of one recent circle or arc centre or straight-edge midpoint meets the vertical guide of another; a free coordinate, with no constraint and no construction geometry. Off: those guides stay visual and the cursor does not move. The references come from `sketch_tracking_guides`, #8694)
 - `sketch_state_icons` (default true: a sketch's icon in History and the browser takes the colour of its solve state, `sketch` under constrained, `sketch_fixed` fully constrained, `error` while its constraints conflict, and its tooltip names the state; false: every sketch row's icon and tooltip as before, #7245)
 - `sketch_tab_always` (default false: the SKETCH tab stays in the ribbon right after MODEL while no sketch is open; a tool in its CREATE or REFERENCE section then opens Create Sketch, on the selected plane or planar face or else on the plane picked next, and starts in the new sketch, #7904)
 - `smooth_wheel_zoom` (default true)
@@ -464,11 +465,10 @@ the Design camera. See [the integrated Render workspace](render-workspace.md).
 `ui.prefs {sketch_tracking_guides: true}` enables temporary horizontal and vertical dotted
 alignment guides from hovered circle/arc centres and straight-edge midpoints (default true).
 The guide spans the reference and cursor projection, including positions inside a circle.
-The two most recent references are kept. While a drawing tool is placing a point, the cursor
-snaps to the crossing of those guides when it is within a few pixels. That snap is a free
-coordinate: it adds no constraint and no construction geometry. A single guide does not move
-the cursor. Set the preference to `false` to hide the guides and skip the crossing snap.
-Snap suppression (Alt, unless rebound) does the same for that gesture.
+The two most recent references are kept, and both guides can be drawn. A single guide does
+not move the cursor. Set the preference to `false` to hide the guides. Snap suppression
+(Alt, unless rebound) does the same for that gesture. Snapping the cursor to where those
+guides cross is separate, and off unless `sketch_recent_snap` is true.
 
 ### Continuous camera motion
 

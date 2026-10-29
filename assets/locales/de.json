@@ -1886,7 +1886,7 @@
   "prefs.sketch_tab_always": "Registerkarte Skizze immer zeigen",
   "prefs.sketch_tab_always_note": "Die Registerkarte Skizze bleibt im Menüband direkt nach Modell, auch wenn keine Skizze offen ist. Ihre Zeichenwerkzeuge beginnen dann eine Skizze auf der ausgewählten Ebene oder Fläche oder auf der Ebene, die Sie als Nächstes wählen, und das Werkzeug ist darin bereit.",
   "prefs.sketch_tracking_guides": "Ausrichtungshilfen für Mittelpunkte",
-  "prefs.sketch_tracking_guides_note": "Den Mauszeiger über einen Kreismittelpunkt oder eine Kantenmitte bewegen und dann waagerecht oder senkrecht bewegen, um eine temporäre gepunktete Hilfslinie anzuzeigen. Die beiden zuletzt verwendeten Referenzen rasten den Zeiger außerdem dort ein, wo sich ihre Hilfslinien kreuzen.",
+  "prefs.sketch_tracking_guides_note": "Den Mauszeiger über einen Kreismittelpunkt oder eine Kantenmitte bewegen und dann waagerecht oder senkrecht bewegen, um eine temporäre gepunktete Hilfslinie anzuzeigen.",
   "prefs.stand_up_unknown": "Für Dateien aus unbekannten Programmen",
   "prefs.stand_up_unknown.ask": "In einem Dialog fragen",
   "prefs.stand_up_unknown.note": "Einen Hinweis zeigen",

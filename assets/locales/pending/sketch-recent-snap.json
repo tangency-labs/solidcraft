@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.sketch_recent_snap": "Auto snap to recent centers and midpoints",
+    "prefs.sketch_recent_snap_note": "While drawing, snap the cursor where the guides of the two most recent circle centers or straight-edge midpoints cross. Off: those guides stay visual and the cursor does not move."
+  },
+  "en-GB": {
+    "prefs.sketch_recent_snap": "Auto snap to recent centres and midpoints",
+    "prefs.sketch_recent_snap_note": "While drawing, snap the cursor where the guides of the two most recent circle centres or straight-edge midpoints cross. Off: those guides stay visual and the cursor does not move."
+  },
+  "ja": {
+    "prefs.sketch_recent_snap": "最近使った中心と中点へ自動スナップ",
+    "prefs.sketch_recent_snap_note": "作図中、直前の2つの円の中心または直線辺の中点のガイドが交わる位置にカーソルをスナップします。オフ: ガイドは表示のみで、カーソルは移動しません。"
+  },
+  "zh": {
+    "prefs.sketch_recent_snap": "自动吸附到最近的圆心和中点",
+    "prefs.sketch_recent_snap_note": "绘图时，将光标吸附到最近两个圆心或直线边中点的辅助线相交处。关闭：辅助线仅作显示，光标不会移动。"
+  },
+  "de": {
+    "prefs.sketch_recent_snap": "Automatisch an zuletzt verwendete Mittelpunkte fangen",
+    "prefs.sketch_recent_snap_note": "Fängt den Zeiger beim Zeichnen dort ein, wo sich die Hilfslinien der beiden zuletzt verwendeten Kreismittelpunkte oder Kantenmitten kreuzen. Aus: die Hilfslinien bleiben sichtbar und der Zeiger bewegt sich nicht."
+  },
+  "ko": {
+    "prefs.sketch_recent_snap": "최근 중심과 중점에 자동 스냅",
+    "prefs.sketch_recent_snap_note": "그리는 동안 최근에 사용한 두 원의 중심 또는 직선 모서리 중점의 안내선이 만나는 위치로 커서를 스냅합니다. 끄기: 안내선은 보기만 하고 커서는 움직이지 않습니다."
+  }
+}

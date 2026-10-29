@@ -512,8 +512,10 @@ pub fn refine_snap(
         }
     }
     // The two most recent midpoints or centres: snap where their axes meet. A free coordinate,
-    // so placing it adds no constraint. One reference stays a visual guide. Shift skips this.
+    // so placing it adds no constraint. Off unless Sketch preferences ask for it. One reference
+    // stays a visual guide. Shift skips this.
     if !mid_only
+        && app.preferences.sketch_recent_snap
         && best.is_none()
         && let Some(at) = app.viewport.tracking.meeting(sk, plane, proj, a)
     {

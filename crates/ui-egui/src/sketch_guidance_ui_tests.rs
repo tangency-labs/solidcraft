@@ -334,6 +334,9 @@ fn two_recent_midpoints_snap_where_their_guides_meet() {
     let [x, y] = h.at(&near).unwrap();
     let pos = egui::pos2(x as f32, y as f32);
     let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("viewport"));
+    let (at, _) = crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
+    assert!(at.dist(cross) > 0.2, "the crossing snap is off until asked for: {at:?}");
+    h.call("ui.prefs", json!({"sketch_recent_snap": true}));
     let (at, id) = crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
     assert!(id.is_none(), "{id:?}");
     assert!(at.dist(cross) < 1e-6, "{at:?}");
