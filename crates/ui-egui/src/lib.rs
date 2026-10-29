@@ -207,6 +207,7 @@ pub mod preview;
 mod primitive_placement;
 #[cfg(test)]
 mod primitive_units_tests;
+mod print_face_ui;
 pub mod recovery_ui;
 pub mod ref_images;
 mod render_ui;
@@ -1400,6 +1401,11 @@ impl SolveApp {
                 self.animate_view(id.trim_start_matches("view."));
                 self.home.open = false;
             }
+            return;
+        }
+        // Print Face (Ctrl+B) acts on the selected face at once: it has no dialog.
+        if id == "body.print_face" {
+            print_face_ui::toggle(self);
             return;
         }
         if id == "view.normal_to" {

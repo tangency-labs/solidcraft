@@ -1,92 +1,272 @@
 {
   "en": {
-    "cmd.body.print_face": "Print Face"
+    "cmd.body.print_face": "Print Face",
+    "ui.clear_print_face": "Clear Print Face",
+    "ui.print_face_cleared": "{body}: print face cleared",
+    "ui.print_face_input": "Print face",
+    "ui.print_face_one_body": "A print face is picked for one body: send that body on its own to change it",
+    "ui.print_face_pick": "Select one flat face of a solid body to make it the print face",
+    "ui.print_face_set": "{body}: print face set; Send to Slicer lays the body on it"
   },
   "de": {
-    "cmd.body.print_face": "Auflagefläche"
+    "cmd.body.print_face": "Auflagefläche",
+    "ui.clear_print_face": "Auflagefläche entfernen",
+    "ui.print_face_cleared": "{body}: Auflagefläche entfernt",
+    "ui.print_face_input": "Auflagefläche",
+    "ui.print_face_one_body": "Eine Auflagefläche gehört zu einem Körper: Sende diesen Körper allein, um sie zu ändern",
+    "ui.print_face_pick": "Eine plane Fläche eines Volumenkörpers auswählen, um sie zur Auflagefläche zu machen",
+    "ui.print_face_set": "{body}: Auflagefläche gesetzt; An Slicer senden legt den Körper darauf"
   },
   "ja": {
-    "cmd.body.print_face": "造形面"
+    "cmd.body.print_face": "造形面",
+    "ui.clear_print_face": "造形面を解除",
+    "ui.print_face_cleared": "{body}: 造形面を解除しました",
+    "ui.print_face_input": "造形面",
+    "ui.print_face_one_body": "造形面はボディごとに選びます。変更するにはそのボディだけを送信してください",
+    "ui.print_face_pick": "ソリッドボディの平面を1つ選択すると造形面になります",
+    "ui.print_face_set": "{body}: 造形面を設定しました。スライサーへ送るとこの面を下にして置きます"
   },
   "zh": {
-    "cmd.body.print_face": "打印底面"
+    "cmd.body.print_face": "打印底面",
+    "ui.clear_print_face": "清除打印底面",
+    "ui.print_face_cleared": "{body}：已清除打印底面",
+    "ui.print_face_input": "打印底面",
+    "ui.print_face_one_body": "打印底面属于单个实体：请单独发送该实体以更改它",
+    "ui.print_face_pick": "选择实体的一个平面，将其设为打印底面",
+    "ui.print_face_set": "{body}：已设置打印底面；发送到切片软件时实体将放在此面上"
   },
   "ko": {
-    "cmd.body.print_face": "출력 바닥면"
+    "cmd.body.print_face": "출력 바닥면",
+    "ui.clear_print_face": "출력 바닥면 해제",
+    "ui.print_face_cleared": "{body}: 출력 바닥면을 해제했습니다",
+    "ui.print_face_input": "출력 바닥면",
+    "ui.print_face_one_body": "출력 바닥면은 바디마다 하나입니다. 변경하려면 그 바디만 보내십시오",
+    "ui.print_face_pick": "솔리드 바디의 평면 하나를 선택하면 출력 바닥면이 됩니다",
+    "ui.print_face_set": "{body}: 출력 바닥면을 설정했습니다. 슬라이서로 보내면 이 면이 아래로 놓입니다"
   },
   "ar": {
-    "cmd.body.print_face": "وجه الطباعة"
+    "cmd.body.print_face": "وجه الطباعة",
+    "ui.clear_print_face": "مسح وجه الطباعة",
+    "ui.print_face_cleared": "{body}: تم مسح وجه الطباعة",
+    "ui.print_face_input": "وجه الطباعة",
+    "ui.print_face_one_body": "يُختار وجه الطباعة لجسم واحد: أرسل ذلك الجسم وحده لتغييره",
+    "ui.print_face_pick": "اختر وجهًا مستويًا واحدًا لجسم صلب لجعله وجه الطباعة",
+    "ui.print_face_set": "{body}: تم تعيين وجه الطباعة؛ الإرسال إلى برنامج التقطيع يضع الجسم عليه"
   },
   "he": {
-    "cmd.body.print_face": "פאת הדפסה"
+    "cmd.body.print_face": "פאת הדפסה",
+    "ui.clear_print_face": "נקה פאת הדפסה",
+    "ui.print_face_cleared": "{body}: פאת ההדפסה נוקתה",
+    "ui.print_face_input": "פאת הדפסה",
+    "ui.print_face_one_body": "פאת הדפסה נבחרת לגוף אחד: שלח את הגוף הזה לבדו כדי לשנות אותה",
+    "ui.print_face_pick": "בחר פאה שטוחה אחת של גוף מוצק כדי להפוך אותה לפאת ההדפסה",
+    "ui.print_face_set": "{body}: פאת ההדפסה הוגדרה; שליחה לסלייסר מניחה את הגוף עליה"
   },
   "vi": {
-    "cmd.body.print_face": "Mặt in"
+    "cmd.body.print_face": "Mặt in",
+    "ui.clear_print_face": "Xóa mặt in",
+    "ui.print_face_cleared": "{body}: đã xóa mặt in",
+    "ui.print_face_input": "Mặt in",
+    "ui.print_face_one_body": "Mặt in được chọn cho một thân: hãy gửi riêng thân đó để thay đổi",
+    "ui.print_face_pick": "Chọn một mặt phẳng của thân đặc để đặt làm mặt in",
+    "ui.print_face_set": "{body}: đã đặt mặt in; Gửi đến Slicer sẽ đặt thân lên mặt này"
   },
   "bs": {
-    "cmd.body.print_face": "Površina za štampu"
+    "cmd.body.print_face": "Površina za štampu",
+    "ui.clear_print_face": "Ukloni površinu za štampu",
+    "ui.print_face_cleared": "{body}: površina za štampu uklonjena",
+    "ui.print_face_input": "Površina za štampu",
+    "ui.print_face_one_body": "Površina za štampu pripada jednom tijelu: pošaljite to tijelo samo da biste je promijenili",
+    "ui.print_face_pick": "Odaberite ravnu površinu punog tijela da postane površina za štampu",
+    "ui.print_face_set": "{body}: površina za štampu postavljena; Pošalji u slajser polaže tijelo na nju"
   },
   "cs": {
-    "cmd.body.print_face": "Tisková plocha"
+    "cmd.body.print_face": "Tisková plocha",
+    "ui.clear_print_face": "Zrušit tiskovou plochu",
+    "ui.print_face_cleared": "{body}: tisková plocha zrušena",
+    "ui.print_face_input": "Tisková plocha",
+    "ui.print_face_one_body": "Tisková plocha patří jednomu tělesu: odešlete toto těleso samostatně, abyste ji změnili",
+    "ui.print_face_pick": "Vyberte rovinnou plochu objemového tělesa, aby se stala tiskovou plochou",
+    "ui.print_face_set": "{body}: tisková plocha nastavena; Odeslat do sliceru položí těleso na ni"
   },
   "da": {
-    "cmd.body.print_face": "Printflade"
+    "cmd.body.print_face": "Printflade",
+    "ui.clear_print_face": "Ryd printflade",
+    "ui.print_face_cleared": "{body}: printflade ryddet",
+    "ui.print_face_input": "Printflade",
+    "ui.print_face_one_body": "En printflade hører til ét legeme: send det legeme alene for at ændre den",
+    "ui.print_face_pick": "Vælg en plan flade på et massivt legeme for at gøre den til printfladen",
+    "ui.print_face_set": "{body}: printflade sat; Send til slicer lægger legemet på den"
   },
   "es": {
-    "cmd.body.print_face": "Cara de impresión"
+    "cmd.body.print_face": "Cara de impresión",
+    "ui.clear_print_face": "Quitar cara de impresión",
+    "ui.print_face_cleared": "{body}: cara de impresión quitada",
+    "ui.print_face_input": "Cara de impresión",
+    "ui.print_face_one_body": "Una cara de impresión pertenece a un solo cuerpo: envía ese cuerpo solo para cambiarla",
+    "ui.print_face_pick": "Selecciona una cara plana de un cuerpo sólido para convertirla en la cara de impresión",
+    "ui.print_face_set": "{body}: cara de impresión definida; Enviar al laminador apoya el cuerpo sobre ella"
   },
   "fr": {
-    "cmd.body.print_face": "Face d’impression"
+    "cmd.body.print_face": "Face d’impression",
+    "ui.clear_print_face": "Effacer la face d’impression",
+    "ui.print_face_cleared": "{body} : face d’impression effacée",
+    "ui.print_face_input": "Face d’impression",
+    "ui.print_face_one_body": "Une face d’impression appartient à un seul corps : envoyez ce corps seul pour la modifier",
+    "ui.print_face_pick": "Sélectionnez une face plane d’un corps solide pour en faire la face d’impression",
+    "ui.print_face_set": "{body} : face d’impression définie ; Envoyer au slicer pose le corps sur cette face"
   },
   "gl": {
-    "cmd.body.print_face": "Cara de impresión"
+    "cmd.body.print_face": "Cara de impresión",
+    "ui.clear_print_face": "Quitar cara de impresión",
+    "ui.print_face_cleared": "{body}: cara de impresión quitada",
+    "ui.print_face_input": "Cara de impresión",
+    "ui.print_face_one_body": "Unha cara de impresión pertence a un só corpo: envía ese corpo só para cambiala",
+    "ui.print_face_pick": "Selecciona unha cara plana dun corpo sólido para facela a cara de impresión",
+    "ui.print_face_set": "{body}: cara de impresión definida; Enviar ao laminador apoia o corpo sobre ela"
   },
   "hr": {
-    "cmd.body.print_face": "Ploha ispisa"
+    "cmd.body.print_face": "Ploha ispisa",
+    "ui.clear_print_face": "Ukloni plohu ispisa",
+    "ui.print_face_cleared": "{body}: ploha ispisa uklonjena",
+    "ui.print_face_input": "Ploha ispisa",
+    "ui.print_face_one_body": "Ploha ispisa pripada jednom tijelu: pošaljite to tijelo samo da biste je promijenili",
+    "ui.print_face_pick": "Odaberite ravnu plohu punog tijela da postane ploha ispisa",
+    "ui.print_face_set": "{body}: ploha ispisa postavljena; Pošalji u slicer polaže tijelo na nju"
   },
   "hu": {
-    "cmd.body.print_face": "Nyomtatási lap"
+    "cmd.body.print_face": "Nyomtatási lap",
+    "ui.clear_print_face": "Nyomtatási lap törlése",
+    "ui.print_face_cleared": "{body}: nyomtatási lap törölve",
+    "ui.print_face_input": "Nyomtatási lap",
+    "ui.print_face_one_body": "A nyomtatási lap egy testhez tartozik: a módosításhoz küldd el azt a testet egyedül",
+    "ui.print_face_pick": "Válassz ki egy tömör test egy sík lapját, hogy az legyen a nyomtatási lap",
+    "ui.print_face_set": "{body}: nyomtatási lap beállítva; a Küldés szeletelőnek erre a lapra fekteti a testet"
   },
   "id": {
-    "cmd.body.print_face": "Permukaan cetak"
+    "cmd.body.print_face": "Permukaan cetak",
+    "ui.clear_print_face": "Hapus permukaan cetak",
+    "ui.print_face_cleared": "{body}: permukaan cetak dihapus",
+    "ui.print_face_input": "Permukaan cetak",
+    "ui.print_face_one_body": "Permukaan cetak milik satu bodi: kirim bodi itu sendiri untuk mengubahnya",
+    "ui.print_face_pick": "Pilih satu permukaan datar dari bodi padat untuk dijadikan permukaan cetak",
+    "ui.print_face_set": "{body}: permukaan cetak diatur; Kirim ke slicer meletakkan bodi di atasnya"
   },
   "it": {
-    "cmd.body.print_face": "Faccia di stampa"
+    "cmd.body.print_face": "Faccia di stampa",
+    "ui.clear_print_face": "Rimuovi faccia di stampa",
+    "ui.print_face_cleared": "{body}: faccia di stampa rimossa",
+    "ui.print_face_input": "Faccia di stampa",
+    "ui.print_face_one_body": "Una faccia di stampa appartiene a un solo corpo: invia quel corpo da solo per cambiarla",
+    "ui.print_face_pick": "Seleziona una faccia piana di un corpo solido per renderla la faccia di stampa",
+    "ui.print_face_set": "{body}: faccia di stampa impostata; Invia allo slicer appoggia il corpo su di essa"
   },
   "ms": {
-    "cmd.body.print_face": "Muka cetakan"
+    "cmd.body.print_face": "Muka cetakan",
+    "ui.clear_print_face": "Kosongkan muka cetakan",
+    "ui.print_face_cleared": "{body}: muka cetakan dikosongkan",
+    "ui.print_face_input": "Muka cetakan",
+    "ui.print_face_one_body": "Muka cetakan dimiliki oleh satu jasad: hantar jasad itu sahaja untuk menukarnya",
+    "ui.print_face_pick": "Pilih satu muka rata pada jasad pepejal untuk menjadikannya muka cetakan",
+    "ui.print_face_set": "{body}: muka cetakan ditetapkan; Hantar ke penghiris meletakkan jasad di atasnya"
   },
   "nb": {
-    "cmd.body.print_face": "Utskriftsflate"
+    "cmd.body.print_face": "Utskriftsflate",
+    "ui.clear_print_face": "Fjern utskriftsflate",
+    "ui.print_face_cleared": "{body}: utskriftsflate fjernet",
+    "ui.print_face_input": "Utskriftsflate",
+    "ui.print_face_one_body": "En utskriftsflate hører til ett legeme: send det legemet alene for å endre den",
+    "ui.print_face_pick": "Velg en plan flate på et massivt legeme for å gjøre den til utskriftsflaten",
+    "ui.print_face_set": "{body}: utskriftsflate satt; Send til slicer legger legemet på den"
   },
   "nl": {
-    "cmd.body.print_face": "Printvlak"
+    "cmd.body.print_face": "Printvlak",
+    "ui.clear_print_face": "Printvlak wissen",
+    "ui.print_face_cleared": "{body}: printvlak gewist",
+    "ui.print_face_input": "Printvlak",
+    "ui.print_face_one_body": "Een printvlak hoort bij één lichaam: stuur dat lichaam alleen om het te wijzigen",
+    "ui.print_face_pick": "Selecteer één vlak van een massief lichaam om het het printvlak te maken",
+    "ui.print_face_set": "{body}: printvlak ingesteld; Naar slicer sturen legt het lichaam erop"
   },
   "pl": {
-    "cmd.body.print_face": "Powierzchnia druku"
+    "cmd.body.print_face": "Powierzchnia druku",
+    "ui.clear_print_face": "Usuń powierzchnię druku",
+    "ui.print_face_cleared": "{body}: usunięto powierzchnię druku",
+    "ui.print_face_input": "Powierzchnia druku",
+    "ui.print_face_one_body": "Powierzchnia druku należy do jednej bryły: wyślij tę bryłę osobno, aby ją zmienić",
+    "ui.print_face_pick": "Wybierz płaską powierzchnię bryły, aby ustawić ją jako powierzchnię druku",
+    "ui.print_face_set": "{body}: ustawiono powierzchnię druku; Wyślij do slicera kładzie bryłę na niej"
   },
   "pt-BR": {
-    "cmd.body.print_face": "Face de impressão"
+    "cmd.body.print_face": "Face de impressão",
+    "ui.clear_print_face": "Limpar face de impressão",
+    "ui.print_face_cleared": "{body}: face de impressão removida",
+    "ui.print_face_input": "Face de impressão",
+    "ui.print_face_one_body": "Uma face de impressão pertence a um único corpo: envie esse corpo sozinho para alterá-la",
+    "ui.print_face_pick": "Selecione uma face plana de um corpo sólido para torná-la a face de impressão",
+    "ui.print_face_set": "{body}: face de impressão definida; Enviar ao fatiador apoia o corpo sobre ela"
   },
   "ro": {
-    "cmd.body.print_face": "Față de imprimare"
+    "cmd.body.print_face": "Față de imprimare",
+    "ui.clear_print_face": "Șterge fața de imprimare",
+    "ui.print_face_cleared": "{body}: fața de imprimare a fost ștearsă",
+    "ui.print_face_input": "Față de imprimare",
+    "ui.print_face_one_body": "O față de imprimare aparține unui singur corp: trimiteți acel corp singur pentru a o schimba",
+    "ui.print_face_pick": "Selectați o față plană a unui corp solid pentru a o face fața de imprimare",
+    "ui.print_face_set": "{body}: fața de imprimare a fost setată; Trimite la slicer așază corpul pe ea"
   },
   "ru": {
-    "cmd.body.print_face": "Грань печати"
+    "cmd.body.print_face": "Грань печати",
+    "ui.clear_print_face": "Сбросить грань печати",
+    "ui.print_face_cleared": "{body}: грань печати сброшена",
+    "ui.print_face_input": "Грань печати",
+    "ui.print_face_one_body": "Грань печати относится к одному телу: отправьте это тело отдельно, чтобы изменить её",
+    "ui.print_face_pick": "Выберите плоскую грань твёрдого тела, чтобы сделать её гранью печати",
+    "ui.print_face_set": "{body}: грань печати задана; «Отправить в слайсер» кладёт тело на неё"
   },
   "sr": {
-    "cmd.body.print_face": "Површина за штампу"
+    "cmd.body.print_face": "Површина за штампу",
+    "ui.clear_print_face": "Уклони површину за штампу",
+    "ui.print_face_cleared": "{body}: површина за штампу уклоњена",
+    "ui.print_face_input": "Површина за штампу",
+    "ui.print_face_one_body": "Површина за штампу припада једном телу: пошаљите то тело само да бисте је променили",
+    "ui.print_face_pick": "Изаберите равну површину пуног тела да постане површина за штампу",
+    "ui.print_face_set": "{body}: површина за штампу постављена; Пошаљи у слајсер полаже тело на њу"
   },
   "sv": {
-    "cmd.body.print_face": "Utskriftsyta"
+    "cmd.body.print_face": "Utskriftsyta",
+    "ui.clear_print_face": "Rensa utskriftsyta",
+    "ui.print_face_cleared": "{body}: utskriftsyta rensad",
+    "ui.print_face_input": "Utskriftsyta",
+    "ui.print_face_one_body": "En utskriftsyta hör till en kropp: skicka den kroppen ensam för att ändra den",
+    "ui.print_face_pick": "Välj en plan yta på en solid kropp för att göra den till utskriftsytan",
+    "ui.print_face_set": "{body}: utskriftsyta angiven; Skicka till slicer lägger kroppen på den"
   },
   "tr": {
-    "cmd.body.print_face": "Baskı yüzeyi"
+    "cmd.body.print_face": "Baskı yüzeyi",
+    "ui.clear_print_face": "Baskı yüzeyini temizle",
+    "ui.print_face_cleared": "{body}: baskı yüzeyi temizlendi",
+    "ui.print_face_input": "Baskı yüzeyi",
+    "ui.print_face_one_body": "Baskı yüzeyi tek bir gövdeye aittir: değiştirmek için o gövdeyi tek başına gönderin",
+    "ui.print_face_pick": "Baskı yüzeyi yapmak için katı bir gövdenin düz bir yüzeyini seçin",
+    "ui.print_face_set": "{body}: baskı yüzeyi ayarlandı; Dilimleyiciye gönder gövdeyi bu yüzeyin üzerine koyar"
   },
   "uk": {
-    "cmd.body.print_face": "Грань друку"
+    "cmd.body.print_face": "Грань друку",
+    "ui.clear_print_face": "Скинути грань друку",
+    "ui.print_face_cleared": "{body}: грань друку скинуто",
+    "ui.print_face_input": "Грань друку",
+    "ui.print_face_one_body": "Грань друку належить одному тілу: надішліть це тіло окремо, щоб змінити її",
+    "ui.print_face_pick": "Виберіть плоску грань твердого тіла, щоб зробити її гранню друку",
+    "ui.print_face_set": "{body}: грань друку задано; «Надіслати в слайсер» кладе тіло на неї"
   },
   "zh-TW": {
-    "cmd.body.print_face": "列印底面"
+    "cmd.body.print_face": "列印底面",
+    "ui.clear_print_face": "清除列印底面",
+    "ui.print_face_cleared": "{body}：已清除列印底面",
+    "ui.print_face_input": "列印底面",
+    "ui.print_face_one_body": "列印底面屬於單一實體：請單獨傳送該實體以變更它",
+    "ui.print_face_pick": "選取實體的一個平面，將其設為列印底面",
+    "ui.print_face_set": "{body}：已設定列印底面；傳送到切片軟體時實體會放在此面上"
   }
 }
