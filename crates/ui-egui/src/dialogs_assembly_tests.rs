@@ -1107,3 +1107,76 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let Kind::Assembly(Asm::Joint(f)) = edit.kind else { panic!("no edit") };
     assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.5 in"));
 }
+
+/// An imported assembly makes a joint per placed part: from the second joint, the timeline shows
+/// them as one grouped button with their count, and clicking it shows (and hides) each one.
+#[test]
+fn many_joints_start_grouped_in_the_timeline() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "one joint shows on its own");
+    let first = h.app.session.doc.assembly.joints[0].clone();
+    for i in 1..=JOINT_GROUP_MIN as u64 {
+        let mut copy = first.clone();
+        copy.id = first.id + i;
+        copy.name = format!("Held {i}");
+        h.app.session.doc_mut().assembly.joints.push(copy);
+    }
+    h.frames(2);
+    assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1), "a second joint starts them grouped");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1), "clicking the group shows each joint");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1), "clicking it again groups them");
+}
+
+/// The grouped joints' arrow has a well of its own at the button's end: it lights up only under
+/// the pointer, and clicking it shows and hides the joints like the rest of the button.
+#[test]
+fn the_grouped_joints_arrow_lights_up_under_the_pointer() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
+    let first = h.app.session.doc.assembly.joints[0].clone();
+    // Thousands of joints, as an imported assembly makes: the count is four digits wide.
+    for i in 1..=1200u64 {
+        let mut copy = first.clone();
+        copy.id = first.id + i;
+        copy.name = format!("Held {i}");
+        h.app.session.doc_mut().assembly.joints.push(copy);
+    }
+    h.frames(2);
+    let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert!(arrow.left() > group.x, "the arrow sits at the button's right end");
+    let hot = |h: &mut crate::scenario::Harness, x: f32, y: f32| {
+        h.call("ui.move", json!({"x": x, "y": y}));
+        h.frames(1);
+        crate::scenario::count_of("timeline:joints_arrow_hot")
+    };
+    assert_eq!(hot(&mut h, arrow.center().x, arrow.center().y), Some(1.0), "the well lights up under the pointer");
+    let icon_x = arrow.left() - 2.0 * (arrow.left() - group.x) + 6.0;
+    assert_eq!(hot(&mut h, icon_x, arrow.center().y), Some(0.0), "not over the icon or the count");
+    assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
+    assert!(joints_open(&h.app, 1201), "clicking the arrow shows each joint");
+    let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
+    assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
+    assert!(!joints_open(&h.app, 1201), "and groups them again");
+}
