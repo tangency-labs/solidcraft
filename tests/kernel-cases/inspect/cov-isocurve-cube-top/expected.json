@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "three isocurves each way across a cube's top",
+ "source": "analytic",
+ "method": "cube 40 with a corner at the origin: its top is the plane z = 40, 0..40 each way; 3 curves each way, evenly spaced, are x = 10, 20, 30 and y = 10, 20, 30: 3 u-curves and 3 v-curves",
+ "results": [
+  {
+   "command": 1,
+   "pointer": "/faces/0/body",
+   "value": "Cube"
+  },
+  {
+   "command": 1,
+   "pointer": "/faces/0/count",
+   "value": 3
+  },
+  {
+   "command": 1,
+   "pointer": "/faces/0/u_curves",
+   "value": 3
+  },
+  {
+   "command": 1,
+   "pointer": "/faces/0/v_curves",
+   "value": 3
+  }
+ ]
+}
