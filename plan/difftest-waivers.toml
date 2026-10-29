@@ -7,3 +7,9 @@
 # check = "ratchet"          # or "value-share"
 # case = "insert_at_end"     # ratchet only; omit to waive every case of the unit
 # reason = "fixture asserted the pre-#123 clamp; replaced by insert_at_end_clamped"
+
+[[waiver]]
+unit = "sweep.topology_sweep"
+check = "ratchet"
+case = "nm_box_linear_z_stitch"
+reason = "ND-491 C++ heap-order nondeterminism: 993/1000 C++ runs succeed with Rust's result, 7/1000 SM_ERR (main CI run 40862396783 at 881b040f9); parked like its 7 siblings"
