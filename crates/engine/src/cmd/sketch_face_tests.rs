@@ -353,6 +353,10 @@ fn freezing_rebuilt_arc_borders_keeps_authored_dimension_entity_indices() {
     run(&mut s, "sketch.line", json!({"points":[format!("{arc}.end"),format!("{arc}.start")],"infer":false}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch":profile,"distance":10,"operation":"new","body_name":"Sector"}));
+    // A notch clear of the sector until `notch` moves it across the arc at 90°: then the top face's
+    // arc border is rebuilt in two arcs and the notch's sides.
+    run(&mut s, "parameters.add", json!({"name":"notch","expression":"30 mm"}));
+    run(&mut s, "solid.box", json!({"corner":["-1 mm","notch","-1 mm"],"length":2,"width":2,"height":12,"operation":"cut","targets":["Sector"]}));
     let pick = top_pick(&s, "Sector");
     let id = run(&mut s, "sketch.create", json!({"plane":pick}))["sketch"].as_u64().unwrap();
     let circle = run(&mut s, "sketch.circle.center", json!({"center":[20,20],"radius":2}))["curves"][0].as_str().unwrap().to_owned();
@@ -360,7 +364,8 @@ fn freezing_rebuilt_arc_borders_keeps_authored_dimension_entity_indices() {
     run(&mut s, "sketch.finish", json!({}));
     let before_count = s.model.state().sketch(id).unwrap().sketch.curves.len();
     run(&mut s, "parameters.change", json!({"name":"turn","expression":"300 deg"}));
-    assert!(s.model.result(id).unwrap().error.is_none());
+    run(&mut s, "parameters.change", json!({"name":"notch","expression":"9 mm"}));
+    assert!(s.model.result(id).unwrap().error.is_none(), "{:?}", s.model.result(id).unwrap().error);
     let visible = s.model.state().sketch(id).unwrap().sketch.clone();
     assert_ne!(visible.curves.len(), before_count, "fixture must rebuild projected topology");
     let mut pick = top_pick(&s, "Sector");
