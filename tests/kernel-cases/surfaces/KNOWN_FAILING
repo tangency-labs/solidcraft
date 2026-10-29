@@ -1,0 +1,5 @@
+# The surfaces cases that fail today, one a line: `<case> <why it fails today>`. Sorted. Run as a
+# regression gate (`cargo xtask kernel-cases --area surfaces --known-failing <this file>`), a case
+# that fails and is not listed fails it, and so does a listed case that passes: a fix removes its
+# line in the same pull request.
+# Baseline: rig-cases-surfaces 45f69c0e5 with SMLib 60b1c6a, aarch64 Linux.
