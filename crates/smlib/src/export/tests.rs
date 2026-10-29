@@ -82,10 +82,19 @@ mod native_tests {
     fn edges_are_on_smlibs_curves() {
         let cyl = Brep::make_cylinder([0.0; 3], 5.0, 10.0).unwrap().to_native().unwrap();
         let side = cyl.faces.iter().find(|f| matches!(f.surface, b::Surface::Cylinder { .. })).unwrap();
-        assert!((side.domain[0][1] - side.domain[0][0] - TAU).abs() < 1e-12);
-        assert_eq!(side.domain[1], [0.0, 10.0]);
+        // The side is on SMLib's NURBS form of the cylinder (its domain is the form's): the whole
+        // turn, so its domain's two u ends meet, from the base to the top.
+        let form = b::eval::SurfaceEval::new(side.parameters()).unwrap();
+        let [[u0, u1], [v0, v1]] = side.domain;
+        for v in [v0, v1] {
+            let (a, z) = (form.point([u0, v]).unwrap(), form.point([u1, v]).unwrap());
+            assert!(a.dist(z) < 1e-9, "{a:?} {z:?}");
+        }
+        let heights = [form.point([u0, v0]).unwrap().z, form.point([u0, v1]).unwrap().z];
+        assert!(heights.iter().any(|h| h.abs() < 1e-9) && heights.iter().any(|h| (h - 10.0).abs() < 1e-9), "{heights:?}");
         for e in &cyl.edges {
-            let eval = b::eval::CurveEval::new(&e.curve).unwrap();
+            // Evaluated on the curve its interval is on (a circle's NURBS form).
+            let eval = b::eval::CurveEval::new(e.parameters()).unwrap();
             let [a, z] = e.interval;
             // Ends on the edge's vertices.
             for (t, v) in [(a, e.vertices[0]), (z, e.vertices[1])] {
@@ -94,6 +103,7 @@ mod native_tests {
                 assert!((p - Vec3::new(q[0], q[1], q[2])).len() < 1e-9, "{:?} at {t}", e.curve);
             }
             if let b::Curve::Circle { radius, .. } = e.curve {
+                let [a, z] = e.curve_interval().unwrap();
                 assert!((radius - 5.0).abs() < 1e-12 && (z - a - TAU).abs() < 1e-9);
             }
         }
@@ -126,7 +136,8 @@ mod native_tests {
                 p[0].abs() < 1e-9 && (p[1] - 14.5).abs() < 1e-9
             })
         };
-        let middle = |e: &b::Edge| b::eval::CurveEval::new(&e.curve).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
+        // On the curve the interval is on (a circle's NURBS form).
+        let middle = |e: &b::Edge| b::eval::CurveEval::new(e.parameters()).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap();
         let copies: Vec<&b::Edge> = record.edges.iter().filter(|e| on_line(e)).collect();
         assert_eq!(copies.len(), 2);
         for copy in copies {
