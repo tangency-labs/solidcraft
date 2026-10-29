@@ -1238,7 +1238,9 @@ fn object_param(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result
         return Ok((Some(FacePick(p)), None));
     }
     if !v.is_object() && !v.is_string() {
-        return Err(bad(cmd, format!("`{what}` must be a point [x, y, z] or a reference: {}", super::construct::REF)));
+        // As the typed contract words it (`schema::types::ToPoint`, `FromPoint`).
+        let target = if what == "from" { "on the face or point to start from" } else { "on the face, vertex or point to extrude to" };
+        return Err(bad(cmd, format!("`{what}` must be a point [x, y, z] {target}, or a reference")));
     }
     let g = super::construct::geo(s, Some(v), cmd, what)?;
     if let GeoRef::Face { at, .. } = g {
