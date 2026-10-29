@@ -1102,7 +1102,8 @@ mod tests {
         assert_eq!(disk::route("/opfs/part.solidcraft"), disk::WriteTo::Opfs);
         assert_eq!(disk::route("/disk/id/part.solidcraft"), disk::WriteTo::Disk);
         assert_eq!(disk::route("/downloads/part.step"), disk::WriteTo::Download);
-        assert!(design_url("/elsewhere/part.solidcraft").is_err());
+        assert!(design_url("/elsewhere/part.solidcraft", "http://solidcraft.io").is_ok());
+        assert!(server::link_path("/elsewhere/part.solidcraft", "http://solidcraft.io").is_none());
     }
 
     #[test]
