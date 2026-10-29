@@ -96,6 +96,14 @@ fn the_hlsl_for_fxc_has_no_arrays_fxc_must_unroll_loops_for() {
     }
 }
 
+/// The shader's basis slots hold the highest degree the CPU evaluator takes, so every surface
+/// the CPU evaluates the GPU evaluates too.
+#[test]
+fn the_shader_takes_every_degree_the_cpu_evaluator_does() {
+    let slots = format!("const W: u32 = {}u;", solidcraft_geom::bspline::MAX_SPLINE_DEGREE + 1);
+    assert!(SHADER.contains(&slots), "tess.wgsl must declare `{slots}`");
+}
+
 fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     match r {
         Ok(v) => v,
