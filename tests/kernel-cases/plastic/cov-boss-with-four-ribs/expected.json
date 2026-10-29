@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "plastic.boss 10 across and 12 high with 4 ribs 1.5 thick, 6 out from the wall, 2 below the top, on a 60 x 60 x 3 plate",
+ "source": "analytic",
+ "method": "each rib is a 1.5-wide strip from r0/2 = 2.5 to r0 + 6 = 11 from the axis, 12 - 2 = 10 high from the face; outside the post (r0 = 5) its section is t(r0 + l) - [(t/2)sqrt(r0^2 - t^2/4) + r0^2 asin(t/(2 r0))] = 9.028220693 (the strip less the circle's part of it). V = 60*60*3 + pi*5^2*12 + 4*9.028220693*10 = 12103.606624",
+ "body_count": 1,
+ "volume_mm3": 12103.606623800613,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   60,
+   15
+  ]
+ }
+}

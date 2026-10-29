@@ -1,0 +1,48 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 3,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "plastic.manage_rules",
+   "params": {
+    "name": "ABS (1.5mm)",
+    "active": true
+   }
+  },
+  {
+   "command": "plastic.manage_rules",
+   "params": {
+    "name": "Steep",
+    "draft": "4 deg"
+   }
+  },
+  {
+   "command": "plastic.assign_rule",
+   "params": {
+    "bodies": [
+     "Plate"
+    ],
+    "rule": "Steep"
+   }
+  },
+  {
+   "command": "plastic.rest",
+   "params": {
+    "position": [
+     30,
+     20,
+     3
+    ],
+    "width": 10,
+    "height": 5
+   }
+  }
+ ]
+}

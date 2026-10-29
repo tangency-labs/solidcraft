@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "plastic.boss 10 across and 12 high with a 4 mm hole, on a 60 x 60 x 3 plate with no plastic rule (no draft)",
+ "source": "analytic",
+ "method": "no rule, no draft: a cylinder r 5, h 12 standing on the face, its hole r 2 from the top down to the face (hole_depth defaults to the height). V = 60*60*3 + pi*5^2*12 - pi*2^2*12 = 11591.681349. Faces: the plate's 6 (the top with the post's foot in it), the post's side, its top ring, the hole's wall and its floor (a disc on the plate's plane, inside the post, apart from the plate's top)",
+ "body_count": 1,
+ "volume_mm3": 11591.68134870463,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   60,
+   15
+  ]
+ }
+}

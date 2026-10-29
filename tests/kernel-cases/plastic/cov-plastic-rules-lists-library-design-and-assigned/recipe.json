@@ -1,0 +1,33 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 3,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "plastic.manage_rules",
+   "params": {
+    "name": "Housing",
+    "draft": "3 deg"
+   }
+  },
+  {
+   "command": "plastic.assign_rule",
+   "params": {
+    "bodies": [
+     "Plate"
+    ],
+    "rule": "Housing"
+   }
+  },
+  {
+   "command": "plastic.rules",
+   "params": {}
+  }
+ ]
+}

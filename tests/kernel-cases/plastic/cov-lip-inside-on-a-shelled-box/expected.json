@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "plastic.lip 1 wide and 2 high along the inside edge of the rim of an 80 x 50 x 30 box shelled 2 mm open at the top",
+ "source": "analytic",
+ "method": "shelled: 80*50*30 - 76*46*28 = 22112; the lip is the band along the rim's inner edge (76 x 46), 1 wide (to 78 x 48), raised 2: (78*48 - 76*46)*2 = 496. V = 22608; the top rises to 32",
+ "body_count": 1,
+ "volume_mm3": 22608.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   80,
+   50,
+   32
+  ]
+ }
+}
