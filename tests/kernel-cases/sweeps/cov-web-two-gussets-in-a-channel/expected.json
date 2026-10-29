@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "a web of two lines, one wall each, across the two inside corners of a U channel",
+ "source": "analytic",
+ "method": "channel: base 60x40x5 + two walls 5x40x35 = 26000; each line closes a right triangle of legs 15 with its wall and the base: 2 * 112.5 * 2 thick = 450",
+ "body_count": 1,
+ "volume_mm3": 26450.0,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   40
+  ]
+ }
+}

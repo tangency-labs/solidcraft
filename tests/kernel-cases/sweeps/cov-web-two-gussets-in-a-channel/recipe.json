@@ -1,0 +1,119 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 40,
+    "height": 5,
+    "body_name": "Bracket"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 5,
+    "width": 40,
+    "height": 40,
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 5,
+    "width": 40,
+    "height": 40,
+    "corner": [
+     55,
+     0,
+     0
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      20,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Gussets"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      5,
+      20
+     ],
+     [
+      20,
+      5
+     ]
+    ],
+    "ids": [
+     "g1"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      40,
+      5
+     ],
+     [
+      55,
+      20
+     ]
+    ],
+    "ids": [
+     "g2"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Gussets"
+   }
+  },
+  {
+   "command": "solid.web",
+   "params": {
+    "sketch": "Gussets",
+    "curves": [
+     "g1",
+     "g2"
+    ],
+    "thickness": 2
+   }
+  }
+ ]
+}
