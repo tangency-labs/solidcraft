@@ -403,6 +403,61 @@ fn boundary_hits(face: &mt::Face, g: &Field) -> Vec<Hit> {
     out
 }
 
+fn convex_boundary_hits(face: &mt::Face, g: &Field, size: f64) -> Vec<Hit> {
+    let tol = size * 1e-7 + 1e-9;
+    let mut hits = boundary_hits(face, g);
+    for edge in face.edge_iter() {
+        let c = edge.curve();
+        let (a, b) = c.range_tuple();
+        for t in [a, b] {
+            let p = c.subs(t);
+            if g.eval(from_p3(p)).abs() <= tol && !hits.iter().any(|h| h.p.distance(p) <= tol) {
+                hits.push(Hit { edge: edge.clone(), t, p });
+            }
+        }
+    }
+    hits
+}
+
+/// A convex planar face meets a plane in at most one segment. Its exact
+/// boundary crossings work even when the face's coarse triangles miss a thin
+/// circular segment beside the boundary.
+fn trace_convex_flat(face: &mt::Face, g: &Field, size: f64) -> Option<Vec<Chain>> {
+    let Field::Plane { n, .. } = g else { return None };
+    let mt::Surface::Plane(surface) = face.surface() else { return None };
+    let m = surface.normal();
+    let along = Vec3::new(m.x, m.y, m.z).cross(*n).normalized()?;
+    let tol = size * 1e-7 + 1e-9;
+    let mut low = f64::INFINITY;
+    let mut high = f64::NEG_INFINITY;
+    for e in face.edge_iter() {
+        let c = e.curve();
+        let (a, b) = c.range_tuple();
+        for i in 0..=16 {
+            let v = g.eval(from_p3(c.subs(a + (b - a) * i as f64 / 16.)));
+            low = low.min(v);
+            high = high.max(v);
+        }
+    }
+    if low >= -tol || high <= tol {
+        return Some(Vec::new());
+    }
+    let mut points: Vec<_> = convex_boundary_hits(face, g, size).into_iter().map(|h| h.p).collect();
+    points.sort_by(|p, q| from_p3(*p).dot(along).total_cmp(&from_p3(*q).dot(along)));
+    points.dedup_by(|p, q| p.distance(*q) <= tol);
+    if points.len() < 2 {
+        return Some(Vec::new());
+    }
+    let (a, b) = (*points.first()?, *points.last()?);
+    if a.distance(b) <= tol {
+        return Some(Vec::new());
+    }
+    let s = mt::Surface::Plane(surface);
+    let ua = s.search_nearest_parameter(a, None, 100)?;
+    let ub = s.search_nearest_parameter(b, None, 100)?;
+    Some(vec![Chain { pts: vec![(a, ua), (b, ub)], closed: false }])
+}
+
 /// The exact boundary crossings each open chain runs between (`None` for closed chains and
 /// for chains whose ends have no crossing of their own).
 ///
@@ -697,14 +752,22 @@ fn inside(poly: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// by its pieces, boundary edges cut in every face).
 /// Returns how many lines split it and how many faces now stand in its place (at `fi`). The
 /// pieces of cut edges are recorded in `rec`.
-fn split_one(faces: &mut Vec<mt::Face>, fi: usize, g: &Field, size: f64, new_edges: &mut Vec<mt::Edge>, rec: &mut Rebuild) -> Result<(usize, usize)> {
+fn split_one(
+    faces: &mut Vec<mt::Face>,
+    fi: usize,
+    g: &Field,
+    size: f64,
+    new_edges: &mut Vec<mt::Edge>,
+    rec: &mut Rebuild,
+    convex: bool,
+) -> Result<(usize, usize)> {
     let Some(face) = faces.get(fi).cloned() else { return Ok((0, 1)) };
-    let chains = trace(&face, g, size)?;
+    let chains = if convex { trace_convex_flat(&face, g, size).map(Ok).unwrap_or_else(|| trace(&face, g, size))? } else { trace(&face, g, size)? };
     if chains.is_empty() {
         return Ok((0, 1));
     }
     let tol = size * 1e-7 + 1e-9;
-    let hits = boundary_hits(&face, g);
+    let hits = if convex { convex_boundary_hits(&face, g, size) } else { boundary_hits(&face, g) };
     let ends = chain_ends(&chains, &hits, trace_tol(&face, size));
     // Pieces of the original face as they are split.
     let mut pieces: Vec<mt::Face> = vec![face.clone()];
@@ -1091,7 +1154,7 @@ pub(crate) struct Imprint {
     rec: Rebuild,
 }
 
-fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<Imprint> {
+fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64, convex: bool) -> Result<Imprint> {
     let mut out = Imprint { shells: Vec::new(), origin: Vec::new(), new_edges: Vec::new(), made: HashMap::new(), rec: Rebuild::default() };
     let body_faces: Vec<&mt::Face> = body.solid.face_iter().collect();
     let mut base = 0;
@@ -1110,7 +1173,7 @@ fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<
                     continue;
                 }
                 let src = origin.get(k).copied().unwrap_or(0);
-                let (m, pieces) = split_one(&mut fs, k, g, size, &mut out.new_edges, &mut out.rec)?;
+                let (m, pieces) = split_one(&mut fs, k, g, size, &mut out.new_edges, &mut out.rec, convex)?;
                 *out.made.entry(src).or_default() += m;
                 // The pieces stand at k..k + pieces; positions after shift.
                 target = target.iter().take(k).copied().chain(std::iter::repeat_n(true, pieces)).chain(target.iter().skip(k + 1).copied()).collect();
@@ -1120,7 +1183,11 @@ fn imprint(body: &Body, faces: &[usize], fields: &[Field], size: f64) -> Result<
         }
         for (f, src) in fs.iter().zip(&origin) {
             if let Some(from) = body_faces.get(*src) {
-                out.rec.whole(f, from);
+                if convex && out.made.get(src).is_some_and(|count| *count > 0) {
+                    out.rec.face(f, from);
+                } else {
+                    out.rec.whole(f, from);
+                }
             }
         }
         out.shells.push(fs);
@@ -1165,7 +1232,7 @@ pub(crate) fn split_any(body: &Body, faces: &[usize], tool: &SplitTool) -> Resul
         return Err(KernelError::Invalid("no such face".into()));
     }
     guard("split face", || {
-        let mut imp = imprint(body, faces, &fields, size)?;
+        let mut imp = imprint(body, faces, &fields, size, false)?;
         if imp.made.values().all(|m| *m == 0) {
             return Err(KernelError::Invalid("the tool does not cross the selected faces".into()));
         }
@@ -1349,6 +1416,17 @@ fn components(faces: Vec<mt::Face>) -> Vec<Vec<mt::Face>> {
 /// back first. A body the tool misses comes back whole. Each part's history is over `[body]`:
 /// its faces the body's (or pieces of them), the section new.
 pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
+    split_body_impl(body, tool, false, None)
+}
+
+/// The caller certifies convexity. A section can reuse edges already in its
+/// plane; collect its boundary from the final imprint, rather than only the
+/// newly traced edges (which can include traces not used by a face).
+pub(crate) fn split_convex_body(body: &Body, plane: &Plane, stock: &crate::round_cap_cut::RoundStock) -> Result<Vec<Body>> {
+    split_body_impl(body, &SplitTool::Plane(*plane), true, Some(stock))
+}
+
+fn split_body_impl(body: &Body, tool: &SplitTool, convex: bool, stock: Option<&crate::round_cap_cut::RoundStock>) -> Result<Vec<Body>> {
     body.require_brep("split body")?;
     if body.solid.boundaries().len() != 1 {
         return Err(KernelError::Invalid("not supported yet: splitting a body with voids".into()));
@@ -1387,8 +1465,67 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let total = body.solid.face_iter().count();
     let all: Vec<usize> = (0..total).collect();
     guard("split body", || {
-        let imp = imprint(body, &all, &fields, size)?;
-        let new_edges = imp.new_edges;
+        let imp = imprint(body, &all, &fields, size, convex)?;
+        if convex {
+            let stock = stock.ok_or_else(|| KernelError::Invalid("convex stock certificate".into()))?;
+            let SplitTool::Plane(plane) = tool else { return Err(KernelError::Invalid("convex section plane".into())) };
+            for edge in &imp.new_edges {
+                let support =
+                    imp.shells.iter().flatten().find_map(|f| {
+                        (!matches!(f.surface(), mt::Surface::Plane(_)) && f.edge_iter().any(|e| e.id() == edge.id())).then(|| f.surface())
+                    });
+                let Some(support) = support else { continue };
+                if let mt::Curve::Line(line) = edge.curve() {
+                    let on = |p: mt::Point3| {
+                        let q = from_p3(p) - stock.base;
+                        let h = q.dot(stock.axis);
+                        let r = stock.radii[0] + (stock.radii[1] - stock.radii[0]) * h / stock.height;
+                        (q.len2() - h * h - r * r).abs() <= size * size * 1e-10
+                    };
+                    if [line.0, line.1, line.subs(0.5)].into_iter().all(on) {
+                        continue;
+                    }
+                }
+                let curve = stock
+                    .section_curve(&support, plane, edge.absolute_front().point(), edge.absolute_back().point())
+                    .ok_or_else(|| KernelError::Failed("round section conic".into()))?;
+                edge.set_curve(curve);
+            }
+        }
+        let new_edges = if convex {
+            let Field::Plane { o, n } = g else { return Err(KernelError::Invalid("convex section requires a plane".into())) };
+            let tol = size * 1e-7 + 1e-9;
+            let mut seen = std::collections::HashSet::new();
+            let mut work = 2_000_000usize;
+            let mut on = |p: mt::Point3| {
+                if work == 0 {
+                    return false;
+                }
+                work -= 1;
+                (from_p3(p) - *o).dot(*n).abs() <= tol
+            };
+            imp.shells
+                .iter()
+                .flatten()
+                .flat_map(|f| f.edge_iter())
+                .filter(|edge| seen.insert(edge.id()))
+                .filter(|edge| match edge.curve() {
+                    mt::Curve::Line(c) => on(c.0) && on(c.1),
+                    mt::Curve::BSplineCurve(c) => c.control_points().iter().copied().all(&mut on),
+                    mt::Curve::NurbsCurve(c) => c.control_points().iter().all(|p| p.w > 0. && on(mt::Point3::new(p.x / p.w, p.y / p.w, p.z / p.w))),
+                    mt::Curve::IntersectionCurve(c) => [c.surface0(), c.surface1()].iter().any(|s| match s {
+                        mt::Surface::Plane(p) => {
+                            let m = p.normal();
+                            let m = Vec3::new(m.x, m.y, m.z);
+                            m.cross(*n).len() < 1e-9 && (from_p3(p.origin()) - *o).dot(*n).abs() <= tol
+                        }
+                        _ => false,
+                    }),
+                })
+                .collect::<Vec<_>>()
+        } else {
+            imp.new_edges
+        };
         if imp.made.values().all(|m| *m == 0) || new_edges.is_empty() {
             return Ok(vec![crate::boolean_record::operand(body, 0, &crate::record::counts(&[body]))]);
         }

@@ -776,9 +776,31 @@ mod shortcut_tests {
         for k in [0, 3, 6, 9] {
             for placement in PLACEMENTS {
                 let (pin, plate) = pin_in_plate_bore(3.02, k as f64 * 0.13, placement);
-                let (r, report) = crate::capture_boolean_diagnostics(|| boolean(&pin, &plate, BoolOp::Intersect));
-                let shared = r.unwrap().map(|b| crate::measure(&b).unwrap().volume);
-                assert!(shared.is_some_and(|v| (v - want).abs() < 0.05 * want), "{k} {placement:?} {shared:?} {want} {report:?}");
+                for (a, b) in [(&pin, &plate), (&plate, &pin)] {
+                    let (r, report) = crate::capture_boolean_diagnostics(|| boolean(a, b, BoolOp::Intersect));
+                    let shared = r.unwrap().map(|b| crate::measure(&b).unwrap().volume);
+                    assert!(shared.is_some_and(|v| (v - want).abs() < 0.05 * want), "{k} {placement:?} {shared:?} {want} {report:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shortening_a_thin_annulus_keeps_its_brep_caps() {
+        let want = std::f64::consts::PI * (3.02f64.powi(2) - 9.0) * 6.;
+        for turn in [0., 0.39, 0.78, 1.17] {
+            let (pin, plate) = pin_in_plate_bore(3.02, turn, PLACEMENTS[0]);
+            let ring = boolean(&pin, &plate, BoolOp::Intersect).unwrap().unwrap();
+            assert!(!ring.is_mesh());
+            let clip = crate::cylinder(Vec3::ZERO, Vec3::Z, 10., 6.).unwrap();
+            for (a, b) in [(&ring, &clip), (&clip, &ring)] {
+                let result = boolean(a, b, BoolOp::Intersect).unwrap().unwrap();
+                assert!(!result.is_mesh(), "a shortened annulus must keep its exact caps");
+                assert!(result.validity().is_empty(), "{:?}", result.validity());
+                let coarse = crate::measure(&result).unwrap().volume;
+                let fine = result.tessellate_with(1e-5, true).unwrap().measure().volume;
+                assert!((coarse - want).abs() < 0.05 * want, "{turn}: {coarse} vs {want}");
+                assert!((fine - want).abs() < 0.002 * want, "{turn}: {fine} vs {want}");
             }
         }
     }
@@ -874,6 +896,9 @@ thread_local! {
     static APART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set while a union runs with a bore narrowed off a common cylinder (no second round).
     static BORES: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Only the outer intersection retries its operand order. Nested seam and
+    /// tangent operations must not recursively multiply the retry tree.
+    static INTERSECTION_ORDER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The intersections left to the booleans running under [`with_attempt_budget`], if any.
     static ATTEMPTS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
@@ -921,6 +946,51 @@ pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
 }
 
 fn boolean_untimed(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
+    if op != BoolOp::Intersect || INTERSECTION_ORDER.with(|active| active.get()) {
+        return boolean_ordered(a, b, op);
+    }
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            INTERSECTION_ORDER.with(|active| active.set(false));
+        }
+    }
+    INTERSECTION_ORDER.with(|active| active.set(true));
+    let _reset = Reset;
+    let first = boolean_ordered(a, b, op);
+    if first.is_ok() {
+        return first;
+    }
+    // Intersection is commutative, but numerical surface tracing can depend on
+    // which surface is the target. Retry the unchanged operands in reverse,
+    // retaining their original order in all face and edge origins.
+    let (reversed, report) = capture_boolean_diagnostics(|| with_attempt_budget(8, || boolean_ordered(b, a, op)));
+    let mapped = reversed.and_then(|result| {
+        let body = result
+            .map(|body| {
+                let history = body.history().cloned().map(|h| h.renumbered(&[Some(1), Some(0)], 2)).transpose()?;
+                match history {
+                    Some(history) => body.with_history_counts(history, &record::counts(&[a, b])),
+                    None => Ok(body),
+                }
+            })
+            .transpose()?;
+        crate::boolean_guard::check_retry(a, b, op, body.as_ref())?;
+        Ok(body)
+    });
+    if mapped.is_ok() {
+        merge(report);
+        mapped
+    } else {
+        if let Some(Ok(body)) = crate::round_intersection::intersect(a, b) {
+            record(BooleanFallback::new(BooleanStrategy::Piecewise));
+            return Ok(Some(body));
+        }
+        first
+    }
+}
+
+fn boolean_ordered(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     if let Some(r) = with_hollow_tool(a, b, op) {
         return finished(a, b, op, Ok(r));
     }
@@ -1651,6 +1721,15 @@ where
                 merge(diagnostics);
                 return Ok(Some(body));
             }
+        }
+        // A round taper with straight through-bores, enclosed by the cutter's
+        // circular outline: its cap planes alone take the cut (#3456 analogue).
+        if attempt == 1
+            && op == BoolOp::Cut
+            && let Some(Ok(result)) = crate::round_cap_cut::cut(a, b)
+            && result.as_ref().is_none_or(|body| check(body).0)
+        {
+            return Ok(result);
         }
         // A lens cut from a sphere's projected outline carries a redundant cylinder
         // tangent to the sphere (#2750). Remove it only after proving that it

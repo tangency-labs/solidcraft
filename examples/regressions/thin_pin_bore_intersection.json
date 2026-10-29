@@ -1,0 +1,109 @@
+{
+  "description": "A turned R3.02 pin intersects a plate with an R3 bore, leaving a thin annulus, z=0..9.65. A second intersection shortens it to z=0..6. Both planar caps must remain measurable: volume pi*(3.02^2-3^2)*6 = 2.26948653295 mm3. XZ sketch coordinates use -Z for local Y.",
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XZ"
+      }
+    },
+    {
+      "command": "sketch.rectangle.two_point",
+      "params": {
+        "p0": [
+          0,
+          -9.65
+        ],
+        "p1": [
+          3.02,
+          2.35
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.revolve",
+      "params": {
+        "axis": "y",
+        "operation": "new",
+        "body_name": "Pin"
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "length": 16,
+        "width": 16,
+        "height": 19.5,
+        "corner": [
+          -8,
+          -8,
+          0
+        ],
+        "operation": "new",
+        "body_name": "Plate"
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 3,
+        "height": 21.5,
+        "base": [
+          0,
+          0,
+          -1
+        ],
+        "operation": "new",
+        "body_name": "Bore"
+      }
+    },
+    {
+      "command": "solid.combine",
+      "params": {
+        "target": "Plate",
+        "tools": [
+          "Bore"
+        ],
+        "operation": "cut"
+      }
+    },
+    {
+      "command": "solid.combine",
+      "params": {
+        "target": "Pin",
+        "tools": [
+          "Plate"
+        ],
+        "operation": "intersect"
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 10,
+        "height": 6,
+        "base": [
+          0,
+          0,
+          0
+        ],
+        "operation": "new",
+        "body_name": "Clip"
+      }
+    },
+    {
+      "command": "solid.combine",
+      "params": {
+        "target": "Pin",
+        "tools": [
+          "Clip"
+        ],
+        "operation": "intersect"
+      }
+    }
+  ]
+}

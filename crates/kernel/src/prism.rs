@@ -2237,23 +2237,45 @@ fn simple_prism_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2
         |rs: &[Region2]| rs.iter().map(|r| r.outer.signed_area().abs() - r.holes.iter().map(|h| h.signed_area().abs()).sum::<f64>()).sum::<f64>();
     // Prisms of one section overlapping or touching end to end: one longer prism.
     let stacked = op == BoolOp::Union && !same && pb.lo <= pa.hi + tol && pa.lo <= pb.hi + tol;
+    let (overlap_lo, overlap_hi) = (pa.lo.max(pb.lo), pa.hi.min(pb.hi));
+    if op == BoolOp::Intersect {
+        if overlap_hi <= overlap_lo {
+            return Some(Ok(None));
+        }
+        // A positive sliver below this route's resolution is not an empty
+        // intersection. Leave it to the general strategies to resolve/refuse.
+        if overlap_hi - overlap_lo <= tol {
+            return None;
+        }
+    }
     let ok = match op {
-        BoolOp::Cut | BoolOp::Intersect => spans,
+        BoolOp::Cut => spans,
+        BoolOp::Intersect => true,
         BoolOp::Union => same || stacked,
     };
     if !ok {
         return None;
     }
     let section = boolean2d_tagged(&pa.section, &pb.section, op, tol)?;
+    let known_frame = op == BoolOp::Intersect && (!spans || section.regions.iter().any(|region| !region.holes.is_empty()));
     let regions = &section.regions;
     if regions.is_empty() {
         return Some(Ok(None));
     }
     let (u, x, y) = (area(regions), area(&pa.section.regions), area(&pb.section.regions));
+    // The new height-clipping route keeps a complete operand section. Leave
+    // simultaneous section and height changes on the existing strategies.
+    if op == BoolOp::Intersect && !spans && !same_area(u, x, tol) && !same_area(u, y, tol) {
+        return None;
+    }
     let alike = |v: f64| (u - v).abs() <= tol * (1.0 + u);
     // A tool that misses its target (or an intersection that is one operand whole) leaves it
     // as it is: the B-rep boolean reuses that operand itself, where this would rebuild it.
-    if matches!(op, BoolOp::Cut | BoolOp::Intersect) && (same_area(u, x, tol) || (op == BoolOp::Intersect && same_area(u, y, tol))) {
+    let whole_a = overlap_lo <= pa.lo + tol && overlap_hi >= pa.hi - tol;
+    let whole_b = overlap_lo <= pb.lo + tol && overlap_hi >= pb.hi - tol;
+    if (op == BoolOp::Cut && same_area(u, x, tol))
+        || (op == BoolOp::Intersect && ((whole_a && same_area(u, x, tol)) || (whole_b && same_area(u, y, tol))))
+    {
         return None;
     }
     let (lo, hi) = if stacked {
@@ -2269,11 +2291,14 @@ fn simple_prism_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2
             return Some(Ok(Some(body)));
         }
         (pa.lo.min(pb.lo), pa.hi.max(pb.hi))
+    } else if op == BoolOp::Intersect {
+        (overlap_lo, overlap_hi)
     } else {
         (pa.lo, pa.hi)
     };
     let base = plane.offset(lo);
-    let bodies = match crate::extrude(&base, regions, 0.0, hi - lo) {
+    let built = if known_frame { crate::build::extrude_in_frame(&base, regions, 0.0, hi - lo) } else { crate::extrude(&base, regions, 0.0, hi - lo) };
+    let bodies = match built {
         Ok(b) => b,
         Err(e) => return Some(Err(e)),
     };

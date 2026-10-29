@@ -1,0 +1,328 @@
+{
+  "description": "Public-safe analogue of #3456, not its missing original design: redefine feature 17 from sketch 16, profile 1, to a -98 mm Cut. Target: 20 curved faces (cone and cylinder); tool: 12 curved faces (cylinder). Nine through-bores, a matching multi-loop cutter, and a conical rim. The 2 mm drilled base must remain; the distant box must be unchanged.",
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY"
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 20
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "distance": 100,
+        "taper": "5 deg",
+        "operation": "new",
+        "body_name": "Target"
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          -8,
+          -8,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          -8,
+          0,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          -8,
+          8,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          0,
+          -8,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          0,
+          0,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          0,
+          8,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          8,
+          -8,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          8,
+          0,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "radius": 2,
+        "height": 102,
+        "base": [
+          8,
+          8,
+          -1
+        ],
+        "operation": "cut",
+        "targets": [
+          "Target"
+        ]
+      }
+    },
+    {
+      "command": "solid.box",
+      "params": {
+        "corner": [
+          100,
+          0,
+          0
+        ],
+        "length": 5,
+        "width": 5,
+        "height": 5,
+        "operation": "new",
+        "body_name": "Unchanged"
+      }
+    },
+    {
+      "command": "construct.plane.offset",
+      "params": {
+        "base": "XY",
+        "offset": 10
+      }
+    },
+    {
+      "command": "construct.plane.offset",
+      "params": {
+        "base": "XY",
+        "offset": 20
+      }
+    },
+    {
+      "command": "construct.plane.offset",
+      "params": {
+        "base": "XY",
+        "offset": 30
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "offset": 100
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 40
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 28.7488663525924
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 2
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          8,
+          0
+        ],
+        "radius": 2
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          -8,
+          0
+        ],
+        "radius": 2
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          8
+        ],
+        "radius": 2
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          -8
+        ],
+        "radius": 2
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "sketch": 16,
+        "profiles": [
+          1
+        ],
+        "distance": "-1",
+        "direction": "positive",
+        "operation": "new",
+        "body_name": "TemporaryTool"
+      }
+    },
+    {
+      "command": "timeline.redefine",
+      "params": {
+        "command": "solid.extrude",
+        "feature": 17,
+        "params": {
+          "sketch": 16,
+          "profiles": [
+            1
+          ],
+          "distance": "-98",
+          "direction": "positive",
+          "convention": "total_distance",
+          "operation": "cut",
+          "targets": [
+            "Target"
+          ]
+        }
+      }
+    }
+  ]
+}

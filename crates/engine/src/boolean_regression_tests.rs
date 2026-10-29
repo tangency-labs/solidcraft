@@ -1492,3 +1492,125 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
 }
+
+/// #3456 analogue: same feature/sketch/profile, depth and curved-face counts.
+/// The missing original design is not inferred from its final command alone.
+#[test]
+fn drilled_taper_redefine_retains_all_bodies_and_reopens() {
+    let mut s = replay(include_str!("../../../examples/regressions/drilled_taper_cap_cut.json"));
+    let integral = |z: f64| {
+        let k = 5_f64.to_radians().tan();
+        std::f64::consts::PI * (400. * z + 20. * k * z * z + k * k * z * z * z / 3. - 36. * z)
+    };
+    let check = |s: &Session, pieces: usize, expected: f64| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        assert!(s.model.results.iter().all(|r| r.boolean_diagnostics.warning().is_none()));
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), pieces + 1);
+        assert!((volume(s, "Unchanged") - 125.).abs() < 1e-8);
+        let bodies: Vec<_> = state.bodies.iter().filter(|b| b.name != "Unchanged").collect();
+        assert_eq!(bodies.len(), pieces);
+        let mut actual = 0.;
+        for body in bodies {
+            assert!(body.body.validity().is_empty(), "{:?}", body.body.validity());
+            assert_eq!(body.body.lumps().unwrap().len(), 1);
+            let mesh = body.body.tessellate_with(1e-6, true).unwrap();
+            actual += mesh.measure().volume;
+            assert!(!mesh.contains(solidcraft_geom::Vec3::new(0., 0., 1.)), "through bore filled");
+        }
+        assert!((actual - expected).abs() < 0.2, "{actual} vs {expected}");
+    };
+    check(&s, 1, integral(2.));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened, 1, integral(2.));
+    s.execute(
+        "timeline.redefine",
+        &json!({"feature":17,"command":"solid.extrude","params":{
+            "sketch":16,"profiles":[1],"distance":"-50","start_offset":"-25","direction":"positive","operation":"cut","targets":["Target"]
+        }}),
+    )
+    .unwrap();
+    check(&s, 2, integral(25.) + integral(100.) - integral(75.));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    check(&reopened, 2, integral(25.) + integral(100.) - integral(75.));
+}
+
+#[test]
+fn partial_height_cylinder_intersection_replays_and_reopens() {
+    let s = replay(include_str!("../../../examples/regressions/partial_height_cylinder_intersection.json"));
+    let check = |s: &Session| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.boolean_diagnostics.warning().is_none()));
+        assert_eq!(s.model.state().bodies.len(), 1);
+        let state = s.model.state();
+        let body = &state.body("Lower").unwrap().body;
+        assert!(body.validity().is_empty());
+        let mesh = body.tessellate_with(1e-5, true).unwrap();
+        assert!((mesh.measure().volume - std::f64::consts::PI * 4. * 11.25).abs() < 0.01);
+        assert!((mesh.bounds().min.z + 5.25).abs() < 1e-7);
+        assert!((mesh.bounds().max.z - 6.).abs() < 1e-7);
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+}
+
+#[test]
+fn chained_thin_annular_intersections_keep_measurable_caps_after_reopen() {
+    let s = replay(include_str!("../../../examples/regressions/thin_pin_bore_intersection.json"));
+    let check = |s: &Session| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.boolean_diagnostics.warning().is_none()));
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1);
+        let body = &state.body("Pin").unwrap().body;
+        assert!(!body.is_mesh());
+        assert!(body.validity().is_empty());
+        assert_eq!(body.lumps().unwrap().len(), 1);
+        let expected = std::f64::consts::PI * (3.02f64.powi(2) - 9.) * 6.;
+        let mesh = body.tessellate_with(1e-5, true).unwrap();
+        assert!((mesh.measure().volume - expected).abs() < 0.002 * expected);
+        assert!((solidcraft_kernel::measure(body).unwrap().volume - expected).abs() < 0.05 * expected);
+        assert!(mesh.contains(solidcraft_geom::Vec3::new(3.01, 0., 3.)));
+        assert!(!mesh.contains(solidcraft_geom::Vec3::new(0., 0., 3.)));
+        assert!(!mesh.contains(solidcraft_geom::Vec3::new(3.01, 0., 7.)));
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+}
+
+/// The six formerly refused intersections (three layouts, both operand orders)
+/// must survive command replay and design serialization with the correct solid.
+#[test]
+fn reducible_round_intersections_replay_in_both_orders_and_reopen() {
+    // Cylinder: analytic finite Steinmetz integral, including both end caps.
+    // Parallel frusta: Simpson integration of circular lens sections, 4096 and
+    // 8192 slices both give 83.7052814274469. Oblique frusta: independent
+    // quadratic-ray integration gives 77.3972483 (512²), 77.3972262 (1024²).
+    for (script, expected) in [
+        (include_str!("../../../examples/regressions/oblique_cylinder_intersection.json"), 73.85771361452393),
+        (include_str!("../../../examples/regressions/oblique_frustum_intersection.json"), 77.3972262023362),
+        (include_str!("../../../examples/regressions/parallel_frustum_intersection.json"), 83.70528142744693),
+    ] {
+        for reversed in [false, true] {
+            let mut script: Value = serde_json::from_str(script).unwrap();
+            if reversed {
+                let last = script["commands"].as_array_mut().unwrap().last_mut().unwrap();
+                last["params"]["target"] = json!("Tool");
+                last["params"]["tools"] = json!(["Target"]);
+            }
+            let mut s = Session::default();
+            s.run_script(&script).unwrap();
+            let check = |s: &Session| {
+                assert!(s.model.results.iter().all(|r| r.error.is_none() && r.boolean_diagnostics.warning().is_none()));
+                let state = s.model.state();
+                assert_eq!(state.bodies.len(), 1);
+                let body = &state.bodies[0].body;
+                assert!(!body.is_mesh());
+                assert!(body.validity().is_empty());
+                assert_eq!(body.lumps().unwrap().len(), 1);
+                let volume = body.tessellate_with(1e-5, true).unwrap().measure().volume;
+                assert!((volume - expected).abs() < 0.01, "reversed={reversed}: {volume} vs {expected}");
+            };
+            check(&s);
+            check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
+        }
+    }
+}

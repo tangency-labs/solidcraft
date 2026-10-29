@@ -110,6 +110,383 @@ fn union_and_intersect() {
     assert!(rel(measure(&i).unwrap().volume, 125.0) < 1e-6);
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum AxisPrimitive {
+    Cylinder,
+    Cone,
+    PointedCone,
+    Sphere,
+}
+
+const AXIS_PRIMITIVES: [AxisPrimitive; 3] = [AxisPrimitive::Cylinder, AxisPrimitive::Cone, AxisPrimitive::Sphere];
+
+/// Independent equations for convex cylinders, conical frusta and spheres.
+/// A sphere has no unique axis; its axis here only rotates its patch layout.
+#[derive(Clone, Copy)]
+struct AxisFixture {
+    kind: AxisPrimitive,
+    center: Vec3,
+    axis: Vec3,
+    scale: f64,
+}
+
+impl AxisFixture {
+    fn build(self) -> Body {
+        match self.kind {
+            AxisPrimitive::Cylinder => cylinder(self.center - self.axis * (6. * self.scale), self.axis, 2. * self.scale, 12. * self.scale).unwrap(),
+            AxisPrimitive::Cone => {
+                let plane = Plane::from_normal(self.center - self.axis * (6. * self.scale), self.axis).unwrap();
+                let region = Region2 { outer: Loop2::circle(Vec2::ZERO, 1.5 * self.scale), holes: vec![] };
+                extrude_tapered(&plane, &region, 12. * self.scale, 1., (1_f64 / 12.).atan()).unwrap()
+            }
+            AxisPrimitive::PointedCone => {
+                let frame = Plane::from_normal(self.center, self.axis).unwrap();
+                let plane = Plane { origin: self.center, x: frame.x, y: self.axis };
+                let profile = Region2 {
+                    outer: Loop2::polygon(&[
+                        Vec2::new(0., -6. * self.scale),
+                        Vec2::new(2.5 * self.scale, -6. * self.scale),
+                        Vec2::new(0., 6. * self.scale),
+                    ]),
+                    holes: vec![],
+                };
+                revolve(&plane, &[profile], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap()
+            }
+            AxisPrimitive::Sphere => {
+                let frame = Plane::from_normal(self.center, self.axis).unwrap();
+                crate::build::sphere_patches_rotated(self.center, 2. * self.scale, [frame.x, frame.y, self.axis]).unwrap()
+            }
+        }
+    }
+
+    fn volume(self) -> f64 {
+        self.scale.powi(3)
+            * match self.kind {
+                AxisPrimitive::Cylinder => 48. * PI,
+                AxisPrimitive::Cone => 49. * PI,
+                AxisPrimitive::PointedCone => 25. * PI,
+                AxisPrimitive::Sphere => 32. * PI / 3.,
+            }
+    }
+
+    fn margin(self, p: Vec3) -> f64 {
+        let q = p - self.center;
+        if self.kind == AxisPrimitive::Sphere {
+            return 2. * self.scale - q.len();
+        }
+        let t = q.dot(self.axis);
+        let radius = match self.kind {
+            AxisPrimitive::Cone => 2. * self.scale + t / 12.,
+            AxisPrimitive::PointedCone => 1.25 * self.scale - 2.5 * t / 12.,
+            _ => 2. * self.scale,
+        };
+        (6. * self.scale - t.abs()).min(radius - (q - self.axis * t).len())
+    }
+
+    /// Vertical ray intervals from quadratic surface equations and linear caps.
+    /// No kernel mesh or Boolean result supplies the reference volume.
+    fn ray(self, x: f64, y: f64) -> Vec<(f64, f64)> {
+        let q = Vec3::new(x - self.center.x, y - self.center.y, -self.center.z);
+        let t = q.dot(self.axis);
+        let d = self.axis.z;
+        let (mid, k) = match self.kind {
+            AxisPrimitive::Cone => (2. * self.scale, 1. / 12.),
+            AxisPrimitive::PointedCone => (1.25 * self.scale, -2.5 / 12.),
+            _ => (2. * self.scale, 0.),
+        };
+        let r = mid + k * t;
+        let (a, b, c) = if self.kind == AxisPrimitive::Sphere {
+            (1., 2. * q.z, q.dot(q) - 4. * self.scale * self.scale)
+        } else {
+            (1. - d * d - (k * d).powi(2), 2. * (q.z - t * d - r * k * d), q.dot(q) - t * t - r * r)
+        };
+        let extent = if self.kind == AxisPrimitive::Sphere { 2. * self.scale } else { 8.5 * self.scale };
+        let (lo, hi) = (self.center.z - extent, self.center.z + extent);
+        let mut cuts = vec![lo, hi];
+        if a.abs() < 1e-12 {
+            if b.abs() > 1e-12 {
+                cuts.push(-c / b);
+            }
+        } else {
+            let disc = b * b - 4. * a * c;
+            if disc >= 0. {
+                cuts.extend([(-b - disc.sqrt()) / (2. * a), (-b + disc.sqrt()) / (2. * a)]);
+            }
+        }
+        if self.kind != AxisPrimitive::Sphere && d.abs() > 1e-12 {
+            cuts.extend([(-6. * self.scale - t) / d, (6. * self.scale - t) / d]);
+        }
+        cuts.retain(|v| v.is_finite() && *v >= lo && *v <= hi);
+        cuts.sort_by(f64::total_cmp);
+        cuts.windows(2)
+            .filter_map(|w| {
+                let (a, b) = (w[0], w[1]);
+                (b > a && self.margin(Vec3::new(x, y, (a + b) / 2.)) > 0.).then_some((a, b))
+            })
+            .collect()
+    }
+}
+
+fn axis_overlap_reference(a: AxisFixture, b: AxisFixture, n: usize) -> f64 {
+    // Every crossing fixture's first operand has its axis along Z, so this
+    // square encloses its entire XY projection, even for the tapered stock.
+    let r = if matches!(a.kind, AxisPrimitive::Cone | AxisPrimitive::PointedCone) { 2.5 } else { 2. } * a.scale;
+    let step = 2. * r / n as f64;
+    let mut sum = 0.;
+    for i in 0..n {
+        for j in 0..n {
+            let x = a.center.x - r + (i as f64 + 0.5) * step;
+            let y = a.center.y - r + (j as f64 + 0.5) * step;
+            for (lo, hi) in a.ray(x, y) {
+                for (u, v) in b.ray(x, y) {
+                    sum += (hi.min(v) - lo.max(u)).max(0.);
+                }
+            }
+        }
+    }
+    sum * step * step
+}
+
+fn check_axis_result(a: AxisFixture, b: AxisFixture, op: BoolOp, result: Option<Body>, expected: f64, tag: &str) -> std::result::Result<(), String> {
+    if expected == 0. {
+        return if result.is_none() { Ok(()) } else { Err(format!("{tag}: zero volume must return no solid")) };
+    }
+    let result = result.ok_or_else(|| format!("{tag}: lost positive material"))?;
+    let validity = result.validity();
+    if !validity.is_empty() {
+        return Err(format!("{tag}: {validity:?}"));
+    }
+    let lumps = result.lumps().map_err(|e| format!("{tag}: {e}"))?;
+    if lumps.len() != 1 {
+        return Err(format!("{tag}: expected one convex intersection/contained body, got {}", lumps.len()));
+    }
+    let mesh = result.tessellate_with(1e-4, true).map_err(|e| format!("{tag}: {e}"))?;
+    let got = mesh.measure().volume;
+    if (got - expected).abs() > 0.002 * expected.max(1.) {
+        return Err(format!("{tag}: volume {got}, expected {expected}"));
+    }
+    for x in [-2.5, -1., 0., 0.8, 2.5] {
+        for y in [-2., -0.6, 0., 0.7, 2.] {
+            for z in [-5., -2., -0.5, 0.5, 2., 5.] {
+                let p = Vec3::new(x, y, z);
+                let (ma, mb) = (a.margin(p), b.margin(p));
+                if ma.abs() < 1e-4 || mb.abs() < 1e-4 {
+                    continue;
+                }
+                let (ia, ib) = (ma > 0., mb > 0.);
+                let want = match op {
+                    BoolOp::Cut => ia && !ib,
+                    BoolOp::Union => ia || ib,
+                    BoolOp::Intersect => ia && ib,
+                };
+                if mesh.contains(p) != want {
+                    return Err(format!("{tag}: wrong material at {p:?}"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Test every ordered primitive pairing, in both operand orders, for one layout.
+fn round_axis_layout(pose: &str, center: Vec3, axis: Vec3) {
+    let mut failures = Vec::new();
+    for first in AXIS_PRIMITIVES {
+        let a = AxisFixture { kind: first, center: Vec3::ZERO, axis: Vec3::Z, scale: 1. };
+        let body = a.build();
+        for second in AXIS_PRIMITIVES {
+            let b = AxisFixture { kind: second, center, axis, scale: 1. };
+            let tool = b.build();
+            let coarse = axis_overlap_reference(a, b, 256);
+            let expected = axis_overlap_reference(a, b, 512);
+            assert!(
+                (coarse - expected).abs() < 0.001 * expected.max(1.),
+                "reference convergence {first:?}/{second:?}/{pose}: {coarse} vs {expected}"
+            );
+            let before = step_export(&[&body, &tool], "axis operands").unwrap();
+            for reversed in [false, true] {
+                let (l, r, lf, rf) = if reversed { (&tool, &body, b, a) } else { (&body, &tool, a, b) };
+                let tag = format!("{first:?}/{second:?}/{pose}/reversed={reversed}");
+                let start = std::time::Instant::now();
+                let result = boolean(l, r, BoolOp::Intersect);
+                let got =
+                    result.map_err(|e| format!("{tag}: {e}")).and_then(|result| check_axis_result(lf, rf, BoolOp::Intersect, result, expected, &tag));
+                assert_eq!(step_export(&[&body, &tool], "axis operands").unwrap(), before, "{tag}: operands changed");
+                eprintln!("axis {tag}: {got:?} ({:.2}s)", start.elapsed().as_secs_f64());
+                if let Err(e) = got {
+                    failures.push(e);
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+}
+
+#[test]
+fn reducible_round_intersections_are_invariant_under_placement_and_scale() {
+    use truck_modeling::{BoundedCurve, ParametricCurve};
+    for (kind, center, axis) in [
+        (AxisPrimitive::Cylinder, Vec3::ZERO, Vec3::new(1., 1., 2.).normalized().unwrap()),
+        (AxisPrimitive::Cone, Vec3::ZERO, Vec3::new(1., 1., 2.).normalized().unwrap()),
+        (AxisPrimitive::Cone, Vec3::new(1.5, 0., 0.), Vec3::Z),
+    ] {
+        let a = AxisFixture { kind, center: Vec3::ZERO, axis: Vec3::Z, scale: 1. };
+        let b = AxisFixture { kind, center, axis, scale: 1. };
+        let expected = axis_overlap_reference(a, b, 512);
+        for (scale, angle) in [(0.5, 0.37), (2., -0.61)] {
+            let shift = Vec3::new(17., -23., 5.);
+            let turn = Vec3::new(1., 2., 3.);
+            let scaling = |s: f64| [[s, 0., 0., 0.], [0., s, 0., 0.], [0., 0., s, 0.], [0., 0., 0., 1.]];
+            let place = |body: &Body| transform(&transform_matrix(body, scaling(scale)).unwrap(), shift, Vec3::ZERO, turn, angle).unwrap();
+            let (left, right) = (place(&a.build()), place(&b.build()));
+            for reversed in [false, true] {
+                let (l, r) = if reversed { (&right, &left) } else { (&left, &right) };
+                let result = crate::round_intersection::intersect(l, r)
+                    .expect("certified placed stocks")
+                    .unwrap_or_else(|e| panic!("{kind:?}/{center:?}/scale={scale}/angle={angle}/reversed={reversed}: {e}"));
+                let restored = transform_matrix(&transform(&result, -shift, shift, turn, -angle).unwrap(), scaling(1. / scale)).unwrap();
+                for edge in restored.solid.edge_iter() {
+                    let curve = edge.curve();
+                    let (lo, hi) = curve.range_tuple();
+                    for i in 0..=64 {
+                        let p = crate::body::from_p3(curve.subs(lo + (hi - lo) * i as f64 / 64.));
+                        let (ma, mb) = (a.margin(p), b.margin(p));
+                        assert!(
+                            ma >= -2e-7 && mb >= -2e-7 && ma.abs().min(mb.abs()) < 2e-7,
+                            "section misses exact quadric/cap boundary at {p:?}: {ma}, {mb}"
+                        );
+                    }
+                }
+                check_axis_result(a, b, BoolOp::Intersect, Some(restored), expected, "placed round intersection").unwrap();
+            }
+        }
+    }
+}
+
+macro_rules! round_axis_test {
+    ($name:ident, $pose:expr, $center:expr, $axis:expr) => {
+        #[test]
+        fn $name() {
+            round_axis_layout($pose, $center, $axis);
+        }
+    };
+}
+
+round_axis_test!(round_axis_collinear, "collinear", Vec3::new(0., 0., 0.75), Vec3::Z);
+round_axis_test!(round_axis_anti_parallel, "anti_parallel", Vec3::new(0., 0., 0.75), -Vec3::Z);
+round_axis_test!(round_axis_parallel_offset, "parallel_offset", Vec3::new(1.5, 0., 0.), Vec3::Z);
+round_axis_test!(round_axis_right_angle, "crossing", Vec3::new(0., 0., 0.7), Vec3::Y);
+round_axis_test!(round_axis_oblique_sixty_degrees, "oblique_60", Vec3::ZERO, Vec3::new(0., (PI / 3.).sin(), (PI / 3.).cos()));
+round_axis_test!(round_axis_shallow_oblique, "oblique", Vec3::ZERO, Vec3::new(1., 1., 2.).normalized().unwrap());
+round_axis_test!(round_axis_skew, "skew", Vec3::new(0.8, 0., 0.7), Vec3::Y);
+round_axis_test!(round_axis_disjoint, "disjoint", Vec3::new(20., 0., 0.), Vec3::Y);
+
+#[test]
+fn round_axis_full_containment_and_equal_bodies_have_exact_set_semantics() {
+    let mut failures = Vec::new();
+    for outer in AXIS_PRIMITIVES {
+        let a = AxisFixture { kind: outer, center: Vec3::ZERO, axis: Vec3::Z, scale: 6. };
+        let body = a.build();
+        for inner in AXIS_PRIMITIVES {
+            let b = AxisFixture { kind: inner, center: Vec3::new(0.2, -0.1, 0.4), axis: Vec3::new(1., 2., 3.).normalized().unwrap(), scale: 1. };
+            let tool = b.build();
+            for reversed in [false, true] {
+                let (l, r, lf, rf) = if reversed { (&tool, &body, b, a) } else { (&body, &tool, a, b) };
+                for op in [BoolOp::Cut, BoolOp::Union, BoolOp::Intersect] {
+                    let expected = match op {
+                        BoolOp::Cut => {
+                            if reversed {
+                                0.
+                            } else {
+                                a.volume() - b.volume()
+                            }
+                        }
+                        BoolOp::Union => a.volume(),
+                        BoolOp::Intersect => b.volume(),
+                    };
+                    let tag = format!("{outer:?} surrounds {inner:?}/reversed={reversed}/{op:?}");
+                    let got =
+                        boolean(l, r, op).map_err(|e| format!("{tag}: {e}")).and_then(|result| check_axis_result(lf, rf, op, result, expected, &tag));
+                    eprintln!("containment {tag}: {got:?}");
+                    if let Err(e) = got {
+                        failures.push(e);
+                    }
+                }
+            }
+        }
+        let a = AxisFixture { scale: 1., ..a };
+        let body = a.build();
+        let twin = a.build(); // Independent topology, not a clone/identity shortcut.
+        for turn in [0., 0.41] {
+            let twin = transform(&twin, Vec3::ZERO, Vec3::ZERO, Vec3::Z, turn).unwrap();
+            for op in [BoolOp::Cut, BoolOp::Union, BoolOp::Intersect] {
+                let tag = format!("equal {outer:?}/seam rotation {turn}/{op:?}");
+                let expected = if op == BoolOp::Cut { 0. } else { a.volume() };
+                let got = boolean(&body, &twin, op)
+                    .map_err(|e| format!("{tag}: {e}"))
+                    .and_then(|result| check_axis_result(a, a, op, result, expected, &tag));
+                eprintln!("equal {tag}: {got:?}");
+                if let Err(e) = got {
+                    failures.push(e);
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// Include a true apex, separately from the frusta in the larger axis sweep.
+#[test]
+fn round_axis_pointed_cones_cross_equal_and_fit_inside_other_primitives() {
+    let cone = AxisFixture { kind: AxisPrimitive::PointedCone, center: Vec3::ZERO, axis: Vec3::Z, scale: 1. };
+    let body = cone.build();
+    let mut failures = Vec::new();
+    let mut check = |a: AxisFixture, b: AxisFixture, left: &Body, right: &Body, op, expected, tag: &str| {
+        let result =
+            boolean(left, right, op).map_err(|e| format!("{tag}: {e}")).and_then(|result| check_axis_result(a, b, op, result, expected, tag));
+        eprintln!("pointed cone {tag}: {result:?}");
+        if let Err(error) = result {
+            failures.push(error);
+        }
+    };
+    for turn in [0., 0.41] {
+        let twin = transform(&cone.build(), Vec3::ZERO, Vec3::ZERO, Vec3::Z, turn).unwrap();
+        for op in [BoolOp::Cut, BoolOp::Union, BoolOp::Intersect] {
+            check(cone, cone, &body, &twin, op, if op == BoolOp::Cut { 0. } else { cone.volume() }, &format!("equal/seam {turn}/{op:?}"));
+        }
+    }
+    for kind in AXIS_PRIMITIVES {
+        let crossing = AxisFixture { kind, center: Vec3::new(0., 0., 0.7), axis: Vec3::Y, scale: 1. };
+        let other = crossing.build();
+        let expected = axis_overlap_reference(cone, crossing, 512);
+        let coarse = axis_overlap_reference(cone, crossing, 256);
+        assert!((coarse - expected).abs() < 0.001 * expected.max(1.));
+        for (a, b, l, r) in [(cone, crossing, &body, &other), (crossing, cone, &other, &body)] {
+            check(a, b, l, r, BoolOp::Intersect, expected, &format!("crossing {kind:?}/first {:?}", a.kind));
+        }
+        let outer = AxisFixture { kind, center: Vec3::ZERO, axis: Vec3::Z, scale: 6. };
+        let surrounding = outer.build();
+        for reversed in [false, true] {
+            let (a, b, l, r) = if reversed { (cone, outer, &body, &surrounding) } else { (outer, cone, &surrounding, &body) };
+            for op in [BoolOp::Cut, BoolOp::Union, BoolOp::Intersect] {
+                let expected = match op {
+                    BoolOp::Cut => {
+                        if reversed {
+                            0.
+                        } else {
+                            outer.volume() - cone.volume()
+                        }
+                    }
+                    BoolOp::Union => outer.volume(),
+                    BoolOp::Intersect => cone.volume(),
+                };
+                check(a, b, l, r, op, expected, &format!("{kind:?} surrounds pointed cone/reversed {reversed}/{op:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+}
+
 #[test]
 fn revolve_washer_and_sphere() {
     let r =

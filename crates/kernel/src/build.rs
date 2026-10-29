@@ -156,6 +156,19 @@ fn attach_profile(wires: &[mt::Wire]) -> Result<mt::Face> {
     guard("face", || builder::try_attach_plane(wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))
 }
 
+/// The contour orientation is defined in this frame. A fitted plane can choose
+/// the opposite normal, which leaves thin annular caps without triangles.
+fn attach_profile_in_frame(plane: &Plane, wires: &[mt::Wire]) -> Result<mt::Face> {
+    if !frame_ok(plane) {
+        return Err(KernelError::Invalid("profile frame is not finite and orthonormal".into()));
+    }
+    guard("profile plane", || {
+        let o = p3(plane.origin);
+        let surface = mt::Surface::Plane(mt::Plane::new(o, o + v3(plane.x), o + v3(plane.y)));
+        mt::Face::try_new(wires.to_vec(), surface).map_err(|e| KernelError::Invalid(format!("profile: {e}")))
+    })
+}
+
 fn region_ok(r: &Region2) -> Result<()> {
     if r.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
@@ -191,7 +204,12 @@ pub(crate) fn frame_ok(plane: &Plane) -> bool {
 
 /// Extrude each region from `start` to `end` along the plane normal (offsets in mm, `end > start`).
 pub fn extrude(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
-    extrude_with(plane, regions, start, end, false)
+    extrude_with(plane, regions, start, end, false, false)
+}
+
+/// Extrude a certified planar section without fitting its already known plane.
+pub(crate) fn extrude_in_frame(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
+    extrude_with(plane, regions, start, end, false, true)
 }
 
 /// [`extrude`] with each run of profile lines that continue one another in a straight line (a side
@@ -200,10 +218,10 @@ pub fn extrude(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Resu
 /// history lists every piece under it. For the Extrude feature; other builders (sheet metal's
 /// flat pattern, tools) keep a face per segment.
 pub fn extrude_whole_sides(plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
-    extrude_with(plane, regions, start, end, true)
+    extrude_with(plane, regions, start, end, true, false)
 }
 
-fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_sides: bool) -> Result<Vec<Body>> {
+fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_sides: bool, known_frame: bool) -> Result<Vec<Body>> {
     if !frame_ok(plane) {
         return Err(KernelError::Invalid("extrude frame is not finite and orthonormal".into()));
     }
@@ -234,7 +252,11 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_
         };
         let profile = region_wires(&base, &numbered)?;
         let wires = wires_of(&profile);
-        let f = guard("extrude profile", || builder::try_attach_plane(&wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))?;
+        let f = if known_frame {
+            attach_profile_in_frame(&base, &wires)?
+        } else {
+            guard("extrude profile", || builder::try_attach_plane(&wires).map_err(|e| KernelError::Invalid(format!("profile: {e}"))))?
+        };
         let solid: Solid = guard("extrude", || Ok(builder::tsweep(&f, v3(n * (hi - lo)))))?;
         let body = Body::new(solid)?;
         // tsweep retains each actual input boundary edge on its generated side: one pass over
@@ -1790,11 +1812,27 @@ fn revolve_touching_axis(plane: &Plane, numbered: &NumberedLoop, axis_origin: Ve
 /// with planar caps into a body, whose history is the sides' and the caps': the profile at
 /// `w0` is the start cap and at `w1` the end cap (the other way round when `from_end`).
 pub(crate) fn cap_and_close(sides: Vec<Side>, w0: &[mt::Wire], w1: &[mt::Wire], from_end: bool) -> Result<Body> {
+    cap_and_close_with_frames(sides, w0, w1, from_end, None)
+}
+
+/// Close a ruled section with the cap planes its construction already knows.
+pub(crate) fn cap_and_close_in_frames(sides: Vec<Side>, w0: &[mt::Wire], w1: &[mt::Wire], from_end: bool, low: &Plane, high: &Plane) -> Result<Body> {
+    cap_and_close_with_frames(sides, w0, w1, from_end, Some((low, high)))
+}
+
+fn cap_and_close_with_frames(sides: Vec<Side>, w0: &[mt::Wire], w1: &[mt::Wire], from_end: bool, frames: Option<(&Plane, &Plane)>) -> Result<Body> {
     let (mut faces, prov): (Vec<mt::Face>, Vec<Option<FaceProv>>) = sides.into_iter().unzip();
     let history: Option<Vec<FaceProv>> = prov.into_iter().chain([Some(record::cap(from_end)), Some(record::cap(!from_end))]).collect();
-    let bottom =
-        builder::try_attach_plane(&w0.iter().map(|w| w.inverse()).collect::<Vec<_>>()).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
-    let top = builder::try_attach_plane(w1).map_err(|e| KernelError::Failed(format!("cap: {e}")))?;
+    let low_wires: Vec<_> = w0.iter().map(|w| w.inverse()).collect();
+    let (bottom, top) = if let Some((low, high)) = frames {
+        let low = Plane { y: -low.y, ..*low };
+        (attach_profile_in_frame(&low, &low_wires)?, attach_profile_in_frame(high, w1)?)
+    } else {
+        (
+            builder::try_attach_plane(&low_wires).map_err(|e| KernelError::Failed(format!("cap: {e}")))?,
+            builder::try_attach_plane(w1).map_err(|e| KernelError::Failed(format!("cap: {e}")))?,
+        )
+    };
     let mut last = String::new();
     for (b, t) in [(bottom.clone(), top.clone()), (bottom.inverse(), top.inverse()), (bottom.clone(), top.inverse()), (bottom.inverse(), top)] {
         let mut all = std::mem::take(&mut faces);

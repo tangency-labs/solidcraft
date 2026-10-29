@@ -87,10 +87,14 @@ fn verified<'a>(r: &'a Body, operands: &[&Body], tol: f64) -> &'a History {
 /// it is an offset of; an edge lies along its origin edges (within `at.moved`). Faces from
 /// nothing are allowed only where `generated` says.
 pub(crate) fn checked<'a>(r: &'a Body, operands: &[&Body], tol: f64, at: Reach, generated: &dyn Fn(usize) -> bool) -> &'a History {
+    checked_with_refinement(r, operands, tol, at, generated, false)
+}
+
+fn checked_with_refinement<'a>(r: &'a Body, operands: &[&Body], tol: f64, at: Reach, generated: &dyn Fn(usize) -> bool, refine: bool) -> &'a History {
     let h = r.history().expect("the operation reports its history");
     h.check(r, operands).unwrap();
-    let rm = r.tessellate(tol).unwrap();
-    let ms: Vec<Mesh> = operands.iter().map(|b| b.tessellate(tol).unwrap()).collect();
+    let rm = r.tessellate_with(tol, refine).unwrap();
+    let ms: Vec<Mesh> = operands.iter().map(|b| b.tessellate_with(tol, refine).unwrap()).collect();
     let near = 4.0 * tol + r.size() * 1e-6;
     let on = |o: &FaceOrigin, p: Vec3| match *o {
         FaceOrigin::Face { operand, face } => to_face(&ms[operand], face, p) < near.max(at.moved),
@@ -521,6 +525,103 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
         let h = verified(&r, &[&arm, tool], 0.01);
         for f in 0..arm.face_count() {
             assert!(!from(h, face(0, f)).is_empty(), "{op:?}: face {f} of the plate and boss is lost\n{}", show(h));
+        }
+    }
+}
+
+#[test]
+fn partial_height_cylinder_intersection_keeps_both_cap_origins() {
+    let a = crate::cylinder(Vec3::new(0., 0., -6.), Vec3::Z, 2., 12.).unwrap();
+    let b = crate::cylinder(Vec3::new(0., 0., -5.25), Vec3::Z, 2., 12.).unwrap();
+    for (a, b) in [(&a, &b), (&b, &a)] {
+        let result = boolean(a, b, BoolOp::Intersect).unwrap().unwrap();
+        let h = verified(&result, &[a, b], 0.01);
+        let origins: BTreeSet<_> = h
+            .faces
+            .iter()
+            .flat_map(|f| &f.origins)
+            .filter_map(|o| match o {
+                FaceOrigin::Face { operand, .. } => Some(*operand),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(origins, BTreeSet::from([0, 1]), "both operand caps must survive");
+        let mesh = result.tessellate_with(1e-5, true).unwrap();
+        assert!((mesh.measure().volume - std::f64::consts::PI * 4. * 11.25).abs() < 0.01);
+        assert!((mesh.bounds().min.z + 5.25).abs() < 1e-7);
+        assert!((mesh.bounds().max.z - 6.).abs() < 1e-7);
+    }
+}
+
+#[test]
+fn reversed_cone_cylinder_intersection_keeps_original_operand_history() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let profile = Region2 { outer: Loop2::circle(Vec2::ZERO, 1.5), holes: vec![] };
+    let cone = crate::extrude_tapered(&Plane::XY.offset(-6.), &profile, 12., 1., (1_f64 / 12.).atan()).unwrap();
+    let cylinder = crate::cylinder(Vec3::new(1.5, 0., -6.), Vec3::Z, 2., 12.).unwrap();
+    let result = boolean(&cone, &cylinder, BoolOp::Intersect).unwrap().unwrap();
+    verified(&result, &[&cone, &cylinder], 0.02);
+    assert!(result.validity().is_empty());
+}
+
+#[test]
+fn reducible_round_intersections_keep_exact_face_and_edge_history() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    for (taper, center, axis) in [
+        (false, Vec3::ZERO, Vec3::new(1., 1., 2.).normalized().unwrap()),
+        (true, Vec3::ZERO, Vec3::new(1., 1., 2.).normalized().unwrap()),
+        (true, Vec3::new(1.5, 0., 0.), Vec3::Z),
+    ] {
+        let build = |center: Vec3, axis: Vec3| {
+            let base = center - axis * 6.;
+            if taper {
+                crate::extrude_tapered(
+                    &Plane::from_normal(base, axis).unwrap(),
+                    &Region2 { outer: Loop2::circle(Vec2::ZERO, 1.5), holes: vec![] },
+                    12.,
+                    1.,
+                    (1. / 12f64).atan(),
+                )
+                .unwrap()
+            } else {
+                crate::cylinder(base, axis, 2., 12.).unwrap()
+            }
+        };
+        let a = build(Vec3::ZERO, Vec3::Z);
+        let b = build(center, axis);
+        let before = crate::step_export(&[&a, &b], "round operands").unwrap();
+        for reversed in [false, true] {
+            let (left, right) = if reversed { (&b, &a) } else { (&a, &b) };
+            let result = crate::round_intersection::intersect(left, right)
+                .expect("certified round pair")
+                .unwrap_or_else(|e| panic!("taper={taper}/{center:?}/reversed={reversed}: {e}"));
+            assert!(result.validity().is_empty());
+            assert_eq!(result.lumps().unwrap().len(), 1);
+            // Refine triangle interiors as well as their boundaries: a coarse
+            // triangle's centroid can lie off an exact conic wall by several
+            // chord tolerances even when all its vertices are on the wall.
+            let h = checked_with_refinement(&result, &[left, right], 1e-3, Reach { made: 0., moved: 0. }, &|_| false, true);
+            assert!(h.faces.iter().all(|f| f.change != Change::Kept), "every original face is trimmed");
+            // Besides the mesh-based lineage check, each curved support must
+            // retain the original rational surface exactly (no fitted wall).
+            for (f, provenance) in result.solid.face_iter().zip(&h.faces) {
+                let truck_modeling::Surface::NurbsSurface(surface) = f.surface() else { continue };
+                assert!(
+                    provenance.origins.iter().any(|origin| {
+                        let FaceOrigin::Face { operand, face } = *origin else { return false };
+                        let Some(original) = [left, right][operand].solid.face_iter().nth(face) else { return false };
+                        let truck_modeling::Surface::NurbsSurface(original) = original.surface() else { return false };
+                        surface.control_points() == original.control_points()
+                            && surface.uknot_vec() == original.uknot_vec()
+                            && surface.vknot_vec() == original.vknot_vec()
+                    }),
+                    "curved support changed"
+                );
+            }
+            for operand in 0..2 {
+                assert!(h.faces.iter().flat_map(|f| &f.origins).any(|o| matches!(o, FaceOrigin::Face { operand: i, .. } if *i == operand)));
+            }
+            assert_eq!(crate::step_export(&[&a, &b], "round operands").unwrap(), before, "operands changed");
         }
     }
 }

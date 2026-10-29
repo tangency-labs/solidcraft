@@ -1,0 +1,43 @@
+{
+  "description": "Partially overlapping collinear cylinders: intersection must retain z=-5.25..6 (11.25 mm), not fail on their coincident cylindrical walls. Independent solid.cylinder features, not cloned topology.",
+  "commands": [
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "base": [
+          0,
+          0,
+          -6
+        ],
+        "radius": 2,
+        "height": 12,
+        "operation": "new",
+        "body_name": "Lower"
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "base": [
+          0,
+          0,
+          -5.25
+        ],
+        "radius": 2,
+        "height": 12,
+        "operation": "new",
+        "body_name": "Upper"
+      }
+    },
+    {
+      "command": "solid.combine",
+      "params": {
+        "target": "Lower",
+        "tools": [
+          "Upper"
+        ],
+        "operation": "intersect"
+      }
+    }
+  ]
+}

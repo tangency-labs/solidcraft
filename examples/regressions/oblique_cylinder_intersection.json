@@ -1,0 +1,53 @@
+{
+  "description": "Axes crossing at 35.2643897 degrees equal-radius cylinders (r=2), height 12 mm. The exact intersection must be one closed B-rep; reversing the target and tool gives the same geometry.",
+  "commands": [
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "base": [
+          0,
+          0,
+          -6
+        ],
+        "axis": [
+          0,
+          0,
+          1
+        ],
+        "radius": 2,
+        "height": 12,
+        "operation": "new",
+        "body_name": "Target"
+      }
+    },
+    {
+      "command": "solid.cylinder",
+      "params": {
+        "base": [
+          -2.4494897427831783,
+          -2.4494897427831783,
+          -4.898979485566357
+        ],
+        "axis": [
+          0.4082482904638631,
+          0.4082482904638631,
+          0.8164965809277261
+        ],
+        "radius": 2,
+        "height": 12,
+        "operation": "new",
+        "body_name": "Tool"
+      }
+    },
+    {
+      "command": "solid.combine",
+      "params": {
+        "target": "Target",
+        "tools": [
+          "Tool"
+        ],
+        "operation": "intersect"
+      }
+    }
+  ]
+}

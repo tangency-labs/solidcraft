@@ -203,7 +203,16 @@ impl<'a> Context<'a> {
     /// one's outline, clear of the other's, lies inside it.
     fn overlap(&self, x: &Outline, y: &Outline) -> bool {
         let within = |x: &Outline, y: &Outline| x.middles.iter().any(|m| dist_to(&y.regions, *m) > self.tol && inside(&y.regions, *m));
-        !x.walls.is_disjoint(&y.walls) || within(x, y) || within(y, x)
+        !x.walls.is_disjoint(&y.walls)
+            || within(x, y)
+            || within(y, x)
+            // Coincident outlines from different operands can have different
+            // wall tags and every boundary midpoint on the other boundary.
+            // A verified interior witness still proves positive area overlap.
+            || x.regions.iter().chain(&y.regions).any(|region| {
+                let p = region.interior_point();
+                dist_to(&x.regions, p) > self.tol && dist_to(&y.regions, p) > self.tol && inside(&x.regions, p) && inside(&y.regions, p)
+            })
     }
 
     /// The operand wall a segment was read beside.

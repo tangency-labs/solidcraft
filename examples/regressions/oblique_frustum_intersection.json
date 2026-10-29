@@ -1,0 +1,105 @@
+{
+  "description": "Axes crossing at 35.2643897 degrees equal-slope frusta (r=1.5 to 2.5), height 12 mm. The exact intersection must be one closed B-rep; reversing the target and tool gives the same geometry.",
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": {
+          "origin": [
+            0,
+            0,
+            -6
+          ],
+          "x_dir": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "y_dir": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        }
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 1.5
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "distance": 12,
+        "taper": "0.083141231888441219 rad",
+        "operation": "new",
+        "body_name": "Target"
+      }
+    },
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": {
+          "origin": [
+            -2.4494897427831783,
+            -2.4494897427831783,
+            -4.898979485566357
+          ],
+          "x_dir": [
+            -0.7071067811865476,
+            0.7071067811865476,
+            0.0
+          ],
+          "y_dir": [
+            -0.5773502691896258,
+            -0.5773502691896258,
+            0.5773502691896258
+          ]
+        }
+      }
+    },
+    {
+      "command": "sketch.circle.center",
+      "params": {
+        "center": [
+          0,
+          0
+        ],
+        "radius": 1.5
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "distance": 12,
+        "taper": "0.083141231888441219 rad",
+        "operation": "new",
+        "body_name": "Tool"
+      }
+    },
+    {
+      "command": "solid.combine",
+      "params": {
+        "target": "Target",
+        "tools": [
+          "Tool"
+        ],
+        "operation": "intersect"
+      }
+    }
+  ]
+}
