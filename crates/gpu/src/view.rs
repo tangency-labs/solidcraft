@@ -961,7 +961,7 @@ pub struct Frame {
     /// Viewport size in physical pixels.
     pub size_px: [f32; 2],
     /// Section cut: up to [`MAX_SECTION_PLANES`] planes (normal, d), the first ones; fragments
-    /// with normal·p > d for any are hidden. A zero normal: no plane (the first: no section).
+    /// with normal·p > d for every one are hidden. A zero normal: no plane (the first: no section).
     pub clip: [[f32; 4]; MAX_SECTION_PLANES],
     /// Colour of the inside of cut bodies (straight sRGB, 0..1); alpha 1 hatches it, 0 leaves it plain in the body's colour.
     pub cap: [f32; 4],
