@@ -1,0 +1,32 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Long",
+    "values": {
+     "W": "60 mm"
+    }
+   }
+  },
+  {
+   "command": "config.rule",
+   "params": {
+    "rule": {
+     "id": "range",
+     "name": "Range",
+     "condition": {
+      "type": "always"
+     },
+     "effect": {
+      "type": "parameter_range",
+      "parameter": "W",
+      "minimum": "30 mm",
+      "maximum": "50 mm"
+     }
+    }
+   }
+  }
+ ]
+}

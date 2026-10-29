@@ -1,0 +1,26 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.column",
+   "params": {
+    "param": "H"
+   }
+  },
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Tall",
+    "values": {
+     "H": "20 mm"
+    }
+   }
+  },
+  {
+   "command": "config.activate",
+   "params": {
+    "row": "Tall"
+   }
+  }
+ ]
+}

@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "config.configure of a feature the design does not have",
+ "source": "invariants",
+ "method": "no feature Nope: refused naming it",
+ "outcome": "refused",
+ "refusal": "no feature `Nope`"
+}

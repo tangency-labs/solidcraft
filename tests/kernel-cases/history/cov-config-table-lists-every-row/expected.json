@@ -1,0 +1,41 @@
+{
+ "sources": [],
+ "what": "config.table lists the three rows, each with its values",
+ "method": "Default (W 40, hole on), Long (W 60), Plain (hole off); Default stays active: V = 12000 - pi 25 10",
+ "body_count": 1,
+ "volume_mm3": 11214.601836602551,
+ "faces": 7,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "active": "Default",
+    "matches": true,
+    "rows": [
+     {
+      "name": "Default",
+      "values": {
+       "param:W": "40 mm",
+       "suppress:Hole": "false"
+      }
+     },
+     {
+      "name": "Long",
+      "values": {
+       "param:W": "60 mm",
+       "suppress:Hole": "false"
+      }
+     },
+     {
+      "name": "Plain",
+      "values": {
+       "param:W": "40 mm",
+       "suppress:Hole": "true"
+      }
+     }
+    ]
+   }
+  }
+ ],
+ "source": "analytic"
+}

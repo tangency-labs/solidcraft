@@ -1,0 +1,21 @@
+{
+ "sources": [],
+ "what": "config.rule drives H to 20 when W is 60 or more",
+ "method": "Long: W = 60, the rule sets H = 20: V = 60 30 20 - pi 25 20 = 36000 - 500 pi; faces 7",
+ "body_count": 1,
+ "volume_mm3": 34429.203673205106,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   30,
+   20
+  ]
+ },
+ "source": "analytic"
+}

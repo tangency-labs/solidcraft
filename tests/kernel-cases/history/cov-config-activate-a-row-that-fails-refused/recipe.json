@@ -1,0 +1,20 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Zero",
+    "values": {
+     "W": "0 mm"
+    }
+   }
+  },
+  {
+   "command": "config.activate",
+   "params": {
+    "row": "Zero"
+   }
+  }
+ ]
+}
