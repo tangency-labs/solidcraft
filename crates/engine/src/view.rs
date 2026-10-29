@@ -907,24 +907,30 @@ fn build_scene(
 }
 
 /// Where the plane through `o` with normal `n` cuts a mesh: one segment per crossed triangle,
-/// nudged a hair to the kept side (so the clip leaves them drawn).
+/// nudged a hair to the kept side (so the clip leaves them drawn), and running so that
+/// `(b - a) × n` points into the body. A vertex on the plane counts as kept, so a plane lying on
+/// a face the body is behind cuts nothing.
 pub fn section_segments(m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec3, Vec3)> {
-    let eps = section_nudge(m);
+    let (eps, tol) = (section_nudge(m), section_tol(m));
     let mut out = Vec::new();
     for t in &m.triangles {
-        cut_triangle(m, t, o, n, eps, &mut out);
+        cut_triangle(m, t, o, n, eps, tol, &mut out);
     }
     out
 }
 
-/// The part of a cut outline segment `a`–`b` of plane `own` that bounds what the section hides:
-/// where every other plane hides too (the section hides what lies on the positive side of all
-/// of its planes).
+/// The part of a cut outline segment `a`–`b` of plane `own` (from [`section_segments`]) that
+/// bounds what the section hides: where every other plane hides too (the section hides what lies
+/// on the positive side of all of its planes). On another plane, the side of the cut face the
+/// body is on decides.
 pub fn outline_part(a: Vec3, b: Vec3, planes: &[SectionPlane], own: usize) -> Option<(Vec3, Vec3)> {
+    let c = planes.get(own)?;
+    let onto = |p: Vec3| p - c.normal * c.normal.dot(p - c.origin);
+    let inward = (b - a).cross(c.normal).normalized().unwrap_or(Vec3::ZERO) * (1e-6 * (1.0 + a.len().max(b.len())));
+    let (pa, pb) = (onto(a) + inward, onto(b) + inward);
     let (mut lo, mut hi) = (0.0f64, 1.0f64);
     for (_, c) in planes.iter().enumerate().filter(|(i, _)| *i != own) {
-        let tol = 1e-9 * (1.0 + a.len().max(b.len()));
-        let (da, db) = (c.normal.dot(a - c.origin) + tol, c.normal.dot(b - c.origin) + tol);
+        let (da, db) = (c.normal.dot(pa - c.origin), c.normal.dot(pb - c.origin));
         match (da > 0.0, db > 0.0) {
             (true, true) => {}
             (false, false) => return None,
@@ -940,10 +946,15 @@ fn section_nudge(m: &solidcraft_geom::Mesh) -> f64 {
     1e-4 * (1.0 + m.bounds().diagonal())
 }
 
+/// How far beyond the plane a vertex must lie for [`section_segments`] to count it hidden.
+fn section_tol(m: &solidcraft_geom::Mesh) -> f64 {
+    1e-9 * (1.0 + m.bounds().diagonal())
+}
+
 /// The segment where the plane through `o` with normal `n` crosses triangle `t`, if it does.
-fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: f64, out: &mut Vec<(Vec3, Vec3)>) {
+fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: f64, tol: f64, out: &mut Vec<(Vec3, Vec3)>) {
     let Some(p) = m.tri(t) else { return };
-    let d = p.map(|q| n.dot(q - o));
+    let d = p.map(|q| n.dot(q - o) - tol);
     let mut pts = Vec::with_capacity(2);
     for (i, j) in [(0, 1), (1, 2), (2, 0)] {
         if (d[i] < 0.0) != (d[j] < 0.0) {
@@ -952,7 +963,8 @@ fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: 
         }
     }
     if let [a, b] = pts[..] {
-        out.push((a, b));
+        let outward = (p[1] - p[0]).cross(p[2] - p[0]);
+        out.push(if (b - a).cross(n).dot(outward) > 0.0 { (b, a) } else { (a, b) });
     }
 }
 
@@ -968,6 +980,7 @@ pub struct SectionIndex {
     /// Per slab, the triangles whose heights reach into it.
     slabs: Vec<Vec<u32>>,
     eps: f64,
+    tol: f64,
 }
 
 /// Slabs a [`SectionIndex`] makes, at most.
@@ -986,7 +999,7 @@ impl SectionIndex {
         let (lo, hi) = heights.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(*l), b.max(*h)));
         let count = if lo.is_finite() && hi.is_finite() { (m.triangles.len() / 64).clamp(1, SECTION_SLABS) } else { 0 };
         let step = if count > 0 && hi > lo { (hi - lo) / count as f64 } else { 1.0 };
-        let mut index = SectionIndex { normal, start: lo, step, slabs: vec![Vec::new(); count], eps: section_nudge(m) };
+        let mut index = SectionIndex { normal, start: lo, step, slabs: vec![Vec::new(); count], eps: section_nudge(m), tol: section_tol(m) };
         for (i, h) in heights.iter().enumerate() {
             let (Some((l, h)), Ok(i)) = (h, u32::try_from(i)) else { continue };
             for k in index.slab(*l)..=index.slab(*h) {
@@ -1012,13 +1025,13 @@ impl SectionIndex {
     /// `o` with this index's normal.
     pub fn segments(&self, m: &solidcraft_geom::Mesh, o: Vec3) -> Vec<(Vec3, Vec3)> {
         let mut out = Vec::new();
-        let at = self.normal.dot(o);
+        let at = self.normal.dot(o) + self.tol;
         if self.slabs.is_empty() || !at.is_finite() || at < self.start {
             return out;
         }
         for i in self.slabs.get(self.slab(at)).into_iter().flatten() {
             if let Some(t) = m.triangles.get(*i as usize) {
-                cut_triangle(m, t, o, self.normal, self.eps, &mut out);
+                cut_triangle(m, t, o, self.normal, self.eps, self.tol, &mut out);
             }
         }
         out
@@ -1275,6 +1288,26 @@ mod tests {
         assert!(outline.iter().any(|l| on(l, |p| (p.y - 15.0).abs() < 1e-2)) && outline.iter().any(|l| on(l, |p| (p.x - 20.0).abs() < 1e-2)));
         for l in &outline {
             assert!(on(l, |p| p.x > 20.0 - 1e-2 && p.y < 15.0 + 1e-2), "outside what is cut away: {:?}", l.points);
+        }
+        // A plane lying on the front face with the box behind it hides nothing of the box, so the
+        // section hides nothing: no outline, neither the plane's own nor the other's along it.
+        let outline =
+            |s: &Session| -> Vec<SceneLine> { scene(s, &cam).lines.into_iter().filter(|l| l.width == 1.6 && l.color == colors::EDGE).collect() };
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
+        let top = outline(&s);
+        assert!(top.iter().any(|l| on(l, |p| p.y.abs() < 1e-2)), "one plane outlines the front of its cut: {}", top.len());
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, -1, 0]}, "add": true})).unwrap();
+        let none = outline(&s);
+        assert!(none.is_empty(), "a plane on a face the box is behind: {:?}", none.iter().map(|l| &l.points).collect::<Vec<_>>());
+        // Facing into the box, the same plane keeps the cut as it was: the first plane's outline
+        // all round, the front edge included.
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 10], "normal": [0, 0, 1]}})).unwrap();
+        s.execute("inspect.section", &json!({"plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}, "add": true})).unwrap();
+        let kept = outline(&s);
+        let sides: [fn(&Vec3) -> bool; 4] =
+            [|p| p.x.abs() < 1e-2, |p| (p.x - 40.0).abs() < 1e-2, |p| p.y.abs() < 1e-2, |p| (p.y - 30.0).abs() < 1e-2];
+        for (i, side) in sides.into_iter().enumerate() {
+            assert!(kept.iter().any(|l| on(l, side) && on(l, |p| (p.z - 10.0).abs() < 1e-2)), "side {i} of the cut lost its outline");
         }
     }
 
