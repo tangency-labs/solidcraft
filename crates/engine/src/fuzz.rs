@@ -293,42 +293,6 @@ pub fn run_with(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> 
     run_session(seed, max_steps, on_step).0
 }
 
-/// What a seed builds, as recorded in the robustness goldens (`tests/robustness/goldens.json`):
-/// the steps, how it ended (with the start of the message when it did not end ok) and, for the
-/// design it left, its bodies' total volume and area and their face, edge and shell counts.
-pub fn golden(seed: u64, max_steps: usize) -> Value {
-    let (run, s) = run_session(seed, max_steps, &mut |_| {});
-    let st = s.model.state();
-    let (mut volume, mut area, mut faces, mut edges, mut shells) = (0.0, 0.0, 0, 0, 0);
-    let mut measured = true;
-    for b in &st.bodies {
-        match solidcraft_kernel::measure(&b.body) {
-            Ok(m) => {
-                volume += m.volume;
-                area += m.area;
-                faces += m.faces;
-                edges += m.edges;
-                shells += m.shells;
-            }
-            Err(_) => measured = false,
-        }
-    }
-    let round = |x: f64| (x * 1e6).round() / 1e6;
-    json!({
-        "steps": run.steps.iter().map(|st| st.kind).collect::<Vec<_>>(),
-        "outcome": run.outcome.kind,
-        "error": (run.outcome.kind != "ok").then(|| gist(&run.outcome.detail)),
-        "unsupported": run.unsupported.len(),
-        "rejected": run.rejected,
-        "bodies": st.bodies.len(),
-        "volume": measured.then(|| round(volume)),
-        "area": measured.then(|| round(area)),
-        "faces": faces,
-        "edges": edges,
-        "shells": shells,
-    })
-}
-
 /// [`run_with`], and the session the run left.
 fn run_session(seed: u64, max_steps: usize, on_step: &mut dyn FnMut(&Step)) -> (Run, Session) {
     let mut r = Rng::new(seed);

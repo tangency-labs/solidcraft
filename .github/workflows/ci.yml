@@ -107,7 +107,6 @@ jobs:
     outputs:
       native: ${{ steps.paths.outputs.native }}
       kernel: ${{ steps.paths.outputs.kernel }}
-      goldens: ${{ steps.paths.outputs.goldens }}
       windows: ${{ steps.paths.outputs.windows }}
       # The GPU path tests run: native, and the whole workspace or solidcraft-gpu selected. The
       # job's `if` and the `ci` job's check both read this, so they cannot disagree.
@@ -142,7 +141,6 @@ jobs:
         run: |
           native=false
           kernel=false
-          goldens=false
           windows=false
           full=true
           packages=
@@ -218,13 +216,6 @@ jobs:
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
             while IFS= read -r -d '' path; do
               case "$path" in crates/kernel/*|vendor/truck-*) kernel=true ;; esac
-              # What a pull request re-checks the goldens for: the kernel, truck and the goldens
-              # themselves (a re-record is checked before it is queued). The goldens are frozen, so
-              # on any other change they would only re-check unchanged results; the merge queue,
-              # main and the nightly run every seed before anything lands.
-              case "$path" in
-                crates/kernel/*|vendor/truck-*|tests/robustness/*) goldens=true ;;
-              esac
             done < "$RUNNER_TEMP/ci-paths"
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
@@ -232,10 +223,6 @@ jobs:
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
             if [ "$full" = true ] || [ -n "$packages" ]; then native=true; fi
-            # The goldens are solidcraft-engine tests: its tests must be in the archive.
-            if [ "$goldens" = true ] && [ "$full" != true ]; then
-              case " $packages " in *" solidcraft-engine "*) ;; *) packages="$packages solidcraft-engine" ;; esac
-            fi
           fi
           # The reference tests replay recipes through solidcraft-cli: needed when it, or anything
           # it depends on, is selected.
@@ -250,13 +237,12 @@ jobs:
           doctests=$native
           if [ "$EVENT_NAME" = pull_request ]; then windows=false; oracle=false; doctests=false; fi
           # Until a maintainer adds approved-for-ci, a pull request gets a quick compile instead of
-          # Clippy, the tests, the doc tests and the goldens.
+          # Clippy, the tests and the doc tests.
           quick=false
           if [ "$EVENT_NAME" = pull_request ] && [ "$APPROVED" != true ]; then
             quick=$native
             native=false
             oracle=false
-            goldens=false
           fi
           # A push that only merges main into the change (Merge branch 'main', Update branch) when
           # the change itself already passed: nothing new to test here, and main tests the merged
@@ -269,7 +255,6 @@ jobs:
             if [ -n "$carried" ]; then
               echo "Only a merge of main into a change that passed in $carried: repository checks only."
               native=false
-              goldens=false
             fi
           fi
           # The GPU path tests (their own job) run with the other tests, when solidcraft-gpu is
@@ -283,7 +268,6 @@ jobs:
             echo "native=$native"
             echo "gpu=$gpu"
             echo "kernel=$kernel"
-            echo "goldens=$goldens"
             echo "windows=$windows"
             echo "oracle=$oracle"
             echo "doctests=$doctests"
@@ -510,13 +494,8 @@ jobs:
       - name: Run tests
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GOLDENS: ${{ needs.changes.outputs.goldens }}
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
-          # The robustness golden seeds a pull request skips: each takes one to twenty minutes under
-          # CI load, together about four fifths of the goldens' time. Pushes to main, the merge
-          # queue and the nightly run every seed.
-          SLOW_SEEDS: 81|45|20|24|95|02|57|40|18|48|32|46|85|61|77|34|14
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -530,29 +509,16 @@ jobs:
             # The boolean property tests draw new random inputs every run; they run only in the
             # nightly property-tests job, so a known kernel bug cannot turn main red at random.
             base='not (package(solidcraft-kernel) & binary(boolean_props))'
-          elif [ "$GOLDENS" = true ]; then
-            # A pull request that can change a robustness golden (tests/robustness/goldens.json)
-            # also checks every seed but the slow ones, in the same run so they share its cores.
-            base="(default() & not (binary(action_matrix) & test(=action_matrix_sample))) | (package(solidcraft-engine) & test(/^tests::robustness_goldens::/) & not test(/^tests::robustness_goldens::seed_($SLOW_SEEDS)\$/))"
           fi
           junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
           rm -f "$junit"
           # Pull requests test the affected packages (scripts/ci/affected.py).
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
-          status=0
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=1
-          if [ "$status" != 0 ]; then
-            # A failed golden gets the hint to re-record it (junit.xml lists the failures).
-            if [ -f "$junit" ] && tr '\n' ' ' < "$junit" | grep -q '<testcase name="tests::robustness_goldens::[^"]*"[^>]*>[[:space:]]*<failure'; then
-              echo "::error::A robustness golden changed. If the new result is intended, re-record it in this pull request and say why:"
-              echo "::error::ROBUSTNESS_GOLDENS_BLESS=\"why it changed\" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::   (see docs/robustness.md)"
-            fi
-            exit 1
-          fi
+            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))"
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats

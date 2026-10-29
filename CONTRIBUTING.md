@@ -158,9 +158,8 @@ the most complete description of the house style.
 | UI scenarios | `crates/ui-egui/tests/scenarios/*.json` | part of `cargo test` |
 | Reference tests | `cargo xtask oracle` | `tests/oracle/` (see below) |
 
-A geometry change that changes the robustness goldens re-records them in the same pull request:
-`ROBUSTNESS_GOLDENS_BLESS="why it changed" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::`
-(see [docs/robustness.md](docs/robustness.md)); CI runs every seed on pull requests that touch geometry.
+The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
+`cargo xtask kernel-cases --ladder`, [docs/kernel-ladder.md](docs/kernel-ladder.md)).
 A change to the persistent names of faces and edges, or to what a stored name finds, re-records the
 corpus's names in the same pull request, saying why:
 `NAMING_CORPUS_BLESS=1 cargo test --profile ci -p solidcraft-cli --test naming_corpus` (`tests/naming/`).
@@ -222,8 +221,7 @@ Pull requests skip a few heavy tests (one to twelve minutes each), which run in 
 Check that validation after merging. They are listed in
 `.config/nextest.toml` and the [testing page](docs/book/src/dev/testing.md):
 
-- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  the seeds of `tests::robustness_goldens` (`seed_00` … `seed_95`; pull requests that change the kernel, truck or the goldens run all but the slowest, `SLOW_SEEDS` in `ci.yml`),
+- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests

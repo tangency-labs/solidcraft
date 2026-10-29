@@ -359,7 +359,6 @@ mod pleat_join;
 mod primitive_points;
 mod rim_cut;
 mod robustness;
-mod robustness_goldens;
 mod sphere_lens;
 mod spiral_join;
 mod step_import_options;

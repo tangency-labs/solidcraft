@@ -24,7 +24,7 @@ A failing test without its fix cannot merge: it turns `main` red for everyone. I
 - Every test runs in its own process: do not rely on state left by another test, or on wall-clock timing.
 
 ## Goldens, matrices and skipped tests
-- A geometry change that moves the robustness goldens re-records them in the same PR (`ROBUSTNESS_GOLDENS_BLESS="why it changed"`, `docs/robustness.md`).
+- The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`, `cargo xtask kernel-cases --ladder`, `docs/kernel-ladder.md`).
 - The action matrix is a ratchet: record a newly passing action with `cargo xtask action-matrix --bless` (`docs/action-matrix.md`).
 - Pull requests skip a few heavy tests, which run in the merge queue, nightly and on `main`. Check that validation after merging. The list is in `.config/nextest.toml` and the testing page.
 - Mutation testing finds behaviour the suites miss: `docs/mutation-testing.md`.

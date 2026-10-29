@@ -47,7 +47,6 @@ EMBEDDED_PREFIXES = {"assets/locales/": ("solidcraft-ui-egui", "xtask"), "skills
 # Test data and the package directories whose tests (or xtask) read it. Any other folder under
 # tests/ selects the full workspace.
 TEST_DATA = {
-    "tests/robustness/": ("crates/engine/",),
     "tests/hole_matrix/": ("crates/engine/",),
     "tests/projection/": ("crates/engine/",),
     "tests/taper/": ("crates/engine/",),
