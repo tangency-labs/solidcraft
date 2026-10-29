@@ -5,6 +5,8 @@
 //! before the click. Joints and drives preview on the placed (world) model: the moving
 //! component shows where it goes, and with Animate the joint plays its motion.
 
+use std::collections::HashSet;
+
 use crate::fonts::RichTextExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
@@ -1425,86 +1427,106 @@ fn timeline_joint_items(app: &SolveApp, ids: Option<&[u64]>) -> Vec<(u64, String
 /// More joints than this (an imported assembly makes one per placed part) start grouped in the
 /// timeline as one button with their count, from the second joint on; clicking it shows each joint.
 const JOINT_GROUP_MIN: usize = 1;
-/// The grouped joints' arrow sits in a square well of its own at the button's right end.
-const JOINT_ARROW_WELL: f32 = 20.0;
 /// The browser-state key that remembers the timeline's joints were shown one by one.
 const JOINTS_KEY: &str = "timeline_joints";
 
-fn joints_open(app: &SolveApp, count: usize) -> bool {
-    count <= JOINT_GROUP_MIN || crate::browser::is_open(app, JOINTS_KEY, false)
+/// Which joints a row of joint chips in the History bar shows: those no feature folder holds
+/// (after the features), or a folder's (an import's rigid group, see `timeline_folders`).
+#[derive(Clone, Copy)]
+pub(crate) enum JointRun<'a> {
+    Loose,
+    Folder { id: u64, name: &'a str },
 }
 
-fn toggle_joints(app: &mut SolveApp) {
-    crate::browser::toggle(app, JOINTS_KEY, false);
+impl JointRun<'_> {
+    /// The browser-state key that remembers the joints were shown one by one.
+    fn key(self) -> String {
+        match self {
+            Self::Loose => JOINTS_KEY.to_string(),
+            Self::Folder { id, .. } => format!("{JOINTS_KEY}:{id}"),
+        }
+    }
+
+    /// The scenario handle of their grouped chip.
+    fn handle(self) -> String {
+        match self {
+            Self::Loose => "timeline:joints".to_string(),
+            Self::Folder { name, .. } => format!("timeline-folder-joints:{name}"),
+        }
+    }
 }
 
-/// The button that stands for `count` grouped joints, its top left at `at`: the joint icon and the
-/// count, then, past a rule, the arrow in a well of its own. The well lights up under the pointer,
-/// and the whole button turns the accent colour while the joints are shown one by one. Returns
-/// its width and whether it was clicked.
-fn joint_group_button(ui: &mut egui::Ui, p: &egui::Painter, at: egui::Pos2, count: usize, open: bool) -> (f32, bool) {
-    let t = Tokens::get();
-    let label = p.layout_no_wrap(count.to_string(), egui::FontId::proportional(t.font_small), t.text);
-    let icon_side = 28.0;
-    let width = icon_side + 3.0 + label.size().x + 6.0 + 1.0 + 3.0 + JOINT_ARROW_WELL + 4.0;
-    let br = egui::Rect::from_min_size(at, vec2(width, icon_side));
-    let resp = ui.interact(br, ui.id().with("joint_group"), egui::Sense::click());
-    crate::scenario::publish_handle("timeline:joints", br.center());
-    let well =
-        egui::Rect::from_center_size(egui::pos2(br.right() - 4.0 - JOINT_ARROW_WELL / 2.0, br.center().y), vec2(JOINT_ARROW_WELL, JOINT_ARROW_WELL));
-    crate::scenario::publish_target("timeline:joints_arrow", well);
-    // The arrow's well answers the pointer from the rule to the button's end.
-    let on_arrow = resp.hover_pos().is_some_and(|q| q.x >= well.left() - 3.0);
-    crate::scenario::publish_count("timeline:joints_arrow_hot", f64::from(u8::from(on_arrow)));
-    let (fill, edge) = match (open, resp.hovered() && !on_arrow) {
-        (true, _) => (t.accent_soft, t.accent),
-        (false, true) => (t.hover, t.border),
-        (false, false) => (t.timeline_item, t.border),
+fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
+    count <= JOINT_GROUP_MIN || crate::browser::is_open(app, &run.key(), false)
+}
+
+fn toggle_joints(app: &mut SolveApp, run: JointRun) {
+    crate::browser::toggle(app, &run.key(), false);
+}
+
+/// The button that stands for `count` grouped joints, its top left at `at` (see
+/// `HistoryGroupChip`). Returns its width and whether it was clicked.
+fn joint_group_button(
+    ui: &mut egui::Ui,
+    p: &egui::Painter,
+    at: egui::Pos2,
+    count: usize,
+    open: bool,
+    accent: crate::theme::TabAccent,
+    run: JointRun,
+) -> (f32, bool) {
+    let chip = crate::ui_kit::HistoryGroupChip {
+        icon: "joint",
+        name: "",
+        count,
+        open,
+        selected: false,
+        hovered: false,
+        dim: false,
+        error: false,
+        warning: false,
+        accent,
     };
-    let radius = t.radius_sm.saturating_sub(1);
-    p.rect(br, radius, fill, t.control_border_stroke(edge), egui::StrokeKind::Inside);
-    let icon = egui::Rect::from_min_size(br.min, vec2(icon_side, icon_side)).shrink(4.0);
-    crate::icons::paint_icon(p, icon, "joint", f32::from(t.icon.a()) / 255.0);
-    p.galley(egui::pos2(icon.right() + 3.0, br.center().y - label.size().y / 2.0), label, t.text);
-    let rule = well.left() - 3.0;
-    p.line_segment([egui::pos2(rule, br.top() + 6.0), egui::pos2(rule, br.bottom() - 6.0)], t.control_border_stroke(edge));
-    let ink = match (open, on_arrow) {
-        (true, true) => {
-            p.rect_filled(well, radius, t.accent);
-            t.on_accent
-        }
-        (false, true) => {
-            p.rect_filled(well, radius, t.control_border);
-            t.form_ink
-        }
-        (true, false) => t.form_ink,
-        (false, false) => t.form_dim,
-    };
-    crate::ui_kit::disclosure(p, well.center(), open, ink);
+    let br = egui::Rect::from_min_size(at, chip.size(p));
+    let resp = ui.interact(br, ui.id().with(("joint_group", run.key())), egui::Sense::click());
+    let handle = run.handle();
+    crate::scenario::publish_handle(&handle, br.center());
+    crate::scenario::publish_target(&format!("{handle}_arrow"), crate::ui_kit::HistoryGroupChip::well(br));
+    let pointer = resp.hover_pos();
+    let on_arrow = crate::ui_kit::HistoryGroupChip::on_arrow(br, pointer);
+    crate::scenario::publish_count(&format!("{handle}_arrow_hot"), f64::from(u8::from(on_arrow)));
+    chip.paint(p, br, pointer);
     let tip = if open { "click to group them" } else { "click to show each one" };
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("{count} joints: {tip}"));
-    (width, resp.clicked())
+    (br.width(), resp.clicked())
 }
 
-/// Joints after the features in the timeline: double-click edits, the menu drives, suppresses
-/// or deletes. Returns the x after them.
-pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect) -> f32 {
-    timeline_joint_tiles(app, ui, p, x, r, None)
+/// Joints after the features in the timeline, except those a feature folder holds (`held`):
+/// double-click edits, the menu drives, suppresses or deletes. Returns the x after them.
+pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect, held: &HashSet<u64>) -> f32 {
+    let loose: Vec<u64> = app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| !held.contains(id)).collect();
+    if loose.is_empty() {
+        return x;
+    }
+    joint_chips(app, ui, p, x + 8.0, r, &loose, JointRun::Loose)
 }
 
-pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: Option<&[u64]>) -> f32 {
+/// The joints `ids` as chips from `x` on, grouped into one chip (open to show each) when there
+/// are many. Returns the x after them.
+pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: &[u64], set: JointRun) -> f32 {
     let t = Tokens::get();
-    let joints = timeline_joint_items(app, ids);
+    let wanted: HashSet<u64> = ids.iter().copied().collect();
+    let joints: Vec<(u64, String, JointKind, bool)> =
+        app.session.doc.assembly.joints.iter().filter(|j| wanted.contains(&j.id)).map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     if joints.is_empty() {
         return x;
     }
-    x += 8.0;
-    // Only the joints outside feature folders group here; a folder's own tile holds the rest.
-    if ids.is_none() && joints.len() > JOINT_GROUP_MIN {
-        let open = joints_open(app, joints.len());
-        let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open);
+    if joints.len() > JOINT_GROUP_MIN {
+        let open = joints_open(app, joints.len(), set);
+        let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+        let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
         if clicked {
-            toggle_joints(app);
+            toggle_joints(app, set);
         }
         x += width + 4.0;
         if !open {
@@ -1569,7 +1591,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
     if ids.is_none() {
         ui.add_space(4.0);
         if joints.len() > JOINT_GROUP_MIN {
-            let shown = joints_open(app, joints.len());
+            let shown = joints_open(app, joints.len(), JointRun::Loose);
             let header = format!("JOINTS ({})", joints.len());
             let clicked = ui
                 .horizontal(|ui| {
@@ -1584,7 +1606,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
                 })
                 .inner;
             if clicked {
-                toggle_joints(app);
+                toggle_joints(app, JointRun::Loose);
             }
             if !shown {
                 return;

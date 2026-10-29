@@ -1,0 +1,75 @@
+{
+  "en": {
+    "ui.history_scope_all": "Show the whole design's features",
+    "ui.history_scope_all_shown": "The whole design's features",
+    "ui.history_scope_pick": "Edit a component, or pick one in the Browser, to show only its features",
+    "ui.history_scope_show": "Show only the features of {name} and the components inside it",
+    "ui.history_scope_shown": "The features of {name} and the components inside it",
+    "Fold Features": "Fold Features",
+    "Group Features": "Group Features",
+    "Select Features": "Select Features",
+    "Show Each Feature": "Show Each Feature"
+  },
+  "de": {
+    "ui.history_scope_all": "Features des ganzen Designs zeigen",
+    "ui.history_scope_all_shown": "Die Features des ganzen Designs",
+    "ui.history_scope_pick": "Eine Komponente bearbeiten oder im Browser wählen, um nur ihre Features zu zeigen",
+    "ui.history_scope_show": "Nur die Features von {name} und der Komponenten darin zeigen",
+    "ui.history_scope_shown": "Die Features von {name} und der Komponenten darin"
+  },
+  "ja": {
+    "ui.history_scope_all": "設計全体のフィーチャーを表示",
+    "ui.history_scope_all_shown": "設計全体のフィーチャー",
+    "ui.history_scope_pick": "コンポーネントを編集するかブラウザで選ぶと、そのフィーチャーだけを表示します",
+    "ui.history_scope_show": "{name} とその中のコンポーネントのフィーチャーだけを表示",
+    "ui.history_scope_shown": "{name} とその中のコンポーネントのフィーチャー",
+    "Fold Features": "フィーチャーを折りたたむ",
+    "Group Features": "フィーチャーをグループ化",
+    "Select Features": "フィーチャーを選択",
+    "Show Each Feature": "各フィーチャーを表示"
+  },
+  "zh": {
+    "ui.history_scope_all": "显示整个设计的特征",
+    "ui.history_scope_all_shown": "整个设计的特征",
+    "ui.history_scope_pick": "编辑一个零部件，或在浏览器中选中一个，即可只显示它的特征",
+    "ui.history_scope_show": "只显示 {name} 及其内部零部件的特征",
+    "ui.history_scope_shown": "{name} 及其内部零部件的特征",
+    "Fold Features": "折叠特征",
+    "Group Features": "将特征编组",
+    "Select Features": "选择特征",
+    "Show Each Feature": "显示每个特征"
+  },
+  "ar": {
+    "ui.history_scope_all": "إظهار ميزات التصميم كله",
+    "ui.history_scope_all_shown": "ميزات التصميم كله",
+    "ui.history_scope_pick": "حرّر مكوّنًا أو اختر واحدًا في المستعرض لإظهار ميزاته فقط",
+    "ui.history_scope_show": "إظهار ميزات {name} والمكوّنات التي بداخله فقط",
+    "ui.history_scope_shown": "ميزات {name} والمكوّنات التي بداخله",
+    "Fold Features": "طي الميزات",
+    "Group Features": "تجميع الميزات",
+    "Select Features": "تحديد الميزات",
+    "Show Each Feature": "إظهار كل ميزة"
+  },
+  "he": {
+    "ui.history_scope_all": "הצגת הפיצ'רים של כל התכן",
+    "ui.history_scope_all_shown": "הפיצ'רים של כל התכן",
+    "ui.history_scope_pick": "יש לערוך רכיב, או לבחור אחד בעץ התכן, כדי להציג רק את הפיצ'רים שלו",
+    "ui.history_scope_show": "הצגת הפיצ'רים של {name} ושל הרכיבים שבתוכו בלבד",
+    "ui.history_scope_shown": "הפיצ'רים של {name} ושל הרכיבים שבתוכו",
+    "Fold Features": "קיפול פיצ'רים",
+    "Group Features": "קיבוץ פיצ'רים",
+    "Select Features": "בחירת פיצ'רים",
+    "Show Each Feature": "הצגת כל פיצ'ר"
+  },
+  "vi": {
+    "ui.history_scope_all": "Hiện các tính năng của toàn bộ thiết kế",
+    "ui.history_scope_all_shown": "Các tính năng của toàn bộ thiết kế",
+    "ui.history_scope_pick": "Sửa một cụm chi tiết, hoặc chọn một cụm trong Trình duyệt, để chỉ hiện các tính năng của nó",
+    "ui.history_scope_show": "Chỉ hiện các tính năng của {name} và các cụm chi tiết bên trong",
+    "ui.history_scope_shown": "Các tính năng của {name} và các cụm chi tiết bên trong",
+    "Fold Features": "Thu gọn tính năng",
+    "Group Features": "Nhóm tính năng",
+    "Select Features": "Chọn tính năng",
+    "Show Each Feature": "Hiện từng tính năng"
+  }
+}

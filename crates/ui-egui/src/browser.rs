@@ -140,9 +140,19 @@ pub struct TreeState {
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
     pub timeline_anchor: Option<String>,
-    /// Find in Timeline: the feature the history scrolls to the next time it draws its items, in
-    /// the bottom strip or in the history on the left (#5850).
+    /// Which part of the design the History bar shows (`timeline_scope`).
+    pub(crate) timeline_scope: crate::timeline_scope::Scope,
+    /// The component edited or picked when the History bar last followed it, once it has
+    /// (`timeline_scope`).
+    pub(crate) timeline_followed: Option<Option<u64>>,
+    /// A feature the History bar scrolls into view the next time it draws its items, in the
+    /// bottom strip or in the history on the left: the edited component's last, or the one Find
+    /// in Timeline found (#5850).
     pub timeline_reveal: Option<u64>,
+    /// The runs and folders opened and folded in the active design's History (`history_folds`).
+    pub(crate) history_folds: crate::history_folds::Folds,
+    /// Those of designs with a file, by file, kept between runs (`history_folds`).
+    pub(crate) history_remembered: crate::history_folds::Remembered,
     /// The feature of the face or edge last picked in the view, so a new pick scrolls the
     /// history to it once.
     pub view_pick: Option<u64>,
