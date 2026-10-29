@@ -3211,8 +3211,8 @@ pub fn active_view(app: &SolveApp) -> solidcraft_engine::sketch::SketchView {
 /// session's (or a sketch's Slice).
 pub fn section_planes(app: &SolveApp) -> Vec<SectionPlane> {
     if let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, crate::dialogs::Kind::Section { .. })) {
-        // Adding a plane shows the section as it is until the plane is picked.
-        let adding = matches!(d.kind, crate::dialogs::Kind::Section { add: true, .. });
+        // Adding or moving a plane shows the section as it is until the plane is picked.
+        let adding = matches!(d.kind, crate::dialogs::Kind::Section { add: true, .. } | crate::dialogs::Kind::Section { edit: Some(_), .. });
         let Some((_, p)) = crate::dialogs::apply_commands(app, d).ok().and_then(|cmds| cmds.into_iter().next()) else {
             return if adding { app.session.section.clone() } else { Vec::new() };
         };
