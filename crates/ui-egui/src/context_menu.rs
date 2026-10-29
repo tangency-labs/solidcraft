@@ -74,6 +74,8 @@ pub enum Target {
     ViewTool,
     /// Selection filter: Faces, Bodies, Components; the current one marked (#11505).
     SelectionFilter,
+    /// Selection mode: what a click on the model picks, the current one marked (#4255).
+    SelectionMode,
     /// The mouse mappings (Preferences › Navigation), from the status bar (#7023).
     Navigation,
     /// An assembly joint.
@@ -487,6 +489,15 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 item
             })
             .collect(),
+        Target::SelectionMode => crate::navigation_bar::SELECTION_MODE_ICONS
+            .iter()
+            .map(|&(mode, icon)| {
+                let label = app.tr(crate::selection_mode::label_id(mode));
+                let mut item = cmd(app, "select.mode", label).with(json!({"mode": mode})).key(if app.ui.pick_mode == mode { "current" } else { "" });
+                item.icon = icon.into();
+                item
+            })
+            .collect(),
         Target::ViewTool => {
             let latched = match app.viewport.nav {
                 Some(crate::viewport::NavMode::Orbit) => "orbit",
@@ -510,7 +521,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect()
         }
         Target::SelectionFilter => {
-            let mode = app.ui.pick_mode();
+            let mode = crate::selection_mode::render_filter(app.ui.pick_mode);
             [("face", "Faces"), ("body", "Bodies"), ("component", "Components")]
                 .into_iter()
                 .map(|(choice, label)| {
@@ -603,7 +614,6 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
 }
 
 /// Resolve the picked face's creator, rather than the feature that first made its body.
-/// Persistent face names retain their creator through later trims and placements.
 fn picked_face_feature(app: &SolveApp) -> Option<u64> {
     let (body, index) = app.session.selection.iter().find_map(|s| match s {
         Sel::Face { body, index, .. } => Some((body, *index)),
@@ -612,7 +622,8 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
     face_feature(app, body, index)
 }
 
-/// The feature that made face `index` of `body` (by its world name).
+/// The feature that made face `index` of `body` (persistent face names retain their creator
+/// through later trims and placements); None for an import's faces and in another component.
 pub(crate) fn face_feature(app: &SolveApp, body: &str, index: usize) -> Option<u64> {
     let state = crate::open_meshing::session_world(&app.session);
     let body = state.body(body)?;
@@ -2317,6 +2328,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::VisualStyle
         | Target::ViewTool
         | Target::SelectionFilter
+        | Target::SelectionMode
         | Target::Navigation
         | Target::Toolbar
         | Target::HistoryControls
@@ -3087,6 +3099,7 @@ mod tests {
     #[test]
     fn selection_filter_from_command_search_offers_its_modes_not_a_missing_mode_error() {
         // #11505: command search started select.filter with no parameters, which could only fail.
+        use solidcraft_engine::PickMode;
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.status = None;
@@ -3103,16 +3116,16 @@ mod tests {
         };
         assert_eq!(current(&h), ["Faces"]);
         h.call("ui.menuPick", json!({"item":"Bodies"}));
-        assert!(h.app.ui.pick_bodies && !h.app.ui.pick_components);
+        assert_eq!(h.app.ui.pick_mode, PickMode::Bodies);
         assert!(h.app.viewport.context_menu.is_none());
         assert!(!error(&h), "{:?}", h.app.status);
         h.call("ui.start", json!({"command":"select.filter"}));
         assert_eq!(current(&h), ["Bodies"]);
         h.call("ui.menuPick", json!({"item":"Components"}));
-        assert!(h.app.ui.pick_components && !h.app.ui.pick_bodies);
+        assert_eq!(h.app.ui.pick_mode, PickMode::Parts, "the filter's Components picks the innermost placement");
         h.app.start("select.filter");
         h.call("ui.menuPick", json!({"item":"Faces"}));
-        assert!(!h.app.ui.pick_components && !h.app.ui.pick_bodies);
+        assert_eq!(h.app.ui.pick_mode, PickMode::Faces);
         assert!(!error(&h), "{:?}", h.app.status);
         // Programmatic calls keep their contract: no parameters is still refused, and opens no menu.
         let missing = h.call("engine.execute", json!({"command":"select.filter","params":{}}));
@@ -3121,6 +3134,31 @@ mod tests {
     }
 
     /// Direct Trim undoes back to the association; the explicit Break menu still makes the offset editable.
+    #[test]
+    fn selection_mode_start_offers_the_six_modes_not_an_error() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.status = None;
+        let error = |h: &crate::scenario::Harness| h.app.status.as_ref().is_some_and(|(_, _, error)| *error);
+        h.call("ui.start", json!({"command":"select.mode"}));
+        assert!(!error(&h), "{:?}", h.app.status);
+        assert_eq!(h.app.menu.target, Target::SelectionMode);
+        let menu = describe(&h.app);
+        let labels: Vec<_> = menu["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(labels, ["Faces & edges", "Bodies", "Features", "Parts", "Components", "Sketch geometry"]);
+        let current = |h: &crate::scenario::Harness| {
+            items(&h.app, &Target::SelectionMode).iter().filter(|i| i.shortcut == "current").map(|i| i.label.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(current(&h), ["Faces & edges"]);
+        h.call("ui.menuPick", json!({"item":"Parts"}));
+        assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Parts);
+        assert!(h.app.viewport.context_menu.is_none());
+        h.call("ui.start", json!({"command":"select.mode"}));
+        assert_eq!(current(&h), ["Parts"]);
+        assert!(!error(&h));
+        assert!(h.app.session.undo.is_empty(), "what a click picks is not a design edit");
+    }
+
     #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
         use solidcore_record::Vec2;

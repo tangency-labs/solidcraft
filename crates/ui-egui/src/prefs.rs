@@ -1900,7 +1900,7 @@ struct Snapshot {
     shadow: bool,
     perspective: bool,
     style: u8,
-    pick_bodies: bool,
+    pick_mode: solidcraft_engine::PickMode,
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
@@ -1928,7 +1928,7 @@ impl Snapshot {
             shadow: app.ui.ground_shadow,
             perspective: app.ui.perspective,
             style: app.ui.visual_style,
-            pick_bodies: app.ui.pick_bodies,
+            pick_mode: app.ui.pick_mode,
             agent: app.ui.agent_cursor,
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
@@ -1958,7 +1958,7 @@ impl Snapshot {
         app.ui.ground_shadow = self.shadow;
         app.ui.perspective = self.perspective;
         app.ui.visual_style = self.style;
-        app.ui.pick_bodies = self.pick_bodies;
+        app.ui.pick_mode = self.pick_mode;
         app.ui.agent_cursor = self.agent;
         app.autosave_minutes = self.autosave;
         set_autosave(app);
@@ -1988,7 +1988,7 @@ impl Snapshot {
             shadow,
             perspective,
             style,
-            pick_bodies,
+            pick_mode,
             agent,
             autosave,
             auto_project,
@@ -2008,7 +2008,7 @@ impl Snapshot {
             && *shadow == app.ui.ground_shadow
             && *perspective == app.ui.perspective
             && *style == app.ui.visual_style
-            && *pick_bodies == app.ui.pick_bodies
+            && *pick_mode == app.ui.pick_mode
             && *agent == app.ui.agent_cursor
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
@@ -2061,7 +2061,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         ("navigation_bar", serde_json::json!(s.navigation_bar)),
         ("tool_cursor", serde_json::json!(s.tool_cursor)),
         ("perspective", serde_json::json!(s.perspective)),
-        ("pick_bodies", serde_json::json!(s.pick_bodies)),
+        ("pick_mode", serde_json::json!(s.pick_mode)),
         ("auto_project", serde_json::json!(s.auto_project)),
         ("visual_style", serde_json::json!(s.style)),
         ("shortcut_box", shortcut_box),
@@ -2256,7 +2256,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
         }
         PAGE_SKETCH => {
             app.session.auto_project = true;
-            app.ui.pick_bodies = false;
+            // The page's Select bodies, off: as unticking it, and any other mode stays.
+            if app.ui.pick_mode == solidcraft_engine::PickMode::Bodies {
+                app.ui.pick_mode = solidcraft_engine::PickMode::Faces;
+            }
         }
         _ => {}
     }
@@ -4742,6 +4745,14 @@ mod tests {
         navbar_click(&mut h, "prefs:navbar:slot:visual_style");
         navbar_click(&mut h, "prefs:navbar:shows:0");
         assert_eq!(h.app.preferences.navigation_bar.menu_display("visual_style"), MenuDisplay::IconAndValue);
+        // Every menu that holds a setting offers the choice, the selection mode's too (#4255).
+        h.call(
+            "ui.prefs",
+            json!({"open":"Interface/Navigation bar", "navigation_bar":{"slots":["fit","visual_style","selection_mode","display","spin"]}}),
+        );
+        navbar_click(&mut h, "prefs:navbar:slot:selection_mode");
+        navbar_click(&mut h, "prefs:navbar:shows:1");
+        assert_eq!(h.app.preferences.navigation_bar.menu_display("selection_mode"), MenuDisplay::IconOnly);
         navbar_click(&mut h, "prefs:navbar:anchor:0");
         assert_eq!(h.app.preferences.navigation_bar.position, Position::Left);
         assert_eq!(h.app.preferences.navigation_bar.edge, crate::navigation_bar::Edge::Top);
@@ -6463,17 +6474,17 @@ mod tests {
         assert_eq!(page_index("Shortcuts"), Some(PAGE_SHORTCUTS));
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.ui.agent_cursor.show = false;
-        app.ui.pick_bodies = true;
+        app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
         app.session.auto_project = false;
         defaults(&mut app, PAGE_GENERAL);
         assert!(!app.ui.agent_cursor.show);
-        assert!(app.ui.pick_bodies);
+        assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Bodies);
         assert!(!app.session.auto_project);
         defaults(&mut app, PAGE_ASSISTANT);
         let expected = SolveApp::new(Default::default(), Default::default()).ui.agent_cursor.show;
         assert_eq!(app.ui.agent_cursor.show, expected);
         defaults(&mut app, PAGE_SKETCH);
-        assert!(!app.ui.pick_bodies);
+        assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
         assert!(app.session.auto_project);
     }
 
@@ -6594,7 +6605,7 @@ mod tests {
             app.ui.ground_shadow = false;
             app.ui.perspective = true;
             app.session.auto_project = false;
-            app.ui.pick_bodies = true;
+            app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
             app.ui.agent_cursor.show = true;
             app.keymap.custom.insert("solid.extrude".into(), vec!["X".into()]);
             defaults(&mut app, page);
@@ -6609,9 +6620,13 @@ mod tests {
             assert_eq!(app.ui.ground_shadow, page == PAGE_GRAPHICS);
             assert_eq!(app.ui.perspective, page != PAGE_GRAPHICS);
             assert_eq!(app.session.auto_project, page == PAGE_SKETCH);
-            assert_eq!(app.ui.pick_bodies, page != PAGE_SKETCH);
+            assert_eq!(app.ui.pick_mode == solidcraft_engine::PickMode::Bodies, page != PAGE_SKETCH);
             assert_eq!(app.ui.agent_cursor.show, page != PAGE_ASSISTANT);
             assert_eq!(app.keymap.custom.is_empty(), page == PAGE_SHORTCUTS);
+            // Select bodies is the page's one pick setting: any other mode stays, as component picking did.
+            app.ui.pick_mode = solidcraft_engine::PickMode::Parts;
+            defaults(&mut app, page);
+            assert_eq!(app.ui.pick_mode, solidcraft_engine::PickMode::Parts, "page {page}");
         }
     }
 
@@ -7814,7 +7829,7 @@ mod tests {
             h.call("ui.prefs", json!({"language":"en","theme":theme}));
             h.call("ui.prefs", json!({"open":"Sketch"}));
             let original = h.app.preferences.clone();
-            let session = (h.app.session.auto_project, h.app.ui.pick_bodies);
+            let session = (h.app.session.auto_project, h.app.ui.pick_mode);
             let mut expected = serde_json::to_value(&original).unwrap();
             for (field, label) in [
                 ("sketch_tracking_points", "prefs.sketch.tracking_points"),
@@ -7854,7 +7869,7 @@ mod tests {
                 h.step(&json!({"click":{"handle":handle}})).unwrap();
                 expected[field] = json!(!expected[field].as_bool().unwrap());
                 assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field}");
-                assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), session, "{field} leaves session values alone");
+                assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), session, "{field} leaves session values alone");
             }
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences, original);
@@ -7869,7 +7884,7 @@ mod tests {
             h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
             // Opening the page must retain a non-default session, too.
             h.app.session.auto_project = false;
-            h.app.ui.pick_bodies = true;
+            h.app.ui.pick_mode = solidcraft_engine::PickMode::Bodies;
             let original = Snapshot::take(&h.app);
             h.call("ui.prefs", json!({"open":"Sketch"}));
             assert!(original.matches(&h.app));
@@ -7899,13 +7914,17 @@ mod tests {
                 expected[key] = json!(false);
                 assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{key} changes only its field");
             }
-            for (key, bodies) in [("faces_edges", false), ("bodies", true), ("faces_edges", false)] {
+            for (key, mode) in [
+                ("faces_edges", solidcraft_engine::PickMode::Faces),
+                ("bodies", solidcraft_engine::PickMode::Bodies),
+                ("faces_edges", solidcraft_engine::PickMode::Faces),
+            ] {
                 h.app.prefs_window.filter = h.app.tr("prefs.sketch.click_selects").into();
                 h.frames(5);
                 let handle = format!("prefs:pick_bodies:{key}");
                 super::reveal_preference(&mut h, &handle);
                 h.step(&json!({"click":{"handle":handle}})).unwrap();
-                assert_eq!(h.app.ui.pick_bodies, bodies);
+                assert_eq!(h.app.ui.pick_mode, mode);
                 assert!(!h.app.session.auto_project);
                 assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
             }
@@ -7914,7 +7933,7 @@ mod tests {
             super::reveal_preference(&mut h, "prefs:auto_project");
             h.step(&json!({"click":{"handle":"prefs:auto_project"}})).unwrap();
             assert!(h.app.session.auto_project);
-            assert!(!h.app.ui.pick_bodies);
+            assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
             assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected);
             assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original.prefs).unwrap(), "unapplied tile choices are held back");
             h.call("ui.prefs", json!({"button":"apply"}));
@@ -7933,14 +7952,14 @@ mod tests {
                     "{field}: only Sketch resets"
                 );
             }
-            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
 
             // The session fields also roll back when the page was opened with the opposite values.
             original.clone().restore_other_preferences(&mut h.app);
             h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
-            assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
+            assert_eq!((h.app.session.auto_project, h.app.ui.pick_mode), (true, solidcraft_engine::PickMode::Faces));
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert!(original.matches(&h.app));
         }

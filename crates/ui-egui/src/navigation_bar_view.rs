@@ -1,6 +1,6 @@
 //! Measured single-row navigation bar. Commands own all view changes.
 use crate::navigation::NavCaps;
-use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Slot};
+use crate::navigation_bar::{self, Canvas, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Slot};
 use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{self, Container, Surface};
@@ -18,11 +18,11 @@ pub(crate) struct BarLayout {
 }
 
 /// Drop menu values, then labels, before moving a suffix into More. All rectangles use logical UI points.
-pub(crate) fn measure(content: Rect, prefs: &NavigationBar, caps: NavCaps, label_width: impl Fn(&Slot) -> f32) -> BarLayout {
-    measure_row(content, prefs, caps, label_width, false)
+pub(crate) fn measure(content: Rect, prefs: &NavigationBar, canvas: impl Into<Canvas>, label_width: impl Fn(&Slot) -> f32) -> BarLayout {
+    measure_row(content, prefs, canvas.into(), label_width, false)
 }
 
-fn measure_row(content: Rect, prefs: &NavigationBar, caps: NavCaps, label_width: impl Fn(&Slot) -> f32, editing: bool) -> BarLayout {
+fn measure_row(content: Rect, prefs: &NavigationBar, canvas: Canvas, label_width: impl Fn(&Slot) -> f32, editing: bool) -> BarLayout {
     use ui_kit::*;
     let metrics = NavigationMetrics::for_size(prefs.size);
     let button = prefs.size.points();
@@ -34,7 +34,7 @@ fn measure_row(content: Rect, prefs: &NavigationBar, caps: NavCaps, label_width:
         return result;
     }
     let slots: Vec<_> =
-        prefs.slots.iter().take(navigation_bar::MAX_SLOTS).filter_map(|id| navigation_bar::find(id)).filter(|slot| slot.available(caps)).collect();
+        prefs.slots.iter().take(navigation_bar::MAX_SLOTS).filter_map(|id| navigation_bar::find(id)).filter(|slot| slot.available(canvas)).collect();
     if slots.is_empty() {
         return result;
     }
@@ -48,7 +48,7 @@ fn measure_row(content: Rect, prefs: &NavigationBar, caps: NavCaps, label_width:
                 + NAV_MENU_RIGHT
                 + NAV_CHEVRON
                 + NAV_MENU_GAP
-                + if values && slot.id == "visual_style" && prefs.menu_display(slot.id) == MenuDisplay::IconAndValue {
+                + if values && slot.shows_value() && prefs.menu_display(slot.id) == MenuDisplay::IconAndValue {
                     label_width(slot).max(0.0) + NAV_MENU_GAP
                 } else {
                     0.0
@@ -110,7 +110,7 @@ fn measure_row(content: Rect, prefs: &NavigationBar, caps: NavCaps, label_width:
 /// Editing retains every stored catalogue slot, including those hidden by the preview canvas.
 pub(crate) fn editor_layout(stage: Rect, prefs: &NavigationBar, label_width: impl Fn(&Slot) -> f32) -> BarLayout {
     let virtual_canvas = Rect::from_min_size(stage.min, vec2(8192.0, ui_kit::NAV_STAGE_HEIGHT));
-    let mut bar = measure_row(virtual_canvas, prefs, NavCaps::MODEL, label_width, true);
+    let mut bar = measure_row(virtual_canvas, prefs, NavCaps::MODEL.into(), label_width, true);
     if !bar.rect.is_positive() {
         let metrics = ui_kit::NavigationMetrics::for_size(prefs.size);
         bar.rect = Rect::from_min_size(stage.min, vec2(metrics.button + 2.0 * (ui_kit::NAV_PADDING + ui_kit::NAV_BORDER), metrics.height()));
@@ -141,7 +141,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
     let label_width = |slot: &Slot| {
         ctx.fonts_mut(|fonts| fonts.layout_no_wrap(slot_text(app, slot).to_owned(), crate::fonts::medium(ui_kit::NAV_TEXT), t.form_ink).size().x)
     };
-    let mut bar = measure(content, &app.preferences.navigation_bar, navigation_bar::canvas_caps(app), label_width);
+    let mut bar = measure(content, &app.preferences.navigation_bar, navigation_bar::canvas(app), label_width);
     let Some(_) = app.universal_panel_frame() else {
         return bar;
     };
@@ -177,7 +177,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
         bar = measure(
             Rect::from_min_size(content.min, vec2(width, content.height())),
             &app.preferences.navigation_bar,
-            navigation_bar::canvas_caps(app),
+            navigation_bar::canvas(app),
             label_width,
         );
         if bar.rect.is_positive() {
@@ -192,7 +192,7 @@ pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> Ba
         bar = measure(
             Rect::from_min_size(content.min, vec2(width, content.height())),
             &app.preferences.navigation_bar,
-            navigation_bar::canvas_caps(app),
+            navigation_bar::canvas(app),
             label_width,
         );
         if bar.rect.is_positive() {
@@ -263,12 +263,12 @@ fn tooltip(app: &SolveApp, response: egui::Response, slot: &Slot, hidden: Option
     let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
     let label = if let Some(hidden) = hidden {
         app.tr(hidden).to_owned()
-    } else if slot.id == "visual_style" {
-        crate::i18n::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", current_style(app))])
     } else if slot.id == "projection" && projection_locked(app) {
         app.tr("nav.perspective.sketch").to_owned()
     } else if slot.id == "zoom" && key.is_some() {
         app.tr("navbar.zoom_hold_tip").to_owned()
+    } else if let Some(value) = current_value(app, slot) {
+        crate::i18n::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", value)])
     } else {
         app.tr(slot.label).to_owned()
     };
@@ -366,6 +366,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
                                 open.clear();
                             }
                         }
+                        "selection_mode" => {
+                            if selection_menu(app, ui) {
+                                open.clear();
+                            }
+                        }
                         "display" => display_menu(app, ui),
                         "more" => overflow_menu(app, ui, &bar.overflow, &mut open),
                         _ => open.clear(),
@@ -393,11 +398,19 @@ pub(crate) fn current_style(app: &SolveApp) -> &str {
     })
 }
 
+/// The setting a menu slot holds, for its button and tooltip; `None` for slots without one.
+fn current_value<'a>(app: &'a SolveApp, slot: &Slot) -> Option<&'a str> {
+    match slot.id {
+        "visual_style" => Some(current_style(app)),
+        "selection_mode" => Some(app.tr(crate::selection_mode::label_id(app.ui.pick_mode))),
+        _ => None,
+    }
+}
+
 pub(crate) fn slot_text<'a>(app: &'a SolveApp, slot: &Slot) -> &'a str {
-    if slot.id == "visual_style" && app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue {
-        current_style(app)
-    } else {
-        app.tr(slot.label)
+    match current_value(app, slot) {
+        Some(value) if app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue => value,
+        _ => app.tr(slot.label),
     }
 }
 
@@ -407,7 +420,7 @@ pub(crate) fn paint_row(
     ui: &mut egui::Ui,
     bar: &BarLayout,
     open: &str,
-    editing: Option<(Option<usize>, NavCaps, bool)>,
+    editing: Option<(Option<usize>, Canvas, bool)>,
 ) -> Vec<(usize, &'static Slot, egui::Response)> {
     ui_kit::navigation_surface(ui, bar.rect, app.preferences.navigation_bar.size, editing.is_some());
     let mut responses = Vec::new();
@@ -419,7 +432,7 @@ pub(crate) fn paint_row(
         cursor = index + 1;
         let response = ui
             .push_id(index, |ui| {
-                let hidden = editing.is_some_and(|(_, caps, _)| !slot.available(caps));
+                let hidden = editing.is_some_and(|(_, canvas, _)| !slot.available(canvas));
                 ui.scope(|ui| {
                     if hidden {
                         ui.set_opacity(ui_kit::NAV_HIDDEN_OPACITY);
@@ -437,13 +450,11 @@ pub(crate) fn paint_row(
                         let button = ui_kit::NavigationButton {
                             id: slot.id,
                             kind: slot.kind,
-                            icon: slot.current_icon(app.ui.visual_style),
+                            icon: slot.current_icon(&app.ui),
                             label: slot_text(app, slot),
                             selected: if editing.is_some() { false } else { selected(app, slot.id) || open == slot.id },
                             labels: if slot.kind == Kind::Menu {
-                                bar.values
-                                    && slot.id == "visual_style"
-                                    && app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue
+                                bar.values && slot.shows_value() && app.preferences.navigation_bar.menu_display(slot.id) == MenuDisplay::IconAndValue
                             } else {
                                 bar.labels
                             },
@@ -460,10 +471,10 @@ pub(crate) fn paint_row(
             })
             .inner;
         let mut hidden = None;
-        if let Some((selected, caps, render)) = editing {
+        if let Some((selected, canvas, render)) = editing {
             response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected == Some(index), app.tr(slot.label)));
-            ui_kit::navigation_edit_outline(ui, *bounds, !slot.available(caps), selected == Some(index));
-            if !slot.available(caps) {
+            ui_kit::navigation_edit_outline(ui, *bounds, !slot.available(canvas), selected == Some(index));
+            if !slot.available(canvas) {
                 hidden = Some(if render { "navbar.custom.hidden_render" } else { "navbar.custom.hidden_design" });
             }
         } else {
@@ -532,6 +543,29 @@ fn style_menu(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     chosen
 }
 
+/// "What a click picks": the five modes that pick from the model, then sketch geometry. Rows run
+/// `select.mode`; true once one is chosen.
+fn selection_menu(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
+    use solidcraft_engine::PickMode;
+    ui_kit::navigation_menu_heading(ui, app.tr("navbar.selection.heading"));
+    let mut chosen = false;
+    for &(mode, icon) in navigation_bar::SELECTION_MODE_ICONS {
+        if mode == PickMode::Sketch {
+            ui_kit::navigation_menu_separator(ui);
+        }
+        let id = crate::selection_mode::id(mode);
+        let mut item = ui_kit::NavigationMenuRow::new(&id, app.tr(crate::selection_mode::label_id(mode)), icon);
+        item.selected = app.ui.pick_mode == mode;
+        let response = item.show(ui);
+        crate::scenario::publish_target(&format!("nav:selection:{id}"), response.rect);
+        if response.clicked() {
+            crate::selection_mode::set(app, mode);
+            chosen = true;
+        }
+    }
+    chosen
+}
+
 fn overflow_menu(app: &mut SolveApp, ui: &mut egui::Ui, slots: &[&Slot], open: &mut String) {
     for slot in slots {
         if slot.kind == Kind::Separator {
@@ -541,7 +575,7 @@ fn overflow_menu(app: &mut SolveApp, ui: &mut egui::Ui, slots: &[&Slot], open: &
             crate::scenario::publish_target(&format!("nav:slot:{}", slot.id), bounds);
             continue;
         }
-        let mut item = ui_kit::NavigationMenuRow::new(slot.id, app.tr(slot.label), slot.current_icon(app.ui.visual_style));
+        let mut item = ui_kit::NavigationMenuRow::new(slot.id, app.tr(slot.label), slot.current_icon(&app.ui));
         if matches!(slot.kind, Kind::Tool | Kind::Toggle) {
             item.selected = selected(app, slot.id);
         }
@@ -591,7 +625,7 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     heading(ui, app.tr("navbar.show"));
     for id in ["grid", "ground_shadow", "ambient_occlusion"] {
         let Some(slot) = navigation_bar::find(id) else { continue };
-        let mut item = NavigationMenuRow::new(slot.id, app.tr(slot.label), slot.current_icon(app.ui.visual_style));
+        let mut item = NavigationMenuRow::new(slot.id, app.tr(slot.label), slot.current_icon(&app.ui));
         item.selected = selected(app, slot.id);
         let response = item.show(ui);
         crate::scenario::publish_target(&format!("view:{id}"), response.rect);
