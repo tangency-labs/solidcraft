@@ -200,12 +200,23 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
     found
 }
 
-/// What the picked reference edges leave the hole free to do: with one edge, along it at its
-/// distance; with two, anywhere again, a move then setting both distances (as it did before any
-/// edge was picked); with none, anywhere. Read from the frame last found for these edges (`sync`
-/// keeps it current); an edge picked but not framed yet, or a frame that failed, leaves the hole free.
-pub(crate) fn freedom(d: &Dialog) -> Freedom {
+/// The face input's item the reference edges place: the first face pick (see [`place`]). The
+/// edges place that one hole only; OK refuses them with more than one.
+fn place_item(d: &Dialog) -> Option<usize> {
+    d.inputs.first()?.items.iter().position(|x| matches!(x, Sel::Face { .. }))
+}
+
+/// What the picked reference edges leave the hole at item `i` of the face input free to do: with
+/// one edge, along it at its distance; with two, anywhere again, a move then setting both
+/// distances (as it did before any edge was picked); with none, anywhere. Only the hole the edges
+/// place (see [`place_item`]) is held; another hole in the same dialog moves anywhere. Read from
+/// the frame last found for these edges (`sync` keeps it current); an edge picked but not framed
+/// yet, or a frame that failed, leaves the hole free.
+pub(crate) fn freedom(d: &Dialog, i: usize) -> Freedom {
     let Kind::Hole { opts, .. } = &d.kind else { return Freedom::Plane };
+    if place_item(d) != Some(i) {
+        return Freedom::Plane;
+    }
     let edges = edges(d);
     let Some(f) = opts.refs.frame.as_ref().filter(|f| f.edges == edges) else { return Freedom::Plane };
     match f.frame.as_ref().map(|(fr, _)| fr.lines.as_slice()) {
@@ -217,8 +228,11 @@ pub(crate) fn freedom(d: &Dialog) -> Freedom {
 /// Move the hole at item `i` of the face input toward `near` as far as its one reference edge
 /// lets it: onto the line at the typed distance from it, nearest `near`. The typed distance
 /// stays as it is, an expression included, so a drag never rewrites it. False when the hole
-/// cannot go there (off its face, no frame, or not exactly one edge).
+/// cannot go there (off its face, no frame, not exactly one edge, or not the hole the edges place).
 pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> bool {
+    if place_item(d) != Some(i) {
+        return false;
+    }
     let Some((f, picked)) = frame(s, d) else { return false };
     if picked.len() != 1 {
         return false;

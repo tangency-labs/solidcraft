@@ -230,3 +230,30 @@ fn two_reference_edges_free_the_hole_again_and_a_drag_sets_both_distances() {
     assert!(matches!(places(&h).as_slice(), [p] if p.dist(Vec3::new(25.0, 22.0, 20.0)) < 0.3), "free again: {:?}", places(&h));
     assert!((distance(&h, 0) - 25.0).abs() < 0.3 && (distance(&h, 1) - 22.0).abs() < 0.3, "both distances follow: {:?}", distances(&h));
 }
+
+#[test]
+fn a_second_hole_on_another_face_moves_freely_while_the_first_is_held_by_its_edge() {
+    // The reference edges place the first hole only: a hole on the other block keeps its own
+    // face and goes where it is dragged, not onto the first hole's line.
+    let mut h = blocks();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let first = Vec3::new(10.0, 10.0, 20.0);
+    let at = screen(&mut h, first);
+    h.step(&json!({"click": at})).unwrap();
+    let at = screen(&mut h, Vec3::new(60.0, 15.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Reference 1"}})).unwrap();
+    let left = screen(&mut h, Vec3::new(0.0, 15.0, 20.0));
+    h.step(&json!({"click": left})).unwrap();
+    h.settle();
+    assert!((distance(&h, 0) - 10.0).abs() < 1e-6, "measured for the first hole: {:?}", distances(&h));
+    let to = Vec3::new(65.0, 25.0, 20.0);
+    let ts = screen(&mut h, to);
+    h.step(&json!({"drag": [{"handle": "hole:1"}, ts], "steps": 12})).unwrap();
+    h.settle();
+    let p = places(&h);
+    assert!(matches!(p.as_slice(), [a, b] if a.dist(first) < 1e-4 && b.dist(to) < 0.3), "the second hole went where it was dragged: {p:?}");
+    let d = h.app.dialog.as_ref().expect("a dialog is open");
+    assert!(matches!(&d.inputs[0].items[1], Sel::Face { body, .. } if body == "Other"), "on its own block: {:?}", d.inputs[0].items);
+    assert!((distance(&h, 0) - 10.0).abs() < 1e-6, "the first hole's distance is unchanged: {:?}", distances(&h));
+}

@@ -5,9 +5,9 @@
 //! shared Placement handles setting. No ring: a hole has nothing to turn. Holes on sketch points
 //! (Multiple) have no markers: their place is the point's.
 //!
-//! Reference edges (#37): with one picked, the marker has two arms along the edge and drags the
-//! hole along it at its distance; with two, the marker has its four arms again and a drag sets
-//! both distances.
+//! Reference edges (#37) place the first hole: with one picked, its marker has two arms along the
+//! edge and drags the hole along it at its distance; with two, the marker has its four arms again
+//! and a drag sets both distances. Any other hole in the dialog moves anywhere.
 
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
@@ -28,7 +28,7 @@ pub(super) static SPEC: Spec = Spec {
     move_to,
     click: Some(|app, d, key| crate::hole_place::remove_place(d, &app.session, key)),
     footprint,
-    freedom: |_, d, _| crate::hole_refs::freedom(d),
+    freedom: |_, d, key| crate::hole_refs::freedom(d, key),
     turn: None,
 };
 
@@ -56,7 +56,7 @@ fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
 fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
     let s = &app.session;
     let Some(to) = face_pick(d, s, hits) else { return false };
-    match crate::hole_refs::freedom(d) {
+    match crate::hole_refs::freedom(d, key) {
         Freedom::Plane => crate::hole_place::move_place(d, s, key, to),
         Freedom::Line(_) => match to {
             Sel::Face { point, .. } => crate::hole_refs::drag_to(s, d, key, point),
