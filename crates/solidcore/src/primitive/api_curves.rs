@@ -19,6 +19,7 @@
 //! | [`create_regular_polygon`]   | `SmApiCreateRegularPolygon`                           |
 //! | [`create_curve`]             | `SmApiCreateCurve`                                    |
 //! | [`create_canonical_curve`], [`CanonicalCurveParams`] | `SmApiCreateCanonicalCurve`   |
+//! | [`create_curve_approx_points`] | `SmApiCreateCurveApproxPoints` (unit `nlib.crv_fit_p4`) |
 //!
 //! Deviations:
 //! - **Out-params.** The created curve is the return value; on failure there is none
@@ -55,6 +56,7 @@ use crate::nurbs::b_spline_curve::{
     BSplineCurve, BSplineCurveForm, CanonicalData, KnotType, NurbCircleParam,
 };
 use crate::nurbs::b_spline_curve_n_lib::HelixSpec;
+use crate::nurbs::crv_fit::p1::ParamMethod;
 
 /// Upstream `SmStatus` value `SM_ERR_NOT_WITHIN_TOLERANCE`, as carried by
 /// [`SolidError::Upstream`].
@@ -600,6 +602,34 @@ pub fn create_canonical_curve(params: &CanonicalCurveParams<'_>) -> Result<BSpli
         weights: params.weights,
         trim: None,
     })
+}
+
+/// A cubic 3D B-spline approximating `points` with uniform parameters
+/// (`SmApiCreateCurveApproxPoints`, through [`BSplineCurve::create_approximating_curve`]):
+/// 4 control points, `n / 2` for more than 8 points, `n / 4` for more than 16.
+///
+/// # Errors
+///
+/// Those of [`BSplineCurve::create_approximating_curve`].
+pub fn create_curve_approx_points(points: &[Point3]) -> Result<BSplineCurve> {
+    // Determine number of points -- This algorithm can be improved
+    let mut max_cntrl_pts = 4; // min number of points
+    if points.len() > 8 {
+        max_cntrl_pts = points.len() / 2; // increase relative to number of input points
+    }
+    if points.len() > 16 {
+        max_cntrl_pts = points.len() / 4; // increase relative to number of input points
+    }
+
+    BSplineCurve::create_approximating_curve(
+        max_cntrl_pts,
+        ParamMethod::Uniform,
+        3,
+        3,
+        points,
+        &[],
+        None,
+    )
 }
 
 #[cfg(test)]

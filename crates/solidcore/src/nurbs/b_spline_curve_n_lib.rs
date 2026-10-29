@@ -17,6 +17,7 @@
 //! | [`BSplineCurve::create_extended_curve`]                | `SmBSplineCurve::CreateExtendedCurve` (parameter) |
 //! | [`BSplineCurve::create_extended_curve_by_distance`]    | `SmBSplineCurve::CreateExtendedCurve` (distance) |
 //! | [`BSplineCurve::create_interpolating_curve`]           | `SmBSplineCurve::CreateInterpolatingCurve`     |
+//! | [`BSplineCurve::create_approximating_curve`]           | `SmBSplineCurve::CreateApproximatingCurve` (unit `nlib.crv_fit_p4`) |
 //! | [`BSplineCurve::dampen_knot_spacing`]                  | `SmBSplineCurve::DampenKnotSpacing`            |
 //! | [`BSplineCurve::degree_reduction`]                     | `SmBSplineCurve::DegreeReduction`              |
 //! | [`BSplineCurve::insert_one_knot`]                      | `SmBSplineCurve::InsertOneKnot`                |
@@ -33,7 +34,7 @@
 //! | [`BSplineCurve::synchronize_knots_of_curves`]          | `SmBSplineCurve::SyncronizeKnotsOfCurves`      |
 //! | [`BSplineCurve::trim`], [`TrimMode`]                   | `SmBSplineCurve::Trim`                         |
 //!
-//! The other functions of the file (`ApproximatePoints`, `CreateApproximatingCurve`,
+//! The other functions of the file (`ApproximatePoints`,
 //! `CreateFromHermiteCurve`, `C1NonRationalCubicInterpolate`, `ForceThroughPoint`,
 //! `MakeNonRational`, `Multiply*`, `SmoothJoin`, `InsertKnotsByDistance`, `RefineCurve`,
 //! `Scale(SmVector3d&, SmPoint3d&)`, `TestDegenerate`, ...) belong to other units.
@@ -61,6 +62,10 @@
 //!   passes through. Where upstream would index outside its arrays the port returns
 //!   `InvalidInput`. `sm_ApproxCircArc`'s bare `NL_YES` exits are `InvalidInput` with
 //!   [`BARE_FLAG_REASON`].
+//! - **Degree type.** `CreateApproximatingCurve` casts `lDegree` to `NL_DEGREE` (a
+//!   `short`), so on its unchecked one-vector path a degree of 32768 or more wraps; the
+//!   port takes a `usize` (no wrap), and the difftest FFI caps the degree at
+//!   `NL_MAXDEG` (17).
 //! - **Input arrays.** `CreateInterpolatingCurve` reinterprets its `const` vector array
 //!   as the in/out `D` of `N_FitCrvFirstDeriv`, which rescales the caller's vectors in
 //!   place when their magnitudes are ignored; the port works on a copy.
@@ -126,6 +131,7 @@ use crate::nurbs::crv_fit::p3::{
     approx_closed_conditions, interp_first_derivs, interp_high_derivs, interp_knots_and_tangents,
     EndTangents, ParamSource, VectorKind,
 };
+use crate::nurbs::crv_fit::p4::approx_end_derivs;
 use crate::nurbs::crv_geom::ToleranceKind;
 use crate::nurbs::crv_tool::p2::{make_compatible_adj_knots, make_compatible_knot_tol};
 use crate::nurbs::geom::{normalize, PI};
@@ -148,6 +154,7 @@ const OP_EXT: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended
 const OP_EXT_DIST: &str =
     "nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve_by_distance";
 const OP_INTERP_CRV: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_interpolating_curve";
+const OP_APPROX_CRV: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_approximating_curve";
 const OP_DAMPEN: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::dampen_knot_spacing";
 const OP_DEG_RED: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::degree_reduction";
 const OP_INS_ONE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::insert_one_knot";
@@ -786,6 +793,83 @@ impl BSplineCurve {
         };
 
         // construct output from new gw_CURVE
+        Ok(Self::from_gw_nurb(dim, &cur))
+    }
+
+    /// A curve of dimension `dim` (not checked, as upstream) and degree `degree` with
+    /// `num_points` control points approximating `points` in the least-squares sense
+    /// (`CreateApproximatingCurve`, through `N_FitCrvApproxDerivs`), with parameters by
+    /// `par`:
+    /// - two vectors: start and end first derivatives, plus the second (and third)
+    ///   derivatives from `more_vectors[0..2]` (`[2..4]`);
+    /// - one vector: the start first derivative, plus the second from `more_vectors[0]`
+    ///   and the third from `more_vectors[2]` (the documented layout: `[0]`/`[1]` start /
+    ///   end second derivatives, `[2]`/`[3]` start / end third; read only when present);
+    /// - no vectors: no derivative constraints.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for more than two vectors, a degree outside `2..=MAX_DEGREE` with two or
+    /// no vectors, no points or no control points, or when the fit fails.
+    pub fn create_approximating_curve(
+        num_points: usize,
+        par: ParamMethod,
+        dim: u64,
+        degree: usize,
+        points: &[Point3],
+        vectors: &[Vec3],
+        more_vectors: Option<&[Vec3]>,
+    ) -> Result<Self> {
+        const OP: &str = OP_APPROX_CRV;
+        // n = lNumPoints - 1 is -1 for no control points: N_FitCrvApproxDerivs' p > n
+        let n = num_points
+            .checked_sub(1)
+            .ok_or_else(|| SolidError::sm_err(OP))?;
+        let p = degree;
+
+        // option 1: given two end tangents as constraints
+        let cur = if vectors.len() == 2 {
+            // check input - range on degree
+            if !(2..=MAX_DEGREE).contains(&degree) {
+                return Err(SolidError::sm_err(OP));
+            }
+            // Ds[1] = vectors[0], De[1] = vectors[1]
+            let mut ds = vec![vec_at(vectors, 0, OP)?];
+            let mut de = vec![vec_at(vectors, 1, OP)?];
+            // when given, the 2nd (and 3rd) derivatives
+            if let Some(more) = more_vectors.filter(|m| m.len() > 1) {
+                ds.push(vec_at(more, 0, OP)?);
+                de.push(vec_at(more, 1, OP)?);
+                if more.len() > 3 {
+                    ds.push(vec_at(more, 2, OP)?);
+                    de.push(vec_at(more, 3, OP)?);
+                }
+            }
+            approx_end_derivs(points, &ds, &de, n, p, par).map_err(SolidError::nl_ser(OP))?
+        }
+        // option 2: given one Vector as constraint
+        else if vectors.len() == 1 {
+            let mut ds = vec![vec_at(vectors, 0, OP)?];
+            if let Some(more) = more_vectors.filter(|m| !m.is_empty()) {
+                ds.push(vec_at(more, 0, OP)?);
+                if more.len() > 2 {
+                    ds.push(vec_at(more, 2, OP)?);
+                }
+            }
+            approx_end_derivs(points, &ds, &[], n, p, par).map_err(SolidError::nl_ser(OP))?
+        }
+        // option 3: no Vectors to interpolate
+        else if vectors.is_empty() {
+            if !(2..=MAX_DEGREE).contains(&degree) {
+                return Err(SolidError::sm_err(OP));
+            }
+            approx_end_derivs(points, &[], &[], n, p, par).map_err(SolidError::nl_ser(OP))?
+        } else {
+            // unsupported option
+            return Err(SolidError::sm_err(OP));
+        };
+
+        // set output
         Ok(Self::from_gw_nurb(dim, &cur))
     }
 
