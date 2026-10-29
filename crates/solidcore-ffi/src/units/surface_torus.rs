@@ -22,7 +22,9 @@
 //!   `state copy == this`; `TrimDomain`: the domain after the call (`TrimWithDomain`
 //!   writes it back), then the state (also after a failure); `IsectPlane`, `Global`:
 //!   status, then on success `more ncurves curves ntypes types ndevs devs nuv1 nuv2
-//!   nnull1 nnull2` (`more` is `0` for `Global`). The plane and the intersection
+//!   nnull1 nnull2` (`more` is `0` for `Global`); `IsNurb`: `found has [state]`
+//!   (`found` is the `SmBoolean`, or the status a failed `SER` returns, in the status
+//!   slot). The plane and the intersection
 //!   arguments are those of [`super::surface_sphere`] ([`Plane`], [`IsectArgs`]).
 //!
 //! The wrappers accept only what upstream handles without undefined behaviour: finite
@@ -31,7 +33,7 @@
 //! inside `[-360, 360]` at most 360 long, generator circles with independent axes and a
 //! positive radius, derivative orders up to 3.
 
-pub use super::surface_sphere::{Dom, IsectArgs, Plane};
+pub use super::surface_sphere::{Dom, IsectArgs, Perturb, Plane};
 use super::surface_sphere::{push_args, push_plane};
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -177,6 +179,16 @@ pub enum Op {
         /// The new NURB domain `[u0, v0, u1, v1]`.
         dom: [f64; 4],
     },
+    /// `IsNurbSurfaceTorus` on a copy of the torus's NURB, edited, as a plain B-spline
+    /// surface (`SmBSplineSurface(g, FALSE, NULL)`).
+    IsNurb {
+        /// Tolerance scale.
+        scale: f64,
+        /// Scale of the homogeneous `x`, `y`, `z`.
+        net_scale: [f64; 3],
+        /// Control point changes.
+        perturb: Vec<Perturb>,
+    },
 }
 
 impl Op {
@@ -195,6 +207,7 @@ impl Op {
             Op::TrimDomain { .. } => 10,
             Op::IsectPlane { .. } => 11,
             Op::Global { .. } => 12,
+            Op::IsNurb { .. } => 13,
         }
     }
 }
@@ -357,6 +370,28 @@ fn push_op(o: &mut Vec<f64>, op: &Op) -> Result<(), FfiError> {
         Op::TrimDomain { dom } => {
             domain(*dom, "trim domain")?;
             o.extend_from_slice(dom);
+        }
+        Op::IsNurb {
+            scale,
+            net_scale,
+            perturb,
+        } => {
+            finite(&[*scale], "scale")?;
+            if *scale <= 0.0 {
+                return Err(bad("scale"));
+            }
+            finite(net_scale, "net scale")?;
+            if perturb.len() > 8 {
+                return Err(bad("too many control point changes"));
+            }
+            o.push(*scale);
+            o.extend_from_slice(net_scale);
+            o.push(perturb.len() as f64);
+            for p in perturb {
+                finite(&p.d, "control point change")?;
+                o.extend([p.i as f64, p.j as f64]);
+                o.extend_from_slice(&p.d);
+            }
         }
     }
     Ok(())

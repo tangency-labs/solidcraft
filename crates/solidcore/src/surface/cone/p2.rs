@@ -1,12 +1,16 @@
 //! `SmCone` part 2: the offset cone, recognition of a cone NURB, the rebuild of the
 //! analytic data from an edited NURB, and the ellipse intervals inside a trimmed cone.
 //!
-//! Upstream: `source/SMLib/src/SmCone.cpp`, `source/SMLib/inc/SmCone.h`.
+//! Upstream: `source/SMLib/src/SmCone.cpp`, `source/SMLib/inc/SmCone.h`;
+//! `SmCylinder::IsNurbSurfaceCylinder` from `source/SMLib/src/SmCylinder.cpp`,
+//! `source/SMLib/inc/SmCylinder.h` (ported here, next to the cone recogniser whose iso
+//! arc test it shares).
 //!
 //! | Rust                                         | Upstream                                         |
 //! |----------------------------------------------|--------------------------------------------------|
 //! | [`Cone::create_offset_surface`]              | `SmCone::CreateOffsetSurface`                    |
 //! | [`Cone::is_nurb_surface_cone`]               | `SmCone::IsNurbSurfaceCone`                      |
+//! | [`Cone::is_nurb_surface_cylinder`]           | `SmCylinder::IsNurbSurfaceCylinder` (`SmCylinder.cpp`) |
 //! | [`Cone::rebuild_step_from_nurb_parameters`]  | `SmCone::RebuildSTEPFromNURBParameters`          |
 //! | [`ellipse_trim_intervals`]                   | `sm_GetEllipseTrimIntervals` (file static)       |
 //! | `is_cone_point_in_trim_domain` (private)     | `sm_IsConePointInTrimDomain` (file static)       |
@@ -59,6 +63,11 @@
 //!   their mean becomes its radius. A larger taper returns `SM_ERR` before editing
 //!   the analytic state. The pinned C++ instead assigns a nonzero semi-angle to
 //!   cylinders. Ordinary `SmCone` objects retain upstream's radius/angle rules.
+//! - **Cylinder recogniser.** [`Cone::is_nurb_surface_cylinder`] returns an error
+//!   where a `SER` call returns its status (a truthy result without cylinder) and
+//!   `Some` where upstream returns `TRUE` with a cylinder; its NURB is a copy of the
+//!   tested one, as upstream. A tested surface without NURB is `SM_ERR_NULL_POINTER`
+//!   (upstream copies a null NURB).
 //! - **Recursion.** None of these functions recurses.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
@@ -84,8 +93,10 @@ use crate::nurbs::b_spline_surface::{
     BSplineSurface, IsoCurveOptions, LocationType, SurfParamType,
 };
 use crate::nurbs::nurbs_crv::to_euclid;
+use crate::nurbs::nurbs_srf::copy_nurb_surface;
 
 const OP_OFFSET: &str = "surface::cone::p2::Cone::create_offset_surface";
+const OP_NURB_CYLINDER: &str = "surface::cone::p2::Cone::is_nurb_surface_cylinder";
 const OP_REBUILD: &str = "surface::cone::p2::Cone::rebuild_step_from_nurb_parameters";
 const OP_REPARAM: &str = "surface::cone::p2::Cone::reparameterize";
 const OP_TRIM: &str = "surface::cone::p2::ellipse_trim_intervals";
@@ -730,6 +741,157 @@ impl Cone {
         ignore_status(cone.reparameterize(k, &test_surface.natural_uv_domain()))?;
 
         Ok(Some(cone))
+    }
+
+    // ---- SmCylinder::IsNurbSurfaceCylinder ------------------------------------------
+
+    /// The cylinder `test_surface` is (`SmCylinder::IsNurbSurfaceCylinder`), or `None`:
+    /// the surface must be rational, of degree 1 with at most two control points in one
+    /// direction and degree 2 in the other; its iso curves at both ends of the linear
+    /// direction are non-degenerate circular arcs over the same angles, with the same
+    /// X axis, of equal radii, on parallel planes perpendicular to the line through
+    /// their centres (at least `SM_EFF_ZERO` apart). Tolerances are `SM_EFF_ZERO_SQRT`
+    /// for angles and `tolerance_scale * SM_EFF_ZERO * 100 * (1 + |min corner| + |max
+    /// corner|)` for distances and radii (upstream default scale `1`). The new bounded
+    /// cylinder ([`Cone::is_cylinder`]) keeps a copy of the tested NURB as its own, its
+    /// polar converter rebuilt from it and its generator reparameterised to the
+    /// linear direction's NURB interval.
+    ///
+    /// # Errors
+    ///
+    /// Upstream's `SER` statuses (returned as a `TRUE` result without cylinder): those
+    /// of the iso curves; those of the degeneracy and arc tests;
+    /// `SM_ERR_NULL_POINTER` for a surface without NURB (upstream copies the null NURB).
+    pub fn is_nurb_surface_cylinder(
+        k: &Kernel,
+        test_surface: &BSplineSurface,
+        tolerance_scale: f64,
+    ) -> Result<Option<Self>> {
+        let deg_u = test_surface.degree(SurfParamType::U);
+        let deg_v = test_surface.degree(SurfParamType::V);
+        if deg_u + deg_v != 3
+            || !test_surface.is_rational()
+            || (deg_u == 1 && test_surface.number_control_points(SurfParamType::U) > 2)
+            || (deg_v == 1 && test_surface.number_control_points(SurfParamType::V) > 2)
+        {
+            return Ok(None);
+        }
+
+        // (evaluation statuses ignored upstream)
+        let uv_domain = test_surface.natural_uv_domain();
+        let min_pnt = ignored(test_surface.evaluate_point(uv_domain.min()))?.unwrap_or(Vec3::UNDEF);
+        let max_pnt = ignored(test_surface.evaluate_point(uv_domain.max()))?.unwrap_or(Vec3::UNDEF);
+
+        let pt_tol = tolerance_scale
+            * EFF_ZERO
+            * ANALYTIC_TOL_SCALE
+            * (1.0 + min_pnt.max_dimension() + max_pnt.max_dimension());
+
+        let ang_tol = EFF_ZERO_SQRT;
+        let (swap_uv, surf_param, bot_knot, top_knot) = if deg_u == 1 {
+            // Need to swap UV when mapping parameters from analytic domain to nurbs domain
+            (true, SurfParamType::U, uv_domain.min().x, uv_domain.max().x)
+        } else {
+            (
+                false,
+                SurfParamType::V,
+                uv_domain.min().y,
+                uv_domain.max().y,
+            )
+        };
+
+        let top_iso = test_surface
+            .create_iso_parametric_curve(k, surf_param, top_knot, IsoCurveOptions::default())?
+            .curve;
+        if top_iso.is_degenerate(k, pt_tol, None)? {
+            return Ok(None);
+        }
+        let Some(top) = iso_arc(k, &top_iso, pt_tol)? else {
+            return Ok(None);
+        };
+
+        let bot_iso = test_surface
+            .create_iso_parametric_curve(k, surf_param, bot_knot, IsoCurveOptions::default())?
+            .curve;
+        if bot_iso.is_degenerate(k, pt_tol, None)? {
+            return Ok(None);
+        }
+        let Some(bot) = iso_arc(k, &bot_iso, pt_tol)? else {
+            return Ok(None);
+        };
+
+        if (top.start_ang - bot.start_ang).abs() > ang_tol
+            || (top.end_ang - bot.end_ang).abs() > ang_tol
+        {
+            return Ok(None);
+        }
+
+        let center_top = top.frame.origin();
+        let x_axis = top.frame.x_axis();
+        // (status ignored upstream, which then reads the uninitialised angle; the arcs'
+        // unit X axes never fail it: 0 here)
+        let ang = ignored(x_axis.angle_between(bot.frame.x_axis()))?.unwrap_or(0.0);
+        if ang.abs() > ang_tol {
+            return Ok(None);
+        }
+
+        let center_bot = bot.frame.origin();
+        let mut z_axis = center_top - center_bot;
+        let height = z_axis.length();
+
+        // If you don't do this, Unitize will fail
+        if height < EFF_ZERO {
+            return Ok(None);
+        }
+
+        z_axis = z_axis.unitize_or_z();
+        if !z_axis.is_parallel_to(bot.frame.z_axis(), ang_tol) {
+            return Ok(None);
+        }
+
+        let inside_out = z_axis.dot(bot.frame.z_axis()) < 0.0;
+
+        let y_axis = z_axis.cross(x_axis);
+        // Try to eliminate some numerical inaccurracies (the top radius is not used
+        // further)
+        let equal_radii = (bot.radius - top.radius).abs() < pt_tol;
+        if !equal_radii {
+            return Ok(None);
+        }
+
+        let mut cylinder = Self::new_cylinder_bounded(
+            center_bot,
+            x_axis,
+            y_axis,
+            bot.radius,
+            top.start_ang,
+            top.end_ang,
+            height,
+            swap_uv,
+            inside_out,
+            false,
+        );
+        // (error recovery: the constructor always makes its generator)
+
+        // the cylinder's NURB is a copy of the tested one
+        let nurb = test_surface
+            .gw_nurb()
+            .ok_or_else(|| SolidError::null_pointer(OP_NURB_CYLINDER))?;
+        cylinder.rev.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        cylinder.rev.base.nurb_is_borrowed = false;
+
+        // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
+
+        // (status ignored upstream)
+        ignore_status(cylinder.rebuild_cone_polar_converter(k))?;
+
+        // (status ignored upstream)
+        let gen_ivl = Extent1d::from_min_max(bot_knot, top_knot);
+        if let Some(gen) = cylinder.rev.gen_curve.as_mut() {
+            ignore_status(gen.edit_parameterization(k, &gen_ivl))?;
+        }
+
+        Ok(Some(cylinder))
     }
 
     // ---- RebuildSTEPFromNURBParameters ---------------------------------------------
@@ -1670,5 +1832,88 @@ mod tests {
             (trimmed - ellipse_part_above_v30()).abs() < 1e-9,
             "{trimmed}"
         );
+    }
+
+    /// The control points and knots of two NURBs agree bit for bit.
+    fn same_nurb(a: &BSplineSurface, b: &BSplineSurface) -> bool {
+        match (a.gw_nurb(), b.gw_nurb()) {
+            (Some(a), Some(b)) => {
+                let rows = |s: &crate::nurbs::srf_basic::Surface| {
+                    s.rows()
+                        .flat_map(|r| r.iter().map(|p| [p.x, p.y, p.z, p.w]))
+                        .collect::<Vec<_>>()
+                };
+                rows(a) == rows(b) && a.u_knots() == b.u_knots() && a.v_knots() == b.v_knots()
+            }
+            _ => false,
+        }
+    }
+
+    /// tangency-labs/solidcore#1433: the cylinder test finds the radius 5 cylinder
+    /// about +Z from its NURB form and keeps exactly that NURB.
+    #[test]
+    fn issue_1433_cylinder_found_in_its_nurb_keeps_it() {
+        let k = kernel();
+        let cyl = Cone::create_canonical_cylinder(&k, &Axis2Placement::default(), 5.0).unwrap();
+        let nurbs = cyl.rev().base().clone();
+        let found = Cone::is_nurb_surface_cylinder(&k, &nurbs, 1.0)
+            .unwrap()
+            .expect("a cylinder");
+        assert!(found.is_cylinder());
+        assert_eq!(found.semi_angle_deg(), 0.0);
+        assert!(
+            (found.base_radius() - 5.0).abs() < 1e-12,
+            "{}",
+            found.base_radius()
+        );
+        let z = found
+            .rev()
+            .position()
+            .x_axis()
+            .cross(found.rev().position().y_axis());
+        assert!(z.is_parallel_to(Vec3::new(0.0, 0.0, 1.0), 1e-9), "{z:?}");
+        assert!(found.rev().position().origin().x.abs() < 1e-12);
+        assert!(found.rev().position().origin().y.abs() < 1e-12);
+        assert!(same_nurb(found.rev().base(), &nurbs));
+    }
+
+    /// A bounded partial cylinder (either UV order, inside out) is found with its
+    /// radius, angles and height; a cone and a tapered cylinder NURB are not cylinders.
+    #[test]
+    fn cylinder_recognition_partial_and_non_matching() {
+        let k = kernel();
+        for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+            let frame = Axis2Placement::new(
+                Vec3::new(1.0, -2.0, 3.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            );
+            let mut cyl = Cone::new_cylinder_bounded(
+                frame.origin(),
+                frame.x_axis(),
+                frame.y_axis(),
+                2.5,
+                30.0,
+                200.0,
+                4.0,
+                swap,
+                inside,
+                false,
+            );
+            cyl.make_nurb(&k).unwrap();
+            let nurbs = cyl.rev().base().clone();
+            let found = Cone::is_nurb_surface_cylinder(&k, &nurbs, 1.0)
+                .unwrap()
+                .expect("a cylinder");
+            assert!((found.base_radius() - 2.5).abs() < 1e-12);
+            assert!(same_nurb(found.rev().base(), &nurbs));
+            let d = found.rev().step_uv_domain();
+            assert!((d.max().x - d.min().x - 170.0).abs() < 1e-9, "{d:?}");
+            assert!((d.max().y - d.min().y - 4.0).abs() < 1e-9, "{d:?}");
+        }
+        let cone = canonical(&k, 2.0, 30.0, 3.0, false, false);
+        assert!(Cone::is_nurb_surface_cylinder(&k, cone.rev().base(), 1.0)
+            .unwrap()
+            .is_none());
     }
 }

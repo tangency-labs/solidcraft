@@ -4,7 +4,7 @@
 // (the constructor and MakeNurb), operator==, Copy, CreateOffsetSurface,
 // ConvertUVFromSTEPToNURBS, ConvertUVFromNURBSToSTEP, EvaluateSTEP, EvaluateSTEPPoint,
 // CreateIsoParametricCurve, RebuildSTEPFromNURBParameters, Transform, GetMaxAnalyticDomain,
-// GetInsideOut and IsKindOf; and the inherited SmSurfOfRevolution::TrimWithDomain,
+// GetInsideOut, IsKindOf and IsNurbSurfaceTorus; and the inherited SmSurfOfRevolution::TrimWithDomain,
 // IntersectWithPlane and GlobalSurfaceIntersect (with a plane).
 //
 // One entry point, sc_surface_torus_eval(op, in, n_in, out, cap, out_len). Layouts are
@@ -60,6 +60,7 @@ enum : int32_t
     OP_TRIM_DOMAIN = 10,
     OP_ISECT_PLANE = 11,
     OP_GLOBAL = 12,
+    OP_IS_NURB = 13,
     OP_CONST_MAKE = 20, // the constructor with no MakeNurb, then sc::put_const_make
 };
 
@@ -407,6 +408,48 @@ void torus_op(int32_t op, Rd& rd, const SmContext& ctx, SmTorus* s, std::vector<
             }
         }
         delete off;
+        break;
+    }
+    case OP_IS_NURB:
+    {
+        double scale = rd.num();
+        double sx = rd.num();
+        double sy = rd.num();
+        double sz = rd.num();
+        int64_t npert = rd.idx();
+        const gw_SURFACE* src = s->GetGwNurbPointer();
+        gw_SURFACE* g = sm_AllocateAndCopyNurbSurface((gw_SURFACE*)src);
+        for (gw_INDEX i = 0; i <= g->net->n; i++)
+            for (gw_INDEX j = 0; j <= g->net->m; j++)
+            {
+                g->net->Pw[i][j].x *= sx;
+                g->net->Pw[i][j].y *= sy;
+                g->net->Pw[i][j].z *= sz;
+            }
+        for (int64_t k = 0; k < npert; k++)
+        {
+            int64_t i = rd.idx();
+            int64_t j = rd.idx();
+            double dx = rd.num();
+            double dy = rd.num();
+            double dz = rd.num();
+            if (i < 0 || j < 0 || i > g->net->n || j > g->net->m)
+                continue;
+            g->net->Pw[i][j].x += dx;
+            g->net->Pw[i][j].y += dy;
+            g->net->Pw[i][j].z += dz;
+        }
+        SmBSplineSurface* test = new (ctx) SmBSplineSurface(g, FALSE, NULL);
+        SmTorus* r = NULL;
+        // SmBoolean is an int: a failed `SER(..)` returns its status as a truthy "found" with
+        // no torus, so the value is recorded as is.
+        SmBoolean found = SmTorus::IsNurbSurfaceTorus(ctx, test, r, scale);
+        o.push_back((double)found);
+        o.push_back(flg(r != NULL));
+        if (r)
+            put_state(o, r);
+        delete r;
+        delete test;
         break;
     }
     case OP_REBUILD:

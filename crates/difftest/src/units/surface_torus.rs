@@ -2,7 +2,8 @@
 //! `operator==`, `Copy`, `CreateOffsetSurface`, the STEP/NURB conversions, STEP
 //! evaluation, iso curves, `RebuildSTEPFromNURBParameters`, `Transform`, and the
 //! inherited `SmSurfOfRevolution::TrimWithDomain`, `IntersectWithPlane` and
-//! `GlobalSurfaceIntersect` with a plane).
+//! `GlobalSurfaceIntersect` with a plane; `IsNurbSurfaceTorus` on its NURB, fixtures
+//! only).
 //!
 //! C++: `solidcore_ffi::units::surface_torus` (upstream `source/SMLib/src/SmTorus.cpp`).
 //! Rust: `solidcore::surface::torus`.
@@ -28,7 +29,7 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::b_spline_surface::{IsoCurveOptions, SurfParamType};
+use solidcore::nurbs::b_spline_surface::{BSplineSurface, IsoCurveOptions, SurfParamType};
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::surface::surface::p2::{
     B_SPLINE_SURFACE_TYPE, SURF_OF_REVOLUTION_TYPE, TORUS_TYPE, TYPE,
@@ -167,6 +168,27 @@ enum OpIn {
     TrimDomain {
         dom: [f64; 4],
     },
+    /// `IsNurbSurfaceTorus` on the torus's NURB, scaled per axis and with control point
+    /// changes (fixtures only: the generator stream is unchanged).
+    IsNurb {
+        scale: f64,
+        #[serde(default = "unit_scale")]
+        net_scale: [f64; 3],
+        #[serde(default)]
+        perturb: Vec<PerturbIn>,
+    },
+}
+
+/// A control point change `(i, j) += d`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+struct PerturbIn {
+    i: usize,
+    j: usize,
+    d: [f64; 3],
+}
+
+const fn unit_scale() -> [f64; 3] {
+    [1.0, 1.0, 1.0]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +303,22 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             args: ffi_args(args),
         },
         OpIn::TrimDomain { dom } => ffi::Op::TrimDomain { dom: *dom },
+        OpIn::IsNurb {
+            scale,
+            net_scale,
+            perturb,
+        } => ffi::Op::IsNurb {
+            scale: *scale,
+            net_scale: *net_scale,
+            perturb: perturb
+                .iter()
+                .map(|p| ffi::Perturb {
+                    i: p.i,
+                    j: p.j,
+                    d: p.d,
+                })
+                .collect(),
+        },
     };
     let flat = ffi::torus_op(&ffi_torus(&i.torus), &op).map_err(|e| harness(e.to_string()))?;
     to_output(i, &flat)
@@ -712,8 +750,65 @@ fn rust_op(
                 }
             }
         }
+        OpIn::IsNurb {
+            scale,
+            net_scale,
+            perturb,
+        } => match is_nurb(k, t, *scale, *net_scale, perturb) {
+            Err(e) if e.is_unported() => Err(e),
+            // upstream returns the status of a failed SER call as a truthy result
+            Err(e) => {
+                o.extend([status(&e).max(1.0), 0.0]);
+                Ok(())
+            }
+            Ok(None) => {
+                o.extend([0.0, 0.0]);
+                Ok(())
+            }
+            Ok(Some(found)) => {
+                o.extend([1.0, 1.0]);
+                put_state(o, &found)
+            }
+        },
     };
     Ok(r)
+}
+
+/// The shim's `OP_IS_NURB`: a copy of the torus's NURB, scaled and changed, as a plain
+/// B-spline surface owning it, given to `IsNurbSurfaceTorus`.
+fn is_nurb(
+    k: &Kernel,
+    t: &Torus,
+    scale: f64,
+    net_scale: [f64; 3],
+    perturb: &[PerturbIn],
+) -> solidcore::Result<Option<Torus>> {
+    let mut nurb = t
+        .base()
+        .base()
+        .gw_nurb()
+        .cloned()
+        .ok_or_else(|| SolidError::null_pointer("difftest::surface_torus::is_nurb"))?;
+    let ix = nurb.indices();
+    for i in 0..=ix.n {
+        for j in 0..=ix.m {
+            let p = nurb.cpt_mut(i, j)?;
+            p.x *= net_scale[0];
+            p.y *= net_scale[1];
+            p.z *= net_scale[2];
+        }
+    }
+    for pt in perturb {
+        if pt.i > ix.n || pt.j > ix.m {
+            continue;
+        }
+        let p = nurb.cpt_mut(pt.i, pt.j)?;
+        p.x += pt.d[0];
+        p.y += pt.d[1];
+        p.z += pt.d[2];
+    }
+    let test = BSplineSurface::from_nurb(nurb, false);
+    Torus::is_nurb_surface_torus(k, &test, scale)
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
@@ -1254,6 +1349,7 @@ mod tests {
             OpIn::IsectPlane { .. } => "isect_plane",
             OpIn::Global { .. } => "global",
             OpIn::TrimDomain { .. } => "trim_domain",
+            OpIn::IsNurb { .. } => "is_nurb",
         }
     }
 

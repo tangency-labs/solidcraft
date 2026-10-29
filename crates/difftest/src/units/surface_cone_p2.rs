@@ -1,6 +1,7 @@
 //! Runner for unit `surface.cone_p2`: `SmCone::CreateOffsetSurface`,
-//! `SmCone::IsNurbSurfaceCone`, `SmCone::RebuildSTEPFromNURBParameters` and the
-//! file-static `sm_GetEllipseTrimIntervals`.
+//! `SmCone::IsNurbSurfaceCone`, `SmCylinder::IsNurbSurfaceCylinder`,
+//! `SmCone::RebuildSTEPFromNURBParameters` and the file-static
+//! `sm_GetEllipseTrimIntervals`.
 //!
 //! C++: `solidcore_ffi::units::surface_cone_p2` (upstream `source/SMLib/src/SmCone.cpp`).
 //! Rust: `solidcore::surface::cone::p2`.
@@ -181,6 +182,12 @@ enum OpIn {
     Rebuild {
         edit: EditIn,
     },
+    /// `SmCylinder::IsNurbSurfaceCylinder` (fixtures only: the generator stream is
+    /// unchanged).
+    RecognizeCylinder {
+        edit: EditIn,
+        scale: f64,
+    },
     Trim {
         origin: [f64; 3],
         x: [f64; 3],
@@ -357,6 +364,10 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         },
         OpIn::Rebuild { edit } => ffi::Op::Rebuild {
             edit: ffi_edit(edit),
+        },
+        OpIn::RecognizeCylinder { edit, scale } => ffi::Op::RecognizeCylinder {
+            edit: ffi_edit(edit),
+            scale: *scale,
         },
         OpIn::Trim {
             origin,
@@ -770,6 +781,22 @@ fn rust_op(k: &Kernel, s: &mut Cone, op: &OpIn, o: &mut Vec<f64>) -> solidcore::
             let mut test = s.rev().base().clone();
             edit_nurb(test.get_or_create_gw_nurb()?, &ffi_edit(edit), swap)?;
             match Cone::is_nurb_surface_cone(k, &test, *scale) {
+                Ok(found) => {
+                    o.push(flag(found.is_some()));
+                    o.push(flag(found.is_some()));
+                    if let Some(found) = found {
+                        put_state(k, o, &found)?;
+                    }
+                }
+                Err(e) if e.is_unported() => return Err(e),
+                Err(e) => o.extend([status(&e), 0.0]),
+            }
+        }
+        OpIn::RecognizeCylinder { edit, scale } => {
+            let swap = s.rev().swap_uv();
+            let mut test = s.rev().base().clone();
+            edit_nurb(test.get_or_create_gw_nurb()?, &ffi_edit(edit), swap)?;
+            match Cone::is_nurb_surface_cylinder(k, &test, *scale) {
                 Ok(found) => {
                     o.push(flag(found.is_some()));
                     o.push(flag(found.is_some()));
@@ -1285,6 +1312,7 @@ mod tests {
             OpIn::Offset { .. } => "offset",
             OpIn::Recognize { .. } => "recognize",
             OpIn::Rebuild { .. } => "rebuild",
+            OpIn::RecognizeCylinder { .. } => "recognize_cylinder",
             OpIn::Trim { .. } => "trim",
         }
     }

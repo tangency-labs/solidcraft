@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `surface.cone_p2`.
 // Wraps the SmCone members owned by the unit (source/SMLib/src/SmCone.cpp):
-// CreateOffsetSurface, IsNurbSurfaceCone and RebuildSTEPFromNURBParameters, plus a verbatim
+// CreateOffsetSurface, IsNurbSurfaceCone and RebuildSTEPFromNURBParameters (and
+// SmCylinder::IsNurbSurfaceCylinder from SmCylinder.cpp), plus a verbatim
 // copy of the file-statics sm_IsConePointInTrimDomain and sm_GetEllipseTrimIntervals.
 //
 // One entry point, sc_surface_cone_p2_eval(op, in, n_in, out, cap, out_len). Layouts are
@@ -441,6 +442,7 @@ enum : int32_t
     OP_RECOGNIZE = 2,
     OP_REBUILD = 3,
     OP_TRIM = 4,
+    OP_RECOGNIZE_CYLINDER = 5,
 };
 
 // Construction modes (the surface.cone_p1 shim's).
@@ -861,6 +863,23 @@ void cone_op(int32_t op, Rd& rd, const SmContext& ctx, SmCone* s, std::vector<do
         SmBSplineSurface* test = new (ctx) SmBSplineSurface(*(SmBSplineSurface*)s);
         SmCone* found = NULL;
         SmBoolean res = SmCone::IsNurbSurfaceCone(ctx, test, found, scale);
+        o.push_back((double)res);
+        o.push_back(flg(found != NULL));
+        if (found != NULL)
+        {
+            put_state(o, found);
+            delete found;
+        }
+        delete test;
+        break;
+    }
+    case OP_RECOGNIZE_CYLINDER:
+    {
+        edit_nurb(rd, s->GetGwNurbPointer(), s->GetSwapUV() != FALSE);
+        double scale = rd.num();
+        SmBSplineSurface* test = new (ctx) SmBSplineSurface(*(SmBSplineSurface*)s);
+        SmCylinder* found = NULL;
+        SmBoolean res = SmCylinder::IsNurbSurfaceCylinder(ctx, test, found, scale);
         o.push_back((double)res);
         o.push_back(flg(found != NULL));
         if (found != NULL)

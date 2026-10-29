@@ -13,6 +13,7 @@
 //! * `Recognize`: `result has [state]`: the [`Edit`] is applied to the cone's NURB, the
 //!   `SmBSplineSurface` copy of it is given to `IsNurbSurfaceCone(ctx, .., scale)`
 //!   (`result` is its `SmBoolean`, or the error status it returns through `SER`);
+//! * `RecognizeCylinder`: as `Recognize`, with `SmCylinder::IsNurbSurfaceCylinder`;
 //! * `Rebuild`: `status state`: the [`Edit`] is applied to the cone's NURB, then
 //!   `RebuildSTEPFromNURBParameters`; the state is the cone's afterwards;
 //! * `Trim`: `1000 n [min max]*n`, the intervals of `sm_GetEllipseTrimIntervals`.
@@ -125,6 +126,13 @@ pub enum Op {
         /// Tolerance scale.
         scale: f64,
     },
+    /// `SmCylinder::IsNurbSurfaceCylinder(ctx, copy of the edited NURB, .., scale)`.
+    RecognizeCylinder {
+        /// NURB edit.
+        edit: Edit,
+        /// Tolerance scale.
+        scale: f64,
+    },
     /// `RebuildSTEPFromNURBParameters` after an edit of the NURB.
     Rebuild {
         /// NURB edit.
@@ -162,6 +170,7 @@ impl Op {
             Op::Recognize { .. } => 2,
             Op::Rebuild { .. } => 3,
             Op::Trim { .. } => 4,
+            Op::RecognizeCylinder { .. } => 5,
         }
     }
 }
@@ -334,7 +343,7 @@ fn push_op(o: &mut Vec<f64>, op: &Op) -> Result<(), FfiError> {
             finite(&[*distance, *tol], "offset")?;
             o.extend([*distance, *tol]);
         }
-        Op::Recognize { edit, scale } => {
+        Op::Recognize { edit, scale } | Op::RecognizeCylinder { edit, scale } => {
             push_edit(o, edit)?;
             finite(&[*scale], "recognize scale")?;
             o.push(*scale);

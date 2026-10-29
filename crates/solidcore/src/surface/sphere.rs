@@ -96,6 +96,10 @@
 //!   point only when the intersection circle's own radius is within the tolerance, not
 //!   when the gap to tangency is, which collapses circles of radius up to about
 //!   `sqrt(2 R tol)`. Off by default (upstream behaviour). No input-driven recursion.
+//! - **Opt-in fix** ([`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb),
+//!   WR-493, the SolidCraft fork's tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere`
+//!   tests the half meridian within `180 + 360 * SM_EFF_ZERO` degrees and the sphere it
+//!   finds keeps the tested NURB (`SetFromGwNurb`). Off by default (upstream).
 //! - **Parent calls.** `Transform` finishes in `SmSurfOfRevolution::Transform` (status
 //!   ignored), its polar-converter rebuild given the sphere's iso circles as upstream's
 //!   virtual call does; `ReadFromDB` reads the parent record with
@@ -125,6 +129,7 @@ use crate::nurbs::b_spline_surface::{
     BSplineSurface, BoundingBoxRequest, IsoCurveOptions, LocationType, SurfParamType,
 };
 use crate::nurbs::nurbs_crv::to_euclid;
+use crate::nurbs::nurbs_srf::copy_nurb_surface;
 use crate::surface::cone::Cone;
 use crate::surface::plane::p2::PlaneOwner;
 use crate::surface::plane::Plane;
@@ -1887,6 +1892,13 @@ impl Sphere {
     /// domain of `test` (through [`Self::reparameterize`]). `None` when `test` is not
     /// a sphere.
     ///
+    /// With the opt-in
+    /// [`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb)
+    /// (WR-493) the half turn is tested within `180 + 360 * SM_EFF_ZERO` degrees and the
+    /// sphere then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
+    /// (`SetFromGwNurb`); by default `180 + SM_EFF_ZERO` and the NURB made from the
+    /// fitted circles, as upstream.
+    ///
     /// # Errors
     ///
     /// Upstream's `SER` statuses (returned as a `TRUE` result without sphere): those of
@@ -1937,14 +1949,21 @@ impl Sphere {
         // see if we have a U or a V oriented sphere
         let angles_u = iso_u.angles.unwrap_or(Extent1d::new());
         let angles_v = iso_v.angles.unwrap_or(Extent1d::new());
+        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the half-meridian
+        // tolerance compensates for degrees, as RebuildSTEPFromNURBParameters [B279]
+        let half_meridian_tol = if k.fixes.found_torus_sphere_keep_tested_nurb {
+            360.0 * EFF_ZERO
+        } else {
+            EFF_ZERO
+        };
         let is_sphere_with_swap_uv = iso_u.parallel_planes
             && !iso_u.same_plane // [ 080625 ]
             && iso_v.coaxial_centers
-            && angles_v.length() <= 180.0 + EFF_ZERO;
+            && angles_v.length() <= 180.0 + half_meridian_tol;
         let is_sphere_no_swap_uv = iso_v.parallel_planes
             && !iso_v.same_plane // [ 080625 ]
             && iso_u.coaxial_centers
-            && angles_u.length() <= 180.0 + EFF_ZERO;
+            && angles_u.length() <= 180.0 + half_meridian_tol;
 
         // quit when not a properly oriented sphere
         if !is_sphere_with_swap_uv && !is_sphere_no_swap_uv {
@@ -2084,6 +2103,17 @@ impl Sphere {
             Err(e) if e.is_unported() => return Err(e),
             Err(_) => return Ok(None), // [B414]
             Ok(()) => {}
+        }
+
+        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the sphere keeps
+        // the NURB tested (SetFromGwNurb, whose rebuild's status is ignored)
+        if k.fixes.found_torus_sphere_keep_tested_nurb {
+            let nurb = test
+                .gw_nurb()
+                .ok_or_else(|| SolidError::null_pointer(OP_NURB_SPHERE))?;
+            sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+            sphere.base.base.nurb_is_borrowed = false;
+            ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
         }
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
@@ -2949,5 +2979,37 @@ mod tests {
         let mut db = DatabaseReader::new();
         let r = Sphere::read_from_db(&Kernel::default(), &mut db, 0);
         assert!(r.is_err());
+    }
+
+    /// The control points and knots of two NURBs agree bit for bit.
+    fn same_nurb(a: &BSplineSurface, b: &BSplineSurface) -> bool {
+        match (a.gw_nurb(), b.gw_nurb()) {
+            (Some(a), Some(b)) => {
+                let rows = |s: &crate::nurbs::srf_basic::Surface| {
+                    s.rows()
+                        .flat_map(|r| r.iter().map(|p| [p.x, p.y, p.z, p.w]))
+                        .collect::<Vec<_>>()
+                };
+                rows(a) == rows(b) && a.u_knots() == b.u_knots() && a.v_knots() == b.v_knots()
+            }
+            _ => false,
+        }
+    }
+
+    /// tangency-labs/smlib@7ea6a96 (WR-493): with `found_torus_sphere_keep_tested_nurb`
+    /// the sphere found in a NURB keeps exactly that NURB.
+    #[test]
+    fn wr493_sphere_found_in_its_nurb_keeps_it() {
+        let mut k = Kernel::default();
+        k.fixes.found_torus_sphere_keep_tested_nurb = true;
+        for radius in [2.0, -2.0, 1e-3, 500.0] {
+            let s = canonical(&k, radius);
+            let nurbs = BSplineSurface::from_gw_nurb(s.base().base().gw_nurb().unwrap());
+            let found = Sphere::is_nurb_surface_sphere(&k, &nurbs, 1.0)
+                .unwrap()
+                .expect("a sphere");
+            assert!(same_nurb(found.base().base(), &nurbs));
+            assert!((found.radius() - radius.abs()).abs() < 1e-9 * radius.abs());
+        }
     }
 }
