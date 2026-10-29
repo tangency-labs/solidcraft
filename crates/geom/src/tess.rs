@@ -514,46 +514,55 @@ pub(crate) fn span_of(knots: &[f64], p: usize, n: usize, t: f64) -> usize {
     k
 }
 
+/// The non-zero basis functions of degree `p` on span `span` (NURBS Book A2.2): element `j` is
+/// `N_{span−p+j}`.
+fn basis_funs(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[f64; W]> {
+    if p >= W {
+        return None;
+    }
+    let kn = |i: usize| knots.get(i).copied();
+    let mut n = [0.0f64; W];
+    n[0] = 1.0;
+    for j in 1..=p {
+        let mut saved = 0.0;
+        for (r, nr) in n.iter_mut().enumerate().take(j) {
+            // right[r + 1] and left[j − r] of A2.2.
+            let right = kn(span + r + 1)? - t;
+            let left = t - kn((span + 1 + r).checked_sub(j)?)?;
+            let den = right + left;
+            let temp = if den != 0.0 { *nr / den } else { 0.0 };
+            *nr = saved + right * temp;
+            saved = left * temp;
+        }
+        n[j] = saved;
+    }
+    Some(n)
+}
+
 /// Non-zero basis functions of degree `p` on span `span` and their first derivatives
-/// (NURBS Book A2.3 with n = 1). `ders[0][j]` is `N_{span−p+j}`, `ders[1][j]` its derivative.
+/// (NURBS Book eq. 2.7, from the degree p − 1 functions on the same span). `ders[0][j]` is
+/// `N_{span−p+j}`, `ders[1][j]` its derivative. One-dimensional tables, as the GPU twin keeps
+/// them, so a high degree costs its own work only.
 pub(crate) fn basis_ders(knots: &[f64], span: usize, p: usize, t: f64) -> Option<[[f64; W]; 2]> {
     if p == 0 || p >= W {
         return None;
     }
     let kn = |i: usize| knots.get(i).copied();
-    // ndu[j][r]: basis values (upper triangle incl. diagonal), knot differences (lower).
-    let mut ndu = [[0.0f64; W]; W];
-    let (mut left, mut right) = ([0.0f64; W], [0.0f64; W]);
-    ndu[0][0] = 1.0;
-    for j in 1..=p {
-        left[j] = t - kn((span + 1).checked_sub(j)?)?;
-        right[j] = kn(span + j)? - t;
-        let mut saved = 0.0;
-        for r in 0..j {
-            ndu[j][r] = right[r + 1] + left[j - r];
-            let temp = if ndu[j][r] != 0.0 { ndu[r][j - 1] / ndu[j][r] } else { 0.0 };
-            ndu[r][j] = saved + right[r + 1] * temp;
-            saved = left[j - r] * temp;
-        }
-        ndu[j][j] = saved;
-    }
-    let mut ders = [[0.0f64; W]; 2];
-    for j in 0..=p {
-        ders[0][j] = ndu[j][p];
-    }
-    // First derivative: p·(N_{r,p−1}/(u_{r+p}−u_r) − N_{r+1,p−1}/(u_{r+p+1}−u_{r+1})).
+    let lower = basis_funs(knots, span, p - 1, t)?;
+    let mut ders = [basis_funs(knots, span, p, t)?, [0.0f64; W]];
+    // N'_{i,p} = p·(N_{i,p−1}/(u_{i+p}−u_i) − N_{i+1,p−1}/(u_{i+p+1}−u_{i+1})), i = span − p + r.
     for r in 0..=p {
         let mut d = 0.0;
         if r >= 1 {
-            let den = ndu[p][r - 1];
+            let den = kn(span + r)? - kn((span + r).checked_sub(p)?)?;
             if den != 0.0 {
-                d += ndu[r - 1][p - 1] / den;
+                d += lower[r - 1] / den;
             }
         }
         if r < p {
-            let den = ndu[p][r];
+            let den = kn(span + r + 1)? - kn((span + r + 1).checked_sub(p)?)?;
             if den != 0.0 {
-                d -= ndu[r][p - 1] / den;
+                d -= lower[r] / den;
             }
         }
         ders[1][r] = d * p as f64;

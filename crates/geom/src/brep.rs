@@ -284,7 +284,7 @@ fn knots(values: &[f64], count: usize, budget: &mut Budget) -> Result<()> {
     budget.add(values.len())?;
     numbers(values.iter().copied())?;
     let degree = values.len().checked_sub(count.saturating_add(1)).ok_or(Invalid("spline degree"))?;
-    require((2..=4096).contains(&count) && (1..=16).contains(&degree) && degree < count, "spline degree or size")?;
+    require((2..=4096).contains(&count) && (1..=crate::bspline::MAX_SPLINE_DEGREE).contains(&degree) && degree < count, "spline degree or size")?;
     require(values.windows(2).all(|w| w.first() <= w.get(1)), "unordered knots")?;
     require(values.get(degree) < values.get(count), "empty spline domain")?;
     // No knot may have multiplicity greater than degree + 1.
