@@ -1,0 +1,32 @@
+{
+ "sources": [],
+ "what": "joint.limits -10..45 on a revolute, then a drive to 90",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); limits set afterwards clamp the same way: 90 -> 45, centre (20 cos45, 20 sin45, 5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 10,
+   "json": {
+    "values": [
+     {
+      "value": 45.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      14.142136,
+      14.142136,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}
