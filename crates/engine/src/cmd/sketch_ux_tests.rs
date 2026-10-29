@@ -1578,11 +1578,14 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
             assert_eq!(which, expected, "turned {turn}, text at ({x}, {y}): {r}");
             assert!(side > 0.0, "turned {turn}, text at ({x}, {y}): the end on the other side");
         }
-        // Near the boundary (0.5 of the major half-axis along, 0.55 of the minor across) the
-        // half-axis a placement had is kept; well past it, it is not.
+        // Near the boundary (0.5 of the major half-axis along, 0.55 or 0.45 of the minor
+        // across) the half-axis a placement had is kept, from either side; well past it, it is not.
         let near = json!(turned(10.0, 4.4, turn));
         assert_eq!(dimension(turn, json!({"text_at": near})).0, "major");
         assert_eq!(dimension(turn, json!({"text_at": near, "previous_axis": "minor"})).0, "minor");
+        let near = json!(turned(10.0, 3.6, turn));
+        assert_eq!(dimension(turn, json!({"text_at": near})).0, "minor");
+        assert_eq!(dimension(turn, json!({"text_at": near, "previous_axis": "major"})).0, "major");
         assert_eq!(dimension(turn, json!({"text_at": turned(16.0, 4.0, turn), "previous_axis": "major"})).0, "minor");
     }
     // An explicit type wins; with no text, the minor half-axis; radius, and any other type,

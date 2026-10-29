@@ -1403,7 +1403,7 @@ mod tests {
         h.step(&json!({"key":"Tab"})).unwrap();
         // Across the major axis, then on the boundary: the major half-axis; past its end, then
         // on the boundary again: the minor one.
-        for (at, half) in [([3., 16.], 20.), ([10., 4.4], 20.), ([16., 4.], 8.), ([10., 4.4], 8.)] {
+        for (at, half) in [([3., 16.], 20.), ([10., 3.6], 20.), ([16., 4.], 8.), ([10., 4.4], 8.)] {
             h.step(&json!({"move":{"sketch":at}})).unwrap();
             h.settle();
             let (param, draft) = placement_preview(&h.app).expect("an ellipse has a dimension preview");
