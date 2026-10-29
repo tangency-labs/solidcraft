@@ -7,19 +7,22 @@
 //! Every op starts with a B-rep block (the shim builds a fresh `SmBrep` per call):
 //! `0` + the B-rep block of [`super::topology_edgeuse_p1`] (`.smb` file, wire edge,
 //! face, `prog_test` wire network); `1 n (surface u0 v0 u1 v1)*n` with `1 <= n <=`
-//! [`MAX_FACES`], one face per surface in one B-rep (unstitched sheets); or
-//! `2 P[3] l w h` (`SmApiCreateBox`). Indices refer to the export's traversal order; a
-//! target is `ty idx` with `ty` an `SmTopoTypes.h` code (vertex, edge or face). Every
-//! output starts with `0`, or with `-1 status` when the B-rep could not be built
-//! (nothing else follows). `-2` in a status slot is "upstream would dereference null or
-//! free twice": the shim did not call it.
+//! [`MAX_FACES`], one face per surface in one B-rep (unstitched sheets);
+//! `2 P[3] l w h` (`SmApiCreateBox`); or `3 P1[3] D1[3] P2[3] D2[3] t0 t1 edge_tol
+//! vertex_tol`, one wire edge over an `SmHermiteCurve` with the given interval, built
+//! by the native constructors on each side (the shared export carries only B-spline and
+//! line curves exactly, so this block has no import). Indices refer to the export's
+//! traversal order; a target is `ty idx` with `ty` an `SmTopoTypes.h` code (vertex, edge
+//! or face). Every output starts with `0`, or with `-1 status` when the B-rep could not
+//! be built (nothing else follows). `-2` in a status slot is "upstream would dereference
+//! null or free twice": the shim did not call it.
 //!
 //! | [`Op`]      | parameters after the block                          | outputs |
 //! |-------------|-----------------------------------------------------|---------|
 //! | `Export`    |                                                     | the `Export` of unit `topology.brep_p1` (its extras, then the graph) |
 //! | `Select`    | `ty1 idx1 ty2 idx2 dist`                            | `status [keep_first max_distance]` (`SmStitchCallback::SelectTopologyToKeep`) |
 //! | `Interior`  | `edge t tol`                                        | `status [interior]` (`sm_CheckInteriorEdge`) |
-//! | `Split`     | `edge P[3] tol`                                     | `status [reason dist split [digest]]` (`sm_TestAndSplitEdge`) |
+//! | `Split`     | `edge P[3] tol editing probe`                       | `status [reason dist split [digest]]` (`sm_TestAndSplitEdge`, on the B-rep with `m_bEditingEnabled` set when `editing`), then with `probe` `present [n_spans (left right c0 c1 max_length chsq turn imin imax)*n]` (`SmBezierAux1d` of the edge curve's cache as the split-point solve left it) |
 //! | `VPairs`    | `tol ignore n1 v*n1 n2 v*n2`                        | `status [max_gap min_gap processed deleted list1 list2 [digest]]` (`StitchVertexPairs`; lists `n idx*n`, `-1` for null) |
 //! | `Edges`     | `tol manifold fast ignore nesting n v*n`            | `status [max_gap min_gap glued deleted [digest]]` (`StitchEdgesOfVertices`) |
 //! | `Simple`    | `api tol nk f*nk nd f*nd`                           | `status [max_vertex_gap max_edge_gap stitched digest]` (`DoSimpleFaceStitch`, or `SmApiSimpleFaceStitch` with the B-rep tolerance) |
@@ -93,9 +96,9 @@ mod sys {
     }
 }
 
-/// A stitch B-rep block (shared with unit `heal.stitch_p2`).
+/// A B-rep block for this unit's shim, including its native Hermite-wire builder.
 pub(crate) fn block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
-    match rd.index(2)? {
+    match rd.index(3)? {
         0 => brep_block(rd, path),
         1 => {
             let n = rd.index(MAX_FACES)?;
@@ -108,12 +111,36 @@ pub(crate) fn block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
             }
             Ok(())
         }
-        _ => {
+        2 => {
             rd.vec3()?;
             for _ in 0..3 {
                 let d = rd.finite()?;
                 if !(1e-3..=1e6).contains(&d) {
                     return Err(bad("box size out of range"));
+                }
+            }
+            Ok(())
+        }
+        // `3 P1[3] D1[3] P2[3] D2[3] t0 t1 edge_tol vertex_tol`: a wire edge over one
+        // SmHermiteCurve, built by the native constructors on each side (the shared B-rep
+        // export carries only B-spline and line curves exactly, so this block is not
+        // exported for import: the Rust runner builds the same B-rep itself)
+        _ => {
+            for _ in 0..4 {
+                let v = rd.vec3()?;
+                if v.iter().any(|c| c.abs() > MAX_STITCH_COORD) {
+                    return Err(bad("hermite point beyond 1e150"));
+                }
+            }
+            let t0 = rd.finite()?;
+            let t1 = rd.finite()?;
+            if !(t0 >= 0.0 && t1 <= 1.0 && t0 < t1) {
+                return Err(bad("hermite interval must be inside [0, 1]"));
+            }
+            for _ in 0..2 {
+                let tol = rd.finite()?;
+                if !(0.0..=1e6).contains(&tol) {
+                    return Err(bad("hermite tolerance out of range"));
                 }
             }
             Ok(())
@@ -183,6 +210,11 @@ fn op_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError> 
             rd.below(ne)?;
             rd.vec3()?;
             rd.finite()?;
+            // `editing`: set the B-rep's m_bEditingEnabled first (MakeVertexSplitEdge
+            // refuses every split with it off); `probe`: append the edge curve's cache
+            // after the call, as the split-point solve left it
+            rd.flag()?;
+            rd.flag()?;
         }
         Op::VPairs => {
             rd.finite()?;
