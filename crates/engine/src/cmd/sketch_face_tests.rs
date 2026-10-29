@@ -75,11 +75,26 @@ fn explicit_rebind_preserves_geometry_dimensions_context_and_one_undo() {
 #[test]
 fn unsupported_face_has_explicit_fixed_alternative_and_no_live_projection() {
     let mut s = Session::default();
-    // A top half Offset Face raised: no construction certificate and no exact history name yet.
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Base"}));
-    run(&mut s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
-    run(&mut s, "solid.offset_face", json!({"faces":[[10,15,20]],"distance":5}));
-    let mut pick = top_pick(&s, "Base");
+    // A rib's wall: a rib reports no roles for the faces it builds (Traced::unnamed), so the
+    // wall has no construction certificate and no exact history name to attach by.
+    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
+    run(&mut s, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
+    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
+    run(&mut s, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+    let mut pick = {
+        let world = s.world_state().unwrap();
+        let body = world.body("L").unwrap();
+        let face = body
+            .body
+            .faces(0.01)
+            .unwrap()
+            .into_iter()
+            .find(|face| face.plane_normal.is_some_and(|n| n.dot(Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
+            .unwrap();
+        json!({"body":"L","index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
+    };
     let before = s.doc.to_json();
     let error = s.execute("sketch.create", &json!({"plane":pick})).unwrap_err();
     assert!(error.to_string().contains("fixed"), "{error}");
