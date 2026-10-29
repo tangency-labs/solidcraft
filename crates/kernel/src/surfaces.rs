@@ -1883,8 +1883,15 @@ mod tests {
         // A torus patch (R 20, r 5): between the tube radii r and r + 1 over its own angles, θ round
         // the tube and φ round the axis (read off its mesh): the volume is
         // Δφ·[R((r+1)² − r²)/2·Δθ + ((r+1)³ − r³)/3·(sin θ1 − sin θ0)].
-        let ring = torus(Vec3::ZERO, 20.0, 5.0).unwrap();
-        let face = copy_faces(&ring, &[Vec3::new(25.0, 0.0, 0.0)]).unwrap();
+        // SMLib makes a torus one face: the patch is the piece of it with x, y > 0 and z > 1
+        // (bounded by iso lines both ways: planes through the axis, and z = 1 round the tube).
+        let mut ring = torus(Vec3::ZERO, 20.0, 5.0).unwrap();
+        for (o, n) in [(Vec3::ZERO, Vec3::X), (Vec3::ZERO, Vec3::Y), (Vec3::new(0.0, 0.0, 1.0), Vec3::Z)] {
+            let pieces = crate::split_by_plane(&ring, &Plane::from_normal(o, n).unwrap()).unwrap();
+            ring = pieces.into_iter().find(|b| (measure(b).unwrap().bbox.min - o).dot(n) > -1e-6).unwrap();
+        }
+        let (c, s) = (std::f64::consts::FRAC_PI_4.cos(), std::f64::consts::FRAC_PI_4.sin());
+        let face = copy_faces(&ring, &[Vec3::new((20.0 + 5.0 * c) * c, (20.0 + 5.0 * c) * s, 5.0 * s)]).unwrap();
         let mesh = face.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
         let angles: Vec<(f64, f64)> = mesh.positions.iter().map(|p| (p.z.atan2((p.x * p.x + p.y * p.y).sqrt() - 20.0), p.y.atan2(p.x))).collect();
         let span = |f: &dyn Fn(&(f64, f64)) -> f64| {

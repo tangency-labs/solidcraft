@@ -627,7 +627,9 @@ fn extrude_of_adjacent_profiles_has_whole_edges() {
     assert_eq!(below.len(), 2, "{si}");
     run(&mut s, "solid.extrude", json!({"sketch": "Holder", "profiles": below, "distance": 23, "body_name": "Holder"}));
     let topo = run(&mut s, "model.faces", json!({"body": "Holder"}));
-    assert_eq!(topo["faces"].as_array().unwrap().len(), 5, "a cut-off cylinder: {topo}");
+    // The arc side (one face: SMLib keeps a cylinder's arc of more than half a turn whole), the
+    // chord's flat side and the two ends.
+    assert_eq!(topo["faces"].as_array().unwrap().len(), 4, "a cut-off cylinder: {topo}");
     let lo = run(&mut s, "inspect.measure", json!({"bodies": ["Holder"]}))["bodies"][0]["bbox"]["min"][1].as_f64().unwrap();
     run(&mut s, "solid.move", json!({"bodies": ["Holder"], "translate": [0, -5.0 - lo, 0]}));
     // The handle: r35 on the Y axis with a bevelled end.
@@ -1920,13 +1922,15 @@ fn a_checkpoint_survives_file_new() {
     run(&mut s, "solid.box", json!({"length": 1.0, "width": 1.0, "height": 1.0}));
     let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
     run(&mut s, "file.new", json!({"name": "Replacement"}));
+    // The volume as SMLib integrates it, to rounding (a unit box measures 1 + 2e-16).
+    let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
     run(&mut s, "solid.box", json!({"length": 2.0, "width": 2.0, "height": 2.0}));
-    assert_eq!(run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64(), Some(8.0));
+    assert!((volume(&mut s) - 8.0).abs() < 1e-12);
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
-    assert_eq!(run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64(), Some(1.0));
+    assert!((volume(&mut s) - 1.0).abs() < 1e-12);
     // The undo history is the restored design's own: one step back is the empty design.
     run(&mut s, "edit.undo", json!({}));
-    assert_eq!(run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64(), Some(0.0));
+    assert!(volume(&mut s).abs() < 1e-12);
 }
 
 #[test]
@@ -4432,31 +4436,21 @@ fn creating_a_component_recomputes_nothing() {
     run(&mut s, "sketch.circle.center", json!({"center": [25, 25], "radius": 2}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Post sketch", "to": [25, 25, 10], "operation": "new", "body_name": "Post"}));
-    // A plate whose top face loses its certificate: a patterned cut, a pad joined flush with
-    // the top, then one more cut. Extruding that face makes a sketch on a legacy face plane.
+    // A sketch on a face without a construction certificate: a face extrude on a plate, saved
+    // as a design from before face attachments were certified (no anchor), and reopened.
     run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "corner": [200, 0, 0], "operation": "new", "body_name": "Plate"}));
-    run(
-        &mut s,
-        "solid.cylinder",
-        json!({"diameter": 4, "height": 12, "base": [210, 10, -1], "operation": "cut", "targets": ["Plate"], "name": "Pilot"}),
-    );
-    run(
-        &mut s,
-        "solid.pattern.rectangular",
-        json!({"features": ["Pilot"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 20, "dir2": [0, 1, 0], "count2": 4, "spacing2": 20}),
-    );
-    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "5 mm", "name": "Pad sketch"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [260, 60], "p1": [295, 95]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.extrude", json!({"sketch": "Pad sketch", "distance": 5, "operation": "join", "targets": ["Plate"]}));
-    run(&mut s, "solid.box", json!({"length": 5, "width": 100, "height": 12, "corner": [199, 0, -1], "operation": "cut", "targets": ["Plate"]}));
     run(&mut s, "solid.extrude", json!({"face": [240, 40, 10], "distance": 1, "operation": "join", "name": "Face layer"}));
-    let legacy_face = s
-        .doc
-        .features
-        .iter()
-        .any(|f| matches!(&f.kind, solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor: None, .. }, .. }));
-    assert!(legacy_face, "the face extrude's sketch is on a legacy face plane");
+    let mut legacy = (*s.doc).clone();
+    let mut legacy_face = false;
+    for f in &mut legacy.features {
+        if let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor, .. }, .. } = &mut f.kind {
+            *anchor = None;
+            legacy_face = true;
+        }
+    }
+    assert!(legacy_face, "the face extrude's sketch is on a face plane");
+    let mut s = Session::new(solidcraft_doc::Document::from_json(&legacy.to_json()).unwrap());
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "the legacy design evaluates");
     for name in ["First", "Second"] {
         run(&mut s, "component.create", json!({"name": name}));
         assert_eq!(s.model.last_recomputed, 0, "creating {name} recomputed a feature");

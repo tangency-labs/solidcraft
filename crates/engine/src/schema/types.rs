@@ -730,8 +730,8 @@ macro_rules! pick_list {
 
 pick_list!(
     /// The `faces` of `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face` and
-    /// `face.delete`, as `features::face_points` reads them. (Extrude's `faces` is a
-    /// [`FacesParam`].)
+    /// `face.delete`, as `features::face_points` reads them; `solid.shell` also takes an empty
+    /// list (a closed hollow body). (Extrude's `faces` is a [`FacesParam`].)
     FaceRefs,
     FaceRef,
     "`faces` must be a list of points or face names",
