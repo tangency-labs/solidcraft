@@ -429,8 +429,30 @@ fn end_cap_outlines_inset_and_chamfer_exactly() {
     close(inset(&round.outer, 2.0).unwrap().signed_area(), std::f64::consts::PI * 324.0, "round inset");
     assert!(inset(&round.outer, 20.0).is_err());
     assert!(chamfered(&inset(&round.outer, 2.0).unwrap(), 1.0).is_err());
-    let angle = Profile::Angle { width: 40.0, height: 40.0, thickness: 4.0, root_radius: None, toe_radius: None }.region().unwrap();
-    assert!(inset(&angle.outer, 1.0).is_err());
+    // A 40 x 40 x 4 angle in by 1: an L 38 long each way and 2 thick, 38 * 2 + 36 * 2.
+    let angle = Profile::Angle { width: 40.0, height: 40.0, thickness: 4.0, root_radius: Some(0.0), toe_radius: Some(0.0) }.region().unwrap();
+    let l = inset(&angle.outer, 1.0).unwrap();
+    close(l.signed_area(), 148.0, "angle inset");
+    // Five outside corners lose 0.5 * 0.5 / 2 each; the inside corner stays. A chamfer of 1 eats
+    // the 2 mm toes whole.
+    close(chamfered(&l, 0.5).unwrap().signed_area(), 148.0 - 5.0 * 0.125, "angle chamfer");
+    assert!(chamfered(&l, 1.0).is_err());
+    // Half the leg thickness or more leaves no plate.
+    assert!(inset(&angle.outer, 2.0).is_err());
+    assert!(inset(&angle.outer, 2.5).is_err());
+    // A root rounding of 3 grows to 4 and keeps its fillet: 16 - 4 pi more than the sharp L.
+    let rooted = Profile::Angle { width: 40.0, height: 40.0, thickness: 4.0, root_radius: Some(3.0), toe_radius: Some(0.0) }.region().unwrap();
+    close(inset(&rooted.outer, 1.0).unwrap().signed_area(), 148.0 + 16.0 - 4.0 * std::f64::consts::PI, "rooted angle inset");
+    // A 100 x 50 I-beam (web 4.5, flanges 7) in by 1: flanges 48 x 5, a web 2.5 x 88.
+    let beam = Profile::IBeam { height: 100.0, width: 50.0, web: 4.5, flange: 7.0, root_radius: Some(0.0) }.region().unwrap();
+    close(inset(&beam.outer, 1.0).unwrap().signed_area(), 2.0 * 48.0 * 5.0 + 2.5 * 88.0, "beam inset");
+    assert!(inset(&beam.outer, 2.3).is_err());
+    let channel =
+        Profile::Channel { height: 100.0, width: 50.0, web: 6.0, flange: 8.0, root_radius: Some(5.0), toe_radius: Some(2.0) }.region().unwrap();
+    let c = inset(&channel.outer, 1.5).unwrap();
+    assert!(chamfered(&c, 3.0).is_err(), "3 + 3 is more than the 5 mm flange tip");
+    let cut = chamfered(&c, 2.0).unwrap();
+    assert!(cut.signed_area() < c.signed_area() && cut.signed_area() > c.signed_area() - 30.0);
     for d in [f64::NAN, f64::INFINITY, -1.0, 1e300] {
         let _ = inset(&tube.outer, d).and_then(|l| chamfered(&l, d));
     }

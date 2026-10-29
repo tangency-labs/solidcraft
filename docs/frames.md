@@ -86,15 +86,17 @@ each must be a flat end of a frame member, square to its line.
 - **Thickness** is the plate's thickness. **Outward** puts it past the end, so the frame gets
   longer by the thickness; **Inward** cuts the member back by the thickness and puts the plate
   where the end was, so the frame keeps its length.
-- **Corner Chamfer** cuts each corner along both edges, measured from where the edges meet. On a
+- **Corner Chamfer** cuts each outside corner along both edges, measured from where the edges meet. On a
   rounded corner it must be at least the rounding, which it cuts away; a round cap has no corners
   to chamfer.
 - Caps follow the member: change its profile, its line or the frame sketch and they move and
   resize with it. Renaming the member keeps them. A cap whose member or face is gone reports an
   error instead of picking another end.
-- Caps follow convex outlines of lines and arcs: round and rectangular bars and tubes, and profile
-  sketches of that shape. An angle, channel or I-beam, whose outline turns inward, is refused, as
-  are an inset or chamfer that leaves no plate.
+- Caps follow any outline of lines and arcs: bars and tubes, and the L of an angle, the C of a
+  channel and the I of a beam, flanges, web and all. The plate keeps the profile's shape: a root
+  rounding where the web meets a flange grows by the inset, and the chamfer cuts only outside
+  corners, leaving the roots as they are. An inset of half a wall or more (an angle's leg, a
+  beam's web) leaves no plate and is refused, as is a chamfer longer than its edges allow.
 
 ```json
 {"command": "frame.end_cap", "params": {"faces": [{"face": [18.5, 0, 300], "body": "Post", "index": 7}], "thickness": 6}}

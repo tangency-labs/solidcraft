@@ -510,9 +510,12 @@ pub(super) fn build(
         }
         if let (FeatureKind::FrameEndCap { ends, .. }, FeatureKind::FrameEndCap { ends: originals, .. }) = (&mut f.kind, &old.kind) {
             for (end, original) in ends.iter_mut().zip(originals) {
-                if let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(&mut end.plane), super::sketch::face::anchor(&original.plane)) {
+                if let (Some(anchor), Some(original)) =
+                    (super::sketch::face::anchor_mut(&mut end.plane), super::sketch::face::anchor(&original.plane))
+                {
                     if bodies.contains_key(&original.target.body) {
-                        anchor.component = *components.get(&original.component).ok_or_else(|| bad(CMD, "end cap's member is outside the copied graph"))?;
+                        anchor.component =
+                            *components.get(&original.component).ok_or_else(|| bad(CMD, "end cap's member is outside the copied graph"))?;
                         anchor.path = cloned_path(&source, &original.path, component, &clone_path, &occurrences)?;
                     }
                     anchor.author_path = cloned_path(&source, &original.author_path, component, &clone_path, &occurrences)?;

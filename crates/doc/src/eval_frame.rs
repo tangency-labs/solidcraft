@@ -88,7 +88,13 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
 
 /// The member of feature `f` on line `line`, as its body was made: the plane square to the line
 /// at its start (x × y along the line), its length, and its profile in that plane.
-pub(crate) fn member_section(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState, line: &str) -> Result<(Plane, f64, Region2)> {
+pub(crate) fn member_section(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+    line: &str,
+) -> Result<(Plane, f64, Region2)> {
     let Layout { segments, regions, at, turn, .. } = layout(doc, vals, f, st)?;
     let (_, a, b) = segments.iter().find(|(id, _, _)| id == line).ok_or_else(|| DocError::Unknown(format!("line `{line}` of the member feature")))?;
     let (x, y) = frame::member_axes(*b - *a, turn).ok_or_else(|| DocError::Invalid(format!("line `{line}` has no length")))?;

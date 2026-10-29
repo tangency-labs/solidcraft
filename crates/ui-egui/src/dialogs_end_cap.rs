@@ -4,7 +4,7 @@ use crate::{
     SolveApp,
     dialogs::{Kind, shown_expr},
     selection::{PLANAR_FACES, SelInput},
-    ui_kit::{choice_row, expr_row},
+    ui_kit::{IconSegment, choice_row, expr_row, row, segmented_icons},
 };
 use serde_json::{Map, Value, json};
 use solidcraft_engine::{
@@ -36,8 +36,21 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut EndCap) -> bool {
     let mut enter = expr_row(ui, app.tr("ui.thickness"), &mut c.thickness);
-    choice_row(ui, app.tr("ui.end_cap.direction"), "end_cap_direction", &mut c.direction, &[app.tr("ui.end_cap.outward"), app.tr("ui.end_cap.inward")]);
-    choice_row(ui, app.tr("ui.end_cap.inset_kind"), "end_cap_inset_kind", &mut c.inset_kind, &[app.tr("ui.end_cap.ratio"), app.tr("ui.end_cap.length")]);
+    // On top of the end, or set into it with the member cut back: the icons show which.
+    row(ui, app.tr("ui.end_cap.direction"), |ui| {
+        let options = [
+            IconSegment { key: "outward", icon: "end_cap_outward", tip: app.tr("ui.end_cap.outward").to_string() },
+            IconSegment { key: "inward", icon: "end_cap_inward", tip: app.tr("ui.end_cap.inward").to_string() },
+        ];
+        segmented_icons(ui, &mut c.direction, &options, &[]);
+    });
+    choice_row(
+        ui,
+        app.tr("ui.end_cap.inset_kind"),
+        "end_cap_inset_kind",
+        &mut c.inset_kind,
+        &[app.tr("ui.end_cap.ratio"), app.tr("ui.end_cap.length")],
+    );
     if c.inset_kind == 0 {
         enter |= expr_row(ui, app.tr("ui.end_cap.inset_ratio"), &mut c.ratio);
     } else {
