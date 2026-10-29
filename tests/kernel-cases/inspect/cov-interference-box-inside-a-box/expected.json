@@ -1,0 +1,27 @@
+{
+ "sources": [],
+ "what": "a box wholly inside another",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin and a box 10 x 10 x 10 from (5,5,5) inside it: the overlap is the small box: V 1000, centre (10,10,10)",
+ "results": [
+  {
+   "command": 2,
+   "pointer": "/count",
+   "value": 1
+  },
+  {
+   "command": 2,
+   "pointer": "/interferences/0/volume_mm3",
+   "value": 1000.0
+  },
+  {
+   "command": 2,
+   "pointer": "/interferences/0/center",
+   "value": [
+    10,
+    10,
+    10
+   ]
+  }
+ ]
+}
