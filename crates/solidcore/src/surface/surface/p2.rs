@@ -801,6 +801,7 @@ impl Surface {
                 minor_radius: s.minor_radius,
                 // The copy constructor resets this flag; an evaluation copy must not.
                 inside_out: s.inside_out,
+                keeps_inside_out: s.keeps_inside_out,
             })),
             SurfaceKind::SurfOfRevolution(s) => {
                 SurfaceKind::SurfOfRevolution(Box::new(s.clone_for_evaluation(depth + 1)?))

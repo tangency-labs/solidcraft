@@ -23,6 +23,10 @@
 //! a whole turn gives each other curve its cylinder, cone, sphere or torus
 //! ([`analytic_revolution`]) before falling back to the `SmSurfOfRevolution`, and a
 //! partial turn sweeps with [`RotationalSweepGeometry::set_analytic_revolutions`] on.
+//! With the fix a whole turn also skips the one-curve special case
+//! (`sm_CreateAnalyticRotationalSweep`), as fork 9853e54 deletes it: a one-curve profile
+//! goes through the same per-curve rule, so a whole circle's torus has its seam at the
+//! profile (#1491).
 
 use super::{construct::target, geometry::bspline, PrimitiveAccess};
 use crate::curve::curve::Curve;
@@ -315,7 +319,12 @@ impl PrimitiveCreation {
         self.init_entity_maps();
         let _ = target(self, brep)?;
         a.set_editing(brep, true)?;
-        if let [Some(curve)] = curves {
+        // Not upstream (#1491, with `fixes.revolve_analytic_profile_faces`): fork
+        // 9853e54 deletes the one-curve special case (sm_CreateAnalyticRotationalSweep),
+        // whose whole-circle torus puts its seam a quarter turn from the profile; the
+        // per-curve rule below covers a one-curve profile too
+        let one_curve_special_case = !a.kernel(brep)?.fixes.revolve_analytic_profile_faces;
+        if let (true, [Some(curve)]) = (one_curve_special_case, &mut *curves) {
             if ignored(a.with_primitive_brep(brep, |k, b| {
                 analytic_rotational_sweep(k, b, curve, axis_base, axis)
             }))?

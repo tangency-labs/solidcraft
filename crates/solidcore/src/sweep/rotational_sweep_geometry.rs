@@ -1471,16 +1471,23 @@ mod tests {
             };
             assert_eq!(analytic, expected, "{name}");
             let (n_new, n_old) = (new.normal.unwrap(), old.normal.unwrap());
-            if matches!(name, "cone" | "drill point") {
-                // #1463: a line falling along the axis sweeps its cone from the low
-                // end, never inside out (fork 9853e54), laid out as the reversed
-                // line's B-spline: the loop runs the other way round, its normal
-                // the analytic surface's, against the B-spline's
-                if let SurfaceKind::Cone(c) = surface.kind() {
-                    assert!(!c.inside_out(), "{name}");
-                }
+            // #1463, #1490: never inside out (fork 9853e54)
+            let inside_out = match surface.kind() {
+                SurfaceKind::Cone(c) => c.inside_out(),
+                SurfaceKind::Sphere(s) => s.inside_out(),
+                SurfaceKind::Torus(t) => t.inside_out(),
+                _ => false,
+            };
+            assert!(!inside_out, "{name}");
+            if (n_new - n_old).length() >= 1e-12 {
+                // a curve falling along the axis or round its circle is laid out as the
+                // reversed curve's B-spline: the loop runs the other way round, its
+                // normal the analytic surface's at the curve's other end
                 assert!(
-                    (n_new + n_old).length() < 1e-12,
+                    matches!(
+                        name,
+                        "cone" | "drill point" | "fillet" | "minor circle from the bottom"
+                    ),
                     "{name}: {n_new:?} {n_old:?}"
                 );
                 assert_eq!(new.trim_curves.len(), old.trim_curves.len(), "{name}");

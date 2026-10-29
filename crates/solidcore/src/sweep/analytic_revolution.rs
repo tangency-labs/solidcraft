@@ -18,13 +18,14 @@
 //! surface of revolution: `u` the turn (`0` at the curve, rising with the rotation about
 //! the axis), `v` the curve from its start to its end; for a line falling along the axis,
 //! the reversed line's (`v` from its end), its cylinder or cone built from the low end
-//! and never inside out, as 9853e54's `AnalyticSurface` (#1463). It is only returned when its
+//! and never inside out, as 9853e54's `AnalyticSurface` (#1463); likewise an arc
+//! falling round its circle, its sphere or torus never inside out (#1490). It is only returned when its
 //! corners, the curve's start tangent and the turn's sense agree with that layout, so a
 //! caller can swap it in for the B-spline and keep the trims and loop the B-spline
 //! layout gives. Any other curve, or a construction that fails, gives `None` and the
 //! caller keeps the upstream surface. No recursion.
 
-use crate::curve::curve::Curve;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignored, Result};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::{line_closest_point, line_point_distance};
@@ -110,14 +111,13 @@ pub fn analytic_revolution(
     let reference = match reference {
         Some(surface) if !reversed => surface,
         _ => {
-            // a line falling along the axis: laid out as the reversed line's B-spline
+            // a curve falling along the axis or round its circle: laid out as the
+            // reversed curve's B-spline
             let made_srf = if reversed {
-                let Some(line) =
-                    ignored(BSplineCurve::create_line_segment(3, ends.end, ends.start))?
-                else {
+                let Some(back) = ignored(reversed_curve(k, curve, ends.start, ends.end))? else {
                     return Ok(None);
                 };
-                create_rot_srf(k, &Curve::from(line), base_pt, axis, angle_deg)
+                create_rot_srf(k, &back, base_pt, axis, angle_deg)
             } else {
                 create_rot_srf(k, curve, base_pt, axis, angle_deg)
             };
@@ -242,8 +242,22 @@ fn in_half_plane(
     Ok(true)
 }
 
+/// `curve` run the other way (from `end` to `start`): a line its segment, another
+/// curve a copy with its parameterisation reversed.
+fn reversed_curve(k: &Kernel, curve: &Curve, start: Point3, end: Point3) -> Result<Curve> {
+    if matches!(curve.kind(), CurveKind::Line(_)) {
+        return Ok(Curve::from(BSplineCurve::create_line_segment(
+            3, end, start,
+        )?));
+    }
+    let mut back = curve.clone();
+    let _ = back.reverse_parameterization(k, &curve.natural_interval())?;
+    Ok(back)
+}
+
 /// The analytic surface for the curve's shape, before the layout test, and whether it
-/// is laid out as the reversed curve's B-spline (a line falling along the axis).
+/// is laid out as the reversed curve's B-spline (a line falling along the axis, an arc
+/// falling round its circle).
 fn candidate(
     k: &Kernel,
     curve: &Curve,
@@ -372,12 +386,15 @@ fn candidate(
         };
         let (start_lat, end_lat) = (latitude(ends.start), latitude(ends.end));
         // the meridian rises from x towards the axis (x cross axis is -y)
+        // #1490: never inside out (fork 9853e54 builds the sphere over its latitude
+        // range); a falling meridian is laid out as the reversed arc's B-spline
         let rising = frame.z_axis().dot(-y) > 0.0;
-        let (low, high, inside_out) = if rising {
-            (start_lat, end_lat, false)
+        let (low, high) = if rising {
+            (start_lat, end_lat)
         } else {
-            (end_lat, start_lat, true)
+            (end_lat, start_lat)
         };
+        let inside_out = false;
         if high - low <= EFF_ZERO {
             return Ok(None);
         }
@@ -395,7 +412,7 @@ fn candidate(
             },
         )?;
         sphere.make_nurb(k)?;
-        return Ok(Some((Surface::from(sphere), false)));
+        return Ok(Some((Surface::from(sphere), !rising)));
     }
 
     // a torus: its minor circle is the arc's, centred off the axis
@@ -411,12 +428,16 @@ fn candidate(
         let d = p - centre;
         d.dot(axis).atan2(d.dot(x)) * to_deg
     };
+    // #1490: never inside out (fork 9853e54's `CreateCanonical(.., FALSE, FALSE, ..)`
+    // over the tube angle range from its low end); an arc falling round its minor
+    // circle is laid out as the reversed arc's B-spline
     let rising = frame.z_axis().dot(-y) > 0.0;
-    let (start, inside_out) = if rising {
-        (minor_angle(ends.start), false)
+    let start = if rising {
+        minor_angle(ends.start)
     } else {
-        (minor_angle(ends.end), true)
+        minor_angle(ends.end)
     };
+    let inside_out = false;
     let (low, high) = tube_range(start, sweep);
     let mut torus = Torus::new(
         k,
@@ -433,7 +454,7 @@ fn candidate(
         },
     )?;
     torus.make_nurb(k)?;
-    Ok(Some((Surface::from(torus), false)))
+    Ok(Some((Surface::from(torus), !rising)))
 }
 
 /// What a surface of revolution's natural domain shows of its layout.

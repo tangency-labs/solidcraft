@@ -1,0 +1,724 @@
+{
+ "cases": [
+  {
+   "name": "issue1491_circle_py_s1_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_circle_py_s1_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_circle_py_s1em3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_circle_py_s1em3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_circle_py_s1e3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_circle_py_s1e3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_circle_my_s1_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_circle_my_s1_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_circle_my_s1em3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_circle_my_s1em3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_circle_my_s1e3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_circle_my_s1e3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_py_s1_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_py_s1_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_py_s1em3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_py_s1em3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_py_s1e3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_py_s1e3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_my_s1_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_my_s1_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_my_s1em3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_my_s1em3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -0.03,
+       0.0,
+       0.0
+      ],
+      "radius": 0.003
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_my_s1e3_360",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 360.0,
+    "cap": false
+   }
+  },
+  {
+   "name": "issue1491_analytic_circle_my_s1e3_270",
+   "upstream_ref": "https://github.com/tangency-labs/solidcore/issues/1491; SmPrimitiveCreation::CreateRotationalSweep one-curve case (sm_CreateAnalyticRotationalSweep)",
+   "inputs": {
+    "op": "rotational",
+    "curves": [
+     {
+      "kind": "analytic_circle",
+      "center": [
+       -30000.0,
+       0.0,
+       0.0
+      ],
+      "radius": 3000.0
+     }
+    ],
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0,
+     -1,
+     0
+    ],
+    "angle_deg": 270.0,
+    "cap": true
+   }
+  }
+ ]
+}
