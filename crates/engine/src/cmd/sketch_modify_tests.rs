@@ -1988,6 +1988,12 @@ fn an_ellipse_comes_with_its_axes_as_construction_lines() {
     run(&mut s, "sketch.delete", json!({"entities": edges}));
     let sk = sketch(&s);
     assert!(sk.curves.len() == 2 && sk.curves.iter().all(|c| c.construction), "{:?}", sk.curves);
+    // With axes: false (the Sketch preference off), the ellipse alone, as before its axes.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8, "axes": false}));
+    let sk = sketch(&s);
+    assert!(sk.curves.len() == 1 && sk.constraints.is_empty(), "{r}");
+    assert_eq!(r["sketch"]["dof"], json!(5));
 }
 
 /// #1026: a construction diagonal ending at a rectangle's corner is not one of the corner's

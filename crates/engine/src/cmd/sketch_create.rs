@@ -15,7 +15,7 @@ macro_rules! text_style_doc {
 use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, result, slot};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
-use crate::params::{bad, num, req_vec2, str_, string_list};
+use crate::params::{bad, bool_, num, req_vec2, str_, string_list};
 use crate::schema::sketch_create::{SplineReverseParams, SplineReverseResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis",
+        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", spline_fit)
@@ -629,6 +629,9 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
         let mi = sk.add_point(m, None)?;
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
+        if !bool_(p, "axes").unwrap_or(true) {
+            return Ok((ids_of(sk, &[e]), Vec::new()));
+        }
         // Its major and minor axes, construction lines through the centre that bisects both:
         // the major one ends at the major end, the minor one is perpendicular to it and ends
         // on the ellipse. Six new coordinates, six equations: the ellipse keeps its 5 degrees
