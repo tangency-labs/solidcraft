@@ -1,0 +1,14 @@
+{
+ "sources": [],
+ "what": "the top of a box unstitched: the top a surface body, the open box the other",
+ "source": "analytic",
+ "method": "the picked face (top, 200) its own body, the other five (800) stay together under the box's name: 2 bodies, area 1000, free edges 4 (the top's) + 4 (the open box's rim)",
+ "valid": false,
+ "body_count": 2,
+ "faces": 6,
+ "boundary_edges": 8,
+ "area_mm2": 1000.0,
+ "surface_types": [
+  "plane"
+ ]
+}
