@@ -6745,7 +6745,12 @@ struct SolidProbe<'a> {
 
 impl<'a> SolidProbe<'a> {
     fn new(mesh: &'a Mesh, tol: f64) -> SolidProbe<'a> {
-        SolidProbe { inside: mesh.inside_index(), surface: solidcraft_geom::compare::TriangleTree::new(mesh), bounds: mesh.bounds(), margin: 2.0 * tol }
+        SolidProbe {
+            inside: mesh.inside_index(),
+            surface: solidcraft_geom::compare::TriangleTree::new(mesh),
+            bounds: mesh.bounds(),
+            margin: 2.0 * tol,
+        }
     }
 
     fn holds(&self, p: Vec3) -> bool {
