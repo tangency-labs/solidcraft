@@ -210,6 +210,12 @@ impl Capturer {
         // is built), so the previous picture's highlight would show in this one.
         frame.hl_key = state.key;
         frame.hl_slot = Arc::new(Mutex::new(Some(highlight.unwrap_or_default())));
+        self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height])
+    }
+
+    /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
+    /// drew (read while the caller holds `state`).
+    fn picture(&self, state: &mut State, frame: &Frame, (top, bottom): (Rgb, Rgb), [width, height]: [u32; 2]) -> Result<(Vec<u8>, DrawStats)> {
         let (device, queue) = (&self.device, &self.queue);
         let scopes = error_scopes(device);
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
@@ -230,10 +236,9 @@ impl Capturer {
         let depth = texture("sc_capture_depth", self.depth, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
-        let (top, bottom) = scene.background.unwrap_or(BACKGROUND);
         let background = background_vertices(device, top, bottom);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
-        state.renderer.prepare(device, queue, &mut encoder, &frame);
+        state.renderer.prepare(device, queue, &mut encoder, frame);
         {
             let (view, resolve_target, store) = match &multisampled_view {
                 Some(ms) => (ms, Some(&resolved_view), wgpu::StoreOp::Discard),
@@ -265,7 +270,7 @@ impl Capturer {
             pass.set_pipeline(&state.background);
             pass.set_vertex_buffer(0, background.slice(..));
             pass.draw(0..6, 0..1);
-            state.renderer.paint(&frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
+            state.renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;
         let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -408,6 +413,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         ssaa: 1.0,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
+        moving: None,
     }
 }
 
@@ -602,6 +608,99 @@ mod tests {
         assert_eq!(color(&almost, &almost.tris).map(|c| c[3]), Some(255));
         let trace = geometry(0.0);
         assert_eq!(color(&trace, &trace.glass).map(|c| c[3]), Some(13), "0.05 of 255");
+    }
+
+    /// Bodies dragged as a layer of their own ([`crate::view::MovingLayer`]) are drawn moved by
+    /// its transform: the picture is the one of the bodies built where they were moved to, and
+    /// the bodies go back to the model scene when the drag ends (on this machine's GPU, skipped
+    /// without one).
+    #[test]
+    fn a_moving_layer_is_drawn_moved_by_its_transform() {
+        let Ok(capturer) = Capturer::headless_single_sample() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let wide = Arc::new(Mesh {
+            positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)],
+            ..(*sheet()).clone()
+        });
+        let shift = Vec3::new(0.6, 0.0, 0.3);
+        let at = |offset: Vec3| {
+            let mesh = Mesh { positions: wide.positions.iter().map(|p| *p + offset).collect(), ..(*wide).clone() };
+            Scene {
+                meshes: vec![SceneMesh { mesh: Arc::new(mesh), color: Rgb(200, 30, 30), face_colors: Vec::new(), opacity: 1.0 }],
+                ..Default::default()
+            }
+        };
+        // Two and a half units of the view's height either side.
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let slot = |sc: GpuScene| Arc::new(Mutex::new(Some(sc)));
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        // Drawn where it was moved to.
+        let moved = frame(&at(shift), &cam, size, 1, None);
+        let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+        assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the body shows");
+        // Drawn where it was, moved by the layer; the model scene empty.
+        let mut layered = frame(&Scene::default(), &cam, size, 2, None);
+        let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift.x as f32, shift.y as f32, shift.z as f32, 1.0]];
+        layered.moving = Some(crate::view::MovingLayer { key: 3, slot: slot(scene_geometry(&at(Vec3::ZERO))), transform });
+        let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+        let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+        assert!(differ <= 4, "{differ} pixels differ from the body drawn where it was moved to");
+        // The drag over: the model scene draws it, and nothing is drawn twice or left behind.
+        let after = frame(&at(shift), &cam, size, 4, None);
+        let back = capturer.picture(&mut state, &after, BACKGROUND, size).unwrap().0;
+        assert_eq!(back, expected);
+    }
+
+    /// A dragged component's parts drawn as instances (one copy of a part's triangles, placed
+    /// many times) move with its layer too, lit flat or smooth: the layer built where the drag
+    /// found them and moved by its transform draws what the model scene draws with the
+    /// placements moved.
+    #[test]
+    fn a_moving_layers_instances_are_drawn_moved_by_its_transform() {
+        let Ok(capturer) = Capturer::headless_single_sample() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let flat = Mesh { positions: vec![Vec3::new(-1.0, 0.0, -0.5), Vec3::new(0.2, 0.0, -0.5), Vec3::new(-0.4, 0.0, 0.6)], ..(*sheet()).clone() };
+        let smooth = Mesh { normals: vec![Vec3::new(-0.2, -1.0, 0.0), Vec3::new(0.2, -1.0, 0.0), Vec3::new(0.0, -1.0, 0.2)], ..flat.clone() };
+        let shift = [0.6_f32, 0.0, 0.3];
+        let cam = Camera { distance: 6.0, ..Camera::default() };
+        let size = [64, 64];
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        for (k, mesh) in [flat, smooth].iter().enumerate() {
+            let tris = Arc::new(crate::view::SharedTris::new(mesh));
+            assert_eq!(tris.flat, k == 0);
+            let placed_at = |[x, y, z]: [f32; 3]| {
+                let mut inst = crate::view::InstancedMesh {
+                    key: 1,
+                    tris: tris.clone(),
+                    instances: Vec::new(),
+                    look: crate::view::InstanceLook::Opaque,
+                    levels: Vec::new(),
+                };
+                let mut sc = GpuScene::default();
+                let red = sc.color([200, 30, 30, 255]);
+                inst.place([[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, y], [0.0, 0.0, 1.0, z]], red);
+                sc.instanced = vec![inst];
+                Arc::new(Mutex::new(Some(sc)))
+            };
+            let key = 10 * k as u64;
+            // The model scene with the placement where it was moved to.
+            let mut moved = frame(&Scene::default(), &cam, size, key + 1, None);
+            moved.slot = placed_at(shift);
+            let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+            assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
+            // Placed where it was, in the layer moved by the drag; the model scene empty.
+            let mut layered = frame(&Scene::default(), &cam, size, key + 2, None);
+            let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift[0], shift[1], shift[2], 1.0]];
+            layered.moving = Some(crate::view::MovingLayer { key: key + 3, slot: placed_at([0.0; 3]), transform });
+            let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+            let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
+            assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where it was moved to", k == 0);
+        }
     }
 
     /// A face with a colour of its own is drawn in that colour, and takes its body's opacity:
