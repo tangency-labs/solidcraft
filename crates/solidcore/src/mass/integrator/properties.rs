@@ -620,10 +620,16 @@ pub fn brep_properties(
     }
     Ok(total)
 }
-/// `SmApiEdgeComputeLength` (the curve's virtual Length).
+/// `SmApiEdgeComputeLength` (the curve's virtual Length). The edge's curve is owned by
+/// the edge, so its zone tolerance (`SmTol::GetZoneTol3d(pCurve)`) is the edge's.
 pub fn edge_length(k: &Kernel, b: &Brep, e: EdgeId, accuracy: f64) -> Result<f64> {
     let c = edge::curve(b, e)?.ok_or_else(|| SolidError::sm_err(OP))?;
-    c.length(k, &edge::interval(b, e)?, accuracy)
+    let owner_zone_tol_3d = if c.owner().is_some() {
+        Some(edge::tolerance(b, e)?)
+    } else {
+        None
+    };
+    c.length_with_zone_tol(k, &edge::interval(b, e)?, accuracy, owner_zone_tol_3d)
 }
 fn area_estimate(bbox: &Extent3d) -> f64 {
     let s = bbox.size();

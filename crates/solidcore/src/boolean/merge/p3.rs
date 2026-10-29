@@ -173,6 +173,77 @@ impl MergeEngine {
         }
         Ok(())
     }
+
+    /// (not upstream: upstream's attributes stay on the operands' objects, which the
+    /// merge edits in place.) Moves each operand's own attributes
+    /// ([`Brep::add_attribute`]) into the engine's store under the merge's names of
+    /// their objects, so the merge's notifications propagate them with SMLib's
+    /// handlers. Pair with [`Self::restore_operand_attributes`].
+    ///
+    /// # Errors
+    /// [`SolidError::InvalidInput`] for an engine using the caller's identities (it has
+    /// no names of its own for the operands) or an attribute list whose key names no
+    /// object.
+    pub fn seed_operand_attributes(
+        &mut self,
+        primary: Option<&mut Brep>,
+        other: Option<&mut Brep>,
+    ) -> Result<()> {
+        const SEED: &str = "boolean::merge::p3::MergeEngine::seed_operand_attributes";
+        let namespace = self
+            .intersector
+            .namespace()
+            .ok_or(SolidError::invalid_input(
+                SEED,
+                "the engine names no operand objects",
+            ))?;
+        for (body, is_other) in [(primary, false), (other, true)] {
+            let Some(body) = body else { continue };
+            let store = body.take_attributes();
+            self.attributes.absorb(store, &|key| {
+                crate::topology::loopuse::entity_of_notify_key(key)
+                    .map(|e| {
+                        crate::boolean::merge::p4::notification_key(namespace, is_other, e).key
+                    })
+                    .ok_or(SolidError::invalid_input(
+                        SEED,
+                        "attribute list names no object",
+                    ))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// (not upstream) Hands the engine's attributes back to the B-reps the merge
+    /// leaves: each live object of `result` (the primary slot's arena) and of a kept
+    /// `other` gets the attribute list the merge's notifications left on it; every other
+    /// object's list (an object the merge deleted, or of the other operand when it is
+    /// consumed) is cleared as upstream's object destructor does. A reference attribute
+    /// on objects of both returned B-reps becomes one attribute per B-rep.
+    ///
+    /// # Errors
+    /// None in practice.
+    pub fn restore_operand_attributes(
+        &mut self,
+        result: Option<&mut Brep>,
+        other: Option<&mut Brep>,
+    ) -> Result<()> {
+        let Some(namespace) = self.intersector.namespace() else {
+            return Ok(());
+        };
+        for (body, is_other) in [(result, false), (other, true)] {
+            let Some(body) = body else { continue };
+            let mut store = self.attributes.clone();
+            let live = &*body;
+            store.retain_rekeyed(&|key| {
+                crate::boolean::merge::p4::entity_of_notification_key(namespace, key)
+                    .filter(|&(o, e)| o == is_other && live.is_live_entity(e))
+                    .map(|(_, e)| crate::topology::loopuse::notify_ref(e).key)
+            })?;
+            body.set_attributes(store);
+        }
+        Ok(())
+    }
 }
 
 impl DependencyMerge {

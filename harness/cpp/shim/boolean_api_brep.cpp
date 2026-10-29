@@ -15,14 +15,16 @@
 // (SmApiCreateSphere), sheets (SmApiCreatePlane), planar disks (SmApiCreatePlanarCircle),
 // tori (SmApiCreateTorus), an operand moved
 // by SmApiRotate / SmApiTranslate steps, a skin solid (SmApiCreateSkinPrimitive of NURB
-// curves) or the SmApiBoolean result of two operands; a failing
+// curves), cylinders (SmApiCreateCylinder) or the SmApiBoolean result of two operands; a failing
 // constructor or operand Boolean is SC_ERR_ARG, except a failing SmApiCreateTorus, whose
 // status becomes the call's (record `2`) so its radius guard is compared. `out` receives the
 // API status (0 = SM_SUCCESS, else the SmStatus) and, on success, the op's outputs.
 //
 // Ownership follows source/SM_API/inc/SmApiBrep.h: a rejected or failed two-B-rep call leaves
 // both operands with the caller (deleted here); on success the result is deleted and the second
-// operand is deleted here only when upstream keeps it. A failed N-ary call after validation
+// operand is deleted here only when upstream keeps it. OP_ATTRIBUTED tags every operand face
+// and edge with an SmLongAttribute before SmApiBoolean and records the attributes the result's
+// faces and edges carry (the Rust side tags its own operands the same way). A failed N-ary call after validation
 // may have consumed some operands, so those are leaked rather than risk a double delete.
 #include "sc_shim.h"
 
@@ -31,6 +33,7 @@
 #include <SmApiGeneral.h>
 #include <SmApiPrimitives.h>
 #include <SmApiQueries.h>
+#include <SmAttribute.h>
 #include <SmBSplineCurve.h>
 #include <SmBrep.h>
 #include <SmContext.h>
@@ -76,6 +79,7 @@ enum : int32_t
     OP_PIECEWISE = 14,
     OP_NM_SWEEP = 15,
     OP_NM_ROTATIONAL_SWEEP = 16,
+    OP_ATTRIBUTED = 17,
 };
 
 // Most entries of one non-manifold sweep selection array (MAX_SELECTION in the Rust module).
@@ -92,6 +96,7 @@ enum : int32_t
     BK_MOVED = 6,    // an operand moved by SmApiRotate / SmApiTranslate steps
     BK_SKIN = 7,     // SmApiCreateSkinPrimitive(counts, NURB curves, degree, cap)
     BK_DISK = 8,     // SmApiCreatePlanarCircle(origin, radius)
+    BK_CYLINDER = 9, // SmApiCreateCylinder(origin, radius, height), the SmBrep*& overload
 };
 
 // Most curves (and profiles) of one BK_SKIN operand (MAX_SKIN_CURVES in the Rust module),
@@ -160,7 +165,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     if (depth >= MAX_DEPTH)
         throw Bad();
     BrepSpec s;
-    s.kind = (int32_t)rd.idx(1, 8);
+    s.kind = (int32_t)rd.idx(1, 9);
     int k = 0;
     switch (s.kind)
     {
@@ -172,6 +177,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     case BK_MOVED: k = 0; break;
     case BK_SKIN: k = 0; break;
     case BK_DISK: k = 4; break;
+    case BK_CYLINDER: k = 5; break;
     default: throw Bad();
     }
     if (s.kind == BK_BOOLEAN)
@@ -288,6 +294,7 @@ SmBrep* build(const BrepSpec& s)
     case BK_TORUS: stat = SmApiCreateTorus(o, s.d[3], s.d[4], r); break;
     case BK_SKIN: stat = build_skin(s, r); break;
     case BK_DISK: stat = SmApiCreatePlanarCircle(o, s.d[3], r); break;
+    case BK_CYLINDER: stat = SmApiCreateCylinder(o, s.d[3], s.d[4], r); break;
     case BK_MOVED:
     {
         r = build(s.sub[0]);
@@ -538,6 +545,162 @@ void run_two(Rd& rd, int32_t api, std::vector<double>& o)
     if (api == OP_MEASURED)
         put_measures(o, res);
     delete res; // b1 itself on the documented path; any other b1 is left (ownership unknown)
+}
+
+// OP_ATTRIBUTED: the first application attribute id, and the accuracy of the edge lengths
+// (SmApiEdgeComputeLength's absolute accuracy).
+const ULONG ATTRIBUTE_BASE = 10007;
+const double LENGTH_ACCURACY = 1e-9;
+
+// Gives every face (GetFaces order) and edge (GetEdges order) of operand `operand` its own
+// SmLongAttribute: id ATTRIBUTE_BASE + 1000 operand + 500 kind + index (kind 0 face, 1
+// edge), value the id, behaviour `behavior`: one attribute id per origin, as a history
+// caller tags its operands.
+void tag_operand(SmBrep* b, ULONG operand, SmAttributeBehaviorType behavior)
+{
+    const SmContext& ctx = *SmApiGetOrCreateContext();
+    SmTArray<SmFace*> faces;
+    b->GetFaces(faces);
+    for (ULONG i = 0; i < faces.GetSize(); i++)
+    {
+        ULONG id = ATTRIBUTE_BASE + 1000 * operand + i;
+        faces[i]->AddAttribute(new (ctx) SmLongAttribute(id, (long)id, behavior));
+    }
+    SmTArray<SmEdge*> edges;
+    b->GetEdges(edges);
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+    {
+        ULONG id = ATTRIBUTE_BASE + 1000 * operand + 500 + i;
+        edges[i]->AddAttribute(new (ctx) SmLongAttribute(id, (long)id, behavior));
+    }
+}
+
+// One object's row: `measure n` then per attribute `id behavior value users` (value: an
+// SmLongAttribute's GetValue, else 0; users: GetUsers' size), the attributes in ascending
+// order: which of two merged coplanar faces survives (and so whose attributes come first
+// in its list) depends on the C++ process's earlier heap use, the set does not.
+std::vector<double> attribute_row(const SmAObject* obj, double measure)
+{
+    SmTArray<SmAttribute*> attrs;
+    obj->GetAttributes(attrs);
+    std::vector<std::vector<double>> entries;
+    for (ULONG i = 0; i < attrs.GetSize(); i++)
+    {
+        SmAttribute* a = attrs[i];
+        SmLongAttribute* l = dynamic_cast<SmLongAttribute*>(a);
+        SmTArray<SmAObject*> users;
+        a->GetUsers(users);
+        std::vector<double> e;
+        e.push_back((double)a->GetAttributeID());
+        e.push_back((double)a->GetBehavior());
+        e.push_back(l != NULL ? (double)l->GetValue() : 0.0);
+        e.push_back((double)users.GetSize());
+        entries.push_back(e);
+    }
+    std::sort(entries.begin(), entries.end());
+    std::vector<double> row;
+    row.push_back(measure);
+    row.push_back((double)entries.size());
+    for (size_t i = 0; i < entries.size(); i++)
+        row.insert(row.end(), entries[i].begin(), entries[i].end());
+    return row;
+}
+
+// Rows sorted by their attribute part (from index 1), then by measure, so the order of
+// the result's lists does not matter.
+bool row_less(const std::vector<double>& x, const std::vector<double>& y)
+{
+    if (std::lexicographical_compare(x.begin() + 1, x.end(), y.begin() + 1, y.end()))
+        return true;
+    if (std::lexicographical_compare(y.begin() + 1, y.end(), x.begin() + 1, x.end()))
+        return false;
+    return x[0] < y[0];
+}
+
+void put_rows(std::vector<double>& o, std::vector<std::vector<double>>& rows)
+{
+    std::sort(rows.begin(), rows.end(), row_less);
+    o.push_back((double)rows.size());
+    for (size_t i = 0; i < rows.size(); i++)
+        o.insert(o.end(), rows[i].begin(), rows[i].end());
+}
+
+// `faces rows... edges rows...` of a B-rep: each face's row with its area
+// (SmApiFaceComputeArea at AREA_ACCURACY; a failure as minus its status) and each edge's
+// with its length (SmApiEdgeComputeLength at LENGTH_ACCURACY, likewise).
+void put_attributes(std::vector<double>& o, SmBrep* b)
+{
+    std::vector<std::vector<double>> rows;
+    SmTArray<SmFace*> faces;
+    b->GetFaces(faces);
+    for (ULONG i = 0; i < faces.GetSize(); i++)
+    {
+        double area = 0.0;
+        SmApiStatus astat = SmApiFaceComputeArea(faces[i], AREA_ACCURACY, area);
+        rows.push_back(attribute_row(faces[i], astat == SM_SUCCESS ? area : -(double)st(astat)));
+    }
+    put_rows(o, rows);
+    rows.clear();
+    SmTArray<SmEdge*> edges;
+    b->GetEdges(edges);
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+    {
+        double length = 0.0;
+        SmApiStatus lstat = SmApiEdgeComputeLength(edges[i], LENGTH_ACCURACY, length);
+        rows.push_back(attribute_row(edges[i], lstat == SM_SUCCESS ? length : -(double)st(lstat)));
+    }
+    put_rows(o, rows);
+}
+
+// OP_ATTRIBUTED `brep brep operation behavior`: tags both operands (tag_operand, operand 0
+// and 1), runs SmApiBoolean, and records `status` then on success the two-B-rep record of
+// run_two followed by the attribute rows of the result and of a kept second operand
+// (put_attributes) and the number of those values last (as OP_MEASURED's tail).
+void run_attributed(Rd& rd, std::vector<double>& o)
+{
+    BrepSpec a = read_spec(rd);
+    BrepSpec b = read_spec(rd);
+    int32_t op = (int32_t)rd.idx(0, 10);
+    SmAttributeBehaviorType behavior = (SmAttributeBehaviorType)rd.idx(0, 4);
+    if (rd.at != rd.n)
+        throw Bad();
+    std::vector<BrepSpec> specs;
+    specs.push_back(a);
+    specs.push_back(b);
+    std::vector<SmBrep*> bs = build_all(specs);
+    SmBrep* b1 = bs[0];
+    SmBrep* b2 = bs[1];
+    tag_operand(b1, 0, behavior);
+    tag_operand(b2, 1, behavior);
+    SmBrep* res = b1;
+    SmApiStatus stat = SmApiBoolean(b1, b2, (SmBooleanOperationType)op, res);
+    o.push_back(st(stat));
+    if (stat != SM_SUCCESS)
+    {
+        if (res != NULL && res != b1 && res != b2)
+            delete res;
+        delete b1;
+        delete b2;
+        return;
+    }
+    bool kept = keeps_other(op, false);
+    o.push_back(flg(res != NULL));
+    if (res == NULL)
+        return;
+    o.push_back(flg(res == b1));
+    o.push_back(flg(kept));
+    put_brep(o, res);
+    if (kept && b2 != res)
+        put_brep(o, b2);
+    size_t start = o.size();
+    put_attributes(o, res);
+    if (kept && b2 != res)
+    {
+        put_attributes(o, b2);
+        delete b2;
+    }
+    o.push_back((double)(o.size() - start));
+    delete res;
 }
 
 void run_merge_breps(Rd& rd, std::vector<double>& o)
@@ -847,7 +1010,7 @@ void run_sweep(Rd& rd, int32_t api, std::vector<double>& o)
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t api = (int32_t)rd.idx(1, 16);
+    int32_t api = (int32_t)rd.idx(1, 17);
     switch (api)
     {
     case OP_BOOLEAN:
@@ -866,6 +1029,7 @@ void run(Rd& rd, std::vector<double>& o)
     case OP_PIECEWISE: run_more_two(rd, api, o); break;
     case OP_NM_SWEEP:
     case OP_NM_ROTATIONAL_SWEEP: run_sweep(rd, api, o); break;
+    case OP_ATTRIBUTED: run_attributed(rd, o); break;
     default: throw Bad();
     }
 }

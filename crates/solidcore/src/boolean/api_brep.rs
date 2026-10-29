@@ -68,6 +68,15 @@
 //!   component traversal's mark locks.
 //! - **Nullable tree output.** Tree operands are `Option<Brep>` slots, preserving
 //!   consumed entries on failure and defined null outputs of repeated leaves.
+//! - **Attributes.** Upstream's attributes live on the operands' objects, which the merge
+//!   edits in place. Here each [`Brep`] owns its attributes ([`Brep::add_attribute`]):
+//!   the two-B-rep entry points move both operands' attributes into the merge's store
+//!   under the merge's names of their objects, the merge's notifications propagate them
+//!   with SMLib's handlers, and the attributes left on the result's (and a kept other
+//!   B-rep's) objects go back to those B-reps; those of objects the merge deleted are
+//!   cleared as upstream's destructors do. A reference attribute on objects of both
+//!   returned B-reps becomes one attribute per B-rep. The list, tree and
+//!   [`merge_breps`] entry points do not carry attributes yet.
 //! - The debug drawing (`SM_DEBUG_CODE`) and `SM_ASSERT_VALID` checks are not ported.
 //! - **Cached topology.** Every returned B-rep has the port's own cached fields
 //!   ([`crate::topology::Edge::vertices`], `Face::shell`, ..., which topology edits
@@ -216,6 +225,11 @@ fn merge_boolean_by(
     let mut primary = Some(brep1);
     let mut other = Some(brep2);
     driver.construct(k, &mut primary, &mut other, 0.0, 0.0, options.as_ref())?;
+    // (not upstream) the operands' attributes go to the merge's objects, as upstream's
+    // live on the objects the merge edits
+    if let Some(engine) = driver.engine_mut() {
+        engine.seed_operand_attributes(primary.as_mut(), other.as_mut())?;
+    }
     let manifold_solids = match (&primary, &other) {
         (Some(_), Some(_)) if method == MergeMethod::NonManifold => false,
         (Some(a), Some(b)) => is_manifold_solid(a)? && is_manifold_solid(b)?,
@@ -246,6 +260,11 @@ fn merge_boolean_by(
         )?
     };
     let mut result = result.ok_or_else(|| SolidError::null_pointer(OP_BOOLEAN))?;
+    // (not upstream) the attributes the merge's notifications left on the result's and
+    // the kept other B-rep's objects go back to those B-reps
+    if let Some(engine) = driver.engine_mut() {
+        engine.restore_operand_attributes(Some(&mut result), other.as_mut())?;
+    }
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
     if let Some(o) = other.as_mut() {

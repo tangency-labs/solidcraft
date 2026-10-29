@@ -996,8 +996,8 @@ pub(crate) fn notify_ref(e: EntityRef) -> ObjectRef {
 /// [`notify_ref`], as [`ArenaNotifyState`](crate::topology::brep::p2::ArenaNotifyState)
 /// does; a change of that scheme changes this decoder with it. (The heal path's
 /// tracker now decodes kernel identities, `topology::brep::p3::topology_entity`, since
-/// part 5's plain edits run under them; this inverse stays for the arena scheme's tests.)
-#[cfg(test)]
+/// part 5's plain edits run under them; this inverse also names the B-rep-owned
+/// attribute store's keys, [`Brep::attributed_entities`](crate::topology::Brep::attributed_entities).)
 pub(crate) fn entity_of_notify_key(key: ObjectKey) -> Option<EntityRef> {
     let raw = key.0.checked_sub(1)?;
     let kind = raw >> 32;

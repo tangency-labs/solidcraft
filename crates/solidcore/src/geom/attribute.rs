@@ -1073,6 +1073,94 @@ impl AttributeStore {
         Ok(())
     }
 
+    // ---- moving attributes between stores (not upstream) ---------------------------
+
+    /// Every object with a non-empty attribute list, in key order.
+    #[must_use]
+    pub fn attributed_objects(&self) -> Vec<ObjectKey> {
+        self.lists
+            .iter()
+            .filter(|(_, list)| !list.is_empty())
+            .map(|(&key, _)| key)
+            .collect()
+    }
+
+    /// (not upstream: upstream attributes live on the objects, so handing an object to
+    /// an operation hands its attributes with it.) Moves every live attribute of
+    /// `source` into this store under new handles, renaming each object key through
+    /// `rekey`, in `source`'s slot and key order. Attributes keep their sharing (a
+    /// reference attribute listed by several objects of `source` is one attribute here
+    /// too) and their user order.
+    ///
+    /// # Errors
+    /// `rekey`'s error (an object key with no name here), or a store that cannot grow.
+    pub(crate) fn absorb(
+        &mut self,
+        source: AttributeStore,
+        rekey: &dyn Fn(ObjectKey) -> Result<ObjectKey>,
+    ) -> Result<()> {
+        let mut handles = Vec::new();
+        for slot in source.slots {
+            let new = match slot {
+                Some(mut attribute) => {
+                    attribute.users = attribute
+                        .users
+                        .iter()
+                        .map(|&user| rekey(user))
+                        .collect::<Result<_>>()?;
+                    Some(self.insert(attribute)?)
+                }
+                None => None,
+            };
+            handles.push(new);
+        }
+        for (key, list) in source.lists {
+            let renamed: Vec<AttributeHandle> = list
+                .iter()
+                .filter_map(|h| handles.get(h.index()).copied().flatten())
+                .collect();
+            if renamed.is_empty() {
+                continue;
+            }
+            self.lists.entry(rekey(key)?).or_default().extend(renamed);
+        }
+        Ok(())
+    }
+
+    /// (not upstream) Ends an operation's naming: each attributed object `keep` does
+    /// not name is no longer an object of the result, so its list is cleared as
+    /// upstream's object destructor does (`~SmAObject` → [`Self::clear_attributes`]:
+    /// dependent attributes die with their last user, standalone ones survive without
+    /// users), in key order; the remaining lists and user lists are then renamed
+    /// through `keep`.
+    ///
+    /// # Errors
+    /// None in practice (every listed handle is live).
+    pub(crate) fn retain_rekeyed(
+        &mut self,
+        keep: &dyn Fn(ObjectKey) -> Option<ObjectKey>,
+    ) -> Result<()> {
+        let gone: Vec<ObjectKey> = self
+            .lists
+            .keys()
+            .copied()
+            .filter(|&key| keep(key).is_none())
+            .collect();
+        for key in gone {
+            self.clear_attributes(key)?;
+        }
+        let lists = core::mem::take(&mut self.lists);
+        for (key, list) in lists {
+            if let Some(renamed) = keep(key) {
+                self.lists.entry(renamed).or_default().extend(list);
+            }
+        }
+        for attribute in self.slots.iter_mut().flatten() {
+            attribute.users = attribute.users.iter().filter_map(|&u| keep(u)).collect();
+        }
+        Ok(())
+    }
+
     // ---- propagation handlers -----------------------------------------------------
 
     /// Places this attribute on `target` with its behaviour when `target` has no

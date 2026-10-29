@@ -492,6 +492,25 @@ pub fn boolean_post_process(
     relations: &CleanupRelations,
     check_all_edges: bool,
 ) -> Result<()> {
+    boolean_post_process_with_notifications(k, brep, relations, check_all_edges, None)
+}
+
+/// [`boolean_post_process`] with the merge's notification state: `DeleteEdge`'s face
+/// merges, `DeleteVertex` and `DeleteTopologicalVertex`'s edge merges notify through
+/// `notifications` (its records, attributes and identities), so the merged faces and
+/// edges keep the attributes of the objects merged into them (`SM_NO_MERGE_IN_BREP`).
+/// Without it each deletion notifies through a store of its own, as for a caller
+/// holding no notification state.
+///
+/// # Errors
+/// As [`boolean_post_process`].
+pub(crate) fn boolean_post_process_with_notifications(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    relations: &CleanupRelations,
+    check_all_edges: bool,
+    mut notifications: Option<&mut edge::NotifyEnv<'_>>,
+) -> Result<()> {
     let mut edges: Vec<_> = if check_all_edges {
         brep_edges(brep)?
     } else {
@@ -566,8 +585,13 @@ pub fn boolean_post_process(
                 endpoints.push(v);
             }
         }
-        // SER(DeleteEdge(pEdge, pSurfToKeep)); the cleanup holds no notification state
-        p4::with_local_env(|env| p4::delete_edge(k, brep, env, e, Some(keep)))?;
+        // SER(DeleteEdge(pEdge, pSurfToKeep))
+        match notifications.as_deref_mut() {
+            Some(env) => {
+                p4::delete_edge(k, brep, &mut p4::DeleteEnv::from_notify(env), e, Some(keep))?;
+            }
+            None => p4::with_local_env(|env| p4::delete_edge(k, brep, env, e, Some(keep)))?,
+        }
         // `pSurfToKeep->GetFace()`: when the face holding the kept surface is the one
         // merged away, DeleteEdge swaps that surface onto the surviving face first
         let keep = if brep.face(keep).is_ok() {
@@ -608,7 +632,12 @@ pub fn boolean_post_process(
         }
         if vertex::is_loop_vertex(brep, v)? {
             // SER(DeleteVertex(pVertex))
-            p4::with_local_env(|env| p4::delete_vertex(k, brep, env, v))?;
+            match notifications.as_deref_mut() {
+                Some(env) => {
+                    p4::delete_vertex(k, brep, &mut p4::DeleteEnv::from_notify(env), v)?;
+                }
+                None => p4::with_local_env(|env| p4::delete_vertex(k, brep, env, v))?,
+            }
             continue;
         }
         if vertex::is_topological_vertex(k, brep, v)? {
@@ -626,13 +655,16 @@ pub fn boolean_post_process(
                     brep.geometry_owner_key(EntityRef::Edge(e)),
                 ));
             }
-            ignore_failure(crate::topology::brep::p5::delete_topological_vertex(
-                k,
-                brep,
-                editing,
-                Some(v),
-                None,
-            ))?;
+            ignore_failure(
+                crate::topology::brep::p5::delete_topological_vertex_with_notifications(
+                    k,
+                    brep,
+                    editing,
+                    Some(v),
+                    None,
+                    notifications.as_deref_mut(),
+                ),
+            )?;
             for (e, owner, proven) in owners {
                 if !brep.edge_list().contains(&e) {
                     continue;

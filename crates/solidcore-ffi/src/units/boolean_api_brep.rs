@@ -18,7 +18,9 @@
 //! `7 np counts... nc curves... degree cap` (`SmApiCreateSkinPrimitive` of `nc` NURB
 //! curves, each `p n+1 (n+1) x [x y z w] (n+p+2) knots`, built as
 //! `SmBSplineCurve(gw_CURVE*, 3, FALSE)`; at most [`MAX_SKIN_CURVES`]) or `8 O[3] radius`
-//! (`SmApiCreatePlanarCircle`). Nested blocks are at most [`MAX_DEPTH`] deep.
+//! (`SmApiCreatePlanarCircle`) or `9 O[3] radius
+//! height` (`SmApiCreateCylinder`, the `SmBrep*&` overload). Nested blocks are at most
+//! [`MAX_DEPTH`] deep.
 //!
 //! | [`Call`]        | op | args                                   | output after the status (on success)            |
 //! |-----------------|----|----------------------------------------|-------------------------------------------------|
@@ -38,6 +40,7 @@
 //! | `Piecewise`     | 14 | brep brep `create_new`                 | `has [is_first brep brep]`                      |
 //! | `Sweep`         | 15 | brep `D[3] dist stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)         |
 //! | `RotationalSweep` | 16 | brep `P[3] A[3] angle stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)  |
+//! | `Attributed`    | 17 | brep brep `operation` `behavior`       | two-B-rep record, then the attribute rows       |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -66,6 +69,18 @@
 //! selection `sel` is three arrays (faces, edges, vertices), each `count` (`-1` for a NULL
 //! array, at most [`MAX_SELECTION`]) then entries, each an index into the operand's
 //! `GetFaces`/`GetEdges`/`GetVertices` list or `-1` for a NULL entry.
+//!
+//! `Attributed` gives every face (`GetFaces` order) and edge (`GetEdges` order) of the first
+//! (operand 0) and second (operand 1) B-rep its own `SmLongAttribute`: id
+//! [`ATTRIBUTE_BASE`] `+ 1000 operand + 500 kind + index` (kind 0 face, 1 edge), value the
+//! id, behaviour `behavior` (`SmAttributeBehaviorType`, 0 to 4); then `SmApiBoolean`. On
+//! success the two-B-rep record is followed by `faces rows... edges rows...` of the result
+//! and, when upstream keeps it, of the second B-rep, then the number of those values
+//! ([`split_measures`]). A row is `measure n` then per attribute (in ascending order)
+//! `id behavior value users` (value: the long value, else 0; users: `GetUsers`' size); the
+//! measure is the face's `SmApiFaceComputeArea` at [`AREA_ACCURACY`] or the edge's
+//! `SmApiEdgeComputeLength` at [`LENGTH_ACCURACY`] (minus the status on failure); rows are
+//! sorted by their attribute part, then by measure ([`sort_rows`]).
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite
 //! operand data with positive box and plane dimensions and a nonzero sphere radius (torus
@@ -101,6 +116,25 @@ pub const MAX_SELECTION: usize = 16;
 pub const VOLUME_ACCURACY: f64 = 1e-6;
 /// `dRelativeAccuracy` of the [`Call::Measured`] face areas (`SmApiFaceComputeArea`).
 pub const AREA_ACCURACY: f64 = 1e-4;
+/// `dDesiredAccuracy` of the [`Call::Attributed`] edge lengths (`SmApiEdgeComputeLength`).
+pub const LENGTH_ACCURACY: f64 = 1e-9;
+/// The first attribute id [`Call::Attributed`] tags operands with.
+pub const ATTRIBUTE_BASE: u64 = 10007;
+
+/// Sorts [`Call::Attributed`] rows (`measure n [id behavior value users]...`) as the shim
+/// does: by the attribute part, then by measure.
+pub fn sort_rows(rows: &mut [Vec<f64>]) {
+    rows.sort_by(|x, y| {
+        let (mx, ax) = x.split_first().map_or((0.0, &[][..]), |(m, a)| (*m, a));
+        let (my, ay) = y.split_first().map_or((0.0, &[][..]), |(m, a)| (*m, a));
+        ax.iter()
+            .zip(ay)
+            .map(|(p, q)| p.total_cmp(q))
+            .find(|o| o.is_ne())
+            .unwrap_or_else(|| ax.len().cmp(&ay.len()))
+            .then(mx.total_cmp(&my))
+    });
+}
 
 mod sys {
     extern "C" {
@@ -162,6 +196,15 @@ pub enum BrepSpec {
         a: Box<BrepSpec>,
         /// Second operand (deleted by upstream).
         b: Box<BrepSpec>,
+    },
+    /// `SmApiCreateCylinder(origin, radius, height)` (axis +Z, the `SmBrep*&` overload).
+    Cylinder {
+        /// Center of the base.
+        origin: [f64; 3],
+        /// Radius (positive).
+        radius: f64,
+        /// Height (positive).
+        height: f64,
     },
     /// `SmApiCreateSkinPrimitive(counts, curves, degree, cap)` of 3D NURB curves.
     Skin {
@@ -454,6 +497,18 @@ pub enum Call {
         /// The optional selections.
         selection: Selection,
     },
+    /// Both operands' faces and edges tagged, then `SmApiBoolean`, followed by the
+    /// attribute rows of the B-reps it returns.
+    Attributed {
+        /// First operand (operand 0).
+        a: BrepSpec,
+        /// Second operand (operand 1).
+        b: BrepSpec,
+        /// `SmBooleanOperationType` value.
+        operation: i32,
+        /// `SmAttributeBehaviorType` value of the tags (0 to 4).
+        behavior: u8,
+    },
 }
 
 fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
@@ -492,6 +547,18 @@ fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
         } => {
             if !center.iter().all(|x| x.is_finite()) || !major.is_finite() || !minor.is_finite() {
                 return Err(bad("torus: non-finite value"));
+            }
+        }
+        BrepSpec::Cylinder {
+            origin,
+            radius,
+            height,
+        } => {
+            if !origin.iter().all(|x| x.is_finite()) || !radius.is_finite() || !height.is_finite() {
+                return Err(bad("cylinder: non-finite value"));
+            }
+            if *radius <= 0.0 || *height <= 0.0 {
+                return Err(bad("cylinder: radius and height must be positive"));
             }
         }
         BrepSpec::Moved { steps, brep } => {
@@ -593,6 +660,16 @@ fn push_checked(o: &mut Vec<f64>, s: &BrepSpec) {
             o.extend_from_slice(center);
             o.push(*major);
             o.push(*minor);
+        }
+        BrepSpec::Cylinder {
+            origin,
+            radius,
+            height,
+        } => {
+            o.push(9.0);
+            o.extend_from_slice(origin);
+            o.push(*radius);
+            o.push(*height);
         }
         BrepSpec::Moved { steps, brep } => {
             o.push(6.0);
@@ -832,6 +909,22 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             o.push(*angle_deg);
             o.extend([flag(*stitch), flag(*merge), region.code()]);
             push_selection(&mut o, selection)?;
+        }
+        Call::Attributed {
+            a,
+            b,
+            operation,
+            behavior,
+        } => {
+            check_op(*operation)?;
+            if *behavior > 4 {
+                return Err(bad("behavior is not an SmAttributeBehaviorType value"));
+            }
+            o.push(17.0);
+            push_spec(&mut o, a)?;
+            push_spec(&mut o, b)?;
+            o.push(f64::from(*operation));
+            o.push(f64::from(*behavior));
         }
     }
     Ok(o)
