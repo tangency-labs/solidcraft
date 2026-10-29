@@ -1,0 +1,40 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "construct.point.edge_plane",
+   "params": {
+    "edge": {
+     "edge": [
+      20,
+      0,
+      0
+     ]
+    },
+    "plane": {
+     "plane": {
+      "origin": [
+       12,
+       0,
+       0
+      ],
+      "normal": [
+       1,
+       0,
+       0
+      ]
+     }
+    },
+    "name": "P"
+   }
+  }
+ ]
+}
