@@ -31,8 +31,10 @@ fn circle_path() -> [PathSeg; 2] {
 fn tube(body: &Body, volume: f64, genus: usize) {
     let m = measure(body).unwrap();
     assert!((m.volume - volume).abs() < volume * 0.01, "{m:?}, expected {volume}");
-    // A closed orientable tube has Euler characteristic 2 - 2g. Coincident caps gave 2.
-    assert_eq!(m.vertices + m.faces + 2 * genus, m.edges + 2, "{m:?}");
+    // A closed orientable tube of genus g: V - E + F - (L - F) = 2 - 2g (Euler-Poincare, L the
+    // loops: an annular face has two). Coincident caps gave 2 - 2g + 2.
+    let loops: usize = body.record().faces.iter().map(|f| f.loops.len()).sum();
+    assert_eq!(m.vertices + 2 * m.faces + 2 * genus, m.edges + loops + 2, "{m:?}, {loops} loops");
     // Every shell closed: each edge bounds two faces.
     assert!(body.record().edges.iter().all(|e| e.uses.len() >= 2));
     let h = body.history().expect("sweep provenance");

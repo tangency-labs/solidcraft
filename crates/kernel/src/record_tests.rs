@@ -439,13 +439,13 @@ fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<u
 #[test]
 fn sweeps_along_paths() {
     let r = Region2 { outer: rotated(&rect(-2.0, -2.0, 2.0, 2.0).reversed(), 1), holes: vec![] };
-    // A line then a quarter turn (two parts): three faces per segment.
+    // A line then a quarter turn: a face per segment along each path segment.
     let path = [
         PathSeg::Line { a: Vec3::ZERO, b: Vec3::new(0.0, 0.0, 10.0) },
         PathSeg::Arc { a: Vec3::new(0.0, 0.0, 10.0), center: Vec3::new(20.0, 0.0, 10.0), axis: Vec3::Y, angle: FRAC_PI_2 },
     ];
     let b = crate::sweep(&Plane::XY, &r, &path).unwrap();
-    check_sweep(&b, &Plane::XY, &r, Some(3));
+    check_sweep(&b, &Plane::XY, &r, Some(2));
     // Along a smooth 3D path: one wall per segment.
     let curve: Vec<Vec3> = (0..=40)
         .map(|i| {

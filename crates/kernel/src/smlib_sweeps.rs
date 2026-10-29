@@ -555,9 +555,18 @@ mod imp {
         if runs.len() > 1 {
             return cornered(plane, pieces, path, &runs, translate);
         }
-        let (brep, _) = swept(plane, pieces, path, translate)?;
+        let (brep, [_, middle, last]) = swept(plane, pieces, path, translate)?;
         let body = body_of(&brep, "sweep")?;
-        let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
+        // The walls known by the profile carried half way (past the start's edges: a wall the
+        // start touches by no edge, as round a closed path, and walls along later path segments).
+        let inside = seeds(plane, pieces, |q| apply(&middle, q));
+        let start = path.first().map(crate::PathSeg::start);
+        let end = path.last().map(seg_ends).transpose()?.map(|(_, b)| b);
+        let roles = match (start, end) {
+            // Round a closed path there are no caps, and the start holds seams only.
+            (Some(a), Some(b)) if a.dist(b) <= 1e-6 => roles(&body, &plane.offset(body.size().max(1e-9) * 10.0), None, &[], &inside, false)?,
+            _ => roles(&body, plane, Some(&placed(plane, &last)), &seeds(plane, pieces, |q| q), &inside, false)?,
+        };
         with_history(body, &roles, pieces)
     }
 
