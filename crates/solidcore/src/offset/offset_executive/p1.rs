@@ -2330,18 +2330,19 @@ impl OffsetExecutive {
         let domain = ignored(original_face.uv_domain.intersect(&offset_face.uv_domain))?
             .unwrap_or_else(Extent2d::new);
         let mid_uv = domain.evaluate(0.5, 0.5);
+        // (`EvaluateNormal(sMidUV, TRUE, TRUE, ..)`: from the left)
         let normal = ignored(required(original_face.surface.as_ref())?.evaluate_normal(
             kernel.kernel(),
             mid_uv,
-            Side::Right,
-            Side::Right,
+            Side::Left,
+            Side::Left,
         ))?
         .unwrap_or(Vec3::UNDEF);
         let offset_normal = ignored(required(offset_face.surface.as_ref())?.evaluate_normal(
             kernel.kernel(),
             mid_uv,
-            Side::Right,
-            Side::Right,
+            Side::Left,
+            Side::Left,
         ))?
         .unwrap_or(Vec3::UNDEF);
         let same_normals = normal.dot(offset_normal) > 0.0;

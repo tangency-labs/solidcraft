@@ -1248,7 +1248,7 @@ fn edgeuse_normal(
     let uv = Point2::new(uv3.x, uv3.y);
     let f = deref(srf, op)?;
     let s = deref(b.face(f)?.surface.as_ref(), op)?;
-    Ok(ignored(s.evaluate_normal(k, uv, Side::Left, Side::Left))?.unwrap_or(Vec3::UNDEF))
+    Ok(ignored(s.evaluate_normal(k, uv, Side::Right, Side::Right))?.unwrap_or(Vec3::UNDEF))
 }
 
 /// The lamina branch of [`delete_edge`].

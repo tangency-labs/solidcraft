@@ -1210,8 +1210,8 @@ impl Curve {
         let dom = self.natural_interval();
         for &frac in &params {
             let t = dom.evaluate(frac);
-            // (status ignored)
-            if let Some(v) = ignored(self.evaluate(k, t, 1, false, false))? {
+            // (status ignored; `SmCurve::Evaluate`'s default `bNonZeroTangents = TRUE`)
+            if let Some(v) = ignored(self.evaluate(k, t, 1, false, true))? {
                 for (d, s) in pt_der.iter_mut().zip(v) {
                     *d = s;
                 }

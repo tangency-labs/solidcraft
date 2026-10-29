@@ -1677,8 +1677,9 @@ fn rust_extend(input: &Extension) -> RResult<Output> {
             let point = point.unwrap_or(Vec3::ZERO);
             statuses.push(status);
             samples.extend([point.x, point.y, point.z]);
+            // (the shim's `EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
             let (status, normal) =
-                operation(surface.evaluate_normal(&kernel, uv, Side::Right, Side::Right))?;
+                operation(surface.evaluate_normal(&kernel, uv, Side::Left, Side::Left))?;
             let normal = normal.unwrap_or(Vec3::ZERO);
             statuses.push(status);
             samples.extend([normal.x, normal.y, normal.z]);
