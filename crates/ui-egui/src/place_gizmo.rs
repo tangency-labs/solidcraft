@@ -318,6 +318,24 @@ fn arms(proj: &Proj, base: Vec3, n: Vec3, bs: Pos2, freedom: Freedom) -> Vec<egu
 /// How long a millimetre along a line of motion must be on screen for the line to be dragged.
 const LINE_MIN_PX: f32 = 0.5;
 
+/// An id for each of the tool's `n` places by their order, the same from frame to frame: a place
+/// keeps its id while it moves (its key, an index, can change, as a round face's two halves come
+/// and go), a new place gets a new one. A marker's press, hover and look go by it. With a place
+/// gone, every place gets a new id, so the one after it does not take over the press, hover or
+/// look of the one taken out.
+fn marker_ids(ctx: &egui::Context, store: egui::Id, n: usize) -> Vec<u64> {
+    let (mut ids, mut next) = ctx.data(|d| d.get_temp::<(Vec<u64>, u64)>(store)).unwrap_or_default();
+    if ids.len() > n {
+        ids.clear();
+    }
+    while ids.len() < n {
+        ids.push(next);
+        next += 1;
+    }
+    ctx.data_mut(|d| d.insert_temp(store, (ids.clone(), next)));
+    ids
+}
+
 /// Draw the handles of the open dialog and take their drags (after the dialog's own arrow, so the
 /// marker wins the pointer near the base). The dialog stays in `app` while the pointer is picked
 /// under, so a drag snaps as a click does (its input's points, the hole's face and rim snaps);
@@ -331,20 +349,23 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let t = Tokens::get();
     let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
     let id = |what: &str| egui::Id::unique(("sc_place", sp.name, what));
-    let at = |key: usize, what: &str| egui::Id::unique(("sc_place", sp.name, key, what));
+    let at = |marker: u64, what: &str| egui::Id::unique(("sc_place", sp.name, marker, what));
+    let store = id("markers");
     let sense = if sp.click.is_some() { egui::Sense::click_and_drag() } else { egui::Sense::drag() };
     let freedom_of = |app: &SolveApp, key: usize| app.dialog.as_ref().map_or(Freedom::Plane, |d| (sp.freedom)(app, d, key));
 
     // The crosshairs that move the feature, one per place. The press lands where the finger is,
     // not always the centre: the drag keeps that gap. A place held still has no press area.
-    let mut markers: Vec<(usize, egui::Response)> = Vec::new();
-    for pl in places(app) {
+    let mut markers: Vec<(u64, egui::Response)> = Vec::new();
+    let before = places(app);
+    let ids = marker_ids(ui.ctx(), store, before.len());
+    for (pl, marker) in before.into_iter().zip(ids) {
         let Some(bs) = proj.to_screen(pl.base) else { continue };
         if arms(proj, pl.base, pl.n, bs, freedom_of(app, pl.key)).is_empty() {
             continue;
         }
-        let r = ui.interact(area(bs), at(pl.key, "position"), sense);
-        let off = motion::grab(ui, at(pl.key, "grab"), &r, |p| Some(p - bs));
+        let r = ui.interact(area(bs), at(marker, "position"), sense);
+        let off = motion::grab(ui, at(marker, "grab"), &r, |p| Some(p - bs));
         if r.dragged() {
             crate::tool_modifiers::set_manipulator_dragging(true);
             if let Some(p) = r.interact_pointer_pos() {
@@ -362,30 +383,24 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         {
             with_dialog(app, |app, d| click(app, d, pl.key));
         }
-        markers.push((pl.key, r));
+        markers.push((marker, r));
     }
-    // Read the places again: a drag moved one this frame, a click may have taken one out. A key
-    // is an index, not an identity: with a place gone, the ones after it have moved down, so the
-    // markers' states are left alone for this frame rather than given to the wrong place.
+    // Read the places again: a drag moved one this frame, a click may have taken one out (and
+    // the markers' ids with it, so this frame's press and hover reach none of the others).
     let now = places(app);
+    let ids = marker_ids(ui.ctx(), store, now.len());
     let ctx = ui.ctx().clone();
     // The marker steps back while the ring works (the ring's drag is last frame's).
     let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
     let mut first: Option<(Place, Pos2, bool)> = None;
-    let mut free = 0;
-    for (n, pl) in now.into_iter().enumerate() {
+    for (n, (pl, marker)) in now.into_iter().zip(ids).enumerate() {
         let Some(bs) = proj.to_screen(pl.base) else { continue };
         let name = if sp.many { format!("{}:{n}", sp.name) } else { format!("{}:position", sp.name) };
         crate::scenario::publish_handle(&name, bs);
         DRAWN.with(|h| h.borrow_mut().push(bs));
         let dirs = arms(proj, pl.base, pl.n, bs, freedom_of(app, pl.key));
         let held = dirs.is_empty();
-        if !held {
-            free += 1;
-        }
-        // A place that moved into another's index this frame (one was taken out) keeps no state.
-        let settled = free <= markers.len();
-        let r = markers.iter().filter(|_| settled && !held).find(|(k, _)| *k == pl.key).map(|(_, r)| r);
+        let r = markers.iter().filter(|_| !held).find(|(m, _)| *m == marker).map(|(_, r)| r);
         let (hovered, dragging) = r.map_or((false, false), |r| (r.hovered(), r.dragged()));
         // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
         if hovered
@@ -396,10 +411,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         }
         // A held place steps back as a handle not in use does: there, but offering no move.
         let style = CrossStyle {
-            hot: MARKER_HOT.run(&ctx, at(pl.key, "hot"), hovered || dragging).t,
-            active: MARKER_ACTIVE.run(&ctx, at(pl.key, "active"), dragging).t,
-            alpha: motion::step_back(&ctx, at(pl.key, "marker_dim"), turning || held, DIM, DIM_S),
+            hot: MARKER_HOT.run(&ctx, at(marker, "hot"), hovered || dragging).t,
+            active: MARKER_ACTIVE.run(&ctx, at(marker, "active"), dragging).t,
+            alpha: motion::step_back(&ctx, at(marker, "marker_dim"), turning || held, DIM, DIM_S),
         };
+        crate::scenario::publish_count(&format!("{name}:hot"), f64::from(style.hot));
         if dragging && let Some(d) = app.dialog.as_ref() {
             let pts: Option<Vec<Pos2>> = (sp.footprint)(app, d, pl.base, pl.n).into_iter().map(|p| proj.to_screen(p)).collect();
             if let Some(pts) = pts.filter(|p| p.len() >= 3) {
