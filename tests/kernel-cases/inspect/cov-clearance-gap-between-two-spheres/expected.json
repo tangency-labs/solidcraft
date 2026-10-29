@@ -1,0 +1,46 @@
+{
+ "sources": [],
+ "what": "the gap between two spheres",
+ "source": "analytic",
+ "method": "spheres r 5 on (0,0,0) and (20,0,0): 20 - 5 - 5 = 10 apart, from (5,0,0) to (15,0,0)",
+ "results": [
+  {
+   "command": 2,
+   "pointer": "/overlaps",
+   "value": []
+  },
+  {
+   "command": 2,
+   "pointer": "/near/0/a",
+   "value": "A"
+  },
+  {
+   "command": 2,
+   "pointer": "/near/0/b",
+   "value": "B"
+  },
+  {
+   "command": 2,
+   "pointer": "/near/0/distance_mm",
+   "value": 10.0
+  },
+  {
+   "command": 2,
+   "pointer": "/near/0/from",
+   "value": [
+    5,
+    0,
+    0
+   ]
+  },
+  {
+   "command": 2,
+   "pointer": "/near/0/to",
+   "value": [
+    15,
+    0,
+    0
+   ]
+  }
+ ]
+}

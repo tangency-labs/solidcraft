@@ -1,0 +1,31 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "A",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "B",
+    "operation": "new"
+   }
+  },
+  {
+   "command": "inspect.compare",
+   "params": {
+    "a": "A",
+    "b": "B"
+   }
+  }
+ ]
+}

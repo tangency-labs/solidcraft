@@ -1,0 +1,18 @@
+{
+ "sources": [],
+ "what": "two spheres farther apart than the clearance asked",
+ "source": "analytic",
+ "method": "spheres r 5 on (0,0,0) and (20,0,0) are 10 apart; closer than 5 asked: none",
+ "results": [
+  {
+   "command": 2,
+   "pointer": "/overlaps",
+   "value": []
+  },
+  {
+   "command": 2,
+   "pointer": "/near",
+   "value": []
+  }
+ ]
+}

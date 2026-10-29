@@ -1,0 +1,50 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "S"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 7
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      20
+     ],
+     [
+      10,
+      20
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "inspect.curvature_comb",
+   "params": {
+    "sketch": "S",
+    "curves": [
+     "c1",
+     "l1"
+    ]
+   }
+  }
+ ]
+}
