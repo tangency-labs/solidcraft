@@ -370,10 +370,15 @@ impl BrepIdentity<'static> {
 }
 
 impl BrepIdentity<'static> {
-    /// The identities `b`'s geometry owners use by its recorded naming scheme
-    /// ([`Brep::naming`]) for `brep_id`.
+    /// The base identities of `b` at `brep_id` by its recorded naming scheme alone
+    /// ([`Brep::naming`]): the Euler operators' notification identities for a
+    /// [`NamingScheme::Notify`] B-rep (one built through `new_brep` and the face
+    /// builders), else [`BrepIdentity::arena`]. It ignores the proven owner keys `b`
+    /// records (`Brep::geometry_owner_keys`), so it misses the geometry of a copy whose
+    /// owners are the caller's keys ([`crate::topology::brep::p3::api_brep_copy`] under
+    /// a caller `key_of`): prefer [`Self::of_brep_with_id`].
     #[must_use]
-    pub fn of_brep_with_id(brep_id: BrepId, b: &Brep) -> Self {
+    pub fn of_naming_with_id(brep_id: BrepId, b: &Brep) -> Self {
         match b.naming() {
             NamingScheme::Notify => Self {
                 brep_id,
@@ -384,102 +389,62 @@ impl BrepIdentity<'static> {
         }
     }
 
-    /// The identities `b`'s geometry owners use by its recorded naming scheme
-    /// ([`Brep::naming`]): the Euler operators' notification identities for a
-    /// [`NamingScheme::Notify`] B-rep (one built through `new_brep` and the face
-    /// builders), else [`BrepIdentity::arena`]. A query under the wrong scheme resolves
-    /// no geometry owner and silently finds nothing (`plan/findings.md`, "two
-    /// owner-naming schemes").
+    /// The identities `b`'s geometry owners use, at `brep_id`: its naming scheme
+    /// ([`Self::of_naming_with_id`]) overridden by the proven producer owner keys it
+    /// records (`Brep::geometry_owner_keys`), as [`ProvenBrepIdentity::new`]. The
+    /// overrides are owned, so the result is a [`ProvenBrepIdentity`]; pass
+    /// [`ProvenBrepIdentity::identity`] where a [`BrepIdentity`] is taken. A query
+    /// under the wrong identities resolves no geometry owner and finds nothing
+    /// (`plan/findings.md`, "two owner-naming schemes"; #1440).
     #[must_use]
-    pub fn of_brep(b: &Brep) -> Self {
+    pub fn of_brep_with_id(brep_id: BrepId, b: &Brep) -> ProvenBrepIdentity<'static> {
+        ProvenBrepIdentity::new(Self::of_naming_with_id(brep_id, b), b)
+    }
+
+    /// [`Self::of_brep_with_id`] at [`BrepId`] `0`.
+    #[must_use]
+    pub fn of_brep(b: &Brep) -> ProvenBrepIdentity<'static> {
         Self::of_brep_with_id(BrepId::from_index(0), b)
     }
 }
-
-/// The cache-object identities of a [`NamingScheme::Notify`] B-rep
-/// ([`crate::topology::loopuse::notify_ref`] for its edges, faces and vertices).
-fn notify_identity(object: CacheObject) -> ObjectRef {
-    crate::topology::brep::p2::caller_cache_key(&crate::topology::loopuse::notify_ref, object)
-}
-
-impl Default for BrepIdentity<'_> {
-    /// [`BrepIdentity::arena`] of the first B-rep of the caller's store (a caller
-    /// querying one B-rep at a time).
-    fn default() -> Self {
-        BrepIdentity::arena(BrepId::from_index(0))
-    }
-}
-
-/// The ray directions of [`BrepQuery::point_3d_classify`], in firing order: each axis
-/// forward, then backward when the forward ray fails.
-const CLASSIFY_RAYS: [(Vec3, Vec3); 3] = [
-    (Vec3::new(1.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
-    (Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
-    (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0)),
-];
 
 type ProvenKeyFn<'a> = Box<dyn Fn(CacheObject) -> ObjectRef + 'a>;
 
-/// A B-rep's queries over its cache: the identities and the `SM_OC_BREP` cache, which
-/// upstream builds when a query first needs it and keeps on the B-rep
-/// (`SmSAGObject::CacheMakeOrValidate`). Keep one per B-rep state and reuse it across
-/// queries; edits to the B-rep invalidate it.
-pub struct BrepQuery<'a> {
-    identity: BrepIdentity<'a>,
+/// A [`BrepIdentity`] with the proven producer owner keys of its B-rep
+/// (`Brep::geometry_owner_keys`) overriding the base keys where they differ: what
+/// [`BrepIdentity::of_brep`] and [`BrepQuery::of_brep`] resolve a B-rep's records by.
+/// It owns its overrides and does not borrow the B-rep.
+pub struct ProvenBrepIdentity<'a> {
+    base: BrepIdentity<'a>,
     proven_keys: Option<ProvenKeyFn<'a>>,
-    cache: OnceCell<BrepCache>,
 }
 
-impl core::fmt::Debug for BrepQuery<'_> {
+impl core::fmt::Debug for ProvenBrepIdentity<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("BrepQuery")
-            .field("identity", &self.identity)
-            .field("cache", &self.cache)
-            .finish_non_exhaustive()
+        f.debug_struct("ProvenBrepIdentity")
+            .field("base", &self.base)
+            .field("overridden", &self.proven_keys.is_some())
+            .finish()
     }
 }
 
-impl Default for BrepQuery<'static> {
-    /// The queries of a B-rep with the default identities ([`BrepIdentity::default`]).
-    fn default() -> Self {
-        Self::new(BrepIdentity::default())
-    }
-}
-
-impl BrepQuery<'static> {
-    /// Queries of `b` at [`BrepId`] `0`, resolving records by `b`'s naming scheme and
-    /// proven producer geometry-owner identities (`Brep::geometry_owner_keys`).
+impl<'a> ProvenBrepIdentity<'a> {
+    /// `base` without overrides.
     #[must_use]
-    pub fn of_brep(b: &Brep) -> Self {
-        Self::of_brep_with_id(BrepId::from_index(0), b)
-    }
-
-    /// Queries of `b` at `brep_id`, resolving records by `b`'s naming scheme and proven
-    /// producer geometry-owner identities (`Brep::geometry_owner_keys`).
-    #[must_use]
-    pub fn of_brep_with_id(brep_id: BrepId, b: &Brep) -> Self {
-        Self::with_proven_owners(BrepIdentity::of_brep_with_id(brep_id, b), b)
-    }
-}
-
-impl<'a> BrepQuery<'a> {
-    /// The queries of the B-rep with `identity`; its cache is built on first use.
-    #[must_use]
-    pub const fn new(identity: BrepIdentity<'a>) -> Self {
+    pub const fn plain(base: BrepIdentity<'a>) -> Self {
         Self {
-            identity,
+            base,
             proven_keys: None,
-            cache: OnceCell::new(),
         }
     }
 
-    /// Queries of `b` with `identity` as the base naming, overriding edge/face keys where
-    /// `b` records a proven producer geometry-owner key (`Brep::geometry_owner_keys`) that
-    /// differs from `identity.keys`. Unowned (`None`) and foreign-owned geometry not
-    /// recorded in `b.geometry_owner_keys()` is still excluded.
+    /// `base`, overriding edge/face keys where `b` records a proven producer
+    /// geometry-owner key (`Brep::geometry_owner_keys`) that differs from `base.keys`
+    /// for geometry actually owned by it. Unowned (`None`) and foreign-owned geometry
+    /// not recorded in `b.geometry_owner_keys()` is still excluded.
     #[must_use]
-    pub fn with_proven_owners(identity: BrepIdentity<'a>, b: &Brep) -> Self {
-        let base_keys = identity.keys;
+    pub fn new(base: BrepIdentity<'a>, b: &Brep) -> Self {
+        let base_keys = base.keys;
         let mut overrides = std::collections::BTreeMap::new();
         for (&entity, &proven) in b.geometry_owner_keys() {
             let matches_base = match entity {
@@ -513,42 +478,138 @@ impl<'a> BrepQuery<'a> {
                     .unwrap_or_else(|| base_keys(object))
             }) as ProvenKeyFn<'a>
         });
+        Self { base, proven_keys }
+    }
+
+    /// The base identities, without the overrides.
+    #[must_use]
+    pub const fn base(&self) -> BrepIdentity<'a> {
+        self.base
+    }
+
+    /// The effective identities: the base with the proven overrides applied.
+    #[must_use]
+    pub fn identity(&self) -> BrepIdentity<'_> {
+        BrepIdentity {
+            brep_id: self.base.brep_id,
+            keys: match &self.proven_keys {
+                Some(keys) => keys.as_ref(),
+                None => self.base.keys,
+            },
+            owner_of: self.base.owner_of,
+        }
+    }
+}
+
+/// The cache-object identities of a [`NamingScheme::Notify`] B-rep
+/// ([`crate::topology::loopuse::notify_ref`] for its edges, faces and vertices).
+fn notify_identity(object: CacheObject) -> ObjectRef {
+    crate::topology::brep::p2::caller_cache_key(&crate::topology::loopuse::notify_ref, object)
+}
+
+impl Default for BrepIdentity<'_> {
+    /// [`BrepIdentity::arena`] of the first B-rep of the caller's store (a caller
+    /// querying one B-rep at a time).
+    fn default() -> Self {
+        BrepIdentity::arena(BrepId::from_index(0))
+    }
+}
+
+/// The ray directions of [`BrepQuery::point_3d_classify`], in firing order: each axis
+/// forward, then backward when the forward ray fails.
+const CLASSIFY_RAYS: [(Vec3, Vec3); 3] = [
+    (Vec3::new(1.0, 0.0, 0.0), Vec3::new(-1.0, 0.0, 0.0)),
+    (Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
+    (Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, -1.0)),
+];
+
+/// A B-rep's queries over its cache: the identities and the `SM_OC_BREP` cache, which
+/// upstream builds when a query first needs it and keeps on the B-rep
+/// (`SmSAGObject::CacheMakeOrValidate`). Keep one per B-rep state and reuse it across
+/// queries; edits to the B-rep invalidate it.
+pub struct BrepQuery<'a> {
+    identity: ProvenBrepIdentity<'a>,
+    cache: OnceCell<BrepCache>,
+}
+
+impl core::fmt::Debug for BrepQuery<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BrepQuery")
+            .field("identity", &self.identity)
+            .field("cache", &self.cache)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for BrepQuery<'static> {
+    /// The queries of a B-rep with the default identities ([`BrepIdentity::default`]).
+    fn default() -> Self {
+        Self::new(BrepIdentity::default())
+    }
+}
+
+impl BrepQuery<'static> {
+    /// Queries of `b` at [`BrepId`] `0`, resolving records by `b`'s naming scheme and
+    /// proven producer geometry-owner identities (`Brep::geometry_owner_keys`).
+    #[must_use]
+    pub fn of_brep(b: &Brep) -> Self {
+        Self::of_brep_with_id(BrepId::from_index(0), b)
+    }
+
+    /// Queries of `b` at `brep_id`, resolving records by `b`'s naming scheme and proven
+    /// producer geometry-owner identities (`Brep::geometry_owner_keys`).
+    #[must_use]
+    pub fn of_brep_with_id(brep_id: BrepId, b: &Brep) -> Self {
+        Self::from_proven(BrepIdentity::of_brep_with_id(brep_id, b))
+    }
+}
+
+impl<'a> BrepQuery<'a> {
+    /// The queries of the B-rep with `identity`; its cache is built on first use.
+    #[must_use]
+    pub const fn new(identity: BrepIdentity<'a>) -> Self {
+        Self::from_proven(ProvenBrepIdentity::plain(identity))
+    }
+
+    /// The queries of the B-rep with `identity` (proven overrides included).
+    #[must_use]
+    pub const fn from_proven(identity: ProvenBrepIdentity<'a>) -> Self {
         Self {
             identity,
-            proven_keys,
             cache: OnceCell::new(),
         }
+    }
+
+    /// Queries of `b` with `identity` as the base naming, overriding edge/face keys where
+    /// `b` records a proven producer geometry-owner key (`Brep::geometry_owner_keys`)
+    /// ([`ProvenBrepIdentity::new`]).
+    #[must_use]
+    pub fn with_proven_owners(identity: BrepIdentity<'a>, b: &Brep) -> Self {
+        Self::from_proven(ProvenBrepIdentity::new(identity, b))
     }
 
     /// The queries over a cache the caller already holds for the B-rep.
     #[must_use]
     pub fn with_cache(identity: BrepIdentity<'a>, cache: BrepCache) -> Self {
         Self {
-            identity,
-            proven_keys: None,
+            identity: ProvenBrepIdentity::plain(identity),
             cache: OnceCell::from(cache),
         }
     }
 
-    /// The identities.
+    /// The base identities (without proven overrides).
     #[must_use]
     pub const fn identity(&self) -> BrepIdentity<'a> {
-        self.identity
+        self.identity.base()
     }
 
     /// The effective [`BrepIdentity`], including any proven geometry-owner overrides
     /// recorded on the B-rep when built with [`Self::of_brep`] or
-    /// [`Self::with_proven_owners`].
+    /// [`Self::with_proven_owners`] (the same as [`BrepIdentity::of_brep`]'s
+    /// [`ProvenBrepIdentity::identity`]).
     #[must_use]
     pub fn effective_identity(&self) -> BrepIdentity<'_> {
-        BrepIdentity {
-            brep_id: self.identity.brep_id,
-            keys: match &self.proven_keys {
-                Some(keys) => keys.as_ref(),
-                None => self.identity.keys,
-            },
-            owner_of: self.identity.owner_of,
-        }
+        self.identity.identity()
     }
 
     /// The cache of `b`, built keyed by the identities when first asked for.
