@@ -24,6 +24,8 @@ use solidcore::{Result as SolidResult, SolidError};
 use solidcore_ffi::units::blend_fillet_executive_p3 as ffi;
 use std::collections::BTreeMap;
 
+#[path = "blend_fillet_executive_p3/attributed.rs"]
+mod attributed;
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
 #[path = "blend_fillet_executive_p3/preview.rs"]
@@ -48,6 +50,10 @@ struct Inputs {
     surface_surface: Option<end_to_end::SurfaceSurface>,
     #[serde(default)]
     surface_surface_bodies: Option<surface_bodies::SurfaceSurfaceBodies>,
+    /// Issue #1462: a public fillet API on a body whose faces and edges carry caller
+    /// attributes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attributed: Option<attributed::AttributedFillet>,
     #[serde(default)]
     fillet_preview: Option<preview::FilletPreview>,
     /// tangency-labs/solidcore#880's unequal chamfer (module `two_offset_chamfer`).
@@ -56,18 +62,21 @@ struct Inputs {
 }
 
 impl Inputs {
-    /// Whether any other fixture form accompanies a `fillet_preview` case.
-    fn mixed_with_preview(&self) -> bool {
+    /// Whether any form but `attributed` is present.
+    fn has_other_form(&self) -> bool {
+        self.fillet_preview.is_some() || self.has_record_form()
+    }
+    /// Whether any form but `attributed` and `fillet_preview` is present.
+    fn has_record_form(&self) -> bool {
         self.surface_surface_bodies.is_some()
             || self.surface_surface.is_some()
             || self.real_solid.is_some()
             || self.upstream_case.is_some()
             || !self.record.is_empty()
     }
-
-    /// Whether any other fixture form accompanies a `two_offset_chamfer` case.
-    fn mixed_with_chamfer(&self) -> bool {
-        self.fillet_preview.is_some() || self.mixed_with_preview()
+    /// Whether any other fixture form accompanies a `fillet_preview` case.
+    fn mixed_with_preview(&self) -> bool {
+        self.attributed.is_some() || self.has_record_form()
     }
 }
 
@@ -967,11 +976,11 @@ impl UnitDiff for Runner {
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
-        if let Some(chamfer) = &input.two_offset_chamfer {
-            if input.mixed_with_chamfer() {
+        if let Some(attributed) = &input.attributed {
+            if input.has_other_form() {
                 return Err(HarnessError::new("mixed fixture forms"));
             }
-            return two_offset_chamfer::cpp(chamfer);
+            return attributed::cpp(attributed);
         }
         if let Some(preview) = &input.fillet_preview {
             if input.mixed_with_preview() {
@@ -1020,11 +1029,11 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
-        if let Some(chamfer) = &input.two_offset_chamfer {
-            if input.mixed_with_chamfer() {
+        if let Some(attributed) = &input.attributed {
+            if input.has_other_form() {
                 return Err(HarnessError::new("mixed fixture forms"));
             }
-            return two_offset_chamfer::rust(chamfer);
+            return attributed::rust(attributed);
         }
         if let Some(preview) = &input.fillet_preview {
             if input.mixed_with_preview() {

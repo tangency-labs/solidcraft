@@ -774,6 +774,96 @@ pub fn surface_surface_bodies(input: &[f64]) -> Result<Vec<f64>, FfiError> {
     })
 }
 
+extern "C" {
+    fn sc_blend_fillet_executive_p3_attributed(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// Number of fillet parameters on the [`attributed`] wire before the edge indices:
+/// radius, end radius, cross-section, continuity, thumbweight, edge count.
+pub const ATTRIBUTED_FILLET_PARAMS: usize = 6;
+
+/// Validate the attributed-fillet wire (issue #1462): api (0 `SmApiFilletEdges`,
+/// 1 `SmApiFilletEdgesPerEdge`, 2 `SmApiVariableRadiusFillet`, 3 `SmApiCircularFillet`,
+/// 4 `SmApiChamferFillet`), attribute behaviour (`SmAttributeBehaviorType` 0..=4), body
+/// kind (0 box: origin and positive size; 2 cylinder, 3 box union, 4 box difference as
+/// on the [`real_source`] wire), [`SOURCE_PARAMS`] body parameters, then
+/// [`ATTRIBUTED_FILLET_PARAMS`] and the `GetEdges` indices. The cross-section is a
+/// `ULONG` 0..=2 for apis 0 and 2 and an `SmFilletSurfaceGeneratorType` 1..=3 for api 1;
+/// continuity 1..=3. Apis 0..=2 take at least one edge, apis 3 and 4 none. The shim
+/// rejects an index past the built body's edges.
+pub fn validate_attributed(input: &[f64]) -> Result<(), FfiError> {
+    let bad = |what: &str| FfiError::InvalidArgument(format!("attributed fillet: {what}"));
+    let int_in = |v: f64, lo: f64, hi: f64| v.is_finite() && v.fract() == 0.0 && v >= lo && v <= hi;
+    if input.iter().any(|v| !v.is_finite()) {
+        return Err(bad("non-finite value"));
+    }
+    let head = 3 + SOURCE_PARAMS + ATTRIBUTED_FILLET_PARAMS;
+    let (Some(&api), Some(&behavior), Some(&kind)) = (input.first(), input.get(1), input.get(2))
+    else {
+        return Err(bad("short wire"));
+    };
+    if !int_in(api, 0.0, 4.0) || !int_in(behavior, 0.0, 4.0) || ![0.0, 2.0, 3.0, 4.0].contains(&kind) {
+        return Err(bad("api, behaviour or body kind"));
+    }
+    let p = input.get(3..3 + SOURCE_PARAMS).ok_or_else(|| bad("short wire"))?;
+    let positive: &[usize] = match kind as u32 {
+        0 => &[3, 4, 5],
+        2 => &[3, 4],
+        _ => &[3, 4, 5, 9, 10, 11],
+    };
+    if positive.iter().any(|&i| p.get(i).is_none_or(|&v| v <= 1e-12)) {
+        return Err(bad("non-positive body size"));
+    }
+    let f = input
+        .get(3 + SOURCE_PARAMS..head)
+        .ok_or_else(|| bad("short wire"))?;
+    let &[_, _, xsect, continuity, _, count] = f else {
+        return Err(bad("short wire"));
+    };
+    let xsect_ok = if api == 1.0 {
+        int_in(xsect, 1.0, 3.0)
+    } else {
+        int_in(xsect, 0.0, 2.0)
+    };
+    if !xsect_ok || !int_in(continuity, 1.0, 3.0) {
+        return Err(bad("cross-section or continuity"));
+    }
+    let indices = input.get(head..).unwrap_or_default();
+    if !int_in(count, 0.0, MAX_SOURCE_EDGE as f64) || count as usize != indices.len() {
+        return Err(bad("edge count"));
+    }
+    if (api <= 2.0) == indices.is_empty() {
+        return Err(bad("edges for apis 0..=2 only"));
+    }
+    if indices.iter().any(|&i| !int_in(i, 0.0, MAX_SOURCE_EDGE as f64)) {
+        return Err(bad("edge index"));
+    }
+    Ok(())
+}
+
+/// Tag a fresh body's faces and edges with long attributes, run the public fillet api
+/// of [`validate_attributed`]'s wire on it, and record `status V E F`, then the face
+/// rows and edge rows (each `measure n (id behavior value users)*n`, as
+/// `boolean_api_brep`'s attributed op; [`super::boolean_api_brep::sort_rows`] order).
+pub fn attributed(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_attributed(input)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_attributed(
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
 #[cfg(test)]
 mod source_tests {
     use super::{validate_real_source, validate_surface_surface, SOURCE_PARAMS};

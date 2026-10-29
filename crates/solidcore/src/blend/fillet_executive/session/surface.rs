@@ -605,8 +605,23 @@ impl FilletSession<'_> {
     }
 
     /// Take the fillet B-rep [`Self::surface_surface_fillet`] built (upstream
-    /// `GetFilletBrep()`, whose ownership the caller takes).
+    /// `GetFilletBrep()`, whose ownership the caller takes). It carries the attributes
+    /// its objects hold, less `SM_AI_ALL_FILLET_EDGES`, which `~SmFilletExecutive`
+    /// removes from its users.
     pub fn take_fillet_brep(&mut self) -> Option<Brep> {
-        self.objects.intermediate.take()
+        let mut body = self.objects.intermediate.take()?;
+        if let Some(serial) = body.notify_serial() {
+            let mut store = self.objects.attributes.clone();
+            let edge_attribute = match self.executive.edge_attribute {
+                Some(FilletObject::Attribute(handle)) => store.destroy(handle),
+                _ => Ok(()),
+            };
+            if let Ok(store) =
+                edge_attribute.and_then(|()| super::body_attributes(&store, &body, serial))
+            {
+                body.set_attributes(store);
+            }
+        }
+        Some(body)
     }
 }

@@ -14,9 +14,10 @@
 //! The original-trim mark lock encloses the tail, as upstream's `sMarkLocks` scope.
 //! `delete m_pFilletBrep` clears the session attributes and notification records of
 //! every entity of the intermediate body before `~SmBrep`. `RemoveTopoEdges` and
-//! `BooleanPostProcess` notify through local environments (their ports take none);
-//! afterwards the attributes of target edges they deleted are cleared from the
-//! session store. With the opt-in `Kernel::fixes.fillet_refuse_non_manifold_result`
+//! `BooleanPostProcess` notify through the session's records and attributes, so their
+//! face and edge merges carry the dying objects' attributes to the survivors
+//! (`SM_NO_MERGE_IN_BREP`); afterwards the attributes of target edges they deleted are
+//! cleared from the session store. With the opt-in `Kernel::fixes.fillet_refuse_non_manifold_result`
 //! `do_fillet` ends with the closed-manifold check of the generic
 //! `FilletExecutive::do_fillet` (not upstream, WR-212, tangency-labs/solidcore#422);
 //! the public wrappers that drive it put the caller's body back on that refusal.
@@ -119,7 +120,39 @@ impl FinishAccess<'_, '_> {
         }
     }
 
-    /// `ClearAttributes` of target edges a local-environment edit deleted.
+    /// `body` on the target with a notification environment over the session's records
+    /// and attributes under the target's issued identities.
+    fn with_target_env<T>(
+        &mut self,
+        k: &mut Kernel,
+        body: impl FnOnce(
+            &mut Kernel,
+            &mut crate::topology::Brep,
+            &mut crate::topology::edge::NotifyEnv<'_>,
+        ) -> Result<T>,
+    ) -> Result<T> {
+        let serial = self.0.target_serial;
+        let key_of = |entity| p3::topology_ref(serial, entity);
+        let SessionObjects {
+            target,
+            notification_records,
+            attributes,
+            ..
+        } = &mut *self.0;
+        p3::seed_records(notification_records, target, &key_of);
+        crate::geom::context::Context::with_notification_context(k, |k, context| {
+            let mut env = crate::topology::edge::NotifyEnv {
+                records: notification_records,
+                attributes,
+                context: Some(context),
+                key_of: &key_of,
+            };
+            body(k, target, &mut env)
+        })
+        .and_then(|result| result)
+    }
+
+    /// `ClearAttributes` of target edges an edit deleted.
     fn clear_deleted_edges(&mut self, before: &[EdgeId]) -> Result<()> {
         let serial = self.0.target_serial;
         for &edge in before {
@@ -291,8 +324,15 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             .map(|edge| edge.map(target_edge).transpose())
             .collect::<Result<Vec<_>>>()?;
         let before = p1::edges(self.0.target, None)?;
-        let result =
-            crate::blend::fillet_executive::p1::remove_topo_edges(k, self.0.target, &edges);
+        // As the cleanup below: the merges notify through the session's store.
+        let result = self.with_target_env(k, |k, target, env| {
+            crate::blend::fillet_executive::p1::remove_topo_edges_with_notifications(
+                k,
+                target,
+                &edges,
+                Some(env),
+            )
+        });
         let cleared = self.clear_deleted_edges(&before);
         result.and(cleared)
     }
@@ -343,12 +383,17 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             relations.kept_faces.clone_from(faces);
         }
         let before = p1::edges(self.0.target, None)?;
-        let result = crate::boolean::merge::p1::boolean_post_process(
-            k,
-            self.0.target,
-            &relations,
-            check_all_edges,
-        );
+        // The cleanup's face and edge merges notify through the session's store, so the
+        // survivors keep the attributes of the objects merged into them.
+        let result = self.with_target_env(k, |k, target, env| {
+            crate::boolean::merge::p1::boolean_post_process_with_notifications(
+                k,
+                target,
+                &relations,
+                check_all_edges,
+                Some(env),
+            )
+        });
         let cleared = self.clear_deleted_edges(&before);
         result.and(cleared)
     }

@@ -41,6 +41,14 @@
 //! the change is reverted, so the copies evaluate as the shared object does.
 //! This foundation supports solver construction/loading; it does not substitute a
 //! result for the remaining fillet execution stages. No recursion.
+//! Attributes (issue #1462): upstream they live on the bodies' objects; here
+//! [`FilletSession::with_second_base`] moves the target's (and second base's) own
+//! attributes ([`Brep::add_attribute`]) into the session store under the bodies' issued
+//! identities, after the executive's `m_pAttributeE`, and dropping the session
+//! (`~SmFilletExecutive`: `m_pAttributeE` leaves its users and is deleted) hands each
+//! body the lists of its live objects back. While the session lives the bodies' own
+//! stores are empty. `take_fillet_brep` gives the fillet B-rep its objects' attributes
+//! less `m_pAttributeE`.
 
 pub mod insertion;
 
@@ -1094,6 +1102,60 @@ pub struct FilletSession<'target> {
     objects: SessionObjects<'target>,
 }
 
+/// (not upstream) Moves `body`'s own attributes ([`Brep::add_attribute`]) into the
+/// session store under the body's issued identities (`serial`).
+fn seed_body_attributes(
+    attributes: &mut AttributeStore,
+    body: &mut Brep,
+    serial: u64,
+) -> Result<()> {
+    let store = body.take_attributes();
+    attributes.absorb(store, &|key| {
+        crate::topology::loopuse::entity_of_notify_key(key)
+            .map(|e| crate::topology::brep::p3::topology_ref(serial, e).key)
+            .ok_or_else(|| invalid("attribute list names no object"))
+    })
+}
+
+/// (not upstream) The session store's attributes of the live objects of `body`
+/// (issued `serial`), keyed by the body's own identities; the lists of every other
+/// object are cleared, as upstream's object destructor does.
+fn body_attributes(
+    attributes: &AttributeStore,
+    body: &Brep,
+    serial: u64,
+) -> Result<AttributeStore> {
+    let mut store = attributes.clone();
+    store.retain_rekeyed(&|key| {
+        crate::topology::brep::p3::topology_entity(serial, key)
+            .filter(|&e| body.is_live_entity(e))
+            .map(|e| crate::topology::loopuse::notify_ref(e).key)
+    })?;
+    Ok(store)
+}
+
+/// `~SmFilletExecutive`: `m_pAttributeE` leaves each of its users and is deleted.
+/// (not upstream) Then the bodies get their attributes back from the session store.
+impl Drop for FilletSession<'_> {
+    fn drop(&mut self) {
+        if let Some(FilletObject::Attribute(handle)) = self.executive.edge_attribute {
+            // a handle the session allocated; nothing to report from a destructor
+            let _ = self.objects.attributes.destroy(handle);
+        }
+        let objects = &mut self.objects;
+        if let Ok(store) =
+            body_attributes(&objects.attributes, objects.target, objects.target_serial)
+        {
+            objects.target.set_attributes(store);
+        }
+        if let Some(second) = &mut objects.second_base {
+            if let Ok(store) = body_attributes(&objects.attributes, second.body, second.serial) {
+                second.body.set_attributes(store);
+            }
+        }
+    }
+}
+
 impl<'target> FilletSession<'target> {
     /// Construct the native executive-owned objects, with its ordinary defaults.
     ///
@@ -1116,7 +1178,7 @@ impl<'target> FilletSession<'target> {
         second_base: Option<&'target mut Brep>,
     ) -> Result<Self> {
         let target_serial = crate::topology::brep::p3::notify_serial(&mut k.context, target)?;
-        let second_base = match second_base {
+        let mut second_base = match second_base {
             Some(body) => Some(SecondBase {
                 serial: crate::topology::brep::p3::notify_serial(&mut k.context, body)?,
                 body,
@@ -1137,6 +1199,13 @@ impl<'target> FilletSession<'target> {
             ids::ALL_FILLET_EDGES,
             Behavior::StandaloneReference,
         ))?;
+        // (not upstream: upstream the attributes stay on the bodies' objects.) The
+        // session's store holds the bodies' own attributes under its identities while it
+        // runs, after the executive's own; `Drop` hands them back.
+        seed_body_attributes(&mut attributes, target, target_serial)?;
+        if let Some(second) = &mut second_base {
+            seed_body_attributes(&mut attributes, second.body, second.serial)?;
+        }
         let executive = FilletExecutive::new(
             Some(FilletObject::Body(FilletBody::Target)),
             ExecutiveObjects {
