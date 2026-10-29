@@ -1371,6 +1371,8 @@ pub struct PrefsWindow {
     snapshot: Option<Snapshot>,
     /// The up axis preference the view follows now (applied when it changes, and at startup).
     applied_up: Option<String>,
+    /// The appearance last asked of the native window ([`sync_window_theme`]).
+    window_theme: Option<egui::SystemTheme>,
     /// The perspective angle the view was last drawn with ([`follow_view_fov`]); 0 before the first.
     drawn_fov: f64,
     /// The search text of the interface font list.
@@ -1859,6 +1861,26 @@ fn defaults(app: &mut SolveApp, page: usize) {
 
 /// Settings that follow the preferences every frame: the theme when it follows the system, and
 /// the interface scale.
+/// Tell the native window which appearance to take (#8983): the operating system's while the
+/// theme follows it, otherwise the theme's own, so the title bar matches. egui's own window sync
+/// (`Options::sync_window_theme`) went by the egui theme, which [`crate::theme::apply`] always
+/// sets to light or dark. A macOS window told to be light stays light and no longer reports the
+/// system appearance changing, so a theme following the system never turned with it.
+fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bool) {
+    let window = if follows_system {
+        egui::SystemTheme::SystemDefault
+    } else if app.ui.dark {
+        egui::SystemTheme::Dark
+    } else {
+        egui::SystemTheme::Light
+    };
+    if app.prefs_window.window_theme != Some(window) {
+        ctx.options_mut(|o| o.sync_window_theme = false);
+        ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(window));
+        app.prefs_window.window_theme = Some(window);
+    }
+}
+
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
     apply_network(&app.preferences);
@@ -1884,10 +1906,12 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(f) = file {
         app.ui.dark = f.base.is_dark();
     }
+    let follows_system = app.preferences.theme == "system" && file.is_none();
     let custom = file.map(|f| crate::theme::Custom { dark: f.base.is_dark(), tokens: crate::theme_files::resolve(f) });
     if crate::theme::set_custom(custom) {
         app.styled = false;
     }
+    sync_window_theme(app, ctx, follows_system);
     if crate::theme::set_logo_accent(app.preferences.logo_accent) {
         app.styled = false;
     }
@@ -5139,6 +5163,48 @@ mod tests {
         assert_eq!(theme_file(&app, "system", false)["base"], "light");
         assert_eq!(app.preferences.theme, "light");
         assert!(!app.ui.dark);
+    }
+
+    /// The System theme leaves the native window to follow the operating system (#8983). A macOS
+    /// window told to be light or dark keeps that appearance and no longer reports the system
+    /// appearance changing, so the app stayed light after the system turned dark. Dark and Light
+    /// still give the window their own appearance, for its title bar.
+    #[test]
+    fn the_system_theme_leaves_the_window_to_follow_the_system() {
+        let mut h = crate::scenario::Harness::new();
+        // A frame with the system appearance `system`: the window themes the frame asked for.
+        let frame = |h: &mut crate::scenario::Harness, system: egui::Theme| {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))),
+                system_theme: Some(system),
+                ..Default::default()
+            };
+            let app = &mut h.app;
+            let out = h.ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            });
+            let commands = out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default();
+            commands.into_iter().filter_map(|c| if let egui::ViewportCommand::SetTheme(t) = c { Some(t) } else { None }).collect::<Vec<_>>()
+        };
+        let frames = |h: &mut crate::scenario::Harness, system: egui::Theme| (0..3).flat_map(|_| frame(h, system)).collect::<Vec<_>>();
+        let out = h.call("ui.prefs", json!({"theme": "system"}));
+        assert_eq!(out["result"]["theme"], "system", "{out}");
+        frames(&mut h, egui::Theme::Light);
+        assert_eq!(h.app.prefs_window.window_theme, Some(egui::SystemTheme::SystemDefault));
+        assert!(!h.ctx.options(|o| o.sync_window_theme), "egui would tell the window light or dark");
+        assert!(!h.app.ui.dark);
+        // The system turns dark: the app follows, and nothing is asked of the window.
+        assert_eq!(frames(&mut h, egui::Theme::Dark), vec![]);
+        assert!(h.app.ui.dark);
+        assert_eq!(frames(&mut h, egui::Theme::Light), vec![]);
+        assert!(!h.app.ui.dark);
+        // An explicit theme gives the window its appearance, whatever the system's.
+        let out = h.call("ui.prefs", json!({"theme": "light"}));
+        assert_eq!(out["result"]["theme"], "light", "{out}");
+        assert_eq!(frames(&mut h, egui::Theme::Dark), vec![]);
+        assert_eq!(h.app.prefs_window.window_theme, Some(egui::SystemTheme::Light));
+        assert!(!h.app.ui.dark);
     }
 
     /// The 3D view in the other theme's colours (#4146): `ui.prefs` sets it, the window keeps its
