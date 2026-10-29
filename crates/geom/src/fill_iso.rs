@@ -562,8 +562,9 @@ fn corner_scales(edges: &[IsoEdge]) -> SplineResult<Vec<f64>> {
 impl Quilt {
     /// The fill's patches over the loop's sides at degree `degree` (at least) in spaces refined
     /// by `extra` breaks (along u and v). One patch has a space each way, each holding the two
-    /// sides that run that way; patches about a centre share one space both ways, which each
-    /// spoke, a row of two patches, runs in.
+    /// sides that run that way; about a centre, the space along each spoke is the two patches'
+    /// either side of it (one's along v, the other's along u), holding the spoke and the two edge
+    /// halves it meets those patches beside.
     fn new(edges: &[IsoEdge], extra: &[Vec<f64>; 2], degree: usize) -> SplineResult<Quilt> {
         let n = edges.len();
         let scales = corner_scales(edges)?;
@@ -613,16 +614,48 @@ impl Quilt {
         for m in &middle {
             curves.push(line(*m, HPoint::weighted(centre, 1.0))?);
         }
-        let refs: Vec<&Curve> = curves.iter().collect();
-        let (space, rows) = compatible(&refs, &extra[0], degree)?;
-        let c = space.count();
-        let row = |r: usize| rows.get(r).cloned().ok_or_else(|| SplineError::Invalid("rows".into()));
+        // Space k runs along spoke k: it is patch k's along v (its sides edge k − 1's second half
+        // and spoke k) and patch k + 1's along u (edge k + 1's first half and spoke k), so it
+        // holds those three curves' breaks only, not every edge's.
+        let mut spaces: Vec<Space> = Vec::with_capacity(n);
+        // Each curve carried into the space it runs in: [first half, second half] per edge, and
+        // each spoke.
+        let mut first_half: Vec<Option<Vec<HPoint>>> = vec![None; n];
+        let mut second_half: Vec<Option<Vec<HPoint>>> = vec![None; n];
+        let mut spoke_rows: Vec<Vec<HPoint>> = Vec::with_capacity(n);
+        for k in 0..n {
+            let (prev, next) = ((k + n - 1) % n, (k + 1) % n);
+            let refs = [
+                curves.get(2 * prev + 1).ok_or_else(|| SplineError::Invalid("curves".into()))?,
+                curves.get(2 * next).ok_or_else(|| SplineError::Invalid("curves".into()))?,
+                curves.get(2 * n + k).ok_or_else(|| SplineError::Invalid("curves".into()))?,
+            ];
+            let (space, mut rows) = compatible(&refs, &extra[0], degree)?;
+            let spoke = rows.pop().ok_or_else(|| SplineError::Invalid("rows".into()))?;
+            let first = rows.pop().ok_or_else(|| SplineError::Invalid("rows".into()))?;
+            let second = rows.pop().ok_or_else(|| SplineError::Invalid("rows".into()))?;
+            second_half[prev] = Some(second);
+            first_half[next] = Some(first);
+            spoke_rows.push(spoke);
+            spaces.push(space);
+        }
+        let got = |v: &[Option<Vec<HPoint>>], k: usize| v.get(k).cloned().flatten().ok_or_else(|| SplineError::Invalid("rows".into()));
+        let space = |k: usize| spaces.get(k).cloned().ok_or_else(|| SplineError::Invalid("spaces".into()));
+        let spoke_row = |k: usize| spoke_rows.get(k).cloned().ok_or_else(|| SplineError::Invalid("rows".into()));
         let mut patches = Vec::with_capacity(n);
         for k in 0..n {
             let prev = (k + n - 1) % n;
-            // v = 0: edge k's first half; u = 0: edge k − 1's second half, from V_k up to M_{k−1};
-            // u = 1: spoke k; v = 1: spoke k − 1, from M_{k−1} to C.
-            patches.push(coons([space.clone(), space.clone()], &row(2 * k)?, &row(2 * n + prev)?, &row(2 * prev + 1)?, &row(2 * n + k)?, false)?);
+            // Along u, space k − 1: v = 0 edge k's first half, v = 1 spoke k − 1 (from M_{k−1} to
+            // C); along v, space k: u = 0 edge k − 1's second half (from V_k up to M_{k−1}),
+            // u = 1 spoke k.
+            patches.push(coons(
+                [space(prev)?, space(k)?],
+                &got(&first_half, k)?,
+                &spoke_row(prev)?,
+                &got(&second_half, prev)?,
+                &spoke_row(k)?,
+                false,
+            )?);
         }
         // The spokes are shared rows: their weights the same in both patches (the Coons blends
         // agree on them), and so are their points once solved.
@@ -634,20 +667,21 @@ impl Quilt {
             unknowns - 1
         };
         let centre_id = next();
-        let spoke_ids: Vec<Vec<usize>> = (0..n).map(|_| (1..c - 1).map(|_| next()).collect()).collect();
+        let spoke_ids: Vec<Vec<usize>> = spaces.iter().map(|sp| (1..sp.count().saturating_sub(1)).map(|_| next()).collect()).collect();
         let mut slots = Vec::with_capacity(n);
         for k in 0..n {
             let prev = (k + n - 1) % n;
-            let mut s = vec![None; c * c];
-            for j in 1..c {
-                for i in 1..c {
-                    let id = match (i == c - 1, j == c - 1) {
+            let [cu, cv] = patches.get(k).map(Patch::counts).ok_or_else(|| SplineError::Invalid("patch".into()))?;
+            let mut s = vec![None; cu * cv];
+            for j in 1..cv {
+                for i in 1..cu {
+                    let id = match (i == cu - 1, j == cv - 1) {
                         (true, true) => centre_id,
                         (true, false) => *spoke_ids.get(k).and_then(|x| x.get(j - 1)).ok_or_else(|| SplineError::Invalid("spoke".into()))?,
                         (false, true) => *spoke_ids.get(prev).and_then(|x| x.get(i - 1)).ok_or_else(|| SplineError::Invalid("spoke".into()))?,
                         (false, false) => next(),
                     };
-                    if let Some(slot) = s.get_mut(i + c * j) {
+                    if let Some(slot) = s.get_mut(i + cu * j) {
                         *slot = Some(id);
                     }
                 }
@@ -988,8 +1022,10 @@ pub fn iso_fill(
         let stations = stations(edges, &quilt, &mut *across, &corners)?;
         let spaces = quilt.patches.first().map(|p| p.spaces.clone()).ok_or_else(|| SplineError::Invalid("no patch".into()))?;
         let shared = !quilt.spokes.is_empty();
-        // Rows enough for the conditions from opposite sides not to share control points.
-        let cramped = spaces.clone().map(|s| s.count() < 2 * (order + 1));
+        // Rows enough for the conditions from opposite sides not to share control points, in
+        // every patch.
+        let fewest = |d: usize| quilt.patches.iter().filter_map(|p| p.spaces.get(d).map(Space::count)).min().unwrap_or(0);
+        let cramped = [fewest(0), fewest(1)].map(|c| c < 2 * (order + 1));
         if cramped.iter().any(|c| *c) && refinable(&spans, cramped, shared, quilt.unknowns) {
             halve(&mut extra, &mut spans, &spaces, cramped, shared);
             continue;
@@ -1032,10 +1068,19 @@ fn refinable(spans: &[usize; 2], wanted: [bool; 2], shared: bool, unknowns: usiz
     spans_ok && unknowns.saturating_mul(2usize.pow(grows)) <= Quilt::most_unknowns(shared)
 }
 
-/// Halve every span of the spaces in the `wanted` directions (both when the patches share one
-/// space): the breaks that do it added to `extra`.
+/// Halve every span of the spaces in the `wanted` directions: the breaks that do it added to
+/// `extra`. About a centre, every spoke's space takes the middles of a uniform grid as fine as
+/// the refinement has reached.
 fn halve(extra: &mut [Vec<f64>; 2], spans: &mut [usize; 2], spaces: &[Space; 2], wanted: [bool; 2], shared: bool) {
-    let wanted = if shared { [true; 2] } else { wanted };
+    if shared {
+        // Each spoke's space has the breaks of its own sides: every one of them gets the same
+        // further breaks, the middles of the uniform grid at the level reached so far.
+        let n = spans[0];
+        extra[0].extend((0..n).map(|i| (2 * i + 1) as f64 / (2 * n) as f64));
+        spans[0] *= 2;
+        spans[1] *= 2;
+        return;
+    }
     for (((e, n), s), w) in extra.iter_mut().zip(spans.iter_mut()).zip(spaces).zip(wanted) {
         if w {
             e.extend(breaks(s).windows(2).map(|w| 0.5 * (w[0] + w[1])));
@@ -1157,10 +1202,10 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
     let mut located: Vec<(usize, [f64; 2])> = Vec::new();
     let mut report = Achieved::default();
     let mut along = Along::default();
-    let spoke_count = quilt.patches.first().map_or(0, |p| station_count(&p.spaces[0]));
+    let spoke_count = quilt.patches.iter().map(|p| station_count(&p.spaces[0])).max().unwrap_or(0);
     let top = stations.iter().map(Station::order).max().unwrap_or(1);
-    // The mean span of each space (the same in every patch).
-    let span = quilt.patches.first().map_or([1.0; 2], |p| p.spaces.clone().map(|s| 1.0 / breaks(&s).len().saturating_sub(1).max(1) as f64));
+    // The mean span of each space of a patch.
+    let span = |p: &Patch| p.spaces.clone().map(|s| 1.0 / breaks(&s).len().saturating_sub(1).max(1) as f64);
     let rounds = if top >= 2 { ROUNDS_PER_ORDER * top } else { ROUNDS };
     let smooth = knot_line_rows(&quilt, spec.angle_tol)?;
     for round in 0..rounds {
@@ -1168,7 +1213,7 @@ fn solve(mut quilt: Quilt, stations: &[Station], spec: &IsoSpec) -> SplineResult
         for s in stations {
             let Some(patch) = quilt.patches.get(s.patch) else { continue };
             // The span across the side: of v for sides 0 and 2, of u for 1 and 3.
-            linkage_rows(&mut rows, patch, s, span.get(1 - s.side % 2).copied().unwrap_or(1.0))?;
+            linkage_rows(&mut rows, patch, s, span(patch).get(1 - s.side % 2).copied().unwrap_or(1.0))?;
         }
         // Across each spoke the two patches' derivatives away from it are opposed.
         for &(left, right) in &quilt.spokes {
