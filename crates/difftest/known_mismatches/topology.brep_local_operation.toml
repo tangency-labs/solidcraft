@@ -1,0 +1,10 @@
+# Known mismatches of topology.brep_local_operation (format: crates/difftest/src/known.rs).
+
+# The merge stitch's inner-shell test reseeds rand() from the clock (ND-493, the ND-1
+# mechanism): the C++ result depends on the second the call runs in.
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "nurb_fillet_face5_same"
+libc = "glibc"
+cpp_defect = "ND-493"
+why = "C++ clock-seeded rand() in IsInnerShell's sample points (ND-493): geometry[131] is 1.0308646e-3 (the Rust result) in most runs, 1.0335321e-3 in others; main CI failed intermittently at c47d6d3b5 and 7ca6ce7a9"

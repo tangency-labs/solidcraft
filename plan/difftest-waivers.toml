@@ -13,3 +13,9 @@ unit = "sweep.topology_sweep"
 check = "ratchet"
 case = "nm_box_linear_z_stitch"
 reason = "ND-491 C++ heap-order nondeterminism: 993/1000 C++ runs succeed with Rust's result, 7/1000 SM_ERR (main CI run 40862396783 at 881b040f9); parked like its 7 siblings"
+
+[[waiver]]
+unit = "topology.brep_local_operation"
+check = "ratchet"
+case = "nurb_fillet_face5_same"
+reason = "ND-493 C++ clock-seeded rand() (srand(time(NULL)) in GetPointsInFace via IsInnerShell in the merge stitch): intermittent on main CI at c47d6d3b5 and 7ca6ce7a9; Rust deterministic; parked"
