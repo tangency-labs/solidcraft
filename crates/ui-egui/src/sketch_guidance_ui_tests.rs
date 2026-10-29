@@ -308,6 +308,52 @@ fn centre_and_midpoint_tracking_is_visual_in_idle_and_drawing_modes() {
 }
 
 #[test]
+fn two_recent_midpoints_snap_where_their_guides_meet() {
+    use solidcraft_engine::geom::Vec2;
+    let mut h = tracking_fixture();
+    // Grid snap at this zoom already rounds a nearby cursor onto the origin. Snap off leaves
+    // the cursor where it is, so only the remembered crossing can pull it to (0, 0).
+    h.app.run("sketch.options", json!({"snap": false})).unwrap();
+    h.app.start("sketch.line");
+    // Top midpoint (0, 20) and the circle centre (-10, 3) meet at (0, 3), which is not the
+    // model origin and not a sketch point. A cursor a fraction of a millimetre away stays put
+    // until both references have been hovered.
+    let cross = Vec2::new(0.0, 3.0);
+    let near = json!({"sketch":[0.4,3.3]});
+    step(&mut h, json!({"move":{"sketch":[0,20]}}));
+    let [x, y] = h.at(&near).unwrap();
+    let pos = egui::pos2(x as f32, y as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("viewport"));
+    let (at, _) = crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
+    assert!(at.dist(cross) > 0.2, "one reference does not pin both coordinates: {at:?}");
+    step(&mut h, json!({"move":{"sketch":[-10,3]}}));
+    step(&mut h, json!({"move":{"sketch":[0.4,3.3]}}));
+    let (a, b) = h.app.viewport.tracking.guide.expect("current guide");
+    let (c, d) = h.app.viewport.tracking.remembered_guide.expect("remembered guide");
+    assert!(b.dist(cross) < 1e-6 && d.dist(cross) < 1e-6, "{a:?} {b:?} {c:?} {d:?}");
+    let [x, y] = h.at(&near).unwrap();
+    let pos = egui::pos2(x as f32, y as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.expect("viewport"));
+    let (at, id) = crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
+    assert!(id.is_none(), "{id:?}");
+    assert!(at.dist(cross) < 1e-6, "{at:?}");
+    crate::tool_modifiers::set_target_midpoint(true);
+    let shifted = crate::viewport::sketch_point_at(&h.app, &proj, pos);
+    crate::tool_modifiers::set_target_midpoint(false);
+    let (at, _) = shifted.unwrap();
+    assert!(at.dist(cross) > 0.2, "shift midpoint mode skips the crossing: {at:?}");
+    step(&mut h, json!({"click":{"sketch":[0.4,3.3]}}));
+    let placed = h.app.tool.as_ref().unwrap().pts[0].0;
+    assert!(placed.dist(cross) < 1e-6, "{placed:?}");
+    let curves = h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
+    assert_eq!(curves, 5, "the snap adds no construction geometry");
+    h.call("ui.prefs", json!({"sketch_tracking_guides":false}));
+    h.frames(2);
+    let (at, _) = crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
+    assert!(at.dist(cross) > 0.2, "the preference keeps the old cursor: {at:?}");
+}
+
+#[test]
 fn tracking_clears_on_escape_sketch_exit_and_preference_and_respects_suppression() {
     let mut h = tracking_fixture();
     for action in ["suppression", "preference", "escape", "exit"] {

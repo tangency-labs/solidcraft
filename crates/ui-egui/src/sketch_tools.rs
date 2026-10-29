@@ -511,6 +511,14 @@ pub fn refine_snap(
             }
         }
     }
+    // The two most recent midpoints or centres: snap where their axes meet. A free coordinate,
+    // so placing it adds no constraint. One reference stays a visual guide. Shift skips this.
+    if !mid_only
+        && best.is_none()
+        && let Some(at) = app.viewport.tracking.meeting(sk, plane, proj, a)
+    {
+        best = Some((at.dist(lp), "+", at));
+    }
     // The tool's points and kind (a click takes the tool out of the app while it runs, so the
     // last hover's are kept: a rectangle's click takes no Line tool inference its hover didn't).
     let (own, line_tool) = match app.tool.as_ref() {

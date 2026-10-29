@@ -42,7 +42,7 @@
   "prefs.sketch_state_icons": "Sketch icons in the colour of their state",
   "prefs.sketch_state_icons_note": "In History and the browser, a sketch's icon takes the colour of its state (under constrained, fully constrained or conflicting) and its tooltip names the state. Off: every sketch has the same icon.",
   "prefs.sketch_tracking_guides": "Centre and midpoint alignment guides",
-  "prefs.sketch_tracking_guides_note": "Hover over a circle centre or straight-edge midpoint, then move horizontally or vertically to show a temporary dotted guide.",
+  "prefs.sketch_tracking_guides_note": "Hover over a circle centre or straight-edge midpoint, then move horizontally or vertically to show a temporary dotted guide. The two most recent references also snap the cursor where those guides cross.",
   "prefs.status_bar_note": "A thin bar along the window's bottom edge shows what is being edited, the open sketch's state in its colour and the design's units; a click on the units changes them. The sketch's state then no longer shows in the view's corner.",
   "prefs.theme_follow": "Follow a theme file",
   "prefs.theme_follow_error": "Not applied: {error}. The last good theme stays on.",

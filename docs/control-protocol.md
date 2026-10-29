@@ -464,8 +464,11 @@ the Design camera. See [the integrated Render workspace](render-workspace.md).
 `ui.prefs {sketch_tracking_guides: true}` enables temporary horizontal and vertical dotted
 alignment guides from hovered circle/arc centres and straight-edge midpoints (default true).
 The guide spans the reference and cursor projection, including positions inside a circle.
-It is visual only: coordinates, snapping and constraints are unchanged. Set the preference
-to `false` to hide the guides.
+The two most recent references are kept. While a drawing tool is placing a point, the cursor
+snaps to the crossing of those guides when it is within a few pixels. That snap is a free
+coordinate: it adds no constraint and no construction geometry. A single guide does not move
+the cursor. Set the preference to `false` to hide the guides and skip the crossing snap.
+Snap suppression (Alt, unless rebound) does the same for that gesture.
 
 ### Continuous camera motion
 

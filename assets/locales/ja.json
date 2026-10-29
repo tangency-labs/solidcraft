@@ -1987,7 +1987,7 @@
   "prefs.sketch_tab_always": "スケッチ タブを常に表示",
   "prefs.sketch_tab_always_note": "スケッチを開いていないときも、スケッチ タブをリボンのモデルのすぐ後に表示します。そこにある作図ツールは、選択した平面または面に、なければ次に選ぶ平面にスケッチを開始し、そのスケッチでツールをすぐ使える状態にします。",
   "prefs.sketch_tracking_guides": "中心・中点の整列ガイド",
-  "prefs.sketch_tracking_guides_note": "円の中心や直線辺の中点にカーソルを合わせ、水平・垂直に移動すると一時的な点線ガイドを表示します。",
+  "prefs.sketch_tracking_guides_note": "円の中心や直線辺の中点にカーソルを合わせ、水平・垂直に移動すると一時的な点線ガイドを表示します。直前の2つの参照では、ガイドが交わる位置にカーソルもスナップします。",
   "prefs.sketching": "スケッチ",
   "prefs.snap_drawing_note": "スケッチの描画中または点のドラッグ中に使用します。",
   "prefs.source": "入力元",

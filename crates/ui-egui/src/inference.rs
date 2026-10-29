@@ -250,13 +250,16 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
 }
 
-/// A hovered centre or straight-edge midpoint. Transient, per viewport, never a constraint.
+/// The two most recent hovered centres or straight-edge midpoints. Transient, per viewport,
+/// never a constraint. A third hover drops the oldest. Endpoints are ordinary point snaps.
 #[derive(Default)]
 pub(crate) struct Tracking {
     sketch: Option<u64>,
     document: std::sync::Weak<solidcraft_engine::doc::Document>,
     anchor: Option<String>,
+    previous: Option<String>,
     pub(crate) guide: Option<(Vec2, Vec2)>,
+    pub(crate) remembered_guide: Option<(Vec2, Vec2)>,
 }
 
 impl Tracking {
@@ -271,26 +274,91 @@ impl Tracking {
         }
     }
 
+    fn point_of(sk: &Sketch, id: &str) -> Option<Vec2> {
+        Self::reference(sk, sk.curve_index(id)?)
+    }
+
+    /// Keep `id` as one of the two remembered references. Hovering the older one swaps them,
+    /// so going back does not drop it. A third, different reference drops the oldest.
+    fn remember(&mut self, id: String) {
+        if self.anchor.as_deref() == Some(id.as_str()) {
+            return;
+        }
+        if self.previous.as_deref() == Some(id.as_str()) {
+            std::mem::swap(&mut self.anchor, &mut self.previous);
+            return;
+        }
+        self.previous = self.anchor.replace(id);
+    }
+
+    /// Where the horizontal through one reference meets the vertical through the other, when
+    /// that point is within a few pixels of the cursor and is not either reference itself.
+    pub(crate) fn meeting(&self, sk: &Sketch, plane: &solidcraft_engine::geom::Plane, proj: &Proj, cursor: egui::Pos2) -> Option<Vec2> {
+        let a = self.anchor.as_deref().and_then(|id| Self::point_of(sk, id))?;
+        let b = self.previous.as_deref().and_then(|id| Self::point_of(sk, id))?;
+        if a.dist(b) < 1e-6 {
+            return None;
+        }
+        let to = |p: Vec2| proj.to_screen(plane.to_world(p));
+        let mut best: Option<(f32, Vec2)> = None;
+        for at in [Vec2::new(a.x, b.y), Vec2::new(b.x, a.y)] {
+            if at.dist(a) < 1e-6 || at.dist(b) < 1e-6 {
+                continue;
+            }
+            let Some(screen) = to(at).filter(|p| proj.rect.contains(*p)) else { continue };
+            let distance = cursor.distance(screen);
+            if distance < 8.0 && best.is_none_or(|(d, _)| distance < d) {
+                best = Some((distance, at));
+            }
+        }
+        best.map(|(_, at)| at)
+    }
+
+    fn axis_guide(anchor: Vec2, at: Vec2, cursor: egui::Pos2, to: &impl Fn(Vec2) -> Option<egui::Pos2>) -> Option<(Vec2, Vec2)> {
+        let origin = to(anchor)?;
+        let mut distance = 6.0;
+        let mut end = None;
+        for candidate in [Vec2::new(at.x, anchor.y), Vec2::new(anchor.x, at.y)] {
+            let Some(screen) = to(candidate) else { continue };
+            let off_axis = cursor.distance(screen);
+            if origin.distance(screen) > 8.0 && off_axis < distance {
+                distance = off_axis;
+                end = Some(candidate);
+            }
+        }
+        end.map(|end| (anchor, end))
+    }
+
     fn update(&mut self, sk: &Sketch, plane: &solidcraft_engine::geom::Plane, proj: &Proj, cursor: egui::Pos2) {
         self.guide = None;
+        self.remembered_guide = None;
         let to = |p: Vec2| proj.to_screen(plane.to_world(p));
         // Screen-space tolerances stay the same at any zoom; only visible references wake.
         let mut nearest = 8.0;
+        let mut nearest_id = None;
         for (index, curve) in sk.curves.iter().enumerate() {
-            let Some(p) = Self::reference(sk, index).and_then(to).filter(|p| proj.rect.contains(*p)) else { continue };
+            let Some(p) = Self::reference(sk, index).and_then(&to).filter(|p| proj.rect.contains(*p)) else { continue };
             let distance = cursor.distance(p);
             if distance < nearest {
                 nearest = distance;
-                self.anchor = Some(curve.id.clone());
+                nearest_id = Some(curve.id.clone());
             }
         }
-        let Some((anchor, origin)) = self.anchor.as_deref().and_then(|id| {
-            let anchor = Self::reference(sk, sk.curve_index(id)?)?;
-            Some((anchor, to(anchor)?))
+        if let Some(id) = nearest_id {
+            self.remember(id);
+        }
+        let Some(anchor) = self.anchor.as_deref().and_then(|id| Self::point_of(sk, id)).or_else(|| {
+            self.anchor = self.previous.take();
+            self.anchor.as_deref().and_then(|id| Self::point_of(sk, id))
         }) else {
             self.anchor = None;
+            self.previous = None;
             return;
         };
+        if self.previous.as_deref().and_then(|id| Self::point_of(sk, id)).is_none() {
+            self.previous = None;
+        }
+        let Some(origin) = to(anchor) else { return };
         if !proj.rect.contains(origin) {
             return;
         }
@@ -300,21 +368,27 @@ impl Tracking {
         if !at.x.is_finite() || !at.y.is_finite() {
             return;
         }
+        // Near the crossing, both guides end on that point. Otherwise each reference keeps
+        // its own axis, and a single guide stays visual (it does not move the cursor).
+        if let Some(meet) = self.meeting(sk, plane, proj, cursor) {
+            let span = |from: Vec2| to(from).zip(to(meet)).filter(|(a, b)| a.distance(*b) > 8.0).map(|_| (from, meet));
+            self.guide = span(anchor);
+            if let Some(previous) = self.previous.as_deref().and_then(|id| Self::point_of(sk, id)) {
+                self.remembered_guide = span(previous);
+            }
+            return;
+        }
         // Finite guides connect the reference to the cursor's projection onto its axis.
         // No model-space length cap: the viewport clips them, as it does other sketch guides.
-        let mut distance = 6.0;
-        for end in [Vec2::new(at.x, anchor.y), Vec2::new(anchor.x, at.y)] {
-            let Some(screen) = to(end) else { continue };
-            let off_axis = cursor.distance(screen);
-            if origin.distance(screen) > 8.0 && off_axis < distance {
-                distance = off_axis;
-                self.guide = Some((anchor, end));
-            }
+        self.guide = Self::axis_guide(anchor, at, cursor, &to);
+        if let Some(previous) = self.previous.as_deref().and_then(|id| Self::point_of(sk, id)) {
+            self.remembered_guide = Self::axis_guide(previous, at, cursor, &to);
         }
     }
 }
 
 /// Visual H/V tracking works before a tool's first click and while simply editing a sketch.
+/// The crossing of the two remembered references is also a snap. A single guide stays visual.
 /// Existing snaps, picks and constraints retain their behaviour.
 pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: &Proj, cursor: Option<egui::Pos2>) {
     crate::scenario::publish_count("sketch_tracking_guides", 0.0);
@@ -334,12 +408,19 @@ pub(crate) fn track_and_show(app: &mut SolveApp, painter: &egui::Painter, proj: 
         return;
     };
     tracking.update(&ss.sketch, &ss.plane, proj, cursor);
-    crate::scenario::publish_count("sketch_tracking_guides", usize::from(tracking.guide.is_some()) as f64);
-    if let Some((a, b)) = tracking.guide
-        && let (Some(a), Some(b)) = (proj.to_screen(ss.plane.to_world(a)), proj.to_screen(ss.plane.to_world(b)))
-    {
-        let tk = Tokens::get();
+    let shown = tracking.guide.is_some() || tracking.remembered_guide.is_some();
+    crate::scenario::publish_count("sketch_tracking_guides", usize::from(shown) as f64);
+    let tk = Tokens::get();
+    let draw = |guide: (Vec2, Vec2)| {
+        let (Some(a), Some(b)) = (proj.to_screen(ss.plane.to_world(guide.0)), proj.to_screen(ss.plane.to_world(guide.1))) else { return None };
         painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+        painter.circle_stroke(a, 4.0, Stroke::new(1.0, tk.rubber_band));
+        Some(b)
+    };
+    let ends = [tracking.guide.and_then(&draw), tracking.remembered_guide.and_then(&draw)];
+    if let (Some(a), Some(b)) = (ends[0], ends[1])
+        && a.distance(b) < 1.0
+    {
         painter.circle_stroke(a, 4.0, Stroke::new(1.0, tk.rubber_band));
     }
 }
@@ -391,6 +472,55 @@ mod tests {
             assert!(tracking.guide.is_none(), "removed references cannot leave a stale guide");
             sk.curves.iter_mut().find(|c| c.id == "renamed").unwrap().id = "l".into();
         }
+    }
+
+    #[test]
+    fn two_recent_references_meet_and_a_third_drops_the_oldest() {
+        use solidcraft_engine::geom::Plane;
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.cam.yaw = 0.0;
+        app.cam.pitch = std::f64::consts::FRAC_PI_2;
+        app.cam.distance = 180.0;
+        let mut sk = Sketch::new();
+        sk.add_line(Vec2::new(-30.0, 20.0), Vec2::new(30.0, 20.0), None, None, Some("top")).unwrap();
+        sk.add_line(Vec2::new(30.0, -20.0), Vec2::new(30.0, 20.0), None, None, Some("right")).unwrap();
+        sk.add_circle(Vec2::new(-10.0, 3.0), 5.0, None, Some("c")).unwrap();
+        sk.add_line(Vec2::new(50.0, -10.0), Vec2::new(50.0, 10.0), None, None, Some("far")).unwrap();
+        let proj = crate::viewport::projection(&app, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0)));
+        let to = |p: Vec2| proj.to_screen(Plane::XY.to_world(p)).unwrap();
+        let mut tracking = Tracking::default();
+        let hover = |tracking: &mut Tracking, p: Vec2| tracking.update(&sk, &Plane::XY, &proj, to(p));
+        hover(&mut tracking, Vec2::new(0.0, 20.0));
+        hover(&mut tracking, Vec2::new(30.0, 0.0));
+        let centre = Vec2::ZERO;
+        let near = to(centre) + egui::vec2(4.0, 3.0);
+        assert!(tracking.meeting(&sk, &Plane::XY, &proj, near).unwrap().dist(centre) < 1e-6);
+        tracking.update(&sk, &Plane::XY, &proj, near);
+        let (a, b) = tracking.guide.unwrap();
+        let (c, d) = tracking.remembered_guide.unwrap();
+        assert!(b.dist(centre) < 1e-6 && d.dist(centre) < 1e-6, "both guides end on the crossing");
+        assert!(a.dist(Vec2::new(30.0, 0.0)) < 1e-6 && c.dist(Vec2::new(0.0, 20.0)) < 1e-6);
+        assert!(tracking.meeting(&sk, &Plane::XY, &proj, to(centre) + egui::vec2(20.0, 0.0)).is_none());
+        // Back to the first reference: both stay, in swapped order.
+        hover(&mut tracking, Vec2::new(0.0, 20.0));
+        assert_eq!(tracking.anchor.as_deref(), Some("top"));
+        assert_eq!(tracking.previous.as_deref(), Some("right"));
+        // A circle centre and a midpoint meet the same way.
+        hover(&mut tracking, Vec2::new(-10.0, 3.0));
+        let cross = Vec2::new(0.0, 3.0);
+        assert!(tracking.meeting(&sk, &Plane::XY, &proj, to(cross)).unwrap().dist(cross) < 1e-6);
+        // A third reference drops the oldest. The far edge shares a horizontal with the right edge,
+        // so their axes do not invent the rectangle centre.
+        hover(&mut tracking, Vec2::new(30.0, 0.0));
+        hover(&mut tracking, Vec2::new(50.0, 0.0));
+        assert_eq!(tracking.anchor.as_deref(), Some("far"));
+        assert_eq!(tracking.previous.as_deref(), Some("right"));
+        assert!(tracking.meeting(&sk, &Plane::XY, &proj, to(centre)).is_none());
+        sk.curves.iter_mut().find(|c| c.id == "far").unwrap().id = "gone".into();
+        tracking.update(&sk, &Plane::XY, &proj, to(Vec2::new(40.0, 40.0)));
+        assert_eq!(tracking.anchor.as_deref(), Some("right"));
+        assert!(tracking.previous.is_none());
+        assert!(tracking.guide.is_none(), "a removed reference leaves no guide");
     }
 
     #[test]

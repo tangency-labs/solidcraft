@@ -1987,7 +1987,7 @@
   "prefs.sketch_tab_always": "始终显示草图选项卡",
   "prefs.sketch_tab_always_note": "未打开草图时，草图选项卡也保留在功能区中紧随模型之后。其中的绘图工具会先在所选平面或面上（否则在接下来选取的平面上）创建草图，并在其中准备好该工具。",
   "prefs.sketch_tracking_guides": "圆心和中点对齐辅助线",
-  "prefs.sketch_tracking_guides_note": "将光标悬停在圆心或直线边的中点，然后水平或垂直移动以显示临时虚线辅助线。",
+  "prefs.sketch_tracking_guides_note": "将光标悬停在圆心或直线边的中点，然后水平或垂直移动以显示临时虚线辅助线。最近的两个参照还会在辅助线相交处吸附光标。",
   "prefs.sketching": "草图",
   "prefs.snap_drawing_note": "在绘制或拖动草图点时使用。",
   "prefs.source": "来源",
