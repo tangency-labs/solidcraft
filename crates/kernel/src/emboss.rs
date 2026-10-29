@@ -9,7 +9,7 @@ use crate::numbered::NumberedRegion;
 use crate::offset::{Surf, face_edges, surf_of};
 use crate::{KernelError, Result, guard};
 use solidcraft_geom::brep::eval::CurveEval;
-use solidcraft_geom::brep::{Brep, Curve, Frame, Loop, Surface};
+use solidcraft_geom::brep::{Brep, Curve, Frame, Loop, Surface, form};
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 fn fail(s: &str) -> KernelError {
@@ -40,10 +40,11 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         if z.dot(axis).abs() < 1.0 - 1e-9 {
             continue;
         }
-        // The circle's parameter is its angle: the wall spans the edge's interval about the
-        // angle of its middle (a whole turn, from the seam, for a wall in one piece).
-        let c = CurveEval::new(e.parameters()).ok()?;
-        let [t0, t1] = e.interval;
+        // The circle's parameter is its angle: the wall spans the edge's angles on the circle
+        // (`interval` is on its NURBS form where it has one) about the angle of its middle (a
+        // whole turn, from the seam, for a wall in one piece).
+        let c = CurveEval::new(&e.curve).ok()?;
+        let [t0, t1] = e.curve_interval()?;
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
         let half = 0.5 * (t1 - t0);
         return Some((am - half, am + half));
@@ -327,9 +328,12 @@ fn emboss_impl(body: &Body, anchor: Option<Vec3>, plane: &Plane, regions: &[Regi
             let at = o + axis * p.y + (radial * (p.x / r).cos() + tangent * (p.x / r).sin()) * r;
             return Ok(EmbossOutcome::Anchor(fi, at));
         }
-        let wall = Wrap { o, axis, radial, tangent, r };
         let mut asm = Assembly::from_record(&rec)?;
         let selected = asm.faces.get_mut(fi).and_then(Option::take).ok_or_else(|| fail("face"))?;
+        // The footprint's arcs lie on the wall face and are labelled on its frame, so their NURBS
+        // forms run on the face's own quarter grid and their pcurves there are exact.
+        let label = form::frame_of(&selected.surface);
+        let wall = Wrap { o, axis, radial, tangent, r, label, tol };
         // The wall's pieces left around the footprints: the face itself, then one per profile
         // hole (the original radius inside it).
         let mut base_patches: Vec<Vec<Vec<AUse>>> = vec![selected.loops.clone()];
@@ -416,6 +420,9 @@ struct Wrap {
     radial: Vec3,
     tangent: Vec3,
     r: f64,
+    /// The wall face's own frame, which the arcs at its radius are labelled on.
+    label: Option<Frame>,
+    tol: f64,
 }
 
 impl Wrap {
@@ -441,7 +448,12 @@ impl Wrap {
         let (ta, tb) = (p.x / self.r, q.x / self.r);
         let forward = ta < tb;
         let (interval, ends) = if forward { ([ta, tb], (a, b)) } else { ([tb, ta], (b, a)) };
-        Ok(AUse { edge: asm.edge(Curve::Circle { frame, radius }, interval, ends.0, ends.1)?, forward, given: None })
+        let circle = Curve::Circle { frame, radius };
+        let (circle, interval) = match &self.label {
+            Some(label) if (radius - self.r).abs() <= self.tol => form::on_frame(&circle, interval, label, self.tol).unwrap_or((circle, interval)),
+            _ => (circle, interval),
+        };
+        Ok(AUse { edge: asm.edge(circle, interval, ends.0, ends.1)?, forward, given: None })
     }
 
     /// A profile loop wrapped onto the wall: its footprint at the wall's radius and its cap's
