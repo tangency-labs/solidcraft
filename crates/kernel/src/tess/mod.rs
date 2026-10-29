@@ -356,7 +356,14 @@ fn boundary(
         }
         let n = uvs.len();
         let pole = |q: &[f64; 2]| (0..2).any(|d| pole_along(*q, d));
-        if let Some(k) = (0..n).find(|&k| uvs.get(k).is_some_and(|q| !pole(q)) && uvs.get((k + n - 1) % n).is_some_and(|q| !pole(q))) {
+        let off = |k: usize| uvs.get(k).is_some_and(|q| !pole(q));
+        // A node off the poles whose predecessor is off them too; failing that (a whole sphere's
+        // seam in two segments: pole, equator, pole), one whose predecessor is a pole on the same
+        // edge, so the step into it is the edge's own and the step into that pole, from the
+        // edge before, is in the loop where it is unwrapped like any other.
+        let same_edge = |k: usize| segs.get((k + n - 1) % n).zip(segs.get(k)).is_some_and(|(a, b)| a.0 == b.0);
+        let start = (0..n).find(|&k| off(k) && off((k + n - 1) % n)).or_else(|| (0..n).find(|&k| off(k) && same_edge(k)));
+        if let Some(k) = start {
             uvs.rotate_left(k);
             pts.rotate_left(k);
             segs.rotate_left(k);

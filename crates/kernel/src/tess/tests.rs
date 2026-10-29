@@ -883,3 +883,23 @@ fn a_loop_corner_within_its_tolerance_of_a_pole_is_a_pole() {
     let Err(e) = plan(&pyramid_past_a_near_pole(1e-8), 0.01, None) else { panic!("no pole without the tolerance") };
     assert!(e.to_string().contains("winds around the surface"), "{e}");
 }
+
+/// A whole sphere as one face (its seam the only edge) in a body many times its size: at the
+/// body's chord the seam gets two segments, pole to equator to pole, and every node off the poles
+/// follows a pole. The loop used to start at a pole and close across the other, which unwrapped
+/// to a whole turn: "boundary winds around the surface", and the sphere was left out (a sealed
+/// void r 2 in a 60 mm block). It meshes closed.
+#[test]
+fn a_small_sphere_void_in_a_large_block_meshes() {
+    let block = ok(crate::box_solid(Vec3::new(-30.0, -30.0, 0.0), Vec3::new(30.0, 30.0, 60.0)));
+    let ball = ok(crate::sphere(Vec3::new(0.0, 0.0, 30.0), 2.0));
+    let hollow = cut(&block, &ball);
+    let tol = hollow.size() * 0.01;
+    let (m, stats) = match plan(&record(&hollow), tol, None) {
+        Ok((p, stats)) => (p.evaluate(), stats),
+        Err(e) => panic!("plan: {e}"),
+    };
+    assert!(stats.unmeshed.is_empty(), "{:?}", stats.unmeshed.iter().map(|u| &u.reason).collect::<Vec<_>>());
+    assert_watertight(&m, "block with a sphere void");
+    assert_eq!(hollow.unmeshed_faces(), 0);
+}
