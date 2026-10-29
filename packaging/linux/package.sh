@@ -14,6 +14,11 @@
 # (downloaded into $CARGO_TARGET_DIR if missing). Build on an old distro (CI: Ubuntu 22.04,
 # glibc 2.35) so the binaries run on newer ones. Optional: desktop-file-validate, appstreamcli,
 # zsyncmake (the zsync package) for the AppImage's .zsync.
+#
+# Cross builds (CI: riscv64; deb, rpm and tar.gz): set CROSS_ARCH (riscv64), CROSS_TARGET (the
+# Rust triple), CROSS_COMPILE (binutils prefix, for strip), GLIBC_FLOOR (the build host's glibc,
+# which the deb's libc6 dependency declares; 2.35 by default) and optionally EMULATOR (e.g.
+# qemu-riscv64) to smoke-test the CLI.
 # Adapted from PhotoCraft's packaging (storytold/photocraft, Apache-2.0; see ATTRIBUTION.md).
 set -euo pipefail
 # shellcheck source=../env.sh
@@ -38,6 +43,8 @@ case "$ARCH" in
   aarch64 | arm64) ARCH=aarch64; DEB_ARCH=arm64 ;;
   *) echo "unsupported architecture $ARCH" >&2; exit 2 ;;
 esac
+# The deb's libc6 floor (nfpm.yaml): the glibc of the host the binaries were built on.
+export GLIBC_FLOOR="${GLIBC_FLOOR:-2.35}"
 export SOLIDCRAFT_MAINTAINER="${SOLIDCRAFT_MAINTAINER:-${SOLVECRAFT_MAINTAINER:-SolidCraft contributors <https://github.com/bherbruck/solidcraft>}}"  # SOLVECRAFT_*: compatibility shim, see docs/compatibility.md
 BASENAME="solidcraft-$VERSION-linux-$ARCH"
 
@@ -67,7 +74,7 @@ install -Dm755 "$BIN/solidcraft" "$STAGE/usr/bin/solidcraft"
 install -Dm755 "$BIN/solidcraft-cli" "$STAGE/usr/bin/solidcraft-cli"
 # Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
 install -Dm755 "$BIN/solvecraft-cli" "$STAGE/usr/bin/solvecraft-cli"
-strip "$STAGE/usr/bin/solidcraft" "$STAGE/usr/bin/solidcraft-cli" "$STAGE/usr/bin/solvecraft-cli" 2>/dev/null || true
+"${CROSS_COMPILE:-}strip" "$STAGE/usr/bin/solidcraft" "$STAGE/usr/bin/solidcraft-cli" "$STAGE/usr/bin/solvecraft-cli" 2>/dev/null || true
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.mime.xml" "$STAGE/usr/share/mime/packages/$APP_ID.xml"
 mkdir -p "$STAGE/usr/share/metainfo"
@@ -155,6 +162,10 @@ if has appimage; then
   fi
 fi
 
-"$STAGE/usr/bin/solidcraft-cli" --version
+if [ -z "${CROSS_TARGET:-}" ]; then
+  "$STAGE/usr/bin/solidcraft-cli" --version
+elif [ -n "${EMULATOR:-}" ]; then
+  "$EMULATOR" "$STAGE/usr/bin/solidcraft-cli" --version
+fi
 echo "==> done"
 ls -lh "$DIST"

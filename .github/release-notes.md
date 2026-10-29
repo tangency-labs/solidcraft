@@ -31,6 +31,7 @@ Documentation, the browser app and the Flatpak feed use the SolidCraft project P
 - **Linux** (x86_64 and aarch64, glibc 2.35+): the `.AppImage` (`chmod +x`, then run it), the
   `.deb` or `.rpm`, the `.flatpak` (`flatpak install --user <file>`), the `.snap`
   (`sudo snap install --dangerous <file>`, or `sudo snap install solidcraft` from the Snap Store), or the `.tar.gz`.
+- **Linux riscv64** (glibc 2.39+): the `.deb`, `.rpm` or `.tar.gz`.
 - **FreeBSD:** `tar -xzf solidcraft-{version}-freebsd-x86_64.tar.gz --strip-components 1 -C /usr/local`.
 - **Web:** `solidcraft-web-{version}.zip` is a static site to host yourself.
 - `SHA256SUMS.txt`: `sha256sum -c SHA256SUMS.txt --ignore-missing`.

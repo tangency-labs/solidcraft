@@ -12,6 +12,7 @@ Every platform and package. The links point at the latest release.
   openSUSE), or use [Flatpak](https://docs.solidcraft.io/guide/getting-started.html#linux-flatpak).
   With Snap: `sudo snap install solidcraft` ([Snap Store][snap-store], or the [.snap file][linux-snap]).
   For ARM64: [AppImage][linux-arm64-appimage], [.deb][linux-arm64-deb], [.rpm][linux-arm64-rpm].
+  For RISC-V (riscv64): [.deb][linux-riscv64-deb], [.rpm][linux-riscv64-rpm] (glibc 2.39 or later).
 - **Web:** [try it in your browser][web-app], no install.
 
 
@@ -46,5 +47,7 @@ Install details, upgrading from earlier builds and building from source are in
 [linux-arm64-deb]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.deb
 [linux-arm64-rpm]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.rpm
 [linux-snap]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap
+[linux-riscv64-deb]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-riscv64.deb
+[linux-riscv64-rpm]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-riscv64.rpm
 [snap-store]: https://snapcraft.io/solidcraft
 [web-app]: https://solidcraft.io/app

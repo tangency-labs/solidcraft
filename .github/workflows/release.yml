@@ -10,6 +10,7 @@
 # (see the windows job). Nothing else is signed yet.
 #
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .snap, .tar.gz packaging/linux
+#   Linux riscv64           .deb, .rpm, .tar.gz (cross-compiled on x86_64)         packaging/linux
 #   FreeBSD x86_64          .tar.gz (built in a FreeBSD VM)                        packaging/freebsd
 #   macOS universal         .dmg, and the CLI as a .zip (both archs built in parallel)  packaging/macos
 #   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
@@ -167,6 +168,63 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-linux-${{ matrix.arch }}
+          path: dist/release/*
+          if-no-files-found: error
+
+  linux-riscv64:
+    name: Linux riscv64
+    needs: version
+    if: needs.version.outputs.build == 'true'
+    # Cross-compiled: GitHub has no riscv64 runners. On 24.04, because on 22.04 the amd64 and
+    # riscv64 libtinfo6 can't match and the cross dependencies don't install
+    # (storytold/craft-common-actions#44); the binaries then need glibc 2.39, which the deb declares.
+    runs-on: ubuntu-24.04
+    env:
+      SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
+      SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
+      GLIBC_FLOOR: "2.39"
+      CROSS_ARCH: riscv64
+      CROSS_TARGET: riscv64gc-unknown-linux-gnu
+      CROSS_COMPILE: riscv64-linux-gnu-
+      EMULATOR: qemu-riscv64
+      QEMU_LD_PREFIX: /usr/riscv64-linux-gnu
+      CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+      PKG_CONFIG_SYSROOT_DIR: /
+      PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+      PKG_CONFIG_ALLOW_CROSS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The Craft apps' shared cross toolchain and nfpm (storytold/craft-common-actions, MIT OR
+      # Apache-2.0), pinned by commit: Ubuntu ports for riscv64, gcc-riscv64-linux-gnu,
+      # qemu-user, and a SHA256-checked nfpm.
+      - uses: storytold/craft-common-actions/actions/install-riscv64-cross@fa5ef18780cf5e7d5d3b8de068de56cffc83cac5 # main
+      - uses: storytold/craft-common-actions/actions/install-nfpm@fa5ef18780cf5e7d5d3b8de068de56cffc83cac5 # main
+        with:
+          nfpm-version: 2.47.0
+          deb-arch: amd64
+      - name: Install rpm (for the checks)
+        run: sudo apt-get install -y --no-install-recommends rpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv64gc-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-linux-riscv64
+      - name: Build and package (deb, rpm, tar.gz)
+        run: packaging/linux/package.sh --formats "deb rpm tar"
+      - name: Check the packages
+        run: |
+          dpkg-deb --info dist/release/*.deb
+          dpkg-deb --field dist/release/*.deb Architecture | grep -x riscv64
+          dpkg-deb --field dist/release/*.deb Depends | grep -F 'libc6 (>= 2.39)'
+          dpkg-deb --contents dist/release/*.deb | grep -E 'usr/bin/solidcraft$|usr/bin/solidcraft-cli$|metainfo|applications|THIRD-PARTY-LICENSES.txt'
+          rpm -qip dist/release/*.rpm | grep -E '^Architecture *: riscv64'
+          rpm -qlp dist/release/*.rpm | grep -E '/usr/bin/solidcraft$|THIRD-PARTY-LICENSES.txt'
+          tar -tzf dist/release/*.tar.gz | grep -E '/bin/solidcraft$|THIRD-PARTY-LICENSES.txt'
+          file "target/$CROSS_TARGET/release/solidcraft" | grep -F 'RISC-V'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-riscv64
           path: dist/release/*
           if-no-files-found: error
 
@@ -571,7 +629,7 @@ jobs:
 
   release:
     name: GitHub Release or dry-run artifacts
-    needs: [version, linux, flatpak, snap, freebsd, macos, windows, web]
+    needs: [version, linux, linux-riscv64, flatpak, snap, freebsd, macos, windows, web]
     if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-latest
     permissions:

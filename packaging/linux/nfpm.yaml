@@ -37,7 +37,8 @@ overrides:
     conflicts:
       - solvecraft
     depends:
-      - libc6 (>= 2.35)
+      # The build host's glibc (packaging/linux/package.sh): 2.35, or 2.39 for riscv64.
+      - libc6 (>= ${GLIBC_FLOOR})
       - libgcc-s1
       - libxkbcommon0
       - libxkbcommon-x11-0
