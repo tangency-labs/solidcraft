@@ -1,0 +1,26 @@
+{
+ "sources": [],
+ "what": "sheet.perforate, a square field of 2 mm holes at 5 mm pitch, 1 mm margin, over a 30 x 20 x 1 plate",
+ "source": "analytic",
+ "method": "holes start at margin + radius = 2 from the flat's lower-left corner and step 5: x 2, 7, ..., 27 (6, each <= 30 - 2), y 2, 7, 12, 17 (4): 24 holes, open area 24*pi*1^2. The field is stored, not cut into the B-rep: the body stays the 30 x 20 x 1 plate, V = 600, 6 faces",
+ "body_count": 1,
+ "volume_mm3": 600.0,
+ "faces": 6,
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "perforations": [
+     {
+      "count": 24,
+      "pattern": "square",
+      "diameter": 2.0,
+      "pitch": 5.0,
+      "margin": 1.0,
+      "open_area_mm2": 75.39822368615503
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "sheet.perforate, a square field over a 40 x 20 x 1 base with a 10 mm flange on its x = 40 edge: no hole within the margin of the bend zone",
+ "source": "analytic",
+ "method": "T = 1, R = 1, K = 0.5: the flange sets the base back R + T = 2 (flat x 0..38), its bend zone is BA = (pi/2)(R + K*T) = 2.356194 wide (x 38..40.356194), its leg 10 - 2 = 8 (to x 48.356194). 1 mm holes, pitch 4, margin 1 (clear 1.5): rows y 1.5, 5.5, 9.5, 13.5, 17.5 (5); per row x 1.5, 5.5, ..., 45.5 (<= 46.8562) less those within 1.5 of the zone (37.5 and 41.5): 9 on the base, 1 on the flange (45.5): 50 holes",
+ "body_count": 1,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "perforations": [
+     {
+      "count": 50,
+      "pattern": "square"
+     }
+    ]
+   }
+  }
+ ]
+}
