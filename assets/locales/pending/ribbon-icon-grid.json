@@ -1,0 +1,44 @@
+{
+  "en": {
+    "prefs.menu_grid": "Large icons",
+    "prefs.menu_list": "List",
+    "prefs.menus": "Menus",
+    "ui.ribbon_menus_skip_pinned": "Leave pinned commands out of the drop-down menus"
+  },
+  "de": {
+    "prefs.menu_grid": "Große Symbole",
+    "prefs.menu_list": "Liste",
+    "prefs.menus": "Menüs",
+    "ui.ribbon_menus_skip_pinned": "Angeheftete Befehle nicht in den Aufklappmenüs wiederholen"
+  },
+  "ja": {
+    "prefs.menu_grid": "大きなアイコン",
+    "prefs.menu_list": "リスト",
+    "prefs.menus": "メニュー",
+    "ui.ribbon_menus_skip_pinned": "ピン留めしたコマンドをドロップダウンメニューに表示しない"
+  },
+  "zh": {
+    "prefs.menu_grid": "大图标",
+    "prefs.menu_list": "列表",
+    "prefs.menus": "菜单",
+    "ui.ribbon_menus_skip_pinned": "下拉菜单中不再列出已固定的命令"
+  },
+  "ar": {
+    "prefs.menu_grid": "أيقونات كبيرة",
+    "prefs.menu_list": "قائمة",
+    "prefs.menus": "القوائم",
+    "ui.ribbon_menus_skip_pinned": "استبعاد الأوامر المثبتة من القوائم المنسدلة"
+  },
+  "he": {
+    "prefs.menu_grid": "סמלים גדולים",
+    "prefs.menu_list": "רשימה",
+    "prefs.menus": "תפריטים",
+    "ui.ribbon_menus_skip_pinned": "השמטת פקודות מוצמדות מהתפריטים הנפתחים"
+  },
+  "vi": {
+    "prefs.menu_grid": "Biểu tượng lớn",
+    "prefs.menu_list": "Danh sách",
+    "prefs.menus": "Menu",
+    "ui.ribbon_menus_skip_pinned": "Không lặp lại các lệnh đã ghim trong menu thả xuống"
+  }
+}
