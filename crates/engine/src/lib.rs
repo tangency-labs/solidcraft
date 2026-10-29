@@ -1143,6 +1143,14 @@ impl Session {
             return;
         }
         cmd::joints::place(self);
+        self.joints_placed();
+    }
+
+    /// The joints were just solved for this design and model and the design moved to the
+    /// solution: the refresh after the command need not solve them again unless the model
+    /// changes (see [`Session::solve_joints`]). `joint.reach` says so after its own solve, which
+    /// every frame of a joint drag runs.
+    pub(crate) fn joints_placed(&mut self) {
         self.joints_settled = Some((self.doc.clone(), Arc::downgrade(&self.model.state())));
     }
 

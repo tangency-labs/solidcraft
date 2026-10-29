@@ -1065,6 +1065,8 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // Loops closed again from there, and where it ended up.
     let sol = if response_analysis(p) == joints::Analysis::Placement { place(s) } else { resolve(s) };
+    // That solve placed every occurrence for this model: the refresh after the command keeps it.
+    s.joints_placed();
     let t = joints::occurrence_world(&s.doc, occ);
     let got = solidcraft_doc::apply_point(&t, at);
     let mut out = sol_json(&sol, p);
