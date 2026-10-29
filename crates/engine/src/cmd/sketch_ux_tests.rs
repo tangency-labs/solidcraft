@@ -466,12 +466,12 @@ fn coincident_refuses_invalid_curve_pairs_atomically() {
     run(&mut s, "sketch.line", json!({"points":[[10,10],[30,10]],"infer":false,"connect":false}));
     run(&mut s, "sketch.circle.center", json!({"center":[40,40],"radius":5}));
     let before = serde_json::to_value(&s.doc).unwrap();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for (a, b, message) in [("l1", "l1", "distinct lines"), ("l1", "c1", "straight lines"), ("c1", "l1", "straight lines")] {
         let error = s.execute("sketch.constraint.coincident", &json!({"a":a,"b":b})).unwrap_err();
         assert!(error.to_string().contains(message), "{error}");
         assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 }
 
@@ -2159,14 +2159,14 @@ fn finishing_a_temporary_sketch_edit_at_the_undo_limit_keeps_the_original_design
     for i in 0..crate::MAX_UNDO {
         run(&mut s, "browser.visibility", json!({"items": ["Body1"], "visible": i % 2 != 0}));
     }
-    assert_eq!(s.undo.len(), crate::MAX_UNDO);
+    assert_eq!(s.history.len(), crate::MAX_UNDO);
     let before = s.doc.to_json();
     run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": null}));
     for y in [20, 30] {
         run(&mut s, "sketch.line", json!({"points": [[0, y], [10, y]]}));
     }
     run(&mut s, "sketch.finish", json!({}));
-    assert!(s.undo.len() <= crate::MAX_UNDO);
+    assert!(s.history.len() <= crate::MAX_UNDO);
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.active_sketch, None);

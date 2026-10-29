@@ -151,7 +151,7 @@ fn view_bar_json_commands_apply_ui_state_without_dialogs_or_undo() {
     let mut h = Harness::new();
     moved_block(&mut h);
     let design = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let camera = h.app.cam;
     for (tool, mode) in [("orbit", Some(NavMode::Orbit)), ("pan", Some(NavMode::Pan)), ("zoom", Some(NavMode::Zoom)), ("none", None)] {
         let r = h.call("engine.execute", json!({"command":"view.tool","params":{"tool":tool}}));
@@ -194,7 +194,7 @@ fn view_bar_json_commands_apply_ui_state_without_dialogs_or_undo() {
     }
     assert!(h.app.dialog.is_none() && h.app.tool.is_none());
     assert_eq!(h.app.session.doc.to_json(), design);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn navigation_bar_visibility_defaults_and_round_trips() {
 fn navigation_bar_buttons_run_registered_commands() {
     let mut h = Harness::new();
     moved_block(&mut h);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let mut orbit_on = false;
     h.call("ui.prefs", json!({"navigation_bar":{"slots":["orbit","pan","zoom","fit","home","visual_style","spin"]}}));
     for (slot, id) in [
@@ -253,7 +253,7 @@ fn navigation_bar_buttons_run_registered_commands() {
     let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
     assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo));
     assert_eq!(h.app.ui.visual_style, 1);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn fit_and_home_json_commands_preserve_design_framing() {
     let mut h = Harness::new();
     moved_block(&mut h);
     let design = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for command in ["view.fit", "view.home"] {
         h.app.cam.set_view(StandardView::Front);
         h.app.cam.pan(300.0, 200.0, 500.0);
@@ -277,7 +277,7 @@ fn fit_and_home_json_commands_preserve_design_framing() {
         }
     }
     assert_eq!(h.app.session.doc.to_json(), design);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 /// #10091: Preferences › Navigation "Home and Fit size" is how much of the view the model fills
@@ -319,7 +319,7 @@ fn fit_json_frames_selection_while_home_frames_everything() {
     h.settle();
     h.app.run("select.set", json!({"items":[{"type":"body","name":"Near"}]})).unwrap();
     let design = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let r = h.call("engine.execute", json!({"command":"view.fit","params":{}}));
     assert_eq!(r["ok"], true, "{r}");
     let selected = h.app.cam;
@@ -329,7 +329,7 @@ fn fit_json_frames_selection_while_home_frames_everything() {
     assert!(h.app.cam.distance > selected.distance * 10.0);
     assert!(same_cam(&h.app.cam, &home(&h)));
     assert_eq!(h.app.session.doc.to_json(), design);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]
@@ -355,7 +355,7 @@ fn navigation_bar_toggle_slots_apply_commands_and_projection_compatibility() {
     moved_block(&mut h);
     h.call("ui.prefs", json!({"navigation_bar":{"slots":["grid","ground_shadow","ambient_occlusion","projection"]}}));
     let design = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for slot in ["grid", "ground_shadow", "ambient_occlusion", "projection"] {
         let value = |app: &crate::SolveApp| match slot {
             "grid" => app.ui.show_grid,
@@ -375,7 +375,7 @@ fn navigation_bar_toggle_slots_apply_commands_and_projection_compatibility() {
     }
     assert!(h.app.dialog.is_none() && h.app.tool.is_none());
     assert_eq!(h.app.session.doc.to_json(), design);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]
@@ -427,10 +427,10 @@ fn navigation_bar_look_at_keeps_the_active_sketch_fallback() {
     h.settle();
     let sketch = h.app.session.active_sketch;
     let design = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":"nav:slot:look_at"}})).unwrap();
     assert!(h.app.cam.back().dist(Vec3::Z) < 1e-6);
     assert_eq!(h.app.session.active_sketch, sketch);
     assert_eq!(h.app.session.doc.to_json(), design);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }

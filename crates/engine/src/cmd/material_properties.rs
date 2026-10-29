@@ -115,7 +115,7 @@ mod tests {
         s.execute("material.edit", &json!({"material":"Synthetic","physical_card":card()})).unwrap();
         let mass = s.execute("component.properties", &json!({})).unwrap();
         let doc = s.doc.clone();
-        let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.camera, s.selection.clone());
+        let before = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.camera, s.selection.clone());
         let inspected = s.execute("material.inspect", &json!({"material":" synthetic "})).unwrap();
         assert_eq!(inspected["physical_card"], serde_json::to_value(s.doc.user_materials[0].physical_card.as_ref().unwrap()).unwrap());
         assert_eq!(inspected["density_comparison"]["assigned_density_kg_m3"], 800.0);
@@ -125,7 +125,7 @@ mod tests {
             assert!(s.execute("material.inspect", &params).is_err());
         }
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.camera, s.selection.clone()));
+        assert_eq!(before, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.camera, s.selection.clone()));
         assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
     }
 
@@ -136,7 +136,7 @@ mod tests {
             "sources":[{"id":"test","title":"Original synthetic fixture","kind":"illustrative"}],
             "properties":[{"source_id":"test","data":{"kind":"elasticity","model":{"symmetry":"isotropic","young_modulus_pa":12e9,"poisson_ratio":0.25}}}]});
         let doc = s.doc.clone();
-        let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.camera, s.selection.clone());
+        let before = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.camera, s.selection.clone());
         let response = s.execute("material.properties.directional", &json!({"card":card,"direction":[1,2,3]})).unwrap();
         assert_eq!(response["young_modulus_pa"], 12e9);
         assert_eq!(response["validation"]["source_review_required"], json!(["test"]));
@@ -146,7 +146,7 @@ mod tests {
         }
         assert!(s.execute("material.properties.directional", &json!({"card":card,"direction":[1,0,0],"assign":true})).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.camera, s.selection.clone()));
+        assert_eq!(before, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.camera, s.selection.clone()));
     }
 
     #[test]
@@ -170,8 +170,8 @@ mod tests {
         s.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
         s.execute("edit.undo", &json!({})).unwrap();
         let doc = s.doc.clone();
-        let undo = s.undo.clone();
-        let redo = s.redo.clone();
+        let undo = s.history.steps().to_vec();
+        let redo = s.history.redo_steps().to_vec();
         let before = (s.is_dirty(), s.revision, s.evaluations, s.model.is_stale(), s.camera, s.selection.clone());
         let card = json!({"schema_version":1,"designation":"Synthetic empty card","family":"other","sources":[],"properties":[]});
         let result = s.execute("material.properties.validate", &json!({"card":card})).unwrap();
@@ -182,7 +182,7 @@ mod tests {
         }
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert_eq!(before, (s.is_dirty(), s.revision, s.evaluations, s.model.is_stale(), s.camera, s.selection.clone()));
-        for (a, b) in [(&undo, &s.undo), (&redo, &s.redo)] {
+        for (a, b) in [(&undo[..], s.history.steps()), (&redo[..], s.history.redo_steps())] {
             assert_eq!(a.len(), b.len());
             for (a, b) in a.iter().zip(b) {
                 assert!(Arc::ptr_eq(&a.doc, &b.doc));
@@ -207,7 +207,7 @@ mod tests {
         }
         assert!(s.model.is_stale());
         let doc = s.doc.clone();
-        let before = (s.revision, s.evaluations, s.active_sketch, s.undo.len(), s.redo.len());
+        let before = (s.revision, s.evaluations, s.active_sketch, s.history.len(), s.history.redo_steps().len());
         let card = json!({"schema_version":1,"designation":"Synthetic","family":"other","sources":[],"properties":[]});
         s.execute("material.properties.validate", &json!({"card":card})).unwrap();
         assert!(s.execute("material.properties.validate", &json!({"card":false})).is_err());
@@ -220,6 +220,6 @@ mod tests {
         assert!(s.execute("material.inspect", &json!({"material":"missing"})).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert!(s.model.is_stale());
-        assert_eq!(before, (s.revision, s.evaluations, s.active_sketch, s.undo.len(), s.redo.len()));
+        assert_eq!(before, (s.revision, s.evaluations, s.active_sketch, s.history.len(), s.history.redo_steps().len()));
     }
 }

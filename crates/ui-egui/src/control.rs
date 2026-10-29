@@ -330,7 +330,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
         && app.session.active_sketch.is_none()
         // Cheap test first: placing the world (`world_state`) after every step of a batch in a
         // design with components placed every component's bodies again once per step.
-        && app.session.undo.len() <= 2
+        && app.session.history.len() <= 2
         && crate::open_meshing::session_world(&app.session).bodies.len() == 1
     {
         app.fit_view();

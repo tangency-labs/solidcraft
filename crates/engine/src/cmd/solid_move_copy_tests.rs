@@ -311,12 +311,12 @@ fn a_copy_that_fails_part_way_changes_nothing() {
     let mut s = Session::default();
     let (_, occurrence) = part_with_cube(&mut s);
     let before = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     // The first component copies; the second names no occurrence, so the whole move is refused.
     let error = s.execute("solid.move", &json!({"bodies": [], "occurrences": [[occurrence], [999_999]], "copy": true, "translate": [50, 0, 0]}));
     assert!(error.is_err());
     assert_eq!(s.doc, before, "the first copy is rolled back with the rest");
-    assert_eq!(s.undo.len(), undo, "a refused move leaves no undo step");
+    assert_eq!(s.history.len(), undo, "a refused move leaves no undo step");
 }
 
 #[test]

@@ -36,8 +36,8 @@ fn edits_after_a_large_import_share_one_copy_of_its_text() {
     for i in 0..30 {
         s.execute("parameters.add", &json!({"name": format!("p{i}"), "expression": format!("{i} mm")})).unwrap();
     }
-    assert!(s.undo.len() >= 30);
-    for snap in &s.undo {
+    assert!(s.history.len() >= 30);
+    for snap in s.history.steps() {
         for f in &snap.doc.features {
             if let FeatureKind::Import { step, .. } = &f.kind {
                 assert!(Arc::ptr_eq(step, &text), "an undo state holds its own copy of the STEP text");

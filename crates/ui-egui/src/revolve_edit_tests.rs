@@ -70,7 +70,7 @@ fn to_object_noop_preserves_cut_targets_and_untargeted_body() {
         solidcraft_engine::kernel::PointClass::Inside
     );
     let before_bounds: Vec<_> = state.bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     open(&mut h);
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
@@ -78,7 +78,7 @@ fn to_object_noop_preserves_cut_targets_and_untargeted_body() {
     assert!((solidcraft_engine::doc::kernel::measure(&state.body("B").unwrap().body).unwrap().volume - 2000.0).abs() < 1e-7);
     assert!((cut_volume(&state) - before_a).abs() < 1e-7);
     assert_eq!(state.bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect::<Vec<_>>(), before_bounds);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let FeatureKind::Revolve { targets, .. } = &h.app.session.doc.find_feature("Turn").unwrap().kind else { panic!("revolve") };
     assert_eq!(targets, &["A"]);
 }
@@ -181,13 +181,13 @@ fn revolve_angle_edit_preserves_axis_downstream_binding_and_one_undo() {
     let mut h = make(Harness::new(), json!({"origin":[0,0,0],"dir":[0,2,0]}));
     h.app.run("solid.box", json!({"length":2,"width":2,"height":"(d1 / (1 rad)) * 1 mm","corner":[30,0,0],"body_name":"Dependent"})).unwrap();
     let original = axis(&h);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     open(&mut h);
     h.step(&json!({"key":"A","cmd":true})).unwrap();
     h.step(&json!({"text":"180 deg"})).unwrap();
     h.step(&json!({"widget":"OK"})).unwrap();
     assert_eq!(axis(&h), original);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!((h.app.session.world_state().unwrap().body("Dependent").unwrap().mesh().bounds().max.z - std::f64::consts::PI).abs() < 1e-8);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(axis(&h), original);
@@ -237,13 +237,13 @@ fn world_and_sketch_axis_handles_follow_authoring_occurrence() {
 fn sketch_axis_cancel_restores_original_document_and_history() {
     let mut h = make(Harness::new(), json!("y"));
     let original = serde_json::to_value(&*h.app.session.doc).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     open(&mut h);
     h.step(&json!({"key":"A","cmd":true})).unwrap();
     h.step(&json!({"text":"180 deg"})).unwrap();
     h.step(&json!({"widget":"Cancel"})).unwrap();
     assert_eq!(serde_json::to_value(&*h.app.session.doc).unwrap(), original);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     assert!(matches!(&h.app.session.doc.find_feature("Turn").unwrap().kind,FeatureKind::Revolve{axis:AxisRef::SketchAxis{axis},..} if axis=="y"));
 }
 

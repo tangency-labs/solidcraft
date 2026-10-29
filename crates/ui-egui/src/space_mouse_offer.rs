@@ -477,7 +477,7 @@ mod preferences_tests {
                 h.app.dialog.is_some(),
                 h.app.tool.is_some(),
                 h.app.session.selection.len(),
-                h.app.session.undo.len(),
+                h.app.session.history.len(),
                 h.app.prefs_window.open,
                 h.app.space_mouse.calibrating.is_some(),
                 h.app.keymap.open,

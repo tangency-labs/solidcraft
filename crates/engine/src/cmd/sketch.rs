@@ -1011,8 +1011,8 @@ fn entry_point(s: &Session) -> SketchEntry {
     SketchEntry {
         sketch: 0,
         doc: s.doc.clone(),
-        undo_len: s.undo.len(),
-        undo_top: s.undo.last().map(|snap| snap.doc.clone()),
+        undo_len: s.history.len(),
+        undo_top: s.history.last().map(|snap| snap.doc.clone()),
         restore_marker: None,
         pending_moves: s.pending_moves.clone(),
         visibility: s.visibility.clone(),
@@ -1037,15 +1037,15 @@ fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let entry = s.sketch_entry.clone().filter(|entry| entry.sketch == id);
     let current = entry.filter(|entry| {
-        let top = entry.undo_len.checked_sub(1).and_then(|i| s.undo.get(i)).map(|snap| &snap.doc);
-        let same_before = s.undo.len() >= entry.undo_len
+        let top = entry.undo_len.checked_sub(1).and_then(|i| s.history.steps().get(i)).map(|snap| &snap.doc);
+        let same_before = s.history.len() >= entry.undo_len
             && match (top, &entry.undo_top) {
                 (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
                 (None, None) => true,
                 _ => false,
             };
         // The step that created the sketch was taken before it was open: its state is the entry's.
-        let since = s.undo.get(entry.undo_len..).unwrap_or_default();
+        let since = s.history.steps().get(entry.undo_len..).unwrap_or_default();
         same_before
             && since.iter().enumerate().all(|(i, snap)| snap.active_sketch == Some(id) || (i == 0 && std::sync::Arc::ptr_eq(&snap.doc, &entry.doc)))
     });
@@ -1094,12 +1094,15 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
     use std::sync::Arc;
     let start = match &entry.undo_top {
-        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
+        Some(top) => s.history.steps().iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
         None => Some(0),
     }
-    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0));
+    .or_else(|| {
+        let steps = s.history.steps();
+        (steps.len() == crate::MAX_UNDO && steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0)
+    });
     let Some(start) =
-        start.filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
+        start.filter(|&start| s.history.steps().get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
     else {
         return;
     };
@@ -1108,21 +1111,16 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
     let mut after = (*s.doc).clone();
     after.marker = marker.filter(|m| *m < after.features.len());
     let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility;
-    s.undo.truncate(start);
-    if changed {
-        s.undo.push(Snapshot {
-            label: "Edit Sketch".into(),
-            doc: Arc::new(before),
-            active_sketch: None,
-            pending_moves: entry.pending_moves.clone(),
-            visibility: entry.visibility.clone(),
-        });
-        if s.undo.len() > crate::MAX_UNDO {
-            s.undo.remove(0);
-        }
-    }
+    let edit = changed.then(|| Snapshot {
+        label: "Edit Sketch".into(),
+        doc: Arc::new(before),
+        active_sketch: None,
+        pending_moves: entry.pending_moves.clone(),
+        visibility: entry.visibility.clone(),
+    });
+    s.history.replace_from(start, edit);
     // Redo of a step undone while editing must not reopen a finished temporary rollback.
-    for snap in &mut s.redo {
+    for snap in s.history.redo_steps_mut() {
         if snap.active_sketch == Some(entry.sketch) {
             let doc = Arc::make_mut(&mut snap.doc);
             doc.marker = marker.filter(|m| *m < doc.features.len());
@@ -1455,7 +1453,7 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let rounded = scratch.execute("sketch.fillet", &fillet)?;
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
-    scratch.undo.clear();
+    scratch.history.clear();
     s.accept_computed(scratch);
     let arcs = rounded.get("curves").cloned().unwrap_or_else(|| json!([]));
     if let Some(o) = out.as_object_mut() {

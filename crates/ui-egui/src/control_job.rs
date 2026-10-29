@@ -137,7 +137,7 @@ pub(crate) fn changes_the_design(method: &str) -> bool {
 
 /// Whether `doc` is the design `session` shows, as it is or edited since (an undo step away).
 fn shows_design(session: &solidcraft_engine::Session, doc: &Arc<solidcraft_engine::doc::Document>) -> bool {
-    Arc::ptr_eq(&session.doc, doc) || session.undo.iter().chain(&session.redo).any(|snap| Arc::ptr_eq(&snap.doc, doc))
+    Arc::ptr_eq(&session.doc, doc) || session.history.steps().iter().chain(session.history.redo_steps()).any(|snap| Arc::ptr_eq(&snap.doc, doc))
 }
 
 /// The reply to a request whose design left the window while it computed.
@@ -437,7 +437,7 @@ impl SolveApp {
         }
         // The copy has no history and no file (#9624): an inspection reports the design's own.
         let s = &self.session;
-        let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
+        let own = (id == "document.inspect").then(|| (s.history.len(), s.history.redo_steps().len(), s.path.clone()));
         let rx = spawn(scope, move || {
             let mut reply = match copy.execute(id, &params) {
                 Ok(mut v) => {

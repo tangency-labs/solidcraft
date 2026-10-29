@@ -78,12 +78,12 @@ fn unchanged_sketch_edit_keeps_undo_and_redo() {
     let mut h = plate_and_cylinder();
     h.app.run("edit.undo", json!({})).unwrap();
     let before = h.app.session.doc.to_json();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     let id = first_sketch(&h.app);
     h.app.edit_sketch(id);
     h.app.finish_sketch();
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
     h.app.run("edit.redo", json!({})).unwrap();
     assert_eq!(h.app.session.model.state().bodies.len(), 2);
 }

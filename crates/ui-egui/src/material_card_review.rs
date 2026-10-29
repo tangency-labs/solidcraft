@@ -254,8 +254,8 @@ mod tests {
         let before = (
             h.app.session.revision,
             h.app.session.model.is_stale(),
-            h.app.session.undo.len(),
-            h.app.session.redo.len(),
+            h.app.session.history.len(),
+            h.app.session.history.redo_steps().len(),
             h.app.session.selection.clone(),
         );
         h.step(&json!({"start":"material.properties.validate"})).unwrap();
@@ -283,8 +283,8 @@ mod tests {
             (
                 h.app.session.revision,
                 h.app.session.model.is_stale(),
-                h.app.session.undo.len(),
-                h.app.session.redo.len(),
+                h.app.session.history.len(),
+                h.app.session.history.redo_steps().len(),
                 h.app.session.selection.clone()
             )
         );
@@ -305,7 +305,7 @@ mod tests {
         }
         assert!(window.error.as_deref().unwrap().contains("256 KiB"));
         assert!(Arc::ptr_eq(&doc, &app.session.doc));
-        assert!(app.session.undo.is_empty() && app.session.redo.is_empty());
+        assert!(app.session.history.is_empty() && app.session.history.redo_steps().is_empty());
         assert!(!app.session.is_dirty());
     }
 

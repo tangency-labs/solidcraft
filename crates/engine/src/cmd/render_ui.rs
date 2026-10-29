@@ -230,7 +230,7 @@ fn render_lights_remaining_planned_commands_refuse_without_mutation() {
     session.execute("render.settings.set", &json!({"name":"Studio","set":{"width":900}})).unwrap();
     session.execute("edit.undo", &json!({})).unwrap();
     let document = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    let before = (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty());
     for command in COMMANDS {
         if command.planned.is_none() {
             continue;
@@ -240,7 +240,10 @@ fn render_lights_remaining_planned_commands_refuse_without_mutation() {
             let error = session.execute(command.id, &params).unwrap_err().to_string();
             assert!(error.contains("not supported yet"), "{error}");
             assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
-            assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+            assert_eq!(
+                before,
+                (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty())
+            );
         }
     }
 }
@@ -292,7 +295,7 @@ fn close_result(s: &mut Session, params: &Value) -> Result<Value> {
 fn output_viewer_requests_are_validated_headless_echoes() {
     let mut s = Session::default();
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.evaluations);
+    let before = (s.revision, s.history.len(), s.evaluations);
     for size in [json!({"width":1280,"height":720}), json!({"width":1920,"height":1080})] {
         assert_eq!(s.execute("render.output.size", &size).unwrap(), size);
     }
@@ -317,7 +320,7 @@ fn output_viewer_requests_are_validated_headless_echoes() {
         }
     }
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.evaluations));
+    assert_eq!(before, (s.revision, s.history.len(), s.evaluations));
 }
 
 #[cfg(test)]
@@ -325,14 +328,14 @@ fn output_viewer_requests_are_validated_headless_echoes() {
 fn output_sections_copy_report_validates_without_design_history_or_job_changes() {
     let mut s = Session::default();
     let doc = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty());
     let report = json!({"text":"Check\n✓ Size is within the renderer limit"});
     assert_eq!(s.execute("render.preflight.copy", &report).unwrap(), report);
     for request in [json!({}), json!({"text":""}), json!({"text":true}), json!({"text":"check","job":1}), json!({"text":"x".repeat(65537)})] {
         assert!(s.execute("render.preflight.copy", &request).is_err());
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty()));
 }
 
 #[cfg(test)]
@@ -357,9 +360,9 @@ fn retained_results_cap_order_metadata_and_selection_never_edit_a_design() {
     s.execute("render.settings.set", &json!({"name":"Hero","set":{"width":16,"height":8}})).unwrap();
     s.execute("render.settings.set", &json!({"name":"Hero","set":{"width":32}})).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
-    assert_eq!(s.redo.len(), 1, "view commands must preserve an available redo step");
+    assert_eq!(s.history.redo_steps().len(), 1, "view commands must preserve an available redo step");
     let document = s.doc.clone();
-    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty());
     let jobs: Vec<_> = (0..10).map(|_| complete_result(&mut s, "Hero")).collect();
     let results = s.render_retained_results().unwrap();
     assert_eq!(results.len(), 8);
@@ -390,7 +393,7 @@ fn retained_results_cap_order_metadata_and_selection_never_edit_a_design() {
     assert!(s.render_selected_result().is_none());
     assert!(s.execute("render.result.copy", &json!({})).is_err());
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty()));
 }
 
 #[cfg(test)]
@@ -401,7 +404,7 @@ fn retained_result_requests_refuse_hostile_and_missing_indices_atomically() {
     s.execute("render.settings.set", &json!({"name":"Front","set":{"width":8,"height":8}})).unwrap();
     let job = complete_result(&mut s, "Front");
     let document = s.doc.clone();
-    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty());
     let retained = s.render_job_host().unwrap().admitted_bytes();
     for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
         s.param_check = mode;
@@ -428,7 +431,7 @@ fn retained_result_requests_refuse_hostile_and_missing_indices_atomically() {
                 assert_eq!(s.render_selected_result(), Some(job));
                 assert_eq!(s.render_job_host().unwrap().admitted_bytes(), retained);
                 assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-                assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+                assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty()));
             }
         }
     }
@@ -454,7 +457,7 @@ fn render_results_compare_validates_both_sides_and_clamps_only_finite_dividers_w
     s.execute("render.settings.set", &json!({"name":"Hero","set":{"width":16}})).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty());
     let selected = s.selection.clone();
     for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
         s.param_check = mode;
@@ -488,7 +491,7 @@ fn render_results_compare_validates_both_sides_and_clamps_only_finite_dividers_w
             assert!(s.execute("render.compare.divider", &request).is_err());
         }
         assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-        assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+        assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty()));
         assert_eq!(s.selection, selected);
         assert_eq!(s.render_retained_results().unwrap().len(), 2);
     }
@@ -520,7 +523,7 @@ fn render_results_batch_is_sequential_uses_snapshot_cameras_and_one_setup_withou
     s.execute("render.settings.set", &json!({"name":"Shot 00","set":{"width":64}})).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty());
     let cameras: Vec<_> = s.doc.render.setups.values().map(|setup| setup.camera).collect();
     s.param_check = crate::schema::ParamCheck::Strict;
     assert_eq!(
@@ -554,7 +557,7 @@ fn render_results_batch_is_sequential_uses_snapshot_cameras_and_one_setup_withou
     assert_eq!(results.iter().map(|result| result.frame.job).collect::<Vec<_>>(), jobs);
     assert_eq!(results.iter().map(|result| result.shot.clone().unwrap()).collect::<Vec<_>>(), ["Shot 00", "Shot 01", "Shot 02"]);
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty()));
 }
 
 #[cfg(test)]
@@ -562,7 +565,7 @@ fn render_results_batch_is_sequential_uses_snapshot_cameras_and_one_setup_withou
 fn render_results_batch_caps_at_32_and_cancel_discards_every_waiting_shot() {
     let mut s = batch_fixture(32);
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty());
     assert_eq!(s.execute("render.batch", &json!({})).unwrap(), json!({"queued":32}));
     let queue = s.render_queue_state();
     assert_eq!((queue.running, queue.waiting), (1, 31));
@@ -581,7 +584,7 @@ fn render_results_batch_caps_at_32_and_cancel_discards_every_waiting_shot() {
     assert_eq!(next["job"]["serial"], 2, "Cancel must not start any waiting shot");
     s.execute("render.cancel", &json!({"job":next["job"]})).unwrap();
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty()));
     std::sync::Arc::make_mut(&mut std::sync::Arc::make_mut(&mut s.doc).render).setups.insert("Over limit".into(), Default::default());
     assert!(s.execute("render.batch", &json!({})).unwrap_err().to_string().contains("32"));
     assert_eq!(s.render_queue_state().waiting, 0);
@@ -594,7 +597,7 @@ fn render_results_batch_refuses_missing_shots_busy_hostile_and_failed_requests_w
     assert!(empty.execute("render.batch", &json!({})).is_err());
     let mut s = batch_fixture(2);
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty());
     for request in [
         json!([]),
         json!({"request":1e300}),
@@ -613,13 +616,13 @@ fn render_results_batch_refuses_missing_shots_busy_hostile_and_failed_requests_w
     assert_eq!((s.render_queue_state().running, s.render_queue_state().waiting), (1, 0));
     s.execute("render.cancel", &json!({"job":job})).unwrap();
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty()));
     s.set_render_job_host(None).unwrap();
     assert!(s.execute("render.batch", &json!({})).is_err());
     assert_eq!((s.render_queue_state().running, s.render_queue_state().waiting), (0, 0));
     assert!(s.render_queue_state().error.is_some());
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty()));
 }
 
 #[cfg(test)]
@@ -633,7 +636,7 @@ fn render_results_batch_cameras_and_common_setup_are_captured_before_later_shot_
     s.execute("render.settings.set", &json!({"name":"Shot 01","set":{"camera":changed}})).unwrap();
     s.execute("render.settings.set", &json!({"name":"Shot 00","set":{"width":64}})).unwrap();
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations);
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations);
     let host = s.render_job_host().unwrap().clone();
     for _ in 0..100 {
         if !host.pump(4096).unwrap() {
@@ -647,7 +650,7 @@ fn render_results_batch_cameras_and_common_setup_are_captured_before_later_shot_
     assert_eq!(request.camera, original);
     assert_eq!(request.width, 8);
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations));
     s.execute("render.cancel", &json!({"job":next})).unwrap();
 }
 
@@ -661,7 +664,7 @@ fn render_results_compare_keeps_copy_on_the_visible_result_until_a_source_is_evi
     assert_eq!(s.render_comparison(), Some([None, Some(first)]));
     assert_eq!(s.render_selected_result(), Some(first));
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations);
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations);
     let mut newest = first;
     for index in 0..7 {
         newest = complete_result(&mut s, "Shot 00");
@@ -673,5 +676,5 @@ fn render_results_compare_keeps_copy_on_the_visible_result_until_a_source_is_evi
     assert!(s.render_comparison().is_none());
     assert_eq!(s.render_selected_result(), Some(newest));
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations));
 }

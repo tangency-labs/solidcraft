@@ -56,11 +56,11 @@ fn viewport_restores_isolated_occurrences_and_undo_restores_isolation() {
 
         let restore = menu_item(&h, label);
         assert!(restore.enabled, "{label} must restore a hidden component instance");
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         context_menu::run_item(&mut h.app, &restore, egui::Pos2::ZERO);
         assert!(h.app.session.visibility.hidden_occurrences.is_empty());
         assert!(h.app.session.body_visible(&other_body));
-        assert_eq!(h.app.session.undo.len(), undo + 1, "restoring visibility is one undo step");
+        assert_eq!(h.app.session.history.len(), undo + 1, "restoring visibility is one undo step");
         assert!(!menu_item(&h, label).enabled, "all component instances are visible again");
 
         h.app.run("edit.undo", json!({})).unwrap();

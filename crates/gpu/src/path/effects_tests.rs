@@ -297,7 +297,7 @@ fn saved_aging_identity_reaches_real_gpu_after_cold_reopen() {
     assert_eq!(checked, session.execute("render.preflight", &json!({"settings":saved})).unwrap());
     let physical = session.execute("component.properties", &json!({})).unwrap();
     let before = session.doc.clone();
-    let history = (session.revision, session.undo.len(), session.redo.len());
+    let history = (session.revision, session.history.len(), session.history.redo_steps().len());
     let started = session.execute("render.start", &json!({"setup":"Aging"})).unwrap();
     let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
     let handle = session.render_job_handle(id).unwrap();
@@ -306,7 +306,7 @@ fn saved_aging_identity_reaches_real_gpu_after_cold_reopen() {
     assert_eq!(json!(status.options.aging), checked["options"]["aging"]);
     assert!(handle.frame().unwrap().is_some());
     assert!(Arc::ptr_eq(&before, &session.doc));
-    assert_eq!((session.revision, session.undo.len(), session.redo.len()), history);
+    assert_eq!((session.revision, session.history.len(), session.history.redo_steps().len()), history);
     assert_eq!(session.execute("component.properties", &json!({})).unwrap(), physical);
     session.visibility.hidden_bodies.push("Target panel".into());
     for command in ["render.preflight", "render.start"] {

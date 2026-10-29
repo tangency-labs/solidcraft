@@ -23,7 +23,7 @@ fn copied_recipe_id_labels_are_inert_and_explicit_recipe_requests_stay_strict() 
         }
     }
     let before = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     for params in [
         json!({"bodies":["Specimen"],"name":"Owned label"}),
         json!({"bodies":["Specimen"],"name":"Owned label","appearance":"starter.metal.gold-warm","color":[31,61,91]}),
@@ -32,7 +32,7 @@ fn copied_recipe_id_labels_are_inert_and_explicit_recipe_requests_stay_strict() 
     ] {
         assert!(s.execute("appearance.assign", &params).is_err());
         assert!(Arc::ptr_eq(&before, &s.doc));
-        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
     }
     s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"starter.metal.gold-warm"})).unwrap();
     assert_eq!(s.doc.appearances.bodies["Specimen"].name, "Metal - Warm Reflective Gold");
@@ -100,7 +100,7 @@ fn opaque_response_preserves_geometry_mass_undo_and_cold_reopening() {
 fn invalid_optical_requests_refuse_atomically_and_scalar_export_cannot_lose_them() {
     let mut s = fixture();
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     for params in [
         json!({"bodies":["Specimen"],"pbr":{"metallic":0,"roughness":0.5,"dielectric_ior":1.5}}),
         json!({"bodies":["Specimen"],"color":"#ffffff","pbr":{"metallic":0,"roughness":0,"dielectric_ior":1.5}}),
@@ -111,7 +111,7 @@ fn invalid_optical_requests_refuse_atomically_and_scalar_export_cannot_lose_them
     ] {
         assert!(s.execute("appearance.assign", &params).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
     }
     s.execute(
         "appearance.assign",
@@ -283,12 +283,12 @@ fn named_opaque_finish_refuses_transparency_atomically_and_allows_explicit_scala
     s.execute("appearance.assign", &json!({"bodies":["Specimen"],"color":"#123456"})).unwrap();
     s.execute("edit.undo", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     assert!(history.1 > 0);
     for opacity in [json!(0), json!(0.5), json!(-0.1), json!(2), json!("invalid"), json!(null), json!(true)] {
         assert!(s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"Steel - Satin PBR","opacity":opacity})).is_err());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
     }
     s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"Steel - Satin PBR","pbr":null,"opacity":0.5})).unwrap();
     let scalar = s.doc.appearances.bodies["Specimen"].clone();
@@ -312,7 +312,7 @@ fn physical_material_presets_refuse_inherited_transparency_before_any_edit() {
     s.execute("edit.undo", &json!({})).unwrap();
     let mass = s.execute("component.properties", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     assert!(history.1 > 0);
     for command in ["material.create", "material.edit"] {
         let mut params = if command == "material.create" {
@@ -325,7 +325,7 @@ fn physical_material_presets_refuse_inherited_transparency_before_any_edit() {
             params["opacity"] = opacity;
             assert!(s.execute(command, &params).is_err(), "{command}: {params}");
             assert!(Arc::ptr_eq(&doc, &s.doc));
-            assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+            assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
         }
     }
     assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
@@ -424,7 +424,7 @@ fn pack_session() -> Session {
 fn pack_listing_keeps_legacy_rows_and_labels_unavailable_recipes_without_mutation() {
     let mut s = pack_session();
     let doc = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let reply = s.execute("appearance.library", &json!({})).unwrap();
     let rows = reply["appearances"].as_array().unwrap();
     // Compatibility fixture: exact pre-pack scalar library, independent of the
@@ -496,21 +496,21 @@ fn pack_listing_keeps_legacy_rows_and_labels_unavailable_recipes_without_mutatio
         assert_eq!(row["requirements"], json!(["refraction", "certified_thin_or_closed"]));
     }
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
 }
 
 #[test]
 fn opaque_pack_uses_normal_assignment_undo_and_preserves_engineering_properties() {
     let mut s = pack_session();
     let before = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let density = s.doc.density("Swatch");
     let physical = s.execute("component.properties", &json!({"component":"root"})).unwrap()["total"].clone();
     s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":"starter.metal.gold-warm"})).unwrap();
     let look = s.doc.appearances.bodies.get("Swatch").unwrap();
     assert_eq!(look.pbr.unwrap().metallic(), 1.0);
     assert_eq!(look.opacity, 1.0);
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!(s.doc.density("Swatch"), density);
     assert_eq!(s.execute("component.properties", &json!({"component":"root"})).unwrap()["total"], physical);
     let assigned = s.doc.clone();
@@ -524,17 +524,17 @@ fn opaque_pack_uses_normal_assignment_undo_and_preserves_engineering_properties(
 fn unavailable_glass_and_invalid_opaque_override_refuse_atomically() {
     let mut s = pack_session();
     let doc = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty());
     for extra in [json!({}), json!({"color":"#ffffff"}), json!({"opacity":0.25,"pbr":null})] {
         let mut params = json!({"bodies":["Swatch"],"appearance":"starter.glass.clear-soda-lime"});
         params.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         assert!(s.execute("appearance.assign", &params).unwrap_err().to_string().contains("refraction"));
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.is_dirty()));
+        assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty()));
     }
     assert!(s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":"starter.wood.oak-honey","opacity":0.4})).is_err());
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty()));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -563,12 +563,12 @@ fn starter_selectors_keep_final_validation_and_custom_names_stay_inert() {
     let mut s = pack_session();
     let preset = solidcraft_doc::appearance_pack::find("starter.wood.oak-honey").unwrap();
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     for selector in [preset.id, preset.name] {
         for opacity in [json!(0.5), json!(2.0), json!("1"), json!(null)] {
             assert!(s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":selector,"opacity":opacity})).is_err());
             assert!(Arc::ptr_eq(&doc, &s.doc));
-            assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+            assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
         }
     }
     s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":preset.id,"pbr":null,"opacity":0.4})).unwrap();
@@ -607,13 +607,13 @@ fn starter_visual_defaults_and_overrides_keep_saved_physical_cards_independent()
     assert_eq!(s.execute("component.properties", &json!({})).unwrap(), mass);
     assert!(Arc::ptr_eq(&geometry, &product_scene::extract(&s).unwrap().meshes[0].mesh));
     let before = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     for command in ["material.create", "material.edit"] {
         let params = json!({"name":"Refused glass","material":"Pack substrate","density_g_cm3":1.0,
             "appearance":"starter.glass.clear-soda-lime","pbr":null,"opacity":0.25});
         assert!(s.execute(command, &params).is_err());
         assert!(Arc::ptr_eq(&before, &s.doc));
-        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
     }
     s.execute("material.edit", &json!({"material":"Pack substrate","appearance":"starter.wood.walnut-dark"})).unwrap();
     assert_eq!(s.execute("material.inspect", &json!({"material":"Pack substrate"})).unwrap()["physical_card"], expected_card);
@@ -639,14 +639,14 @@ fn starter_names_and_ids_share_admission_before_all_overrides() {
                     json!({"color":"#aabbcc","pbr":{"metallic":0.0,"roughness":0.5,"dielectric_ior":1.5}}),
                 ] {
                     let before = s.doc.clone();
-                    let history = (s.undo.len(), s.redo.len(), s.revision);
+                    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
                     let mut params = overrides;
                     params["bodies"] = json!(["Swatch"]);
                     params["appearance"] = json!(selector);
                     let error = s.execute("appearance.assign", &params).unwrap_err().to_string();
                     assert!(error.contains("refraction"), "{selector}: {error}");
                     assert!(Arc::ptr_eq(&before, &s.doc));
-                    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+                    assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
                 }
             } else {
                 s.execute("appearance.assign", &json!({"bodies":["Swatch"],"appearance":selector,"color":[31,61,91]})).unwrap();
@@ -683,7 +683,7 @@ fn appearance_chain_and_from_material_preserve_mass_and_all_four_steps() {
     s.execute("appearance.assign", &json!({"components":["Part"],"appearance":"ABS - Blue"})).unwrap();
     s.execute("appearance.assign", &json!({"bodies":["Specimen"],"color":"#abcdef","opacity":0.5})).unwrap();
     s.execute("appearance.assign", &json!({"body":"Specimen","faces":[[5,10,5]],"appearance":"Copper - Clean PBR"})).unwrap();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     let doc = s.doc.clone();
     let chain = chain_read(&mut s, target.clone());
     assert_eq!(chain["active"], "face");
@@ -696,7 +696,7 @@ fn appearance_chain_and_from_material_preserve_mass_and_all_four_steps() {
     assert_eq!(chain["steps"][2]["look"]["name"], "ABS - Blue");
     assert_eq!(chain["steps"][3]["look"]["pbr"]["metallic"], 1.0);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
     assert_eq!(chain_read(&mut s, json!({"body":"Specimen"}))["active"], "body");
     assert_eq!(chain_read(&mut s, json!({"component":"Part"}))["active"], "component");
     // The existing clear form walks down the same chain, one edit at a time.
@@ -744,12 +744,12 @@ fn appearance_replace_is_exact_atomic_one_undo_and_survives_reopen() {
     let mass = s.execute("component.properties", &json!({})).unwrap();
     let scene = product_scene::extract(&s).unwrap();
     let before = s.doc.clone();
-    let history = s.undo.len();
+    let history = s.history.len();
     let listed = s.execute("appearance.list", &json!({})).unwrap();
     let from = listed["in_design"].as_array().unwrap().iter().find(|l| l.get("pbr").is_some()).unwrap().clone();
     let params = json!({"from":from,"to":"Copper - Clean PBR"});
     assert_eq!(s.execute("appearance.replace", &params).unwrap()["count"], 3);
-    assert_eq!(s.undo.len(), history + 1);
+    assert_eq!(s.history.len(), history + 1);
     assert_eq!(s.doc.appearances.bodies["Suppressed fixture"], scalar);
     assert_eq!(s.doc.user_materials, before.user_materials);
     assert_eq!(s.doc.materials, before.materials);
@@ -766,11 +766,11 @@ fn appearance_replace_is_exact_atomic_one_undo_and_survives_reopen() {
     let reopened = Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(reopened.doc.appearances, after);
     let snapshot = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     assert_eq!(s.execute("appearance.replace", &params).unwrap()["count"], 0);
     assert_eq!(s.execute("appearance.replace", &json!({"from":"Copper - Clean PBR","to":"Copper - Clean PBR"})).unwrap()["count"], 0);
     assert!(Arc::ptr_eq(&snapshot, &s.doc));
-    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
 }
 
 #[test]
@@ -781,7 +781,7 @@ fn appearance_replace_scope_deduplicates_and_does_not_expand_component_targets()
     let part = s.doc.find_component("Part").unwrap();
     let assign = json!({"bodies":["Specimen"],"components":["Part"],"body":"Specimen","faces":[[5,10,5]],"appearance":"ABS - Red"});
     s.execute("appearance.assign", &assign).unwrap();
-    let history = s.undo.len();
+    let history = s.history.len();
     assert_eq!(
         s.execute(
             "appearance.replace",
@@ -790,7 +790,7 @@ fn appearance_replace_scope_deduplicates_and_does_not_expand_component_targets()
         .unwrap()["count"],
         2
     );
-    assert_eq!(s.undo.len(), history + 1);
+    assert_eq!(s.history.len(), history + 1);
     assert_eq!(s.doc.appearances.components[&part].name, "ABS - Red");
     assert_eq!(
         s.execute("appearance.replace", &json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"components":[part,"Part",part.to_string()]}}))
@@ -801,10 +801,10 @@ fn appearance_replace_scope_deduplicates_and_does_not_expand_component_targets()
     // Empty scope is an explicit no-op, and a no-op preserves an existing redo entry.
     s.execute("edit.undo", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     assert_eq!(s.execute("appearance.replace", &json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"bodies":[]}})).unwrap()["count"], 0);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+    assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
 }
 
 #[test]
@@ -812,7 +812,7 @@ fn appearance_chain_and_replace_hostile_inputs_refuse_atomically() {
     let mut s = fixture();
     s.execute("appearance.assign", &json!({"bodies":["Specimen"],"appearance":"ABS - Red"})).unwrap();
     let doc = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len(), s.revision);
+    let history = (s.history.len(), s.history.redo_steps().len(), s.revision);
     for target in [
         json!({}),
         json!({"body":"missing"}),
@@ -856,7 +856,7 @@ fn appearance_chain_and_replace_hostile_inputs_refuse_atomically() {
     ] {
         assert!(s.execute("appearance.replace", &params).is_err(), "{params}");
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!((s.undo.len(), s.redo.len(), s.revision), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision), history);
     }
 }
 
@@ -895,21 +895,21 @@ fn appearance_gestures_copy_paste_preserve_full_resolved_look_and_history() {
         .unwrap()["index"]
         .clone();
     let before = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let target = json!({"body":"Specimen","face":face});
     let sampled = s.execute("appearance.pick_up", &json!({"target":target})).unwrap();
     assert_eq!(sampled["look"]["name"], "Sampled");
     assert_eq!(s.execute("appearance.copy", &json!({"target":target})).unwrap(), sampled);
     s.execute("appearance.paint", &sampled["look"]).unwrap();
     assert!(Arc::ptr_eq(&before, &s.doc));
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     s.execute("appearance.paste", &json!({"bodies":["Specimen"]})).unwrap();
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert_eq!(serde_json::to_value(&s.doc.appearances.bodies["Specimen"]).unwrap()["pbr"], sampled["look"]["pbr"]);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.doc.to_json(), before.to_json());
     let document = s.doc.clone();
-    let history = (s.undo.len(), s.redo.len());
+    let history = (s.history.len(), s.history.redo_steps().len());
     for (id, params) in [
         ("appearance.pick_up", json!({"target":{"body":"missing"}})),
         ("appearance.copy", json!({"target":{"body":"Specimen","face":999999}})),
@@ -918,7 +918,7 @@ fn appearance_gestures_copy_paste_preserve_full_resolved_look_and_history() {
     ] {
         assert!(s.execute(id, &params).is_err(), "{id}");
         assert!(Arc::ptr_eq(&document, &s.doc));
-        assert_eq!((s.undo.len(), s.redo.len()), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
     }
 }
 
@@ -926,7 +926,7 @@ fn appearance_gestures_copy_paste_preserve_full_resolved_look_and_history() {
 fn appearance_gestures_favorite_is_a_validated_transient_request() {
     let mut s = fixture();
     let before = s.doc.clone();
-    let state = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let state = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty());
     for favorite in [true, false] {
         let reply = s.execute("appearance.favorite", &json!({"look":{"appearance":"Copper"},"favorite":favorite})).unwrap();
         assert_eq!(reply["look"]["name"], "Copper");
@@ -943,7 +943,7 @@ fn appearance_gestures_favorite_is_a_validated_transient_request() {
         assert!(s.execute("appearance.favorite", &params).is_err());
     }
     assert!(Arc::ptr_eq(&before, &s.doc));
-    assert_eq!((s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()), state);
+    assert_eq!((s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty()), state);
 }
 
 /// A placed copy's name (`KB (K:2)`, the name inspect.measure lists) and a placement's (`K:2`)

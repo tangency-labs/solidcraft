@@ -353,12 +353,12 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
         }));
         h.app.start("sheet.flat_pattern");
         h.settle();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"widget":"Export DXF…"})).unwrap();
         let exported = std::fs::read_to_string(&path).expect("actual Export DXF button writes the picker destination");
         assert!(exported.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
         assert!(exported.contains("OUTLINE"));
-        assert_eq!(h.app.session.undo.len(), undo, "export does not alter the part");
+        assert_eq!(h.app.session.history.len(), undo, "export does not alter the part");
         assert!(h.app.dialog.is_some(), "export keeps the flat viewer open");
     }
 }
@@ -378,7 +378,7 @@ fn bend_table_picker_writes_the_current_body() {
             assert_eq!(extensions, &["csv"]);
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
@@ -386,7 +386,7 @@ fn bend_table_picker_writes_the_current_body() {
         std::fs::remove_file(&path).unwrap();
         assert_eq!(contents.lines().count(), 2);
         assert!(contents.contains(",90.000000000,up,2.500000000,"), "{contents}");
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
     }
 }
 
