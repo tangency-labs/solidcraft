@@ -1,0 +1,232 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1865",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/1910",
+ "test": "crates/kernel/src/coplanar_tests.rs: cylinders_meeting_along_their_sides_can_be_intersected, the_join_of_those_cylinders_is_still_taken_exactly, boxes_that_overlap_still_join_without_facets and the flush-contact half of a_face_flush_on_a_faceted_body_keeps_its_retry (PR #1910, open as a draft under tangency-labs/solidcraft#3992)",
+ "summary": "Booleans of two cylinders on one axis, of one radius, overlapping along it: the lower r 25.6 from z 0 to 30, the upper the same radius from z 22 to 46, sharing 8 mm. Where they meet, each body's round side lies in the other's, which SolidCraft's B-rep boolean could not take, and its exact polygon fallback for such a meeting takes planar faces only -- so the intersection was refused although the bodies plainly share a volume. SolidCraft's answer was to facet both operands and combine them, which resolves the operation at the cost of a result that is flat where the sides curve. The expected values here are the closed forms, not that approximation: a cylinder of radius 25.6 is pi*25.6^2 per mm of height, and an inscribed-facet result is about 11 mm^3 light on the intersection, so the 0.01 mm^3 tolerance rejects it. Taking these exactly is therefore stronger than the fix being ported. The union was always exact in SolidCraft and is kept here as the control that must not regress, and the overlapping boxes are the issue's own planar control. Two of the five tests in the source file assert which internal route answered and how often it was asked; those are SolidCraft's own bookkeeping and have nothing to port.",
+ "cases": [
+  {
+   "name": "coincident_cylinders_intersect_exactly",
+   "note": "The reduction in the issue. What the two share is the 8 mm of one cylinder that both stand through, bounded by their coincident sides.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "lower",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 25.6,
+     "height": 30.0
+    },
+    {
+     "op": "cylinder",
+     "id": "upper",
+     "origin": [
+      0.0,
+      0.0,
+      22.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 25.6,
+     "height": 24.0
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "lower",
+     "b": "upper"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 16470.993291652856,
+     "tol": 0.01,
+     "formula": "pi*25.6^2*(30-22) = pi*655.36*8"
+    }
+   }
+  },
+  {
+   "name": "coincident_cylinders_join_exactly",
+   "note": "Control: the join of the same two bodies was always taken exactly, and must not start coming back faceted. One cylinder 46 tall.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "lower",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 25.6,
+     "height": 30.0
+    },
+    {
+     "op": "cylinder",
+     "id": "upper",
+     "origin": [
+      0.0,
+      0.0,
+      22.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 25.6,
+     "height": 24.0
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "lower",
+     "b": "upper"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 94708.21142700392,
+     "tol": 0.01,
+     "formula": "pi*25.6^2*46 = pi*655.36*46"
+    }
+   }
+  },
+  {
+   "name": "overlapping_boxes_join_control",
+   "note": "The issue's planar control: a 20 mm cube and a bar through one of its sides, sharing 10 x 5 x 20. All-planar contact had an exact route of its own throughout.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "cube",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      20.0
+     ]
+    },
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      10.0,
+      -5.0,
+      0.0
+     ],
+     "size": [
+      20.0,
+      10.0,
+      20.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "cube",
+     "b": "bar"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 11000.0,
+     "tol": 0.01,
+     "formula": "20^3 + 20*10*20 - 10*5*20 = 8000 + 4000 - 1000"
+    }
+   }
+  },
+  {
+   "name": "block_flush_on_the_shared_bodys_cap",
+   "note": "A block set flush on the shared body's top cap at z 30, well inside its rim: coincident-face contact on a body whose sides curve, which is the contact the retries under a boolean exist for. Flush, not overlapping, so the join is the two volumes and one piece.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "lower",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 25.6,
+     "height": 30.0
+    },
+    {
+     "op": "cylinder",
+     "id": "upper",
+     "origin": [
+      0.0,
+      0.0,
+      22.0
+     ],
+     "axis": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "radius": 25.6,
+     "height": 24.0
+    },
+    {
+     "op": "intersection",
+     "id": "shared",
+     "a": "lower",
+     "b": "upper"
+    },
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      -10.0,
+      -10.0,
+      30.0
+     ],
+     "size": [
+      20.0,
+      20.0,
+      10.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "shared",
+     "b": "block"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 20470.993291652856,
+     "tol": 0.01,
+     "formula": "pi*655.36*8 + 20*20*10"
+    }
+   }
+  }
+ ]
+}
