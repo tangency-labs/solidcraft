@@ -968,10 +968,23 @@ fn middle(vertices: &mut Vec<[f64; 3]>, made: &mut std::collections::HashMap<(us
 /// tolerance, since a planar face is exact and other operations treat it as containing its
 /// edges to that tolerance. A fitted face gets [`face_tolerance`], ten times looser.
 pub(crate) fn planarity_tolerance(body: &Body) -> f64 {
-    (body.size() * 1e-7).max(solidcraft_geom::LINEAR_TOL)
+    (placed_size(body) * 1e-7).max(solidcraft_geom::LINEAR_TOL)
 }
 
-/// How far the fill's surface may be from the loop's edges: `10⁻⁶` of the body's size, at least
+/// The body's size as the fill tolerances take it, the same wherever the body is and however it
+/// is turned (the bounding box's diagonal is not: a cup turned 0.7 rad about (1, 2, 3) grows from
+/// 54.7 to 61.6, and its fill was sampled to another tolerance): the diameter of the smallest ball
+/// holding its vertices. (Twice the farthest vertex's distance from their centroid is not the
+/// body's size where the vertices crowd one end: up to twice its diameter, and a rounded box's G2
+/// corner patch, its vertices crowding that corner, then fitted past the box.) A body with no
+/// vertices takes its box's diagonal.
+fn placed_size(body: &Body) -> f64 {
+    let vertices: Vec<Vec3> = body.record().vertices.iter().map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).collect();
+    solidcraft_geom::Ball::enclosing(&vertices).map_or_else(|| body.size(), |ball| ball.diameter())
+}
+
+/// How far the fill's surface may be from the loop's edges: `10⁻⁶` of the body's size
+/// ([`placed_size`]), at least
 /// `10⁻⁵` mm — ten times [`planarity_tolerance`]. Ten times the linear tolerance because a
 /// fitted surface approaches curved edges like a cubic spline, so each further factor of ten
 /// costs about twice the spans each way, and imported edges may already lie `10⁻⁵` mm or more off
@@ -979,7 +992,7 @@ pub(crate) fn planarity_tolerance(body: &Body) -> f64 {
 /// tolerance, not the linear one: the face's edges are the body's exact edges, the surface
 /// between them is the fit (the patch record's edges and vertices hold this gap: [`hold_gap`]).
 pub(crate) fn face_tolerance(body: &Body) -> f64 {
-    (body.size() * 1e-6).max(1e-5)
+    (placed_size(body) * 1e-6).max(1e-5)
 }
 
 #[cfg(test)]
@@ -1064,13 +1077,23 @@ mod tests {
     }
 
     /// Whether every edge of `made` is one of `of`'s own: the same kind of curve, on the same
-    /// curve record it is parameterised on (its NURBS form where it has one), on the same
-    /// interval. (A circle's or ellipse's frame is SMLib's again after a round trip, its axes
-    /// renormalised to the last bit.)
+    /// interval, on the curve it is parameterised on (its NURBS form where it has one) to
+    /// rounding: the same knots and control points within 10⁻¹² of their size. (SMLib makes a
+    /// conic's frame and NURBS form again on a round trip, the last bit of a coordinate apart.)
     fn own_edges(made: &Body, of: &Body) -> bool {
         let own = record(of).edges;
         let kind = |e: &b::Edge| std::mem::discriminant(&e.curve);
-        record(made).edges.iter().all(|e| own.iter().any(|o| kind(o) == kind(e) && o.parameters() == e.parameters() && o.interval == e.interval))
+        let close = |p: &[f64], q: &[f64]| p.len() == q.len() && p.iter().zip(q).all(|(x, y)| (x - y).abs() <= 1e-12 * (1.0 + x.abs().max(y.abs())));
+        let same = |c: &b::Curve, d: &b::Curve| match (c, d) {
+            (b::Curve::Spline { knots: k, points: p }, b::Curve::Spline { knots: l, points: q }) => {
+                k == l && p.len() == q.len() && p.iter().zip(q).all(|(x, y)| close(x, y))
+            }
+            (b::Curve::RationalSpline { knots: k, homogeneous: p }, b::Curve::RationalSpline { knots: l, homogeneous: q }) => {
+                k == l && p.len() == q.len() && p.iter().zip(q).all(|(x, y)| close(x, y))
+            }
+            _ => c == d,
+        };
+        record(made).edges.iter().all(|e| own.iter().any(|o| kind(o) == kind(e) && same(o.parameters(), e.parameters()) && o.interval == e.interval))
     }
 
     /// The fill's mesh: every normal finite, and no triangle folded over (all face the same way
