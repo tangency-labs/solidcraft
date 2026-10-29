@@ -784,11 +784,16 @@ fn a_face_bounded_by_two_short_arcs_keeps_an_area_to_mesh() {
     let sq = [[3000.0, 0.0, 0.0], [5000.0, 0.0, 0.0], [5000.0, 2000.0, 0.0], [3000.0, 2000.0, 0.0]];
     let plane = Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
     let mut edges = vec![
-        PartEdge { curve: circle(-c), interval: [top, PI - top], vertices: [0, 1] },
-        PartEdge { curve: circle(c), interval: [PI + top, TAU - top], vertices: [1, 0] },
+        PartEdge { nurbs: None, curve: circle(-c), interval: [top, PI - top], vertices: [0, 1] },
+        PartEdge { nurbs: None, curve: circle(c), interval: [PI + top, TAU - top], vertices: [1, 0] },
     ];
     for k in 0..4 {
-        edges.push(PartEdge { curve: line(sq[k], sq[(k + 1) % 4]), interval: [0.0, 1.0], vertices: [2 + k as u32, 2 + ((k + 1) % 4) as u32] });
+        edges.push(PartEdge {
+            nurbs: None,
+            curve: line(sq[k], sq[(k + 1) % 4]),
+            interval: [0.0, 1.0],
+            vertices: [2 + k as u32, 2 + ((k + 1) % 4) as u32],
+        });
     }
     let uses = |es: &[u32]| es.iter().map(|&edge| PartUse { edge, forward: true, given: None }).collect::<Vec<_>>();
     let mut vertices = vec![[half, 0.0, 0.0], [-half, 0.0, 0.0]];

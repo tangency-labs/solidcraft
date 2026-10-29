@@ -108,7 +108,7 @@ fn rim_points(body: &Body, per: usize) -> Vec<Vec3> {
     let r = body.record();
     let mut out = Vec::new();
     for e in r.edges.iter().filter(|e| e.uses.len() == 1) {
-        let c = CurveEval::new(&e.curve).unwrap();
+        let c = CurveEval::new(e.parameters()).unwrap();
         let [t0, t1] = e.interval;
         for k in 0..per {
             out.push(c.point(t0 + (t1 - t0) * (k as f64 + 0.5) / per as f64).unwrap());
@@ -238,7 +238,7 @@ fn free_edge_points(body: &Body) -> Vec<Vec3> {
         .edges
         .iter()
         .filter(|e| e.uses.len() == 1)
-        .map(|e| CurveEval::new(&e.curve).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap())
+        .map(|e| CurveEval::new(e.parameters()).unwrap().point(0.5 * (e.interval[0] + e.interval[1])).unwrap())
         .collect::<Vec<_>>();
     // In a fixed order.
     points.sort_by(|a, b| (a.z, a.y, a.x).partial_cmp(&(b.z, b.y, b.x)).unwrap());

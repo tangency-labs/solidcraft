@@ -214,7 +214,7 @@ fn too_large_or_unsupported_is_refused() {
         .record()
         .edges
         .iter()
-        .filter_map(|e| solidcraft_geom::brep::eval::CurveEval::new(&e.curve).ok()?.point(0.5 * (e.interval[0] + e.interval[1])))
+        .filter_map(|e| solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).ok()?.point(0.5 * (e.interval[0] + e.interval[1])))
         .find(|m| (m.z - 10.0).abs() < 1e-6)
         .unwrap();
     match chamfer_sides(&t, &[rim], 1.0, ChamferSide::Distance(2.0), false) {

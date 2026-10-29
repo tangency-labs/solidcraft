@@ -286,7 +286,7 @@ impl Builder {
             }
         };
         let id = u32::try_from(self.edges.len()).map_err(|_| KernelError::Invalid("sew: edge budget exceeded".into()))?;
-        self.edges.push(PartEdge { curve, interval, vertices: [va, vb] });
+        self.edges.push(PartEdge { nurbs: None, curve, interval, vertices: [va, vb] });
         self.by_key.insert((ka, fa, kb, fb, mid, sheet), id);
         Ok((id, true))
     }
@@ -1303,6 +1303,10 @@ pub(crate) struct PartUse {
 
 pub(crate) struct PartEdge {
     pub curve: b::Curve,
+    /// The NURBS form the edge is parameterised on, as a record edge keeps it
+    /// ([`b::Edge::nurbs`]): given, `interval` is on it and `curve` only says what the edge is,
+    /// so an edge taken from a record goes back as that same edge.
+    pub nurbs: Option<b::Curve>,
     pub interval: [f64; 2],
     pub vertices: [u32; 2],
 }
@@ -1366,8 +1370,8 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
         g
     };
     // Each edge's label and NURBS form (`form::edge`): a circle about a revolved face's axis on
-    // that face's frame, so its form lies on the face's quarter grid; an edge the caller gave a
-    // pcurve for keeps the parameter that pcurve is on.
+    // that face's frame, so its form lies on the face's quarter grid; an edge given with its form
+    // keeps it, and an edge the caller gave a pcurve for keeps the parameter that pcurve is on.
     let mut frames_of: Vec<Vec<b::Frame>> = vec![Vec::new(); edges.len()];
     for f in &faces {
         let Some(frame) = b::form::frame_of(&f.surface) else { continue };
@@ -1380,6 +1384,13 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     let mut labels: Vec<(b::Curve, [f64; 2])> = Vec::with_capacity(edges.len());
     let mut forms: Vec<Option<(b::Curve, [f64; 2])>> = Vec::with_capacity(edges.len());
     for ((e, frames), given) in edges.iter().zip(&frames_of).zip(&given_on) {
+        if let Some(form) = &e.nurbs {
+            let on_label =
+                b::curve_interval(&e.curve, Some(form), e.interval).ok_or_else(|| fail("an edge's NURBS form does not evaluate".into()))?;
+            labels.push((e.curve.clone(), on_label));
+            forms.push(Some((form.clone(), e.interval)));
+            continue;
+        }
         if *given {
             labels.push((e.curve.clone(), e.interval));
             forms.push(None);

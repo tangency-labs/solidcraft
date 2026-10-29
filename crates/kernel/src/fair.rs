@@ -1379,6 +1379,7 @@ mod tests {
         let vertices: Vec<[f64; 3]> = corners.iter().map(|&(i, j)| net[j * cu + i]).collect();
         let edges = (0..4)
             .map(|k| PartEdge {
+                nurbs: None,
                 curve: b::Curve::Line { start: vertices[k], end: vertices[(k + 1) % 4] },
                 interval: [0.0, 1.0],
                 vertices: [k as u32, ((k + 1) % 4) as u32],

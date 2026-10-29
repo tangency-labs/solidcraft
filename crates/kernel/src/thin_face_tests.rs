@@ -61,11 +61,13 @@ fn a_face_touching_its_own_edge_meshes() {
     let (h, dip) = (0.3175, 2.8e-7);
     let vertices = vec![[0.0, 0.0, 0.0], [5.0, 0.0, 0.0], [5.0, h, 0.0], [0.0, h, 0.0]];
     let line = |a: usize, b: usize| PartEdge {
+        nurbs: None,
         curve: Curve::Line { start: vertices[a], end: vertices[b] },
         interval: [0.0, 1.0],
         vertices: [a as u32, b as u32],
     };
     let arch = PartEdge {
+        nurbs: None,
         curve: Curve::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[5.0, h, 0.0], [2.5, -h - 2.0 * dip, 0.0], [0.0, h, 0.0]] },
         interval: [0.0, 1.0],
         vertices: [2, 3],
