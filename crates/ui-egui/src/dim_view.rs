@@ -112,13 +112,14 @@ impl DimensionDraft {
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
-        previous_axis(&self.entities, &mut params);
+        previous_axis(self.sketch, &self.entities, &mut params);
         params
     }
     fn evaluate(&self, app: &SolveApp, expr: &str) -> Result<solidcraft_engine::Session, String> {
         let mut scratch = app.session.scratch();
-        let result = scratch.execute("sketch.dimension", &self.params(expr)).map_err(|e| shown_error("sketch.dimension", &e.to_string()))?;
-        remember_axis(&self.entities, &result);
+        let params = self.params(expr);
+        let result = scratch.execute("sketch.dimension", &params).map_err(|e| shown_error("sketch.dimension", &e.to_string()))?;
+        remember_axis(self.sketch, &self.entities, &params, &result);
         let param = result.get("param").and_then(serde_json::Value::as_str).ok_or("The dimension value is unavailable")?;
         let state = scratch.world_state();
         let solved = state.sketch(self.sketch).ok_or("The dimension sketch is unavailable")?;
@@ -151,9 +152,10 @@ pub fn cancel() {
 
 /// Near the boundary between an ellipse's two half-axes, a dimension being placed keeps the
 /// one it had (`sketch.dimension`'s `previous_axis`), so the preview does not flip.
-fn previous_axis(entities: &[String], params: &mut serde_json::Value) {
+fn previous_axis(sketch: u64, entities: &[String], params: &mut serde_json::Value) {
     AXIS.with(|axis| {
-        if let Some((picked, axis)) = axis.borrow().as_ref()
+        if let Some((in_sketch, picked, axis)) = axis.borrow().as_ref()
+            && *in_sketch == sketch
             && picked.as_slice() == entities
         {
             params["previous_axis"] = json!(axis);
@@ -161,9 +163,13 @@ fn previous_axis(entities: &[String], params: &mut serde_json::Value) {
     });
 }
 
-fn remember_axis(entities: &[String], result: &serde_json::Value) {
-    if let Some(chosen) = result.get("axis").and_then(serde_json::Value::as_str) {
-        AXIS.with(|axis| *axis.borrow_mut() = Some((entities.to_vec(), chosen.to_string())));
+/// Only a draft whose text was placed chose its half-axis; one without text is the minor one
+/// by default and would bias the first placement.
+fn remember_axis(sketch: u64, entities: &[String], params: &serde_json::Value, result: &serde_json::Value) {
+    if params.get("text_at").is_some()
+        && let Some(chosen) = result.get("axis").and_then(serde_json::Value::as_str)
+    {
+        AXIS.with(|axis| *axis.borrow_mut() = Some((sketch, entities.to_vec(), chosen.to_string())));
     }
 }
 
@@ -174,7 +180,10 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
     let (param, expr, draft) = dimension_draft(app, entities, Some(at))?;
     if draft.driven {
         PLACEMENT.with(|preview| *preview.borrow_mut() = None);
-        app.run("sketch.dimension", json!({"entities": entities_value(&draft.entities), "text_at": [at.x, at.y], "driven": true}))?;
+        let mut params = json!({"entities": entities_value(&draft.entities), "text_at": [at.x, at.y], "driven": true});
+        previous_axis(draft.sketch, &draft.entities, &mut params);
+        AXIS.with(|axis| *axis.borrow_mut() = None);
+        app.run("sketch.dimension", params)?;
         app.set_status(crate::i18n::tr("sketch.dimension_added_driven"), false);
         return Ok(());
     }
@@ -314,9 +323,9 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
     if let Some(at) = at {
         params["text_at"] = json!([at.x, at.y]);
     }
-    previous_axis(entities, &mut params);
+    previous_axis(sketch, entities, &mut params);
     let result = scratch.execute("sketch.dimension", &params).map_err(|e| e.to_string())?;
-    remember_axis(entities, &result);
+    remember_axis(sketch, entities, &params, &result);
     let (param, expr) = if driven {
         let before =
             app.session.doc.sketch(sketch).ok().map(|sk| sk.constraints.iter().map(|c| c.id.clone()).collect::<Vec<_>>()).unwrap_or_default();
@@ -398,8 +407,9 @@ thread_local! {
     static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
     static PLACEMENT: RefCell<Option<Placement>> = const { RefCell::new(None) };
-    /// The half-axis of an ellipse the last draft for these picks measured (see `previous_axis`).
-    static AXIS: RefCell<Option<(Vec<String>, String)>> = const { RefCell::new(None) };
+    /// The half-axis of an ellipse the last placed draft for these picks in this sketch
+    /// measured (see `previous_axis`).
+    static AXIS: RefCell<Option<(u64, Vec<String>, String)>> = const { RefCell::new(None) };
     /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
     /// drew them last frame: sketch, constraint id, parameter (None: driven), text box.
     static MODEL: RefCell<Vec<ModelDim>> = const { RefCell::new(Vec::new()) };
@@ -1091,6 +1101,7 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// The Dimension tool starts over (its picks became a dimension, or were cancelled).
 fn clear_picks(app: &mut SolveApp) {
+    AXIS.with(|axis| *axis.borrow_mut() = None);
     if let Some(tool) = app.tool.as_mut().filter(|t| t.kind == crate::tools::Kind::Dimension) {
         tool.picks.clear();
         tool.point_picks.clear();
@@ -1412,6 +1423,77 @@ mod tests {
             assert!(matches!(c.kind, ConstraintKind::Distance {value,..} if (value-half).abs()<1e-6), "text at {at:?}: {:?}", c.kind);
         }
         h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        cancel();
+    }
+
+    /// The preview's half-axis of an ellipse at a pointer position.
+    fn previewed_half_axis(h: &mut crate::scenario::Harness, at: [f64; 2]) -> f64 {
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.settle();
+        let (id, draft) = placement_preview(&h.app).expect("an ellipse has a dimension preview");
+        let sk = &draft.preview.sketch(draft.sketch).unwrap().sketch;
+        let c = sk.constraints.iter().find(|c| c.param.as_deref() == Some(&id) || c.id == id).unwrap();
+        let ConstraintKind::Distance { value, .. } = c.kind else { panic!("text at {at:?}: {:?}", c.kind) };
+        value
+    }
+
+    /// An ellipse's half-axis placement starts from where its text is: neither the draft made
+    /// before the text was placed (the minor half-axis by default) nor the dimension placed
+    /// before it biases which half-axis it takes near the boundary.
+    #[test]
+    fn an_ellipse_half_axis_placement_starts_from_where_its_text_is() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        // Picked near the boundary on the major side, the text first where it was picked, then
+        // near the boundary again: the major.
+        h.step(&json!({"click":{"sketch":[13.383,-5.945]}})).unwrap();
+        h.frames(4);
+        h.step(&json!({"key":"Tab"})).unwrap();
+        assert!((previewed_half_axis(&mut h, [10., 4.4]) - 20.).abs() < 1e-6);
+        h.step(&json!({"click":{"sketch":[10,4.4]}})).unwrap();
+        assert!(editing());
+        h.step(&json!({"text":"20"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.settle();
+        assert!(!editing());
+        // The next one on the same ellipse, picked near the boundary on the minor side, the
+        // text where it was picked: the minor.
+        h.step(&json!({"click":{"sketch":[14.863,-5.353]}})).unwrap();
+        h.frames(4);
+        h.step(&json!({"key":"Tab"})).unwrap();
+        assert!((previewed_half_axis(&mut h, [14.863, -5.353]) - 8.).abs() < 1e-6);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        cancel();
+    }
+
+    /// On an ellipse already sized, a half-axis is placed as a driven dimension at once on
+    /// the click: it is the half-axis the preview showed, near the boundary too.
+    #[test]
+    fn a_driven_ellipse_half_axis_is_the_one_its_preview_showed() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let out = h.app.run("sketch.ellipse", json!({"center":[0,0],"major":[20,0],"minor_radius":8})).unwrap();
+        let e = out["curves"][0].as_str().unwrap().to_string();
+        for ty in ["major", "minor"] {
+            h.app.run("sketch.dimension", json!({"entities":[e],"type":ty})).unwrap();
+        }
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.dimension"})).unwrap();
+        h.step(&json!({"click":{"sketch":[13.383,-5.945]}})).unwrap();
+        assert!((previewed_half_axis(&mut h, [3., 16.]) - 20.).abs() < 1e-6);
+        assert!((previewed_half_axis(&mut h, [10., 3.6]) - 20.).abs() < 1e-6);
+        h.step(&json!({"click":{"sketch":[10,3.6]}})).unwrap();
+        h.settle();
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let driven: Vec<_> = sk.constraints.iter().filter(|c| c.driven).map(|c| c.kind.clone()).collect();
+        assert!(matches!(driven.as_slice(), [ConstraintKind::Distance { value, .. }] if (value - 20.).abs() < 1e-6), "{driven:?}");
         h.step(&json!({"key":"Escape"})).unwrap();
         cancel();
     }
