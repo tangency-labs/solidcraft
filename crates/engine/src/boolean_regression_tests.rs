@@ -176,8 +176,8 @@ fn step_export_of_an_enclosure_with_a_screw_hole_finishes_and_reads_back() {
     let s = replay(include_str!("../../../examples/regressions/step_export_screw_hole_enclosure.json"));
     let state = s.model.state();
     let body = &state.body("Unterteil").unwrap().body;
-    // 27 faces; the kernel splits each of the three whole turns (the hole, two standoffs) in two.
-    assert_eq!(body.face_count(), 30);
+    // 27 faces, as the file holds them: each whole turn (the hole, two standoffs) is one face.
+    assert_eq!(body.face_count(), 27);
     let (text, file_faces) = read_back(&s, body);
     assert_eq!(text.matches("CYLINDRICAL_SURFACE(").count(), 7, "the seven round faces stay cylinders");
     assert_eq!(file_faces, 27);
