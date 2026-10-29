@@ -1,7 +1,7 @@
 //! Safe wrapper for unit `surface.surface_assert_valid`: the pinned virtual
 //! `SmSurface::AssertValid` on a real B-spline surface, plane, cylinder, cone, sphere,
-//! torus or surface of revolution built from plain data (block layout in
-//! `harness/cpp/shim/surface_surface_assert_valid.cpp`).
+//! torus, surface of revolution or surface of extrusion built from plain data (block
+//! layout in `harness/cpp/shim/surface_surface_assert_valid.cpp`).
 
 use crate::{call_with_buffer, FfiError};
 
@@ -102,6 +102,35 @@ fn points(rd: &mut Rd<'_>, n: usize, rational: bool) -> Result<(), FfiError> {
     Ok(())
 }
 
+/// Knots clamped at both ends (multiplicity `degree + 1`), as the extrusion's generator
+/// needs: its constructor evaluates the generator and builds its STEP interval.
+fn clamped(k: &[f64], degree: usize) -> Result<(), FfiError> {
+    let m = mults(k);
+    if m.first() != Some(&(degree as i64 + 1)) || m.last() != Some(&(degree as i64 + 1)) {
+        return Err(bad("generator knots not clamped"));
+    }
+    Ok(())
+}
+
+/// Control points spread over more than a point (the constructor's plane test of a
+/// collapsed generator may fail and leave its result unset).
+fn spread(block: &[f64], first: usize, n: usize, rational: bool) -> Result<(), FfiError> {
+    let at = |i: usize, c: usize| block.get(first + 4 * i + c).copied().unwrap_or(0.0);
+    // (homogeneous coordinates when rational)
+    let w = |i: usize| if rational { at(i, 3) } else { 1.0 };
+    let size = (1..n)
+        .map(|i| {
+            (0..3)
+                .map(|c| (at(i, c) / w(i) - at(0, c) / w(0)).abs())
+                .fold(0.0, f64::max)
+        })
+        .fold(0.0, f64::max);
+    if size.is_nan() || size <= 1e-9 {
+        return Err(bad("collapsed generator"));
+    }
+    Ok(())
+}
+
 /// Unique knots' multiplicities.
 fn mults(k: &[f64]) -> Vec<i64> {
     let mut m: Vec<i64> = Vec::new();
@@ -176,12 +205,12 @@ fn internal_pole_indices(
 
 fn check(block: &[f64]) -> Result<(), FfiError> {
     let mut rd = Rd { v: block, at: 0 };
-    let kind = rd.int(0.0, 6.0)?;
+    let kind = rd.int(0.0, 7.0)?;
     let level = rd.int(0.0, 4.0)?;
     if level == 3 {
         return Err(bad("level"));
     }
-    rd.flag()?;
+    let make = rd.flag()?;
     if kind == 0 {
         let p = rd.int(1.0, 5.0)?;
         let q = rd.int(1.0, 5.0)?;
@@ -199,6 +228,34 @@ fn check(block: &[f64]) -> Result<(), FfiError> {
         iso_extraction(&ku, p)?;
         iso_extraction(&kv, q)?;
         points(&mut rd, nu * nv, rational)?;
+    } else if kind == 7 {
+        rd.vec()?;
+        let v = rd.vec()?;
+        let d = rd.dom()?;
+        if d[0] > d[2] || d[1] > d[3] {
+            return Err(bad("extrusion domain not ordered"));
+        }
+        // MakeNurb of a collapsed extrusion (zero vector or domain) is not exercised:
+        // the check of its NURB is the B-spline unit's
+        if make && (len(v) <= 1e-9 || d[2] - d[0] <= 1e-9 || d[3] - d[1] <= 1e-9) {
+            return Err(bad("MakeNurb of a collapsed extrusion"));
+        }
+        rd.flag()?;
+        let p = rd.int(1.0, 5.0)?;
+        let n = rd.int(2.0, 32.0)?;
+        if n <= p {
+            return Err(bad("too few generator points"));
+        }
+        let rational = rd.flag()?;
+        let first = rd.at;
+        points(&mut rd, n, rational)?;
+        spread(block, first, n, rational)?;
+        let k: Vec<f64> = (0..=n + p).map(|_| rd.num()).collect::<Result<_, _>>()?;
+        knots(&k)?;
+        clamped(&k, p)?;
+        rd.flag()?;
+        rd.vec()?;
+        rd.vec()?;
     } else {
         rd.vec()?;
         let x = rd.vec()?;

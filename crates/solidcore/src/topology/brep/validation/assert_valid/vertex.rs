@@ -30,7 +30,7 @@ pub(super) fn vertex(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, v: VertexId)
     let (located, max_gap) = seams::assert_test_vertex1(k, b, v)?;
     if !located {
         // SmTol::GetXSectTol3d(GetBrep())
-        let xsect_tol = 2.0 * b.tolerance();
+        let xsect_tol = crate::topology::vertex::corner::xsect_tol_3d_of_brep(k, b);
         if max_gap > xsect_tol {
             let ok = !cx.rep.need(2);
             rtn &= cx

@@ -273,20 +273,41 @@ fn tolerances_validate_only(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Re
                 return Ok(ERROR);
             };
 
-            // get all edgeuse start/end vertex gaps
-            let start_edge_gap = tvu::vertex_edge_gap(k, b, start_vu, false)?;
-            let start_face_gap = tvu::vertex_face_gap(k, b, start_vu, false)?;
-            let end_edge_gap = tvu::vertex_edge_gap(k, b, end_vu, false)?;
-            let end_face_gap = tvu::vertex_face_gap(k, b, end_vu, false)?;
+            // get all edgeuse start/end vertex gaps: upstream keeps pointers into the
+            // vertex uses' caches and reads their lengths below, so a later refresh that
+            // resets a sibling's cache (`CalcVertexFaceGap` / `CalcVertexEdgeGap` clear
+            // every use of the vertex on the same face / edge, e.g. both ends of a
+            // closed edge) shows in an earlier gap
+            let start_edge_gap = tvu::vertex_edge_gap(k, b, start_vu, false)?.is_some();
+            let start_face_gap = tvu::vertex_face_gap(k, b, start_vu, false)?.is_some();
+            let end_edge_gap = tvu::vertex_edge_gap(k, b, end_vu, false)?.is_some();
+            let end_face_gap = tvu::vertex_face_gap(k, b, end_vu, false)?.is_some();
             let start_tol = b.vertex(start_v)?.tolerance;
             let end_tol = b.vertex(end_v)?.tolerance;
+            let (start, end) = (b.vertexuse(start_vu)?, b.vertexuse(end_vu)?);
 
             // report bad edgeuse start and end vertex/edge and vertex/face gaps
             let gaps = [
-                (0, start_edge_gap.map(|g| g.gap_3d), start_tol),
-                (1, start_face_gap.map(|g| g.gap_3d), start_tol),
-                (2, end_edge_gap.map(|g| g.gap_3d), end_tol),
-                (3, end_face_gap.map(|g| g.gap_3d), end_tol),
+                (
+                    0,
+                    start_edge_gap.then_some(start.vertex_edge_gap.gap_3d),
+                    start_tol,
+                ),
+                (
+                    1,
+                    start_face_gap.then_some(start.vertex_face_gap.gap_3d),
+                    start_tol,
+                ),
+                (
+                    2,
+                    end_edge_gap.then_some(end.vertex_edge_gap.gap_3d),
+                    end_tol,
+                ),
+                (
+                    3,
+                    end_face_gap.then_some(end.vertex_face_gap.gap_3d),
+                    end_tol,
+                ),
             ];
             for (index, gap, tol) in gaps {
                 let ok = !need || gap.is_none_or(|g| g <= tol / 2.0);

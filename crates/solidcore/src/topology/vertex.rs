@@ -82,7 +82,7 @@
 //! - `IsZoneTol3dConsistent`, `GetLoopOfFace`,
 //!   `GetVertexuseOfEdge`, `GetVertexNumberInBrep`, the `Has*` / `IsEdgeVertex` /
 //!   `IsOnSeam` / `IsConnectedToEdge` / `IsConnectedToFace` predicates,
-//!   `IsWithinXSectTol3dOfEdges`, `CheckPointers`,
+//!   `IsWithinXSectTol3dOfEdges`,
 //!   `IsComplexCornerMember`, `RefineGeometry`, `FindAndRemoveVertexuseByEdge`,
 //!   `GetMemoryUsed`, `AssertValid`, the graphics and the `Dump`s are not part of this
 //!   unit.

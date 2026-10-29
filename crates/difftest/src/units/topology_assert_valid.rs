@@ -210,6 +210,16 @@ fn own_brep(k: &mut Kernel, src: &Src) -> Result<Result<Brep, Output>, HarnessEr
         Built::Brep(b) => {
             let mut b = *b;
             b.set_naming(NamingScheme::Notify);
+            // the copy keeps each UV trim curve's owner from the B-rep it was built in;
+            // upstream's `SmEdgeuse::AssertValid` test 6 expects the edge use holding it
+            // (`GetOwner() == this`), here under the same identities as the walk's
+            let uses: Vec<_> = b.edgeuses().ids().collect();
+            for eu in uses {
+                let edgeuse = b.edgeuse_mut(eu).map_err(|e| herr(e.to_string()))?;
+                if let Some(trim) = edgeuse.uv_trim_curve.as_mut() {
+                    let _ = trim.set_owner(Some(key(EntityRef::Edgeuse(eu))), None);
+                }
+            }
             Ok(b)
         }
         Built::Failed(e) => Err(Output::unported(&e)

@@ -40792,6 +40792,20 @@
    },
    {
     "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20175,
+    "lines": 25,
+    "name": "sm_GetLoopSampleUVPoint",
+    "usr": "c:SmFace.cpp@F@sm_GetLoopSampleUVPoint#*1$@S@SmLoop#&$@S@SmVector2d#"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
+    "line": 20226,
+    "lines": 55,
+    "name": "sm_AssertTestFace37",
+    "usr": "c:@F@sm_AssertTestFace37#*1$@S@SmFace#"
+   },
+   {
+    "file": "source/SMLib/src/SmFace.cpp",
     "line": 16646,
     "lines": 83,
     "name": "SmFace::HasCoincidentVertices",
@@ -43929,6 +43943,13 @@
     "lines": 4,
     "name": "SmVertex::IsKindOf",
     "usr": "c:@S@SmVertex@F@IsKindOf#L#1"
+   },
+   {
+    "file": "source/SMLib/src/SmVertex.cpp",
+    "line": 1446,
+    "lines": 262,
+    "name": "SmVertex::CheckPointers",
+    "usr": "c:@S@SmVertex@F@CheckPointers#1"
    },
    {
     "file": "source/SMLib/src/SmVertex.cpp",

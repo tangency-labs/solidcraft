@@ -13,7 +13,7 @@
 //! | [`is_on_face_corner`]                 | `SmVertex::IsOnFaceCorner`                |
 //! | [`assert_test_vertex1`]               | `sm_AssertTestVertex1` (`SmVertex.cpp`)   |
 //! | `vertex_scaled_zero` (private)        | `SmTol::GetScaledZero(const SmVertex&)`   |
-//! | `brep_xsect_tol_3d` (private)         | `SmTol::GetXSectTol3d(GetBrep())` (`SM_USE_OLDTOL`) |
+//! | `brep_xsect_tol_3d` (private), [`xsect_tol_3d_of_brep`] | `SmTol::GetXSectTol3d(GetBrep())` (`SM_USE_OLDTOL`) |
 //!
 //! Deviations:
 //! - **Out-params.** Optional outputs are always computed and returned in structs or
@@ -21,11 +21,12 @@
 //!   makes (`pOptMaxGap3d`, `pOptMaxGapFace` given, the corner outputs not), so the
 //!   corner test runs only when the gap test passed.
 //! - **Tolerances.** `SM_USE_NEWTOL` is not defined in the reference build, so the
-//!   intersection tolerance is `2 * GetBrep()->GetTolerance()`. A vertex outside any
+//!   intersection tolerance is `2 * SmZoneTol3d(GetBrep()->GetTolerance())` (the zone
+//!   tolerance constructed first, then doubled, as `SmTol`). A vertex outside any
 //!   B-rep (`GetBrep()` null, which upstream dereferences) returns
 //!   [`SolidError::InvalidInput`]. `SmTol::GetApproxTol3d(GetContext())` reads the
-//!   context zone tolerance; topology here carries no context of its own, so it is the
-//!   system value, as the other topology ports use (`context_*_tol_3d(k, None, ..)`).
+//!   zone tolerance of the vertex's context, the B-rep's: the kernel's context
+//!   (`context_approx_tol_3d(k, Some(&k.context), ..)`, as the B-rep constructor reads it).
 //! - **Temporary point.** `SmTemporaryChangeValue<SmPoint3d>` (the parallel-face branch
 //!   of `CalcCornerFromFaces`) sets the vertex point and restores it afterwards; it is
 //!   restored before any error is returned too.
@@ -83,11 +84,19 @@ fn vertex_scaled_zero(b: &Brep, v: VertexId) -> Result<f64> {
     Ok(tol::eff_zero() * (1.0 + p.max_dimension()))
 }
 
-/// `SmTol::GetXSectTol3d(GetBrep())` (`SM_USE_OLDTOL`): `2 * GetZoneTol3d(pBrep)`, the
-/// B-rep's stored tolerance.
+/// `SmTol::GetXSectTol3d(GetBrep())` (`SM_USE_OLDTOL`) of the vertex's B-rep.
 fn brep_xsect_tol_3d(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
     let brep = super::brep(b, v)?.ok_or_else(|| null("vertex outside a B-rep (GetBrep() null)"))?;
-    Ok(tol::xsect_tol3d(k, 2.0 * brep.tolerance()))
+    Ok(xsect_tol_3d_of_brep(k, brep))
+}
+
+/// `SmTol::GetXSectTol3d(const SmBrep*)` (`SM_USE_OLDTOL`): `2 * GetZoneTol3d(pBrep)`,
+/// in upstream's order: the B-rep's stored tolerance made a zone tolerance
+/// (`SmZoneTol3d(double)`), doubled, then made an intersection tolerance
+/// (`SmXSectTol3d(double)`).
+#[must_use]
+pub fn xsect_tol_3d_of_brep(k: &Kernel, brep: &Brep) -> f64 {
+    tol::xsect_tol3d(k, 2.0 * tol::zone_tol3d(k, brep.tolerance()))
 }
 
 /// `SmVertex::IsWithinXSectTol3dOfFaces(&maxGap3d, &maxGapFace, bForceCalc)`: whether
@@ -315,7 +324,8 @@ pub fn calc_corner_from_faces(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<F
         return Ok(out);
     }
 
-    let approx_tol_3d = tol::context_approx_tol_3d(k, None, tol::SmallTopoType::NormalSize);
+    let approx_tol_3d =
+        tol::context_approx_tol_3d(k, Some(&k.context), tol::SmallTopoType::NormalSize);
 
     let parallel = has_parallel_faces(k, b, v, Some(tol::ANG_TOL_DEG))?;
 

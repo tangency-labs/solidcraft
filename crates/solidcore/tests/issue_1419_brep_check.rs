@@ -3,9 +3,6 @@
 //!
 //! Valid primitive bodies must report no failure at level 2, and bodies broken by a
 //! direct edit must report the exact upstream report lines and `is_valid() == false`.
-//! Checks that need a dependency seam not yet ported (the WP4 package of
-//! #1419) are `#[ignore]`d with the seam named, and a live test pins that they still
-//! return `Unported` so the ignore is removed when the seam is wired.
 
 #![allow(
     clippy::unwrap_used,
@@ -17,7 +14,7 @@
 use solidcore::primitive::api_primitives as ap;
 use solidcore::topology::brep::validation::{check_brep, BrepCheck, CheckLevel};
 use solidcore::topology::Brep;
-use solidcore::{Kernel, SolidError, Vec3};
+use solidcore::{Kernel, Vec3};
 
 fn origin() -> Vec3 {
     Vec3::new(0.0, 0.0, 0.0)
@@ -39,33 +36,15 @@ fn check(k: &mut Kernel, b: &mut Brep) -> BrepCheck {
     check_brep(k, b, CheckLevel::Level2).unwrap()
 }
 
-/// Pending: every non-empty body reaches `sm_AssertTestVertex1` (WP4, every level), and
-/// level 2 reaches `sm_AssertTestFace32/33/38` and `sm_AssertTestEdge13` (WP4). The
-/// WP2 helpers (#1472) and `SmSurface::AssertValid` (package 3a, #1460) are wired.
+/// Every non-empty body reaches `sm_AssertTestVertex1` and, at level 2,
+/// `sm_AssertTestFace32/33/38` and `sm_AssertTestEdge13` (WP4, #1478).
 #[test]
-#[ignore = "pending #1419 WP4 seams (#1478): sm_AssertTestVertex1, sm_AssertTestFace32/33/38, sm_AssertTestEdge13"]
 fn valid_bodies_report_no_failures_at_level_2() {
     let mut k = Kernel::default();
     for (name, mut b) in bodies(&mut k) {
         let c = check(&mut k, &mut b);
         assert_eq!(c.failure_count(), 0, "{name}: {:?}", c.lines());
         assert!(c.is_valid(), "{name}");
-    }
-}
-
-/// The pending cases above still stop at a seam; when this fails, a seam was wired:
-/// drop the `#[ignore]` above.
-#[test]
-fn valid_bodies_are_pending_on_seams() {
-    let mut k = Kernel::default();
-    for (name, mut b) in bodies(&mut k) {
-        match check_brep(&mut k, &mut b, CheckLevel::Level2) {
-            Err(SolidError::Unported { unit, .. }) => assert!(
-                ["topology.vertex", "topology.edge", "topology.face_p4"].contains(&unit),
-                "{name}: {unit}"
-            ),
-            other => panic!("{name}: seam wired? {:?}", other.map(|c| c.lines())),
-        }
     }
 }
 

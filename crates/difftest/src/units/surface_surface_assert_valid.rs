@@ -1,6 +1,6 @@
 //! Runner for unit `surface.surface_assert_valid`: the virtual `SmSurface::AssertValid`
-//! on real B-spline surfaces, planes, cylinders, cones, spheres, tori and surfaces of
-//! revolution.
+//! on real B-spline surfaces, planes, cylinders, cones, spheres, tori, surfaces of
+//! revolution and surfaces of extrusion.
 //!
 //! C++: `solidcore_ffi::units::surface_surface_assert_valid` (shim
 //! `harness/cpp/shim/surface_surface_assert_valid.cpp`, which documents the block).
@@ -14,7 +14,12 @@
 //! and nearly collapsed boundaries, folded (non-monotonic) nets, flat corners,
 //! coincident boundaries, degenerate surfaces, rational weights, negative and zero
 //! scales and radii, apexes inside cone domains, spindle tori, mismatched and
-//! degenerate generators, at huge and tiny scales.
+//! degenerate generators, and extrusions of lines, planar curves (the extrusion along,
+//! across and at an angle to their plane) and twisted ones with zero and degenerate
+//! extrusion vectors and domains, origins off the generator, generators with a tangent
+//! along the extrusion and stale cached planes and lines, at huge and tiny scales. The
+//! named extrusion fixtures (`fixtures/surface.surface_assert_valid/extrusion.json`) cover
+//! every generator orientation with and without a tangent along the extrusion.
 
 // The generator indexes the nets and knot vectors it has just built (as other runners do).
 #![allow(clippy::indexing_slicing)]
@@ -36,6 +41,7 @@ use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::sphere::{Sphere, SphereOptions};
+use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::surface::torus::{Torus, TorusOptions};
@@ -47,6 +53,9 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
+
+/// Generated extrusion cases per run (`extNNNN`, their own seed stream).
+pub const EXTRUSION_CASES: usize = 400;
 
 /// `surface.surface_assert_valid` runner.
 pub struct Runner;
@@ -112,7 +121,35 @@ impl Rd<'_> {
     }
 }
 
+/// A B-spline generator: `p n rational pts[n*4] knots[n+p+1]`.
+fn generator(rd: &mut Rd<'_>) -> Result<Curve, HarnessError> {
+    let (p, n) = (rd.int()?, rd.int()?);
+    let rational = rd.flag()?;
+    let pts = (0..n).map(|_| rd.point(rational)).collect::<Result<Vec<_>, _>>()?;
+    let knots = (0..=n + p).map(|_| rd.num()).collect::<Result<Vec<_>, _>>()?;
+    Ok(Curve::from(BSplineCurve::from_nurb(
+        NlCurve::new(pts, p, knots).map_err(herr)?,
+        3,
+        false,
+    )))
+}
+
 fn build(k: &Kernel, rd: &mut Rd<'_>, kind: usize) -> Result<Surface, HarnessError> {
+    if kind == 7 {
+        let origin = rd.vec()?;
+        let vec = rd.vec()?;
+        let d = rd.dom()?;
+        let swap = rd.flag()?;
+        let gen = generator(rd)?;
+        let stale = rd.flag()?;
+        let (cp, cv) = (rd.vec()?, rd.vec()?);
+        let mut e = SurfOfExtrusion::new(k, gen, origin, vec, d, swap).map_err(herr)?;
+        if stale {
+            e.set_curve_point(cp);
+            e.set_curve_vec(cv);
+        }
+        return Ok(Surface::from(e));
+    }
     if kind == 0 {
         let (p, q, nu, nv) = (rd.int()?, rd.int()?, rd.int()?, rd.int()?);
         let rational = rd.flag()?;
@@ -173,15 +210,7 @@ fn build(k: &Kernel, rd: &mut Rd<'_>, kind: usize) -> Result<Surface, HarnessErr
         _ => {
             let d = rd.dom()?;
             let swap = rd.flag()?;
-            let (p, n) = (rd.int()?, rd.int()?);
-            let rational = rd.flag()?;
-            let pts = (0..n).map(|_| rd.point(rational)).collect::<Result<Vec<_>, _>>()?;
-            let knots = (0..=n + p).map(|_| rd.num()).collect::<Result<Vec<_>, _>>()?;
-            let gen = Curve::from(BSplineCurve::from_nurb(
-                NlCurve::new(pts, p, knots).map_err(herr)?,
-                3,
-                false,
-            ));
+            let gen = generator(rd)?;
             Surface::from(SurfOfRevolution::new(k, gen, o, x, y, d, swap).map_err(herr)?)
         }
     })
@@ -211,9 +240,19 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let kind = rd.int()?;
     let level = rd.int()?;
     let make = rd.flag()?;
-    let surface = build(&k, &mut rd, kind)?;
+    let mut surface = build(&k, &mut rd, kind)?;
     if make {
         // MakeNurb (status ignored)
+        if let SurfaceKind::SurfOfExtrusion(extrusion) = surface.kind_mut() {
+            // the shim's MakeNurb on the object itself: it trims the generator to the
+            // U interval of the analytic domain (AdjustSTEPInterval), which the lazy,
+            // const NURB of kind_with_nurb leaves on a copy
+            if let Err(e) = extrusion.make_nurb(&k) {
+                if let Some(o) = Output::unported(&e) {
+                    return Ok(o);
+                }
+            }
+        }
         match surface.kind() {
             SurfaceKind::Plane(p) => {
                 let _ = p.base_with_nurb();
@@ -477,6 +516,99 @@ fn angles(rng: &mut Rng) -> (f64, f64) {
     }
 }
 
+/// The generator of an extrusion case, its control points (`x y z w`, homogeneous when
+/// rational) and its clamped knots, by shape: 0 a line, 1 a planar arc in z = 0,
+/// 2 a planar arc in x = 0 whose start tangent is along z, 3 a twisted (non-planar)
+/// curve, 4 a non-planar curve whose interior control points are lifted, 5 a nearly
+/// straight curve.
+fn extrusion_generator(rng: &mut Rng, shape: u64, s: f64) -> (usize, Vec<[f64; 4]>, Vec<f64>) {
+    let p = if shape == 0 { 1 + rng.below(2) as usize } else { 2 + rng.below(2) as usize };
+    let n = p + 1 + rng.below(3) as usize;
+    let knots = clamped(rng, n, p);
+    let rational = shape != 0 && rng.chance(0.2);
+    let pts = (0..n)
+        .map(|i| {
+            let t = i as f64 / (n - 1) as f64;
+            let a = t * 2.5;
+            let c = match shape {
+                0 => [t, 0.5 * t, -0.25 * t],
+                1 => [a.cos(), a.sin(), 0.0],
+                2 => [0.0, a.cos(), a.sin()],
+                3 => [a.cos(), a.sin(), 0.4 * t * t],
+                4 => [t, t * t, if i == 0 || i + 1 == n { 0.0 } else { 0.5 }],
+                _ => [t, 1e-9 * (i % 2) as f64, 0.0],
+            };
+            let w = if rational { rng.uniform(0.5, 2.0) } else { 1.0 };
+            [c[0] * s * w, c[1] * s * w, c[2] * s * w, w]
+        })
+        .collect();
+    (p, pts, knots)
+}
+
+/// An extrusion case after the `kind level make` head.
+fn gen_extrusion(rng: &mut Rng, b: &mut Vec<f64>, s: f64) {
+    let shape = rng.below(6);
+    let (p, pts, knots) = extrusion_generator(rng, shape, s);
+    // the generator's start (its first control point: the knots are clamped), or a
+    // point off it
+    let mid = pts[pts.len() / 2];
+    let origin = if rng.chance(0.15) {
+        [mid[0] / mid[3] + s, mid[1] / mid[3] - s, mid[2] / mid[3] + 0.5 * s]
+    } else {
+        let first = pts[0];
+        [first[0] / first[3], first[1] / first[3], first[2] / first[3]]
+    };
+    let dir = match rng.below(8) {
+        0 => [0.0, 0.0, 0.0],
+        1 => [0.0, 0.0, 1e-13],
+        2 => [1.0, 0.0, 0.0],
+        3 => [0.0, 1.0, 0.0],
+        4 => [0.3, -0.4, 0.8],
+        _ => [0.0, 0.0, 1.0],
+    };
+    let length = rng.uniform(0.5, 3.0) * s;
+    let vec = dir.map(|c| c * length);
+    let (v0, v1) = match rng.below(8) {
+        0 => (0.5, 0.5),
+        1 => (-1.0, -1.0 + 1e-14),
+        _ => {
+            let v = rng.uniform(-2.0, 2.0);
+            (v, v + rng.uniform(0.1, 3.0))
+        }
+    };
+    let (u0, u1) = match rng.below(8) {
+        0 => (0.0, 0.0),
+        1 => (0.2, 0.8),
+        _ => (0.0, 1.0),
+    };
+    b.extend(origin);
+    b.extend(vec);
+    b.extend([u0, v0, u1, v1, flag(rng, 0.3)]);
+    let rational = pts.iter().any(|q| q[3] != 1.0);
+    b.extend([p as f64, pts.len() as f64, f64::from(u8::from(rational))]);
+    for q in &pts {
+        b.extend(q);
+    }
+    b.extend(knots);
+    // a stale cached plane or line point and vector
+    if rng.chance(0.15) {
+        b.push(1.0);
+        b.extend([rng.uniform(-2.0, 2.0) * s, rng.uniform(-2.0, 2.0) * s, s]);
+        b.extend([rng.uniform(-1.0, 1.0), rng.uniform(-1.0, 1.0), rng.uniform(0.0, 1.0)]);
+    } else {
+        b.extend([0.0; 7]);
+    }
+}
+
+/// An extrusion case (kind 7): its own seed stream, so the other generated cases are
+/// unchanged.
+fn gen_extrusion_case(rng: &mut Rng) -> Inputs {
+    let mut b = vec![7.0, level(rng), flag(rng, 0.5)];
+    let s = scale(rng);
+    gen_extrusion(rng, &mut b, s);
+    Inputs { block: b }
+}
+
 fn gen_case(rng: &mut Rng) -> Inputs {
     let kind = rng.below(7) as usize;
     let mut b = vec![kind as f64, level(rng)];
@@ -587,11 +719,25 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let main = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &main)?;
+        // extrusions: their own seed stream (the other generated cases are unchanged);
+        // named `extNNNN`
+        let ext = CaseContext {
+            seeds: ctx.seeds.max(EXTRUSION_CASES),
+            ..ctx.clone()
+        };
+        for mut c in ext.generated_cases("surface.surface_assert_valid:extrusion", |rng| {
+            serde_json::to_value(gen_extrusion_case(rng)).ok()
+        }) {
+            c.name = c.name.replacen("gen", "ext", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

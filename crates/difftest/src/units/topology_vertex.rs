@@ -46,6 +46,7 @@ use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::query::poly::PolyVertexId;
 use solidcore::surface::surface::p2::DropCurveFail;
 use solidcore::surface::surface::Surface;
+use solidcore::topology::brep_cache::{arena_identity, CacheObject};
 use solidcore::topology::topology::Topology;
 use solidcore::topology::vertex::{self as vx, corner, VertexGap};
 use solidcore::topology::{
@@ -848,8 +849,14 @@ fn import(ex: &[f64]) -> Result<(Brep, Option<i64>), HarnessError> {
             .collect();
         b.add_shell_record(s).map_err(|e| harness(e.to_string()))?;
     }
-    for (f, (surface, faceuse, uv_domain, tolerance)) in surfaces.into_iter().enumerate() {
+    for (f, (mut surface, faceuse, uv_domain, tolerance)) in surfaces.into_iter().enumerate() {
         let shell = face_shells.get(f).copied().unwrap_or(ShellId::from_index(0));
+        // `SmFace::SetSurface` owns the surface (`GetOwner() == face`): its solvers read
+        // the face tolerance through it (`LocalPointSolve_1`'s loose tolerance, which
+        // decides a seam jump), under the arena identity of [`CONVENTIONS`]
+        if let Some(s) = surface.as_mut() {
+            s.set_owner(Some(arena_identity(CacheObject::Face(FaceId::from_index(f as u32)))));
+        }
         // The rectangular-trim flag is not exported (`SmFace()` default); the UV domain and
         // tolerance are (the vertex/face gaps solve against them).
         b.add_face_record(Face {
