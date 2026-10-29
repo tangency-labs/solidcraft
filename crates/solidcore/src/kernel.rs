@@ -335,6 +335,8 @@ pub struct UpstreamFixes {
     pub ssi_tangent_contact_points: bool,
     /// `SmSurfaceIntersector` traces an open tangent curve once: `AddStartPoint` keeps one start point per cluster of tangent boundary start points (`IsSameTangentCluster`), a finished trace removes the clusters at its ends (`DoIntersection`), `TraceCurve` runs its "already traced" test on a first step that snapped onto another start point, and a near-tangent trace stops at the free end of a curve already found instead of running over it (WR-76, #392; the SolidCraft fork's tangency-labs/smlib@0ce09f2).
     pub ssi_trace_tangent_curves_once: bool,
+    /// `SmAdvSurfaceIntersector::ComputeSingularityPoint` starts a curve at a singularity from the first singular direction that points into both domains, whose angle is the search's `dAngleMin`, before the later inside directions are searched for the one closest to the previous direction. Upstream leaves the output at `aSingDirections[0]`, so where the first inside direction is the nearest (or the only one) the curve starts along a direction that need not point into either domain (WR-512, #1522; the fork's tangency-labs/smlib#52).
+    pub ssi_singular_start_inside_direction: bool,
     /// `SmFilletIntersector::ComputeNextPoint` rejects a next point that is more than half a step short of where the step aimed, when the step was not clipped: where `StepSolve`'s plane-adjusting retry lands on another root of the sphere equations (a variable round whose law is evaluated past the end of its edge), the span passes the Hermite test along a straight trace, but its rail parameter advances by the whole step over a fraction of it, and the rail doubles back (WR-503).
     pub fillet_trace_rejects_short_step: bool,
 }
