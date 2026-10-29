@@ -21,9 +21,18 @@ pub enum BoolOp {
 /// everything or an intersection of disjoint bodies. A result SMLib's check refuses is an error.
 ///
 /// The result carries its exact history ([`Body::history`]) over the operands `[a, b]`, from
-/// SMLib's own tags, or none where a body's order cannot be matched to SMLib's.
+/// SMLib's own tags, or none where a body's order cannot be matched to SMLib's. A cut by a tool
+/// apart from the body is the body itself (its faces and edges kept), and their intersection empty.
 pub fn boolean(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
     crate::profile::timed(crate::profile::Kind::Boolean, "boolean", || {
+        // A tool apart from the body (their exact boxes, grown by the tolerances, do not meet)
+        // leaves a cut the body itself and an intersection nothing, with no intersection work.
+        if matches!(op, BoolOp::Cut | BoolOp::Intersect) && apart(a, b)? {
+            return Ok(match op {
+                BoolOp::Cut => Some(crate::boolean_record::operand(a, 0, &crate::record::counts(&[a, b]))),
+                _ => None,
+            });
+        }
         let r = guard("SMLib boolean", || crate::smlib_boolean::smlib_boolean(a, b, op));
         with_operand_roles(a, b, op, r)
     })
@@ -42,6 +51,16 @@ pub fn union_all(bodies: &[&Body]) -> Result<Body> {
         }
         guard("SMLib union", || crate::smlib_boolean::smlib_union_all(bodies))?.with_preserved_union_planar_sources(bodies)
     })
+}
+
+/// Whether B-rep bodies `a` and `b` are apart: their exact boxes, each grown by twice its
+/// record's tolerance (as [`union_apart`] takes them), do not meet.
+fn apart(a: &Body, b: &Body) -> Result<bool> {
+    if a.is_mesh() || b.is_mesh() {
+        return Ok(false);
+    }
+    let grown = |x: &Body| x.exact_bounds().map(|bb| bb.inflated(2.0 * x.record().tolerance));
+    Ok(!grown(a)?.meets(&grown(b)?))
 }
 
 /// A boolean's result with what its operands' faces stood for carried over: regularization

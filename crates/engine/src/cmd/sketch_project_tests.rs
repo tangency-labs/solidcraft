@@ -452,10 +452,11 @@ fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
     run(&mut s, "sketch.create", json!({"plane": "XY", "offset": -10}));
     // The base circle (centred at the origin) seen from above.
     let r = run(&mut s, "sketch.project", json!({"refs": [{"edge": [0, 5, 0]}]}));
-    // One seam half: exact conics (rational quadratic arcs).
+    // The rim is one closed circle edge: an exact ellipse, x semi-axis 5·cos 45° (the tilt), y 5.
     let si = inspect(&mut s);
     let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == r["links"][0]["curves"][0]).unwrap().clone();
-    assert_eq!(c["type"], "conic", "{c}");
+    assert_eq!(c["type"], "ellipse", "{c}");
+    assert!((c["minor_radius"].as_f64().unwrap() - 5.0 * std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9, "{c}");
     let st = s.model.state();
     let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
     for ci in sk.link_curves(r["links"][0]["link"].as_str().unwrap()) {
@@ -465,7 +466,7 @@ fn tilted_circles_project_to_exact_ellipses_and_splines_stay_splines() {
             assert!((e - 1.0).abs() < 1e-9, "{q:?}");
         }
     }
-    // The whole face (both halves of its rim, plus its seam) gives the full ellipse.
+    // The whole face (its rim, plus its seam) gives the full ellipse.
     let r = run(&mut s, "sketch.project", json!({"refs": [{"face": [0, 0, 0]}]}));
     let si = inspect(&mut s);
     let types: Vec<String> = r["links"][0]["curves"]
@@ -812,6 +813,21 @@ fn intersect_curves(steps: &[(&str, Value)], plane: Value) -> std::result::Resul
     Ok(linked_curves(&inspect(&mut s)))
 }
 
+/// The lines among `curves` as an outline: each line's ends rounded and the lower first, the lines
+/// sorted. A section's chains are walked from either end (the mesh's triangle order picks which),
+/// so a line's direction says nothing about the cut.
+fn outline(curves: &[Value]) -> Vec<[f64; 4]> {
+    let mut ends: Vec<[f64; 4]> = line_ends(curves)
+        .into_iter()
+        .map(|e| {
+            let e = e.map(f64::round);
+            if [e[2], e[3]] < [e[0], e[1]] { [e[2], e[3], e[0], e[1]] } else { e }
+        })
+        .collect();
+    ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ends
+}
+
 fn line_ends(curves: &[Value]) -> Vec<[f64; 4]> {
     let at = |c: &Value, k: &str, i: usize| c[k][i].as_f64().unwrap_or(f64::NAN);
     curves
@@ -827,10 +843,8 @@ fn line_ends(curves: &[Value]) -> Vec<[f64; 4]> {
 fn intersect_keeps_its_exact_cuts() {
     let block = [("solid.box", json!({"length": 40, "width": 30, "height": 20}))];
     for offset in [10, 0] {
-        let mut ends = line_ends(&intersect_curves(&block, json!({"plane": "XY", "offset": offset})).unwrap());
-        ends.iter_mut().for_each(|e| *e = e.map(|v| v.round()));
-        ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(ends, vec![[0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 0.0, 0.0], [40.0, 0.0, 40.0, 30.0], [40.0, 30.0, 0.0, 30.0]], "offset {offset}");
+        let ends = outline(&intersect_curves(&block, json!({"plane": "XY", "offset": offset})).unwrap());
+        assert_eq!(ends, vec![[0.0, 0.0, 0.0, 30.0], [0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 40.0, 30.0], [40.0, 0.0, 40.0, 30.0]], "offset {offset}");
     }
     for (steps, plane, radius) in [
         (vec![("solid.cylinder", json!({"base": [0, 0, 0], "radius": 7, "height": 30}))], json!({"plane": "XY", "offset": 12}), 7.0),
@@ -870,8 +884,6 @@ fn intersect_crosses_a_curved_face_on_the_surface() {
 #[test]
 fn intersect_on_a_top_face_gives_its_outline() {
     let block = [("solid.box", json!({"length": 40, "width": 30, "height": 20}))];
-    let mut ends = line_ends(&intersect_curves(&block, json!({"plane": "XY", "offset": 20})).unwrap());
-    ends.iter_mut().for_each(|e| *e = e.map(|v| v.round()));
-    ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    assert_eq!(ends, vec![[0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 0.0, 0.0], [40.0, 0.0, 40.0, 30.0], [40.0, 30.0, 0.0, 30.0]]);
+    let ends = outline(&intersect_curves(&block, json!({"plane": "XY", "offset": 20})).unwrap());
+    assert_eq!(ends, vec![[0.0, 0.0, 0.0, 30.0], [0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 40.0, 30.0], [40.0, 0.0, 40.0, 30.0]]);
 }
