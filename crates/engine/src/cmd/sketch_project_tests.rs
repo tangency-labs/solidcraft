@@ -731,12 +731,23 @@ fn a_face_sketch_saved_with_fitted_letters_reopens_and_builds_the_same() {
         let r = s.model.result(id).unwrap();
         assert!(r.error.is_none(), "{name}: {:?}", r.error);
     }
-    // The build that saved it measured 5916.018831 mm³.
-    assert!((volume - 5916.018830904924).abs() < 1e-3, "{volume}");
+    // The 30 x 20 x 10 block less the "S" 1 deep (its profile's exact area, Sketch2's smaller
+    // region) and the r 2 circle 3 deep, clear of the letter: 5916.010767. (The build that saved
+    // it measured 5916.018831, 8e-3 off; SMLib's integral is within 1e-8 of the closed form.)
+    let letter = s.model.state().sketches.iter().find(|k| k.name == "Sketch2").unwrap().profiles.iter().map(|p| p.area).fold(f64::INFINITY, f64::min);
+    let want = 6000.0 - letter - 3.0 * std::f64::consts::PI * 4.0;
+    assert!((volume - want).abs() < 1e-8 * 6000.0, "{volume} vs {want}");
+    // The letter's exact pieces in the face's link: its quadratic Béziers, as conics (or splines).
     let st = s.model.state();
     let sketch = &st.sketches.last().unwrap().sketch;
-    let pieces =
-        sketch.curves.iter().filter(|c| c.link.is_some() && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. })).count();
+    let pieces = sketch
+        .curves
+        .iter()
+        .filter(|c| {
+            c.link.is_some()
+                && matches!(c.kind, solidcraft_sketch::CurveKind::Spline { control: true, .. } | solidcraft_sketch::CurveKind::Conic { .. })
+        })
+        .count();
     assert!(pieces > 0, "{pieces}");
 }
 
