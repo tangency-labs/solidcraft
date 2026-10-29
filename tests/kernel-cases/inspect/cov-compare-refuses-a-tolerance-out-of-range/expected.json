@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "compare with a 0 mm tolerance",
+ "source": "analytic",
+ "method": "the tolerance must be 0.001 to 10 mm: 0 is refused",
+ "outcome": "refused",
+ "refusal": "tolerance"
+}
