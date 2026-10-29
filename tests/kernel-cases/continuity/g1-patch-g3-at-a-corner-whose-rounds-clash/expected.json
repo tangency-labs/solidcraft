@@ -1,0 +1,33 @@
+{
+ "sources": [],
+ "body_count": 1,
+ "what": "the hole a three-round corner's blend face leaves, patched g3 (Curvature change): G1 and not G2 over each whole seam, since the faces round the hole meet each other G1 at its corners",
+ "source": "analytic",
+ "method": "box 40x40x30, its vertical edge at (40,40) rounded r8, then the top edges and the arc between them rounded r4; the blend face at the corner deleted (heal false), the four-sided hole patched g3 and stitched in. At each corner of the hole two of its neighbours (the r4 rounds, the r8 round) meet along their own G1 seam, their normal curvatures there differing by 1/4 or 1/8 per mm; a patch smooth at the corner has one curvature there, so it cannot meet both, and the fill asks no more than G1 near such a corner. Each seam's worst G2 station is its end: 0.125 or 0.25 per mm. In the middle of each seam (30-70 %) the patch reaches g3 (kernel test a_corner_of_three_rounds_patched_g3_holds_the_curvature_change_a_g2_patch_does_not).",
+ "continuity": {
+  "order": "g1",
+  "exact": true,
+  "edges": [
+   [
+    34.828,
+    34.828,
+    30.0
+   ],
+   [
+    37.657,
+    37.657,
+    26.0
+   ],
+   [
+    38.828,
+    32.0,
+    28.828
+   ],
+   [
+    32.0,
+    38.828,
+    28.828
+   ]
+  ]
+ }
+}

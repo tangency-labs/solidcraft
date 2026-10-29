@@ -1,0 +1,104 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 40,
+    "height": 30,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Plate",
+    "edges": [
+     [
+      40,
+      40,
+      15
+     ]
+    ],
+    "radius": 8
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "body": "Plate",
+    "edges": [
+     [
+      40,
+      20,
+      30
+     ],
+     [
+      20,
+      40,
+      30
+     ]
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "face.delete",
+   "params": {
+    "body": "Plate",
+    "faces": [
+     [
+      37.79,
+      36.155,
+      28.43
+     ]
+    ],
+    "heal": false
+   }
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "body": "Plate",
+    "edges": [
+     [
+      34.828,
+      34.828,
+      30.0
+     ],
+     [
+      37.657,
+      37.657,
+      26.0
+     ],
+     [
+      38.828,
+      32.0,
+      28.828
+     ],
+     [
+      32.0,
+      38.828,
+      28.828
+     ]
+    ],
+    "continuity": "g3",
+    "body_name": "Patch"
+   }
+  },
+  {
+   "command": "surface.stitch",
+   "params": {
+    "bodies": [
+     "Plate",
+     "Patch"
+    ]
+   }
+  }
+ ]
+}

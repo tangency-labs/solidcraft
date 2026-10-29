@@ -1091,7 +1091,7 @@ fn crown(surface: NurbsSurface, net: &Net, st: &[Station], dev: &Developed, crow
     if crown == 0.0 {
         return Ok(surface);
     }
-    // The side the neighbours' normals face, by the patch's normals at the G1/G2 stations.
+    // The side the neighbours' normals face, by the patch's normals at the stations of G1 and up.
     let mut side = 0.0;
     for (s, q) in st.iter().zip(&dev.d) {
         if let (Some(a), Some((n, _, _))) = (s.across, net.frame(*q)) {
@@ -1099,7 +1099,7 @@ fn crown(surface: NurbsSurface, net: &Net, st: &[Station], dev: &Developed, crow
         }
     }
     if side == 0.0 {
-        return Err(SplineError::Unsupported("crowning a patch with no g1 or g2 edge to say which side is out".into()));
+        return Err(SplineError::Unsupported("crowning a patch with no g1 or higher edge to say which side is out".into()));
     }
     let sign = side.signum();
     let along = |g: [f64; 2]| net.frame(g).map(|(n, _, _)| n * sign);

@@ -144,6 +144,13 @@ fn patch_orders() -> Vec<Continuity> {
     Construction::Patch.offered()
 }
 
+/// The patch's hover text: each order's line, then what the patch reaches at a corner whose
+/// faces meet each other with different curvatures (tangent only: no surface smooth at the corner
+/// has both curvatures there).
+fn patch_continuity_tip() -> String {
+    format!("{}\n{}", ui_kit::continuity_tip(&patch_orders()), crate::i18n::tr("ui.patch_continuity_corner_tip"))
+}
+
 fn blend_orders() -> Vec<Continuity> {
     Construction::Bridge.offered()
 }
@@ -284,7 +291,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             ui_kit::options(ui, "untrim_options", &mut [("Restore outer boundary", outer), ("In place (surfaces)", in_place)]);
         }
         Surf::Patch { continuity } => {
-            ui_kit::continuity_row(ui, "Continuity", "pa_cont", continuity, &patch_orders());
+            ui_kit::continuity_row_explained(ui, "Continuity", "pa_cont", continuity, &patch_orders(), &patch_continuity_tip());
         }
         Surf::Blend { continuity, bulge, stitch } => {
             let [from, to] = continuity;
@@ -1116,5 +1123,9 @@ mod tests {
             }
         }
         assert_eq!(ui_kit::continuity_tip(&blend_orders()).lines().count(), 4);
+        // The patch's hover text adds what it does at a corner whose faces' curvatures differ.
+        let tip = patch_continuity_tip();
+        assert_eq!(tip.lines().count(), patch_orders().len() + 1, "{tip}");
+        assert!(tip.lines().last().is_some_and(|l| l.contains("corner") && l.contains("G1")), "{tip}");
     }
 }
