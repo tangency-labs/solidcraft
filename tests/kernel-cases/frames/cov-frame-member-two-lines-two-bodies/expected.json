@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "what": "round bar members d10 on two lines meeting at a corner: one body per line",
+ "source": "analytic",
+ "method": "each member a cylinder r5 the line's length: 25 pi (100 + 50); two bodies (they overlap at the corner, kept apart)",
+ "body_count": 2,
+ "volume_mm3": 11780.972450961724,
+ "bbox": {
+  "min": [
+   -5,
+   -5,
+   -5
+  ],
+  "max": [
+   100,
+   50,
+   5
+  ]
+ }
+}

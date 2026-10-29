@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "a 20x10 bar member along a 100 mm line on X",
+ "source": "analytic",
+ "method": "along +X the profile's y is world up (Z) and x = y x d = world Y; centred on the line (anchor origin = the bar's centre): x 0..100, y -10..10, z -5..5; V = 20000, A = 2(2000+1000+200)",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 20000.0,
+ "area_mm2": 6400.0,
+ "bbox": {
+  "min": [
+   0,
+   -10,
+   -5
+  ],
+  "max": [
+   100,
+   10,
+   5
+  ]
+ }
+}

@@ -37,6 +37,8 @@ One directory per area, one per case: `tests/kernel-cases/<area>/<id>/`.
 | `crashes` (crashes and hangs inside kernel operations) | booleans/shell/import/crash rig |
 | `fillets`, `sweeps`, `threads`, `sheet-metal`, `tessellation` | history rig |
 | `continuity` (designed seams of known order, G0 to G4, that prove the continuity measurement itself) | history rig |
+| `solids` (cones, scale, align, bounding solids) | tool coverage |
+| `frames` (frame members, inserted profiles) | tool coverage |
 
 Each area also has its gate files: `KNOWN_FAILING` and `PATHS` (see [the gate](#the-kernel-rig-gate)).
 
