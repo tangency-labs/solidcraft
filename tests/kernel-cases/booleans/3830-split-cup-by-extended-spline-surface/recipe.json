@@ -105,6 +105,7 @@
     ],
     "distance": 30,
     "direction": "symmetric",
+    "convention": "legacy_per_side",
     "body_name": "Body2"
    }
   },
