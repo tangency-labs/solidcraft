@@ -58,7 +58,7 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 label: "Faces",
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
             },
-            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
+            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.lighten", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
             CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
         ],
         _ => &[],
@@ -109,7 +109,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "MODEL",
         panel: "MODIFY",
         promoted: 4,
-        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull", "sheet.convert"],
+        ids: &["solid.fillet", "solid.chamfer", "solid.shell", "solid.lighten", "solid.press_pull", "sheet.convert"],
     },
     Section {
         tab: "MODEL",
@@ -803,6 +803,7 @@ mod tests {
                 "solid.split_face",
                 "face.delete",
                 "solid.shell",
+                "solid.lighten",
                 "solid.combine",
                 "solid.split_body",
                 "solid.scale",
@@ -865,7 +866,7 @@ mod tests {
         for (panel, expected) in [
             ("SKETCH", vec!["sketch.create"]),
             ("CREATE", vec!["solid.extrude", "solid.revolve", "solid.hole"]),
-            ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.press_pull"]),
+            ("MODIFY", vec!["solid.fillet", "solid.chamfer", "solid.shell", "solid.lighten"]),
             ("ARRANGE", vec!["solid.move", "solid.mirror", "solid.pattern.rectangular"]),
             ("CONSTRUCT", vec!["construct.plane.offset"]),
         ] {

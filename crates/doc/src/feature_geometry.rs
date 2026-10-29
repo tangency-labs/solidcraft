@@ -59,6 +59,7 @@ impl FeatureKind {
     pub fn face_body(&self) -> Option<&str> {
         match self {
             FeatureKind::Shell { body, .. }
+            | FeatureKind::Lighten { body, .. }
             | FeatureKind::Draft { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }

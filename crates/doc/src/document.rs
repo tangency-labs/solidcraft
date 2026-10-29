@@ -888,6 +888,35 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         tangent_chain: bool,
     },
+    /// Lightening pockets cut into the planar face at `face`: a rim of `wall` is left round the
+    /// face, bosses of `wall` round its holes, and spokes from the hub through each hole; every
+    /// pocket corner is a tangent arc of `corner_radius` (smaller where it can't fit).
+    Lighten {
+        face: FacePick,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+        #[walk(length = "Wall")]
+        wall: Expr,
+        #[walk(length = "Depth")]
+        depth: Expr,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Draft angle")]
+        draft: Option<Expr>,
+        #[walk(length = "Corner radius")]
+        corner_radius: Expr,
+        /// Round the pocket edges (`fillet_at`: top | bottom | both).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Fillet radius")]
+        fillet: Option<Expr>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        fillet_at: String,
+        /// Bevel the pocket edges (`chamfer_at`: top | bottom | both) not already rounded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Chamfer size")]
+        chamfer: Option<Expr>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        chamfer_at: String,
+    },
     /// Tilt faces (at the given points) about a neutral plane, leaning toward `pull`.
     Draft {
         faces: Vec<FacePick>,
@@ -2349,6 +2378,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "LoftFeature",
             FeatureKind::Sweep { .. } => "SweepFeature",
             FeatureKind::Shell { .. } => "ShellFeature",
+            FeatureKind::Lighten { .. } => "LightenFeature",
             FeatureKind::Draft { .. } => "DraftFeature",
             FeatureKind::Split { .. } => "SplitBodyFeature",
             FeatureKind::SplitFace { .. } => "SplitFaceFeature",
@@ -2432,6 +2462,7 @@ impl FeatureKind {
             FeatureKind::Loft { .. } => "Loft",
             FeatureKind::Sweep { .. } => "Sweep",
             FeatureKind::Shell { .. } => "Shell",
+            FeatureKind::Lighten { .. } => "Lighten",
             FeatureKind::Draft { .. } => "Draft",
             FeatureKind::Split { .. } => "Split",
             FeatureKind::SplitFace { .. } => "SplitFace",

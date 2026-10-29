@@ -83,6 +83,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
             crate::dialogs_plastic::Pl::Rules { .. } => Some("plastic.manage_rules"),
             _ => k.simple_metadata().map(|(command, _)| command),
         },
+        Kind::Lighten(_) => Some("solid.lighten"),
         Kind::Assembly(k) => match k {
             crate::dialogs_assembly::Asm::NewComponent { .. } => Some("component.create"),
             crate::dialogs_assembly::Asm::Joint(f) => Some(if f.as_built { "joint.as_built" } else { "joint.create" }),
@@ -853,6 +854,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
         Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
+        Kind::Lighten(k) => enter |= crate::dialogs_lighten::rows(app, ui, k, &d.inputs),
         Kind::Frame(k) => enter |= crate::dialogs_frame::rows(app, ui, k, &d.inputs),
         Kind::Assembly(k) => enter |= crate::dialogs_assembly::rows(app, ui, k, &mut d.inputs, &mut d.active),
         Kind::Measure { result, show, .. } => measure_rows(app, ui, result.as_ref(), show),
