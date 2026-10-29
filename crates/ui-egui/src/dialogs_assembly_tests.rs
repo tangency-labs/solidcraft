@@ -1132,13 +1132,13 @@ fn many_joints_start_grouped_in_the_timeline() {
     }
     h.frames(2);
     assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
-    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1), "a second joint starts them grouped");
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "a second joint starts them grouped");
     let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
     assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
-    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1), "clicking the group shows each joint");
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking the group shows each joint");
     let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
     assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
-    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1), "clicking it again groups them");
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking it again groups them");
 }
 
 /// The grouped joints' arrow has a well of its own at the button's end: it lights up only under
@@ -1175,8 +1175,8 @@ fn the_grouped_joints_arrow_lights_up_under_the_pointer() {
     let icon_x = arrow.left() - 2.0 * (arrow.left() - group.x) + 6.0;
     assert_eq!(hot(&mut h, icon_x, arrow.center().y), Some(0.0), "not over the icon or the count");
     assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
-    assert!(joints_open(&h.app, 1201), "clicking the arrow shows each joint");
+    assert!(joints_open(&h.app, 1201, JointRun::Loose), "clicking the arrow shows each joint");
     let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
     assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
-    assert!(!joints_open(&h.app, 1201), "and groups them again");
+    assert!(!joints_open(&h.app, 1201, JointRun::Loose), "and groups them again");
 }

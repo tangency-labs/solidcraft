@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock; an import that brings more than one item into the history (its Import feature and the rigid joints holding its parts) goes into a new history folder named `Group #N` → component, component_name, occurrence, subcomponents?, rigid_joints?, group?: the folder); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -156,6 +156,7 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     // assembly's parts and instances turn together.
     let turned = if options.y_up { turn_up(s, &placed)? } else { None };
     let created = created_bodies(s, id);
+    let folder = import_folder(s, id, &placed)?;
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
     let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings, "system": sf.import.system});
     if let Some((up, exporter)) = exporter_up(&sf.import) {
@@ -166,7 +167,30 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
     }
+    if let Some(folder) = folder {
+        out["group"] = json!(folder);
+    }
     Ok(out)
+}
+
+/// An import that brings more than one item into the history (its Import feature and the rigid
+/// joints holding its parts together) goes into a history folder of its own, named `Group #N`,
+/// holding the feature and those joints, so it stands apart from the features before and after
+/// it and the History shows it as one chip. The folder sits in the folder the feature was put
+/// in, if any. Returns the folder.
+fn import_folder(s: &mut Session, feature: u64, placed: &import::Placed) -> Result<Option<u64>> {
+    if placed.joints.is_empty() {
+        return Ok(None);
+    }
+    let parent = s.doc.timeline_groups.iter().find(|folder| folder.features.contains(&feature)).map(|folder| folder.id);
+    let name = next_group_name(&s.doc);
+    super::edit::new_folder(s, &name, vec![feature], placed.joints.clone(), parent, "file.insert_step").map(Some)
+}
+
+/// The first `Group #N` no history folder is named yet.
+fn next_group_name(doc: &Document) -> String {
+    let taken = |name: &str| doc.timeline_groups.iter().any(|folder| folder.name == name);
+    (1..=doc.timeline_groups.len() + 1).map(|n| format!("Group #{n}")).find(|name| !taken(name)).unwrap_or_else(|| "Group".into())
 }
 
 /// The bodies an import feature built, by name.

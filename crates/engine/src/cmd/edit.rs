@@ -403,22 +403,96 @@ fn group_tree(doc: &solidcraft_doc::Document, roots: &[u64]) -> (std::collection
 }
 
 fn sort_group_features(doc: &mut solidcraft_doc::Document) {
-    let positions: std::collections::BTreeMap<u64, usize> = doc.features.iter().enumerate().map(|(index, feature)| (feature.id, index)).collect();
-    for group in &mut doc.timeline_groups {
+    sort_folder_features(&doc.features, &mut doc.timeline_groups);
+}
+
+fn sort_folder_features(features: &[Feature], folders: &mut [solidcraft_doc::TimelineGroup]) {
+    let positions: std::collections::BTreeMap<u64, usize> = features.iter().enumerate().map(|(index, feature)| (feature.id, index)).collect();
+    for group in folders {
         group.features.sort_by_key(|feature| positions.get(feature).copied().unwrap_or(usize::MAX));
     }
 }
 
 fn require_contiguous_groups(doc: &solidcraft_doc::Document, cmd: &str) -> Result<()> {
     let Some(id) = solidcraft_doc::non_contiguous_timeline_group(&doc.features, &doc.timeline_groups) else { return Ok(()) };
-    let name = doc.timeline_groups.iter().find(|group| group.id == id).map(|group| group.name.as_str()).unwrap_or("unknown");
-    Err(bad(cmd, format!("timeline folder `{name}` must contain one contiguous run of features")))
+    Err(not_contiguous(&doc.timeline_groups, id, cmd))
+}
+
+fn not_contiguous(folders: &[solidcraft_doc::TimelineGroup], id: u64, cmd: &str) -> EngineError {
+    let name = folders.iter().find(|group| group.id == id).map(|group| group.name.as_str()).unwrap_or("unknown");
+    bad(cmd, format!("timeline folder `{name}` must contain one contiguous run of features"))
+}
+
+/// The design's folders once `folder` is added, taking its features and joints out of any other
+/// folder and becoming the parent of the folders `groups` (whose features and joints it then holds
+/// through them), and the first folder that would no longer be one run of features, if any.
+fn folders_with(
+    doc: &solidcraft_doc::Document,
+    mut folder: solidcraft_doc::TimelineGroup,
+    groups: &[u64],
+) -> (Vec<solidcraft_doc::TimelineGroup>, Option<u64>) {
+    let nested = group_feature_ids(doc, groups);
+    folder.features.retain(|feature| !nested.contains(feature));
+    let nested_joints = group_joint_ids(doc, groups);
+    folder.joints.retain(|joint| !nested_joints.contains(joint));
+    let mut next = doc.timeline_groups.clone();
+    for group in &mut next {
+        group.joints.retain(|joint| !folder.joints.contains(joint));
+        group.features.retain(|feature| !folder.features.contains(feature));
+        if groups.contains(&group.id) {
+            group.parent = Some(folder.id);
+        }
+    }
+    next.push(folder);
+    sort_folder_features(&doc.features, &mut next);
+    let broken = solidcraft_doc::non_contiguous_timeline_group(&doc.features, &next);
+    (next, broken)
+}
+
+/// A new folder named `name` holding `features` and `joints`, inside the folder `parent` (`None`:
+/// at the history's root), as `timeline.group` makes it. Returns its id.
+pub(crate) fn new_folder(s: &mut Session, name: &str, features: Vec<u64>, joints: Vec<u64>, parent: Option<u64>, cmd: &str) -> Result<u64> {
+    // Folder names are 1…128 bytes, as `timeline.rename_group` takes them.
+    let mut name = name.trim().to_string();
+    while name.len() > 128 {
+        name.pop();
+    }
+    let name = if name.is_empty() { format!("Folder{}", s.doc.timeline_groups.len() + 1) } else { name };
+    let id = s.doc_mut().allocate_id()?;
+    let (folders, broken) = folders_with(&s.doc, solidcraft_doc::TimelineGroup { id, name, parent, features, joints }, &[]);
+    if let Some(broken) = broken {
+        return Err(not_contiguous(&folders, broken, cmd));
+    }
+    s.doc_mut().timeline_groups = folders;
+    Ok(id)
+}
+
+/// The id a folder that is only being tried out goes by.
+const TRIAL_FOLDER: u64 = u64::MAX;
+
+impl Session {
+    /// Why `timeline.group` would refuse a new folder holding `features` inside the folder
+    /// `parent` (`None` at the history's root), in words for a menu's tooltip; `None` when it
+    /// would make it.
+    pub fn group_refusal(&self, features: &[u64], parent: Option<u64>) -> Option<String> {
+        if features.is_empty() {
+            return Some("No features are selected".into());
+        }
+        let trial = solidcraft_doc::TimelineGroup { id: TRIAL_FOLDER, name: String::new(), parent, features: features.to_vec(), joints: Vec::new() };
+        let (folders, broken) = folders_with(&self.doc, trial, &[]);
+        let broken = broken?;
+        if broken == TRIAL_FOLDER {
+            return Some("The features aren't next to each other in the history".into());
+        }
+        let name = folders.iter().find(|folder| folder.id == broken).map_or("", |folder| folder.name.as_str());
+        Some(format!("Folder {name} would no longer hold one run of features"))
+    }
 }
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.group";
-    let mut features = group_features(s, p, false, cmd)?;
-    let mut joints = group_joints(s, p, cmd)?;
+    let features = group_features(s, p, false, cmd)?;
+    let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
         Some(name) if name.len() <= 128 => name.to_string(),
@@ -435,22 +509,12 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "a new folder cannot contain an ancestor of its parent"));
     }
-    let nested = group_feature_ids(&s.doc, &groups);
-    features.retain(|feature| !nested.contains(feature));
-    let nested_joints = group_joint_ids(&s.doc, &groups);
-    joints.retain(|joint| !nested_joints.contains(joint));
-    let mut next = (*s.doc).clone();
-    for group in &mut next.timeline_groups {
-        group.joints.retain(|joint| !joints.contains(joint));
-        group.features.retain(|feature| !features.contains(feature));
-        if groups.contains(&group.id) {
-            group.parent = Some(id);
-        }
+    let folder = solidcraft_doc::TimelineGroup { id, name: name.clone(), parent, features, joints };
+    let (folders, broken) = folders_with(&s.doc, folder, &groups);
+    if let Some(broken) = broken {
+        return Err(not_contiguous(&folders, broken, cmd));
     }
-    next.timeline_groups.push(solidcraft_doc::TimelineGroup { id, name: name.clone(), parent, features, joints });
-    sort_group_features(&mut next);
-    require_contiguous_groups(&next, cmd)?;
-    *s.doc_mut() = next;
+    s.doc_mut().timeline_groups = folders;
     Ok(json!({"group": id, "name": name, "parent": parent, "groups": groups}))
 }
 

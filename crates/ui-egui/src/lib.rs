@@ -72,6 +72,7 @@ pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
+mod history_folds;
 pub(crate) mod history_rows;
 #[cfg(test)]
 mod hole_direction_ui_tests;
@@ -295,7 +296,10 @@ mod theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
 pub mod timeline;
+mod timeline_fold;
+mod timeline_folders;
 pub mod timeline_left;
+mod timeline_scope;
 pub mod titlebar;
 pub mod tool_cursor;
 pub mod tool_modifiers;
@@ -1022,6 +1026,7 @@ impl SolveApp {
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
+            "history_folds": history_folds::prefs(self),
             "recent": self.home.recent,
             "recent_opened_at": self.home.opened_at,
             "recent_forgotten": self.home.forgotten,
@@ -1097,6 +1102,7 @@ impl SolveApp {
         };
         self.tree.collapsed = keys("browser_collapsed");
         self.tree.expanded = keys("browser_expanded");
+        history_folds::load_prefs(self, &v);
         self.home.recent = v
             .get("recent")
             .and_then(Value::as_array)
@@ -1454,6 +1460,10 @@ impl SolveApp {
                     self.preview.reset();
                     self.cam = Camera::default();
                     self.fit_view();
+                    history_folds::load(self);
+                }
+                if matches!(id, "file.save" | "file.save_as") {
+                    history_folds::remember(self);
                 }
                 if matches!(id, "doc.open" | "file.save" | "file.save_as")
                     && let Some(p) = self.session.path.clone()
