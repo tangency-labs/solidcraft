@@ -424,11 +424,18 @@ pub fn folded_folder_items(app: &SolveApp, target: &Target) -> Vec<Item> {
         },
         _ => return Vec::new(),
     };
-    if !bodies_folded(app, comp, &scope, entries(app, comp, "bodies").len()) {
+    let count = entries(app, comp, "bodies").len();
+    if !bodies_folded(app, comp, &scope, count) {
         return Vec::new();
     }
-    let items =
-        folder_items(app, comp, "bodies", &scope).into_iter().filter(|i| matches!(i.id.as_str(), "component.from_bodies" | "ui.groupSelected"));
+    // Components from a component's only body would just nest it one level deeper.
+    let items: Vec<_> = folder_items(app, comp, "bodies", &scope)
+        .into_iter()
+        .filter(|i| i.id == "ui.groupSelected" || (i.id == "component.from_bodies" && count > 1))
+        .collect();
+    if items.is_empty() {
+        return items;
+    }
     std::iter::once(Item::sep()).chain(items).collect()
 }
 

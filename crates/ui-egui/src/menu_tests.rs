@@ -469,12 +469,17 @@ fn component_menu_activates_grounds_and_pastes() {
     act(&mut app, &t, "Activate");
     assert_eq!(app.session.active_component, c);
     let rows = context_menu::items(&app, &t);
+    let ids: Vec<_> = rows.iter().map(|i| i.id.as_str()).collect();
+    assert!(ids.contains(&"ui.moveOccurrence"), "Move/Copy stays on the menu");
+    let own = ids.iter().position(|id| *id == "ui.group.component").expect("the Component flyout");
+    assert_eq!(ids.get(own.wrapping_sub(1)), Some(&"ui.group.position"), "Position comes right before Component");
     assert!(find(&rows, "Position").children.iter().any(|i| i.id == "occurrence.ground"), "Ground sits in the Position flyout");
-    assert!(!rows.iter().any(|i| i.id == "occurrence.ground"));
-    assert!(
-        rows.iter().any(|i| i.id == "ui.moveOccurrence") && rows.iter().any(|i| i.id == "ui.appearance"),
-        "the everyday actions stay on the menu"
-    );
+    let own: Vec<_> = find(&rows, "Component").children.iter().map(|i| i.id.clone()).collect();
+    for id in ["ui.rename", "ui.appearance", "ui.material", "component.cycle_color", "component.create", "ui.properties"] {
+        assert!(own.iter().any(|o| o == id) && !ids.contains(&id), "{id} sits in the Component flyout only");
+    }
+    assert!(find(&rows, "Browser").children.iter().any(|i| i.id == "ui.newGroup"), "New Group sits with the browser tree's entries");
+    assert!(ids.contains(&"ui.pasteNew"), "Paste New stays with the clipboard");
     // The design's first part comes in grounded (#2804); the menu frees it and grounds it again.
     assert!(app.session.doc.occurrence_of(c).unwrap().grounded);
     act(&mut app, &t, "Unground");
@@ -1088,7 +1093,7 @@ fn rename_shows_f2_and_f2_with_a_menu_open_renames_what_the_menu_is_for() {
     let data = solidcraft_engine::doc::canvas::base64_encode(&png);
     let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
     let rename_key = |app: &SolveApp, target: &Target| {
-        context_menu::items(app, target)
+        context_menu::entries(app, target)
             .into_iter()
             .find(|i| i.id == "ui.rename")
             .map(|i| i.shortcut)
@@ -1820,6 +1825,103 @@ fn only_one_row_is_lit_while_a_flyout_is_closing() {
     h.frames(2);
     assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "the flyout is still closing");
     assert_eq!(lit_rows(&h, &rows), vec![other.label.clone()], "the parent gives up its highlight as soon as the pointer leaves it");
+}
+
+/// A component's menu (its Component flyout holds Appearance, which has a flyout of its own),
+/// open in a harness with the pointer on the menu.
+fn component_menu() -> (crate::scenario::Harness, u64) {
+    let mut h = crate::scenario::Harness::new();
+    h.app = sample_app();
+    let b = body(&h.app);
+    h.app.run("component.from_bodies", json!({"bodies": [b]})).unwrap();
+    let c = h.app.session.doc.components[0].id;
+    h.frames(3);
+    context_menu::open_for(&mut h.app, pos2(300.0, 60.0), Target::Component { id: c });
+    h.frames(2);
+    h.step(&json!({"move":[10, 10]})).unwrap();
+    (h, c)
+}
+
+#[test]
+fn a_flyout_inside_a_flyout_opens_on_hover_and_applies_its_choice() {
+    use crate::scenario::rect_of;
+    let (mut h, c) = component_menu();
+    h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move":{"handle":"menu:ui.appearance:Appearance"}})).unwrap();
+    h.frames(2);
+    let swatch = "menu:appearance.assign:Aluminum - Satin";
+    assert!(rect_of(swatch).is_some(), "hovering Appearance in the Component flyout opens its quick choices");
+    assert!(rect_of("menu:ui.rename:Rename").is_some(), "the Component flyout stays open");
+    h.step(&json!({"click":{"handle":swatch}})).unwrap();
+    assert!(h.app.session.doc.appearances.components.contains_key(&c), "the choice applies to the component");
+    assert!(h.app.viewport.context_menu.is_none());
+    assert!(h.app.dialog.is_none(), "a quick choice opens no editor");
+}
+
+#[test]
+fn keys_walk_into_nested_flyouts_and_left_steps_back_one_level() {
+    use crate::scenario::rect_of;
+    let (mut h, _) = component_menu();
+    let rows = context_menu::items(&h.app, &h.app.menu.target.clone());
+    h.app.menu.key_row = rows.iter().position(|i| i.id == "ui.group.component");
+    h.step(&json!({"key":"ArrowRight"})).unwrap();
+    assert!(rect_of("menu:ui.rename:Rename").is_some(), "Right opens the Component flyout");
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"ArrowDown"})).unwrap();
+    h.step(&json!({"key":"ArrowRight"})).unwrap();
+    h.frames(2);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_some(), "Right on Appearance opens its quick choices");
+    assert!(h.app.dialog.is_none(), "opening a flyout runs nothing");
+    h.step(&json!({"key":"ArrowLeft"})).unwrap();
+    h.frames(2);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_none(), "Left closes the innermost flyout");
+    assert!(rect_of("menu:ui.rename:Rename").is_some(), "and keeps the one it came from");
+    h.step(&json!({"key":"ArrowLeft"})).unwrap();
+    h.frames(2);
+    assert!(rect_of("menu:ui.rename:Rename").is_none(), "Left again closes the Component flyout");
+    assert!(h.app.viewport.context_menu.is_some(), "the menu itself stays open");
+}
+
+/// Resting on another row of a flyout closes only the flyouts further in (#6657).
+#[test]
+fn resting_on_another_row_of_a_flyout_closes_only_the_flyout_beyond_it() {
+    use crate::scenario::rect_of;
+    let (mut h, _) = component_menu();
+    h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move":{"handle":"menu:ui.appearance:Appearance"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move":{"handle":"menu:ui.rename:Rename"}})).unwrap();
+    h.frames(30);
+    assert!(rect_of("menu:appearance.assign:Aluminum - Satin").is_none(), "resting on Rename closes the Appearance flyout");
+    assert!(rect_of("menu:ui.rename:Rename").is_some(), "the Component flyout stays open");
+}
+
+/// Every flyout is as tall as its entries: one opened after a shorter one used to keep the shorter
+/// one's height and scroll, so its last entries could not be clicked.
+#[test]
+fn a_flyout_opened_after_a_shorter_one_shows_all_its_entries() {
+    let (mut h, _) = component_menu();
+    h.step(&json!({"move":{"handle":"menu:ui.group.browser"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"menu:ui.properties:Properties"}})).unwrap();
+    assert!(h.app.menu.props.is_some(), "the last entry of the Component flyout is reachable");
+}
+
+/// A flyout taller than egui's default area size (the quick choices) is measured whole, so it
+/// moves up to fit and its last entries can be clicked.
+#[test]
+fn a_tall_flyout_moves_up_to_fit_and_its_last_entries_can_be_clicked() {
+    let (mut h, c) = component_menu();
+    h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move":{"handle":"menu:ui.appearance:Appearance"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"menu:appearance.assign:Glass - Smoked"}})).unwrap();
+    assert!(h.app.session.doc.appearances.components.contains_key(&c), "a late quick choice is reachable");
 }
 
 #[test]

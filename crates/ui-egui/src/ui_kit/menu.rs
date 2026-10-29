@@ -231,8 +231,18 @@ impl Menu {
     /// Place a submenu beside its row with [`Self::flyout_at`].
     pub(crate) fn submenu<R>(ctx: &egui::Context, id: egui::Id, row: Rect, height: f32, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
         let width = crate::context_menu::LIST_W;
-        let at = Self::flyout_at(ctx.content_rect(), row, vec2(width, height));
-        Container::new(ctx, Surface::Popup).area(id).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| Self::show(ui, width, add))
+        let screen = ctx.content_rect();
+        // The estimate only places the area's first, invisible sizing pass.
+        let height = ctx.memory(|m| m.area_rect(id)).map_or(height, |r| r.height());
+        let at = Self::flyout_at(screen, row, vec2(width, height));
+        // The sizing pass caps the contents at the default size (egui's is 400 points high), and a
+        // scrolling flyout keeps whatever height it measured there.
+        Container::new(ctx, Surface::Popup)
+            .area(id)
+            .default_size(vec2(width, screen.height()))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| Self::show(ui, width, add))
     }
 }
 

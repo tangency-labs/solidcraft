@@ -475,11 +475,14 @@ fn find_in_browser_reaches_a_folded_body() {
 fn a_folded_folders_menu_items_move_to_the_placements_menu() {
     use crate::prefs::BodiesFolders;
     let (mut h, component, first, _) = fixture();
+    let target = Target::Occurrence { path: vec![first] };
+    let has = |h: &Harness, id: &str| context_menu::entries(&h.app, &target).iter().any(|i| i.id == id);
+    let items = context_menu::items(&h.app, &target);
+    assert!(!has(&h, "component.from_bodies"), "a component's only body is not offered as a component of its own");
+    assert!(items.last().is_some_and(|i| i.id != "-"), "and leaves no separator behind");
     h.app.run("component.activate", json!({"component":component})).unwrap();
     h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[20,0,0],"body_name":"Second"})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();
-    let target = Target::Occurrence { path: vec![first] };
-    let has = |h: &Harness, id: &str| context_menu::entries(&h.app, &target).iter().any(|i| i.id == id);
     assert!(!has(&h, "component.from_bodies"), "Several bodies only: two bodies keep their folder");
     h.app.preferences.browser_bodies_folders = BodiesFolders::Never;
     let items = context_menu::items(&h.app, &target);
