@@ -9,6 +9,7 @@ use solidcraft_render::job::{
     looks::{LookKind, LookLayer, LookStack},
     photographic::{Flare, Photographic},
 };
+use wgpu::util::DeviceExt;
 
 // Validate each live receipt before comparing deterministic accounting. RAM
 // snapshots and other retained leases can change between otherwise equal checks.

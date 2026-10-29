@@ -9,6 +9,7 @@ use solidcraft_render::{
 };
 use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 use std::sync::Arc;
+use wgpu::util::DeviceExt;
 
 type Guide = [[f64; 4]; 6];
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {

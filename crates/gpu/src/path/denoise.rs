@@ -1,5 +1,5 @@
 //! Optional output filtering; never writes the Monte Carlo accumulation buffer.
-use super::{Context, Result, SHADER, TIMEOUT, Task, checked, one_compile_at_a_time, placeholder_bind, scopes, warm_up};
+use super::{Context, Result, SHADER, TIMEOUT, Task, checked, gpu, one_compile_at_a_time, placeholder_bind, scopes, warm_up};
 use solidcraft_render::job::{CancelToken, DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
 use std::sync::atomic::{AtomicBool, Ordering};
 use wgpu::util::DeviceExt;
@@ -188,11 +188,19 @@ impl Resources {
             .collect();
         let guide_bind =
             device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("denoise guides"), layout: &context.layout, entries: &entries });
-        let filter_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("denoise parameters"),
-            contents: &[0; 48],
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let filter_uniform = match solidcraft_viewport_gpu::buffer_init(
+            device,
+            "denoise parameters",
+            &[0; 48],
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        ) {
+            Ok(buffer) => buffer,
+            Err(e) => {
+                // Drain the scopes in order before returning.
+                let _ = checked(error_scopes);
+                return Err(gpu(e));
+            }
+        };
         let filter_binds = [(accumulation, &output), (&output, &temporary), (&temporary, &output)]
             .into_iter()
             .map(|(source, destination)| {
