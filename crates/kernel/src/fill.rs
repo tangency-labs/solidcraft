@@ -144,18 +144,20 @@ fn general_fill(
     points: &[Vec3],
     crown: f64,
 ) -> Result<(Body, PatchReport)> {
-    if !(3..=solidcraft_geom::fill_iso::MAX_ISO_EDGES).contains(&chain.len()) {
+    if !(1..=solidcraft_geom::fill_iso::MAX_ISO_EDGES).contains(&chain.len()) {
         return Err(KernelError::Invalid(format!(
-            "not supported yet: a general patch on a loop of {} edges (three to {})",
+            "not supported yet: a general patch on a loop of {} edges (one to {})",
             chain.len(),
             solidcraft_geom::fill_iso::MAX_ISO_EDGES
         )));
     }
-    let edges: Vec<IsoEdge> = chain.iter().map(|&(e, forward)| iso_edge(record, e, forward)).collect::<Result<_>>()?;
+    let pieces = loop_pieces(record, chain)?;
+    let edges: Vec<IsoEdge> = pieces.iter().map(|p| iso_edge(record, p)).collect::<Result<_>>()?;
     let size = body.size().max(solidcraft_geom::LINEAR_TOL);
-    let mut beside: Vec<Option<Beside>> = Vec::with_capacity(chain.len());
-    for (&(e, forward), order) in chain.iter().zip(orders) {
-        beside.push(if *order == Continuity::G0 { None } else { Some(Beside::new(record, e, forward, *order, size)?) });
+    let mut beside: Vec<Option<Beside>> = Vec::with_capacity(pieces.len());
+    for p in &pieces {
+        let order = chain.iter().position(|&(e, _)| e == p.edge).and_then(|k| orders.get(k)).copied().unwrap_or(Continuity::G0);
+        beside.push(if order == Continuity::G0 { None } else { Some(Beside::new(record, p.edge, p.forward, order, size)?) });
     }
     let mut across = |k: usize, ts: &[f64]| -> std::result::Result<Vec<Option<Across>>, String> {
         match beside.get(k) {
@@ -166,7 +168,7 @@ fn general_fill(
     };
     let spec = IsoSpec { tol: face_tolerance(body), angle_tol: PATCH_ANGLE_TOL_DEG.to_radians(), crown, points };
     let fill = solidcraft_geom::fill_iso::iso_fill(&edges, &mut across, &spec).map_err(spline_error)?;
-    let made = quilt_body(body, record, chain, &fill, face_tolerance(body))?;
+    let made = quilt_body(body, record, &pieces, &fill, face_tolerance(body))?;
     let a = fill.achieved;
     let report = PatchReport {
         general: true,
@@ -234,11 +236,71 @@ pub(crate) fn matched_patch(body: &Body, chain: &[(usize, bool)], curvature_tol:
     Ok((made, fill))
 }
 
+/// A piece of a loop edge as the general fill takes it: record edge `edge` over `interval` (in
+/// its own parameter, min < max), run the loop's way along it (`forward`) or back.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Piece {
+    edge: usize,
+    forward: bool,
+    interval: [f64; 2],
+}
+
+/// The loop `chain` as the general fill's sides: each edge whole, but for a loop of one or two
+/// edges (a tube's end: one closed circle) each edge in equal pieces of its parameter, four sides
+/// in all, so the fill is one four-sided patch on pieces of the edges' own curves.
+fn loop_pieces(record: &b::Brep, chain: &[(usize, bool)]) -> Result<Vec<Piece>> {
+    let split = match chain.len() {
+        1 => 4,
+        2 => 2,
+        _ => 1,
+    };
+    let mut out = Vec::with_capacity(chain.len() * split);
+    for &(e, forward) in chain {
+        let edge = record.edges.get(e).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
+        let [a, z] = edge.interval;
+        // A break that falls on one of the curve's own knots (a conic's quarter points) is that
+        // knot exactly: a piece must not start a rounding error off one.
+        let own: Vec<f64> = match edge.parameters() {
+            b::Curve::Spline { knots, .. } | b::Curve::RationalSpline { knots, .. } => knots.clone(),
+            _ => Vec::new(),
+        };
+        let at = |i: usize| {
+            if i == 0 {
+                a
+            } else if i == split {
+                z
+            } else {
+                let t = a + (z - a) * i as f64 / split as f64;
+                own.iter().copied().find(|k| (k - t).abs() <= 1e-9 * (z - a).abs()).unwrap_or(t)
+            }
+        };
+        let mut pieces: Vec<Piece> = (0..split).map(|i| Piece { edge: e, forward, interval: [at(i), at(i + 1)] }).collect();
+        if !forward {
+            pieces.reverse();
+        }
+        out.extend(pieces);
+    }
+    Ok(out)
+}
+
+/// `t` on an edge's interval `[a, z]` reflected about its middle: the loop's parameter along an
+/// edge it runs against.
+fn reflected(a: f64, z: f64, t: f64) -> f64 {
+    if t == a {
+        z
+    } else if t == z {
+        a
+    } else {
+        a + z - t
+    }
+}
+
 /// A loop edge as the patch takes it: a B-spline on the edge's interval, rational when the edge
 /// is (a circle or ellipse on the NURBS form SMLib holds it as, whose parameter the edge's interval
 /// and pcurves are in), running the loop's way, its ends on the edge's vertices. A traced curve
 /// has no such form in its own parameter and is refused by name.
-fn iso_edge(record: &b::Brep, e: usize, forward: bool) -> Result<IsoEdge> {
+fn iso_edge(record: &b::Brep, piece: &Piece) -> Result<IsoEdge> {
+    let Piece { edge: e, forward, interval: [lo, hi] } = *piece;
     let edge = record.edges.get(e).ok_or_else(|| KernelError::Failed("patch: edge reference".into()))?;
     let v3 = |p: &[f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let [a, z] = edge.interval;
@@ -267,18 +329,20 @@ fn iso_edge(record: &b::Brep, e: usize, forward: bool) -> Result<IsoEdge> {
             )));
         }
     };
-    // The piece on the edge's interval, then run the loop's way.
-    let (mut knots, mut h) = solidcraft_geom::bspline::segment(degree, &knots, &h, a, z).map_err(spline_error)?;
+    // The piece of the edge, then run the loop's way (the edge's parameter reflected about its
+    // interval's middle).
+    let (mut knots, mut h) = solidcraft_geom::bspline::segment(degree, &knots, &h, lo, hi).map_err(spline_error)?;
     if !forward {
         knots = knots.iter().rev().map(|k| a + z - k).collect();
         h.reverse();
-        // The interval's ends exactly (the reflection's rounding), so a piece's ends name them.
+        // The ends exactly (the reflection's rounding), so a piece's ends name them.
+        let (rlo, rhi) = (reflected(a, z, hi), reflected(a, z, lo));
         let n = knots.len();
         for (i, k) in knots.iter_mut().enumerate() {
             if i <= degree {
-                *k = a;
+                *k = rlo;
             } else if i + degree + 1 >= n {
-                *k = z;
+                *k = rhi;
             }
         }
     }
@@ -288,14 +352,18 @@ fn iso_edge(record: &b::Brep, e: usize, forward: bool) -> Result<IsoEdge> {
         .map(|q| q.project().filter(|_| q.w > 0.0))
         .collect::<Option<Vec<Vec3>>>()
         .ok_or_else(|| KernelError::Invalid(format!("not supported yet: a general patch on edge {e}, whose weights are not all positive")))?;
-    // Its ends exactly on the loop's vertices.
-    let vertex = |end: usize| record.vertices.get(edge.vertices[end] as usize).map(|v| v3(&v.point));
-    let (first, last) = if forward { (vertex(0), vertex(1)) } else { (vertex(1), vertex(0)) };
-    if let (Some(p), Some(q), Some(f)) = (first, last, points.first_mut()) {
+    // Its ends exactly on the loop's vertices, where they are the edge's ends.
+    let vertex = |at: f64| match (at == a, at == z) {
+        (true, _) => record.vertices.get(edge.vertices[0] as usize).map(|v| v3(&v.point)),
+        (_, true) => record.vertices.get(edge.vertices[1] as usize).map(|v| v3(&v.point)),
+        _ => None,
+    };
+    let (first, last) = if forward { (vertex(lo), vertex(hi)) } else { (vertex(hi), vertex(lo)) };
+    if let (Some(p), Some(f)) = (first, points.first_mut()) {
         *f = p;
-        if let Some(l) = points.last_mut() {
-            *l = q;
-        }
+    }
+    if let (Some(q), Some(l)) = (last, points.last_mut()) {
+        *l = q;
     }
     let weights = rational.then(|| h.iter().map(|q| q.w).collect());
     Ok(IsoEdge { degree, knots, points, weights })
@@ -741,13 +809,13 @@ fn patch_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], surface: b
 /// exact curve record; the spokes from the halves' common vertex to the centre; every pcurve the
 /// straight line in (u, v) the patch gives its side. Its history is over `[body]`: every face is
 /// new, each loop edge (or half) a piece of the body's own, each spoke new.
-fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &IsoFill, tol: f64) -> Result<Body> {
+fn quilt_body(body: &Body, record: &b::Brep, chain: &[Piece], fill: &IsoFill, tol: f64) -> Result<Body> {
     use solidcraft_geom::fill_iso::IsoSide;
     let fail = |m: &str| KernelError::Failed(format!("patch: {m}"));
     let index = |n: usize| u32::try_from(n).map_err(|_| fail("budget"));
     let mut vertices: Vec<[f64; 3]> = Vec::new();
     let mut vertex_of: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
-    let mut middle_of: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+    let mut middle_of: std::collections::HashMap<(usize, u64), u32> = std::collections::HashMap::new();
     let mut edges: Vec<PartEdge> = Vec::new();
     // Each part edge's origin: the record edge it is a piece of (`None` for a spoke).
     let mut origin: Vec<Option<usize>> = Vec::new();
@@ -770,12 +838,14 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
             };
             match *side {
                 IsoSide::Edge { edge: k, from, to, uv } => {
-                    let &(e, forward) = chain.get(k).ok_or_else(|| fail("side"))?;
+                    let &Piece { edge: e, forward, interval: [plo, phi] } = chain.get(k).ok_or_else(|| fail("side"))?;
                     let edge = record.edges.get(e).ok_or_else(|| fail("edge reference"))?;
                     let [a, z] = edge.interval;
-                    // The patch's parameter runs the loop's way: the edge's own, reversed where the
-                    // loop runs against it.
-                    let tau = |t: f64| if forward { t } else { a + z - t };
+                    // The patch's parameter runs the loop's way: the edge's own, reflected where the
+                    // loop runs against it; a side's ends are its piece's ends or middle, exactly.
+                    let near = 1e-9 * (1.0 + (z - a).abs() + a.abs().max(z.abs()));
+                    let snap = |t: f64| [plo, phi, 0.5 * (plo + phi)].into_iter().find(|s| (s - t).abs() <= near).unwrap_or(t);
+                    let tau = |t: f64| snap(if forward { t } else { reflected(a, z, t) });
                     let (tf, tt) = (tau(from), tau(to));
                     let (lo, hi, along) = if tf < tt { (tf, tt, true) } else { (tt, tf, false) };
                     let key = (e, lo.to_bits(), hi.to_bits());
@@ -794,7 +864,7 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
                                     }
                                     id
                                 } else {
-                                    middle(&mut vertices, &mut middle_of, k, edge, t)?
+                                    middle(&mut vertices, &mut middle_of, e, edge, t)?
                                 };
                             }
                             let id = index(edges.len())?;
@@ -814,9 +884,9 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
                         Some(id) => *id,
                         None => {
                             let curve = fill.spokes.get(spoke).ok_or_else(|| fail("spoke"))?;
-                            let &(e, _) = chain.get(spoke).ok_or_else(|| fail("spoke"))?;
+                            let &Piece { edge: e, interval: [plo, phi], .. } = chain.get(spoke).ok_or_else(|| fail("spoke"))?;
                             let edge = record.edges.get(e).ok_or_else(|| fail("edge reference"))?;
-                            let start = middle(&mut vertices, &mut middle_of, spoke, edge, 0.5 * (edge.interval[0] + edge.interval[1]))?;
+                            let start = middle(&mut vertices, &mut middle_of, e, edge, 0.5 * (plo + phi))?;
                             let end = centre.ok_or_else(|| fail("centre"))?;
                             let id = index(edges.len())?;
                             let spline = match &curve.weights {
@@ -879,8 +949,9 @@ fn hold_gap(brep: &mut b::Brep, gap: f64) {
     }
 }
 
-/// The vertex at parameter `t` inside loop edge `k` (record edge `edge`), made once.
-fn middle(vertices: &mut Vec<[f64; 3]>, made: &mut std::collections::HashMap<usize, u32>, k: usize, edge: &b::Edge, t: f64) -> Result<u32> {
+/// The vertex at parameter `t` inside record edge `e` (`edge`), made once.
+fn middle(vertices: &mut Vec<[f64; 3]>, made: &mut std::collections::HashMap<(usize, u64), u32>, e: usize, edge: &b::Edge, t: f64) -> Result<u32> {
+    let k = (e, t.to_bits());
     if let Some(v) = made.get(&k) {
         return Ok(*v);
     }
