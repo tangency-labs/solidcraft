@@ -257,3 +257,30 @@ fn a_second_hole_on_another_face_moves_freely_while_the_first_is_held_by_its_edg
     assert!(matches!(&d.inputs[0].items[1], Sel::Face { body, .. } if body == "Other"), "on its own block: {:?}", d.inputs[0].items);
     assert!((distance(&h, 0) - 10.0).abs() < 1e-6, "the first hole's distance is unchanged: {:?}", distances(&h));
 }
+
+#[test]
+fn the_hole_after_one_taken_out_does_not_take_over_its_hover() {
+    // A click takes out the first hole under the pointer; the second takes its index, not its
+    // marker's state: its marker is not drawn hot on the click's frame (the press and hover are
+    // the first one's) and does not fade from there after it.
+    let mut h = blocks();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(10.0, 10.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    let at = screen(&mut h, Vec3::new(60.0, 15.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    let c = handle_at("hole:0").expect("the first hole's marker");
+    h.step(&json!({"move": [f64::from(c.x), f64::from(c.y)]})).unwrap();
+    h.frames(30);
+    assert!(crate::scenario::count_of("hole:0:hot").is_some_and(|t| t > 0.99), "hovered: {:?}", crate::scenario::count_of("hole:0:hot"));
+    // The click frame by frame: the press, then the release that takes the hole out.
+    let button = |pressed| egui::Event::PointerButton { pos: c, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+    h.frame_with(vec![button(true)]);
+    h.frame_with(vec![button(false)]);
+    let p = places(&h);
+    assert!(matches!(p.as_slice(), [p] if p.dist(Vec3::new(60.0, 15.0, 20.0)) < 1e-4), "the first hole is out: {p:?}");
+    assert_eq!(crate::scenario::count_of("hole:0:hot"), Some(0.0), "not given the click's hover");
+    h.frames(1);
+    assert_eq!(crate::scenario::count_of("hole:0:hot"), Some(0.0), "not fading from the hole taken out");
+}
