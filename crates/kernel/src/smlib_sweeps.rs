@@ -531,6 +531,16 @@ mod imp {
     /// it when `translate`. SMLib's sweep follows a smooth path; at a corner (the direction
     /// jumping) the path is swept piece by piece ([`cornered`]).
     pub(crate) fn sweep(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg], translate: bool) -> Result<Body> {
+        if translate {
+            // Every segment's direction of travel, at its ends and between them.
+            let bad = || KernelError::Invalid("a path segment has no direction".into());
+            let tangents = path
+                .iter()
+                .flat_map(|s| (0..=CROSSING_SAMPLES).map(move |i| seg_at(s, i as f64 / CROSSING_SAMPLES as f64).map(|(_, t)| t)))
+                .collect::<Option<Vec<Vec3>>>()
+                .ok_or_else(bad)?;
+            crate::sweep_path::crossing_check(plane, &tangents)?;
+        }
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
             return cornered(plane, pieces, path, &runs, translate);
@@ -823,6 +833,8 @@ mod imp {
 
     /// Fewest and most stations of a sweep that twists, scales or follows rails.
     const MIN_STATIONS: usize = 16;
+    /// Directions of travel read along each path segment for the parallel sweep's crossing check.
+    const CROSSING_SAMPLES: usize = 32;
     const MAX_STATIONS: usize = 2048;
 
     /// The profile `region` on `plane` swept along the smooth `path` the way `ctl` asks: twisted,
