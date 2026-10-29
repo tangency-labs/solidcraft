@@ -55,12 +55,13 @@ commands:
                   each failing SMLib call (--cli: a solidcraft-cli built with --features smlib)
                   --known-failing FILE: a regression gate instead of the report: fails on a case
                   that fails and FILE does not list, and on a listed case that passes
-                  (tests/kernel-cases/fillets/KNOWN_FAILING, CI's fillet rig job)
-                  --ladder [--record REASON]: the complexity ladder instead
+                  (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow)
+                  --ladder [--record REASON | --gate]: the complexity ladder instead
                   (tests/kernel-cases/ladder/ladder.json, tiers in order), graded and compared
                   with its timing golden (one case at a time unless --jobs), into
                   docs/kernel-ladder.md (DIR default target/kernel-ladder); --record re-measures
-                  the golden and re-sorts each tier by time
+                  the golden and re-sorts each tier by time; --gate fails on any case whose status
+                  or counts differ from the golden, instead of the report
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;

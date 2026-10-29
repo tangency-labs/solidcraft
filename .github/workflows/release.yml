@@ -20,6 +20,7 @@
 # releases/latest/download/<name> links in the README keep working across releases.
 #
 # A dry run: dispatch with draft=false (the default). Only the release branch may create drafts.
+# The release gate (release-gate.yml) calls it as such a dry run.
 # A dry run from any branch also test-signs the Windows files when SIGNPATH_API_TOKEN exists:
 #   gh workflow run release.yml --ref <branch> -f draft=false [-f signpath_signing_policy=test-signing]
 name: Release
@@ -31,6 +32,18 @@ on:
   push:
     branches: [release]
   workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create/update a draft (release branch only; off: build artifacts only)"
+        type: boolean
+        default: false
+      signpath_signing_policy:
+        description: "SignPath signing policy for the Windows files (empty: the repository variable, else test-signing)"
+        type: string
+        default: ""
+  # The release gate (release-gate.yml): a dry run (draft false) of every package and its checks.
+  # The event stays the caller's (workflow_dispatch), so a call runs as a dispatched dry run does.
+  workflow_call:
     inputs:
       draft:
         description: "Create/update a draft (release branch only; off: build artifacts only)"

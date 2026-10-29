@@ -1,4 +1,4 @@
-//! `cargo xtask kernel-cases --ladder [--record REASON]`: the kernel complexity ladder.
+//! `cargo xtask kernel-cases --ladder [--record REASON | --gate]`: the kernel complexity ladder.
 //!
 //! `tests/kernel-cases/ladder/ladder.json` lists tiers in order of complexity and, per tier, its
 //! cases in order (paths under `tests/kernel-cases/`, so a tier may also list rig cases from other
@@ -9,6 +9,8 @@
 //! not shared with other cases. `--record REASON` re-measures the golden and re-sorts each tier
 //! by time, fastest first; both files are committed. The run's output folder (`--out`, default
 //! `target/kernel-ladder`) holds `results.json` and the SMLib dumps, as the rig's does.
+//! `--gate` makes the run a regression gate instead of the report: it fails on any case whose
+//! status or counts differ from the golden (times aside, which are the machine's).
 //!
 //! The report, `docs/kernel-ladder.md`, gives per tier the counts per status and the robustness
 //! frontier: the first case, in ladder order, that fails.
@@ -103,16 +105,25 @@ fn golden_entry(r: &Value) -> Value {
 
 /// What changed against the golden: a slowdown, a status change, other counts.
 fn flags(r: &Value, g: Option<&Value>) -> Vec<String> {
-    let Some(g) = g else { return vec!["no golden".into()] };
-    let mut out = Vec::new();
-    if g["status"] != r["status"] {
-        out.push(format!("status was {}", g["status"].as_str().unwrap_or("?")));
-    }
-    if let (Some(now), Some(then)) = (r["seconds"].as_f64(), g["seconds"].as_f64())
+    let mut out = changes(r, g);
+    if let Some(g) = g
+        && let (Some(now), Some(then)) = (r["seconds"].as_f64(), g["seconds"].as_f64())
         && now > then * SLOWDOWN_FACTOR
         && now - then > SLOWDOWN_MIN_S
     {
         out.push(format!("slower: {now:.2} s (golden {then:.2} s)"));
+    }
+    out
+}
+
+/// What changed against the golden that the machine does not explain: no golden, a status
+/// change, other counts. Times are left out (they depend on the machine the golden was recorded
+/// on), so these are what the gate fails on.
+fn changes(r: &Value, g: Option<&Value>) -> Vec<String> {
+    let Some(g) = g else { return vec!["no golden".into()] };
+    let mut out = Vec::new();
+    if g["status"] != r["status"] {
+        out.push(format!("status was {}", g["status"].as_str().unwrap_or("?")));
     }
     for k in ["body_count", "faces", "edges", "vertices"] {
         let (now, then) = (&r["measured"][k], &g["measured"][k]);
@@ -121,6 +132,35 @@ fn flags(r: &Value, g: Option<&Value>) -> Vec<String> {
         }
     }
     out
+}
+
+/// The ladder's regression gate (`--gate`): every case's status and counts are the golden's. A
+/// case that changed fails it, better or worse, as does a case with no golden: the change is
+/// re-recorded with its reason (`--record`) in the same pull request.
+fn gate(tiers: &[Tier], results: &BTreeMap<String, Value>, golden: &Value) -> Result<String, String> {
+    let mut problems = Vec::new();
+    let mut pass = 0;
+    for c in tiers.iter().flat_map(|t| &t.cases) {
+        let Some(r) = results.get(c) else {
+            problems.push(format!("{c}: no result"));
+            continue;
+        };
+        pass += usize::from(r["status"] == "pass");
+        let changed = changes(r, golden["cases"].get(c));
+        if !changed.is_empty() {
+            problems.push(format!("CHANGED ({}): {c}: {}", r["status"].as_str().unwrap_or("?"), changed.join("; ")));
+        }
+    }
+    let n: usize = tiers.iter().map(|t| t.cases.len()).sum();
+    if problems.is_empty() {
+        Ok(format!("kernel ladder gate: {pass}/{n} pass, every case as the golden records it"))
+    } else {
+        Err(format!(
+            "kernel ladder gate: {} case(s) differ from tests/kernel-cases/ladder/golden.json (re-record with --record \"why\" if the change is right):\n  {}",
+            problems.len(),
+            problems.join("\n  ")
+        ))
+    }
 }
 
 fn secs(v: &Value) -> String {
@@ -218,6 +258,10 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
         Some(None) => return Err("--record needs a reason: --record \"why the golden changes\"".into()),
         Some(Some(r)) => Some(r.to_string()),
     };
+    let gate_run = rest.contains(&"--gate");
+    if gate_run && reason.is_some() {
+        return Err("--gate and --record: a gate run compares with the golden, a record run rewrites it".into());
+    }
     let mut o = options(rest, "target/kernel-ladder")?;
     // Times are compared with the golden: cases run one at a time unless --jobs says otherwise,
     // so they don't share the machine with each other.
@@ -236,7 +280,10 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
     save_results(&o, &all)?;
     let results: BTreeMap<String, Value> = all.into_iter().map(|r| (rel_of(&r), r)).collect();
     let golden = read(&golden_path());
-    if let Some(reason) = &reason {
+    if gate_run {
+        // A gate run grades against the golden; the report stays the last full run's.
+        println!("{}", gate(&tiers, &results, &golden)?);
+    } else if let Some(reason) = &reason {
         record(reason, &manifest, &tiers, &results, &golden)?;
         let tiers = self::tiers(&read(&manifest_path()))?;
         println!("{}", write_report(&tiers, &results, &read(&golden_path()))?);
@@ -262,6 +309,24 @@ mod tests {
         let f = flags(&worse, Some(&golden));
         assert_eq!(f.len(), 3, "{f:?}");
         assert_eq!(flags(&same, None), ["no golden"]);
+    }
+
+    #[test]
+    fn the_gate_fails_on_any_change_but_time() {
+        let t = vec![Tier { tier: "01-a".into(), what: String::new(), cases: vec!["ladder/01-a/001-x".into(), "ladder/01-a/002-y".into()] }];
+        let golden = json!({"cases": {
+            "ladder/01-a/001-x": {"status": "pass", "seconds": 1.0, "measured": {"faces": 6}},
+            "ladder/01-a/002-y": {"status": "fail", "seconds": 1.0}
+        }});
+        let run = |x: Value, y: Value| gate(&t, &BTreeMap::from([("ladder/01-a/001-x".to_string(), x), ("ladder/01-a/002-y".to_string(), y)]), &golden);
+        // Ten times slower is the machine, not a change.
+        assert!(run(json!({"status": "pass", "seconds": 10.0, "measured": {"faces": 6}}), json!({"status": "fail"})).is_ok());
+        let fixed = run(json!({"status": "pass", "measured": {"faces": 6}}), json!({"status": "pass"})).unwrap_err();
+        assert!(fixed.contains("CHANGED (pass): ladder/01-a/002-y: status was fail"), "{fixed}");
+        let counts = run(json!({"status": "pass", "measured": {"faces": 7}}), json!({"status": "fail"})).unwrap_err();
+        assert!(counts.contains("faces 7 (golden 6)"), "{counts}");
+        let unrecorded = gate(&t, &BTreeMap::new(), &golden).unwrap_err();
+        assert!(unrecorded.contains("ladder/01-a/001-x: no result"), "{unrecorded}");
     }
 
     #[test]
