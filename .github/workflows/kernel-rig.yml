@@ -1,0 +1,175 @@
+# The kernel rig and the complexity ladder as a regression gate. A pull request that touches the
+# kernel surface (the paths below) builds solidcraft-cli once (release, SMLib prebuilt), hands it
+# to a matrix of shards as an artifact, and each shard runs one area of tests/kernel-cases/ (or
+# the ladder) in parallel, so the wall time is the build plus the slowest shard. See
+# tests/kernel-cases/README.md.
+#
+# - An area fails on a regression (a case that fails and its tests/kernel-cases/<area>/KNOWN_FAILING
+#   does not list) or on a listed case that passes (it is fixed: remove its line in the same pull
+#   request, so the list only shrinks).
+# - The ladder fails on any case whose status or counts differ from
+#   tests/kernel-cases/ladder/golden.json; a right change is re-recorded (`--record "why"`).
+#
+# GitHub filters a workflow by whole files, so any change to crates/doc/src/eval*.rs or
+# crates/engine/src/cmd/features*.rs selects it. Pushes to main and develop that touch the same
+# paths run it too and commit the compiler cache (a Blacksmith sticky disk) that every other run
+# mounts read-only. A merge group (once the queue is on) always runs it: it is the last check
+# before the change lands. The release gate (release-gate.yml) calls it (workflow_call).
+name: Kernel rig
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/kernel/**"
+      - "crates/geom/**"
+      - "crates/smlib/**"
+      - "crates/step/**"
+      - "crates/doc/src/eval*.rs"
+      - "crates/engine/src/cmd/features*.rs"
+      - "tests/kernel-cases/**"
+      # The rig itself: the grading, the runner and this workflow.
+      - "apps/solidcraft-cli/src/kernel_cases.rs"
+      - "xtask/src/kernel_cases.rs"
+      - "xtask/src/kernel_ladder.rs"
+      - "scripts/fetch-smlib.sh"
+      - ".github/workflows/kernel-rig.yml"
+  push:
+    branches: [main, develop]
+    # The same paths as pull_request.
+    paths:
+      - "crates/kernel/**"
+      - "crates/geom/**"
+      - "crates/smlib/**"
+      - "crates/step/**"
+      - "crates/doc/src/eval*.rs"
+      - "crates/engine/src/cmd/features*.rs"
+      - "tests/kernel-cases/**"
+      # The rig itself: the grading, the runner and this workflow.
+      - "apps/solidcraft-cli/src/kernel_cases.rs"
+      - "xtask/src/kernel_cases.rs"
+      - "xtask/src/kernel_ladder.rs"
+      - "scripts/fetch-smlib.sh"
+      - ".github/workflows/kernel-rig.yml"
+  merge_group:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request replaces its old run.
+  group: kernel-rig-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build the CLI
+    # Draft pull requests run no CI, as in ci.yml.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      SCCACHE_CACHE_SIZE: 10G
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Size parallel compiles to the job's memory
+        run: scripts/ci/build-jobs.sh
+      - uses: dtolnay/rust-toolchain@stable
+      # Only pushes to main and develop commit the cache; pull requests, merge groups and forks
+      # mount a clone and never write back.
+      - name: Mount the compiler cache
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-sccache-kernel-rig
+          path: /home/runner/.cache/sccache
+          commit: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && 'on-change' || 'false' }}
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: kernel-rig
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - name: Build the CLI (release, SMLib) and the rig's runner
+        run: |
+          cargo build --release --locked -p solidcraft-cli --features smlib
+          cargo build --locked -p xtask
+      # A tar keeps the executable bits, which an artifact drops. xtask finds the repository from
+      # the path it was built in (CARGO_MANIFEST_DIR), which is the same checkout path in every
+      # job of this workflow.
+      - name: Pack the binaries
+        run: tar -cf "$RUNNER_TEMP/kernel-rig-bin.tar" -C target release/solidcraft-cli debug/xtask
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kernel-rig-bin
+          path: ${{ runner.temp }}/kernel-rig-bin.tar
+          retention-days: 1
+      - name: Compiler cache statistics
+        if: always()
+        run: sccache --show-stats
+
+  shard:
+    name: Kernel rig (${{ matrix.shard }})
+    needs: build
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every area of tests/kernel-cases/ and the ladder. On the build box (aarch64, 4 cases at
+        # a time) the slowest areas took about 1 minute (booleans, 212 s of cases with one of
+        # 84 s; threads, 161 s) and the ladder, one case at a time, 92 s: no area needs splitting.
+        shard: [booleans, continuity, crashes, fillets, import, ladder, sheet-metal, shell, sweeps, tessellation, threads]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: kernel-rig-bin
+          path: ${{ runner.temp }}
+      - name: Unpack the binaries
+        run: mkdir -p target && tar -xf "$RUNNER_TEMP/kernel-rig-bin.tar" -C target
+      - name: Run the cases against the known-failing list (the ladder against its golden)
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [ "$SHARD" = ladder ]; then
+            set -- --ladder --gate
+          else
+            set -- --area "$SHARD" --known-failing "tests/kernel-cases/$SHARD/KNOWN_FAILING"
+          fi
+          target/debug/xtask kernel-cases "$@" --cli target/release/solidcraft-cli --out "$RUNNER_TEMP/kernel-rig"
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: kernel-rig-results-${{ matrix.shard }}
+          path: ${{ runner.temp }}/kernel-rig/results.json
+          if-no-files-found: ignore
+
+  # One check for the whole gate, for branch protection and the merge queue.
+  kernel-rig:
+    name: kernel-rig
+    needs: [build, shard]
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Every shard passed
+        env:
+          BUILD: ${{ needs.build.result }}
+          SHARDS: ${{ needs.shard.result }}
+        run: |
+          test "$BUILD" = success
+          test "$SHARDS" = success
