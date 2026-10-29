@@ -6063,10 +6063,12 @@ mod tests {
     fn isocurves_of_a_split_face_run_on_across_the_split() {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 30, "center": [0, 0, 15]})).unwrap();
-        // Through the front face from bottom to top: the face is left in two pieces, x < -2 and x > 22.
-        h.app.run("solid.cylinder", json!({"radius": 12, "height": 50, "base": [10, -20, 0], "operation": "join"})).unwrap();
+        // Through the front face from bottom to top: the face is left in two pieces, x < -6 and
+        // x > 18, wide enough for two and one of the lines (10 apart: the body with the boss is
+        // 60 x 52 x 50).
+        h.app.run("solid.cylinder", json!({"radius": 12, "height": 50, "base": [6, -20, 0], "operation": "join"})).unwrap();
         h.settle();
-        h.app.run("inspect.isocurve", json!({"faces": [[-16, -20, 15], [26, -20, 15]]})).unwrap();
+        h.app.run("inspect.isocurve", json!({"faces": [[-18, -20, 15], [24, -20, 15]]})).unwrap();
         let faces = h.app.session.isocurve_lines();
         assert_eq!(faces.len(), 2, "{:?}", h.app.status);
         // Each piece's lines up the face (x held) and across it (z held), by where they are held.
