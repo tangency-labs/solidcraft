@@ -39,6 +39,8 @@ fn faceted_boolean_untimed(a: &Body, b: &Mesh, op: BoolOp, tol: f64) -> Result<O
     if b.triangles.len() > MAX_TRIANGLES {
         return Err(failed(&format!("the mesh is too detailed ({} triangles, at most {MAX_TRIANGLES})", b.triangles.len())));
     }
+    let welded = welded(b);
+    let b = &welded;
     let groups = coplanar_groups(b, tol)?;
     let mut faces = Vec::new();
     let mut face_group = Vec::new();
@@ -58,6 +60,26 @@ fn faceted_boolean_untimed(a: &Body, b: &Mesh, op: BoolOp, tol: f64) -> Result<O
     };
     let counts = [(a.face_count(), a.edge_count()), (b.triangles.len(), 0)];
     Ok(Some(result.with_checked_history(history, &counts)))
+}
+
+/// `m` with corners at the very same point made one vertex, triangles in their order: a body's
+/// own mesh (Body::mesh) gives each face its own vertices, the faces along an edge its very
+/// points, and is closed only once they are one.
+fn welded(m: &Mesh) -> Mesh {
+    let mut at: BTreeMap<[u64; 3], u32> = BTreeMap::new();
+    let mut positions = Vec::with_capacity(m.positions.len());
+    let index: Vec<u32> = m
+        .positions
+        .iter()
+        .map(|p| {
+            *at.entry([p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).or_insert_with(|| {
+                positions.push(*p);
+                (positions.len() - 1) as u32
+            })
+        })
+        .collect();
+    let triangles = m.triangles.iter().map(|t| t.map(|i| index.get(i as usize).copied().unwrap_or(i))).collect();
+    Mesh { positions, triangles, ..Mesh::default() }
 }
 
 /// The mesh's triangles in runs that make one planar face each: triangles sharing an edge, on
