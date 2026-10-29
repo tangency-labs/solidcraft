@@ -994,7 +994,7 @@ mod async_path_host {
         // A second viewport installation cannot replace or duplicate setup.
         h.app.render_workspace.path_host.start(|| panic!("setup started twice"));
         h.frames(3);
-        assert!(h.widget("GPU path tracer: compiling shadersâ€¦").is_some());
+        assert!(h.widget("GPU path tracer: compiling shaders…").is_some());
         assert!(image_host(&h.app, ImageMethod::GpuRaytrace).is_err());
         assert!(!h.app.session.render_backend().executors.iter().any(|e| e.id.as_str() == "test-path"));
         let transparent = h.app.tr("render.image_transparent").to_string();
@@ -1006,7 +1006,7 @@ mod async_path_host {
         enter(&mut h.app, true).unwrap();
         h.app.render_workspace.view.inspector.page = inspector::Page::All;
         h.frames(3);
-        assert!(h.widget("GPU path tracer: compiling shadersâ€¦").is_some());
+        assert!(h.widget("GPU path tracer: compiling shaders…").is_some());
         enter(&mut h.app, false).unwrap();
         release.send(()).unwrap();
         finish_setup(&mut h);
@@ -1014,7 +1014,7 @@ mod async_path_host {
         enter(&mut h.app, true).unwrap();
         h.app.render_workspace.view.inspector.page = inspector::Page::All;
         h.frames(3);
-        assert!(h.widget("GPU path tracer: compiling shadersâ€¦").is_none());
+        assert!(h.widget("GPU path tracer: compiling shaders…").is_none());
         assert!(image_host(&h.app, ImageMethod::GpuRaytrace).is_ok());
         assert_eq!(h.app.session.render_backend().executors.iter().filter(|e| e.id.as_str() == "test-path").count(), 1);
         assert!(h.app.session.render_job_host().unwrap().same_host(&cpu_host));
@@ -1039,7 +1039,7 @@ mod async_path_host {
         });
         h.frames(3);
         let first = h.app.tr("render.gpu_path_first_setup").to_string();
-        assert!(h.widget("GPU path tracer: compiling shadersâ€¦").is_some());
+        assert!(h.widget("GPU path tracer: compiling shaders…").is_some());
         assert!(h.widget(&first).is_some(), "the first setup explains the wait");
         assert!(h.widget("0:00").is_some(), "and counts the time");
         release.send(()).unwrap();
@@ -1080,7 +1080,7 @@ mod async_path_host {
         finish_setup(&mut h);
         let message = "GPU path tracer unavailable: test driver refused the device";
         assert!(h.widget(message).is_some());
-        assert!(h.widget("GPU path tracer: compiling shadersâ€¦").is_none());
+        assert!(h.widget("GPU path tracer: compiling shaders…").is_none());
         assert!(image_host(&h.app, ImageMethod::GpuRaytrace).is_err());
         assert!(h.app.session.render_job_host().is_some());
         completed_preview(&mut h, [200, 210, 220]);
@@ -2621,7 +2621,7 @@ fn four_and_five_k_viewports_preview_downscaled_within_the_limits() {
         if samples <= 4 {
             assert_eq!(preview_size(s.render_viewport(), (1920, 1080)), (1920, 1080), "fits: drawn at full size");
         }
-        // 16Ã— MSAA's scratch cost brings even 1080p under the budget.
+        // 16× MSAA's scratch cost brings even 1080p under the budget.
         let sizes: &[(u64, u64)] = if samples == 16 { &[(1920, 1080), (3840, 2160), (5120, 2880)] } else { &[(3840, 2160), (5120, 2880)] };
         for &full in sizes {
             assert!(resolve_request(&[s.render_backend()], &request(full.0, full.1)).is_err(), "{full:?} at full size is over the limit");
@@ -3221,7 +3221,7 @@ fn cpu_progressive_controls_resize_only_on_request_and_save_reload_without_a_hos
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1024, 1024));
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(h.app.session.undo.len(), undo);
-    let resize = format!("{} 512 Ã— 512", h.app.tr("render.image_use_largest"));
+    let resize = format!("{} 512 × 512", h.app.tr("render.image_use_largest"));
     assert!(h.widget(&resize).is_some(), "the proposed dimensions must be visible before accepting them");
     h.step(&json!({"widget":resize})).unwrap();
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (512, 512));
@@ -3980,9 +3980,9 @@ fn render_workspace_stage_shell_degrades_without_overlap_at_small_window_sizes()
                     docks.push(*panel);
                 }
                 for dock in docks {
-                    assert!(!dock.intersect(bar).is_positive(), "{width}Ã—{height}: {dock:?} {bar:?}");
+                    assert!(!dock.intersect(bar).is_positive(), "{width}×{height}: {dock:?} {bar:?}");
                     if let Some((strip, _)) = h.app.shell.workspace_panels.get("render:shots_strip") {
-                        assert!(!dock.intersect(*strip).is_positive(), "{width}Ã—{height}: {dock:?} {strip:?}");
+                        assert!(!dock.intersect(*strip).is_positive(), "{width}×{height}: {dock:?} {strip:?}");
                     }
                 }
             }
@@ -4920,7 +4920,7 @@ fn render_lights_browser_sections_and_lights_describe_current_job_entries() {
     h.app.render_workspace.view.studio.environment = studio::Environment::Sky;
     h.app.render_workspace.view.studio.rotation_rad = std::f64::consts::FRAC_PI_2;
     h.app.render_workspace.view.studio.intensity = 2.5;
-    assert_eq!(scene::environment(&h.app), ("Sky".into(), "90Â° Â· 2.50Ã—".into()));
+    assert_eq!(scene::environment(&h.app), ("Sky".into(), "90° · 2.50×".into()));
     h.frames(3);
     h.step(&json!({"click":{"handle":"render:tree:environment:current"}})).unwrap();
     assert_eq!(h.app.render_workspace.view.inspector.page, inspector::Page::Environment);
