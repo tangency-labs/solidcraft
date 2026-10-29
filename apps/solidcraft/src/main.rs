@@ -488,6 +488,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
+        // Server-folder saves are the self-hosted web app's (#6675); the desktop writes files itself.
+        persist_save: None,
+        save_conflict_answer: None,
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The chooser that opens may not be the desktop's own (#10159).
             #[cfg(target_os = "linux")]
