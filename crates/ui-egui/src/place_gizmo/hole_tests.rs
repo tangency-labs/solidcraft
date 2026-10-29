@@ -48,9 +48,9 @@ fn a_press_off_the_centre_keeps_its_gap_and_the_hole_lands_short_of_the_pointer(
     h.step(&json!({"click": at})).unwrap();
     h.frames(2);
     let c = handle_at("hole:0").expect("the placed hole has a marker");
-    // Grabbed 6 pt right and 4 pt below the centre (inside the shared marker's reach, outside the
-    // old handle's 9 pt), and let go with the pointer the same gap from `to`: the hole lands on
-    // `to`, not under the pointer.
+    // Grabbed 6 pt right and 4 pt below the centre (7.2 pt off it, inside the marker's reach), and
+    // let go with the pointer the same gap from `to`: the hole lands on `to`, not under the
+    // pointer (about 0.9 mm off here) nor where the drag only started, a few points on.
     let to = Vec3::new(30.0, 20.0, 20.0);
     let ts = screen(&mut h, to);
     h.step(&json!({"drag": [[f64::from(c.x) + 6.0, f64::from(c.y) + 4.0], [ts[0] + 6.0, ts[1] + 4.0]], "steps": 12})).unwrap();
@@ -87,6 +87,11 @@ fn each_placed_hole_has_its_own_marker_and_a_drag_moves_only_its_hole() {
 fn a_click_within_the_markers_reach_takes_the_hole_out() {
     let mut h = blocks();
     h.step(&json!({"start": "solid.hole"})).unwrap();
+    // A hole narrower than the click's 14 pt: a pick there that missed the marker would move the
+    // hole (a pick within the hole's radius takes it out too), so only the marker takes it out.
+    if let Some(crate::dialogs::Kind::Hole { diameter, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *diameter = "0.5 mm".into();
+    }
     let at = screen(&mut h, Vec3::new(10.0, 10.0, 20.0));
     h.step(&json!({"click": at})).unwrap();
     h.frames(2);
