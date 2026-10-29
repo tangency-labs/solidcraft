@@ -1,0 +1,29 @@
+{
+  "en": {
+    "ui.organize": "Organize"
+  },
+  "en-GB": {
+    "ui.organize": "Organise"
+  },
+  "ar": {
+    "ui.organize": "تنظيم"
+  },
+  "de": {
+    "ui.organize": "Organisieren"
+  },
+  "he": {
+    "ui.organize": "ארגון"
+  },
+  "ja": {
+    "ui.organize": "整理"
+  },
+  "ko": {
+    "ui.organize": "정리"
+  },
+  "vi": {
+    "ui.organize": "Sắp xếp"
+  },
+  "zh": {
+    "ui.organize": "整理"
+  }
+}
