@@ -184,9 +184,13 @@ fn octahedral6(n: [f32; 3]) -> u32 {
     (q(y).min(63) << 6) | q(x).min(63)
 }
 /// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
-/// occlusion radius), the 8 analysis colours, their flags, the depth direction and the two
-/// whole-body highlight colours, then the section hatch colours, the product lights, and the sky (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 416 + 16 * solidcraft_render::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
+/// occlusion radius), the 8 analysis colours, their flags, the depth direction, the model matrix
+/// (where the scene is drawn: [`MovingLayer`]), the two whole-body highlight colours, then the
+/// section hatch colours, the product lights, and the sky (`uniform_bytes`).
+const UNIFORM_SIZE: u64 = 480 + 16 * solidcraft_render::hatch::HATCH_COLOURS as u64 + 16 + 21 * 64 + 16;
+
+/// The identity, column-major: a scene drawn where it was built.
+const IDENTITY: [[f32; 4]; 4] = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
 
 /// A body drawn from its display plan, evaluated on the GPU: the plan, and a palette index per
 /// face (the plan's face numbering; faces past the end take the last index).
@@ -1062,6 +1066,33 @@ pub struct Frame {
     /// The world's up direction and 1 to shade in linear light with a sky fill that follows it
     /// (#7974); 0 shades as before.
     pub sky: [f32; 4],
+    /// Scenes drawn moved with the model (a joint drag's moving parts, #6325); empty: none.
+    pub layers: Vec<MovingLayer>,
+}
+
+/// A scene drawn with the model but moved: built once where a drag found its bodies (which the
+/// model scene leaves out meanwhile) and drawn moved by `transform` at every frame, so a frame of
+/// the drag builds, uploads and evaluates nothing; only the transform changes. Drawn like the
+/// model's own bodies: lit with its normals turned, cut by the section, shaded by the ambient
+/// occlusion, see-through order-independently, its edges and outlines with it.
+#[derive(Clone)]
+pub struct MovingLayer {
+    /// Names the scene in `slot`: the same key keeps the scene on the GPU as it is.
+    pub key: u64,
+    pub slot: SceneSlot,
+    /// Column-major: from where the scene was built to where it is drawn (a rigid move).
+    pub transform: [[f32; 4]; 4],
+}
+
+/// The product `a * b` of two column-major matrices.
+fn mat_mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    std::array::from_fn(|c| std::array::from_fn(|r| (0..4).map(|k| a[k][r] * b[c][k]).sum()))
+}
+
+/// The world direction `d` in the frame a rigid `model` moves from (its rotation turned back).
+fn local_direction(model: &[[f32; 4]; 4], d: [f32; 3]) -> [f32; 3] {
+    let column = |c: usize| model.get(c).map_or(0.0, |col| col[0] * d[0] + col[1] * d[1] + col[2] * d[2]);
+    [column(0), column(1), column(2)]
 }
 
 /// Heights of the model seen from a direction (an orthographic depth map): a point is reachable
@@ -2142,6 +2173,10 @@ pub struct Renderer {
     sketch: Batches,
     highlight: Batches,
     preview: Batches,
+    /// The scenes a drag moves ([`MovingLayer`]), one per frame's layer, in order.
+    layers: Vec<LayerGpu>,
+    /// The one-entry palette the layers' stand-in binds view.
+    dummy_palette: wgpu::TextureView,
     image: wgpu::RenderPipeline,
     image_bgl: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -2204,6 +2239,40 @@ pub struct Renderer {
     /// The new resolve textures [`clear_resolve_targets`] has cleared (tests count them).
     #[cfg(test)]
     resolve_clears: u32,
+}
+
+/// A [`MovingLayer`]'s scene on the GPU with the uniform it is drawn with: the frame's, with the
+/// layer's move as the model matrix.
+struct LayerGpu {
+    batches: Batches,
+    uniform: wgpu::Buffer,
+    /// Group 0 for the layer's draws before its scene has a palette (as [`Renderer::bind`]).
+    bind: wgpu::BindGroup,
+}
+
+impl LayerGpu {
+    fn new(device: &wgpu::Device, bgl: &wgpu::BindGroupLayout, dummy_palette: &wgpu::TextureView) -> LayerGpu {
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("sc_viewport_layer_u"),
+            size: UNIFORM_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("sc_viewport_layer"),
+            layout: bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(dummy_palette) },
+            ],
+        });
+        LayerGpu { batches: Batches::default(), uniform, bind }
+    }
+
+    /// The layer's scene and the bind its draws use.
+    fn drawn(&self) -> (&Batches, &wgpu::BindGroup) {
+        (&self.batches, scene_bind(&self.batches, &self.bind))
+    }
 }
 
 /// A triangle over the whole viewport at the far plane's depth (`FAR`), writing no colour:
@@ -3075,6 +3144,8 @@ impl Renderer {
                 sketch: Batches::default(),
                 highlight: Batches::default(),
                 preview: Batches::default(),
+                layers: Vec::new(),
+                dummy_palette: dummy_view,
             }
         })
     }
@@ -3404,6 +3475,12 @@ pub fn frame_key(cb: &Frame) -> u64 {
         }
         None => false.hash(&mut h),
     }
+    // The layers a drag moves: their scenes and where they are drawn.
+    for layer in &cb.layers {
+        layer.key.hash(&mut h);
+        layer.transform.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
+    }
+    cb.layers.len().hash(&mut h);
     std::hash::Hasher::finish(&h)
 }
 
@@ -3477,13 +3554,33 @@ impl Renderer {
         res.sketch.take(device, queue, &res.uniform, &res.uniform_bgl, cb.sketch_key, &cb.sketch_slot, None, res.oit.is_some());
         res.highlight.take(device, queue, &res.uniform, &res.uniform_bgl, cb.hl_key, &cb.hl_slot, None, res.oit.is_some());
         res.preview.take(device, queue, &res.uniform, &res.uniform_bgl, cb.pv_key, &cb.pv_slot, None, res.oit.is_some());
+        // The layers a drag moves: each scene taken once (while its key stays), each frame only
+        // its move written into its uniform. Layers the frame no longer brings let their buffers go.
+        res.layers.truncate(cb.layers.len());
+        for (i, layer) in cb.layers.iter().enumerate() {
+            if res.layers.len() <= i {
+                res.layers.push(LayerGpu::new(device, &res.uniform_bgl, &res.dummy_palette));
+            }
+            let Some(gpu) = res.layers.get_mut(i) else { continue };
+            let tess = res.tess.as_ref().map(|t| (t, &mut *encoder));
+            gpu.batches.take(device, queue, &gpu.uniform, &res.uniform_bgl, layer.key, &layer.slot, tess, res.oit.is_some());
+            let bytes = uniform_bytes_placing(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth(), layer.transform);
+            queue.write_buffer(&gpu.uniform, 0, &bytes);
+        }
         // See-through surfaces are drawn without sorting where the device can (order-independent
         // transparency, in an offscreen frame); else their triangles are sorted for the view.
-        let see_through = res.oit.is_some() && res.model.see_through();
+        let see_through = res.oit.is_some() && (res.model.see_through() || res.layers.iter().any(|l| l.batches.see_through()));
         if !see_through {
             res.model.sort_glass(queue, cb.back);
         }
         res.model.cull(queue, &cb.view_proj, cb.size_px);
+        for (gpu, layer) in res.layers.iter_mut().zip(&cb.layers) {
+            // A layer's bodies are where its move puts them: sorted and culled there.
+            if !see_through {
+                gpu.batches.sort_glass(queue, local_direction(&layer.transform, cb.back));
+            }
+            gpu.batches.cull(queue, &mat_mul(&cb.view_proj, &layer.transform), cb.size_px);
+        }
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
         if let Some(a) = &cb.access
             && a.version != res.access_version
@@ -3491,8 +3588,10 @@ impl Renderer {
             res.access_bind = access_texture(device, Some(queue), &res.access_bgl, a.size, &a.depth);
             res.access_version = a.version;
         }
-        let ao_binds = [scene_bind(&res.model, &res.bind), scene_bind(&res.preview, &res.bind)];
-        res.ao.prepare(device, encoder, ao_binds, cb.ao_radius, cb.size_px, res.target.reversed_depth(), [&res.model, &res.preview]);
+        let mut ao_scenes = vec![(&res.model, scene_bind(&res.model, &res.bind))];
+        ao_scenes.extend(res.layers.iter().map(LayerGpu::drawn));
+        ao_scenes.push((&res.preview, scene_bind(&res.preview, &res.bind)));
+        res.ao.prepare(device, encoder, &ao_scenes, cb.ao_radius, cb.size_px, res.target.reversed_depth());
         // Images: upload new or changed textures, drop removed ones, rebuild the quads.
         res.textures.retain(|id, _| cb.images.iter().any(|i| i.id == *id));
         res.quads.clear();
@@ -3655,20 +3754,35 @@ impl Renderer {
         } else {
             (&res.model, &res.sketch, &res.highlight, &res.preview)
         };
-        // A block's triangles of one class, drawn from its canonical vertex buffer.
-        let block_class = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, class: TriClass| {
-            for key in &m.block_order {
-                let Some(block) = m.blocks.get(key) else { continue };
+        // A scene's block triangles of one class, drawn from each block's canonical vertex buffer.
+        let blocks_of = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, class: TriClass, b: &Batches| {
+            for key in &b.block_order {
+                let Some(block) = b.blocks.get(key) else { continue };
                 if block.class(class).is_some() {
                     pass.set_pipeline(p);
                     block.draw(pass, class, tally);
                 }
             }
         };
+        let block_class = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, class: TriClass| blocks_of(pass, p, class, m);
+        // The layers a drag moves ([`MovingLayer`]), each drawn right after the model's part of a
+        // step with its own palette and uniform; the model's bind is set again after them.
+        let layers: Vec<(&Batches, &wgpu::BindGroup)> =
+            if cb.product { Vec::new() } else { res.layers.iter().take(cb.layers.len()).map(LayerGpu::drawn).collect() };
+        let in_layers = |pass: &mut wgpu::RenderPass<'static>, draw: &dyn Fn(&mut wgpu::RenderPass<'static>, &Batches)| {
+            if layers.is_empty() {
+                return;
+            }
+            for (b, bind) in &layers {
+                pass.set_bind_group(0, *bind, &[]);
+                draw(pass, b);
+            }
+            pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        };
         if phase == Phase::AfterSeeThrough {
             pass.set_bind_group(1, &res.access_bind, &[]);
             pass.set_bind_group(2, &res.ao.maps.bind, &[]);
-            Self::draw_over(res, pass, sk, h, pv, m, &tris, &lines);
+            Self::draw_over(res, pass, sk, h, pv, m, &layers, &tris, &lines);
             return;
         }
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
@@ -3679,8 +3793,8 @@ impl Renderer {
         pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         // `counting`: only closed bodies, for a section's crossing count ([`Cut::count`]).
-        let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, counting: bool| {
-            for d in m.planned.iter().filter(|d| d.class == TriClass::Opaque && (d.closed || !counting)) {
+        let planned = |pass: &mut wgpu::RenderPass<'static>, p: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
+            for d in b.planned.iter().filter(|d| d.class == TriClass::Opaque && (d.closed || !counting)) {
                 pass.set_pipeline(p);
                 pass.set_vertex_buffer(0, d.mesh.vertices.slice(..));
                 pass.set_vertex_buffer(1, d.colors.slice(..));
@@ -3690,8 +3804,8 @@ impl Renderer {
             }
         };
         // Instanced meshes, with the pipeline for smooth and for flat triangles.
-        let instanced = |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, counting: bool| {
-            for d in m.instanced.iter().filter(|d| d.look == InstanceLook::Opaque && (d.closed || !counting)) {
+        let instanced = |pass: &mut wgpu::RenderPass<'static>, smooth: &wgpu::RenderPipeline, flat: &wgpu::RenderPipeline, b: &Batches, counting: bool| {
+            for d in b.instanced.iter().filter(|d| d.look == InstanceLook::Opaque && (d.closed || !counting)) {
                 d.draw(pass, smooth, flat, tally);
             }
         };
@@ -3747,17 +3861,25 @@ impl Renderer {
                 let all = |pass: &mut wgpu::RenderPass<'static>, pick: fn(&Cut) -> &wgpu::RenderPipeline, counting: bool| {
                     pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
                     tris(pass, pick(cut), &m.tris);
-                    if counting {
-                        for block in m.block_order.iter().filter_map(|k| m.blocks.get(k)).filter(|b| b.closed.is_some()) {
-                            pass.set_pipeline(pick(cut));
-                            block.draw_closed(pass, tally);
+                    // The model's bodies, then those of the layers a drag moves, alike.
+                    let own = |pass: &mut wgpu::RenderPass<'static>, b: &Batches| {
+                        if counting {
+                            for block in b.block_order.iter().filter_map(|k| b.blocks.get(k)).filter(|b| b.closed.is_some()) {
+                                pass.set_pipeline(pick(cut));
+                                block.draw_closed(pass, tally);
+                            }
+                        } else {
+                            tris(pass, pick(cut), &b.open_tris);
+                            blocks_of(pass, pick(cut), TriClass::Opaque, b);
                         }
-                    } else {
-                        tris(pass, pick(cut), &m.open_tris);
-                        block_class(pass, pick(cut), TriClass::Opaque);
-                    }
-                    planned(pass, pick(cut_planned), counting);
-                    instanced(pass, pick(cut_instanced), pick(cut_flat), counting);
+                        planned(pass, pick(cut_planned), b, counting);
+                        instanced(pass, pick(cut_instanced), pick(cut_flat), b, counting);
+                    };
+                    own(pass, m);
+                    in_layers(pass, &|pass, l| {
+                        tris(pass, pick(cut), &l.tris);
+                        own(pass, l);
+                    });
                     pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                     tris(pass, pick(cut), &pv.tris);
                     if !counting {
@@ -3778,8 +3900,15 @@ impl Renderer {
                 tris(pass, &res.tri, &m.tris);
                 tris(pass, &res.tri, &m.open_tris);
                 block_class(pass, &res.tri, TriClass::Opaque);
-                planned(pass, &res.tri_planned, false);
-                instanced(pass, &res.tri_instanced, &res.tri_instanced_flat, false);
+                planned(pass, &res.tri_planned, m, false);
+                instanced(pass, &res.tri_instanced, &res.tri_instanced_flat, m, false);
+                in_layers(pass, &|pass, l| {
+                    tris(pass, &res.tri, &l.tris);
+                    tris(pass, &res.tri, &l.open_tris);
+                    blocks_of(pass, &res.tri, TriClass::Opaque, l);
+                    planned(pass, &res.tri_planned, l, false);
+                    instanced(pass, &res.tri_instanced, &res.tri_instanced_flat, l, false);
+                });
                 pass.set_bind_group(0, scene_bind(pv, &res.bind), &[]);
                 tris(pass, &res.tri, &pv.tris);
                 tris(pass, &res.tri, &pv.open_tris);
@@ -3826,10 +3955,12 @@ impl Renderer {
         // edge beside it there with a light line.
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line_hidden, &m.hidden);
+        in_layers(pass, &|pass, l| lines(pass, &res.line_hidden, &l.hidden));
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         lines(pass, &res.line_hidden, &h.hidden);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.line, &m.lines);
+        in_layers(pass, &|pass, l| lines(pass, &res.line, &l.lines));
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.line, &sk.lines);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
@@ -3854,24 +3985,36 @@ impl Renderer {
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         tris(pass, &res.ghost, &m.ghost);
         tris(pass, &res.trans, &m.shadow);
+        in_layers(pass, &|pass, l| tris(pass, &res.trans, &l.shadow));
         if phase == Phase::BeforeSeeThrough {
             return;
         }
         // See-through instanced meshes (placements back to front) with the rest of their kind.
         let see_through =
-            |pass: &mut wgpu::RenderPass<'static>, look: InstanceLook, (smooth, flat): &(wgpu::RenderPipeline, wgpu::RenderPipeline)| {
-                for d in m.instanced.iter().filter(|d| d.look == look) {
+            |pass: &mut wgpu::RenderPass<'static>, look: InstanceLook, (smooth, flat): &(wgpu::RenderPipeline, wgpu::RenderPipeline), b: &Batches| {
+                for d in b.instanced.iter().filter(|d| d.look == look) {
                     d.draw(pass, smooth, flat, tally);
                 }
             };
         tris(pass, &res.glass_far, &m.glass);
-        see_through(pass, InstanceLook::Glass, &res.glass_far_instanced);
+        see_through(pass, InstanceLook::Glass, &res.glass_far_instanced, m);
+        in_layers(pass, &|pass, l| {
+            tris(pass, &res.glass_far, &l.glass);
+            see_through(pass, InstanceLook::Glass, &res.glass_far_instanced, l);
+        });
         tris(pass, &res.glass_near, &m.glass);
-        see_through(pass, InstanceLook::Glass, &res.glass_near_instanced);
+        see_through(pass, InstanceLook::Glass, &res.glass_near_instanced, m);
         tris(pass, &res.trans, &m.trans);
         block_class(pass, &res.trans, TriClass::Faded);
-        see_through(pass, InstanceLook::Faded, &res.trans_instanced);
-        Self::draw_over(res, pass, sk, h, pv, m, &tris, &lines);
+        see_through(pass, InstanceLook::Faded, &res.trans_instanced, m);
+        in_layers(pass, &|pass, l| {
+            tris(pass, &res.glass_near, &l.glass);
+            see_through(pass, InstanceLook::Glass, &res.glass_near_instanced, l);
+            tris(pass, &res.trans, &l.trans);
+            blocks_of(pass, &res.trans, TriClass::Faded, l);
+            see_through(pass, InstanceLook::Faded, &res.trans_instanced, l);
+        });
+        Self::draw_over(res, pass, sk, h, pv, m, &layers, &tris, &lines);
     }
 
     /// What is drawn over the model's see-through surfaces.
@@ -3883,6 +4026,7 @@ impl Renderer {
         h: &Batches,
         pv: &Batches,
         m: &Batches,
+        layers: &[(&Batches, &wgpu::BindGroup)],
         tris: &dyn Fn(&mut wgpu::RenderPass<'static>, &wgpu::RenderPipeline, &Option<Batch>),
         lines: &dyn Fn(&mut wgpu::RenderPass<'static>, &wgpu::RenderPipeline, &Option<Batch>),
     ) {
@@ -3896,16 +4040,29 @@ impl Renderer {
         tris(pass, &res.xray, &pv.xray);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         lines(pass, &res.overlay, &m.overlays);
+        for (l, bind) in layers {
+            pass.set_bind_group(0, *bind, &[]);
+            lines(pass, &res.overlay, &l.overlays);
+        }
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         lines(pass, &res.overlay, &sk.overlays);
         pass.set_bind_group(0, scene_bind(h, &res.bind), &[]);
         lines(pass, &res.overlay, &h.overlays);
     }
 
-    /// The model's see-through surfaces into the order-independent transparency's targets.
+    /// The model's see-through surfaces into the order-independent transparency's targets, then
+    /// those of the layers a drag moves, each with its own palette and uniform.
     fn draw_see_through(&self, pass: &mut wgpu::RenderPass<'static>, p: &oit::Pipelines, tally: &Tally) {
-        let m = &self.model;
-        pass.set_bind_group(0, scene_bind(m, &self.bind), &[]);
+        Self::see_through_of(&self.model, scene_bind(&self.model, &self.bind), pass, p, tally);
+        for layer in &self.layers {
+            let (b, bind) = layer.drawn();
+            Self::see_through_of(b, bind, pass, p, tally);
+        }
+    }
+
+    /// One scene's see-through surfaces, drawn with `bind` (see [`Renderer::draw_see_through`]).
+    fn see_through_of(m: &Batches, bind: &wgpu::BindGroup, pass: &mut wgpu::RenderPass<'static>, p: &oit::Pipelines, tally: &Tally) {
+        pass.set_bind_group(0, bind, &[]);
         pass.set_pipeline(&p.built);
         for batch in [&m.glass, &m.trans].into_iter().flatten() {
             for (buffer, count) in &batch.parts {
@@ -4225,6 +4382,11 @@ fn load_depth<T>(first: bool, clear: T) -> wgpu::LoadOp<T> {
 
 /// Uniform bytes for a frame.
 pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -> Vec<u8> {
+    uniform_bytes_placing(cb, w, h, linear, reversed, IDENTITY)
+}
+
+/// [`uniform_bytes`] for a scene drawn moved by `model` (column-major, rigid: a [`MovingLayer`]).
+fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool, model: [[f32; 4]; 4]) -> Vec<u8> {
     let mut v: Vec<f32> = gpu_view_proj(cb.view_proj, reversed).iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
@@ -4242,6 +4404,7 @@ pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -
     v.extend([cb.ao_radius, cb.ao_samples.clamp(1, AO_SAMPLES) as f32, 0.0, 0.0]);
     v.extend(cb.analysis_colors);
     v.extend([if reversed { 1.0 } else { 0.0 }, FACE_STEPS as f32, FACE_SLOPE, 0.0]);
+    v.extend(model.iter().flatten());
     v.extend([cb.hover_tint[0], cb.hover_tint[1], cb.hover_tint[2], 0.0]);
     v.extend([cb.selection_tint[0], cb.selection_tint[1], cb.selection_tint[2], 0.0]);
     for [r, g, b] in cb.hatch {
@@ -4524,6 +4687,7 @@ mod tests {
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
             hatch: Default::default(),
+            layers: Vec::new(),
             outline: false,
             eye: [0.0; 4],
             ao_radius: 0.0,
@@ -4531,6 +4695,12 @@ mod tests {
             sky: [0.0; 4],
             ssaa: 1.0,
         }
+    }
+
+    fn layer(key: u64, x: f32) -> super::MovingLayer {
+        let mut transform = super::IDENTITY;
+        transform[3][0] = x;
+        super::MovingLayer { key, slot: std::sync::Arc::new(std::sync::Mutex::new(None)), transform }
     }
 
     fn image(version: u64) -> super::GpuImage {
@@ -4588,9 +4758,14 @@ mod tests {
             ),
             ("accessibility", key(|f| f.access = Some(access(1)))),
             ("accessibility map", key(|f| f.access = Some(access(2)))),
+            // A drag's layers (#6325).
+            ("moving layer", key(|f| f.layers.push(layer(5, 0.0)))),
         ] {
             assert_ne!(base, changed, "{what} must draw again");
         }
+        let one = key(|f| f.layers.push(layer(5, 0.0)));
+        assert_ne!(one, key(|f| f.layers.push(layer(5, 1.0))), "a layer moved must draw again");
+        assert_ne!(one, key(|f| f.layers.push(layer(6, 0.0))), "a layer's new scene must draw again");
         // The comparison a frame makes: only a frame drawn into a texture has a picture to blit,
         // and only the picture with the same content is shown again.
         assert!(super::can_reuse(true, Some(base), base));
@@ -4919,6 +5094,7 @@ mod glass_tests {
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
             hatch: Default::default(),
+            layers: Vec::new(),
         };
         let texture = |format, usage, sample_count| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -5090,6 +5266,7 @@ mod glass_tests {
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
             hatch: Default::default(),
+            layers: Vec::new(),
             outline: false,
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
@@ -5360,6 +5537,88 @@ mod glass_tests {
     /// whichever order they come, the same as sorting them where they share a colour, and close to
     /// it where they do not (the weighted average of their colours, by how much they cover).
     /// Skipped without a GPU adapter.
+    /// A scene with what the model draws of a body: lit triangles of a block (opaque and
+    /// see-through), an edge, a loose triangle and a placement of shared triangles, each point
+    /// put by `m` (column-major, rigid).
+    fn layer_scene(m: &[[f32; 4]; 4]) -> GpuScene {
+        let at = |p: [f32; 3]| std::array::from_fn::<f32, 3, _>(|r| m[0][r] * p[0] + m[1][r] * p[1] + m[2][r] * p[2] + m[3][r]);
+        let turn = |n: [f32; 3]| std::array::from_fn::<f32, 3, _>(|r| m[0][r] * n[0] + m[1][r] * n[1] + m[2][r] * n[2]);
+        let mut sc = GpuScene::default();
+        let (orange, glass, edge, blue) =
+            (sc.color([230, 140, 40, 255]), sc.color([40, 200, 120, 140]), sc.color([20, 20, 20, 255]), sc.color([60, 90, 220, 255]));
+        let mut b = BlockBuilder::default();
+        b.begin_body();
+        // A roof: two slopes facing apart, so a turn lights them differently.
+        let slopes = [
+            ([[-6.0, -6.0, 0.0], [0.0, -6.0, 4.0], [0.0, 6.0, 4.0]], [-0.55, 0.0, 0.83]),
+            ([[-6.0, -6.0, 0.0], [0.0, 6.0, 4.0], [-6.0, 6.0, 0.0]], [-0.55, 0.0, 0.83]),
+            ([[0.0, -6.0, 4.0], [6.0, -6.0, 0.0], [6.0, 6.0, 0.0]], [0.55, 0.0, 0.83]),
+            ([[0.0, -6.0, 4.0], [6.0, 6.0, 0.0], [0.0, 6.0, 4.0]], [0.55, 0.0, 0.83]),
+        ];
+        for (p, n) in slopes {
+            b.triangle(p.map(at), [turn(n); 3], orange, TriClass::Opaque);
+        }
+        b.triangle([[-3.0, -3.0, 6.0], [3.0, -3.0, 6.0], [0.0, 3.0, 6.0]].map(at), [turn([0.0, 0.0, 1.0]); 3], glass, TriClass::Glass);
+        b.line(at([0.0, -6.0, 4.0]), at([0.0, 6.0, 4.0]), edge, 2.0);
+        b.end_body();
+        sc.blocks.push(SceneBlock { key: 7, bytes: b.freeze() });
+        for p in [[-8.0, -8.0, 1.0], [-4.0, -8.0, 1.0], [-8.0, -4.0, 1.0]] {
+            sc.tri(at(p), turn([0.0, 0.0, 1.0]), blue);
+        }
+        // A tilted triangle placed at (6, -6, 1), its placement put by `m` too.
+        use solidcore_record::Vec3;
+        let mesh = solidcraft_geom::Mesh {
+            positions: vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 1.0), Vec3::new(0.0, 3.0, 0.0)],
+            normals: vec![Vec3::new(-0.3, 0.0, 0.95); 3],
+            triangles: vec![[0, 1, 2]],
+            ..Default::default()
+        };
+        let tris = Arc::new(SharedTris::new(&mesh));
+        let rows = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r], at([6.0, -6.0, 1.0])[r]]);
+        let mut inst = InstancedMesh { key: 9, tris, instances: Vec::new(), look: InstanceLook::Opaque, levels: Vec::new(), closed: false };
+        inst.place(rows, blue);
+        sc.instanced.push(inst);
+        sc
+    }
+
+    /// #6325: a layer a drag moves is drawn exactly as its scene built where the move puts it:
+    /// lit with its normals turned, its edges, blocks, loose triangles and placements moved,
+    /// cut by the section and seen through like the model's own.
+    #[test]
+    fn a_moving_layer_is_drawn_where_its_move_puts_it() {
+        let Some((_, device, queue)) = crate::open_headless().ok() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let depth = crate::depth_format(&device, true);
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let (c, s) = (30f32.to_radians().cos(), 30f32.to_radians().sin());
+        let (cx, sx) = (20f32.to_radians().cos(), 20f32.to_radians().sin());
+        // A turn of 30 degrees about Z after 20 about X, and a shift.
+        let turn = [[c, s, 0.0, 0.0], [-s * cx, c * cx, sx, 0.0], [s * sx, -c * sx, cx, 0.0], [2.0, -1.0, 0.5, 1.0]];
+        let frame_of = |model: GpuScene, layer: Option<GpuScene>, clip: [f32; 4]| {
+            let mut f = test_frame(model, 1.0);
+            f.clip = clip;
+            f.ao_radius = 1.5;
+            f.layers = layer.into_iter().map(|sc| MovingLayer { key: 11, slot: Arc::new(Mutex::new(Some(sc))), transform: turn }).collect();
+            let mut r = Renderer::new(&device, target, None);
+            render_frame(&mut r, &device, &queue, &f, true)
+        };
+        let different = |a: &[u8], b: &[u8]| {
+            a.as_chunks::<4>().0.iter().zip(b.as_chunks::<4>().0).filter(|(x, y)| x.iter().zip(*y).any(|(p, q)| p.abs_diff(*q) > 6)).count()
+        };
+        for clip in [[0.0; 4], [1.0, 0.0, 0.0, 2.5]] {
+            let built = frame_of(layer_scene(&turn), None, clip);
+            let layered = frame_of(GpuScene::default(), Some(layer_scene(&IDENTITY)), clip);
+            let unmoved = frame_of(layer_scene(&IDENTITY), None, clip);
+            let drawn = built.as_chunks::<4>().0.iter().filter(|p| p[..3] != [255, 255, 255]).count();
+            assert!(drawn > 400, "the scene shows ({drawn} pixels, clip {clip:?})");
+            assert!(different(&built, &unmoved) > 200, "the move shows (clip {clip:?})");
+            let off = different(&built, &layered);
+            assert!(off <= 24, "the layer draws its scene where its move puts it: {off} pixels differ (clip {clip:?})");
+        }
+    }
+
     #[test]
     fn see_through_layers_blend_in_any_order() {
         let (blue, red) = ([40, 80, 220, 128], [220, 40, 40, 128]);

@@ -248,6 +248,10 @@ pub(crate) fn placement_error(s: &solidcraft_engine::Session) -> Option<String> 
 /// far (the picture grows a few times a second), then all of them, in the order they came, until
 /// the design changes; otherwise the session's ([`session_world`]).
 pub(crate) fn shown_world(app: &SolveApp) -> Arc<ModelState> {
+    // A joint drag drawn in layers shows the world it began on, its moving parts moved on the GPU.
+    if let Some(w) = crate::viewport::layers::world(app) {
+        return w;
+    }
     let world = session_world(&app.session);
     let Some(m) = app.open_meshing.as_ref() else { return world };
     if !Arc::ptr_eq(&world, &m.world) {

@@ -41,6 +41,9 @@ mod refine_wait_tests;
 #[path = "navigation_cube.rs"]
 mod navigation_cube;
 
+#[path = "viewport_layers.rs"]
+pub(crate) mod layers;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavMode {
     Orbit,
@@ -224,6 +227,8 @@ pub struct ViewportState {
     /// A part that joints place, being dragged.
     pub(crate) joint_drag: Option<crate::joint_drag::Drag>,
     pub(crate) joint_handles: Option<crate::joint_handles::Mode>,
+    /// A joint drag drawn in layers moved on the GPU (`viewport_layers.rs`).
+    pub(crate) layers: Option<layers::DragLayers>,
     /// A free part being dragged to a new place (#2804).
     pub(crate) occurrence_drag: Option<crate::occurrence_drag::Drag>,
     /// Extrude by pulling a face or profile.
@@ -604,6 +609,8 @@ fn scene_key(app: &SolveApp) -> u64 {
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
     crate::edit_in_place::scene_key(app).hash(&mut h);
+    // A joint drag drawn in layers: the model scene without the parts it moves.
+    layers::scene_key(app).hash(&mut h);
     // A reset palette arena (another design) invalidates every cached block's indices.
     app.viewport.palette.lock().map_or(0, |a| a.generation()).hash(&mut h);
     // Continuity seams are model-scene lines but are not part of the document or world state.
@@ -1364,10 +1371,12 @@ fn reindex_block(block: CachedBlock, draws: &[BodyDraw]) -> CachedBlock {
 struct Instances {
     /// Each candidate body's shared mesh and placement, by body name.
     candidates: std::collections::HashMap<String, (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)>,
-    /// The meshes drawn as instances, in the order their first placement came, by address.
-    meshes: Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, crate::gpu::InstancedMesh)>,
-    /// Where a mesh's look already is in `meshes`, so placing a body is a lookup, not a scan.
-    by_mesh: std::collections::HashMap<(usize, crate::gpu::InstanceLook), usize>,
+    /// The meshes drawn as instances, in the order their first placement came, by address, with
+    /// the scene they are drawn in ([`body_scenes`]).
+    meshes: Vec<(usize, std::sync::Arc<solidcraft_engine::geom::Mesh>, crate::gpu::InstancedMesh)>,
+    /// Where a mesh's look in a scene already is in `meshes`, so placing a body is a lookup, not a
+    /// scan.
+    by_mesh: std::collections::HashMap<(usize, crate::gpu::InstanceLook, usize), usize>,
     kept: InstancedTris,
     lods: crate::mesh_lod::MeshLods,
 }
@@ -1392,22 +1401,23 @@ impl Instances {
         Instances { candidates, meshes: Vec::new(), by_mesh: std::collections::HashMap::new(), kept, lods: app.viewport.mesh_lods.clone() }
     }
 
-    /// Draw `b` as an instance when it is one, in colour `col` (its alpha for a see-through
-    /// `look`): its shared mesh and placement.
+    /// Draw `b` as an instance in scene `scene` when it is one, in colour `col` (its alpha for a
+    /// see-through `look`): its shared mesh and placement.
     fn place(
         &mut self,
         b: &solidcraft_engine::doc::ModelBody,
         col: crate::gpu::PaletteIndex,
         look: crate::gpu::InstanceLook,
+        scene: usize,
     ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
         let (mesh, m) = self.candidates.get(&b.name)?.clone();
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
-        let at = match self.by_mesh.get(&(key, look)).copied() {
+        let at = match self.by_mesh.get(&(key, look, scene)).copied() {
             Some(at) => at,
             None => {
-                // The same triangles (and levels) for each look of a mesh.
-                let made = self.meshes.iter().find(|(k, _)| std::sync::Arc::ptr_eq(k, &mesh)).map(|(_, i)| (i.tris.clone(), i.levels.clone()));
+                // The same triangles (and levels) for each look of a mesh, in every scene.
+                let made = self.meshes.iter().find(|(_, k, _)| std::sync::Arc::ptr_eq(k, &mesh)).map(|(_, _, i)| (i.tris.clone(), i.levels.clone()));
                 let (tris, levels) = match made {
                     Some(made) => made,
                     None => (
@@ -1420,27 +1430,35 @@ impl Instances {
                     ),
                 };
                 self.meshes.push((
+                    scene,
                     mesh.clone(),
                     crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, closed: b.is_closed() },
                 ));
-                self.by_mesh.insert((key, look), self.meshes.len() - 1);
+                self.by_mesh.insert((key, look, scene), self.meshes.len() - 1);
                 self.meshes.len() - 1
             }
         };
-        let (_, inst) = self.meshes.get_mut(at)?;
+        let (_, _, inst) = self.meshes.get_mut(at)?;
         inst.place(rows, col);
         Some((mesh, m))
     }
 
-    /// The instanced meshes, keeping their triangles for the next scene.
-    fn finish(self, app: &SolveApp) -> Vec<crate::gpu::InstancedMesh> {
+    /// The instanced meshes of each of `scenes` scenes, keeping their triangles for the next
+    /// build.
+    fn finish(self, app: &SolveApp, scenes: usize) -> Vec<Vec<crate::gpu::InstancedMesh>> {
         let kept: InstancedTris =
-            self.meshes.iter().map(|(mesh, inst)| (std::sync::Arc::as_ptr(mesh) as usize, (mesh.clone(), inst.tris.clone()))).collect();
+            self.meshes.iter().map(|(_, mesh, inst)| (std::sync::Arc::as_ptr(mesh) as usize, (mesh.clone(), inst.tris.clone()))).collect();
         self.lods.retain(&kept.keys().copied().collect());
         if let Ok(mut k) = app.viewport.instanced_tris.lock() {
             *k = kept;
         }
-        self.meshes.into_iter().map(|(_, inst)| inst).collect()
+        let mut out: Vec<Vec<crate::gpu::InstancedMesh>> = (0..scenes).map(|_| Vec::new()).collect();
+        for (scene, _, inst) in self.meshes {
+            if let Some(list) = out.get_mut(scene) {
+                list.push(inst);
+            }
+        }
+        out
     }
 }
 
@@ -1459,218 +1477,20 @@ fn shared_mesh(
 }
 
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
-    let tk = Tokens::get();
-    let s = &app.session;
     // Bodies where their occurrences place them.
     let st = crate::open_meshing::shown_world(app);
-    let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
-    let (shaded, edges) = match app.ui.visual_style {
-        1 => (true, false),
-        2 => (false, true),
-        _ => (true, true),
-    };
-    let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
-    // Shaded with hidden edges: edges behind the model show faintly.
-    let hidden_edges = app.ui.visual_style == 3;
-    // Vertex markers are an option (#7834), off by default.
-    let markers = app.preferences.vertex_markers;
-    let hidden_col = c4(tk.text.gamma_multiply(0.35));
-    let shown: Vec<&solidcraft_engine::doc::ModelBody> =
-        st.bodies.iter().filter(|b| app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)).collect();
-    let mut arena = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
-    let shown_names: Vec<&str> = shown.iter().map(|b| b.name.as_str()).collect();
-    arena.sync(shown_names.iter().copied());
-    // Allocate every body's slots before the scene's palette is copied, so the stable prefix
-    // covers them; the colours themselves are written in the loop below, into both the arena
-    // and the scene's palette.
-    let slots: Vec<_> = shown.iter().map(|b| arena.body(&b.name, b.body.face_count())).collect();
-    let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(arena.entries()));
-    // Resolve looks once per body and appearance state: a theme, visibility or LOD rebuild does
-    // not scan the whole design's face appearances again.
-    let mut appearance = app.viewport.appearance.lock().unwrap_or_else(|e| e.into_inner());
-    let doc = std::sync::Arc::as_ptr(&s.doc) as usize;
-    let colored = s.colored_components.is_some();
-    if appearance.doc != Some((doc, colored)) {
-        appearance.doc = Some((doc, colored));
-        appearance.faces = face_appearance_hashes(&s.doc);
-        // A design or colouring edit can key any body differently; the resolved looks whose
-        // key comes back unchanged are still reused.
-        appearance.keys.clear();
-    }
-    // The blocks the last scene built, reused when their bodies come back as they were.
-    let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
-    let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
-    let mut run: Vec<BodyDraw> = Vec::new();
-    let mut run_key = std::collections::hash_map::DefaultHasher::new();
-    // Bodies drawn from the same triangles more than once (a part placed by many occurrences)
-    // are drawn as instances of them: one copy of the triangles on the GPU, and none moved on
-    // the CPU.
-    let mut instances = Instances::new(app, &shown, shaded);
-    let mut thread_budget = solidcraft_engine::cosmetic_threads::Budget::default();
-    for (b, slots) in shown.into_iter().zip(slots) {
-        let faded = body_faded(app, b, &active_bodies);
-        let identity = match appearance.keys.get(&b.name).copied() {
-            Some(key) => key,
-            None => {
-                let key = body_appearance_key(&s.doc, b, &appearance.faces, colored);
-                appearance.keys.insert(b.name.clone(), key);
-                key
-            }
-        };
-        let resolved = match appearance.bodies.get(&b.name) {
-            Some((key, resolved)) if *key == identity => resolved.clone(),
-            _ => {
-                let resolved = std::sync::Arc::new(resolve_appearance(app, b));
-                appearance.bodies.insert(b.name.clone(), (identity, resolved.clone()));
-                #[cfg(test)]
-                {
-                    appearance.resolved = appearance.resolved.saturating_add(1);
-                }
-                resolved
-            }
-        };
-        set_palette_color(&mut arena, &mut sc.palette, slots.edge, edge_col);
-        set_palette_color(&mut arena, &mut sc.palette, slots.hidden_edge, hidden_col);
-        if app.preferences.cosmetic_threads
-            && thread_budget.available()
-            && shaded
-            && !faded
-            && thread_budget.has_thread(&b.name, &st.threads)
-            && resolved.opacity >= 0.999
-            && resolved.face_looks.values().all(|l| l.opacity >= 0.999)
-        {
-            let mesh = shown_mesh(app, b, &active_bodies);
-            for (a, c) in solidcraft_engine::cosmetic_threads::segments_with_budget(b, &mesh, &st.threads, &mut thread_budget) {
-                sc.line(a.to_f32(), c.to_f32(), slots.edge, 0.85, false);
-            }
-        }
-        let base = resolved.component.or(resolved.body).unwrap_or(tk.body);
-        let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
-        set_palette_color(&mut arena, &mut sc.palette, slots.body, col);
-        // Appearances: the body's opacity, and faces with looks of their own.
-        let opacity = resolved.opacity;
-        let face_looks = &resolved.face_looks;
-        let faces = b.body.face_count();
-        let mut face_colors = Vec::with_capacity(faces);
-        let mut face_classes = Vec::with_capacity(faces);
-        for f in 0..faces {
-            let look = face_looks.get(&f);
-            let color = look.map_or(base, |l| Color32::from_rgb(l.color[0], l.color[1], l.color[2]));
-            let opacity = look.map_or(opacity, |l| l.opacity);
-            let (rgba, class) = if faded {
-                (c4(color.gamma_multiply(0.35)), crate::gpu::TriClass::Faded)
-            } else if opacity < 0.999 {
-                let mut rgba = c4(color);
-                rgba[3] = (opacity.clamp(0.05, 1.0) * 255.0).round() as u8;
-                (rgba, crate::gpu::TriClass::Glass)
-            } else {
-                (c4(color), crate::gpu::TriClass::Opaque)
-            };
-            let slot = slots.face(f);
-            set_palette_color(&mut arena, &mut sc.palette, slot, rgba);
-            face_colors.push(slot);
-            face_classes.push(class);
-        }
-        let closed = b.is_closed();
-        let class = plan_class(app, &face_classes);
-        let planned = class.and_then(|class| drawn_plan(app, b, true).map(|plan| (plan, class)));
-        let on_gpu = planned.is_some();
-        if let Some((plan, class)) = planned {
-            sc.planned.push(crate::gpu::PlannedBody { plan, face_colors: face_colors.clone(), class, closed });
-        }
-        // Opaque, faded and see-through bodies alike, in one colour (faces of their own colour
-        // are built as before).
-        let look = if faded {
-            crate::gpu::InstanceLook::Faded
-        } else if opacity < 0.999 {
-            crate::gpu::InstanceLook::Glass
-        } else {
-            crate::gpu::InstanceLook::Opaque
-        };
-        let alpha = match look {
-            crate::gpu::InstanceLook::Faded => col[3],
-            crate::gpu::InstanceLook::Glass => (opacity.clamp(0.05, 1.0) * 255.0).round() as u8,
-            crate::gpu::InstanceLook::Opaque => 255,
-        };
-        set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);
-        let instanced = (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look)).flatten();
-        let name = b.name.clone();
-        let body = match instanced {
-            Some((mesh, place)) => BodyDraw {
-                name,
-                mesh,
-                place: Some(place),
-                face_colors,
-                body_color: slots.body,
-                face_classes,
-                faded,
-                closed,
-                on_gpu: true,
-                slot_base: slots.faces,
-                edge: slots.edge,
-                hidden_edge: slots.hidden_edge,
-            },
-            None => BodyDraw {
-                name,
-                mesh: drawn_mesh(app, b),
-                place: None,
-                face_colors,
-                body_color: slots.body,
-                face_classes,
-                faded,
-                closed,
-                on_gpu,
-                slot_base: slots.faces,
-                edge: slots.edge,
-                hidden_edge: slots.hidden_edge,
-            },
-        };
-        let key = body.key(shaded, edges, hidden_edges, markers);
-        key.hash(&mut run_key);
-        run.push(body);
-        // Blocks end where a body's own key says, so a body added or removed changes only its
-        // own block, not every block after it.
-        if key.is_multiple_of(16) || run.len() >= 64 {
-            let draws = std::mem::take(&mut run);
-            let block_key = std::mem::replace(&mut run_key, std::collections::hash_map::DefaultHasher::new()).finish();
-            push_block(&mut sc, &mut kept, &mut made, block_key, draws, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
-        }
-    }
-    if !run.is_empty() {
-        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
-    }
-    // Where each CPU-built body's triangles are in the model's blocks, for whole-body
-    // highlights (see `highlight_block_tris`).
-    let mut body_tris = std::collections::HashMap::new();
-    for (key, c) in &made {
-        for range in &c.ranges {
-            if !range.vertices.is_empty() {
-                body_tris
-                    .insert(range.name.clone(), crate::gpu::BlockTris { block: *key, tris: range.opaque.clone(), vertices: range.vertices.clone() });
-            }
-        }
-    }
-    if let Ok(mut m) = app.viewport.body_tris.lock() {
-        *m = body_tris;
-    }
-    // Every shown body has its entries, so only a larger map holds bodies no longer shown.
-    if appearance.bodies.len() > shown_names.len() || appearance.keys.len() > shown_names.len() {
-        let names: std::collections::HashSet<&str> = shown_names.iter().copied().collect();
-        appearance.bodies.retain(|name, _| names.contains(name.as_str()));
-        appearance.keys.retain(|name, _| names.contains(name.as_str()));
-    }
-    if let Ok(mut b) = app.viewport.blocks.lock() {
-        *b = made;
-    }
-    sc.instanced = instances.finish(app);
+    let mut sc = body_scenes(app, &st, &[]).into_iter().next().unwrap_or_default();
     if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
         ground_shadow(&mut sc, app, &st);
     }
+    let tk = Tokens::get();
+    let s = &app.session;
     // Section: the outline of each body where the plane cuts it, in the view's text colour (#4146).
     if let Some((o, n)) = section_plane(app) {
         let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
         let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
         let mut made = std::collections::HashMap::with_capacity(kept.len());
+        let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
         // The closed solid bodies the plane cuts and where it cuts them: their hatches by part.
         let by_part = app.preferences.section_hatch == crate::prefs::SectionHatch::ByPart;
         let mut cuts: Vec<(&str, Vec<(Vec3, Vec3)>)> = Vec::new();
@@ -1697,6 +1517,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
             .map(|(name, segments)| solidcraft_engine::render::hatch::CutPart { seed: solidcraft_engine::render::hatch::seed(name), segments })
             .collect();
         let hatches = solidcraft_engine::render::hatch::hatches(&parts, n);
+        let arena = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
         let palette = std::sync::Arc::make_mut(&mut sc.palette);
         for ((name, _), hatch) in cuts.iter().zip(hatches) {
             let Some(slots) = arena.slots(name) else { continue };
@@ -1704,6 +1525,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
                 palette.set_hatch(slot, hatch);
             }
         }
+        drop(arena);
         if let Ok(mut k) = app.viewport.section_index.lock() {
             *k = made;
         }
@@ -1738,6 +1560,228 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     crate::edit_in_place::draw_context(app, &mut sc);
 
     sc
+}
+
+/// The shown bodies of `st` as scenes: the first holds every body `layer_of` (by the body's index
+/// in `st`) leaves out, and scene `k + 1` the bodies of layer `k` (a joint drag's moving parts,
+/// `viewport_layers.rs`). The scenes share the model's palette; a body is built the same in any
+/// of them, so its block bytes, instanced triangles and plans are reused across them.
+fn body_scenes(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>, layer_of: &[Option<usize>]) -> Vec<GpuScene> {
+    let tk = Tokens::get();
+    let s = &app.session;
+    let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
+    let (shaded, edges) = match app.ui.visual_style {
+        1 => (true, false),
+        2 => (false, true),
+        _ => (true, true),
+    };
+    let edge_col = if shaded { c4(tk.body_edge) } else { c4(tk.text) };
+    // Shaded with hidden edges: edges behind the model show faintly.
+    let hidden_edges = app.ui.visual_style == 3;
+    // Vertex markers are an option (#7834), off by default.
+    let markers = app.preferences.vertex_markers;
+    let hidden_col = c4(tk.text.gamma_multiply(0.35));
+    let (shown_at, shown): (Vec<usize>, Vec<&solidcraft_engine::doc::ModelBody>) =
+        st.bodies.iter().enumerate().filter(|(_, b)| app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)).unzip();
+    let scenes = 1 + layer_of.iter().flatten().max().map_or(0, |k| k + 1);
+    let scene_of = |i: usize| layer_of.get(i).copied().flatten().map_or(0, |k| k + 1);
+    let mut arena = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
+    let shown_names: Vec<&str> = shown.iter().map(|b| b.name.as_str()).collect();
+    arena.sync(shown_names.iter().copied());
+    // Allocate every body's slots before the scene's palette is copied, so the stable prefix
+    // covers them; the colours themselves are written in the loop below, into both the arena
+    // and the scene's palette.
+    let slots: Vec<_> = shown.iter().map(|b| arena.body(&b.name, b.body.face_count())).collect();
+    let mut palette = std::sync::Arc::new(crate::gpu::Palette::with_stable(arena.entries()));
+    let mut out: Vec<GpuScene> = (0..scenes).map(|_| GpuScene::default()).collect();
+    // Resolve looks once per body and appearance state: a theme, visibility or LOD rebuild does
+    // not scan the whole design's face appearances again.
+    let mut appearance = app.viewport.appearance.lock().unwrap_or_else(|e| e.into_inner());
+    let doc = std::sync::Arc::as_ptr(&s.doc) as usize;
+    let colored = s.colored_components.is_some();
+    if appearance.doc != Some((doc, colored)) {
+        appearance.doc = Some((doc, colored));
+        appearance.faces = face_appearance_hashes(&s.doc);
+        // A design or colouring edit can key any body differently; the resolved looks whose
+        // key comes back unchanged are still reused.
+        appearance.keys.clear();
+    }
+    // The blocks the last scene built, reused when their bodies come back as they were.
+    let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+    let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
+    // Each scene's bodies since its last block, and their key so far.
+    let mut runs: Vec<(Vec<BodyDraw>, std::collections::hash_map::DefaultHasher)> =
+        (0..scenes).map(|_| (Vec::new(), std::collections::hash_map::DefaultHasher::new())).collect();
+    // Bodies drawn from the same triangles more than once (a part placed by many occurrences)
+    // are drawn as instances of them: one copy of the triangles on the GPU, and none moved on
+    // the CPU.
+    let mut instances = Instances::new(app, &shown, shaded);
+    let mut thread_budget = solidcraft_engine::cosmetic_threads::Budget::default();
+    for ((b, slots), at) in shown.into_iter().zip(slots).zip(shown_at) {
+        let scene = scene_of(at);
+        let Some(sc) = out.get_mut(scene) else { continue };
+        let faded = body_faded(app, b, &active_bodies);
+        let identity = match appearance.keys.get(&b.name).copied() {
+            Some(key) => key,
+            None => {
+                let key = body_appearance_key(&s.doc, b, &appearance.faces, colored);
+                appearance.keys.insert(b.name.clone(), key);
+                key
+            }
+        };
+        let resolved = match appearance.bodies.get(&b.name) {
+            Some((key, resolved)) if *key == identity => resolved.clone(),
+            _ => {
+                let resolved = std::sync::Arc::new(resolve_appearance(app, b));
+                appearance.bodies.insert(b.name.clone(), (identity, resolved.clone()));
+                #[cfg(test)]
+                {
+                    appearance.resolved = appearance.resolved.saturating_add(1);
+                }
+                resolved
+            }
+        };
+        set_palette_color(&mut arena, &mut palette, slots.edge, edge_col);
+        set_palette_color(&mut arena, &mut palette, slots.hidden_edge, hidden_col);
+        if app.preferences.cosmetic_threads
+            && thread_budget.available()
+            && shaded
+            && !faded
+            && thread_budget.has_thread(&b.name, &st.threads)
+            && resolved.opacity >= 0.999
+            && resolved.face_looks.values().all(|l| l.opacity >= 0.999)
+        {
+            let mesh = shown_mesh(app, b, &active_bodies);
+            for (a, c) in solidcraft_engine::cosmetic_threads::segments_with_budget(b, &mesh, &st.threads, &mut thread_budget) {
+                sc.line(a.to_f32(), c.to_f32(), slots.edge, 0.85, false);
+            }
+        }
+        let base = resolved.component.or(resolved.body).unwrap_or(tk.body);
+        let col = if faded { c4(base.gamma_multiply(0.35)) } else { c4(base) };
+        set_palette_color(&mut arena, &mut palette, slots.body, col);
+        // Appearances: the body's opacity, and faces with looks of their own.
+        let opacity = resolved.opacity;
+        let face_looks = &resolved.face_looks;
+        let faces = b.body.face_count();
+        let mut face_colors = Vec::with_capacity(faces);
+        let mut face_classes = Vec::with_capacity(faces);
+        for f in 0..faces {
+            let look = face_looks.get(&f);
+            let color = look.map_or(base, |l| Color32::from_rgb(l.color[0], l.color[1], l.color[2]));
+            let opacity = look.map_or(opacity, |l| l.opacity);
+            let (rgba, class) = if faded {
+                (c4(color.gamma_multiply(0.35)), crate::gpu::TriClass::Faded)
+            } else if opacity < 0.999 {
+                let mut rgba = c4(color);
+                rgba[3] = (opacity.clamp(0.05, 1.0) * 255.0).round() as u8;
+                (rgba, crate::gpu::TriClass::Glass)
+            } else {
+                (c4(color), crate::gpu::TriClass::Opaque)
+            };
+            let slot = slots.face(f);
+            set_palette_color(&mut arena, &mut palette, slot, rgba);
+            face_colors.push(slot);
+            face_classes.push(class);
+        }
+        let closed = b.is_closed();
+        let class = plan_class(app, &face_classes);
+        let planned = class.and_then(|class| drawn_plan(app, b, true).map(|plan| (plan, class)));
+        let on_gpu = planned.is_some();
+        if let Some((plan, class)) = planned {
+            sc.planned.push(crate::gpu::PlannedBody { plan, face_colors: face_colors.clone(), class, closed });
+        }
+        // Opaque, faded and see-through bodies alike, in one colour (faces of their own colour
+        // are built as before).
+        let look = if faded {
+            crate::gpu::InstanceLook::Faded
+        } else if opacity < 0.999 {
+            crate::gpu::InstanceLook::Glass
+        } else {
+            crate::gpu::InstanceLook::Opaque
+        };
+        let alpha = match look {
+            crate::gpu::InstanceLook::Faded => col[3],
+            crate::gpu::InstanceLook::Glass => (opacity.clamp(0.05, 1.0) * 255.0).round() as u8,
+            crate::gpu::InstanceLook::Opaque => 255,
+        };
+        set_palette_color(&mut arena, &mut palette, slots.instance, [col[0], col[1], col[2], alpha]);
+        let instanced = (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look, scene)).flatten();
+        let name = b.name.clone();
+        let body = match instanced {
+            Some((mesh, place)) => BodyDraw {
+                name,
+                mesh,
+                place: Some(place),
+                face_colors,
+                body_color: slots.body,
+                face_classes,
+                faded,
+                closed,
+                on_gpu: true,
+                slot_base: slots.faces,
+                edge: slots.edge,
+                hidden_edge: slots.hidden_edge,
+            },
+            None => BodyDraw {
+                name,
+                mesh: drawn_mesh(app, b),
+                place: None,
+                face_colors,
+                body_color: slots.body,
+                face_classes,
+                faded,
+                closed,
+                on_gpu,
+                slot_base: slots.faces,
+                edge: slots.edge,
+                hidden_edge: slots.hidden_edge,
+            },
+        };
+        let key = body.key(shaded, edges, hidden_edges, markers);
+        let Some((run, run_key)) = runs.get_mut(scene) else { continue };
+        key.hash(run_key);
+        run.push(body);
+        // Blocks end where a body's own key says, so a body added or removed changes only its
+        // own block, not every block after it.
+        if key.is_multiple_of(16) || run.len() >= 64 {
+            let draws = std::mem::take(run);
+            let block_key = std::mem::replace(run_key, std::collections::hash_map::DefaultHasher::new()).finish();
+            push_block(sc, &mut kept, &mut made, block_key, draws, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
+        }
+    }
+    for ((run, run_key), sc) in runs.into_iter().zip(out.iter_mut()) {
+        if !run.is_empty() {
+            push_block(sc, &mut kept, &mut made, run_key.finish(), run, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
+        }
+    }
+    // Where each CPU-built body's triangles are in the model's blocks, for whole-body
+    // highlights (see `highlight_block_tris`).
+    let mut body_tris = std::collections::HashMap::new();
+    for (key, c) in &made {
+        for range in &c.ranges {
+            if !range.vertices.is_empty() {
+                body_tris
+                    .insert(range.name.clone(), crate::gpu::BlockTris { block: *key, tris: range.opaque.clone(), vertices: range.vertices.clone() });
+            }
+        }
+    }
+    if let Ok(mut m) = app.viewport.body_tris.lock() {
+        *m = body_tris;
+    }
+    // Every shown body has its entries, so only a larger map holds bodies no longer shown.
+    if appearance.bodies.len() > shown_names.len() || appearance.keys.len() > shown_names.len() {
+        let names: std::collections::HashSet<&str> = shown_names.iter().copied().collect();
+        appearance.bodies.retain(|name, _| names.contains(name.as_str()));
+        appearance.keys.retain(|name, _| names.contains(name.as_str()));
+    }
+    if let Ok(mut b) = app.viewport.blocks.lock() {
+        *b = made;
+    }
+    for (sc, instanced) in out.iter_mut().zip(instances.finish(app, scenes)) {
+        sc.instanced = instanced;
+        sc.palette = palette.clone();
+    }
+    out
 }
 
 /// The colour of a measured seam whose highest order met is `order`, from the theme's
@@ -1910,22 +1954,35 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) {
-    // The bodies' box in the camera's Z-up frame (the ground is its XY plane).
-    let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
     let boxes = body_bounds(app, st);
-    for (x, (_, bb)) in st.bodies.iter().zip(boxes.iter()) {
-        if bb.is_empty() || !app.body_visible(&x.name) {
-            continue;
-        }
-        for i in 0..8 {
-            let p = Vec3::new(
-                if i & 1 == 0 { bb.min.x } else { bb.max.x },
-                if i & 2 == 0 { bb.min.y } else { bb.max.y },
-                if i & 4 == 0 { bb.min.z } else { bb.max.z },
-            );
-            b.add(app.cam.to_frame(p));
-        }
+    let shown = st.bodies.iter().zip(boxes.iter()).filter(|(x, (_, bb))| !bb.is_empty() && app.body_visible(&x.name));
+    let under = ground_shadow_box(app, shown.flat_map(|(_, (_, bb))| box_corners(bb)));
+    ground_shadow_in(sc, app, under);
+}
+
+/// The corners of box `bb`.
+pub(crate) fn box_corners(bb: &solidcraft_engine::geom::Aabb3) -> [Vec3; 8] {
+    std::array::from_fn(|i| {
+        Vec3::new(
+            if i & 1 == 0 { bb.min.x } else { bb.max.x },
+            if i & 2 == 0 { bb.min.y } else { bb.max.y },
+            if i & 4 == 0 { bb.min.z } else { bb.max.z },
+        )
+    })
+}
+
+/// The box round the points `corners` (the shown bodies' boxes' corners) in the camera's Z-up
+/// frame, whose XY plane is the ground the shadow lies on.
+pub(crate) fn ground_shadow_box(app: &SolveApp, corners: impl Iterator<Item = Vec3>) -> solidcraft_engine::geom::Aabb3 {
+    let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
+    for p in corners {
+        b.add(app.cam.to_frame(p));
     }
+    b
+}
+
+/// The ground shadow under `b` ([`ground_shadow_box`]).
+pub(crate) fn ground_shadow_in(sc: &mut GpuScene, app: &SolveApp, b: solidcraft_engine::geom::Aabb3) {
     if b.is_empty() {
         return;
     }
@@ -2243,7 +2300,9 @@ type BodyBounds = (std::sync::Arc<solidcraft_engine::doc::ModelState>, std::sync
 /// The model's extent: bodies (from the cached boxes) and sketches.
 pub fn model_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
     let st = crate::open_meshing::shown_world(app);
-    let bodies = body_bounds(app, &st).iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, x)| a.union(x));
+    // A joint drag drawn in layers: its moving parts where the frame draws them.
+    let bodies = layers::bodies_bounds(app)
+        .unwrap_or_else(|| body_bounds(app, &st).iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, x)| a.union(x)));
     let mut b = bodies.union(&sketch_bounds(app, &st));
     for c in solidcraft_engine::view::shown_point_clouds(&app.session) {
         for p in c.world_corners().into_iter().flatten() {
@@ -2484,7 +2543,9 @@ impl<T: PartialOrd + Copy> Near<T> {
 
 fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, all: bool, include_midpoints: bool, through: bool) -> Vec<Hit> {
     let s = &app.session;
-    let st = crate::open_meshing::shown_world(app);
+    // A joint drag drawn in layers shows its moving parts where the world it began on has them,
+    // moved on the GPU: a pick meanwhile asks for the exact places.
+    let st = if layers::world(app).is_some() { crate::open_meshing::session_world(s) } else { crate::open_meshing::shown_world(app) };
     let bounds = body_bounds(app, &st);
     // Bodies a Move dialog's earlier types moved are picked where they stand, as the preview
     // draws them: their mesh placed, and their box, moved on by that move.
@@ -3131,8 +3192,13 @@ fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
 }
 
 /// Why the model cannot be placed, across the bottom of the viewport, while it cannot: the
-/// viewport then shows no placed bodies (see `open_meshing::session_world`).
+/// viewport then shows no placed bodies (see `open_meshing::session_world`). Not asked while a
+/// joint drag is drawn in layers: the world shown is the one the drag began on, and asking would
+/// place the drag's frame in every frame (#6325).
 fn placement_note(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
+    if layers::world(app).is_some() {
+        return;
+    }
     let Some(why) = crate::open_meshing::placement_error(&app.session) else { return };
     let t = Tokens::get();
     let text = format!("The model cannot be placed: {why}");
@@ -4414,6 +4480,8 @@ pub(crate) fn preview_should_roll_back(app: &SolveApp, held: crate::tool_modifie
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::joint_handles::sync(app);
     let t = Tokens::get();
+    // Before anything reads the world shown: a joint drag drawn in layers shows the one it began on.
+    layers::follow(app);
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
     refresh_layout(app, ui.ctx());
@@ -4513,7 +4581,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Drawn on the GPU; without one (the headless harness, tests) the model is not drawn.
     if app.viewport.gpu.is_some() {
         if key != app.viewport.key {
-            let sc = build_scene(app);
+            let sc = match layers::scenes(app, key) {
+                Some(sc) => sc,
+                None => build_scene(app),
+            };
             if let Ok(mut slot) = app.viewport.slot.lock() {
                 *slot = Some(sc);
             }
@@ -4590,6 +4661,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 [r, g, b]
             }),
             sky: sky_uniform(app.preferences.dark_parts_shading, proj.cam.up),
+            layers: layers::frame(app),
         });
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
@@ -5091,6 +5163,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Captured handle motion is handled below, including the release frame.
             } else if crate::joint_drag::active(app) {
                 crate::joint_drag::to(app, &proj, p);
+                // The rest of the frame (its overlays) reads the world shown: from the drag's
+                // first frame on, the one it began on, not the frame's placed again.
+                layers::follow(app);
             } else if crate::occurrence_drag::active(app) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 crate::occurrence_drag::to(app, &proj, p);
@@ -6481,7 +6556,7 @@ fn midpoint_marker(painter: &egui::Painter, at: Pos2, color: Color32) {
 /// drawn too (#3267). Not the sketch's origin, projected points, or a sketch's points while it
 /// hides them.
 pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
-    let st = crate::open_meshing::session_world(&app.session);
+    let st = crate::open_meshing::shown_world(app);
     let mut out = Vec::new();
     for sid in visible_sketches(app) {
         if app.session.active_sketch == Some(sid) {
@@ -8507,6 +8582,7 @@ mod tests {
                     hover_tint: [0.0; 3],
                     selection_tint: [0.0; 3],
                     hatch: Default::default(),
+                    layers: Vec::new(),
                 };
                 let t0 = std::time::Instant::now();
                 let mut encoder = device.create_command_encoder(&Default::default());
