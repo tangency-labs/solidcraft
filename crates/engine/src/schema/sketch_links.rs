@@ -9,8 +9,8 @@ use serde_json::Value;
 
 use super::types::present;
 
-/// A sketch by its feature id or name, with the message `sketch::target_sketch` gives. Whether
-/// a sketch has that id or name is checked by the handler.
+/// A sketch by its feature id or name, with the message `sketch_store::target` gives; `null`, as
+/// there, is no sketch given. Whether a sketch has that id or name is checked by the handler.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SketchKey(pub Value);
 
@@ -84,8 +84,7 @@ impl JsonSchema for RepairLinkId {
 #[schemars(deny_unknown_fields)]
 pub struct ReferencesParams {
     /// The sketch. Default: the sketch being edited, else every sketch with references.
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "SketchKey")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketch: Option<SketchKey>,
 }
 
@@ -95,8 +94,7 @@ pub struct ReferencesParams {
 #[schemars(deny_unknown_fields)]
 pub struct UpdateReferencesParams {
     /// The sketch. Default: the sketch being edited, else every sketch with references.
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "SketchKey")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketch: Option<SketchKey>,
     /// First capture the uncaptured moves of the occurrence placements the references read.
     /// Default: false.
@@ -125,8 +123,7 @@ pub struct LinksParams {
     #[schemars(with = "IdList")]
     pub entities: Option<IdList>,
     /// The sketch. Default: the sketch being edited.
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "SketchKey")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketch: Option<SketchKey>,
 }
 
@@ -147,8 +144,7 @@ pub struct LinkVisibilityParams {
     #[schemars(with = "IdList")]
     pub entities: Option<IdList>,
     /// The sketch. Default: the sketch being edited.
-    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "SketchKey")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sketch: Option<SketchKey>,
     /// Shown (true) or hidden (false). Default: shown if any of them is hidden, else hidden.
     #[serde(default)]

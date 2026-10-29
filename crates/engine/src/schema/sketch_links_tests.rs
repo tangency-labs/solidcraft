@@ -21,7 +21,7 @@ fn schemas_and_the_key_check_agree() {
 fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
         ("sketch.references", json!({"sketch": true})),
-        ("sketch.references", json!({"sketch": null})),
+        ("sketch.references", json!({"sketch": {"id": 1}})),
         ("sketch.update_references", json!({"sketch": [1]})),
         ("sketch.freeze_link", json!({"sketch": 1, "links": "a"})),
         ("sketch.resume_link", json!({"sketch": 1, "entities": [1]})),
