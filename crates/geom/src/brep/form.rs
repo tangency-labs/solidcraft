@@ -590,6 +590,11 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
         // and a box over both is more than a turn wide.
         let (mut l_lo, mut l_hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
         let mut prev: Option<[f64; 2]> = None;
+        // The loop's bounds in each direction, each with the number of poles the loop had passed
+        // through when it got there; and the first and last points off a pole.
+        let mut bounds: Vec<(usize, usize, f64)> = Vec::new();
+        let (mut crossings, mut on_pole) = (0usize, false);
+        let mut first: Option<[f64; 2]> = None;
         for (c, [t0, t1], forward) in l {
             let curve = super::eval::CurveEval::new(c).ok()?;
             // The point at `t` on the label, a periodic parameter unwrapped next to `near`.
@@ -604,28 +609,34 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
                 }
                 Some(q)
             };
-            let mut samples: Vec<(f64, [f64; 2], [bool; 2])> = Vec::with_capacity(EXTENT_POINTS + 1);
+            let mut samples: Vec<(f64, [f64; 2], [bool; 2], usize)> = Vec::with_capacity(EXTENT_POINTS + 1);
             for k in 0..=EXTENT_POINTS {
                 let f = k as f64 / EXTENT_POINTS as f64;
                 let t = if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f };
                 let q = at(t, prev)?;
                 // At a pole the collapsed parameter is anything: it bounds nothing.
                 let pole = eval.pole(q);
-                for d in 0..2 {
-                    if !pole.get(d).copied().unwrap_or(false) {
-                        l_lo[d] = l_lo[d].min(q[d]);
-                        l_hi[d] = l_hi[d].max(q[d]);
+                if pole.iter().any(|p| *p) {
+                    on_pole = first.is_some();
+                } else {
+                    if on_pole {
+                        crossings += 1;
+                        on_pole = false;
                     }
-                }
-                if !pole.iter().any(|p| *p) {
+                    first = first.or(Some(q));
                     prev = Some(q);
                 }
-                samples.push((t, q, pole));
+                for (d, x) in q.iter().enumerate() {
+                    if !pole.get(d).copied().unwrap_or(false) {
+                        bounds.push((crossings, d, *x));
+                    }
+                }
+                samples.push((t, q, pole, crossings));
             }
             // A sample is a point of the boundary, not its extreme: each sample higher (or lower)
             // than its neighbours brackets an extreme of the edge, which is found there.
             for k in 0..samples.len() {
-                let (_, q, pole) = samples[k];
+                let (_, q, pole, passed) = samples[k];
                 let (a, b) = (samples[k.saturating_sub(1)].0, samples[(k + 1).min(samples.len() - 1)].0);
                 for d in 0..2 {
                     // Next to a pole the parameter it collapses is no function of the point: a
@@ -646,9 +657,27 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
                         }
                         let f = |t: f64| at(t, Some(q)).map_or(f64::NEG_INFINITY, |p| sign * p[d]);
                         let x = sign * golden_max(&f, a.min(b), a.max(b));
-                        l_lo[d] = l_lo[d].min(x);
-                        l_hi[d] = l_hi[d].max(x);
+                        bounds.push((passed, d, x));
                     }
+                }
+            }
+        }
+        // Through a pole the loop goes on from anywhere round the periodic direction it
+        // collapses, so continuing from the point before it is no measure of where: a loop
+        // through a pole closes in (u, v), the pole taking up its turn (a hemisphere bounded by its
+        // rim and its seam, down the seam to the pole and up it on the other side). Past the
+        // first pole, the loop is moved the whole periods that close it.
+        let last = prev;
+        for d in 0..2 {
+            let shift = match (period.get(d), first, last) {
+                (Some(Some(per)), Some(f), Some(e)) if crossings > 0 => -((e[d] - f[d]) / per).round() * per,
+                _ => 0.0,
+            };
+            for &(passed, dd, x) in &bounds {
+                if dd == d {
+                    let x = if passed > 0 { x + shift } else { x };
+                    l_lo[d] = l_lo[d].min(x);
+                    l_hi[d] = l_hi[d].max(x);
                 }
             }
         }

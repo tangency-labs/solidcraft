@@ -850,6 +850,27 @@ fn a_hole_beside_the_seam_lies_in_its_face_turn() {
     assert!(v[0].abs() < 1e-9 && (v[1] - h).abs() < 1e-9, "{v:?}");
 }
 
+/// A hemisphere bounded by its rim and its seam, its loop starting a quarter turn along the rim
+/// (the order a re-imported dimple's loop came in): along the rim to the seam, down the seam to
+/// the pole, up it on the other side and round the rest of the rim. Through the pole the loop goes
+/// on a turn away; continuing from the point before the pole put the seam's second use on the
+/// first and the box a quarter turn off the seam (oracle 14: the re-imported face's form over
+/// -270..90 degrees, its pcurves over 0..360, and its area a quarter short).
+#[test]
+fn a_loop_through_a_pole_closes_its_turn_from_the_seam() {
+    let r = 15.0f64;
+    let sphere = Surface::Sphere { frame: Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: r };
+    let rim = Curve::Circle { frame: Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: r };
+    let seam = Curve::Circle { frame: Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 0., -1.] }, radius: r };
+    let outer =
+        vec![(&rim, [0., FRAC_PI_2], false), (&seam, [0., FRAC_PI_2], true), (&seam, [0., FRAC_PI_2], false), (&rim, [FRAC_PI_2, TAU], false)];
+    let [u, v] = form::extent(&sphere, &[outer]).expect("an extent");
+    assert!((u[1] - u[0] - TAU).abs() < 1e-9, "one turn: {u:?}");
+    let from = u[0].rem_euclid(TAU);
+    assert!(from.min(TAU - from) < 1e-9, "from the seam: {u:?}");
+    assert!((v[0] + FRAC_PI_2).abs() < 1e-9 && v[1].abs() < 1e-9, "{v:?}");
+}
+
 /// A face's box reaches its boundary's extremes, not its samples' nearest ones: an ellipse cut
 /// from a cylinder of radius 20 by a plane at 45 degrees rises 20 above its centre, at an angle
 /// between the points the box is sampled at. Short of it, the face's NURBS form stopped below the
