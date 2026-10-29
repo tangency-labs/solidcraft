@@ -17,7 +17,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             ui_kit::row(ui, app.tr("ui.length_decimals"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.length_decimals, 0..=6, 1.0);
+                ui_kit::settings_number(ui, &mut app.preferences.length_decimals, 0..=6);
                 ui.add_space(t.space_6);
                 let sample = format_length(
                     12.5 * unit_scale(&app.preferences.default_units).0,
@@ -27,7 +27,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::settings_precision_sample(ui, &sample);
             });
             ui_kit::row(ui, app.tr("ui.angle_decimals"), |ui| {
-                ui_kit::settings_number(ui, &mut app.preferences.angle_decimals, 0..=6, 1.0);
+                ui_kit::settings_number(ui, &mut app.preferences.angle_decimals, 0..=6);
                 ui.add_space(t.space_6);
                 ui_kit::settings_precision_sample(ui, &format!("{:.*}°", usize::from(app.preferences.angle_decimals.min(6)), 45.0));
             });

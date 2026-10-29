@@ -5054,6 +5054,48 @@ mod tests {
         }
     }
 
+    /// A Preferences number is typed, not dragged: Enter commits the text, text that is not a
+    /// number keeps the value, a number past the field's range is clamped, and leaving the field
+    /// (here by pressing OK) commits what was typed without Enter.
+    #[test]
+    fn a_preferences_number_commits_on_enter_and_clamps_to_its_range() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        // A bounded turn limit: the field shows only while "Unlimited" is off.
+        h.call("ui.prefs", json!({"agent_chat_turn_limit": 50}));
+        h.call("ui.prefs", json!({"open": "AI"}));
+        let (row, field) = ("Changes per message", "dialog:Changes per message");
+        // Click, select the whole text, type: what a person does to replace a count. The handle is
+        // read afresh each time, so a page that scrolled in between still gets the click.
+        let type_over = |h: &mut crate::scenario::Harness, text: &str, enter: bool| {
+            super::reveal_preference(h, &format!("dialog:row:{row}"));
+            // The window takes the first click to come forward; the field gets the next.
+            for _ in 0..2 {
+                h.step(&json!({"click": {"handle": field}})).unwrap();
+                if h.ctx.memory(|m| m.focused()).is_some() {
+                    break;
+                }
+            }
+            assert!(h.ctx.memory(|m| m.focused()).is_some(), "the click takes the keyboard");
+            h.step(&json!({"key": "A", "cmd": true})).unwrap();
+            h.step(&json!({"text": text})).unwrap();
+            if enter {
+                h.step(&json!({"key": "Enter"})).unwrap();
+            }
+        };
+        type_over(&mut h, "37", true);
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, 37);
+        type_over(&mut h, "abc", true);
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, 37, "text that is not a number keeps the value");
+        type_over(&mut h, "999", true);
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, 200, "a count past the range is clamped");
+        type_over(&mut h, "45", false);
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, 200, "typing alone does not commit");
+        h.step(&json!({"click": {"handle": "prefs:ok"}})).unwrap();
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, 45, "leaving the field commits what was typed");
+        assert!(!h.app.prefs_window.open);
+    }
+
     /// Display quality (#1287) is a preference like any other: set by name, checked, saved with
     /// the others, back to Normal with Restore Defaults.
     #[test]

@@ -155,6 +155,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `value_pair` | Paired captions/expressions; optional independent field names | row/field tokens, `space_8` |
 | `fraction_field`, `scalar_field`, `mixed_scalar_field` | Locale-aware bounded dimensionless values; scalar fields fill their control column; the mixed variant accepts a translated placeholder | form control/font tokens |
 | `number_field` | Integer/decimal field with caller range, drag speed and suffix | form control/font tokens |
+| preferences: `settings_number` | Bounded preference value typed in a plain field: commits on Enter or focus lost, clamps to its range, keeps the value on text that is not a number | form control/font tokens |
 | `length_field`, `angle_field` | Length in design units, angle in degrees | form control/font tokens |
 | `slider` + `Slider` options | One token-painted track/thumb over native slider/value interaction; optional step, caller formatting, whole-step manipulation and hidden value editor | `control_height`, `space_24/8/4/2`, form control/font tokens |
 | `placement_field` | Stable focus ID; drawing tool owns Enter/Tab validation and completion | `control_fill`, `font_body`, `text`, `control_height`, spacing |

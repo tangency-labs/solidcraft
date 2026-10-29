@@ -66,14 +66,58 @@ pub(crate) fn settings_control_width<R>(ui: &mut Ui, width: f32, add: impl FnOnc
     ui.allocate_ui_with_layout(vec2(width, Tokens::get().control_height), Layout::left_to_right(Align::Center), add).inner
 }
 
-/// A small numeric control, using the same number editor and geometry as every form.
-pub(crate) fn settings_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>, speed: f64) -> egui::Response {
-    ui.scope(|ui| {
-        let t = Tokens::get();
-        ui.spacing_mut().interact_size.x = t.form_label_width - t.space_6;
-        super::number_field(ui, value, range, speed, "")
-    })
-    .inner
+/// A bounded preference number, typed rather than dragged: no drag speed, resize cursor or
+/// step arrows, which on a count or a precision read as something to scrub.
+/// Commits on Enter or when it loses focus; text that is not a number keeps the value, and a
+/// number past `range` is clamped. Returns the field's response, `changed` on a committed edit.
+pub(crate) fn settings_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>) -> egui::Response {
+    let t = Tokens::get();
+    // One buffer per field: `ui.id()` carries the row's id salt and its page, so two fields that
+    // share a label on two pages (or under one row's label) never share the text being typed.
+    let id = ui.id().with("settings_number");
+    // Read the in-progress text before asking about focus: on the lost_focus() frame `has_focus`
+    // is already false, so gating the load on it would drop the edit before the commit below.
+    let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| value.to_f64().to_string());
+    let mut response = ui.add_sized(
+        vec2(t.form_label_width - t.space_6, super::metrics::row_height()),
+        super::text_input(egui::TextEdit::singleline(&mut text))
+            .id(id)
+            .font(FontId::monospace(t.font_label))
+            .background_color(t.control_fill)
+            .clip_text(true),
+    );
+    crate::theme::TabAccent::number_focus(ui, &response);
+    // The editor marks the response changed on every keystroke; a caller of a preference number
+    // acts on the committed value, so only the commit below may set it.
+    response.flags.remove(egui::response::Flags::CHANGED);
+    if response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+        if let Some(n) = crate::prefs::parse_number(&text) {
+            let n = T::from_f64(n);
+            // `clamp` needs `Ord`; `Numeric` only promises `PartialOrd`.
+            let n = if n < *range.start() {
+                *range.start()
+            } else if n > *range.end() {
+                *range.end()
+            } else {
+                n
+            };
+            if n != *value {
+                *value = n;
+                response.mark_changed();
+            }
+        }
+        ui.data_mut(|d| d.remove::<String>(id));
+    } else if response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text.clone()));
+    }
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(super::layout::label(ui)));
+        // What the field shows, which is the text being typed while it has the keyboard.
+        info.current_text_value = Some(text.clone());
+        info
+    });
+    super::layout::publish_geometry(ui, &response);
+    response
 }
 
 /// An illustrative half-hour of autosave marks, using the actual configured interval.
