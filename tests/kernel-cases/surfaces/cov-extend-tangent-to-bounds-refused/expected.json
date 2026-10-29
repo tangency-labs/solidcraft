@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a tangent extension back to the surface's bounds: refused, only a natural one goes there",
+ "source": "invariants",
+ "method": "the bounds are the surface's own; a tangent continuation leaves the surface",
+ "outcome": "refused",
+ "refusal": "only a natural extension goes back to the surface's bounds"
+}
