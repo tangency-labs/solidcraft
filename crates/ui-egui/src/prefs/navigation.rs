@@ -16,7 +16,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 };
                 let mut keys = Vec::new();
                 if binding.keys.shift {
-                    keys.push("Shift");
+                    keys.push(crate::i18n::tr("prefs.shift"));
                 }
                 if binding.keys.ctrl {
                     keys.push("Ctrl/Cmd");
