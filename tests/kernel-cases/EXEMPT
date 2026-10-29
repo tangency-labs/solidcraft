@@ -39,7 +39,6 @@ component.rename                  a component name
 component.replace_with_link       component links
 component.unlock                  component locking
 component.update_links            component links
-contact.list                      a listing of contact sets
 diagnostics.crash_report          crash reports
 diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
@@ -59,10 +58,8 @@ edit.restore_checkpoint           undo, redo and checkpoints: an earlier state r
 edit.undo                         undo, redo and checkpoints: an earlier state restored, no new geometry
 engine.commands                   the command registry itself
 engine.describe                   the command registry itself
-explode.create                    exploded views: display offsets
 explode.delete                    exploded views: display offsets
 explode.list                      exploded views: display offsets
-explode.show                      exploded views: display offsets
 expr.evaluate                     expression evaluation
 file.open_in_easyprint            hands the file to another program
 file.save                         saving the design
@@ -78,7 +75,6 @@ inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
-joint.list                        a listing of joints
 library.apply                     material and appearance libraries
 library.export                    material and appearance libraries
 library.inspect                   material and appearance libraries
@@ -97,8 +93,6 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
-motion.play                       plays a study in the view
-occurrence.properties             occurrence properties
 parameters.comment                parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.complete               parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.delete                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
@@ -111,7 +105,6 @@ parameters.move                   parameter bookkeeping; a value change that reb
 parameters.rename                 parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parameters.users                  parameter bookkeeping; a value change that rebuilds is parameters.change, which cases use
 parts.library                     a listing of the parts library
-plastic.rules                     a listing of plastic rules
 render.aging.describe             rendering: images, cameras, stages
 render.backends                   rendering: images, cameras, stages
 render.camera.fit                 rendering: images, cameras, stages
@@ -265,97 +258,17 @@ view.visual_style                 the view: camera, layout, display
 # that a case uses), and a new geometry command gets a case, not a line here.
 [to cover]
 body.repair                       repair: the solid a refused or open part becomes
-component.copy_bodies             assemblies: bodies copied into a component
-component.extract                 assemblies: bodies extracted to a design
-component.from_bodies             assemblies: a component made from bodies
-component.insert_design           assemblies: a design inserted
-component.move_bodies             assemblies: bodies moved between components
 component.move_sketches           assemblies: sketches moved between components
-component.paste_new               assemblies: a pasted new component
 component.revert_position         assemblies: a placement reverted
-config.activate                   configurations: a configured part rebuilt per row
-config.column                     configurations: a configured part rebuilt per row
-config.configure                  configurations: a configured part rebuilt per row
-config.preview                    configurations: a configured part rebuilt per row
-config.row                        configurations: a configured part rebuilt per row
-config.rule                       configurations: a configured part rebuilt per row
-config.rules                      configurations: a configured part rebuilt per row
-config.table                      configurations: a configured part rebuilt per row
-construct.axis.edge               construction: the plane, axis or point exactly
-construct.axis.normal_to_face     construction: the plane, axis or point exactly
-construct.axis.through_cylinder   construction: the plane, axis or point exactly
-construct.axis.two_planes         construction: the plane, axis or point exactly
-construct.plane.at_angle          construction: the plane, axis or point exactly
-construct.plane.midplane          construction: the plane, axis or point exactly
-construct.plane.perpendicular     construction: the plane, axis or point exactly
-construct.plane.tangent           construction: the plane, axis or point exactly
-construct.plane.three_points      construction: the plane, axis or point exactly
-construct.plane.two_edges         construction: the plane, axis or point exactly
-construct.point.along_path        construction: the plane, axis or point exactly
-construct.point.center            construction: the plane, axis or point exactly
-construct.point.edge_plane        construction: the plane, axis or point exactly
-construct.point.three_planes      construction: the plane, axis or point exactly
-construct.point.two_edges         construction: the plane, axis or point exactly
-construct.point.vertex            construction: the plane, axis or point exactly
-contact.check                     assemblies: contact sets and what they report
-contact.create                    assemblies: contact sets and what they report
-contact.disable_all               assemblies: contact sets and what they report
-contact.edit                      assemblies: contact sets and what they report
-contact.enable_all                assemblies: contact sets and what they report
-contact.enable_sets               assemblies: contact sets and what they report
 file.export_view_dxf              drawings: the projection of the model a view DXF holds
-frame.member                      frames: member bodies
-frame.profile.insert              frames: member bodies
-inspect.center_of_mass            inspect: the number or curves it reports
-inspect.clearance                 inspect: the number or curves it reports
-inspect.compare                   inspect: the number or curves it reports
-inspect.continuity                inspect: the number or curves it reports
-inspect.curvature_comb            inspect: the number or curves it reports
 inspect.draft                     inspect: the number or curves it reports
-inspect.interference              inspect: the number or curves it reports
-inspect.isocurve                  inspect: the number or curves it reports
-inspect.minimum_radius            inspect: the number or curves it reports
 inspect.parameter_sweep           inspect: results rebuilt over a parameter range
 inspect.section                   inspect: the number or curves it reports
-joint.as_built                    assemblies: joint placements and values
-joint.cam                         assemblies: joint placements and values
-joint.create                      assemblies: joint placements and values
-joint.delete                      assemblies: joint placements and values
-joint.drive                       assemblies: joint placements and values
-joint.edit                        assemblies: joint placements and values
-joint.gear                        assemblies: joint placements and values
-joint.inspect                     assemblies: joint placements and values
-joint.limits                      assemblies: joint placements and values
-joint.motion_link                 assemblies: joint placements and values
-joint.origin                      assemblies: joint placements and values
-joint.rack_pinion                 assemblies: joint placements and values
-joint.reach                       assemblies: joint placements and values
-joint.rigid_group                 assemblies: joint placements and values
-joint.screw                       assemblies: joint placements and values
-joint.solve                       assemblies: joint placements and values
-joint.sweep                       assemblies: joint placements and values
-motion.interference               assemblies: motion results
-motion.plot                       assemblies: motion results
-motion.study                      assemblies: motion results
-motion.trace                      assemblies: motion results
 motion.trace.edit                 assemblies: motion results
 motion.trace.keep                 assemblies: motion results
-occurrence.copy                   assemblies: an occurrence copied
-occurrence.drag                   assemblies: an occurrence dragged to a placement
-occurrence.reparent               assemblies: an occurrence moved in the tree
 parts.fastener                    standard parts: a fastener body
 parts.insert                      standard parts: a part body
 parts.resize                      standard parts: a part resized
-plastic.assign_rule               plastic: the feature body
-plastic.boss                      plastic: the feature body
-plastic.lip                       plastic: the feature body
-plastic.manage_rules              plastic: rules that rebuild the features using them
-plastic.rest                      plastic: the feature body
-sheet.export_bend_table           sheet metal: the bend table of a flat pattern
-sheet.export_dxf                  sheet metal: the flat pattern as DXF
-sheet.hem                         sheet metal: the feature body
-sheet.path_flange                 sheet metal: the feature body
-sheet.perforate                   sheet metal: the feature body
 sketch.arc3d                      sketch: a curve kind no case profiles yet
 sketch.auto_project               sketch from the model: curves the kernel computes from bodies
 sketch.conic                      sketch: a curve kind no case profiles yet
@@ -364,36 +277,7 @@ sketch.include_3d                 sketch from the model: curves the kernel compu
 sketch.intersect                  sketch from the model: curves the kernel computes from bodies
 sketch.intersection_curve         sketch from the model: curves the kernel computes from bodies
 sketch.isoparametric_curve        sketch from the model: curves the kernel computes from bodies
-sketch.project                    sketch from the model: curves the kernel computes from bodies
 sketch.project_to_surface         sketch from the model: curves the kernel computes from bodies
 sketch.spline.control_point_5     sketch: a curve kind no case profiles yet
 sketch.spline3d                   sketch: a curve kind no case profiles yet
 sketch.spun_profile               sketch from the model: curves the kernel computes from bodies
-solid.align                       solid modelling: the body it makes
-solid.boundary_fill               solid modelling: the body it makes
-solid.bounding_solid              solid modelling: the body it makes
-solid.cone                        solid modelling: the body it makes
-solid.pattern.path                solid modelling: the body it makes
-solid.replace_face                solid modelling: the body it makes
-solid.scale                       solid modelling: the body it makes
-solid.web                         solid modelling: the body it makes
-surface.blend                     surfaces: the surface body it makes
-surface.boundary                  surfaces: the surface body it makes
-surface.fair                      surfaces: the surface body it makes
-surface.match                     surfaces: the surface body it makes
-surface.offset                    surfaces: the surface body it makes
-surface.reverse_normal            surfaces: the surface body it makes
-surface.ruled                     surfaces: the surface body it makes
-surface.unstitch                  surfaces: the surface body it makes
-surface.untrim                    surfaces: the surface body it makes
-timeline.compute_all              timeline: the bodies after the rebuild
-timeline.delete                   timeline: the bodies after the rebuild
-timeline.edit                     timeline: the bodies after the rebuild
-timeline.group                    timeline: the bodies after the rebuild
-timeline.move_many                timeline: the bodies after the rebuild
-timeline.move_to_group            timeline: the bodies after the rebuild
-timeline.reorder                  timeline: the bodies after the rebuild
-timeline.reorder_many             timeline: the bodies after the rebuild
-timeline.roll_to                  timeline: the bodies after the rebuild
-timeline.suppress                 timeline: the bodies after the rebuild
-timeline.ungroup                  timeline: the bodies after the rebuild

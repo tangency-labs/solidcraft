@@ -6,7 +6,6 @@ crates/engine/src/cmd/surface_match.rs
 crates/engine/src/params.rs
 # Their evaluation.
 crates/doc/src/eval_surface.rs
-crates/doc/src/eval.rs
 # The kernel code they call.
 crates/kernel/src/boundary.rs
 crates/kernel/src/boundary_network.rs
@@ -15,7 +14,6 @@ crates/kernel/src/fair.rs
 crates/kernel/src/fill*.rs
 crates/kernel/src/loft*.rs
 crates/kernel/src/matchsurf.rs
-crates/kernel/src/native.rs
 crates/kernel/src/surface_extend.rs
 crates/kernel/src/surface_offset.rs
 crates/kernel/src/surface_ruled.rs
@@ -23,10 +21,5 @@ crates/kernel/src/surface_trim.rs
 crates/kernel/src/surface_untrim.rs
 crates/kernel/src/surfaces.rs
 crates/kernel/src/sweep*.rs
-crates/kernel/src/smlib_sweeps.rs
-crates/geom/src/fill*.rs
-crates/geom/src/network*.rs
 # SMLib and the rig itself.
-crates/smlib/**
-apps/solidcraft-cli/src/kernel_cases.rs
 tests/kernel-cases/surfaces/**

@@ -461,21 +461,44 @@ fn thread_grooves(
             format!("this {shown} mm shaft is too thin for a modelled {m} thread: {cut}; make the shaft {} mm for {m}{alt}", show_mm(d))
         }));
     }
-    // The section's radial span: from the root out past the surface (external), or from inside
-    // the hole wall out to the root (internal), so the cut leaves no skin.
+    // The section: from the root out past the surface (external), or from inside the hole wall
+    // out to the root (internal), so the cut leaves no skin, its flanks the groove's.
     // A taper thread's crests are cut by its major cone (external) or minor cone (internal),
-    // as the die or tap cuts them ([`taper_envelope`]): its groove reaches just past the crest,
-    // by as much as narrows the tooth's crest flat by a quarter (NPT's flat is 0.038 P).
-    let past = |g: &crate::thread_forms::GrooveProfile| 0.25 * g.crest_flat / (g.flank_lo.tan() + g.flank_hi.tan());
-    let span = |g: &crate::thread_forms::GrooveProfile| match (taper.is_some(), t.internal) {
-        (true, true) => (g.crest_r - past(g), g.root_r),
-        (true, false) => (g.root_r, g.crest_r + past(g)),
-        (false, true) => (radius.min(g.crest_r) - 0.1 * p, g.root_r),
-        (false, false) => (g.root_r, radius.max(d / 2.0) + 0.05 * p),
+    // as the die or tap cuts them ([`taper_envelope`]): its groove reaches past the crest by as
+    // much as narrows the tooth's crest flat by a quarter (NPT's flat is 0.038 P). The cone
+    // changes 1 in 32 along the axis (`major_at`) across the section's own width, so its edge
+    // there follows the cone at that margin rather than being cut square: square, its deeper
+    // corner stops short of the cone and leaves a sliver of each flank.
+    let cone = taper.map_or(0.0, |_| (major_at(t.start + 1.0) - major_at(t.start)) / 2.0);
+    let section_of = |g: &crate::thread_forms::GrooveProfile| -> (Vec<Vec2>, f64) {
+        let (tl, th) = (g.flank_lo.tan(), g.flank_hi.tan());
+        if taper.is_none() {
+            let (r0, r1) = if t.internal {
+                (radius.min(g.crest_r) - 0.1 * p, g.root_r)
+            } else {
+                (g.root_r, radius.max(d / 2.0) + 0.05 * p)
+            };
+            let ((lo0, hi0), (lo1, hi1)) = (g.extents(p, r0), g.extents(p, r1));
+            let wide = g.width(p, if t.internal { r0 } else { r1 });
+            return (vec![Vec2::new(r0, -lo0), Vec2::new(r1, -lo1), Vec2::new(r1, hi1), Vec2::new(r0, hi0)], wide);
+        }
+        // Depth from the root, out towards the crest: d(z) = dc + q·z along the edge, which
+        // meets the flanks z = −(h + d·tl) and z = h + d·th.
+        let o = if t.internal { -1.0 } else { 1.0 };
+        let q = o * cone;
+        let h = g.width(p, g.root_r) / 2.0;
+        let dc = o * (g.crest_r - g.root_r) + 0.25 * g.crest_flat / (tl + th);
+        let (z_lo, z_hi) = (-(h + dc * tl) / (1.0 + q * tl), (h + dc * th) / (1.0 - q * th));
+        let r = |z: f64| g.root_r + o * (dc + q * z);
+        let (root, edge) = ([Vec2::new(g.root_r, -h), Vec2::new(g.root_r, h)], [Vec2::new(r(z_lo), z_lo), Vec2::new(r(z_hi), z_hi)]);
+        // In the order the square section has: the inner radius's corners first.
+        let pts = if t.internal { vec![edge[0], root[0], root[1], edge[1]] } else { vec![root[0], edge[0], edge[1], root[1]] };
+        (pts, z_hi - z_lo)
     };
-    let (r0, r1) = span(&g);
-    let wide = if t.internal { r0 } else { r1 };
-    if g.width(p, wide) >= p * 0.98 {
+    let (mut section, wide) = section_of(&g);
+    let radii = |s: &[Vec2]| s.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), v| (a.min(v.x), b.max(v.x)));
+    let (r0, r1) = radii(&section);
+    if wide >= p * 0.98 {
         // The groove would be wider than a pitch: the face is far inside the thread (a hole
         // narrower than its minor diameter, a shaft thicker than its major one, #2688).
         let (m, dia) = (&t.designation, 2.0 * radius);
@@ -488,9 +511,6 @@ fn thread_grooves(
             format!("this {shown} mm shaft is too thick for a modelled {m} thread; make the shaft {} mm for {m}{alt}", show_mm(d))
         }));
     }
-    let (lo0, hi0) = g.extents(p, r0);
-    let (lo1, hi1) = g.extents(p, r1);
-    let mut section = vec![Vec2::new(r0, -lo0), Vec2::new(r1, -lo1), Vec2::new(r1, hi1), Vec2::new(r0, hi0)];
     if !(r0.is_finite() && r1.is_finite() && r0 > 0.0) {
         return Err(DocError::Invalid("thread dimensions are out of range".into()));
     }
@@ -503,7 +523,8 @@ fn thread_grooves(
     // the material (an external thread's away from the axis, past the surface; an internal
     // one's towards it, into the hole) as it turns. It lies past the full-form length, up to the
     // shoulder's clearance; at a free end, inside the face, the groove reaching nothing there.
-    let (w_lo, w_hi) = (lo0.max(lo1), hi0.max(hi1));
+    // How far the section reaches each way along the axis.
+    let (w_lo, w_hi) = section.iter().fold((0.0_f64, 0.0_f64), |(a, b), v| (a.max(-v.y), b.max(v.y)));
     let s0 = match (ends[0], ease[0] > 0.0) {
         (End::Free, false) => t.start - p,
         (End::Free, true) => t.start,
@@ -528,11 +549,8 @@ fn thread_grooves(
     let mut r0 = r0;
     let taper_rate = match taper {
         Some(_) => {
-            let gb = profile(major_at(s0));
-            let (a, b) = span(&gb);
-            let ((l0, h0), (l1, h1)) = (gb.extents(p, a), gb.extents(p, b));
-            section = vec![Vec2::new(a, -l0), Vec2::new(b, -l1), Vec2::new(b, h1), Vec2::new(a, h0)];
-            r0 = a;
+            section = section_of(&profile(major_at(s0))).0;
+            r0 = radii(&section).0;
             (major_at(s0 + lead) - major_at(s0)) / 2.0
         }
         None => 0.0,

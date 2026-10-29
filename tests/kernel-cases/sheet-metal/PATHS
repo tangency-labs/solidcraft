@@ -13,3 +13,5 @@ crates/engine/src/cmd/sheet.rs
 crates/kernel/src/offset_backend.rs
 crates/kernel/src/polyhedron.rs
 crates/kernel/src/sew.rs
+crates/doc/src/eval_more.rs
+crates/io/src/dxf_out.rs

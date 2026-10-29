@@ -5,38 +5,38 @@
  "method": "spheres r 5 on (0,0,0) and (20,0,0): 20 - 5 - 5 = 10 apart, from (5,0,0) to (15,0,0)",
  "results": [
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/overlaps",
-   "value": []
+   "json": []
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/near/0/a",
-   "value": "A"
+   "json": "A"
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/near/0/b",
-   "value": "B"
+   "json": "B"
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/near/0/distance_mm",
-   "value": 10.0
+   "json": 10.0
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/near/0/from",
-   "value": [
+   "json": [
     5,
     0,
     0
    ]
   },
   {
-   "command": 2,
+   "step": 3,
    "pointer": "/near/0/to",
-   "value": [
+   "json": [
     15,
     0,
     0

@@ -10,11 +10,8 @@ crates/engine/src/cmd/compare.rs
 crates/engine/src/cmd/inspect.rs
 # What they measure with: the comparison of two surfaces, a face's isocurves, seam continuity,
 # body distance and mass properties.
-crates/geom/src/compare.rs
-crates/doc/src/eval.rs
 crates/kernel/src/iso.rs
 crates/kernel/src/continuity.rs
 crates/kernel/src/continuity_order.rs
 crates/kernel/src/distance.rs
-crates/kernel/src/measure.rs
 tests/kernel-cases/inspect/**

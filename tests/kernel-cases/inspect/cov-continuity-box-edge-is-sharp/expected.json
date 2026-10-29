@@ -5,29 +5,29 @@
  "method": "box 40 x 30 x 20 with a corner at the origin: the faces y = 0 and z = 0 meet at 90 deg along their edge: g0, sharp, normal angle 90",
  "results": [
   {
-   "command": 1,
+   "step": 2,
    "pointer": "/summary/edges",
-   "value": 1
+   "json": 1
   },
   {
-   "command": 1,
+   "step": 2,
    "pointer": "/bodies/0/edges/0/order",
-   "value": "g0"
+   "json": "g0"
   },
   {
-   "command": 1,
+   "step": 2,
    "pointer": "/bodies/0/edges/0/verdict",
-   "value": "sharp"
+   "json": "sharp"
   },
   {
-   "command": 1,
+   "step": 2,
    "pointer": "/bodies/0/edges/0/normal_angle_deg/value",
-   "value": 90.0
+   "json": 90.0
   },
   {
-   "command": 1,
+   "step": 2,
    "pointer": "/bodies/0/edges/0/gap_mm/value",
-   "value": 0.0,
+   "json": 0.0,
    "rel": 1e-06
   }
  ]

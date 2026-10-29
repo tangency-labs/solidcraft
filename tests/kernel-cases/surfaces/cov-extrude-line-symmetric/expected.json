@@ -1,13 +1,13 @@
 {
  "sources": [],
- "what": "a line extruded symmetric 10 as a surface: surface.extrude's distance is per side (its legacy convention, kept by default), so 10 each way",
+ "what": "a line extruded symmetric 10 as a surface with no convention: the total, 5 each side of the sketch plane, as for a solid extrude (#9091)",
  "source": "analytic",
- "method": "surface.extrude without `convention` keeps legacy_per_side (crates/engine/src/cmd/features.rs, extrude_convention_tests): the plane y = 0, x 0..10, z -10..10, area 200, 4 free edges",
+ "method": "surface.extrude without `convention` reads the distance as the total (default_extrude_convention): the plane y = 0, x 0..10, z -5..5, area 100, 4 free edges",
  "valid": false,
  "body_count": 1,
  "faces": 1,
  "boundary_edges": 4,
- "area_mm2": 200.0,
+ "area_mm2": 100.0,
  "surface_types": [
   "plane"
  ],
@@ -15,12 +15,12 @@
   "min": [
    0,
    0,
-   -10
+   -5
   ],
   "max": [
    10,
    0,
-   10
+   5
   ]
  }
 }
