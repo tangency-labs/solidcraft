@@ -1585,11 +1585,14 @@ fn an_ellipse_half_axis_dimension_follows_where_its_text_is_pulled() {
         assert_eq!(dimension(turn, json!({"text_at": near, "previous_axis": "minor"})).0, "minor");
         assert_eq!(dimension(turn, json!({"text_at": turned(16.0, 4.0, turn), "previous_axis": "major"})).0, "minor");
     }
-    // An explicit type wins; with no text, the minor half-axis; radius stays the minor radius.
+    // An explicit type wins; with no text, the minor half-axis; radius, and any other type,
+    // stays the minor radius as on an ellipse without axes.
     assert_eq!(dimension(false, json!({"type": "major", "text_at": [30, 3]})).0, "major");
     assert_eq!(dimension(false, json!({"type": "minor", "text_at": [3, 16]})).0, "minor");
     assert_eq!(dimension(false, json!({})).0, "minor");
     assert_eq!(dimension(false, json!({"type": "radius", "text_at": [3, 16]})).0, "radius");
+    assert_eq!(dimension(false, json!({"type": "diameter", "text_at": [3, 16]})).0, "radius");
+    assert_eq!(dimension(false, json!({"type": "horizontal", "text_at": [3, 16]})).0, "radius");
     // An axis line is a line: its length is the whole axis.
     let mut s = new_sketch();
     let (_, major, minor) = ellipse_with_axes(&mut s, true);
