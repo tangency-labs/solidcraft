@@ -141,15 +141,44 @@ pub fn transform_matrix(body: &Body, m: [[f64; 4]; 4]) -> Result<Body> {
         return placed.with_history(history, &[body]);
     }
     let sources = body.transformed_sources(m)?;
-    let placed = match Rigid::of_matrix(&m) {
+    let (placed, sources, paint) = match Rigid::of_matrix(&m) {
         Some(motion) => {
             let moved = Body::from_record(body.record().moved(&motion))?;
             let history = History::identity(&moved);
-            moved.with_history(history, &[body])?
+            (moved.with_history(history, &[body])?, sources, body.paint().cloned())
         }
-        None => transformed(body, &m)?,
+        None => {
+            // SMLib numbers the moved body's faces afresh: each face's source and paint follow it
+            // by the history (a face whose origin is not known keeps no source; with no history
+            // the paint stays as it was).
+            let placed = transformed(body, &m)?;
+            let origin: Vec<Option<usize>> = (0..placed.face_count()).map(|f| moved_from(placed.history(), f)).collect();
+            let sources = sources.map(|s| std::sync::Arc::new(origin.iter().map(|o| o.and_then(|j| s.get(j).cloned().flatten())).collect()));
+            let paint = body.paint().cloned().map(|mut p| {
+                if placed.history().is_none() {
+                    return p;
+                }
+                p.faces = p
+                    .faces
+                    .iter()
+                    .flat_map(|fp| {
+                        origin.iter().enumerate().filter(|(_, o)| **o == Some(fp.face)).map(|(face, _)| crate::FacePaint { face, ..fp.clone() })
+                    })
+                    .collect();
+                p
+            });
+            (placed, sources, paint)
+        }
     };
-    Ok(placed.with_color(body.color()).with_paint(body.paint().cloned()).with_face_sources(sources).inherit_regularization_protection(body))
+    Ok(placed.with_color(body.color()).with_paint(paint).with_face_sources(sources).inherit_regularization_protection(body))
+}
+
+/// The face of the operand that face `f` of a moved body is, by the move's history.
+fn moved_from(history: Option<&History>, f: usize) -> Option<usize> {
+    match history?.faces.get(f)?.origins.as_slice() {
+        [crate::history::FaceOrigin::Face { operand: 0, face }] => Some(*face),
+        _ => None,
+    }
 }
 
 /// `body` moved by a matrix that is not a rigid motion, in SMLib, its history from SMLib's tags.
