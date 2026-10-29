@@ -1,0 +1,37 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Section"
+   }
+  },
+  {
+   "command": "frame.profile.insert",
+   "params": {
+    "profile": {
+     "kind": "i_beam",
+     "height": 100,
+     "width": 50,
+     "web": 4.5,
+     "flange": 7,
+     "root_radius": 0
+    }
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Section"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Section",
+    "distance": 100
+   }
+  }
+ ]
+}
