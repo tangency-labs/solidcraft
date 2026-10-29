@@ -10,6 +10,10 @@
 //! | `resolve_crossing_loops_of_face` (private)   | `SmOffsetExecutive::ResolveCrossingLoopsOfFace` |
 //! | `LoopStretch` (private)                      | `sm_LoopStretch`                               |
 //! | `unresolved` (private)                       | `sm_UnresolvedCrossing`                        |
+//! | `walls_touch` (private)                      | `sm_WallsTouch` (a759622)                      |
+//! | `loop_directions_at` (private)               | `sm_LoopDirectionsAt` (a759622)                |
+//! | `loop_touches_at` (private)                  | `sm_LoopTouchesAt` (a759622)                   |
+//! | `LoopContact` (private)                      | `sm_LoopContact` (a759622)                     |
 //!
 //! Deviations: opt-in (`Kernel::fixes.offset_resolve_crossing_loops`, read by
 //! `do_extended_offset`). The reason a crossing is not resolved is the error's
@@ -18,7 +22,13 @@
 //! outer loop (each a sheet of its own, as the fork's `SplitDisconnectedShells` leaves
 //! them), and one that comes apart and keeps holes as well is not resolved
 //! (`SM_ERR_BAD_INTERSECTIONS`). No recursion; every loop is bounded by the face's
-//! edge uses and crossings.
+//! edge uses and crossings. The fork's later a759622 ("an offset whose walls would meet
+//! is refused as such": every contact is examined before any crossing, and loops that
+//! touch without crossing fail with `SM_ERR_OFFSET_WALLS_TOUCH`) is a second opt-in,
+//! `Kernel::fixes.offset_walls_touch_refused`, read here; it has no effect without
+//! `offset_resolve_crossing_loops`, which runs this routine at all. With it off the
+//! routine is 6169ea1's (contacts checked as they are found, a touch reported as
+//! whichever crossing check fails first, `SM_ERR_BAD_INTERSECTIONS`).
 
 use super::p1::OffsetExecutive;
 use super::p2::OffsetNotifications;
@@ -31,11 +41,13 @@ use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::NotifyOperation;
 use crate::geom::point_set::PointContainment;
 use crate::geom::solution_array::SolutionType;
+use crate::geom::tol::ANG_TOL_DEG;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
-use crate::math::Point3;
+use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::knots::Side;
 use crate::query::r#loop::contains_uv_point;
 use crate::surface::surface::p1::{map_to_2d, zone_tol_3d};
 use crate::surface::surface::p4::NoObject;
@@ -53,6 +65,7 @@ const OP: &str = "offset::offset_executive::crossing_loops::resolve_crossing_loo
 
 /// `SM_ERR_BAD_INTERSECTIONS`.
 const SM_ERR_BAD_INTERSECTIONS: i32 = 1027;
+use crate::error::SM_ERR_OFFSET_WALLS_TOUCH;
 /// `SM_ERR_ASSERT_FAILURE`.
 const SM_ERR_ASSERT_FAILURE: i32 = 1005;
 
@@ -88,6 +101,225 @@ fn unresolved(why: &'static str) -> SolidError {
         code: SM_ERR_BAD_INTERSECTIONS,
         entity: None,
     }
+}
+
+/// Loops of an offset face that touch without crossing (`sm_WallsTouch`, fork a759622):
+/// the offset walls they come from meet there, so the offset would pinch to nothing
+/// along a line (or over a stretch). No face is bounded there, and the offset is refused
+/// with `SM_ERR_OFFSET_WALLS_TOUCH`; `why` names the configuration.
+fn walls_touch(why: &'static str) -> SolidError {
+    SolidError::Upstream {
+        operation: why,
+        code: SM_ERR_OFFSET_WALLS_TOUCH,
+        entity: None,
+    }
+}
+
+/// Where edge uses `a` and `b` of different loops meet (`sm_LoopContact`, fork a759622):
+/// their indices and their edge parameters there.
+#[derive(Debug, Clone, Copy)]
+struct LoopContact {
+    a: usize,
+    b: usize,
+    t_a: f64,
+    t_b: f64,
+}
+
+/// The first derivative of `curve` at `t` (`Evaluate(t, 1, from_left, aEval)`, `aEval[1]`).
+fn curve_tangent(k: &Kernel, curve: &Curve, t: f64, from_left: bool) -> Result<Vec3> {
+    let eval = curve.evaluate(k, t, 1, from_left, true)?;
+    Ok(*at(&eval, 1)?)
+}
+
+/// The directions in which a loop (its edge uses `loop_edgeuses`) leaves the point `p`
+/// of its edge use `on` (at edge parameter `t`) (`sm_LoopDirectionsAt`, fork a759622):
+/// both ways along `on`'s curve where `p` lies inside the edge; where `p` is a vertex of
+/// the loop (within `tol_3d`), along each of the loop's edges from it.
+fn loop_directions_at(
+    k: &Kernel,
+    b: &Brep,
+    loop_edgeuses: &[EdgeuseId],
+    on: EdgeuseId,
+    t: f64,
+    p: Point3,
+    tol_3d: f64,
+) -> Result<Vec<Vec3>> {
+    let mut dirs = Vec::new();
+    let on_edge = edge_of(b, on)?;
+    if p.distance(vertex_point(b, edge::start_vertex(b, on_edge)?)?) > tol_3d
+        && p.distance(vertex_point(b, edge::end_vertex(b, on_edge)?)?) > tol_3d
+    {
+        let d = curve_tangent(k, edge_curve(b, on_edge)?, t, true)?;
+        dirs.push(d);
+        dirs.push(-d);
+        return Ok(dirs);
+    }
+    for &edgeuse in loop_edgeuses {
+        let e = edge_of(b, edgeuse)?;
+        let ivl = b.edge(e)?.interval;
+        if p.distance(vertex_point(b, edge::start_vertex(b, e)?)?) <= tol_3d {
+            dirs.push(curve_tangent(k, edge_curve(b, e)?, ivl.min(), true)?);
+        }
+        if p.distance(vertex_point(b, edge::end_vertex(b, e)?)?) <= tol_3d {
+            dirs.push(-curve_tangent(k, edge_curve(b, e)?, ivl.max(), false)?);
+        }
+    }
+    Ok(dirs)
+}
+
+/// Whether loop B touches loop A where they meet (`sm_LoopTouchesAt`, fork a759622;
+/// `normal` the face's normal there, `dirs_a` and `dirs_b` the directions each leaves
+/// that point in): it does when it leaves along one of A's directions (they are tangent
+/// there, to SMLib's angle tolerance for parallel vectors), or when both its directions
+/// lie on the same side of A, so that it comes up to A and goes back without passing
+/// through it. A loop passing the point more than once is not told apart (`false`).
+fn loop_touches_at(dirs_a: &[Vec3], dirs_b: &[Vec3], normal: Vec3) -> Result<bool> {
+    let ([a0, a1], [b0, b1]) = (dirs_a, dirs_b) else {
+        return Ok(false);
+    };
+    for &db in &[*b0, *b1] {
+        for &da in &[*a0, *a1] {
+            let (parallel, anti) = db.parallel_sense(da, ANG_TOL_DEG);
+            if parallel && !anti.unwrap_or(false) {
+                return Ok(true);
+            }
+        }
+    }
+    // The side of A from dirs_a[0] counterclockwise about the normal to dirs_a[1], and
+    // where each of B's lies.
+    let mut side = normal.ccw_angle_between(*a0, *a1)?;
+    if side <= 0.0 {
+        side += 2.0 * core::f64::consts::PI;
+    }
+    let mut on_side = [false; 2];
+    for (slot, &db) in on_side.iter_mut().zip(&[*b0, *b1]) {
+        let mut ang = normal.ccw_angle_between(*a0, db)?;
+        if ang < 0.0 {
+            ang += 2.0 * core::f64::consts::PI;
+        }
+        *slot = ang < side;
+    }
+    Ok(on_side[0] == on_side[1])
+}
+
+/// What [`cut_at_crossings_refusing_touch`] reads of `ResolveCrossingLoopsOfFace`'s
+/// locals: the face's edge uses per loop, every edge use in loop order with its loop and
+/// UV trim curve, where each loop's edge uses start, and the 3D and UV tolerances.
+struct CrossingInputs<'a> {
+    loop_edgeuses: &'a [Vec<EdgeuseId>],
+    loop_of: &'a [usize],
+    edgeuses: &'a [EdgeuseId],
+    uvs: &'a [Curve],
+    first_of_loop: &'a [usize],
+    tol_3d: f64,
+    uv_tol: f64,
+}
+
+/// The crossings of the loops of offset face `f` as fork a759622 finds them, cutting each
+/// edge use's `cuts` there and returning their number: every contact of edge uses of
+/// different loops is found first (in UV space, as `SmFace` test #38 finds them), loops
+/// that touch at any of them are refused (`SM_ERR_OFFSET_WALLS_TOUCH`), then a crossing
+/// at a loop vertex is refused (`SM_ERR_BAD_INTERSECTIONS`) and the rest cut the loops.
+fn cut_at_crossings_refusing_touch(
+    kernel: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    inp: &CrossingInputs<'_>,
+    cuts: &mut [Vec<(f64, i64)>],
+) -> Result<i64> {
+    let (edgeuses, uvs, loop_of, tol_3d) = (inp.edgeuses, inp.uvs, inp.loop_of, inp.tol_3d);
+    // Where edge uses of different loops meet, in UV space.
+    let mut contacts: Vec<LoopContact> = Vec::new();
+    for aa in 0..edgeuses.len() {
+        let first_b = *at(inp.first_of_loop, *at(loop_of, aa)? + 1)?;
+        for bb in first_b..edgeuses.len() {
+            let (uv_a, uv_b) = (at(uvs, aa)?, at(uvs, bb)?);
+            let solutions = uv_a.global_curve_intersect(
+                kernel,
+                &uv_a.natural_interval(),
+                uv_b,
+                &uv_b.natural_interval(),
+                inp.uv_tol,
+                &CurveIntersectOptions::<NoObject>::default(),
+            )?;
+            for solution in solutions.as_slice() {
+                if solution.solution_type != SolutionType::SingleValue {
+                    return Err(walls_touch(
+                        "Offset face loops run along one another: the offset walls meet there",
+                    ));
+                }
+                contacts.push(LoopContact {
+                    a: aa,
+                    b: bb,
+                    t_a: solution.start.param(0)?,
+                    t_b: solution.start.param(1)?,
+                });
+            }
+        }
+    }
+    if contacts.is_empty() {
+        return Ok(0);
+    }
+
+    // Loops that touch without crossing bound no face there, however the rest of it is
+    // resolved.
+    let surface = required(b.face(f)?.surface.as_ref())?;
+    for c in &contacts {
+        let (e_a, e_b) = (
+            edge_of(b, *at(edgeuses, c.a)?)?,
+            edge_of(b, *at(edgeuses, c.b)?)?,
+        );
+        let p_a = edge_curve(b, e_a)?.evaluate_point(kernel, c.t_a)?;
+        let p_b = edge_curve(b, e_b)?.evaluate_point(kernel, c.t_b)?;
+        let uv3 = at(uvs, c.a)?.evaluate_point(kernel, c.t_a)?;
+        let normal =
+            surface.evaluate_normal(kernel, Point2::new(uv3.x, uv3.y), Side::Left, Side::Left)?;
+        let dirs_a = loop_directions_at(
+            kernel,
+            b,
+            at(inp.loop_edgeuses, *at(loop_of, c.a)?)?,
+            *at(edgeuses, c.a)?,
+            c.t_a,
+            p_a,
+            tol_3d,
+        )?;
+        let dirs_b = loop_directions_at(
+            kernel,
+            b,
+            at(inp.loop_edgeuses, *at(loop_of, c.b)?)?,
+            *at(edgeuses, c.b)?,
+            c.t_b,
+            p_b,
+            tol_3d,
+        )?;
+        if loop_touches_at(&dirs_a, &dirs_b, normal)? {
+            return Err(walls_touch(
+                "Offset face loops touch without crossing: the offset walls meet along a line",
+            ));
+        }
+    }
+
+    // The crossings: where each edge use is cut.
+    let mut num_crossings: i64 = 0;
+    for c in &contacts {
+        let (e_a, e_b) = (
+            edge_of(b, *at(edgeuses, c.a)?)?,
+            edge_of(b, *at(edgeuses, c.b)?)?,
+        );
+        let p_a = edge_curve(b, e_a)?.evaluate_point(kernel, c.t_a)?;
+        let p_b = edge_curve(b, e_b)?.evaluate_point(kernel, c.t_b)?;
+        if p_a.distance(vertex_point(b, edge::start_vertex(b, e_a)?)?) <= tol_3d
+            || p_a.distance(vertex_point(b, edge::end_vertex(b, e_a)?)?) <= tol_3d
+            || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
+            || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
+        {
+            return Err(unresolved("Offset face loops cross at a loop vertex"));
+        }
+        at_mut(cuts, c.a)?.push((c.t_a, num_crossings));
+        at_mut(cuts, c.b)?.push((c.t_b, num_crossings));
+        num_crossings += 1;
+    }
+    Ok(num_crossings)
 }
 
 fn assert_failure() -> SolidError {
@@ -162,8 +394,9 @@ impl OffsetExecutive {
     /// # Errors
     ///
     /// `SM_ERR_BAD_INTERSECTIONS` for crossings this does not resolve (see
-    /// `resolve_crossing_loops_of_face`); those of the evaluations, intersections and
-    /// face construction.
+    /// `resolve_crossing_loops_of_face`); with `Kernel::fixes.offset_walls_touch_refused`,
+    /// `SM_ERR_OFFSET_WALLS_TOUCH` for loops that touch without crossing; those of the
+    /// evaluations, intersections and face construction.
     pub(super) fn resolve_crossing_loops(
         &mut self,
         kernel: &mut Kernel,
@@ -260,38 +493,58 @@ impl OffsetExecutive {
         // per edge use: (parameter, crossing)
         let mut cuts: Vec<Vec<(f64, i64)>> = vec![Vec::new(); edgeuses.len()];
         let mut num_crossings: i64 = 0;
-        for aa in 0..edgeuses.len() {
-            let first_b = *at(&first_of_loop, *at(&loop_of, aa)? + 1)?;
-            for bb in first_b..edgeuses.len() {
-                let (uv_a, uv_b) = (at(&uvs, aa)?, at(&uvs, bb)?);
-                let solutions = uv_a.global_curve_intersect(
-                    kernel,
-                    &uv_a.natural_interval(),
-                    uv_b,
-                    &uv_b.natural_interval(),
+        if kernel.fixes.offset_walls_touch_refused {
+            // Fork a759622: every contact is looked at before any crossing is resolved
+            // or refused.
+            num_crossings = cut_at_crossings_refusing_touch(
+                kernel,
+                b,
+                f,
+                &CrossingInputs {
+                    loop_edgeuses: &loop_edgeuses,
+                    loop_of: &loop_of,
+                    edgeuses: &edgeuses,
+                    uvs: &uvs,
+                    first_of_loop: &first_of_loop,
+                    tol_3d,
                     uv_tol,
-                    &CurveIntersectOptions::<NoObject>::default(),
-                )?;
-                for solution in solutions.as_slice() {
-                    if solution.solution_type != SolutionType::SingleValue {
-                        return Err(unresolved("Offset face loops run along one another"));
+                },
+                &mut cuts,
+            )?;
+        } else {
+            for aa in 0..edgeuses.len() {
+                let first_b = *at(&first_of_loop, *at(&loop_of, aa)? + 1)?;
+                for bb in first_b..edgeuses.len() {
+                    let (uv_a, uv_b) = (at(&uvs, aa)?, at(&uvs, bb)?);
+                    let solutions = uv_a.global_curve_intersect(
+                        kernel,
+                        &uv_a.natural_interval(),
+                        uv_b,
+                        &uv_b.natural_interval(),
+                        uv_tol,
+                        &CurveIntersectOptions::<NoObject>::default(),
+                    )?;
+                    for solution in solutions.as_slice() {
+                        if solution.solution_type != SolutionType::SingleValue {
+                            return Err(unresolved("Offset face loops run along one another"));
+                        }
+                        let t_a = solution.start.param(0)?;
+                        let t_b = solution.start.param(1)?;
+                        let e_a = edge_of(b, *at(&edgeuses, aa)?)?;
+                        let e_b = edge_of(b, *at(&edgeuses, bb)?)?;
+                        let p_a = edge_curve(b, e_a)?.evaluate_point(kernel, t_a)?;
+                        let p_b = edge_curve(b, e_b)?.evaluate_point(kernel, t_b)?;
+                        if p_a.distance(vertex_point(b, edge::start_vertex(b, e_a)?)?) <= tol_3d
+                            || p_a.distance(vertex_point(b, edge::end_vertex(b, e_a)?)?) <= tol_3d
+                            || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
+                            || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
+                        {
+                            return Err(unresolved("Offset face loops meet at a loop vertex"));
+                        }
+                        at_mut(&mut cuts, aa)?.push((t_a, num_crossings));
+                        at_mut(&mut cuts, bb)?.push((t_b, num_crossings));
+                        num_crossings += 1;
                     }
-                    let t_a = solution.start.param(0)?;
-                    let t_b = solution.start.param(1)?;
-                    let e_a = edge_of(b, *at(&edgeuses, aa)?)?;
-                    let e_b = edge_of(b, *at(&edgeuses, bb)?)?;
-                    let p_a = edge_curve(b, e_a)?.evaluate_point(kernel, t_a)?;
-                    let p_b = edge_curve(b, e_b)?.evaluate_point(kernel, t_b)?;
-                    if p_a.distance(vertex_point(b, edge::start_vertex(b, e_a)?)?) <= tol_3d
-                        || p_a.distance(vertex_point(b, edge::end_vertex(b, e_a)?)?) <= tol_3d
-                        || p_b.distance(vertex_point(b, edge::start_vertex(b, e_b)?)?) <= tol_3d
-                        || p_b.distance(vertex_point(b, edge::end_vertex(b, e_b)?)?) <= tol_3d
-                    {
-                        return Err(unresolved("Offset face loops meet at a loop vertex"));
-                    }
-                    at_mut(&mut cuts, aa)?.push((t_a, num_crossings));
-                    at_mut(&mut cuts, bb)?.push((t_b, num_crossings));
-                    num_crossings += 1;
                 }
             }
         }

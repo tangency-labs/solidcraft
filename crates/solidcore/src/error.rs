@@ -268,6 +268,13 @@ pub const SM_ERR_WARNING: i32 = 1023;
 /// ignore (its usual mapping is [`SolidError::InvalidInput`]).
 pub const SM_ERR_INVALID_INPUT: i32 = 1007;
 
+/// SMLib fork status `SM_ERR_OFFSET_WALLS_TOUCH` (tangency-labs/smlib a759622,
+/// `SmMessages.h`; not in the pinned upstream), as carried by [`SolidError::Upstream`]:
+/// an offset (a shell, a solid offset) whose walls would meet, because loops of an offset
+/// face touch without crossing. Returned only with the opt-in
+/// `Kernel::fixes.offset_walls_touch_refused`.
+pub const SM_ERR_OFFSET_WALLS_TOUCH: i32 = 1042;
+
 fn fmt_entity(entity: Option<EntityRef>) -> String {
     entity.map_or_else(String::new, |e| format!(" at {e}"))
 }
