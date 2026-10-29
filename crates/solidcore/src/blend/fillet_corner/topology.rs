@@ -407,10 +407,37 @@ impl FilletCorner {
                     (ahead, behind)
                 };
                 let mut skipped = 0;
+                let mut passed_continuation = false;
                 let mut next = *need(sides.get(kk), "side index")?;
-                while total - skipped > 3
-                    && check_tangential_edgeuse_at_vertex(k, target, next, vertex, tol_deg)?
-                {
+                while total - skipped > 3 {
+                    if !check_tangential_edgeuse_at_vertex(k, target, next, vertex, tol_deg)? {
+                        // The filleted edge's continuation across the vertex, of the
+                        // opposite convexity, is passed once as well: the overhang's rim
+                        // continuing a boss's base circle past a wall. The rail on the side
+                        // face runs alongside it and never meets it; the round ends on
+                        // the end face past it (tangency-labs/smlib@420e47d, WR-499).
+                        if !k.fixes.fillet_nx1_opposite_continuation_side_edge {
+                            break;
+                        }
+                        let filleted_edge = edge_of(target, filleted)?;
+                        let next_edge = edge_of(target, next)?;
+                        if passed_continuation
+                            || next_edge == filleted_edge
+                            || !test_g1_continuity(
+                                k,
+                                target,
+                                Some(vertex),
+                                Some(filleted_edge),
+                                Some(next_edge),
+                                tol_deg,
+                            )?
+                            .0
+                            || same_convexity_edges_round_vertex(k, target, filleted, next_edge)?
+                        {
+                            break;
+                        }
+                        passed_continuation = true;
+                    }
                     idx = if kk == 0 {
                         (idx + total - 1) % total
                     } else {
