@@ -1090,6 +1090,8 @@ mod tests {
             let mut cam = home_camera(&s).unwrap();
             cam.fov = fov;
             let mut sc = scene(&s, &cam).unwrap();
+            // The cap in the cap colour: a part's hatch colour is the one its name picks.
+            sc.part_hatch = None;
             assert!(!section_segments(&s.world_state().unwrap().bodies[0].mesh(), Vec3::new(0.0, 15.0, 0.0), -Vec3::Y).is_empty());
             // A marker inside the body, behind the cut face.
             let red = Rgb(255, 0, 0);
