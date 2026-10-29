@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "what": "a box with its top taken away, the rim patched (g0) and stitched in: the box again",
+ "source": "analytic",
+ "method": "the rim is a planar loop and the patch g0, so it is the exact plane z = 10, 20 x 10; stitched, the closed box 20 x 10 x 10: V = 2000, A = 1000, 6 faces",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 2000.0,
+ "area_mm2": 1000.0,
+ "surface_types": [
+  "plane"
+ ],
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   20,
+   10,
+   10
+  ]
+ }
+}
