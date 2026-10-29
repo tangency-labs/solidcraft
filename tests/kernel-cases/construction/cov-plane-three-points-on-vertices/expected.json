@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "the plane through three vertices of a box",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin (x 0..40, y 0..30, z 0..20): vertices (40,0,0), (0,30,0), (0,0,20): x/40 + y/30 + z/20 = 1, normal (3,4,6)",
+ "construction": {
+  "T": {
+   "plane": {
+    "through": [
+     40,
+     0,
+     0
+    ],
+    "normal": [
+     3,
+     4,
+     6
+    ]
+   }
+  }
+ }
+}
