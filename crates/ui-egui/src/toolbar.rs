@@ -1181,8 +1181,30 @@ fn ribbon_tab_style(t: &Tokens, tab: &str, contextual: bool, active: bool, hover
     RibbonTabStyle { fill, ink, outline }
 }
 
+/// The style `on` of the way from unselected (0) to selected (1), while the highlight eases across.
+fn ribbon_tab_style_at(t: &Tokens, tab: &str, contextual: bool, on: f32, hovered: bool) -> RibbonTabStyle {
+    let off = ribbon_tab_style(t, tab, contextual, false, hovered);
+    let selected = ribbon_tab_style(t, tab, contextual, true, hovered);
+    match on {
+        on if !(on > 0.0) => off,
+        on if on >= 1.0 => selected,
+        on => RibbonTabStyle {
+            fill: off.fill.lerp_to_gamma(selected.fill, on),
+            ink: off.ink.lerp_to_gamma(selected.ink, on),
+            outline: off.outline.lerp_to_gamma(selected.outline, on),
+        },
+    }
+}
+
+/// How a ribbon tab change moves: the panels cross-fade and the highlight eases across, or with
+/// the preference off both swap at once.
+pub(crate) fn ribbon_motion(app: &SolveApp) -> crate::ui_kit::CrossFade {
+    crate::ui_kit::CrossFade::new(if app.preferences.ribbon_motion { crate::ui_kit::CROSS_FADE_SECONDS } else { 0.0 })
+}
+
 fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
     let t = Tokens::get();
+    let motion = ribbon_motion(app);
     let tabs = crate::workspace::visible_tabs(app);
     let widths: Vec<_> = tabs
         .iter()
@@ -1253,6 +1275,8 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
             .show(ui, |ui| {
                 let (all, _) = ui.allocate_exact_size(vec2(tabs_width, TAB_ROW_HEIGHT), Sense::hover());
                 let mut x = all.left();
+                // Each tab's widget id, in order, for the arrow keys.
+                let mut order: Vec<(egui::Id, &'static str)> = Vec::with_capacity(tabs.len());
                 for (tab, width) in tabs.into_iter().zip(widths) {
                     let contextual = contextual_tab(app, tab);
                     if contextual {
@@ -1263,10 +1287,19 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     if active && changed {
                         ui.scroll_to_rect(tr, Some(egui::Align::Center));
                     }
-                    let response = ui.interact(tr, ui.id().with(("tab", tab)), Sense::click());
-                    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, ribbon_label(app, tab)));
-                    let style = ribbon_tab_style(&t, tab, contextual, active, response.hovered());
+                    let id = ui.id().with(("tab", tab));
+                    order.push((id, tab));
+                    let response = ui.interact(tr, id, Sense::click());
+                    // Announced as a selectable item with its selected state, as tabs are.
+                    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, active, ribbon_label(app, tab)));
+                    let on = motion.selected(ui.ctx(), id.with("selected"), active);
+                    // Keyboard focus lights the tab as the pointer does, and rings it.
+                    let focused = response.has_focus();
+                    let style = ribbon_tab_style_at(&t, tab, contextual, on, response.hovered() || focused);
                     ui.painter().rect(tr, corner, style.fill, Stroke::new(1.0, style.outline), egui::StrokeKind::Inside);
+                    if focused {
+                        ui.painter().rect_stroke(tr, corner, Stroke::new(1.5, t.text), egui::StrokeKind::Inside);
+                    }
                     ribbon_text(ui, tr.center(), &ribbon_label(app, tab), t.font_button, style.ink, active || contextual);
                     if ui.clip_rect().contains(tr.center()) {
                         crate::scenario::publish_target(&format!("tab:{tab}"), tr);
@@ -1296,6 +1329,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     }
                     x += width + 2.0;
                 }
+                ribbon_tab_keys(app, ui, &order);
                 if add {
                     let pr = Rect::from_min_size(pos2(x, all.top() + inset), vec2(add_size, add_size));
                     let open = crate::context_menu::open_from(app, pr, &crate::context_menu::Target::Toolbar);
@@ -1326,6 +1360,41 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
             [row.left_bottom() - vec2(0.0, 0.5), row.right_bottom() - vec2(0.0, 0.5)],
             t.toolbar.lerp_to_gamma(t.border, 0.5),
         );
+    }
+}
+
+/// With a ribbon tab focused (Tab reaches the tabs), Left and Right select the previous and next tab,
+/// wrapping at the ends, and Home and End the first and last; the focus follows the selection.
+/// Enter and Space select the focused tab as a click does.
+fn ribbon_tab_keys(app: &mut SolveApp, ui: &egui::Ui, order: &[(egui::Id, &'static str)]) {
+    let Some(at) = order.iter().position(|(id, _)| ui.memory(|m| m.has_focus(*id))) else { return };
+    let n = order.len();
+    let (left, right, home, end) = ui.input_mut(|i| {
+        (
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::Home),
+            i.consume_key(egui::Modifiers::NONE, egui::Key::End),
+        )
+    });
+    let next = if home {
+        Some(0)
+    } else if end {
+        n.checked_sub(1)
+    } else if left {
+        Some((at + n - 1) % n)
+    } else if right {
+        Some((at + 1) % n)
+    } else {
+        None
+    };
+    if let Some((id, tab)) = next.and_then(|i| order.get(i)) {
+        app.ui.tab = tab.to_string();
+        // Instead of egui's own move of the focus to whatever lies in the arrow's direction.
+        ui.memory_mut(|m| {
+            m.request_focus(*id);
+            m.move_focus(egui::FocusDirection::None);
+        });
     }
 }
 
@@ -1453,6 +1522,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         ribbon_tabs(app, ui, Rect::from_min_max(pos2(ribbon_left, r.top()), pos2(r.right(), r.top() + TAB_ROW_HEIGHT)));
         // Panels.
         let tab = app.ui.tab.clone();
+        // A tab change cross-fades the panels (this layer only: their drop-downs do not fade).
+        let fade = ribbon_motion(app).begin(ui);
         // The command whose tool or dialog is open right now, shown pressed in the toolbar.
         let running: Option<String> = match (&app.tool, &app.dialog) {
             (Some(tool), _) => Some(tool.cmd.to_string()),
@@ -2063,6 +2134,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 response.response.on_hover_text(crate::i18n::tr_label("More toolbar panels"));
             });
         }
+        fade.end(ui, "ribbon_panels", &tab, Rect::from_min_max(pos2(ribbon_left, top), r.max));
 
         // Resolve persistent paint only after large buttons, dropdowns and overflow have
         // dispatched their actions. No already-painted old analysis can survive replacement.
@@ -4750,6 +4822,135 @@ mod ribbon_label_tests {
         }
         themes.extend(crate::theme_files::builtin().iter().map(crate::theme_files::resolve));
         themes
+    }
+
+    /// Text painted in the ribbon's panels (below the tab row), with its opacity.
+    fn panel_texts(h: &crate::scenario::Harness) -> Vec<(String, f32)> {
+        let toolbar = crate::scenario::rect_of("toolbar").unwrap();
+        let panels = Rect::from_min_max(pos2(toolbar.left(), toolbar.top() + TAB_ROW_HEIGHT), toolbar.max);
+        h.shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(text) if panels.contains(text.pos) && !text.galley.text().is_empty() => {
+                    Some((text.galley.text().to_string(), text.opacity_factor))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn changing_tabs_cross_fades_the_panels_in_place() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        let model = panel_texts(&h);
+        assert!(!model.is_empty() && model.iter().all(|(_, o)| *o == 1.0), "a still ribbon is opaque: {model:?}");
+        h.app.ui.tab = "INSPECT".into();
+        h.frame();
+        // The change's first frame: the Model panels are still fully shown, painted over the
+        // Inspect panels, which start invisible in their own place.
+        let first = panel_texts(&h);
+        for label in &model {
+            assert!(first.contains(label), "{label:?} is still shown as the change starts");
+        }
+        assert!(first.iter().any(|(_, o)| *o == 0.0), "the new panels start invisible: {first:?}");
+        h.frames(4);
+        let mid = panel_texts(&h);
+        assert!(mid.iter().any(|(_, o)| *o > 0.0 && *o < 1.0), "half way, the new panels are partly in: {mid:?}");
+        h.frames(12);
+        let inspect = panel_texts(&h);
+        assert!(inspect.iter().all(|(_, o)| *o == 1.0), "done: only opaque panels: {inspect:?}");
+        assert!(model.iter().any(|label| !inspect.contains(label)), "the Model panels have gone");
+        h.frame();
+        assert_eq!(panel_texts(&h), inspect, "the new panels stay where they arrived");
+    }
+
+    #[test]
+    fn with_ribbon_motion_off_tabs_swap_at_once() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"ribbon_motion": false}));
+        h.frames(3);
+        let model = panel_texts(&h);
+        h.app.ui.tab = "INSPECT".into();
+        h.frame();
+        let inspect = panel_texts(&h);
+        assert!(inspect.iter().all(|(_, o)| *o == 1.0), "nothing fades: {inspect:?}");
+        assert!(model.iter().any(|label| !inspect.contains(label)), "the Model panels went at once");
+        let t = Tokens::get();
+        for (on, active) in [(0.0, false), (1.0, true)] {
+            assert_eq!(ribbon_tab_style_at(&t, "MODEL", false, on, false), ribbon_tab_style(&t, "MODEL", false, active, false));
+        }
+    }
+
+    #[test]
+    fn the_tab_highlight_eases_between_the_unselected_and_selected_styles() {
+        for t in tab_test_themes() {
+            for (tab, contextual) in [("MODEL", false), ("SKETCH", true)] {
+                let off = ribbon_tab_style(&t, tab, contextual, false, false);
+                let on = ribbon_tab_style(&t, tab, contextual, true, false);
+                assert_eq!(ribbon_tab_style_at(&t, tab, contextual, 0.0, false), off);
+                assert_eq!(ribbon_tab_style_at(&t, tab, contextual, f32::NAN, false), off);
+                assert_eq!(ribbon_tab_style_at(&t, tab, contextual, 1.0, false), on);
+                let half = ribbon_tab_style_at(&t, tab, contextual, 0.5, false);
+                assert_eq!(half.fill, off.fill.lerp_to_gamma(on.fill, 0.5));
+            }
+        }
+    }
+
+    /// One frame with `key` pressed (and released the next); the label of the ribbon tab that
+    /// gained the keyboard focus, if one did.
+    fn press(h: &mut crate::scenario::Harness, key: egui::Key) -> Option<String> {
+        let event = |pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![event(true)]);
+        let focused = focus_gained(h);
+        h.frame_with(vec![event(false)]);
+        focused
+    }
+
+    /// The label of a ribbon tab that gained the keyboard focus this frame.
+    fn focus_gained(h: &crate::scenario::Harness) -> Option<String> {
+        h.output.events.iter().find_map(|e| match e {
+            egui::output::OutputEvent::FocusGained(info) if info.typ == egui::WidgetType::SelectableLabel => info.label.clone(),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn the_keyboard_reaches_the_tabs_and_the_arrows_change_tab() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        let tabs = crate::workspace::visible_tabs(&h.app);
+        let label = |h: &crate::scenario::Harness, tab: &str| ribbon_label(&h.app, tab);
+        // Tab moves the focus through the window until it reaches the ribbon's first tab.
+        let first = label(&h, tabs[0]);
+        let reached = (0..400).any(|_| press(&mut h, egui::Key::Tab).as_deref() == Some(first.as_str()));
+        assert!(reached, "Tab reaches the ribbon's tabs");
+        assert_eq!(h.app.ui.tab, tabs[0]);
+        let model = h.ctx.memory(|m| m.focused());
+        press(&mut h, egui::Key::ArrowRight);
+        assert_eq!(h.app.ui.tab, tabs[1], "Right selects the next tab");
+        assert!(h.ctx.memory(|m| m.focused()).is_some_and(|id| Some(id) != model), "the focus follows the selection");
+        press(&mut h, egui::Key::ArrowRight);
+        assert_eq!(h.app.ui.tab, tabs[2], "so the arrows keep going");
+        press(&mut h, egui::Key::End);
+        assert_eq!(h.app.ui.tab, *tabs.last().unwrap(), "End selects the last tab");
+        press(&mut h, egui::Key::ArrowRight);
+        assert_eq!(h.app.ui.tab, tabs[0], "Right wraps to the first");
+        press(&mut h, egui::Key::ArrowLeft);
+        assert_eq!(h.app.ui.tab, *tabs.last().unwrap(), "Left wraps to the last");
+        press(&mut h, egui::Key::Home);
+        assert_eq!(h.app.ui.tab, tabs[0], "Home selects the first tab");
+        // Tab only moves the focus along the tabs; Enter then selects the focused one.
+        assert_eq!(press(&mut h, egui::Key::Tab), Some(label(&h, tabs[1])));
+        assert_eq!(h.app.ui.tab, tabs[0], "focusing a tab does not select it");
+        press(&mut h, egui::Key::Enter);
+        assert_eq!(h.app.ui.tab, tabs[1], "Enter selects the focused tab");
+        let cam = h.app.cam;
+        h.frames(20);
+        assert_eq!(h.app.cam, cam, "the arrows went to the tabs, not to turning the view");
     }
 
     #[test]

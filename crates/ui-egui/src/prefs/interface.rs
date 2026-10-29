@@ -184,6 +184,11 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let check = setting::ribbon_reveal(app, ui).on_hover_text(app.tr("prefs.ribbon_reveal_note"));
                         crate::scenario::publish_target("prefs:ribbon_reveal", check.rect);
                     });
+                    // Tab changes fade the panels; off swaps them at once.
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::ribbon_motion(app, ui).on_hover_text(app.tr("prefs.ribbon_motion_note"));
+                        crate::scenario::publish_target("prefs:ribbon_motion", check.rect);
+                    });
                     // Where every feature dialog puts its OK and Cancel (#6708).
                     ui_kit::row(ui, app.tr("prefs.dialog_buttons"), |ui| {
                         let placements = [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top];
