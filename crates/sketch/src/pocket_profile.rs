@@ -210,11 +210,7 @@ fn circle_line(center: Vec2, radius: f64, origin: Vec2, dir: Vec2) -> Vec<Vec2> 
     }
     let foot = origin + dir * along;
     let height = height2.max(0.0).sqrt();
-    if height < 1e-8 {
-        vec![foot]
-    } else {
-        vec![foot - dir * height, foot + dir * height]
-    }
+    if height < 1e-8 { vec![foot] } else { vec![foot - dir * height, foot + dir * height] }
 }
 
 fn circle_circle(c1: Vec2, r1: f64, c2: Vec2, r2: f64) -> Vec<Vec2> {

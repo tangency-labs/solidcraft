@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::Session;
 
@@ -1436,7 +1436,7 @@ fn a_tapered_foot_under_a_part_joins_as_drawn() {
 /// with the offset and no taper. Two-sided and symmetric tapers are still refused, by name.
 #[test]
 fn a_drafted_extrude_starts_at_an_offset() {
-    use solidcraft_kernel::{face_surface, measure as measure_body, FaceSurface};
+    use solidcraft_kernel::{FaceSurface, face_surface, measure as measure_body};
     // A 30 x 20 profile, 12 mm long, drafted 6 deg, started 4 mm along the normal.
     let (w, d, h, off) = (30.0, 20.0, 12.0, 4.0);
     let part = |p: Value| -> Session {
@@ -1536,7 +1536,7 @@ fn a_drafted_extrude_starts_at_an_offset() {
 /// lies wholly in material, so the cut removes exactly the frustum over its profile.
 #[test]
 fn a_drafted_offset_cut_into_a_body_with_history() {
-    use solidcraft_kernel::{face_surface, measure as measure_body, FaceSurface};
+    use solidcraft_kernel::{FaceSurface, face_surface, measure as measure_body};
     let (w, d, h, off) = (30.0, 20.0, 12.0, 18.0);
     let (ang, t) = (6f64.to_radians(), 6f64.to_radians().tan());
     let frustum = w * d * h + (w + d) * t * h * h + 4.0 / 3.0 * t * t * h * h * h;
