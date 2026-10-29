@@ -649,7 +649,8 @@ mod tests {
             assert!((sweep.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-8);
             assert_eq!(sweep > 0., forward);
         }
-        let line = curve(&[0., 10.], &[0.], &[1.], 17);
+        // A line written at the highest degree a B-rep record holds (MAX_SPLINE_DEGREE).
+        let line = curve(&[0., 10.], &[0.], &[1.], solidcraft_geom::bspline::MAX_SPLINE_DEGREE);
         assert!(matches!(segment(&run(&line, true), &Plane::XY, 1e-5, &mut 2_000_000).unwrap()[0], Seg2::Line { .. }));
         // The longitudinal derivative is negative at t=1/3, independently
         // establishing genuine retracing rather than a stationary tangent.
