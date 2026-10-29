@@ -495,6 +495,9 @@ pub struct Session {
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
     joints_settled: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
+    /// The design and model the last body-name pinning pass saw: a command that changes neither
+    /// the features nor the model's results (a joint drag frame) has no new body to pin.
+    names_pinned: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
     /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
     /// joint of the design on every frame (#3892), the viewport about every body, and an answer
@@ -575,6 +578,9 @@ pub struct Session {
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
+    /// Body-name pinning passes that walked the features (`pin_body_names`), for tests.
+    #[cfg(test)]
+    pub(crate) body_name_passes: usize,
     /// Resolved associative trace inputs, independent of the document revision and view state.
     pub(crate) motion_traces: cmd::motion::associative::Cache,
 }
@@ -724,6 +730,7 @@ impl Session {
             pending_moves: Default::default(),
             world_cache: Default::default(),
             joints_settled: None,
+            names_pinned: None,
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
@@ -758,6 +765,8 @@ impl Session {
             render_jobs: Default::default(),
             #[cfg(test)]
             evaluations: 0,
+            #[cfg(test)]
+            body_name_passes: 0,
             motion_traces: Default::default(),
             crash_journal: false,
         }
@@ -1182,10 +1191,33 @@ impl Session {
     /// with; one made in memory ([`Self::new`]) by its first command that changes it, with the
     /// names it has after that command (a delete, reorder, suppress or rollback renumbers the
     /// later counted bodies once).
+    ///
+    /// Skipped when nothing the pass reads changed since the last one: the features (with the
+    /// names they pin), the reserved names and the model's results. A joint drag frame changes
+    /// only where occurrences are and the joints' values; walking every feature's result for it
+    /// took 40 ms a frame in a 5,484-feature assembly. The model is compared by allocation: the
+    /// weak reference keeps the allocation, so a later model can't be mistaken for it.
     fn pin_body_names(&mut self) {
         if self.model.is_stale() {
             return;
         }
+        let state = self.model.state();
+        let unchanged = self.names_pinned.as_ref().is_some_and(|(doc, model)| {
+            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state)
+                && (Arc::ptr_eq(doc, &self.doc) || (doc.features == self.doc.features && doc.reserved_body_names == self.doc.reserved_body_names))
+        });
+        if unchanged {
+            return;
+        }
+        #[cfg(test)]
+        {
+            self.body_name_passes += 1;
+        }
+        self.pin_body_names_pass();
+        self.names_pinned = Some((self.doc.clone(), Arc::downgrade(&self.model.state())));
+    }
+
+    fn pin_body_names_pass(&mut self) {
         let mut pins: Vec<(u64, Vec<String>)> = Vec::new();
         let mut reserve: Vec<String> = Vec::new();
         // The names of the bodies each feature made, kept with the state they were read from:
@@ -1723,6 +1755,7 @@ impl Session {
             // Read again by the copy: handing it these references measured more peak memory on a
             // large design (the rover, evaluated ahead) for no change in what it pins.
             made_bodies: MadeBodies::new(),
+            names_pinned: None,
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
@@ -1756,6 +1789,8 @@ impl Session {
             saved_visibility: self.saved_visibility.clone(),
             #[cfg(test)]
             evaluations: 0,
+            #[cfg(test)]
+            body_name_passes: 0,
             motion_traces: self.motion_traces.clone(),
             crash_journal: false,
         }
