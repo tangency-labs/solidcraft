@@ -1929,6 +1929,13 @@ fn an_ellipse_comes_with_its_axes_as_construction_lines() {
         let lengths = axes(&s);
         assert!(close(lengths[0], 16.0) && close(lengths[1], 40.0), "dragging {line}: {lengths:?}");
     }
+    // Dragging the outline still sets the minor half-axis, the axes following it.
+    run(&mut s, "sketch.drag", json!({"entity": &e, "from": [moved.x, moved.y + 8.0], "to": [moved.x, moved.y + 10.0]}));
+    run(&mut s, "sketch.drag_end", json!({}));
+    let (at, a, b) = half_axes(&s);
+    assert!(at.dist(moved) < 1e-6 && close(a, 20.0) && close(b, 10.0), "dragging the outline: centre {at:?}, half-axes {a} {b}");
+    let lengths = axes(&s);
+    assert!(close(lengths[0], 20.0) && close(lengths[1], 40.0), "dragging the outline: {lengths:?}");
     // Sizing the ellipse resizes its axes, and they stay through its centre.
     run(&mut s, "sketch.dimension", json!({"entities": [&e], "type": "major", "value": 30}));
     run(&mut s, "sketch.dimension", json!({"entities": [&e], "type": "minor", "value": 10}));
