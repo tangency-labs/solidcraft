@@ -249,8 +249,13 @@ pub fn find_brep_region_of_other_face(
     other_faceuse: FaceuseId,
     brep_mates: &BTreeMap<EdgeId, EdgeId>,
 ) -> Result<Option<RegionId>> {
-    if brep.regions().len() == 1 {
-        return Ok(brep.regions().ids().next());
+    // `GetSize() == 1` and `GetList()`: the B-rep's region list, not its region records
+    // (a region `DeleteFace` merged away keeps its record off the list)
+    let listed = crate::topology::brep::p1::regions(brep, None)?;
+    if listed.len() == 1 {
+        if let Some(&region) = listed.first() {
+            return Ok(Some(region));
+        }
     }
     let edges = eu::faceuse_edgeuses(other, other_faceuse, false, None)?;
     for &other_eu in &edges {

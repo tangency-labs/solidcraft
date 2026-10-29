@@ -134,7 +134,8 @@ fn planes(
         let uv = b.face(face)?.uv_domain.evaluate(0.5, 0.5);
         let (Ok(p), Ok(n)) = (
             surface.evaluate_point(k, uv),
-            surface.evaluate_normal(k, uv, Side::Right, Side::Right),
+            // (the shim's `EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
+            surface.evaluate_normal(k, uv, Side::Left, Side::Left),
         ) else {
             return Ok(None);
         };
@@ -286,8 +287,8 @@ impl UnitDiff for Runner {
     }
 
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
-        // `Solids/nurb_fillet.smb` and `cone.smb` are covered by named fixtures, which are known
-        // mismatches (plan/findings/topology.brep_local_operation--*.md)
+        // `Solids/nurb_fillet.smb` and `cone.smb` are covered by named fixtures (nurb_fillet's
+        // are known mismatches: plan/findings/topology.brep_local_operation--*.md)
         let solids: Vec<_> = FILES
             .iter()
             .filter(|f| !matches!(**f, "Solids/nurb_fillet.smb" | "cone.smb"))

@@ -215,10 +215,17 @@ pub(super) fn bind_owners(k: &mut Kernel, b: &mut Brep) -> SolidResult<()> {
     }
     let faces: Vec<_> = b.faces().ids().collect();
     for face in faces {
+        let mut rebound = false;
         if let Some(surface) = b.face_mut(face)?.surface.as_mut() {
             if surface.owner().is_some() {
                 surface.set_owner(Some(topology_ref(serial, EntityRef::Face(face))));
+                rebound = true;
             }
+        }
+        // a new owner drops the face tolerance the surface reads through GetFace();
+        // re-record it, as every library rebind does (Brep::sync_face_surface_tolerance)
+        if rebound {
+            b.sync_face_surface_tolerance(face)?;
         }
     }
     Ok(())

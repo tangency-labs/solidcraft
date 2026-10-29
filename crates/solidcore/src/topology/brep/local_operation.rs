@@ -73,14 +73,15 @@ pub fn local_operation(
                 .and_then(Option::take)
                 .ok_or_else(null)?;
             let domain = new.natural_uv_domain_if_built();
+            // (`EvaluateNormal(uv, TRUE, TRUE, ..)`: from the left)
             let new_normal =
-                new.evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Right, Side::Right)?;
+                new.evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Left, Side::Left)?;
             let old = face_ops::surface(b, face)?.ok_or_else(null)?;
             let old_normal = old.evaluate_normal(
                 k,
                 b.face(face)?.uv_domain.evaluate(0.5, 0.5),
-                Side::Right,
-                Side::Right,
+                Side::Left,
+                Side::Left,
             )?;
             // when surface normals oppose - reverse the input surface's orientation
             if old_normal.dot(new_normal) < 0.0 {
