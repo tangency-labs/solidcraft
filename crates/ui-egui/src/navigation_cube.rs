@@ -189,6 +189,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         if ui.input(|i| i.pointer.primary_clicked()) {
             navigate(app, None, Some(face.direction));
         }
+        // The viewport leaves clicks over the cube alone: its menu is the cube's (#6455).
+        if ui.input(|i| i.pointer.secondary_clicked()) && app.tool.is_none() && app.dialog.is_none() {
+            crate::context_menu::open_for(app, hover.unwrap_or(face.centre), crate::context_menu::Target::NavigationCube);
+        }
     }
     let square_on = faces.iter().filter(|f| f.text_axes.is_some()).count() == 1;
     let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };

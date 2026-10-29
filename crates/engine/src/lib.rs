@@ -1881,6 +1881,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         next_component_color_index,
+        view_frame,
     } = a;
     *render == b.render
         && *format == b.format
@@ -1916,4 +1917,5 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *named_views == b.named_views
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
+        && *view_frame == b.view_frame
 }

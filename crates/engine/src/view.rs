@@ -875,7 +875,7 @@ pub fn sketch_consumed(s: &Session, id: u64) -> bool {
 
 /// Camera framing the model (iso view).
 pub fn home_camera(s: &Session) -> Camera {
-    let mut c = Camera::default();
+    let mut c = Camera { frame: s.doc.view_frame, ..Camera::default() };
     let b = bounds(s);
     if !b.is_empty() {
         c.fit(&b);

@@ -1127,6 +1127,7 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
             v[k] = x.clone();
         }
         cam = serde_json::from_value(v).map_err(|e| format!("bad camera: {e}"))?;
+        cam.frame = app.cam.frame;
         // The distance cap is far past any Fit (so every reply replays) and still finite in f32.
         if !cam.is_valid() || cam.distance > 1e15 || cam.pitch.abs() > std::f64::consts::FRAC_PI_2 {
             return Err("the camera must be finite, with a distance up to 1e15 mm and a pitch within ±π/2".into());

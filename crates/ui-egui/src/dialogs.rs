@@ -3566,7 +3566,7 @@ fn flip_toward_viewer(app: &SolveApp, name: &str) -> Option<&'static str> {
     if side >= -1e-9 {
         return None;
     }
-    let up = app.cam.up.dir();
+    let up = app.cam.up_dir();
     Some(if plane.y.dot(up) > 1e-9 { "y" } else { "x" })
 }
 

@@ -215,8 +215,88 @@ impl UpAxis {
     }
 }
 
+/// A design's own view frame (#6455, the view cube's Set as Front / Top): the world directions its
+/// FRONT and TOP faces point to, out of the cube. It takes the place of the up axis preference for
+/// that design: the cube's labels, the standard views, Home and the orbit's up axis follow it.
+/// Both are principal world axes at right angles; geometry doesn't move.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ViewFrame {
+    /// Out of the FRONT face: from the target toward the eye of the front view.
+    pub front: Vec3,
+    /// Out of the TOP face.
+    pub top: Vec3,
+}
+
+/// Which face Set as names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameFace {
+    Front,
+    Top,
+}
+
+/// The principal axis nearest `v` (None for a zero or non-finite vector).
+pub fn nearest_axis(v: Vec3) -> Option<Vec3> {
+    if !v.is_finite() {
+        return None;
+    }
+    let (ax, ay, az) = (v.x.abs(), v.y.abs(), v.z.abs());
+    let m = ax.max(ay).max(az);
+    if !(m > 1e-12) {
+        return None;
+    }
+    Some(if ax == m {
+        Vec3::new(v.x.signum(), 0.0, 0.0)
+    } else if ay == m {
+        Vec3::new(0.0, v.y.signum(), 0.0)
+    } else {
+        Vec3::new(0.0, 0.0, v.z.signum())
+    })
+}
+
+impl ViewFrame {
+    /// A frame from two directions, each rounded to its nearest principal axis; None unless they
+    /// end up at right angles.
+    pub fn new(front: Vec3, top: Vec3) -> Option<ViewFrame> {
+        let (front, top) = (nearest_axis(front)?, nearest_axis(top)?);
+        (front.dot(top).abs() < 0.5).then_some(ViewFrame { front, top })
+    }
+    /// Out of the RIGHT face.
+    pub fn right(self) -> Vec3 {
+        self.top.cross(self.front)
+    }
+    /// A world vector in the Z-up frame yaw and pitch are measured in (front along −Y).
+    pub fn to_frame(self, w: Vec3) -> Vec3 {
+        Vec3::new(w.dot(self.right()), -w.dot(self.front), w.dot(self.top))
+    }
+    /// A frame vector in the world.
+    pub fn from_frame(self, v: Vec3) -> Vec3 {
+        self.right() * v.x - self.front * v.y + self.top * v.z
+    }
+    /// Set as Front (or Top) from `cam`'s view: the cube face nearest the view becomes `face`.
+    /// The other face stays where it was when it is at right angles to the new one; else it is
+    /// the face nearest the screen's up (for a new front: TOP is up the screen) or down (for a new
+    /// top: FRONT is at the bottom of the screen, as the standard top view shows it).
+    pub fn set_from_view(cam: &Camera, face: FrameFace) -> Option<ViewFrame> {
+        let (_, screen_up, back) = cam.basis();
+        let chosen = nearest_axis(back)?;
+        let (kept, toward) = match face {
+            FrameFace::Front => (cam.from_frame(Vec3::Z), screen_up),
+            FrameFace::Top => (cam.from_frame(-Vec3::Y), -screen_up),
+        };
+        let other = nearest_axis(kept)
+            .filter(|k| k.dot(chosen).abs() < 0.5)
+            .or_else(|| nearest_axis(toward - chosen * toward.dot(chosen)))
+            .filter(|k| k.dot(chosen).abs() < 0.5)?;
+        match face {
+            FrameFace::Front => ViewFrame::new(chosen, other),
+            FrameFace::Top => ViewFrame::new(other, chosen),
+        }
+    }
+}
+
 /// Orbit camera around `target`. Yaw and pitch are about the up axis (Z, or Y for a Y-up
-/// world): with Y up, the front view looks along −Z and the top view down −Y.
+/// world): with Y up, the front view looks along −Z and the top view down −Y. A design's own
+/// [`ViewFrame`] takes the place of the up axis.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
     pub target: Vec3,
@@ -234,12 +314,15 @@ pub struct Camera {
     /// The world's up axis.
     #[serde(default)]
     pub up: UpAxis,
+    /// The design's own view frame, when it has one: it takes the place of `up`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<ViewFrame>,
 }
 
 impl Default for Camera {
     fn default() -> Self {
         let (yaw, pitch) = StandardView::Iso.angles();
-        Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, distance: 200.0, fov: 0.0, up: UpAxis::Z }
+        Camera { target: Vec3::ZERO, yaw, pitch, roll: 0.0, distance: 200.0, fov: 0.0, up: UpAxis::Z, frame: None }
     }
 }
 
@@ -247,19 +330,25 @@ impl Camera {
     /// Direction from the target toward the eye.
     pub fn back(&self) -> Vec3 {
         let (cp, sp) = (self.pitch.cos(), self.pitch.sin());
-        self.up.from_frame(Vec3::new(-self.yaw.sin() * cp, -self.yaw.cos() * cp, sp).normalized().unwrap_or(Vec3::Z))
+        self.from_frame(Vec3::new(-self.yaw.sin() * cp, -self.yaw.cos() * cp, sp).normalized().unwrap_or(Vec3::Z))
     }
-    /// The world's up direction.
+    /// The world's up direction (the design's TOP when it has its own frame).
     pub fn up_dir(&self) -> Vec3 {
-        self.up.dir()
+        self.frame.map_or(self.up.dir(), |f| f.top)
     }
     /// A world vector in the camera's Z-up frame (where yaw and pitch are measured).
     pub fn to_frame(&self, v: Vec3) -> Vec3 {
-        self.up.to_frame(v)
+        match self.frame {
+            Some(f) => f.to_frame(v),
+            None => self.up.to_frame(v),
+        }
     }
     /// A Z-up frame vector in the world.
     pub fn from_frame(&self, v: Vec3) -> Vec3 {
-        self.up.from_frame(v)
+        match self.frame {
+            Some(f) => f.from_frame(v),
+            None => self.up.from_frame(v),
+        }
     }
     pub fn eye(&self) -> Vec3 {
         self.target + self.back() * self.distance
@@ -267,8 +356,8 @@ impl Camera {
     /// Camera basis: right, up, back (orthonormal).
     pub fn basis(&self) -> (Vec3, Vec3, Vec3) {
         let b = self.back();
-        let right = self.up.from_frame(Vec3::new(self.yaw.cos(), -self.yaw.sin(), 0.0));
-        let up = b.cross(right).normalized().unwrap_or(self.up.dir());
+        let right = self.from_frame(Vec3::new(self.yaw.cos(), -self.yaw.sin(), 0.0));
+        let up = b.cross(right).normalized().unwrap_or(self.up_dir());
         let (s, c) = self.roll.sin_cos();
         (right * c + up * s, up * c - right * s, b)
     }
@@ -430,10 +519,10 @@ impl Camera {
         let rotate = |v: Vec3| v * cos + axis.cross(v) * sin + axis * (axis.dot(v) * (1.0 - cos));
         let rotated_right = rotate(right);
         let Some(rotated_back) = rotate(back).normalized() else { return };
-        let framed = self.up.to_frame(rotated_back);
+        let framed = self.to_frame(rotated_back);
         let yaw = if framed.x.hypot(framed.y) < 1e-10 { self.yaw } else { (-framed.x).atan2(-framed.y) };
         let pitch = framed.z.clamp(-1.0, 1.0).asin();
-        let base_right = self.up.from_frame(Vec3::new(yaw.cos(), -yaw.sin(), 0.0));
+        let base_right = self.from_frame(Vec3::new(yaw.cos(), -yaw.sin(), 0.0));
         let Some(base_up) = rotated_back.cross(base_right).normalized() else { return };
         let roll = rotated_right.dot(base_up).atan2(rotated_right.dot(base_right));
         if yaw.is_finite() && pitch.is_finite() && roll.is_finite() {
@@ -505,7 +594,7 @@ impl Camera {
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
     pub fn looking_from(&self, back: Vec3) -> Camera {
-        let Some(b) = self.up.to_frame(back).normalized() else { return *self };
+        let Some(b) = self.to_frame(back).normalized() else { return *self };
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         let pitch = b.z.clamp(-1.0, 1.0).asin().clamp(-lim, lim);
         let yaw = if b.x.hypot(b.y) < 1e-6 {
@@ -543,6 +632,7 @@ impl Camera {
             distance: a.distance + (b.distance - a.distance) * s,
             fov: a.fov + (b.fov - a.fov) * s,
             up: b.up,
+            frame: b.frame,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -611,6 +701,77 @@ pub struct ViewAngles {
 fn wrap_half_turn(a: f64) -> f64 {
     use std::f64::consts::{PI, TAU};
     if a.is_finite() { PI - (PI - a).rem_euclid(TAU) } else { 0.0 }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    fn close(a: Vec3, b: Vec3) -> bool {
+        a.dist(b) < 1e-5
+    }
+
+    /// The default frame is the Z-up world: front −Y, top +Z, right +X.
+    #[test]
+    fn the_default_frame_is_the_z_up_world() {
+        let f = ViewFrame::new(-Vec3::Y, Vec3::Z).unwrap();
+        assert!(close(f.right(), Vec3::X));
+        for v in [Vec3::X, Vec3::Y, Vec3::Z, Vec3::new(0.3, -0.4, 0.8)] {
+            assert!(close(f.from_frame(v), v) && close(f.to_frame(v), v));
+        }
+        let framed = Camera { frame: Some(f), ..Default::default() };
+        let plain = Camera::default();
+        assert!(close(framed.back(), plain.back()));
+    }
+
+    /// #6455: the face nearest the view becomes FRONT; TOP stays when it can, and the front view
+    /// then looks from the chosen face.
+    #[test]
+    fn set_as_front_takes_the_face_nearest_the_view() {
+        // Looking from the right (+X), a little from above.
+        let mut cam = Camera::default();
+        cam.set_view(StandardView::Right);
+        cam.pitch = 0.2;
+        let f = ViewFrame::set_from_view(&cam, FrameFace::Front).unwrap();
+        assert!(close(f.front, Vec3::X) && close(f.top, Vec3::Z), "{f:?}");
+        let mut framed = Camera { frame: Some(f), ..cam };
+        framed.set_view(StandardView::Front);
+        assert!(close(framed.back(), Vec3::X));
+        framed.set_view(StandardView::Top);
+        assert!(close(framed.back(), Vec3::Z));
+        assert!(close(framed.up_dir(), Vec3::Z));
+    }
+
+    /// Set as Top from the front view: the old front is now on top, so the new front is the face at
+    /// the bottom of the screen.
+    #[test]
+    fn set_as_top_turns_the_design_over() {
+        let mut cam = Camera::default();
+        cam.set_view(StandardView::Front);
+        let f = ViewFrame::set_from_view(&cam, FrameFace::Top).unwrap();
+        assert!(close(f.top, -Vec3::Y), "{f:?}");
+        assert!(close(f.front, -Vec3::Z), "{f:?}");
+        let mut framed = Camera { frame: Some(f), ..cam };
+        framed.set_view(StandardView::Top);
+        assert!(close(framed.back(), -Vec3::Y));
+        assert!(close(framed.up_dir(), -Vec3::Y), "the orbit turns about the new top");
+        // Every standard view is square to the model and the frame is right-handed.
+        assert!(close(f.right().cross(-f.front), f.top));
+    }
+
+    #[test]
+    fn frames_are_principal_axes_at_right_angles() {
+        assert!(ViewFrame::new(Vec3::X, Vec3::X).is_none());
+        assert!(ViewFrame::new(Vec3::X, -Vec3::X).is_none());
+        assert!(ViewFrame::new(Vec3::ZERO, Vec3::Z).is_none());
+        assert!(ViewFrame::new(Vec3::new(f64::NAN, 0.0, 0.0), Vec3::Z).is_none());
+        let f = ViewFrame::new(Vec3::new(0.9, 0.1, 0.0), Vec3::new(0.0, 0.2, 0.7)).unwrap();
+        assert!(close(f.front, Vec3::X) && close(f.top, Vec3::Z));
+        // A frame survives a save.
+        let json = serde_json::to_value(Camera { frame: Some(f), ..Default::default() }).unwrap();
+        assert_eq!(serde_json::from_value::<Camera>(json).unwrap().frame, Some(f));
+        assert!(serde_json::to_value(Camera::default()).unwrap().get("frame").is_none(), "no frame, nothing saved");
+    }
 }
 
 #[cfg(test)]

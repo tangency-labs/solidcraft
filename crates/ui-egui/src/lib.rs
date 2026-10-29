@@ -2028,6 +2028,15 @@ impl SolveApp {
     }
 
     /// Frame the model at once (programmatic use; the toolbar animates).
+    /// The design's own FRONT and TOP changed (#6455): the camera takes them and keeps looking
+    /// from where it was. A Set as turns it to the face itself (`view.frame` sets the camera).
+    pub fn follow_view_frame(&mut self) {
+        let back = self.cam.back();
+        self.cam_anim = None;
+        self.cam.frame = self.session.doc.view_frame;
+        self.cam = self.cam.looking_from(back);
+    }
+
     /// Make `up` the world's up axis: the camera turns to the same standard view in that world
     /// (home) and frames the model.
     pub fn set_up_axis(&mut self, up: solidcraft_engine::render::UpAxis) {
@@ -2290,6 +2299,9 @@ impl SolveApp {
         self.now = ctx.input(|i| i.time);
         if self.cam.up != self.ui.up_axis {
             self.set_up_axis(self.ui.up_axis);
+        }
+        if self.cam.frame != self.session.doc.view_frame {
+            self.follow_view_frame();
         }
         self.step_view_animation(ctx);
         self.poll_control_jobs(ctx);

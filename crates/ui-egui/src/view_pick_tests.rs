@@ -21,6 +21,7 @@ fn top_view() -> Harness {
         distance: 100.0,
         fov: 0.0,
         up: Default::default(),
+        frame: None,
     };
     h
 }

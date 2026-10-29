@@ -1300,7 +1300,8 @@ mod tests {
                     let roll = f64::from(quarter) * std::f64::consts::FRAC_PI_2;
                     let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
                     app.preferences.free_orbit = true;
-                    app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.08, pitch: 0.1, roll: roll + 0.08, distance: 47.0, fov, up };
+                    app.cam =
+                        Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.08, pitch: 0.1, roll: roll + 0.08, distance: 47.0, fov, up, frame: None };
                     let expected = Camera { yaw: 0.0, pitch: 0.0, roll, ..app.cam };
                     orbit_drag(&mut app, rect, 0.0, 0.0, None, true, false);
                     let (right, vertical, back) = app.cam.basis();

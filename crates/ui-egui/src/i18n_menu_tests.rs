@@ -33,7 +33,16 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
     let components: Vec<u64> = app.session.doc.components.iter().map(|c| c.id).collect();
     let groups: Vec<u64> = app.session.doc.browser_groups.iter().map(|g| g.id).collect();
 
-    for target in [Target::Viewport, Target::Origin, Target::Units, Target::Toolbar, Target::HistoryControls, Target::Workspace, Target::NamedViews] {
+    for target in [
+        Target::Viewport,
+        Target::Origin,
+        Target::Units,
+        Target::Toolbar,
+        Target::HistoryControls,
+        Target::Workspace,
+        Target::NamedViews,
+        Target::NavigationCube,
+    ] {
         take_items(out, &context_menu::items(app, &target));
     }
     for name in &bodies {

@@ -41,6 +41,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("view.apply", "Restore Named View", view_apply).icon("camera").noundo().params(
         "view?: front|back|top|bottom|left|right|iso|home (frames the model) | a named view's name; or camera?: {target: [x,y,z], yaw, pitch, distance, fov?, roll?} (radians, mm, about the up axis; yaw: heading of the line of sight, 0 along +Y (Front), π/2 along +X (Left), π (Back), −π/2 (Right); pitch: the eye's elevation, within ±π/2, π/2 = Top; roll defaults to 0, turns the picture clockwise, must be finite and is clamped to ±π; the View angles readout shows these in degrees; up is refused: the up axis comes from the design settings) → camera. The viewport (and the MCP screenshot) moves there. View state: not saved, not an undo step",
     ),
+    CommandSpec::new("view.frame", "Set View Orientation", view_frame).icon("camera").params(
+        "set?: front|top (the view cube's face nearest `camera`'s view becomes that face; the other keeps its place when it can), \
+         camera: {target, yaw, pitch, distance, fov?, roll?, up?, frame?} (the view, as view.camera gives it); or reset?: true (back to the up axis preference). \
+         The design's standard views, Home and the orbit follow its FRONT and TOP; geometry doesn't move. Saved with the design, an undo step; \
+         the viewport turns to the face that was set → front, top (world axes) or null",
+    ),
     CommandSpec::new("browser.order", "Order Browser Items", order).icon("reorder").params("folder, component?, order: [keys] (the folder's items in display order)"),
     CommandSpec::new("browser.visibility", "Show/Hide", visibility).icon("eye").params(
         "visible: bool; items?: [sketch id or name | body name | construction name | joint name | O|X|Y|Z|XY|XZ|YZ]; \
@@ -779,6 +785,49 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "camera": cam }))
 }
 
+fn view_frame(s: &mut Session, p: &Value) -> Result<Value> {
+    use crate::render::{FrameFace, StandardView, ViewFrame};
+    let cmd = "view.frame";
+    let reset = p.get("reset").and_then(Value::as_bool).unwrap_or(false);
+    let (frame, view) = match (str_(p, "set"), reset) {
+        (Some(_), true) => return Err(bad(cmd, "give `set` or `reset`, not both")),
+        (None, false) => return Err(bad(cmd, "`set` (front|top) or `reset: true` is required")),
+        (None, true) => (None, StandardView::Iso),
+        (Some(face), false) => {
+            let (face, view) = match face {
+                "front" => (FrameFace::Front, StandardView::Front),
+                "top" => (FrameFace::Top, StandardView::Top),
+                _ => return Err(bad(cmd, "`set` must be front or top")),
+            };
+            let c = p.get("camera").ok_or_else(|| bad(cmd, "`camera` (the current view) is required"))?;
+            let cam: crate::render::Camera = serde_json::from_value(c.clone()).map_err(|e| bad(cmd, format!("bad camera: {e}")))?;
+            if !cam.is_valid() {
+                return Err(bad(cmd, "the camera must be finite with a positive distance"));
+            }
+            let frame = ViewFrame::set_from_view(&cam, face).ok_or_else(|| bad(cmd, "the view doesn't face a side of the cube"))?;
+            (Some(frame), view)
+        }
+    };
+    if s.doc.view_frame != frame {
+        s.doc_mut().view_frame = frame;
+    }
+    // The viewport turns to the face that was set (Home after a reset), as the cube shows it.
+    let mut cam = match p.get("camera").map(|c| serde_json::from_value::<crate::render::Camera>(c.clone())) {
+        Some(Ok(c)) if c.is_valid() => c,
+        _ => crate::view::home_camera(s),
+    };
+    cam.frame = frame;
+    cam.set_view(view);
+    if reset {
+        cam.fit(&crate::view::bounds(s));
+    }
+    s.camera = Some(cam);
+    Ok(match frame {
+        Some(f) => json!({ "front": [f.front.x, f.front.y, f.front.z], "top": [f.top.x, f.top.y, f.top.z], "camera": cam }),
+        None => json!({ "frame": null, "camera": cam }),
+    })
+}
+
 /// The orbit camera of a named view (Z up, no roll).
 fn camera_of(v: &solidcraft_doc::NamedView) -> crate::render::Camera {
     crate::render::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, ..Default::default() }
@@ -1486,6 +1535,43 @@ mod tests {
         assert!((ymin + 20.0).abs() < 1e-6);
         assert!(s.execute("sketch.redefine", &json!({"sketch": sk, "plane": "nope"})).is_err());
         assert!(s.execute("sketch.redefine", &json!({"sketch": 999, "plane": "XY"})).is_err());
+    }
+
+    /// #6455: the view cube's Set as Front / Top gives the design its own FRONT and TOP. The
+    /// viewport turns to that face, the standard views follow, it is an undo step and it is saved.
+    #[test]
+    fn set_as_front_and_top_give_the_design_its_own_orientation() {
+        use crate::render::{Camera, StandardView};
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5}));
+        // Looking from the right (+X), a little from above: that face becomes FRONT.
+        let mut cam = Camera::default();
+        cam.set_view(StandardView::Right);
+        cam.pitch = 0.2;
+        let r = run(&mut s, "view.frame", json!({"set": "front", "camera": cam}));
+        assert_eq!((r["front"].clone(), r["top"].clone()), (json!([1.0, 0.0, 0.0]), json!([0.0, 0.0, 1.0])));
+        let f = s.doc.view_frame.expect("the design has its own frame");
+        let viewed = s.camera.expect("the viewport turns to the new front");
+        assert!(viewed.back().dist(f.front) < 1e-9);
+        // The standard views follow it.
+        run(&mut s, "view.apply", json!({"view": "front"}));
+        assert!(s.camera.unwrap().back().dist(solidcraft_geom::Vec3::X) < 1e-9);
+        // Saved with the design.
+        let text = s.doc.to_json();
+        assert_eq!(solidcraft_doc::format::read(&text).unwrap().view_frame, Some(f));
+        // Set as Top from the top view of the new frame keeps FRONT.
+        let mut top = Camera { frame: Some(f), ..Camera::default() };
+        top.set_view(StandardView::Top);
+        run(&mut s, "view.frame", json!({"set": "top", "camera": top}));
+        assert_eq!(s.doc.view_frame, Some(f));
+        // An undo step; Reset goes back to the preference's.
+        run(&mut s, "view.frame", json!({"reset": true}));
+        assert_eq!(s.doc.view_frame, None);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.view_frame, Some(f));
+        for bad in [json!({}), json!({"set": "left", "camera": cam}), json!({"set": "front"}), json!({"set": "top", "camera": cam, "reset": true})] {
+            assert!(s.execute("view.frame", &bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

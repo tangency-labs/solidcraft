@@ -137,6 +137,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         named_views,
         visibility,
         point_clouds,
+        // Display only: the design's own view frame shapes nothing.
+        view_frame: _,
     } = a;
     (Arc::ptr_eq(render, &b.render) || *render == b.render)
         && *format == b.format
