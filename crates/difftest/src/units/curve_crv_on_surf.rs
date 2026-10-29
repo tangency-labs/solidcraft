@@ -663,7 +663,7 @@ fn put_state(o: &mut Vec<f64>, c: &CrvOnSurf) {
         None => o.push(0.0),
         Some(a) => {
             o.push(1.0);
-            put_nurb(o, a);
+            put_nurb(o, &a);
         }
     }
     put_curve(o, c.uv_curve());
