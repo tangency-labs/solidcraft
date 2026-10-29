@@ -71,7 +71,10 @@
 //!   copied back even on failure; local solves do not force a cache build. The base
 //!   drop's global solve reads the curve cache the caller keeps for this curve
 //!   ([`Curve::drop_point_in`] and `GlobalCoincidenceChecker`, as for every other kind;
-//!   upstream keeps it on the curve), not one built per drop on the copy. Where
+//!   upstream keeps it on the curve), not one built per drop on the copy; a caller
+//!   without one reads the cache kept on this object (built by its first global solve
+//!   under the same kernel state, dropped by every edit; a copy starts without it), as
+//!   upstream's one cache per curve object. Where
 //!   upstream falls back to the base class
 //!   after a failed approximation (`CalculateBoundingBox`, `DropPoint`), a
 //!   [`SolidError::Unported`] failure is propagated instead.
@@ -125,6 +128,7 @@ use crate::curve::curve::p2::{
     at, evaluate_continuity, is_kind_of as curve_is_kind_of, knots_ignoring_status, Curve,
     CurveEvaluate, CurveKind, KnotsWithStatus, CRV_ON_SURF_TYPE,
 };
+use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::p6::{calculate_bounding_box_base, CurveHandle, DroppedPoint};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
@@ -320,6 +324,11 @@ pub struct CrvOnSurf {
     /// `m_pBSApproxCurve`, `m_dMaxGap3d`, `m_bParametrizationMatches`: mutable even
     /// in upstream's const queries, as `break_cache`.
     approx_cache: Mutex<ApproxCache>,
+    /// The curve cache of the base-class drop's global solve, kept on this object as
+    /// upstream's `SmCacheMgr` keeps one per curve (not a field upstream), with the
+    /// kernel state it was built under (`CurveMemoKey::of_kernel`). A copy starts
+    /// without one; every edit of the curve drops it.
+    curve_cache: Mutex<Option<(CurveMemoKey, CurveCache<CurveHandle>)>>,
 }
 
 /// An exact copy as a separate curve (the [`Curve`] copy constructor's): as upstream's
@@ -354,6 +363,7 @@ impl CrvOnSurf {
             break_cache: Mutex::new(self.lock_break_cache().clone()),
             owner_flag: self.owner_flag,
             approx_cache: Mutex::new(self.lock_approx_cache().clone_exact()),
+            curve_cache: Mutex::new(None),
         }
     }
 }
@@ -370,6 +380,7 @@ impl CrvOnSurf {
             break_cache: Mutex::new(self.lock_break_cache().clone()),
             owner_flag: self.owner_flag,
             approx_cache: Mutex::new(self.lock_approx_cache().clone_exact()),
+            curve_cache: Mutex::new(None),
         })
     }
 
@@ -394,9 +405,16 @@ impl CrvOnSurf {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn curve_cache_mut(&mut self) -> &mut Option<(CurveMemoKey, CurveCache<CurveHandle>)> {
+        self.curve_cache
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Takes the break and approximation caches of `copy`, an exact copy of this curve
     /// that a const query ran on: upstream's const queries write them on the curve
-    /// itself.
+    /// itself. The curve cache lent to the copy ([`Self::drop_point_ref_as`]) comes back
+    /// with them.
     fn keep_caches_of(&self, copy: Self) {
         *self.lock_break_cache() = copy
             .break_cache
@@ -406,6 +424,16 @@ impl CrvOnSurf {
             .approx_cache
             .into_inner()
             .unwrap_or_else(PoisonError::into_inner);
+        if let Some(kept) = copy
+            .curve_cache
+            .into_inner()
+            .unwrap_or_else(PoisonError::into_inner)
+        {
+            *self
+                .curve_cache
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(kept);
+        }
     }
 
     /// `SmCrvOnSurf_TYPE` (`CURV_BASE_TYPE + 48`).
@@ -429,6 +457,7 @@ impl CrvOnSurf {
                 max_gap_3d: BIG_DOUBLE,
                 parametrization_matches: false,
             }),
+            curve_cache: Mutex::new(None),
         })
     }
 
@@ -601,6 +630,7 @@ impl CrvOnSurf {
 
     /// Mutable parameter curve for faithful in-place B-spline base editing.
     pub(crate) fn uv_curve_mut(&mut self) -> &mut Curve {
+        *self.curve_cache_mut() = None;
         &mut self.uv_curve
     }
 
@@ -637,6 +667,13 @@ impl CrvOnSurf {
 
     /// Loads the break cache (`m_bNeedBreaks`, `m_vBreaks`), as `ReadFromDB` does.
     pub fn set_breaks_cache(&mut self, need_breaks: bool, breaks: Vec<f64>) {
+        // the knots the curve cache was built over may change
+        let cache = self.lock_break_cache();
+        let same = cache.need_breaks == need_breaks && cache.breaks == breaks;
+        drop(cache);
+        if !same {
+            *self.curve_cache_mut() = None;
+        }
         *self
             .break_cache
             .get_mut()
@@ -678,6 +715,7 @@ impl CrvOnSurf {
     pub fn set_uv_curve(&mut self, uv_curve: Curve) -> Result<()> {
         Surface::check_curve_evaluation_copy_depth(&uv_curve, 1)?;
         *self.uv_curve = uv_curve;
+        *self.curve_cache_mut() = None;
         Ok(())
     }
 
@@ -1569,7 +1607,9 @@ impl CrvOnSurf {
     /// Run the base algorithm on an exact evaluation copy, then keep only the
     /// break-cache writes it actually made, including writes before an error.
     /// A successful local/fast solve may never request knots; do not force them.
-    /// The global solve reads (and on first use builds) the caller's curve `cache`.
+    /// The global solve reads (and on first use builds) the caller's curve `cache`;
+    /// when the caller holds none, this curve's own (see the `curve_cache` field),
+    /// which the solve's build then refills.
     fn drop_point_base_preserving_breaks(
         &mut self,
         k: &Kernel,
@@ -1582,6 +1622,19 @@ impl CrvOnSurf {
         derived: Option<TangentFieldMembers>,
         cache: &mut Option<CurveCache<CurveHandle>>,
     ) -> Result<DroppedPoint> {
+        // this curve's own cache, for a caller without one (not for a derived object,
+        // whose curve differs; not when the kernel memo is off)
+        let own_key = match (cache.is_none(), derived.is_none()) {
+            (true, true) => CurveMemoKey::of_kernel(k),
+            _ => None,
+        };
+        if let Some(key) = own_key {
+            if let Some((kept, c)) = self.curve_cache_mut().take() {
+                if kept == key {
+                    *cache = Some(c);
+                }
+            }
+        }
         let curve = self.as_curve(derived);
         let result = curve.drop_point_base_cached(
             k,
@@ -1593,6 +1646,11 @@ impl CrvOnSurf {
             op,
             cache,
         );
+        if let Some(key) = own_key {
+            if let Some(c) = cache.take() {
+                *self.curve_cache_mut() = Some((key, c));
+            }
+        }
         let base = match curve.into_kind() {
             CurveKind::CrvOnSurf(c) => Some(*c),
             CurveKind::TangentField(t) => Some(t.into_base()),
@@ -1656,6 +1714,12 @@ impl CrvOnSurf {
     ) -> Result<DroppedPoint> {
         // (an exact stand-in for `this`, whose caches are kept below)
         let mut copy = self.clone_exact_shared();
+        // the copy stands for this curve: it uses (and gives back) this curve's cache
+        *copy.curve_cache_mut() = self
+            .curve_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         let result = copy.drop_point_as(
             k,
             interval,
@@ -1680,6 +1744,7 @@ impl CrvOnSurf {
     ///
     /// Those of the UV curve's edit (the breaks are rescaled already).
     pub fn edit_parameterization(&mut self, k: &Kernel, new_param: &Extent1d) -> Result<()> {
+        *self.curve_cache_mut() = None;
         // when appropriate scale breaks
         if !self.need_breaks() {
             let ivl = self.uv_curve.natural_interval();
@@ -1718,6 +1783,7 @@ impl CrvOnSurf {
         if self.owner_flag == 0 {
             return Err(SolidError::sm_err(OP));
         }
+        *self.curve_cache_mut() = None;
         self.uv_curve.reverse_parameterization(k, old_interval)
     }
 
@@ -1750,6 +1816,7 @@ impl CrvOnSurf {
         }
 
         // pass the call along to the UVCurve
+        *self.curve_cache_mut() = None;
         self.uv_curve
             .trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d)?;
 
@@ -1792,6 +1859,8 @@ impl CrvOnSurf {
         {
             return Ok(());
         }
+
+        *self.curve_cache_mut() = None;
 
         // Transform cached bspline approximation (status ignored)
         if let Some(a) = &mut self.approx_cache_mut().bs_approx {
@@ -2314,36 +2383,85 @@ mod tests {
     }
 
     #[test]
-    fn a_kept_curve_cache_drops_as_a_fresh_one() {
-        // The caller's curve cache, built by the first global solve, gives the drops
-        // of a cache built for each one.
+    fn the_curve_keeps_its_drop_cache_until_edited() {
+        // A caller without a curve cache of its own drops through the curve's: built
+        // by the first global solve, then reused, with the drops of a fresh build; a
+        // copy starts without it and an edit of the curve drops it.
         let k = Kernel::default();
-        let c = CrvOnSurf::new(&k, uv(), patch().into(), None, 0).unwrap();
+        let mut c = CrvOnSurf::new(&k, uv(), patch().into(), None, 0).unwrap();
         let ivl = c.natural_interval();
-        let mut kept = None;
+        let has_cache = |c: &CrvOnSurf| c.curve_cache.lock().unwrap().is_some();
         for t in [0.25, 0.6, 0.9] {
             let point = c.evaluate_point(&k, t).unwrap();
-            let drop = |cache: &mut Option<CurveCache<CurveHandle>>| {
-                c.clone()
-                    .drop_point_base_preserving_breaks(
-                        &k,
-                        &ivl,
-                        point,
-                        None,
-                        1e-6,
-                        None,
-                        SolverOperation::Normalize,
-                        None,
-                        cache,
-                    )
-                    .unwrap()
+            let drop = |c: &mut CrvOnSurf| {
+                c.drop_point_base_preserving_breaks(
+                    &k,
+                    &ivl,
+                    point,
+                    None,
+                    1e-6,
+                    None,
+                    SolverOperation::Normalize,
+                    None,
+                    &mut None,
+                )
+                .unwrap()
             };
-            let fresh = drop(&mut None);
-            let reused = drop(&mut kept);
-            assert!(kept.is_some());
-            assert_eq!(reused.success, fresh.success);
-            assert_eq!(reused.parameter.to_bits(), fresh.parameter.to_bits());
-            assert_eq!(reused.distance.to_bits(), fresh.distance.to_bits());
+            let fresh = drop(&mut c.clone());
+            let kept = drop(&mut c);
+            assert!(has_cache(&c));
+            assert_eq!(kept.success, fresh.success);
+            assert_eq!(kept.parameter.to_bits(), fresh.parameter.to_bits());
+            assert_eq!(kept.distance.to_bits(), fresh.distance.to_bits());
+        }
+        assert!(!has_cache(&c.clone()));
+        let mut edited = c.clone_exact_shared();
+        assert!(!has_cache(&edited));
+        edited.set_uv_curve(c.uv_curve().clone()).unwrap();
+        c.set_uv_curve(c.uv_curve().clone()).unwrap();
+        assert!(!has_cache(&c));
+    }
+
+    #[test]
+    fn a_kept_curve_cache_drops_as_a_fresh_one() {
+        // The curve cache built by the first global solve, kept on the curve for a
+        // caller without one and in the caller's slot for a caller with one, gives the
+        // drops of a cache built for each one.
+        let k = Kernel::default();
+        let mut c = CrvOnSurf::new(&k, uv(), patch().into(), None, 0).unwrap();
+        let ivl = c.natural_interval();
+        let mut held = None;
+        for t in [0.25, 0.6, 0.9] {
+            let point = c.evaluate_point(&k, t).unwrap();
+            let drop = |c: &mut CrvOnSurf, cache: &mut Option<CurveCache<CurveHandle>>| {
+                c.drop_point_base_preserving_breaks(
+                    &k,
+                    &ivl,
+                    point,
+                    None,
+                    1e-6,
+                    None,
+                    SolverOperation::Normalize,
+                    None,
+                    cache,
+                )
+                .unwrap()
+            };
+            let fresh = drop(&mut c.clone(), &mut None);
+            // the curve's own cache (built by the first drop, then reused)
+            let kept = drop(&mut c, &mut None);
+            assert!(c.curve_cache.lock().unwrap().is_some());
+            // a caller's slot takes precedence and stays the caller's
+            if held.is_none() {
+                held = c.curve_cache.lock().unwrap().take().map(|(_, cache)| cache);
+            }
+            let reused = drop(&mut c.clone(), &mut held);
+            assert!(held.is_some());
+            for d in [kept, reused] {
+                assert_eq!(d.success, fresh.success);
+                assert_eq!(d.parameter.to_bits(), fresh.parameter.to_bits());
+                assert_eq!(d.distance.to_bits(), fresh.distance.to_bits());
+            }
         }
     }
 
