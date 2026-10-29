@@ -72,8 +72,17 @@ pub const CORPUS_DIR: &str = "corpus/steptools";
 /// Verdicts, in summary order.
 /// `HEAL-DIFF`: every build stage agrees and the first difference is in `SmApiHealBrep`
 /// or after it; `DIFF`: a build stage (faces, stitch, counts, manifold, area, volume)
-/// differs.
-pub const VERDICTS: [&str; 6] = ["MATCH", "HEAL-DIFF", "DIFF", "DEFERRED", "CRASH", "SKIPPED"];
+/// differs; `RUST-ONLY`: a build without `cpp` built the body on the Rust side alone and
+/// compared nothing.
+pub const VERDICTS: [&str; 7] = [
+    "MATCH",
+    "HEAL-DIFF",
+    "DIFF",
+    "DEFERRED",
+    "CRASH",
+    "SKIPPED",
+    "RUST-ONLY",
+];
 
 /// What one kernel reported for one body: stages in order, and where the Rust side
 /// stopped on unported code.
@@ -801,9 +810,11 @@ fn side_summary(r: &RunResult) -> Value {
     }
 }
 
-fn verdict(results: &[RunResult]) -> (String, Value) {
+/// The verdict of one body from its results in [`sides`] order (`two_sided`: C++ then
+/// Rust; otherwise Rust alone, which compares nothing and is `RUST-ONLY`, not `MATCH`).
+fn verdict(results: &[RunResult], two_sided: bool) -> (String, Value) {
     let (cpp, rust) = match (results.first(), results.get(1)) {
-        (Some(c), Some(r)) if sides().len() == 2 => (Some(c), r),
+        (Some(c), Some(r)) if two_sided => (Some(c), r),
         (Some(r), _) => (None, r),
         _ => return ("CRASH".into(), json!("no result")),
     };
@@ -833,6 +844,9 @@ fn verdict(results: &[RunResult]) -> (String, Value) {
             "DEFERRED".into(),
             json!({"unit": u, "symbol": s, "after": rust.stages.last().map(|(n, _)| n)}),
         );
+    }
+    if cpp.is_none() {
+        return ("RUST-ONLY".into(), Value::Null);
     }
     ("MATCH".into(), Value::Null)
 }
@@ -961,7 +975,7 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
                 continue;
             }
             let res = results.get(wi).map_or(&[][..], Vec::as_slice);
-            let (v, detail) = verdict(res);
+            let (v, detail) = verdict(res, sides().len() == 2);
             *tally.entry(v.clone()).or_default() += 1;
             if v == "DEFERRED" {
                 if let Some(u) = detail.get("unit").and_then(Value::as_str) {
@@ -1049,4 +1063,51 @@ fn run_corpus_inner(root: &Path, opts: &CorpusOptions) -> Result<(), HarnessErro
         println!("report: {}", path.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn built(volume: f64) -> Record {
+        Record {
+            stages: vec![
+                ("faces".into(), vec![1.0, 1.0, 0.0, 0.0, 1.0]),
+                ("volume".into(), vec![0.0, volume]),
+                ("heal".into(), vec![0.0]),
+                ("healed_volume".into(), vec![0.0, volume]),
+            ],
+            ..Record::default()
+        }
+    }
+
+    fn deferred() -> Record {
+        Record {
+            deferred: Some(("unit.x".into(), "SmX::Y".into())),
+            ..built(1.0)
+        }
+    }
+
+    #[test]
+    fn a_rust_only_build_is_not_a_match() {
+        // Without `cpp` there is no C++ side: nothing was compared.
+        assert_eq!(verdict(&[Ok(built(1.0))], false).0, "RUST-ONLY");
+        assert_eq!(verdict(&[Ok(deferred())], false).0, "DEFERRED");
+        assert_eq!(verdict(&[Err("killed".into())], false).0, "CRASH");
+        assert_eq!(verdict(&[], false).0, "CRASH");
+        assert!(VERDICTS.contains(&"RUST-ONLY"));
+    }
+
+    #[test]
+    fn two_sided_verdicts_are_unchanged() {
+        let v = |c: RunResult, r: RunResult| verdict(&[c, r], true).0;
+        assert_eq!(v(Ok(built(1.0)), Ok(built(1.0))), "MATCH");
+        assert_eq!(v(Ok(built(1.0)), Ok(built(2.0))), "DIFF");
+        let mut healed = built(1.0);
+        healed.stages[3].1[1] = 2.0;
+        assert_eq!(v(Ok(built(1.0)), Ok(healed)), "HEAL-DIFF");
+        assert_eq!(v(Ok(built(1.0)), Ok(deferred())), "DEFERRED");
+        assert_eq!(v(Err("timeout".into()), Ok(built(1.0))), "CRASH");
+        assert_eq!(v(Ok(built(1.0)), Err("timeout".into())), "CRASH");
+    }
 }

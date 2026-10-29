@@ -898,7 +898,8 @@ nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --step-cor
   values within `1e-9` relative), `HEAL-DIFF` (every build stage agrees, the heal or a
   later stage differs), `DIFF` (a build stage differs), `DEFERRED` (the Rust side
   reached unported code; the unit is shown), `CRASH` (a child crashed, timed out or
-  the shim rejected the input), `SKIPPED` (no B-rep body in the file).
+  the shim rejected the input), `SKIPPED` (no B-rep body in the file), `RUST-ONLY` (a
+  build without `cpp`: the Rust side built the body, nothing was compared).
 * Each (body, kernel) runs in its own child process (`--step-case <file> <body>
   <cpp|rust> <out.json>`). Output: one line per body, a `STEP-CORPUS` summary line, and
   `bin/step-corpus/report.json` (per body: source counts, both sides' stages, verdict).
