@@ -150,9 +150,10 @@ static TOOLS: &[&Spec] = &[
 ];
 
 thread_local! {
-    /// Where the handles were drawn last frame (screen), for [`contains_pointer`]: navigation and
-    /// Select Other's press-and-hold run before the handles are drawn.
-    static DRAWN: std::cell::RefCell<Vec<Pos2>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// Where the handles were drawn last frame (screen), and whether each takes a press, for
+    /// [`contains_pointer`]: navigation and Select Other's press-and-hold run before the handles
+    /// are drawn. A place held still is drawn (the value box keeps off it) but takes no press.
+    static DRAWN: std::cell::RefCell<Vec<(Pos2, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The ring's screen centre last frame, for [`yield_box`].
     static RING_ABOUT: std::cell::Cell<Option<Pos2>> = const { std::cell::Cell::new(None) };
 }
@@ -165,7 +166,7 @@ pub(crate) fn contains_pointer(app: &SolveApp, p: Pos2) -> bool {
 /// Is `p` within reach of a handle drawn last frame? For the dialog's own manipulators, which run
 /// before the handles and would otherwise take a press meant for a handle their stem crosses.
 pub(crate) fn drawn_at(p: Pos2) -> bool {
-    DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH))
+    DRAWN.with(|h| h.borrow().iter().any(|(c, live)| *live && c.distance(p) <= REACH))
 }
 
 /// The tool whose dialog this is, if it has handles and they are on.
@@ -397,9 +398,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         let Some(bs) = proj.to_screen(pl.base) else { continue };
         let name = if sp.many { format!("{}:{n}", sp.name) } else { format!("{}:position", sp.name) };
         crate::scenario::publish_handle(&name, bs);
-        DRAWN.with(|h| h.borrow_mut().push(bs));
         let dirs = arms(proj, pl.base, pl.n, bs, freedom_of(app, pl.key));
         let held = dirs.is_empty();
+        DRAWN.with(|h| h.borrow_mut().push((bs, !held)));
         let r = markers.iter().filter(|_| !held).find(|(m, _)| *m == marker).map(|(_, r)| r);
         let (hovered, dragging) = r.map_or((false, false), |r| (r.hovered(), r.dragged()));
         // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
@@ -478,7 +479,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         }
     }
     crate::scenario::publish_handle(&format!("{}:rotate", sp.name), gs);
-    DRAWN.with(|h| h.borrow_mut().push(gs));
+    DRAWN.with(|h| h.borrow_mut().push((gs, true)));
     let (hovered, dragging) = (r.hovered(), r.dragged());
     ui.data_mut(|m| m.insert_temp(id("turning"), dragging));
     RING_ABOUT.with(|c| c.set(Some(bs)));
@@ -541,7 +542,7 @@ pub(crate) fn yield_box(ui: &egui::Ui, anchor: Pos2, at: Pos2) -> Pos2 {
         // starts, and the grip can never come under the box.
         Some(centre) => clear_of_circle(at, size, centre, RING_PX + RING_ROOM),
         None => {
-            let covers = |p: Pos2| DRAWN.with(|h| h.borrow().iter().any(|c| egui::Rect::from_min_size(p, size).expand(4.0).contains(*c)));
+            let covers = |p: Pos2| DRAWN.with(|h| h.borrow().iter().any(|(c, _)| egui::Rect::from_min_size(p, size).expand(4.0).contains(*c)));
             if covers(at) {
                 let left = Pos2::new(anchor.x - (at.x - anchor.x) - size.x, at.y);
                 let above = Pos2::new(at.x, anchor.y - 14.0 - size.y);
