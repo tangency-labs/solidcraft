@@ -19,6 +19,9 @@
 // face tail -> BuildOffsetOfFaceuse's contained-domain branch on a MakeFaceWithCurves
 //              plane face, including MapEdgeuses and self-intersection merging.
 // map twin -> MapEdgeuses alone, between two MakeFaceWithCurves rectangle faces.
+// replace -> ReplaceImplicitOffsets on one CreateFaceFromSurface face whose surface is
+//            an owning SmOffsetSurface(d, base) of a real SmPlane, SmBSplineSurface or
+//            SmSurfOfExtrusion (lazy: no NURB until GetOrCreateGwNurbPointer).
 // Deviations: bounded plain-C fixture protocol, traversal IDs instead of pointers;
 // extension-only nonnegative-distance validation. Native array ordering is unchanged.
 // No implementation file is included; no native numerical/helper code is copied.
@@ -39,9 +42,11 @@
 #include <SmNurbsSrf.h>
 #include <SmOffsetExecutive.h>
 #include <SmOffsetGeometryCreation.h>
+#include <SmOffsetSurface.h>
 #include <SmPlane.h>
 #include <SmRegion.h>
 #include <SmShell.h>
+#include <SmSurfOfExtrusion.h>
 #include <SmSSIData.h>
 #include <SmVertex.h>
 #include <SmVertexuse.h>
@@ -1112,10 +1117,71 @@ void map_twin(Reader& rd, std::vector<double>& out) {
     out.insert(out.end(), {0, (double)status});
     put_mapped_uses(out, executive, use);
 }
+void replace(Reader& rd, std::vector<double>& out) {
+    SmContext ctx;
+    int64_t base_kind = rd.index(1);
+    std::unique_ptr<SmSurface> base;
+    if (base_kind == 0) {
+        base = read_surface(rd, ctx);
+    } else {
+        std::unique_ptr<SmCurve> curve = read_curve(rd, ctx);
+        SmBSplineCurve* generator = SM_CAST_PTR(SmBSplineCurve, curve.get());
+        if (!generator) throw Argument{};
+        SmPoint3d origin = rd.point();
+        SmVector3d direction = rd.point();
+        SmExtent2d domain = rd.domain();
+        bool swap = rd.flag();
+        // The extrusion owns its generator curve.
+        base.reset(new (ctx) SmSurfOfExtrusion(generator, origin, direction, domain,
+                                               swap ? TRUE : FALSE));
+        curve.release();
+    }
+    double distance = rd.number(), tol = rd.number();
+    int64_t nsamples = rd.index(64);
+    std::vector<SmPoint2d> samples;
+    for (int64_t i=0; i<nsamples; ++i) {
+        SmPoint2d sample = rd.uv();
+        if (sample.x<0 || sample.x>1 || sample.y<0 || sample.y>1) throw Argument{};
+        samples.push_back(sample);
+    }
+    rd.done();
+    auto original = brep(ctx);
+    struct Pending {
+        SmSurface* p;
+        ~Pending() { if (p && !p->GetOwner()) delete p; }
+    } pending{new (ctx) SmOffsetSurface(distance, *base, TRUE)};
+    base.release();
+    SmExtent2d natural = pending.p->GetNaturalUVDomain();
+    SmFace* face = nullptr;
+    constructed(original->CreateFaceFromSurface(pending.p, natural, face));
+    if (!face) throw Argument{};
+    SmStatus status = SmOffsetExecutive::ReplaceImplicitOffsets(original.get(), tol);
+    SmTArray<SmFace*> faces;
+    original->GetFaces(faces);
+    out.insert(out.end(), {0, (double)status, (double)faces.GetSize()});
+    for (ULONG i=0; i<faces.GetSize(); ++i) {
+        SmSurface* surface = faces[i]->GetSurface();
+        out.push_back(surface ? (double)surface->GetType() : -1.0);
+        put_domain(out, faces[i]->GetUVDomain());
+        if (!surface) continue;
+        SmExtent2d domain = surface->GetNaturalUVDomain();
+        put_domain(out, domain);
+        out.push_back((double)samples.size());
+        for (const SmPoint2d& f : samples) {
+            SmPoint2d uv((1.0-f.x)*domain.GetMin().x + f.x*domain.GetMax().x,
+                         (1.0-f.y)*domain.GetMin().y + f.y*domain.GetMax().y);
+            SmPoint3d point(0,0,0);
+            SmStatus eval = surface->EvaluatePoint(uv, point);
+            out.push_back(eval);
+            if (eval == SM_SUCCESS) put_point(out, point);
+            else out.insert(out.end(), 3, 0.0);
+        }
+    }
+}
 } // namespace
 
 // Plain-C ABI, mode 0 config / 1 synchronize / 2 extend / 3 probe / 4 face tail /
-// 5 map twin / 6 vertex.
+// 5 map twin / 6 vertex / 7 replace.
 // Caller owns every buffer; no native allocation or object address crosses it.
 SC_EXPORT int32_t sc_offset_offset_executive_p1_eval(
     int32_t mode, const double* input, int64_t input_len,
@@ -1135,6 +1201,7 @@ SC_EXPORT int32_t sc_offset_offset_executive_p1_eval(
             case 6: vertex(rd, result); break;
             case 4: face_tail(rd, result); break;
             case 5: map_twin(rd, result); break;
+            case 7: replace(rd, result); break;
             default: throw Argument{};
             }
         } catch (const Rejected& rejection) {

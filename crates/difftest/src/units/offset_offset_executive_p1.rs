@@ -53,7 +53,9 @@ use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
 use solidcore::offset::offset_geometry_creation::SsiData;
+use solidcore::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
 use solidcore::surface::plane::Plane;
+use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p7::{self as brep_p7, FaceCurvesInput};
@@ -89,6 +91,59 @@ enum Inputs {
     Probe { branch: Probe, approx_tol: f64 },
     FaceTail(FaceTailIn),
     MapTwin(MapTwinIn),
+    Replace(ReplaceIn),
+}
+
+/// `ReplaceImplicitOffsets` on one face whose surface is an owning
+/// `SmOffsetSurface(offset_distance, base)` (see [`ffi::Replace`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplaceIn {
+    base: OffsetBaseIn,
+    offset_distance: f64,
+    approx_tol: f64,
+    samples: Vec<[f64; 2]>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum OffsetBaseIn {
+    Surface {
+        surface: SurfaceIn,
+    },
+    Extrusion {
+        generator: CurveIn,
+        origin: [f64; 3],
+        direction: [f64; 3],
+        domain: [f64; 4],
+        swap_uv: bool,
+    },
+}
+
+impl ReplaceIn {
+    fn ffi(&self) -> ffi::Replace {
+        ffi::Replace {
+            base: match &self.base {
+                OffsetBaseIn::Surface { surface } => ffi::OffsetBase::Surface(surface.ffi()),
+                OffsetBaseIn::Extrusion {
+                    generator,
+                    origin,
+                    direction,
+                    domain,
+                    swap_uv,
+                } => ffi::OffsetBase::Extrusion {
+                    generator: generator.ffi(),
+                    origin: *origin,
+                    direction: *direction,
+                    domain: *domain,
+                    swap_uv: *swap_uv,
+                },
+            },
+            offset_distance: self.offset_distance,
+            approx_tol: self.approx_tol,
+            samples: self.samples.clone(),
+        }
+    }
 }
 
 /// `BuildOffsetOfFaceuse` of a unit-square plane face onto the plane
@@ -841,6 +896,30 @@ fn decode(input: &Inputs, raw: &[f64]) -> HResult<Output> {
             let status = snapshot.integer()?;
             let uses = mapped_uses(&mut snapshot)?;
             output = map_twin_output(status, uses);
+        }
+        Inputs::Replace(_) => {
+            output = output.int("replace.status", snapshot.integer()?);
+            let faces = snapshot.count()?;
+            output = output.int("replace.face_count", faces as i64);
+            for face in 0..faces {
+                let key = format!("replace.face.{face}");
+                let kind = snapshot.integer()?;
+                output = output.int(&format!("{key}.surface_type"), kind);
+                output = output.values(&format!("{key}.uv_domain"), snapshot.take(4)?.to_vec());
+                if kind < 0 {
+                    continue;
+                }
+                output = output.values(&format!("{key}.natural_domain"), snapshot.take(4)?.to_vec());
+                let samples = snapshot.count()?;
+                let mut statuses = Vec::with_capacity(samples);
+                let mut points = Vec::with_capacity(samples * 3);
+                for _ in 0..samples {
+                    statuses.push(snapshot.integer()?);
+                    points.extend_from_slice(snapshot.take(3)?);
+                }
+                output = output.ints(&format!("{key}.sample_status"), statuses);
+                output = output.values(&format!("{key}.samples"), points);
+            }
         }
     }
     snapshot.done()?;
@@ -2309,6 +2388,79 @@ fn rust_map_twin(input: &MapTwinIn) -> RResult<Output> {
     Ok(map_twin_output(status, uses))
 }
 
+/// The shim's `replace`: the same record, built from the port.
+fn rust_replace(input: &ReplaceIn) -> RResult<Output> {
+    guard(ffi::validate_replace(&input.ffi()))?;
+    let mut kernel = Kernel::default();
+    let base = match &input.base {
+        OffsetBaseIn::Surface { surface } => surface.rust()?,
+        OffsetBaseIn::Extrusion {
+            generator,
+            origin,
+            direction,
+            domain,
+            swap_uv,
+        } => {
+            let [u0, v0, u1, v1] = *domain;
+            let extrusion = SurfOfExtrusion::new(
+                &kernel,
+                generator.rust()?,
+                v3(*origin),
+                v3(*direction),
+                Extent2d::from_bounds(u0, v0, u1, v1),
+                *swap_uv,
+            )
+            .map_err(setup)?;
+            Surface::from(extrusion)
+        }
+    };
+    let offset = OffsetSurface::new(&kernel, input.offset_distance, base, true, SS_UNKNOWN)
+        .map_err(setup)?;
+    let mut original = super::blend_fillet_geom_p1::new_brep(&mut kernel)?;
+    super::blend_fillet_geom_p1::natural_face(&mut kernel, &mut original, Surface::from(offset))?;
+    let result = probe_env(|env, _| {
+        OffsetExecutive::replace_implicit_offsets(
+            &mut kernel,
+            &mut original,
+            input.approx_tol,
+            &mut solidcore::topology::edge::NotificationStores {
+                records: &mut *env.records,
+                attributes: &mut *env.attributes,
+                key_of: env.key_of,
+            },
+        )
+    });
+    let (status, _) = operation(result)?;
+    let faces = brep_p1::faces(&original, None).map_err(setup)?;
+    let mut raw = vec![0.0, status as f64, faces.len() as f64];
+    for f in faces {
+        let face = original.face(f).map_err(setup)?;
+        let d = face.uv_domain;
+        let Some(surface) = face.surface.as_ref() else {
+            raw.extend([-1.0, d.min().x, d.min().y, d.max().x, d.max().y]);
+            continue;
+        };
+        raw.extend([surface.type_code() as f64, d.min().x, d.min().y, d.max().x, d.max().y]);
+        let n = surface.natural_uv_domain_with_nurb(&kernel)?;
+        raw.extend([n.min().x, n.min().y, n.max().x, n.max().y]);
+        raw.push(input.samples.len() as f64);
+        for &[fu, fv] in &input.samples {
+            let uv = Vec2::new(
+                (1.0 - fu) * n.min().x + fu * n.max().x,
+                (1.0 - fv) * n.min().y + fv * n.max().y,
+            );
+            match surface.evaluate_point(&kernel, uv) {
+                Ok(p) => raw.extend([f64::from(ffi::NATIVE_SUCCESS), p.x, p.y, p.z]),
+                Err(SolidError::Upstream { code, .. }) => {
+                    raw.extend([f64::from(code), 0.0, 0.0, 0.0]);
+                }
+                Err(e) => return Err(RunError::Kernel(e)),
+            }
+        }
+    }
+    Ok(decode(&Inputs::Replace(input.clone()), &raw)?)
+}
+
 fn vertex_point(brep: &Brep, edgeuse: EdgeuseId) -> HResult<Vec3> {
     let vertexuse = brep
         .edgeuse(edgeuse)
@@ -2522,6 +2674,7 @@ impl UnitDiff for Runner {
             Inputs::Probe { branch, approx_tol } => ffi::probe(branch.ffi(), *approx_tol),
             Inputs::FaceTail(input) => ffi::face_tail(&input.ffi()),
             Inputs::MapTwin(input) => ffi::map_twin(&input.ffi()),
+            Inputs::Replace(input) => ffi::replace(&input.ffi()),
         }
         .map_err(|error| bad(format!("native adapter: {error}")))?;
         decode(&input, &raw)
@@ -2536,6 +2689,7 @@ impl UnitDiff for Runner {
             Inputs::Probe { branch, approx_tol } => rust_probe(k, branch, approx_tol),
             Inputs::FaceTail(input) => rust_face_tail(&input),
             Inputs::MapTwin(input) => rust_map_twin(&input),
+            Inputs::Replace(input) => rust_replace(&input),
         };
         match result {
             Ok(output) => normalize_sync_ties(output),
@@ -2802,6 +2956,37 @@ mod tests {
     use super::*;
     use crate::{compare, CaseSource};
 
+    /// Issue #1476: every `replace` fixture (extrusion, plane and B-spline bases)
+    /// replaces its offset surface by a B-spline approximation on both sides, and the
+    /// sides agree; an extrusion base was refused with `SM_ERR` before.
+    #[test]
+    fn replace_fixtures_build_bspline_approximations() {
+        let context = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        };
+        let mut extrusions = 0;
+        for fixture in &Runner.cases(&context).unwrap() {
+            let Inputs::Replace(input) = fixture.parse().unwrap() else {
+                continue;
+            };
+            extrusions += usize::from(matches!(input.base, OffsetBaseIn::Extrusion { .. }));
+            let native = Runner.run_cpp(fixture).unwrap();
+            let rust = Runner.run_rust(fixture).unwrap();
+            let diff = compare(&native, &rust, &[]);
+            assert!(diff.pass(), "{}: {diff:?}", fixture.name);
+            assert_eq!(rust.ints["replace.status"], [1000], "{}", fixture.name);
+            assert_eq!(rust.ints["replace.face_count"], [1], "{}", fixture.name);
+            assert_eq!(
+                rust.ints["replace.face.0.surface_type"],
+                [BSplineSurface::TYPE],
+                "{}",
+                fixture.name
+            );
+        }
+        assert!(extrusions >= 10, "{extrusions}");
+    }
+
     #[test]
     fn vertex_fixtures_compare_actual_caps_not_only_presence() {
         let context = CaseContext {
@@ -3006,8 +3191,8 @@ mod tests {
             .iter()
             .filter(|case| matches!(case.source, CaseSource::Fixture { .. }))
             .collect();
-        assert_eq!(fixtures.len(), 93 + 16 + 312 + 27);
-        // 93 original, 16 vertex, 312 face_tail, 27 map_twin.
+        assert_eq!(fixtures.len(), 93 + 16 + 312 + 27 + 12);
+        // 93 original, 16 vertex, 312 face_tail, 27 map_twin, 12 replace (#1476).
         for case in fixtures {
             case.parse::<Inputs>().unwrap();
         }

@@ -669,8 +669,10 @@ impl OffsetExecutive {
             let base = offset
                 .extended_base_surface()
                 .unwrap_or_else(|| offset.base_surface());
-            // make sure base surface is an SmBSplineSurface
-            let SurfaceKind::BSpline(nurb) = base.kind() else {
+            // make sure base surface is an SmBSplineSurface (`SM_CAST_PTR`, which every
+            // subclass passes: plane, extrusion, revolution, cone, sphere, torus); its
+            // B-spline part with the NURB `GetOrCreateGwNurbPointer` makes when missing
+            let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
                 return Err(SolidError::sm_err(OP));
             };
             // use NLIB function to build offset surface approximation
@@ -3821,8 +3823,30 @@ mod tests {
             .unwrap();
         assert!((p.z - 0.25).abs() < 1.0e-6, "{p:?}");
 
-        // a base that is not a B-spline surface is SM_ERR
+        // a plane is an SmBSplineSurface too (issue #1476): its offset is approximated
         let offset = OffsetSurface::new(&kernel, 0.25, plane(0.0), true, 0).unwrap();
+        let mut brep = Brep::new();
+        let (offset_face, _) = add_face(&mut brep, Surface::from(offset));
+        OffsetExecutive::replace_implicit_offsets(
+            &mut kernel,
+            &mut brep,
+            1.0e-6,
+            &mut NotificationStores {
+                records: &mut records,
+                attributes: &mut attributes,
+                key_of: &loopuse::notify_ref,
+            },
+        )
+        .unwrap();
+        let surface = brep.face(offset_face).unwrap().surface.clone().unwrap();
+        assert!(matches!(surface.kind(), SurfaceKind::BSpline(_)));
+        let mid = surface.natural_uv_domain_if_built().mid();
+        let p = surface.evaluate_point(&kernel, mid).unwrap();
+        assert!((p.z - 0.25).abs() < 1.0e-6, "{p:?}");
+
+        // a base that is not a B-spline surface (here an offset surface) is SM_ERR
+        let inner = OffsetSurface::new(&kernel, 0.25, plane(0.0), true, 0).unwrap();
+        let offset = OffsetSurface::new(&kernel, 0.25, Surface::from(inner), true, 0).unwrap();
         let mut brep = Brep::new();
         add_face(&mut brep, Surface::from(offset));
         let status = OffsetExecutive::replace_implicit_offsets(

@@ -11,6 +11,7 @@
 //! | [`vertex`] | `BuildOffsetOfVertex`, including both real `VertexOffset` callsites |
 //! | [`face_tail`] | `BuildOffsetOfFaceuse` (contained-domain branch), `MapEdgeuses`, `MakeFaceWithCurves` (fixture) |
 //! | [`map_twin`] | `MapEdgeuses` alone, between two `MakeFaceWithCurves` rectangle faces |
+//! | [`replace`] | `ReplaceImplicitOffsets` on one face whose surface is an owning `SmOffsetSurface` of a real `SmPlane`, `SmBSplineSurface` or `SmSurfOfExtrusion` |
 //! | [`probe`] | `ReplaceImplicitOffsets`, `RemoveExcessFaces`, `BuildSideWallOfEdgeuse`, `BuildOffsetOfEdgeuses`, `FillGapEdgeuses`, `BuildOffsetOfVertex`, `BuildOffsetOfFaceuse`, `PiecewiseMerge`, `MapEdgeuses`; `sm_NotifyEdgeAndVertices` indirectly via `MapEdgeuses` |
 //!
 //! Deviations: caller-owned flat snapshots instead of pointers/out-parameters;
@@ -121,6 +122,9 @@
 //!   `1, start_xyz[3], mate_start_xyz[3]` of the offset use.
 //! * `map_twin`: `0, status, number_original_edgeuses` and the same per-use
 //!   records as `face_tail`.
+//! * `replace`: `0, status, face_count`, per face `surface_type, face_uv_domain[4]`
+//!   and, with a surface, its `natural_uv_domain[4]` and counted samples (fractions
+//!   of that domain) `point_status, xyz[3]`.
 //!
 //! **Relation ordering:** this checkout uses pointer-hashed `unordered_set`
 //! values in `SmRelation`. We preserve actual `GetSeconds` order; equal-minimum
@@ -416,6 +420,42 @@ pub struct MapTwin {
     /// Split the offset rectangle's bottom edge at this `x` (strictly inside the
     /// rectangle) into two collinear edges, so the loop has five edges.
     pub split_bottom: Option<f64>,
+}
+
+/// The base of the offset surface of a [`replace`] fixture.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OffsetBase {
+    /// A real `SmPlane` or `SmBSplineSurface`.
+    Surface(SurfaceFixture),
+    /// `SmSurfOfExtrusion(generator, origin, direction, domain, swap_uv)`, without
+    /// NURB (the executive's `GetOrCreateGwNurbPointer` makes it).
+    Extrusion {
+        /// The generator (an `SmBSplineCurve` kind).
+        generator: CurveFixture,
+        /// A point on the generator.
+        origin: [f64; 3],
+        /// The extrusion vector.
+        direction: [f64; 3],
+        /// The analytic domain `umin, vmin, umax, vmax` (U = the generator's domain).
+        domain: [f64; 4],
+        /// The generator is a constant-U iso-curve of the NURB.
+        swap_uv: bool,
+    },
+}
+
+/// A [`replace`] fixture: one `CreateFaceFromSurface` face (natural domain) on an
+/// owning `SmOffsetSurface(offset_distance, base)`, then
+/// `ReplaceImplicitOffsets(brep, approx_tol)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Replace {
+    /// The offset surface's base.
+    pub base: OffsetBase,
+    /// The offset distance.
+    pub offset_distance: f64,
+    /// The approximation tolerance passed to `ReplaceImplicitOffsets`.
+    pub approx_tol: f64,
+    /// Sample fractions in `[0, 1]^2` of each result face surface's natural domain.
+    pub samples: Vec<[f64; 2]>,
 }
 
 mod sys {
@@ -947,6 +987,55 @@ pub fn map_twin(input: &MapTwin) -> Result<Vec<f64>, FfiError> {
     run(5, &map_twin_input(input)?)
 }
 
+fn replace_input(input: &Replace) -> Result<Pack, FfiError> {
+    finite(&[input.offset_distance, input.approx_tol])?;
+    if input.samples.len() > 64 {
+        return Err(bad("at most 64 replace samples"));
+    }
+    let mut pack = Pack::default();
+    match &input.base {
+        OffsetBase::Surface(surface) => {
+            pack.add(&[0.0])?;
+            pack.surface(surface)?;
+        }
+        OffsetBase::Extrusion {
+            generator,
+            origin,
+            direction,
+            domain,
+            swap_uv,
+        } => {
+            finite(origin)?;
+            finite(direction)?;
+            let [a, b, c, d] = *domain;
+            interval([a, c], true)?;
+            interval([b, d], true)?;
+            pack.add(&[1.0])?;
+            pack.curve(generator)?;
+            pack.add(origin)?;
+            pack.add(direction)?;
+            pack.add(domain)?;
+            pack.add(&[f64::from(u8::from(*swap_uv))])?;
+        }
+    }
+    pack.add(&[input.offset_distance, input.approx_tol])?;
+    pack.size(input.samples.len())?;
+    for sample in &input.samples {
+        finite(sample)?;
+        if sample.iter().any(|v| !(0.0..=1.0).contains(v)) {
+            return Err(bad("surface sample fractions must be in [0, 1]"));
+        }
+        pack.add(sample)?;
+    }
+    Ok(pack)
+}
+
+/// Runs the native `ReplaceImplicitOffsets` on one real offset-surface face. See the
+/// module-level protocol for the returned record.
+pub fn replace(input: &Replace) -> Result<Vec<f64>, FfiError> {
+    run(7, &replace_input(input)?)
+}
+
 // The packers' input checks without the native call: the difftest runner's Rust
 // side refuses exactly what the FFI refuses by running the same code (counts,
 // finiteness, selector ranges, fixture geometry validation and the packed-size
@@ -968,6 +1057,10 @@ pub fn validate_extend(input: &Extension) -> Result<(), FfiError> {
 /// [`face_tail`]'s input checks alone.
 pub fn validate_face_tail(input: &FaceTail) -> Result<(), FfiError> {
     face_tail_input(input).map(|_| ())
+}
+/// [`replace`]'s input checks alone.
+pub fn validate_replace(input: &Replace) -> Result<(), FfiError> {
+    replace_input(input).map(|_| ())
 }
 /// [`map_twin`]'s input checks alone.
 pub fn validate_map_twin(input: &MapTwin) -> Result<(), FfiError> {
