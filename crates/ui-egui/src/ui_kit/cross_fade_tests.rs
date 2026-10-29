@@ -139,31 +139,120 @@ fn changing_back_mid_fade_starts_from_what_is_shown() {
 }
 
 #[test]
-fn a_selection_eases_in_and_out_on_the_fade_curves() {
+fn drifting_content_arrives_from_the_side_it_lies_on() {
+    let fade = CrossFade::default().drift(12.0);
+    assert_eq!(fade.offsets(0.0, 1.0), (12.0, -0.0), "the new content starts a drift away, on its side");
+    let (incoming, outgoing) = fade.offsets(fade.duration * 0.25, 1.0);
+    assert!((0.0..6.0).contains(&incoming) && incoming > 0.0, "it settles quickly: {incoming}");
+    assert!((-6.0..0.0).contains(&outgoing), "the old content leaves the other way, half as far: {outgoing}");
+    assert_eq!(fade.offsets(fade.duration, 1.0), (0.0, -6.0));
+    let (incoming, outgoing) = fade.offsets(0.0, -1.0);
+    assert!(incoming < 0.0 && outgoing >= 0.0, "toward the left, mirrored");
+    assert_eq!(fade.offsets(0.0, 0.0).0, 0.0, "no direction, no drift");
+    assert_eq!(CrossFade::default().offsets(0.0, 1.0), (0.0, 0.0), "no drift by default");
+    for hostile in [f32::NAN, f32::INFINITY, -5.0] {
+        let (a, b) = CrossFade::default().drift(hostile).offsets(0.05, 1.0);
+        assert!(a.is_finite() && b.is_finite() && a.abs() <= 200.0);
+    }
+}
+
+/// One pass of content at `x` for `key`, in a row at `order`; where its square was painted.
+fn ordered_pass(ctx: &egui::Context, fade: CrossFade, time: f64, key: u32, order: f32) -> Option<f32> {
+    let input = egui::RawInput { time: Some(time), screen_rect: Some(region()), ..Default::default() };
+    let output = ctx.run_ui(input, |ui| {
+        let scope = fade.begin(ui);
+        ui.painter().rect_filled(Rect::from_min_size(Pos2::new(60.0, 10.0), vec2(40.0, 40.0)), 0.0, if key == 0 { OLD } else { NEW });
+        scope.end_ordered(ui, "content", key, order, region());
+    });
+    output.shapes.iter().find_map(|c| match &c.shape {
+        Shape::Rect(r) if r.fill.a() > 0 && r.fill.b() > r.fill.r() => Some(r.rect.left()),
+        _ => None,
+    })
+}
+
+#[test]
+fn a_change_to_content_later_in_the_row_drifts_in_from_the_right() {
     let ctx = egui::Context::default();
-    let fade = CrossFade::default();
-    let id = egui::Id::new("tab");
-    // Steady frames at 60 a second, as the app draws while something moves.
+    let fade = CrossFade::default().drift(12.0);
+    ordered_pass(&ctx, fade, 0.0, 0, 0.0);
+    ordered_pass(&ctx, fade, 1.0, 0, 0.0);
+    ordered_pass(&ctx, fade, 2.0, 1, 3.0);
+    let arriving = ordered_pass(&ctx, fade, 2.05, 1, 3.0).unwrap();
+    assert!(arriving > 60.0 && arriving < 72.0, "from the right: {arriving}");
+    assert_eq!(ordered_pass(&ctx, fade, 2.5, 1, 3.0), Some(60.0), "settled in place");
+}
+
+fn tab(x: f32, width: f32) -> Rect {
+    Rect::from_min_size(Pos2::new(x, 0.0), vec2(width, 24.0))
+}
+
+/// Steady frames at 60 a second: the highlight for `key` at `target`, once per frame.
+fn slide_frames(ctx: &egui::Context, slide: SlidingHighlight, frame: &mut u32, n: usize, key: &str, target: Rect) -> Vec<Highlight> {
+    (0..n)
+        .map(|_| {
+            *frame += 1;
+            let mut shown = None;
+            let input = egui::RawInput { time: Some(f64::from(*frame) / 60.0), ..Default::default() };
+            let _ = ctx.run_ui(input, |ui| shown = Some(slide.show(ui.ctx(), egui::Id::new("pill"), key, target, NEW)));
+            shown.unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn the_highlight_slides_dimmed_and_lands_at_full_strength() {
+    let ctx = egui::Context::default();
+    let slide = SlidingHighlight::default();
     let mut frame = 0;
-    let mut run = |frames: usize, selected: bool| -> Vec<f32> {
-        (0..frames)
-            .map(|_| {
-                frame += 1;
-                let mut value = 0.0;
-                let input = egui::RawInput { time: Some(f64::from(frame) / 60.0), ..Default::default() };
-                let _ = ctx.run_ui(input, |ui| value = fade.selected(ui.ctx(), id, selected));
-                value
-            })
-            .collect()
-    };
-    assert!(run(10, false).iter().all(|v| *v == 0.0), "unselected from the start");
-    let rising = run(15, true);
-    assert!(rising.windows(2).all(|w| w[0] <= w[1]) && rising[0] < 0.5, "rises: {rising:?}");
-    assert_eq!(rising.last().copied(), Some(1.0));
-    let falling = run(15, false);
-    assert!(falling.windows(2).all(|w| w[0] >= w[1]) && falling[0] > 0.5, "falls: {falling:?}");
-    // 0.17 s in, the old highlight is nearly gone rather than lingering to the end.
-    assert!(falling[9] < 0.2, "{falling:?}");
-    assert_eq!(falling.last().copied(), Some(0.0));
-    assert_eq!(CrossFade::new(0.0).selected(&ctx, id, true), 1.0, "no motion: selected at once");
+    let (a, b) = (tab(0.0, 60.0), tab(300.0, 90.0));
+    let rest = slide_frames(&ctx, slide, &mut frame, 5, "a", a);
+    assert!(rest.iter().all(|h| *h == Highlight { rect: a, fill: NEW, settled: true }), "at rest: {rest:?}");
+    let moving = slide_frames(&ctx, slide, &mut frame, 20, "b", b);
+    let lefts: Vec<f32> = moving.iter().map(|h| h.rect.left()).collect();
+    assert!(lefts.windows(2).all(|w| w[0] <= w[1]), "only toward b: {lefts:?}");
+    assert!(moving[0].rect.left() < 150.0 && moving[3].rect.left() > 150.0, "quick to leave: {lefts:?}");
+    assert!(moving[5].fill.a() < 200, "dimmed on the way: {:?}", moving[5].fill);
+    assert!(moving.iter().all(|h| h.rect.width() >= 60.0 - 0.01 && h.rect.width() <= 90.0 + 0.01), "its width goes from a's to b's");
+    let last = moving.last().unwrap();
+    assert_eq!(*last, Highlight { rect: b, fill: NEW, settled: true }, "landed at full strength");
+}
+
+#[test]
+fn a_new_selection_mid_slide_turns_from_where_the_highlight_is() {
+    let ctx = egui::Context::default();
+    let slide = SlidingHighlight::default();
+    let mut frame = 0;
+    let (a, b, c) = (tab(0.0, 60.0), tab(300.0, 60.0), tab(600.0, 60.0));
+    slide_frames(&ctx, slide, &mut frame, 3, "a", a);
+    let to_b = slide_frames(&ctx, slide, &mut frame, 4, "b", b);
+    let here = to_b.last().unwrap().rect.left();
+    let to_c = slide_frames(&ctx, slide, &mut frame, 2, "c", c);
+    assert!(to_c[0].rect.left() >= here - 0.01 && to_c[0].rect.left() < here + 150.0, "no jump: {here} then {:?}", to_c[0].rect);
+    assert!(to_c[0].fill.a() < 255, "still dimmed: it does not flash on the way");
+    let done = slide_frames(&ctx, slide, &mut frame, 20, "c", c);
+    assert_eq!(done.last().unwrap().rect, c);
+}
+
+#[test]
+fn a_resized_row_moves_a_settled_highlight_at_once() {
+    let ctx = egui::Context::default();
+    let slide = SlidingHighlight::default();
+    let mut frame = 0;
+    slide_frames(&ctx, slide, &mut frame, 3, "a", tab(0.0, 60.0));
+    let moved = slide_frames(&ctx, slide, &mut frame, 1, "a", tab(40.0, 60.0));
+    assert_eq!(moved[0], Highlight { rect: tab(40.0, 60.0), fill: NEW, settled: true });
+}
+
+#[test]
+fn without_motion_or_with_hostile_values_the_highlight_jumps() {
+    let ctx = egui::Context::default();
+    let mut frame = 0;
+    for slide in [SlidingHighlight::new(0.0), SlidingHighlight::new(f32::NAN), SlidingHighlight::new(-1.0)] {
+        slide_frames(&ctx, slide, &mut frame, 2, "a", tab(0.0, 60.0));
+        let jumped = slide_frames(&ctx, slide, &mut frame, 1, "b", tab(300.0, 60.0));
+        assert_eq!(jumped[0], Highlight { rect: tab(300.0, 60.0), fill: NEW, settled: true }, "{slide:?}");
+    }
+    let odd = SlidingHighlight { dip: f32::NAN, easing: Easing::CubicBezier(f32::NAN, 0.0, 1.0, 1.0), ..SlidingHighlight::default() };
+    let (rect, dimmed) = odd.at(tab(0.0, 60.0), tab(300.0, 60.0), f32::NAN, f32::INFINITY);
+    assert!(rect.is_finite() && dimmed.is_finite());
 }

@@ -60,7 +60,7 @@ pub(crate) use choice::*;
 pub(crate) use color::*;
 pub(crate) use confirm::{Confirm, Tone};
 pub use container::{Container, DockEdges, Edge, Surface};
-pub use cross_fade::{CROSS_FADE_SECONDS, CrossFade, CrossFadeScope, Easing};
+pub use cross_fade::{CROSS_FADE_SECONDS, CrossFade, CrossFadeScope, Easing, Highlight, SLIDE_SECONDS, SlidingHighlight};
 pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;
