@@ -62,7 +62,7 @@ fn switching_profiles_applies_every_setting_at_once() {
     h.app.preferences.nav = "solidworks".into();
     h.app.preferences.mouse_gestures.enabled = true;
     h.app.preferences.radial_context_menu = true;
-    h.app.keymap.custom.insert("solid.extrude".into(), "Shift+E".into());
+    h.app.keymap.custom.insert("solid.extrude".into(), vec!["E".into(), "Shift+E".into()]);
     h.app.sbox.pinned = vec!["solid.fillet".into()];
     h.app.toolbar_custom.panels.insert("DESIGN/SOLID/CREATE".into(), vec!["solid.box".into()]);
     run(&mut h, "settings.profile.save", json!({"name": "Large monitor"}));
@@ -78,7 +78,7 @@ fn switching_profiles_applies_every_setting_at_once() {
     run(&mut h, "settings.profile.apply", json!({"name": "Large monitor"}));
     assert_eq!((h.app.preferences.ui_scale, h.app.preferences.nav.as_str()), (1.5, "solidworks"));
     assert!(h.app.preferences.mouse_gestures.enabled && h.app.preferences.radial_context_menu);
-    assert_eq!(h.app.keymap.custom.get("solid.extrude").map(String::as_str), Some("Shift+E"));
+    assert_eq!(h.app.keymap.custom.get("solid.extrude").map(Vec::as_slice), Some(&["E".to_string(), "Shift+E".to_string()][..]));
     assert_eq!(h.app.sbox.pinned, ["solid.fillet"]);
     assert_eq!(h.app.toolbar_custom.panels.get("DESIGN/SOLID/CREATE"), Some(&vec!["solid.box".to_string()]));
 
@@ -191,6 +191,22 @@ fn hostile_profiles_are_refused_or_cut_down_without_panicking() {
 }
 
 #[test]
+fn a_command_with_several_keys_keeps_them_all_in_a_profile() {
+    let doc = sanitize(&json!({
+        "format": FORMAT,
+        "name": "A",
+        "shortcuts": {"solid.extrude": ["E", "Shift+E"], "sketch.line": "L", "sketch.circle": "", "bad": 3, "long": ["E", "x".repeat(300)]},
+    }))
+    .unwrap();
+    assert_eq!(doc["shortcuts"], json!({"solid.extrude": ["E", "Shift+E"], "sketch.line": "L", "sketch.circle": ""}));
+    let mut h = Harness::new();
+    h.app.keymap.custom.insert("solid.extrude".into(), vec!["E".into(), "Shift+E".into()]);
+    let doc = capture(&h.app, "Laptop");
+    assert_eq!(doc["shortcuts"]["solid.extrude"], json!(["E", "Shift+E"]));
+    assert_eq!(sanitize(&doc).unwrap(), doc, "several keys pass the profile's own checks");
+}
+
+#[test]
 fn a_profile_brings_its_imported_theme_along() {
     let mut h = Harness::new();
     let file = json!({"format": "solidcraft-theme/1", "name": "Paper", "base": "light", "colors": {"panel": "#fffdf0"}});
@@ -210,7 +226,7 @@ fn cancel_in_preferences_takes_a_switch_back() {
     let mut h = Harness::new();
     run(&mut h, "settings.profile.save", json!({"name": "Plain"}));
     h.app.preferences.ui_scale = 1.5;
-    h.app.keymap.custom.insert("solid.extrude".into(), "Shift+E".into());
+    h.app.keymap.custom.insert("solid.extrude".into(), vec!["E".into(), "Shift+E".into()]);
     h.app.sbox.pinned = vec!["solid.fillet".into()];
     run(&mut h, "settings.profile.save", json!({"name": "Big"}));
     h.call("ui.prefs", json!({"open": "General"}));
@@ -218,7 +234,7 @@ fn cancel_in_preferences_takes_a_switch_back() {
     assert_eq!(h.app.preferences.ui_scale, 1.0);
     h.call("ui.prefs", json!({"button": "cancel"}));
     assert_eq!(h.app.preferences.ui_scale, 1.5);
-    assert_eq!(h.app.keymap.custom.get("solid.extrude").map(String::as_str), Some("Shift+E"));
+    assert_eq!(h.app.keymap.custom.get("solid.extrude").map(Vec::as_slice), Some(&["E".to_string(), "Shift+E".to_string()][..]));
     assert_eq!(h.app.sbox.pinned, ["solid.fillet"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Big"));
 }

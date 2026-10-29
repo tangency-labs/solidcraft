@@ -200,9 +200,9 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
         .and_then(Value::as_object)
         .into_iter()
         .flatten()
-        .filter(|(id, key)| id.chars().count() <= MAX_ID && key.as_str().is_some_and(|k| k.chars().count() <= MAX_ID))
+        .filter(|(id, _)| id.chars().count() <= MAX_ID)
+        .filter_map(|(id, keys)| Some((id.clone(), shortcut_keys(keys)?)))
         .take(MAX_SHORTCUTS)
-        .map(|(id, key)| (id.clone(), key.clone()))
         .collect();
     let favourites: Vec<String> = o.get("favourites").and_then(Value::as_array).into_iter().flatten().filter_map(text).take(MAX_FAVOURITES).collect();
     let mut toolbar = crate::toolbar_custom::ToolbarCustom::default();
@@ -234,6 +234,13 @@ pub fn sanitize(v: &Value) -> Result<Value, String> {
         return Err(format!("a settings profile is at most {} KiB", MAX_PROFILE_BYTES / 1024));
     }
     Ok(doc)
+}
+
+/// A command's keys in a profile, as the keymap saves them (`""`, one key or a list of them), or
+/// `None` when they can't be read or a key name is too long.
+fn shortcut_keys(v: &Value) -> Option<Value> {
+    let keys = crate::keymap::saved_keys(v)?;
+    keys.iter().all(|k| k.chars().count() <= MAX_ID).then(|| crate::keymap::keys_value(&keys))
 }
 
 /// Apply a checked profile: its themes, each preference (through [`prefs::set`]), the
