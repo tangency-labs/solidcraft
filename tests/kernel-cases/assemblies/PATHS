@@ -1,0 +1,28 @@
+# Source files whose change must rerun the assemblies cases (one git pathspec glob a line).
+# Joints, couplings, cams, reach and the solver.
+crates/doc/src/joints*.rs
+crates/doc/src/assembly.rs
+crates/engine/src/cmd/joints.rs
+crates/engine/src/cmd/joints_inspect.rs
+# Motion studies, plots, traces, interference, sweeps, contact and exploded views.
+crates/doc/src/motion.rs
+crates/engine/src/cmd/motion.rs
+crates/engine/src/cmd/motion_analysis.rs
+crates/engine/src/cmd/motion_sweep.rs
+crates/engine/src/cmd/motion_trace.rs
+crates/engine/src/cmd/contact_sweep.rs
+# Components and occurrences (their placement in the world is crates/doc/src/eval.rs: shared core).
+crates/engine/src/cmd/component.rs
+crates/engine/src/cmd/component_clone.rs
+crates/engine/src/cmd/component_clone_assembly.rs
+crates/engine/src/cmd/component_drag.rs
+crates/engine/src/cmd/component_extract.rs
+crates/engine/src/cmd/component_link.rs
+crates/engine/src/cmd/component_properties.rs
+crates/engine/src/cmd/component_reparent.rs
+crates/engine/src/cmd/component_transfer.rs
+# Interference and clearance between placed bodies.
+crates/engine/src/cmd/clearance.rs
+crates/engine/src/cmd/interference.rs
+# The cases themselves.
+tests/kernel-cases/assemblies/**
