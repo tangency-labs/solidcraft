@@ -77,7 +77,10 @@
 //!   `RebuildSTEPFromNURBParameters` returns `FALSE` (`SM_SUCCESS`) when the
 //!   constant-u iso curves are not circles; that is `Ok(())` with nothing changed.
 //!   `IsNurbSurfaceSphere` returns the status of a failed `SER` call as a `TRUE`
-//!   result without sphere; that is the error.
+//!   result without sphere; that is the error. The degenerate-curve branches of
+//!   `IntersectWithSphere` and `IntersectWithCone` ignore `EvaluatePoint`'s status as
+//!   upstream: a failure leaves the default-constructed `SmPoint3d`
+//!   ([`Vec3::UNDEF`], assuming the failing call does not write it).
 //! - **`GlobalSurfaceIntersect`.** The special cases switch on the other surface's
 //!   kind (plane, cone, sphere, surface of revolution); the fallback
 //!   `SmSurface::GlobalSurfaceIntersect` runs on the [`Surface`] holding the sphere
@@ -1290,7 +1293,11 @@ impl Sphere {
                 // curve is degenerate
                 _ => {
                     // see if degenerateCurvePoint is inside of other surface
-                    let test_point = curve.evaluate_point(k, curve.natural_interval().min())?;
+                    // (EvaluatePoint's status is ignored: a failure leaves the
+                    // default-constructed point)
+                    let test_point =
+                        ignored(curve.evaluate_point(k, curve.natural_interval().min()))?
+                            .unwrap_or(Vec3::UNDEF);
                     let location = if other.is_closed_u() && other.is_closed_v() {
                         // Every point is interior.
                         LocationType::Interior
@@ -1857,7 +1864,9 @@ impl Sphere {
                 }
                 // curve is degenerate
                 _ => {
-                    let point = curve.evaluate_point(k, 0.0)?;
+                    // (EvaluatePoint's status is ignored: a failure leaves the
+                    // default-constructed point)
+                    let point = ignored(curve.evaluate_point(k, 0.0))?.unwrap_or(Vec3::UNDEF);
                     let scaled_zero = EFF_ZERO * (1.0 + point.max_dimension());
 
                     // get UV point for Sphere
