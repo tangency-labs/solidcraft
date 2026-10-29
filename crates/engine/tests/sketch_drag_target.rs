@@ -446,3 +446,24 @@ fn a_linkage_held_by_redundant_parallelograms_follows_the_cursor() {
         assert!(parallelogram_error(&s) < 1e-6);
     }
 }
+
+#[test]
+fn a_drag_that_would_fling_points_far_away_leaves_them_near_the_sketch() {
+    let mut s = solidcraft_engine::Session::default();
+    for (id, params) in [
+        ("sketch.create", json!({"plane":"XY"})),
+        ("sketch.line", json!({"points":[[2,-27],[-2,22],[-10,-10],[2,13]]})),
+        ("sketch.rectangle.two_point", json!({"p0":[-12,1],"p1":[-18,28]})),
+        ("sketch.line", json!({"points":[[6,-21],[-12,-27],[-25,-29],[16,5]]})),
+        ("sketch.rectangle.two_point", json!({"p0":[-21,0],"p1":[-23,-3]})),
+        ("sketch.line", json!({"points":[[24,23],[-7,7],[0,29],[-6,-7]]})),
+        ("sketch.dimension", json!({"entities":["l16","l12"],"type":"angle","value":31})),
+    ] {
+        s.execute(id, &params).unwrap();
+    }
+    s.execute("sketch.drag", &json!({"entity":"p8","from":[-23.0,-0.534780330115472],"to":[23,-8]})).unwrap();
+    for i in 0..30 {
+        let Ok(p) = four_bar::point(&s, &format!("p{i}")) else { continue };
+        assert!(p.len() < 1000.0, "p{i} was thrown to {p:?}");
+    }
+}
