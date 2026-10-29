@@ -657,6 +657,20 @@ impl Waivers {
             .map(Vec::as_slice)
             .unwrap_or_default();
         for (i, w) in entries.iter().enumerate() {
+            // A misspelt or mistyped `case` would read as absent, which waives every case.
+            let table = w
+                .as_table()
+                .ok_or_else(|| format!("waiver #{i}: not a table"))?;
+            for (key, value) in table {
+                if !["unit", "check", "case", "reason"].contains(&key.as_str()) {
+                    return Err(format!(
+                        "waiver #{i}: unknown field `{key}` (unit, check, case, reason)"
+                    ));
+                }
+                if !value.is_str() {
+                    return Err(format!("waiver #{i}: `{key}` must be a string"));
+                }
+            }
             let s = |k: &str| w.get(k).and_then(toml::Value::as_str).map(str::to_string);
             let unit = s("unit").ok_or_else(|| format!("waiver #{i}: missing `unit`"))?;
             let check = s("check")
@@ -1179,5 +1193,41 @@ mod tests {
         )
         .is_err());
         assert_eq!(Waivers::parse("").unwrap(), Waivers::default());
+    }
+
+    #[test]
+    fn malformed_waiver_fields_never_widen_a_waiver() {
+        // Each entry meant to waive one case; read leniently, each waived the whole unit.
+        let other_case = Violation {
+            unit: "a.b".into(),
+            check: Check::Ratchet,
+            case: Some("other".into()),
+            detail: String::new(),
+        };
+        let widened: Vec<String> = [
+            "case = ['gone']",
+            "case = 7",
+            "cases = 'gone'",
+            "Case = 'gone'",
+        ]
+        .into_iter()
+        .filter_map(|field| {
+            let text =
+                format!("[[waiver]]\nunit = 'a.b'\ncheck = 'ratchet'\n{field}\nreason = 'r'\n");
+            let w = Waivers::parse(&text).ok()?;
+            w.covering(&other_case).map(|_| field.to_string())
+        })
+        .collect();
+        assert!(widened.is_empty(), "waived every case: {widened:?}");
+        let e =
+            Waivers::parse("[[waiver]]\nunit='a.b'\ncheck='ratchet'\ncases='gone'\nreason='r'\n")
+                .unwrap_err();
+        assert!(e.contains("cases"), "{e}");
+        let e = Waivers::parse("[[waiver]]\nunit='a.b'\ncheck='ratchet'\ncase=7\nreason='r'\n")
+            .unwrap_err();
+        assert!(e.contains("case"), "{e}");
+        // The checked-in waivers still load.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        Waivers::load(&root).unwrap();
     }
 }
