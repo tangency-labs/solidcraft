@@ -255,6 +255,83 @@ fn update_links_names_the_design_it_reads_while_the_window_draws() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Reload from file reads beside the window, as an insert does: the design waits, Cancel changes
+/// nothing, and a file that is gone is said in the status line.
+#[test]
+fn reloading_a_point_cloud_runs_off_the_window_thread() {
+    let dir = scratch("reload-cloud");
+    let path = dir.join("scan.xyz");
+    std::fs::write(&path, "0 0 0\n1 0 0\n").unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let id = h.app.run("pointcloud.insert", json!({"path": path})).unwrap()["cloud"].as_u64().unwrap();
+    h.app.tree.cloud_panel = Some(crate::browser::CloudPanel::new(&h.app, id));
+    h.frames(4);
+    std::fs::write(&path, "0 0 0\n1 0 0\n2 0 0\n").unwrap();
+    let points = |app: &SolveApp| app.session.doc.point_clouds[0].len();
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "the reload went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+    let hold = |h: &mut crate::scenario::Harness| {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        h.app.file_load.worker_gate = Some((started_tx, release_rx));
+        (started_rx, release_tx)
+    };
+
+    // The card's button: held on its worker, the window draws and the design waits.
+    let design = h.app.session.doc.clone();
+    let (started, release) = hold(&mut h);
+    // Frame by frame: a scenario step would wait for the file operation it starts.
+    let [x, y] = h.widget(crate::i18n::tr("ui.point_cloud_reload")).expect("the card offers a reload");
+    let at = pos2(x as f32, y as f32);
+    let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
+    for event in [Event::PointerMoved(at), button(true), button(false)] {
+        h.frame_with(vec![event]);
+    }
+    let worker = started.recv_timeout(std::time::Duration::from_secs(60)).expect("the worker started");
+    assert_ne!(worker, std::thread::current().id());
+    h.frames(3);
+    assert!(h.widget("Reloading point cloud").is_some(), "the overlay says what runs");
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "the design waits");
+    // Cancel keeps it as it was.
+    h.app.file_load.cancel();
+    drop(release);
+    until_idle(&mut h);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design), "a cancelled reload changes nothing");
+
+    // Run through, it brings the new points in, and says it is done, in one undo step.
+    let r = crate::file_load::begin_request(&mut h.app, {
+        let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
+        request.options.insert("cloud".into(), json!(id));
+        request
+    });
+    assert!(r.is_ok() && h.app.file_load.busy());
+    until_idle(&mut h);
+    assert_eq!(points(&h.app), 3);
+    assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some("Reload Point Cloud done"));
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(points(&h.app), 2);
+
+    // A file that is gone: said, and the design is as it was.
+    std::fs::remove_file(&path).unwrap();
+    let design = h.app.session.doc.clone();
+    let mut request = crate::file_load::Request::new("", crate::file_load::Kind::ReloadCloud);
+    request.options.insert("cloud".into(), json!(id));
+    crate::file_load::begin_request(&mut h.app, request).unwrap();
+    until_idle(&mut h);
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &design));
+    let status = h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+    assert!(status.contains("scan.xyz"), "{status}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A design may link to a file on another computer (`\\host\share\…`); on Windows reading it, or
 /// only asking whether it is there, connects to that computer and may send it the user's sign-in.
 /// Update Links and Open Linked Design ask first, naming the server: Cancel reads nothing, Allow

@@ -42,6 +42,8 @@ pub enum Kind {
     /// Read the active design's linked designs again (`component.update_links`, with the
     /// request's options: `component` or `components` reads only those links).
     UpdateLinks,
+    /// Read a point cloud's file again (`pointcloud.reload`, with the request's `cloud`).
+    ReloadCloud,
 }
 
 pub struct Request {
@@ -84,6 +86,10 @@ impl Request {
     fn insert(&self) -> bool {
         self.kind == Kind::Insert
     }
+    /// It reads files the active design already names, and changes that design in place.
+    fn reads_again(&self) -> bool {
+        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud)
+    }
     /// The command's parameters: the path and the caller's import options.
     fn params(&self) -> Value {
         let mut params = self.options.clone();
@@ -99,6 +105,7 @@ impl Request {
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
+            Kind::ReloadCloud => ("pointcloud.reload", Value::Object(self.options.clone())),
         }
     }
     fn answer(&self, r: Result<Value, String>) {
@@ -320,7 +327,7 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
                 }
                 r
             }
-            Kind::UpdateLinks => {
+            Kind::UpdateLinks | Kind::ReloadCloud => {
                 let (command, params) = request.command();
                 solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params))
             }
@@ -391,12 +398,13 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         Some("doc.open") => Kind::Open,
         Some("file.insert_step" | "file.insert_mesh" | "pointcloud.insert") => Kind::Insert,
         Some("file.export_view_dxf") => Kind::ExportDxf,
+        Some("pointcloud.reload") => Kind::ReloadCloud,
         _ => return Some(req),
     };
     let params = req.params.get("params");
     let path = match params.and_then(|p| p.get("path")).and_then(Value::as_str) {
         Some(path) => path,
-        None if kind == Kind::ExportDxf => "",
+        None if matches!(kind, Kind::ExportDxf | Kind::ReloadCloud) => "",
         None => return Some(req),
     };
     let scope = match crate::control::request_scope(app, &req.params) {
@@ -409,7 +417,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     // Everything but the path, as given: taking only `up` and `names` dropped an import's
     // `matrix` and `name`, so it landed at the origin with nothing said (#4676).
     let mut options = params.and_then(Value::as_object).cloned().unwrap_or_default();
-    if kind != Kind::ExportDxf {
+    if !matches!(kind, Kind::ExportDxf | Kind::ReloadCloud) {
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
@@ -483,7 +491,7 @@ fn start(app: &mut SolveApp) {
     }
     let insert = request.insert();
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
-    let update = request.kind == Kind::UpdateLinks;
+    let update = request.reads_again();
     let mut scratch = if insert || update || request.kind == Kind::ExportDxf { app.session.scratch() } else { Session::default() };
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
@@ -1063,11 +1071,13 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 request.answer(Ok(made.result));
             }
             _ if running.cancelled() => request.answer(Err("file operation cancelled".into())),
-            Ok(made) if request.kind == Kind::UpdateLinks && running.matches(&app.session) => {
+            Ok(made) if request.reads_again() && running.matches(&app.session) => {
                 let (id, _) = request.command();
                 app.session.accept_computed(made.session);
                 app.big_operation = true;
-                crate::linked_source::read_again(app, &request.options, &made.result);
+                if request.kind == Kind::UpdateLinks {
+                    crate::linked_source::read_again(app, &request.options, &made.result);
+                }
                 let r = Ok(made.result);
                 app.finish_command(id, &r);
                 let language = crate::i18n::Locale::for_language(&app.preferences.language);
@@ -1076,6 +1086,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
                     app.set_status(format!("{name}: {why}"), true);
+                }
+                // What the file's reading left out is said too.
+                if let Some(w) =
+                    r.as_ref().ok().filter(|_| request.kind == Kind::ReloadCloud).and_then(|v| v["warnings"].as_array()).and_then(|w| w.first())
+                {
+                    app.set_status(w.as_str().unwrap_or_default().to_string(), false);
                 }
                 request.answer(r);
             }
@@ -1165,7 +1181,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             }
             Err(e) => {
                 request.answer(Err(e.clone()));
-                if request.kind == Kind::UpdateLinks {
+                if request.reads_again() {
                     // Said as when the command ran here (the status line, the run's messages).
                     app.finish_command(request.command().0, &Err(e));
                 } else if let Kind::Recover { id, dir } = &request.kind {
@@ -1255,6 +1271,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             None => app.session.doc.name.clone(),
         },
+        Kind::ReloadCloud => app.session.doc.name.clone(),
         _ => std::path::Path::new(&r.request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
     };
     let phase = r.phase.load(Ordering::Relaxed);
@@ -1299,6 +1316,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Kind::Recover { .. } => "file_load.recovering",
             Kind::ExportDxf => "dxf.exporting",
             Kind::UpdateLinks => "file_load.updating_links",
+            Kind::ReloadCloud => "file_load.reloading_cloud",
         })
     };
     let icon = match r.request.kind {
@@ -1307,6 +1325,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Recover { .. } => "restore",
         Kind::ExportDxf => "export",
         Kind::UpdateLinks => "update",
+        Kind::ReloadCloud => "import",
     };
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)
         .cards(((cover.width() - 16.0) / crate::theme::Tokens::get().form_card_width).clamp(0.5, 1.3))

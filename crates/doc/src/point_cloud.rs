@@ -80,6 +80,9 @@ pub struct PointCloud {
     /// Only the elements within every filter's range are shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<Filter>,
+    /// The file the cloud was read from, to read again (`pointcloud.reload`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source: String,
 }
 
 /// Where a property's values come from on one kind of element.
@@ -556,6 +559,7 @@ mod tests {
             complex: Complex::default(),
             color_property: None,
             filters: Vec::new(),
+            source: String::new(),
         }
     }
 

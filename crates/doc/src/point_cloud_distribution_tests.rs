@@ -24,6 +24,7 @@ fn cloud(points: &[[f32; 3]], segments: &[u32], triangles: &[u32], columns: Vec<
         complex: Complex { segments: Indices(segments.to_vec().into()), triangles: Indices(triangles.to_vec().into()), columns, names: Vec::new() },
         color_property: None,
         filters: Vec::new(),
+        source: String::new(),
     }
 }
 
