@@ -15,7 +15,7 @@ macro_rules! text_style_doc {
 use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_parg, result, slot};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
-use crate::params::{bad, bool_, num, req_vec2, str_, string_list};
+use crate::params::{bad, num, req_vec2, str_, string_list};
 use crate::schema::sketch_create::{SplineReverseParams, SplineReverseResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -624,12 +624,17 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "the minor radius must be positive"));
     }
+    let axes = match p.get("axes") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`axes` must be true or false")),
+    };
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let ci = sk.add_point(c, None)?;
         let mi = sk.add_point(m, None)?;
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
-        if !bool_(p, "axes").unwrap_or(true) {
+        if !axes {
             return Ok((ids_of(sk, &[e]), Vec::new()));
         }
         // Its major and minor axes, construction lines through the centre that bisects both:
