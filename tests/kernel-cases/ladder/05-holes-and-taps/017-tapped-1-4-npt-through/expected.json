@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 1/4-18 NPT tapped hole through the stock (ASME B1.20.1): a straight hole at the tap maker's 10.85 mm, cosmetic thread",
+ "source": "analytic",
+ "method": "ASME B1.20.1 1/4-18 NPT: E0 = 0.47739 in, L1 = 0.2278 in, h = 0.8 P; at the face the minor E1 - h = 0.48163 - 0.04444 in = 11.105 mm, 1/16 smaller per mm deeper; a straight hole takes the tap maker's 10.85 (Yamawa YEU23 p.710): removed pi 5.425^2 20; + one cylinder face",
+ "body_count": 1,
+ "volume_mm3": 46150.819294189,
+ "faces": 7
+}

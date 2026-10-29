@@ -1,0 +1,39 @@
+{
+ "sources": [],
+ "what": "inspect.interference of the arm sunk 5 mm into the base",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Arm moved by (0,0,-5): it shares x 0..10, y -5..5, z -5..0 with Base: 500 mm3, area 2(100+50+50) = 400, centre (5,0,-2.5)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "count": 1,
+    "interferences": [
+     {
+      "volume_mm3": 500.0,
+      "area_mm2": 400.0,
+      "center": [
+       5.0,
+       0.0,
+       -2.5
+      ],
+      "bbox": {
+       "min": [
+        0.0,
+        -5.0,
+        -5.0
+       ],
+       "max": [
+        10.0,
+        5.0,
+        0.0
+       ]
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

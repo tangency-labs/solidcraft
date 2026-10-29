@@ -91,7 +91,11 @@
         "ladder/05-holes-and-taps/011-crossing-holes-steinmetz",
         "ladder/05-holes-and-taps/012-crossing-tapped-holes-offset",
         "ladder/05-holes-and-taps/008-tapped-m5-into-curved-face",
-        "ladder/05-holes-and-taps/013-part-holes"
+        "ladder/05-holes-and-taps/013-part-holes",
+        "ladder/05-holes-and-taps/014-tapped-1-4-20-unc-through",
+        "ladder/05-holes-and-taps/015-tapped-1-4-28-unf-blind",
+        "ladder/05-holes-and-taps/016-tapped-rc-1-2-through",
+        "ladder/05-holes-and-taps/017-tapped-1-4-npt-through"
       ],
       "tier": "05-holes-and-taps",
       "what": "holes and tapped holes"
