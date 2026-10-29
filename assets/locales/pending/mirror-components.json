@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.component_mirror": "Mirror Components"
+  },
+  "ar": {
+    "cmd.component_mirror": "مرآة المكوّنات"
+  },
+  "de": {
+    "cmd.component_mirror": "Komponenten spiegeln"
+  },
+  "he": {
+    "cmd.component_mirror": "שיקוף רכיבים"
+  },
+  "ja": {
+    "cmd.component_mirror": "コンポーネントをミラー"
+  },
+  "ko": {
+    "cmd.component_mirror": "구성 요소 대칭 복사"
+  },
+  "vi": {
+    "cmd.component_mirror": "Lấy đối xứng thành phần"
+  },
+  "zh": {
+    "cmd.component_mirror": "镜像组件"
+  }
+}

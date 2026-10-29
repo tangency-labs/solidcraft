@@ -2,15 +2,16 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::{EditInPlaceParams, FinishEditParams, OccurrenceAlignParams, OccurrenceAlignResult};
+use super::{EditInPlaceParams, FinishEditParams, MirrorComponentsParams, MirrorComponentsResult, OccurrenceAlignParams, OccurrenceAlignResult};
 use crate::Session;
-use crate::schema::tests::{assert_keys, conforms};
+use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<EditInPlaceParams>(), &["component", "path"]);
     assert_keys(input_schema_for::<FinishEditParams>(), &[]);
+    assert_keys(input_schema_for::<MirrorComponentsParams>(), &["as", "components", "follow", "plane", "symmetry"]);
     assert_keys(
         input_schema_for::<OccurrenceAlignParams>(),
         &[
@@ -76,4 +77,34 @@ fn replies_match_the_output_schema() {
         .unwrap_or_else(|e| panic!("{e}"));
     assert!(r2.get("param_warnings").is_some(), "{r2}");
     assert!(conforms(schema, schema, &r2), "{r2} doesn't match {schema}");
+}
+
+#[test]
+fn strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": "sideways"})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": 3})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "symmetry": "W"})),
+    ]);
+}
+
+#[test]
+fn mirror_replies_match_the_output_schema() {
+    let schema = output_schema_for::<MirrorComponentsResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 4, "corner": [20, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    for p in [
+        json!({"components": ["Part"], "plane": "YZ"}),
+        json!({"components": "Part:1", "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0]}, "symmetry": "auto", "follow": false}),
+        json!({"components": ["Part"], "plane": "XZ", "as": "opposite_hand", "symmetry": "Z"}),
+        json!({"components": ["Part"], "plane": "XY", "as": "instance", "follow": true}),
+    ] {
+        let r = s.execute("component.mirror", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert_eq!(r.get("param_warnings"), None, "{r}");
+    }
+    assert!(!conforms(schema, schema, &json!({"occurrences": "1"})));
 }

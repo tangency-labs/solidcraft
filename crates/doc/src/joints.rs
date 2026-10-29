@@ -624,6 +624,9 @@ pub struct Assembly {
     pub traces: Vec<crate::motion::MotionTrace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// Occurrences placed as the mirror image of others, following them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<crate::occurrence_mirror::OccurrenceMirror>,
 }
 
 impl Assembly {
@@ -698,6 +701,7 @@ impl Assembly {
             && self.studies.is_empty()
             && self.traces.is_empty()
             && self.exploded.is_empty()
+            && self.mirrors.is_empty()
     }
 }
 

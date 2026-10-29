@@ -7,7 +7,9 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 
-use super::types::{IdOrName, Point3, PointExpr3, not_blank_pattern, present};
+use super::check::whole;
+use super::types::{IdOrName, Point3, PointExpr3, StringList, not_blank_pattern, present};
+use crate::cmd::{MirrorAs, mirror_as_form, mirror_symmetry_form};
 use crate::params;
 
 /// Edit a linked component's design in place. In the app window: open the design it links in a
@@ -344,6 +346,146 @@ pub struct OccurrenceAlignResult {
     /// placement of it. Left out when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shared: Vec<Vec<u64>>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Mirror components across a plane. Each occurrence is placed again as its mirror image, as
+/// the same part (`as: instance`, for a part symmetric about one of its own mid-planes) or as a
+/// new opposite-hand part (`as: opposite_hand`). A placement is a rigid move: the mirror image
+/// is placed as the reflection across the plane followed by the part's own reflection in its
+/// mid-plane, which shows the mirror image exactly. The mirrored occurrence follows its source
+/// and the plane until either is deleted (unless `follow` is false). Joints of the source are
+/// not copied. Never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MirrorComponentsParams {
+    /// What to mirror: occurrence names (`Bracket:2`) or ids, or component names or ids (their
+    /// first occurrence). Not the design's root.
+    pub components: StringList,
+    /// The mirror plane, in world coordinates: XY, XZ, YZ (or Top, Front, Right), a construction
+    /// plane's name or id (followed when it changes), `{origin, normal}` or
+    /// `{origin, x_dir, y_dir}` (origin coordinates may be length expressions, followed when
+    /// their parameters change).
+    pub plane: MirrorPlane,
+    /// What the mirror makes. `instance`: a new occurrence of the same component, refused for a
+    /// part that is not symmetric about one of its own X, Y or Z mid-planes unless `symmetry`
+    /// names one. `opposite_hand`: a new component named `<name> (mirror)`, its bodies the
+    /// source's own bodies mirrored in the part's own frame (a Mirror feature in it, rebuilt
+    /// when the source's features change), placed so it is the exact mirror image; a component
+    /// that holds other components is refused. Default: instance.
+    #[serde(default, rename = "as", deserialize_with = "mirror_as", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MirrorAsSchema")]
+    pub as_: Option<MirrorAs>,
+    /// The part's own mid-plane (through the middle of its box, square to its own X, Y or Z
+    /// axis; case ignored) that the placement reflects it in. `auto` (the default): for an
+    /// instance, the one of these the part is symmetric about, the one most square to the
+    /// mirror plane first; for an opposite hand, the one most square to the mirror plane.
+    #[serde(default, deserialize_with = "mirror_symmetry", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MirrorSymmetrySchema")]
+    pub symmetry: Option<Option<usize>>,
+    /// Keep each mirrored occurrence at the mirror image of its source as the source moves and
+    /// the plane changes; a following occurrence is not moved on its own. False places it once.
+    /// Default: true.
+    #[serde(default)]
+    pub follow: Option<bool>,
+}
+
+fn mirror_as<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MirrorAs>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => mirror_as_form(&v).map(Some).map_err(|e| D::Error::custom(whole(e))),
+    }
+}
+
+fn mirror_symmetry<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<usize>>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => mirror_symmetry_form(&v).map(Some).map_err(|e| D::Error::custom(whole(e))),
+    }
+}
+
+/// The schema of `as`.
+pub struct MirrorAsSchema;
+
+impl JsonSchema for MirrorAsSchema {
+    fn schema_name() -> Cow<'static, str> {
+        "MirrorAs".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "instance or opposite_hand.", "type": "string", "enum": ["instance", "opposite_hand"]})
+    }
+}
+
+/// The schema of `symmetry`.
+pub struct MirrorSymmetrySchema;
+
+impl JsonSchema for MirrorSymmetrySchema {
+    fn schema_name() -> Cow<'static, str> {
+        "MirrorSymmetry".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "auto, X, Y or Z (case ignored).", "type": "string", "pattern": "^(?i)(auto|x|y|z)$"})
+    }
+}
+
+/// A plane as `features::plane_param` takes it: a name, a construction plane's id, or an object.
+/// Whether it names a plane of the design is the handler's to say.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MirrorPlane(pub Value);
+
+impl<'de> Deserialize<'de> for MirrorPlane {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            v @ (Value::String(_) | Value::Number(_) | Value::Object(_)) => Ok(MirrorPlane(v)),
+            _ => Err(D::Error::custom("must be XY, XZ, YZ, a construction plane name or id, or {origin, normal}")),
+        }
+    }
+}
+
+impl JsonSchema for MirrorPlane {
+    fn schema_name() -> Cow<'static, str> {
+        "MirrorPlane".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "XY, XZ, YZ, a construction plane's name or id, {origin, normal} or {origin, x_dir, y_dir}.",
+            "anyOf": [{"type": "string"}, {"type": "integer", "minimum": 0}, {"type": "object"}]
+        })
+    }
+}
+
+/// One mirrored occurrence.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MirroredOccurrence {
+    /// The occurrence it mirrors.
+    pub source: u64,
+    /// The new occurrence, placed at the mirror image.
+    pub occurrence: u64,
+    /// Its name (`Bracket:2`, `Bracket (mirror):1`).
+    pub name: String,
+    /// Its component: the source's for an instance, the new opposite-hand part's otherwise.
+    pub component: u64,
+    /// `instance` or `opposite_hand`.
+    #[serde(rename = "as")]
+    pub kind: String,
+    /// The part's own axis square to the mid-plane it is reflected in: X, Y or Z.
+    pub symmetry: String,
+    /// Whether it follows its source and the plane.
+    pub follows: bool,
+    /// The Mirror feature that makes an opposite-hand part's bodies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature: Option<u64>,
+}
+
+/// What `component.mirror` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MirrorComponentsResult {
+    /// The new occurrences, in the order of `components`.
+    pub occurrences: Vec<u64>,
+    /// Each one with what it mirrors and how.
+    pub mirrored: Vec<MirroredOccurrence>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

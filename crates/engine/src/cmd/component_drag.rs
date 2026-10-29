@@ -121,6 +121,9 @@ pub(super) fn drag(s: &mut Session, p: &Value) -> Result<Value> {
     let point = move_vector(p, "point", Default::default(), true, cmd)?;
     let t = point - at;
     let world_move = translation(t);
+    if let Some(id) = path.last() {
+        super::mirror::placed_by_mirror(s, *id, cmd)?;
+    }
     let group = s.drag_group(&path).map_err(|e| bad(cmd, e.to_string()))?;
     let dragged = s.occurrence_placement(&path).map_err(|e| bad(cmd, e.to_string()))?;
     let inverse = mat_inverse(&dragged.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;

@@ -12,13 +12,15 @@ use solidcraft_geom::Vec3;
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::component::{
-    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, OccurrenceAlignParams, OccurrenceAlignResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MirrorComponentsParams, MirrorComponentsResult, OccurrenceAlignParams,
+    OccurrenceAlignResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
+const MIRROR_CONTRACT: TypedContract<MirrorComponentsParams> = TypedContract::new();
 
 #[path = "component_align.rs"]
 mod align;
@@ -28,6 +30,8 @@ mod drag;
 mod foreign;
 #[path = "component_matrix.rs"]
 pub(super) mod matrix;
+#[path = "component_mirror.rs"]
+pub(super) mod mirror;
 #[path = "component_placing.rs"]
 pub(super) mod placing;
 #[path = "component_properties.rs"]
@@ -114,6 +118,16 @@ pub static COMMANDS: &[CommandSpec] = &[
          `bodies` and `feature`, or the pasted components' `paths`",
     ),
     CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches).icon("move").params("sketches: [ids or names], component"),
+    CommandSpec::new("component.mirror", "Mirror Components", crate::checked!("component.mirror", mirror::mirror_components))
+        .icon("mirror")
+        .contract(&MIRROR_CONTRACT)
+        .output(output_schema_for::<MirrorComponentsResult>)
+        .params(
+            "components: [component or occurrence names]; plane: XY|XZ|YZ|construction plane|{origin, normal}; as?: instance (default: the \
+             same part, for a part symmetric about one of its own mid-planes) | opposite_hand (a new `<name> (mirror)` part, the exact \
+             mirror image); symmetry?: auto|X|Y|Z (the part's own mid-plane); follow?: bool (default true: follows the source and the \
+             plane). Joints are not copied",
+        ),
     CommandSpec::new("occurrence.copy", "Paste (Instance)", copy_occurrence).icon("copy")
         .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]; in_place?: bool (default false: the selected transform within the parent; true: where the selected placement is in the world, translate in world axes; a parent placed more than once is placed by parent_path?, else the active placement, and every instance gets the copy). Copies the selected effective transform, including pending moves"),
     CommandSpec::new("component.paste_new", "Paste New", paste_new).icon("paste").params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
@@ -620,6 +634,7 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         let name = s.doc.components.iter().find(|c| c.id == group).map(|c| c.name.clone()).unwrap_or_default();
         return Err(bad(cmd, format!("{} is held in {name} by a rigid group: move {name}, or Unlock Contents (component.unlock) first", o.name)));
     }
+    mirror::placed_by_mirror(s, id, cmd)?;
     let delta = if let Some(m) = p.get("matrix") {
         if let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| p.get(*k).is_some()) {
             return Err(bad(cmd, format!("give either matrix or {k}, not both")));

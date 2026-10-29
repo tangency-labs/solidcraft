@@ -93,7 +93,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("pattern_path")
         .params("features: [names] | bodies: [names]; path_sketch: sketch; path: [curve ids in order]; count; spacing (between instances) | distance (first to last); orientation?: identical|path; flip?: bool"),
-    CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)"),
+    CommandSpec::new("solid.mirror", "Mirror", mirror).at("SOLID", "CREATE").icon("mirror").params("features: [names] | bodies: [names] (combine?: join with the original) | components: [component or occurrence names] (placed again as their mirror image, as component.mirror: as?, symmetry?, follow?); plane: XY|XZ|YZ|construction plane name or id|{origin, normal}|{origin, x_dir, y_dir} (origin coordinates may be length expressions; the mirror follows them, or a construction plane)"),
     CommandSpec::new("solid.hole", "Hole", hole)
         .at("SOLID", "CREATE")
         .icon("hole")
@@ -2081,6 +2081,10 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.mirror";
+    if !string_list(cmd, p, "components")?.is_empty() {
+        // Placed again as the mirror image; the plane is in the active component's frame.
+        return super::component::mirror::mirror(s, p, cmd, s.active_component);
+    }
     let bodies = string_list(cmd, p, "bodies")?;
     let features = if bodies.is_empty() { source_features(s, p, cmd)? } else { Vec::new() };
     let plane = plane_param(s, p.get("plane"), cmd)?;
