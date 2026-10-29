@@ -1718,8 +1718,9 @@ mod tests {
         assert!(walls.is_surface() && walls.face_count() == 4 && rel(area(&walls), 80.0) < 1e-9);
         let pts: Vec<Vec3> = (0..=10).map(|i| Vec3::new(0.0, 0.0, i as f64)).collect();
         assert!(rel(area(&sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &pts).unwrap()), 100.0) < 1e-6);
-        // A smooth point path: a quarter circle of radius 30 in the YZ plane. One smooth wall (not
-        // forty ruled strips), a piece of cylinder: 10 × 15π.
+        // A point path through a quarter circle of radius 30 in the YZ plane: the path is its
+        // lines (no wall is fitted through the points), a wall along each of the 40, together
+        // 10 × the polyline's length, within 10⁻⁴ of the cylinder's 10 × 15π.
         let arc: Vec<Vec3> = (0..=40)
             .map(|i| {
                 let t = i as f64 / 40.0 * FRAC_PI_2;
@@ -1727,14 +1728,16 @@ mod tests {
             })
             .collect();
         let curved = sweep_sheet_points(&Plane::XY, std::slice::from_ref(&line), &arc).unwrap();
-        assert_eq!(curved.face_count(), 1, "smooth wall");
+        assert_eq!(curved.face_count(), 40, "a wall along each line");
         let want = 10.0 * 30.0 * FRAC_PI_2;
         assert!(rel(area(&curved), want) < 2e-3, "{} vs {want}", area(&curved)); // (measured on meshes)
-        // A bent chain along the same path: two smooth walls joined by one shared seam edge.
+        // A bent chain along the same path: two walls along each line, sharing every seam: the
+        // profile's two segments at each of the 41 points and its three vertices along each of
+        // the 40 lines.
         let bent = vec![line[0], Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, 5.0) }];
         let two = sweep_sheet_points(&Plane::XY, &[bent], &arc).unwrap();
-        assert_eq!(two.face_count(), 2);
-        assert_eq!(two.edge_count(), 7, "the walls share their seam");
+        assert_eq!(two.face_count(), 2 * 40);
+        assert_eq!(two.edge_count(), 2 * 41 + 3 * 40, "the walls share their seams");
     }
 
     #[test]
@@ -1858,20 +1861,22 @@ mod tests {
         assert!(remove_faces(&b, &[]).is_err());
     }
 
-    /// Faces that are not planes or cylinders thicken onto fitted surfaces. A sixth of a sphere
-    /// (one of its six patches) thickened out by 1 is a sixth of the shell between radii 10 and
-    /// 11; a torus patch (a symmetric share of the torus, by its area) thickened out by 1 is that
+    /// Faces that are not planes or cylinders thicken onto fitted surfaces. A sphere's cap above
+    /// z = 5 (polar angles to 60°: solid angle π) thickened out by 1 is that sector of the shell
+    /// between radii 10 and 11, π/3·(11³ − 10³); a torus patch (a symmetric share of the torus, by its area) thickened out by 1 is that
     /// share of the shell 2π²R((r+1)² − r²); thickened in past the sphere's centre, refused.
     #[test]
     fn thicken_curved_faces_onto_fitted_surfaces() {
         use crate::{sphere, torus};
         use std::f64::consts::PI;
         let ball = sphere(Vec3::ZERO, 10.0).unwrap();
-        let patch = copy_faces(&ball, &[Vec3::new(0.0, 0.0, 10.0)]).unwrap();
-        assert!(rel(measure(&patch).unwrap().area, 4.0 * PI * 100.0 / 6.0) < 2e-3, "one sixth");
+        let caps = crate::split_by_plane(&ball, &Plane::from_normal(Vec3::new(0.0, 0.0, 5.0), Vec3::Z).unwrap()).unwrap();
+        let cap = caps.into_iter().find(|b| measure(b).unwrap().bbox.min.z > 5.0 - 1e-6).unwrap();
+        let patch = copy_faces(&cap, &[Vec3::new(0.0, 0.0, 10.0)]).unwrap();
+        assert!(rel(measure(&patch).unwrap().area, 2.0 * PI * 10.0 * 5.0) < 2e-3, "the cap");
         let shell = thicken(&patch, 1.0, false).unwrap();
         assert!(!shell.is_surface());
-        let want = 4.0 / 3.0 * PI * (1331.0 - 1000.0) / 6.0;
+        let want = PI / 3.0 * (1331.0 - 1000.0);
         let v = measure(&shell).unwrap().volume;
         assert!(rel(v, want) < 3e-3, "{v} vs {want}"); // (measured on meshes)
         assert!(thicken(&patch, -10.0, false).is_err());
@@ -1894,9 +1899,12 @@ mod tests {
         assert!(rel(v, want) < 3e-3, "{v} vs {want}"); // (measured on meshes)
     }
 
-    /// Three faces of a box meeting at a corner (sharp edges), thickened out by 1: three slabs,
-    /// a wedge along each sharp edge and a corner tetrahedron, 3·100 + 3·(½·1²·10) + 1/6; a closed
-    /// solid that every check accepts. Thickened into the inside corner, refused.
+    /// Three faces of a box meeting at a corner (sharp edges), thickened out by 1: each face's
+    /// offset extended until the offsets meet, as SMLib thickens across a convex sharp edge (and
+    /// other CAD does): three slabs, a 1 × 1 × 10 block along each sharp edge and a unit cube at
+    /// the corner, 3·100 + 3·10 + 1 = 331 = 11³ − 10³; a closed solid that every check accepts.
+    /// Into the inside corner, and half each way, the same with the offsets trimmed where they
+    /// cross.
     #[test]
     fn thicken_a_box_corner_across_its_sharp_edges() {
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
@@ -1904,12 +1912,17 @@ mod tests {
         assert!(corner.is_surface() && corner.face_count() == 3);
         let t = thicken(&corner, 1.0, false).unwrap();
         assert!(!t.is_surface());
-        let want = 300.0 + 15.0 + 1.0 / 6.0;
+        let want = 300.0 + 30.0 + 1.0;
         let v = measure(&t).unwrap().volume;
         assert!(rel(v, want) < 1e-9, "{v} vs {want}");
         assert!(t.validity().is_empty(), "{:?}", t.validity());
-        assert!(thicken(&corner, -1.0, false).is_err());
-        assert!(thicken(&corner, 1.0, true).is_err(), "half of it goes into the inside corner");
+        // Into the inside corner the offsets are trimmed where they meet: 10³ − 9³; half each way,
+        // 10.5³ − 9.5³.
+        for (t, symmetric, want) in [(-1.0, false, 1000.0 - 729.0), (1.0, true, 10.5f64.powi(3) - 9.5f64.powi(3))] {
+            let t = thicken(&corner, t, symmetric).unwrap();
+            let v = measure(&t).unwrap().volume;
+            assert!(rel(v, want) < 1e-9 && t.validity().is_empty(), "{v} vs {want}");
+        }
     }
 
     /// A saddle B-spline patch thickened by 1.5 holds the volume its offsets sweep: by Steiner,
@@ -1971,24 +1984,28 @@ mod tests {
     #[test]
     fn thicken_a_cylinder_side_and_a_box_top() {
         let c = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();
-        // One half of the side, offset outward by 1: half of a ring.
-        let half = copy_faces(&c, &[Vec3::new(7.0, 7.0, 10.0)]).unwrap();
+        // The side of the cylinder cut in half at x = 0, offset outward by 1: half of a ring.
+        let halves = crate::split_by_plane(&c, &Plane::from_normal(Vec3::ZERO, Vec3::X).unwrap()).unwrap();
+        let cut = halves.into_iter().find(|b| measure(b).unwrap().bbox.min.x > -1e-6).unwrap();
+        // (It comes in pieces round the axis: picked all the way round.)
+        let round: Vec<Vec3> = (-4..=4).map(|k| f64::from(k) * 0.35).map(|a| Vec3::new(10.0 * a.cos(), 10.0 * a.sin(), 10.0)).collect();
+        let half = copy_faces(&cut, &round).unwrap();
+        assert!(rel(measure(&half).unwrap().area, std::f64::consts::PI * 10.0 * 20.0) < 1e-3, "the half side");
         let v = measure(&thicken(&half, 1.0, false).unwrap()).unwrap().volume;
         let want = std::f64::consts::PI * (121.0 - 100.0) / 2.0 * 20.0;
         assert!(rel(v, want) < 3e-4, "{v} vs {want}"); // (measured on meshes)
-        // Both halves (meeting smoothly): the whole ring, inward.
-        let d = 10.0 / 2f64.sqrt();
-        let side = copy_faces(&c, &[Vec3::new(d, d, 10.0), Vec3::new(-d, -d, 10.0)]).unwrap();
-        assert_eq!(side.face_count(), 2);
+        // The whole side (one face, closed round its seam): the whole ring, inward.
+        let side = copy_faces(&c, &[Vec3::new(7.0, 7.0, 10.0)]).unwrap();
+        assert_eq!(side.face_count(), 1);
         let v = measure(&thicken(&side, -1.0, false).unwrap()).unwrap().volume;
         let want = std::f64::consts::PI * (100.0 - 81.0) * 20.0;
         assert!(rel(v, want) < 3e-4, "{v} vs {want}"); // (measured on meshes)
-        // Two faces meeting at a sharp edge: two slabs and the wedge closing the gap between
-        // them, its ends patched: 2·100 + ½·1²·10.
+        // Two faces meeting at a sharp edge: two slabs and, the offsets extended until they
+        // meet, the 1 × 1 × 10 block along the edge: 2·100 + 10.
         let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
         let two = copy_faces(&b, &[Vec3::new(5.0, 5.0, 10.0), Vec3::new(5.0, 0.0, 5.0)]).unwrap();
         let v = measure(&thicken(&two, 1.0, false).unwrap()).unwrap().volume;
-        assert!(rel(v, 205.0) < 1e-9, "{v}");
+        assert!(rel(v, 210.0) < 1e-9, "{v}");
     }
 
     #[test]

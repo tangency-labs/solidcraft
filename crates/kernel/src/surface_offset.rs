@@ -69,20 +69,21 @@ mod tests {
         assert!(copy.face_count() == 2 && rel(measure(&copy).unwrap().area, 200.0) < 1e-9);
     }
 
-    /// A cylinder's side (two halves) moved out by 2 keeps its halves joined, with radius 12:
-    /// area 2π·12·20. Moved in past its axis, refused.
+    /// A cylinder's side (one face, closed round its seam) moved out by 2 keeps its seam joined,
+    /// with radius 12: area 2π·12·20. Moved in past its axis, refused.
     #[test]
     fn a_cylinder_side_changes_radius() {
         let c = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap();
         let d = 10.0 / 2f64.sqrt();
-        let halves = [face_at(&c, Vec3::new(d, d, 10.0)), face_at(&c, Vec3::new(-d, -d, 10.0))];
-        let out = offset_surface(&c, &halves, 2.0, 0.01).unwrap();
-        assert!(out.face_count() == 2);
+        let side = [face_at(&c, Vec3::new(d, d, 10.0))];
+        assert_eq!(face_at(&c, Vec3::new(-d, -d, 10.0)), side[0], "the side is one face");
+        let out = offset_surface(&c, &side, 2.0, 0.01).unwrap();
+        assert!(out.face_count() == 1);
         let want = 2.0 * std::f64::consts::PI * 12.0 * 20.0;
         assert!(rel(measure(&out).unwrap().area, want) < 1e-3, "{} vs {want}", measure(&out).unwrap().area); // (measured on meshes)
-        let joined = offset_surface(&c, &halves, 0.0, 0.01).unwrap();
-        assert_eq!(edges(&out), edges(&joined), "the halves still share their seams");
-        assert!(offset_surface(&c, &halves, -10.5, 0.01).is_err());
+        let joined = offset_surface(&c, &side, 0.0, 0.01).unwrap();
+        assert_eq!(edges(&out), edges(&joined), "the side still closes on its seam");
+        assert!(offset_surface(&c, &side, -10.5, 0.01).is_err());
     }
 
     /// A sphere (fitted faces) moved out by 2: area 4π·12², within the tolerance; moved in to
