@@ -344,9 +344,25 @@ fn coarse_tolerance(span: f64) -> f64 {
     (span * 0.01).clamp(1e-3, 1.0)
 }
 
-/// Box diagonal of a record's vertices (0 when it has none or no finite extent).
+/// Box diagonal of a record's vertices and points along its edges (0 when it has none or no
+/// finite extent). The edges count: SMLib closes a sphere, a cylinder or a torus along seams, so
+/// its vertices alone can be two poles or a single point (a torus came out 1 mm across, and its
+/// display mesh at a hundredth of that took 214 720 triangles). Points on the edges, not their
+/// control hulls: a rational edge's control points can lie far off it.
 fn span_of(record: &Brep) -> f64 {
-    let bounds: Aabb3 = record.vertices.iter().map(|v| v3(v.point)).collect();
+    let mut bounds: Aabb3 = record.vertices.iter().map(|v| v3(v.point)).collect();
+    for e in &record.edges {
+        if let Ok(c) = brep::eval::CurveEval::new(e.parameters()) {
+            let [t0, t1] = e.interval;
+            for i in 1..4 {
+                if let Some(p) = c.point(t0 + (t1 - t0) * f64::from(i) / 4.0)
+                    && p.is_finite()
+                {
+                    bounds.add(p);
+                }
+            }
+        }
+    }
     let d = if bounds.is_empty() { 0.0 } else { bounds.diagonal() };
     if d.is_finite() && d > 0.0 { d } else { 0.0 }
 }
