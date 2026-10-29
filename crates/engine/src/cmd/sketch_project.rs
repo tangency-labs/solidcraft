@@ -434,9 +434,9 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
     if !entities.iter().any(model_ref) {
         return Ok(p.clone());
     }
-    let id = super::sketch::target_sketch(s, p, cmd)?;
+    let id = sketch_store::target(s, p, cmd)?;
     let mut doc = (*s.doc).clone();
-    let mut sk = doc.sketch(id)?.clone();
+    let mut sk = sketch_store::read(&doc, id)?.clone();
     refresh(s, &doc, id, &mut sk);
     let mut out = entities.clone();
     for entity in out.iter_mut().take(MAX_PROJECTED_ENTITIES) {
@@ -449,7 +449,7 @@ pub(super) fn project_entities(s: &mut Session, p: &Value, cmd: &str) -> Result<
     if let Some(o) = params.as_object_mut() {
         o.insert("entities".into(), Value::Array(out));
     }
-    *doc.sketch_mut(id)? = sk;
+    sketch_store::write(&mut doc, id, sk)?;
     *s.doc_mut() = doc;
     Ok(params)
 }
