@@ -38,6 +38,8 @@ One directory per area, one per case: `tests/kernel-cases/<area>/<id>/`.
 | `fillets`, `sweeps`, `threads`, `sheet-metal`, `tessellation` | history rig |
 | `continuity` (designed seams of known order, G0 to G4, that prove the continuity measurement itself) | history rig |
 
+Each area also has its gate files: `KNOWN_FAILING` and `PATHS` (see [the gate](#the-kernel-rig-gate)).
+
 `<id>` is `<source number>-<short-name>`, such as `1894-prism-cut-touching-walls`.
 
 Each case has:
@@ -100,16 +102,12 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 ## The kernel rig gate
 
 Every area is a regression suite: each case is one small case of one issue, with its exact
-answer. `.github/workflows/kernel-rig.yml` runs them all, and the ladder, on every pull request
-(not a draft) that touches the kernel surface: `crates/kernel/**`, `crates/geom/**`,
-`crates/smlib/**` (`SMLIB_REV` and `SMLIB_PREBUILT` included), `crates/step/**`,
-`crates/doc/src/eval*.rs`, `crates/engine/src/cmd/features*.rs`, `tests/kernel-cases/**` and the
-rig's own code (GitHub filters whole files, so any change to `eval*.rs` or `features*.rs` runs
-it). Pushes to main and develop on the same paths, merge groups and the release gate
-(`release-gate.yml`) run it too. One job builds `solidcraft-cli` (release, SMLib) and the rig's
-runner, and hands both to a matrix of shards, one per area plus the ladder, that run in
-parallel; the `kernel-rig` check passes when every shard does. (`fillet-rig.yml`, the earlier
-fillet-only gate, folds into it.) Each area's shard runs:
+answer. `.github/workflows/kernel-rig.yml` runs them, and the ladder, on pull requests (not
+drafts). A plan job (`scripts/ci/kernel_rig_plan.py`) picks the areas from the changed files, one
+job builds `solidcraft-cli` (release, SMLib) and the rig's runner, and a matrix of shards, one per
+selected area plus the ladder, runs them in parallel; the `kernel-rig` check passes when every
+selected shard does (and when none was selected). Pushes to main and develop, merge groups, the
+release gate (`release-gate.yml`) and a run by hand run every area. Each area's shard runs:
 
 ```sh
 cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
@@ -134,6 +132,42 @@ request, so the list only shrinks and never goes stale:
 
 To check a list locally before pushing: `cargo xtask kernel-cases --area <area> --cli
 target/release/solidcraft-cli --known-failing tests/kernel-cases/<area>/KNOWN_FAILING`.
+
+### Which areas a pull request runs
+
+- `<area>/PATHS`: the source files whose change reruns that area, one git pathspec glob a line
+  (`*` within a folder, `**` across folders; `#` starts a comment): the engine command modules,
+  doc evaluation and kernel files its commands go through. Only the area's own files: never a
+  file `PATHS-ALL` covers, nor a whole crate (the self-test fails on either).
+- `PATHS-ALL`: the shared core, whose change reruns every area: SMLib (`crates/smlib/**`, its pin
+  included) and `scripts/fetch-smlib.sh`, `crates/geom/**`, the kernel's core (bodies, extrude and
+  revolve, booleans, the SMLib bridge, tessellation, what the grader measures), timeline
+  evaluation, the solid feature commands, the grader, the runner and the workflow.
+- A change under `<area>/` (a case, its `KNOWN_FAILING`, its `PATHS`) reruns that area.
+- The ladder spans every operation: it runs whenever any area does, and on a change under
+  `ladder/`.
+
+The workflow's trigger paths are whole folders that hold every `PATHS` glob (a self-test,
+`scripts/ci/test_kernel_rig_plan.py`, checks it), so a pull request that touches none of them
+starts no job at all. To see what a change would run:
+`git diff --name-only -z origin/develop... | python3 scripts/ci/kernel_rig_plan.py --paths -`.
+
+**A new area** joins with its folder: its cases, a `KNOWN_FAILING` (empty but for its header
+when every case passes), and a `PATHS` listing the files its commands go through. The plan finds
+the areas from the folders, so the workflow needs no edit (unless a `PATHS` glob lies outside
+the trigger paths, which the self-test reports). Add a row to the table under Layout.
+
+### Every command has a case
+
+`cargo xtask kernel-cases --coverage --cli target/release/solidcraft-cli` (run in the gate's
+build job) lists every registry command (`solidcraft-cli commands`, planned ones aside) that no
+`recipe.json` here runs, and fails unless `EXEMPT` lists it: one line a command, `<id>  <why it
+has no case>`, each section sorted. Lines before `[to cover]` have no geometry to grade (the
+view, rendering, appearance, files, component and parameter bookkeeping, ...). Lines after it
+make geometry and wait for a case: that section only shrinks. The check also fails on a listed
+command that a case now uses (remove its line in the same pull request) or that the registry no
+longer has. A new geometry command gets a case, not an `EXEMPT` line. The build job runs for this
+check on any change to `crates/engine/src/cmd/`, a recipe or `EXEMPT`, even when no area does.
 
 ## The complexity ladder
 
