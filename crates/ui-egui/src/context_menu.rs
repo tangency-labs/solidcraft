@@ -1017,15 +1017,23 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if doc.parts.contains_key(&id) {
         v.push(cmd(app, "parts.resize", "Edit").with(json!({"component":id})));
     }
-    v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
+    // What a double-click on the row does comes first.
+    let activate = act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active);
+    let edits = crate::edit_in_place::edits_on_double_click(app, id);
+    if !edits {
+        v.push(activate.clone());
+    }
+    if id != 0 && doc.links.contains_key(&id) {
+        v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
+        v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
+    }
+    if edits {
+        v.push(activate);
+    }
     if id != 0 {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
         let movable = !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none();
-        if doc.links.contains_key(&id) {
-            v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
-            v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
-        }
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(movable));
         position.push(
             cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })),
@@ -1038,29 +1046,6 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         }
         position.push(Item::sep());
         position.extend(turn_up_axis(oid, movable));
-    }
-    v.push(Item::sep());
-    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
-    v.push(act("ui.showAll", "Show All Bodies", "eye"));
-    v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
-    v.push(Item::sep());
-    // The clipboard, then Delete, in the same place for the design and its components (the design
-    // is copied as a saved design to link, and is neither cut nor deleted).
-    if id == 0 {
-        v.push(act("ui.copyDesign", "Copy", "copy").key("Ctrl+C"));
-    } else {
-        v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)));
-        v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)));
-    }
-    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").with(into.clone()).on(pastes_here));
-    v.push(
-        act("ui.pasteNew", "Paste New", "paste")
-            .key("Ctrl+Shift+V")
-            .with(into.clone())
-            .on(pastes_here && crate::edit_clipboard::pasting_components(app)),
-    );
-    if id != 0 {
-        v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
     v.push(Item::sep());
     if !position.is_empty() {
@@ -1104,6 +1089,30 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
                 .on(!bodies.is_empty() && crate::dialogs_save_mesh::available(app)),
         ],
     ));
+    v.push(Item::sep());
+    // The clipboard, then Delete, in the same place for the design and its components (the design
+    // is copied as a saved design to link, and is neither cut nor deleted).
+    if id == 0 {
+        v.push(act("ui.copyDesign", "Copy", "copy").key("Ctrl+C"));
+    } else {
+        v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)));
+        v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)));
+    }
+    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").with(into.clone()).on(pastes_here));
+    v.push(
+        act("ui.pasteNew", "Paste New", "paste")
+            .key("Ctrl+Shift+V")
+            .with(into.clone())
+            .on(pastes_here && crate::edit_clipboard::pasting_components(app)),
+    );
+    if id != 0 {
+        v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
+    }
+    v.push(Item::sep());
+    v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(act("ui.showAll", "Show All Bodies", "eye"));
+    v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
+    v.push(Item::sep());
     let mut browser = vec![act("ui.newGroup", "New Group", "folder").with(json!({ "component": id }))];
     if id != 0 {
         // Keep the component in the design but leave its features out of the History bar (#10393).
