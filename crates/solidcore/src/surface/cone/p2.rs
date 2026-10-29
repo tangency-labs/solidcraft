@@ -67,7 +67,9 @@
 //!   where a `SER` call returns its status (a truthy result without cylinder) and
 //!   `Some` where upstream returns `TRUE` with a cylinder; its NURB is a copy of the
 //!   tested one, as upstream. A tested surface without NURB is `SM_ERR_NULL_POINTER`
-//!   (upstream copies a null NURB).
+//!   (upstream copies a null NURB). With the opt-in
+//!   `Kernel::fixes.nurb_cylinder_inside_out_frame` (WR-496, #1463) an inside-out
+//!   NURB gets `IsNurbSurfaceCone`'s frame (top-knot circle, reversed Z).
 //! - **Recursion.** None of these functions recurses.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
@@ -755,7 +757,11 @@ impl Cone {
     /// corner|)` for distances and radii (upstream default scale `1`). The new bounded
     /// cylinder ([`Cone::is_cylinder`]) keeps a copy of the tested NURB as its own, its
     /// polar converter rebuilt from it and its generator reparameterised to the
-    /// linear direction's NURB interval.
+    /// linear direction's NURB interval. Upstream keeps an inside-out NURB's frame
+    /// (origin the bottom-knot circle, Z along the linear direction), which reverses
+    /// the cylinder's axis; with `k.fixes.nurb_cylinder_inside_out_frame` (WR-496,
+    /// #1463) the frame is the one [`Self::is_nurb_surface_cone`] gives it: origin the
+    /// top-knot circle, Z against the linear direction.
     ///
     /// # Errors
     ///
@@ -851,6 +857,17 @@ impl Cone {
 
         let inside_out = z_axis.dot(bot.frame.z_axis()) < 0.0;
 
+        // Not upstream (WR-496, #1463, opt-in): an inside-out NURB's STEP frame points
+        // against the NURB's linear direction from its top-knot circle, as
+        // IsNurbSurfaceCone builds it; upstream ("Do some correction here") keeps the
+        // bottom-knot circle and the NURB's direction, reversing the cylinder's Z
+        let flip = inside_out && k.fixes.nurb_cylinder_inside_out_frame;
+        let (origin, z_axis) = if flip {
+            (center_top, -z_axis)
+        } else {
+            (center_bot, z_axis)
+        };
+
         let y_axis = z_axis.cross(x_axis);
         // Try to eliminate some numerical inaccurracies (the top radius is not used
         // further)
@@ -860,7 +877,7 @@ impl Cone {
         }
 
         let mut cylinder = Self::new_cylinder_bounded(
-            center_bot,
+            origin,
             x_axis,
             y_axis,
             bot.radius,

@@ -16,7 +16,9 @@
 //!
 //! Deviations: not in upstream. The surface is laid out as `sm_CreateRotSrf`'s B-spline
 //! surface of revolution: `u` the turn (`0` at the curve, rising with the rotation about
-//! the axis), `v` the curve from its start to its end. It is only returned when its
+//! the axis), `v` the curve from its start to its end; for a line falling along the axis,
+//! the reversed line's (`v` from its end), its cylinder or cone built from the low end
+//! and never inside out, as 9853e54's `AnalyticSurface` (#1463). It is only returned when its
 //! corners, the curve's start tangent and the turn's sense agree with that layout, so a
 //! caller can swap it in for the B-spline and keep the trims and loop the B-spline
 //! layout gives. Any other curve, or a construction that fails, gives `None` and the
@@ -29,6 +31,7 @@ use crate::geom::geom_utility::p1::{line_closest_point, line_point_distance};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, PI};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::surface::cone::Cone;
@@ -98,20 +101,32 @@ pub fn analytic_revolution(
         0.0
     };
     let tol = tol.min(FIT_REL * (1.0 + size));
-    let Some(Some(candidate)) =
+    let Some(Some((candidate, reversed))) =
         ignored(candidate(k, curve, base_pt, axis, angle_deg, tol, axis_tol))?
     else {
         return Ok(None);
     };
     let made;
-    let reference = if let Some(surface) = reference {
-        surface
-    } else {
-        let Some(surface) = ignored(create_rot_srf(k, curve, base_pt, axis, angle_deg))? else {
-            return Ok(None);
-        };
-        made = Surface::from(surface);
-        &made
+    let reference = match reference {
+        Some(surface) if !reversed => surface,
+        _ => {
+            // a line falling along the axis: laid out as the reversed line's B-spline
+            let made_srf = if reversed {
+                let Some(line) =
+                    ignored(BSplineCurve::create_line_segment(3, ends.end, ends.start))?
+                else {
+                    return Ok(None);
+                };
+                create_rot_srf(k, &Curve::from(line), base_pt, axis, angle_deg)
+            } else {
+                create_rot_srf(k, curve, base_pt, axis, angle_deg)
+            };
+            let Some(surface) = ignored(made_srf)? else {
+                return Ok(None);
+            };
+            made = Surface::from(surface);
+            &made
+        }
     };
     let expected = ignored(Layout::of(k, reference, base_pt, axis))?;
     let actual = ignored(Layout::of(k, &candidate, base_pt, axis))?;
@@ -227,7 +242,8 @@ fn in_half_plane(
     Ok(true)
 }
 
-/// The analytic surface for the curve's shape, before the layout test.
+/// The analytic surface for the curve's shape, before the layout test, and whether it
+/// is laid out as the reversed curve's B-spline (a line falling along the axis).
 fn candidate(
     k: &Kernel,
     curve: &Curve,
@@ -236,7 +252,7 @@ fn candidate(
     angle_deg: f64,
     tol: f64,
     axis_tol: f64,
-) -> Result<Option<Surface>> {
+) -> Result<Option<(Surface, bool)>> {
     let ends = curve.ends(k)?;
     let (start_dist, _) = line_point_distance(base_pt, axis, ends.start);
     let (end_dist, _) = line_point_distance(base_pt, axis, ends.end);
@@ -262,20 +278,25 @@ fn candidate(
         if !in_half_plane(k, curve, base_pt, x, y, tol)? {
             return Ok(None);
         }
-        // the generator line rises along the axis from the origin; inside out runs
-        // the NURB from the top, so that v always runs from the curve's start
-        let (low_h, bot, top, inside_out) = if height > 0.0 {
-            (start_h, start_dist, end_dist, false)
+        // the generator line rises along the axis from the origin at the curve's low
+        // end, never inside out (#1463: tangency-labs/smlib 9853e54's AnalyticSurface;
+        // an inside-out cylinder's NURB is recognised with its axis reversed by
+        // IsNurbSurfaceCylinder). A curve falling along the axis is laid out as the
+        // reversed curve's B-spline (v from its end).
+        let reversed = height < 0.0;
+        let (low_h, bot, top) = if reversed {
+            (end_h, end_dist, start_dist)
         } else {
-            (end_h, end_dist, start_dist, true)
+            (start_h, start_dist, end_dist)
         };
+        let inside_out = false;
         let origin = base_pt + axis * low_h;
         let mut cone = if (start_dist - end_dist).abs() <= tol {
             Cone::new_cylinder_bounded(
                 origin,
                 x,
                 y,
-                start_dist,
+                bot,
                 0.0,
                 angle_deg,
                 height.abs(),
@@ -299,7 +320,7 @@ fn candidate(
             )
         };
         cone.make_nurb(k)?;
-        return Ok(Some(Surface::from(cone)));
+        return Ok(Some((Surface::from(cone), reversed)));
     }
 
     let Some((frame, radius, arc_start, arc_end)) = curve.is_arc(k, 8, tol)? else {
@@ -374,7 +395,7 @@ fn candidate(
             },
         )?;
         sphere.make_nurb(k)?;
-        return Ok(Some(Surface::from(sphere)));
+        return Ok(Some((Surface::from(sphere), false)));
     }
 
     // a torus: its minor circle is the arc's, centred off the axis
@@ -412,7 +433,7 @@ fn candidate(
         },
     )?;
     torus.make_nurb(k)?;
-    Ok(Some(Surface::from(torus)))
+    Ok(Some((Surface::from(torus), false)))
 }
 
 /// What a surface of revolution's natural domain shows of its layout.
