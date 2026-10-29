@@ -764,17 +764,29 @@ fn a_sketch_on_a_face_meshes_its_body_once() {
     assert!(s.model.state().body("Base").unwrap().cached_mesh().is_some(), "the sketch's projection meshed a copy of the body");
 }
 /// Issue 6720: a face picked by its point alone was refused on a body with many faces. The
-/// search charged the whole mesh once per face, and the 5 000 facets a modelled thread leaves
-/// put a plain block past the limit. The search reads each face's own triangles now.
+/// search charged the whole mesh once per face, and the 5 000 facets a modelled thread left put a
+/// plain block past the limit. The search reads each face's own triangles now. A modelled thread
+/// is a few exact helical faces on SMLib, so the many faces are a block drilled with 256 holes:
+/// the old charge (every face times the whole mesh) is past the 2 000 000 budget, the new one
+/// (the mesh once, plus a test per face) well inside it.
 #[test]
-fn a_face_picked_by_point_on_a_block_with_a_modelled_thread_is_found() {
+fn a_face_picked_by_point_on_a_block_with_many_faces_is_found() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":20,"body_name":"Block"}));
-    run(&mut s, "solid.cylinder", json!({"base":[0,0,-1],"radius":3.4,"height":22,"body_name":"Bore"}));
-    run(&mut s, "solid.combine", json!({"target":"Block","tools":["Bore"],"operation":"cut"}));
-    run(&mut s, "solid.thread", json!({"face":[3.4,0,10],"designation":"M8","modeled":true}));
-    assert!(s.model.state().body("Block").unwrap().body.face_count() > 1000);
-    run(&mut s, "sketch.create", json!({"plane":{"face":[15,15,20],"fixed":true}}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","offset":20,"name":"Drills"}));
+    for i in 0..16 {
+        for j in 0..16 {
+            run(&mut s, "sketch.point", json!({"point":[-15.0 + 2.0 * f64::from(i), -15.0 + 2.0 * f64::from(j)]}));
+        }
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch":"Drills","diameter":0.8}));
+    let body = s.model.state().body("Block").unwrap().body.clone();
+    // The search's own mesh (sketch_face: the tolerance it meshes the body at).
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord((body.size() * 1e-4).max(1e-5))).unwrap();
+    let (faces, triangles) = (body.face_count(), mesh.triangles.len());
+    assert!(faces > 256 && faces * triangles > 2_000_000 && faces + triangles < 2_000_000, "{faces} faces, {triangles} triangles");
+    run(&mut s, "sketch.create", json!({"plane":{"face":[19,19,20],"fixed":true}}));
     let plane = run(&mut s, "sketch.inspect", json!({}))["plane"].clone();
     assert!((plane["origin"][2].as_f64().unwrap() - 20.0).abs() < 1e-6, "{plane}");
 }

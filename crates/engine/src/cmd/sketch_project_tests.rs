@@ -871,11 +871,25 @@ fn intersect_keeps_its_exact_cuts() {
         let c = intersect_curves(&steps, plane).unwrap();
         assert!(c.len() == 1 && c[0]["type"] == "circle" && (c[0]["radius"].as_f64().unwrap() - radius).abs() < 1e-4, "{c:?}");
     }
+    // The tilted cylinder's cut is an ellipse the section leaves as the mesh's segments, as many
+    // as the tessellation crosses (21 on truck's mesh, 20 on SMLib's): each end on the cylinder
+    // within the section's own reach of the surface, the display tolerance (a thousandth of the
+    // mesh's size, doc::project::fit_segments), which the old pin of one end to 1e-4 assumed of
+    // one mesh.
     let tilted = [("solid.cylinder", json!({"base": [0, 0, 0], "radius": 5, "height": 40, "axis": [1, 0, 1]}))];
-    let ends = line_ends(&intersect_curves(&tilted, json!({"plane": "XY", "offset": 10})).unwrap());
-    assert_eq!(ends.len(), 21);
-    let first = [2.941, -0.2891, 3.3932, -1.7819];
-    assert!(ends[0].iter().zip(first).all(|(a, b)| (a - b).abs() < 1e-4), "{:?}", ends[0]);
+    let curves = intersect_curves(&tilted, json!({"plane": "XY", "offset": 10})).unwrap();
+    let ends = line_ends(&curves);
+    assert!(ends.len() == curves.len() && ends.len() >= 16, "{curves:?}");
+    let axis = solidcraft_geom::Vec3::new(1.0, 0.0, 1.0).normalized().unwrap();
+    // The cylinder's box: its axis 40 along (1, 0, 1)/√2 and its ends' discs of radius 5 span
+    // (40 + 2·5)/√2 in x and z and 10 in y.
+    let span = 50.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let reach = 1e-3 * (2.0 * span * span + 100.0).sqrt();
+    for e in &ends {
+        for p in [solidcraft_geom::Vec3::new(e[0], e[1], 10.0), solidcraft_geom::Vec3::new(e[2], e[3], 10.0)] {
+            assert!(((p - axis * p.dot(axis)).len() - 5.0).abs() < reach, "{p:?}");
+        }
+    }
 }
 
 /// A plane crossing a curved face's rim cuts it on the surface, not on the mesh's chord: a
