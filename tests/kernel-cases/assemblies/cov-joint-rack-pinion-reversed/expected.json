@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a reversed rack and pinion, the pinion turned 90 degrees",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); as the rack case with reverse: the rack travels -10\u00b7\u03c0/2: Gear centre (65 - 15.70796, 0, 5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 13,
+   "json": {
+    "ratio": -0.174533
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      49.292037,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,28 @@
+{
+ "sources": [],
+ "what": "a rack on a pinion of pitch radius 10, the pinion turned 90 degrees",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); Gear block on a slider along +x at (50,0,0); joint.rack_pinion radius 10: the rack travels r\u00b7\u03b8 = 10\u00b7\u03c0/2 = 15.70796 mm (\u03c0\u00b7d = 62.83 mm a turn), ratio 10\u03c0/180 mm per degree; Gear centre (65 + 15.70796, 0, 5)",
+ "body_count": 3,
+ "volume_mm3": 9000.0,
+ "results": [
+  {
+   "step": 13,
+   "json": {
+    "ratio": 0.174533
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      80.707963,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

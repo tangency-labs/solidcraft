@@ -1,0 +1,30 @@
+{
+ "sources": [],
+ "what": "a knife follower on an eccentric disc cam, the cam turned 90 degrees",
+ "source": "analytic",
+ "method": "an eccentric disc cam (radius 10, centre 5 off its shaft on z through the origin) with a knife follower on a slider along +x through the shaft, touching at x = 15; the knife's distance at cam turn \u03c6 is s(\u03c6) = e cos \u03c6 + \u221a(R\u00b2 - e\u00b2 sin\u00b2 \u03c6) (e 5, R 10): rise s(0) - s(180) = 15 - 5 = 10; at 90 the knife meets the disc where \u03c6 = -90 in the cam's frame: s = \u221a(100 - 25) = 8.66025: tappet centre x 20 + (8.66025 - 15)",
+ "body_count": 3,
+ "volume_mm3": 5770.796,
+ "results": [
+  {
+   "step": 13,
+   "json": {
+    "lift": {
+     "rise": 10.0
+    }
+   }
+  },
+  {
+   "step": 15,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      13.660254,
+      0.0,
+      2.5
+     ]
+    }
+   }
+  }
+ ]
+}
