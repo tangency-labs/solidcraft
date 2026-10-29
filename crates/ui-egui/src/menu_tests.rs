@@ -470,15 +470,14 @@ fn component_menu_activates_grounds_and_pastes() {
     assert_eq!(app.session.active_component, c);
     let rows = context_menu::items(&app, &t);
     let ids: Vec<_> = rows.iter().map(|i| i.id.as_str()).collect();
-    assert!(ids.contains(&"ui.moveOccurrence"), "Move/Copy stays on the menu");
-    let own = ids.iter().position(|id| *id == "ui.group.component").expect("the Component flyout");
-    assert_eq!(ids.get(own.wrapping_sub(1)), Some(&"ui.group.position"), "Position comes right before Component");
-    assert!(find(&rows, "Position").children.iter().any(|i| i.id == "occurrence.ground"), "Ground sits in the Position flyout");
+    let movement = ids.iter().position(|id| *id == "ui.moveOccurrence").expect("Move/Copy stays on the menu");
+    assert_eq!(ids.get(movement + 1), Some(&"ui.group.placement"), "Placement follows Move/Copy");
+    assert!(find(&rows, "Placement").children.iter().any(|i| i.id == "occurrence.ground"), "Ground sits in the Placement flyout");
     let own: Vec<_> = find(&rows, "Component").children.iter().map(|i| i.id.clone()).collect();
     for id in ["ui.rename", "ui.appearance", "ui.material", "component.cycle_color", "component.create", "ui.properties"] {
         assert!(own.iter().any(|o| o == id) && !ids.contains(&id), "{id} sits in the Component flyout only");
     }
-    assert!(find(&rows, "Browser").children.iter().any(|i| i.id == "ui.newGroup"), "New Group sits with the browser tree's entries");
+    assert!(find(&rows, "Organize").children.iter().any(|i| i.id == "ui.newGroup"), "New Group sits with the browser tree's entries");
     assert!(ids.contains(&"ui.pasteNew"), "Paste New stays with the clipboard");
     // The design's first part comes in grounded (#2804); the menu frees it and grounds it again.
     assert!(app.session.doc.occurrence_of(c).unwrap().grounded);
@@ -1901,12 +1900,55 @@ fn resting_on_another_row_of_a_flyout_closes_only_the_flyout_beyond_it() {
     assert!(rect_of("menu:ui.rename:Rename").is_some(), "the Component flyout stays open");
 }
 
+/// Left from a flyout the pointer opened chooses the row that opened it, so Enter never runs a
+/// row the keys chose before.
+#[test]
+fn left_from_a_hovered_flyout_chooses_the_row_that_opened_it() {
+    let (mut h, _) = component_menu();
+    let rows = context_menu::items(&h.app, &h.app.menu.target.clone());
+    h.app.menu.key_row = rows.iter().position(|i| i.id == "ui.copy");
+    h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key":"ArrowLeft"})).unwrap();
+    assert_eq!(h.app.menu.key_row, rows.iter().position(|i| i.id == "ui.group.component"));
+    assert!(crate::scenario::rect_of("menu:ui.rename:Rename").is_none(), "the flyout closed");
+}
+
+/// Near the right edge a flyout opens to the left, and a flyout inside it opens further left
+/// instead of over the menu.
+#[test]
+fn a_flyout_inside_a_flyout_that_opened_to_the_left_opens_to_the_left() {
+    use crate::scenario::rect_of;
+    let (mut h, c) = component_menu();
+    let right = h.ctx.content_rect().right();
+    context_menu::open_for(&mut h.app, pos2(right - context_menu::LIST_W - 50.0, 60.0), Target::Component { id: c });
+    h.frames(2);
+    h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move":{"handle":"menu:ui.appearance:Appearance"}})).unwrap();
+    h.frames(2);
+    let menu = rect_of("menu:ui.group.component").unwrap();
+    let own = rect_of("menu:ui.rename:Rename").unwrap();
+    let swatch = rect_of("menu:appearance.assign:Aluminum - Satin").unwrap();
+    assert!(own.right() <= menu.left(), "the Component flyout opens to the left: {own:?} {menu:?}");
+    assert!(swatch.right() <= own.left(), "and the Appearance flyout further left: {swatch:?} {own:?}");
+}
+
+/// `ui.menuPick` reaches the entries of every flyout and refuses a row that only opens one.
+#[test]
+fn menu_pick_runs_flyout_entries_and_refuses_a_row_that_only_opens_one() {
+    let (mut h, _) = component_menu();
+    assert!(context_menu::pick(&mut h.app, "Organize").is_err());
+    assert!(h.app.viewport.context_menu.is_some(), "a refused pick leaves the menu open");
+    assert_eq!(context_menu::pick(&mut h.app, "Collapse All").unwrap()["ran"], "browser.collapse_all");
+}
+
 /// Every flyout is as tall as its entries: one opened after a shorter one used to keep the shorter
 /// one's height and scroll, so its last entries could not be clicked.
 #[test]
 fn a_flyout_opened_after_a_shorter_one_shows_all_its_entries() {
     let (mut h, _) = component_menu();
-    h.step(&json!({"move":{"handle":"menu:ui.group.browser"}})).unwrap();
+    h.step(&json!({"move":{"handle":"menu:ui.group.organize"}})).unwrap();
     h.frames(2);
     h.step(&json!({"move":{"handle":"menu:ui.group.component"}})).unwrap();
     h.frames(3);

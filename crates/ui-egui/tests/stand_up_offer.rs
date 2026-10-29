@@ -156,17 +156,16 @@ fn turn_up_axis_in_the_component_menu_turns_and_undo_restores() {
     let occurrence = h.app.session.doc.occurrences.iter().map(|o| o.id).max().expect("the import's occurrence");
     h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
     let items = solidcraft_ui_egui::context_menu::items(&h.app, &solidcraft_ui_egui::context_menu::Target::Occurrence { path: vec![occurrence] });
-    let position = items.iter().find(|i| i.label == "Position").expect("the Position flyout is in the menu");
-    let turns: Vec<_> = position.children.iter().filter(|c| c.id == "occurrence.move").collect();
-    let labels: Vec<_> = turns.iter().map(|c| c.label.as_str()).collect();
+    let placement = items.iter().find(|i| i.label == "Placement").expect("the Placement flyout is in the menu");
+    let turn = placement.children.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the Placement flyout");
+    let labels: Vec<_> = turn.children.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(labels, ["Y up \u{2192} Z up", "Z up \u{2192} Y up"]);
-    assert!(position.children.iter().any(|c| c.label == "Turn Up Axis"), "the turns sit under their heading");
     let at = egui::pos2(10.0, 10.0);
-    solidcraft_ui_egui::context_menu::run_item(&mut h.app, turns[0], at);
+    solidcraft_ui_egui::context_menu::run_item(&mut h.app, &turn.children[0], at);
     assert!((height(&h) - 40.0).abs() < 1e-6, "Y up to Z up: {}", height(&h));
     h.app.run("edit.undo", json!({})).unwrap();
     assert!((height(&h) - 5.0).abs() < 1e-6, "undone: {}", height(&h));
-    solidcraft_ui_egui::context_menu::run_item(&mut h.app, turns[1], at);
+    solidcraft_ui_egui::context_menu::run_item(&mut h.app, &turn.children[1], at);
     assert!((height(&h) - 40.0).abs() < 1e-6, "Z up to Y up: {}", height(&h));
 }
 

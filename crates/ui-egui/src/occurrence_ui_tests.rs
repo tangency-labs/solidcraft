@@ -157,13 +157,15 @@ fn turn_up_axis_follows_the_placement_right_clicked() {
     let (mut h, _, first, second) = fixture();
     let turns = |h: &Harness, occurrence: u64| {
         let items = context_menu::entries(&h.app, &Target::Occurrence { path: vec![occurrence] });
-        items.iter().filter(|i| i.id == "occurrence.move").map(|c| (c.enabled, c.params.as_ref().unwrap()["occurrence"].as_u64())).collect::<Vec<_>>()
+        let turn = items.into_iter().find(|i| i.id == "ui.turnUpAxis").unwrap();
+        let children: Vec<_> = turn.children.iter().map(|c| (c.enabled, c.params.as_ref().unwrap()["occurrence"].as_u64())).collect();
+        (turn.enabled, children)
     };
     for (grounded, free) in [(first, second), (second, first)] {
         h.app.run("occurrence.ground", json!({"occurrence": grounded, "grounded": true})).unwrap();
         h.app.run("occurrence.ground", json!({"occurrence": free, "grounded": false})).unwrap();
-        assert_eq!(turns(&h, free), vec![(true, Some(free)); 2], "free placement {free}");
-        assert_eq!(turns(&h, grounded), vec![(false, Some(grounded)); 2], "grounded placement {grounded}");
+        assert_eq!(turns(&h, free), (true, vec![(true, Some(free)); 2]), "free placement {free}");
+        assert_eq!(turns(&h, grounded), (false, vec![(false, Some(grounded)); 2]), "grounded placement {grounded}");
     }
 }
 

@@ -91,7 +91,7 @@ impl Menu {
             let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).open(open).frame(frame);
             // Last pass's size; the first pass assumes the flyout fits on the right.
             let size = popup.get_expected_size().unwrap_or(egui::Vec2::ZERO);
-            let at = Self::flyout_at(ui.ctx().content_rect(), response.interact_rect, size);
+            let at = Self::flyout_at(ui.ctx().content_rect(), response.interact_rect, size, false);
             popup.anchor(at).align(egui::RectAlign::BOTTOM_START).align_alternatives(&[]).gap(0.0).show(content)
         } else {
             Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(frame).show(content)
@@ -163,12 +163,15 @@ impl Menu {
     }
 
     /// Where a flyout of `size` sits beside its `row`: on the right with its first row level with
-    /// `row`, on the left only when the right has no room (#8267), and kept on screen.
-    pub(crate) fn flyout_at(screen: Rect, row: Rect, size: egui::Vec2) -> egui::Pos2 {
+    /// `row`, on the left only when the right has no room (#8267), and kept on screen. A flyout of
+    /// a flyout that opened to the left (`leftward`) opens to the left too while there is room, so
+    /// it never covers the menu.
+    pub(crate) fn flyout_at(screen: Rect, row: Rect, size: egui::Vec2, leftward: bool) -> egui::Pos2 {
         let margin = Self::frame().total_margin();
         let gap = margin.right + 2.0;
         let right = row.right() + gap;
-        let x = if right + size.x <= screen.right() { right } else { (row.left() - gap - size.x).max(screen.left()) };
+        let left = row.left() - gap - size.x;
+        let x = if right + size.x <= screen.right() && !(leftward && left >= screen.left()) { right } else { left.max(screen.left()) };
         let y = (row.top() - margin.top).min(screen.bottom() - size.y).max(screen.top());
         pos2(x, y)
     }
@@ -229,12 +232,19 @@ impl Menu {
     }
 
     /// Place a submenu beside its row with [`Self::flyout_at`].
-    pub(crate) fn submenu<R>(ctx: &egui::Context, id: egui::Id, row: Rect, height: f32, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
+    pub(crate) fn submenu<R>(
+        ctx: &egui::Context,
+        id: egui::Id,
+        row: Rect,
+        height: f32,
+        leftward: bool,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::InnerResponse<R> {
         let width = crate::context_menu::LIST_W;
         let screen = ctx.content_rect();
         // The estimate only places the area's first, invisible sizing pass.
         let height = ctx.memory(|m| m.area_rect(id)).map_or(height, |r| r.height());
-        let at = Self::flyout_at(screen, row, vec2(width, height));
+        let at = Self::flyout_at(screen, row, vec2(width, height), leftward);
         // The sizing pass caps the contents at the default size (egui's is 400 points high), and a
         // scrolling flyout keeps whatever height it measured there.
         Container::new(ctx, Surface::Popup)
@@ -542,16 +552,21 @@ mod tests {
         let size = vec2(200.0, 100.0);
         let top = Menu::frame().total_margin().top;
         let row = Rect::from_min_max(pos2(100.0, 50.0), pos2(400.0, 80.0));
-        let at = Menu::flyout_at(screen, row, size);
+        let at = Menu::flyout_at(screen, row, size, false);
         assert!(at.x > row.right() && at.x + size.x <= screen.right(), "{at:?}");
         assert_eq!(at.y, row.top() - top);
         // No room on the right: the flyout sits left of the row, still clear of it.
         let edge = row.translate(vec2(500.0, 0.0));
-        let at = Menu::flyout_at(screen, edge, size);
+        let at = Menu::flyout_at(screen, edge, size, false);
         assert!(at.x + size.x < edge.left() && at.x >= screen.left(), "{at:?}");
         // A row near the bottom keeps its flyout on screen.
         let low = row.translate(vec2(0.0, 500.0));
-        assert_eq!(Menu::flyout_at(screen, low, size).y, screen.bottom() - size.y);
+        assert_eq!(Menu::flyout_at(screen, low, size, false).y, screen.bottom() - size.y);
+        // Leftward keeps to the left while it fits there, and goes right where it does not.
+        let middle = Rect::from_min_max(pos2(300.0, 50.0), pos2(500.0, 80.0));
+        let at = Menu::flyout_at(screen, middle, size, true);
+        assert!(at.x + size.x < middle.left() && at.x >= screen.left(), "{at:?}");
+        assert!(Menu::flyout_at(screen, row, size, true).x > row.right());
     }
 
     #[test]
