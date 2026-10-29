@@ -715,7 +715,8 @@ fn patch_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], surface: b
     if !ccw {
         uses = uses.into_iter().rev().map(|u| PartUse { forward: !u.forward, ..u }).collect();
     }
-    let made = assemble(Parts { vertices, edges, faces: vec![PartFace { surface, forward: true, loops: vec![uses] }], tolerance: tol }, false)?;
+    let mut made = assemble(Parts { vertices, edges, faces: vec![PartFace { surface, forward: true, loops: vec![uses] }], tolerance: tol }, false)?;
+    hold_gap(&mut made.brep, tol);
     let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("patch: SMLib: {e}")))?;
     let (patch, order) = crate::native::body_from_smlib_ordered(&smlib)?;
     // The patch's edges in its own order, each from the loop edge it is.
@@ -840,7 +841,8 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
         }
         faces.push(PartFace { surface: crate::surfaces::spline_surface(&patch.surface), forward: true, loops: vec![uses] });
     }
-    let made = assemble(Parts { vertices, edges, faces, tolerance: tol }, false)?;
+    let mut made = assemble(Parts { vertices, edges, faces, tolerance: tol }, false)?;
+    hold_gap(&mut made.brep, tol);
     let smlib = solidcraft_smlib::Brep::from_record(&made.brep, true).map_err(|e| KernelError::Failed(format!("patch: SMLib: {e}")))?;
     let (sheet, order) = crate::native::body_from_smlib_ordered(&smlib)?;
     let Some(order) = order else { return Ok(sheet) };
@@ -861,6 +863,20 @@ fn quilt_body(body: &Body, record: &b::Brep, chain: &[(usize, bool)], fill: &Iso
     let Some(edges) = prov.into_iter().collect::<Option<Vec<EdgeProv>>>() else { return Ok(sheet) };
     let history = History { operands: 1, faces: vec![FaceProv { origins: Vec::new(), change: Change::Generated }; sheet.face_count()], edges };
     sheet.with_history(history, &[body])
+}
+
+/// A patch record's edges and vertices given the tolerances that hold a surface `gap` from them.
+/// A record's tolerance is SMLib's intersection tolerance, twice the zone tolerance SMLib holds an
+/// edge's gap to its faces to, and a vertex holds gaps up to half its zone tolerance (SMLib's
+/// `SM_XSECT_TO_ZONETOL3D`, `SmBrep::ValidateAndUpdateTolerances`): an edge takes `2·gap`, a
+/// vertex `4·gap`.
+fn hold_gap(brep: &mut b::Brep, gap: f64) {
+    for e in &mut brep.edges {
+        e.tolerance = e.tolerance.max(2.0 * gap);
+    }
+    for v in &mut brep.vertices {
+        v.tolerance = v.tolerance.max(4.0 * gap);
+    }
 }
 
 /// The vertex at parameter `t` inside loop edge `k` (record edge `edge`), made once.
@@ -890,7 +906,7 @@ pub(crate) fn planarity_tolerance(body: &Body) -> f64 {
 /// costs about twice the spans each way, and imported edges may already lie `10⁻⁵` mm or more off
 /// their vertices. Later operations must take the face to contain its edges within this
 /// tolerance, not the linear one: the face's edges are the body's exact edges, the surface
-/// between them is the fit (the patch record gives its edges this tolerance).
+/// between them is the fit (the patch record's edges and vertices hold this gap: [`hold_gap`]).
 pub(crate) fn face_tolerance(body: &Body) -> f64 {
     (body.size() * 1e-6).max(1e-5)
 }
