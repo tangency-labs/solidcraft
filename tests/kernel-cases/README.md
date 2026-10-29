@@ -97,27 +97,43 @@ the frozen truck-geometry PRs, a `kernel-paused` PR), for the report's coverage 
 | `tolerance` | Optional overrides: `rel`, `abs_mm`, `mesh_mm`, `weld_mm`. |
 | `missing` | A capability SolidCraft has no command or parameter for yet (`"solid.thread has no start count"`): the case is reported **not supported yet** without running, so the gap stays visible. |
 
-## The fillet gate
+## The kernel rig gate
 
-The fillet cases are the fillet regression suite: each is one small case of one issue, with its
-exact answer. `.github/workflows/fillet-rig.yml` runs them on every pull request (not a draft)
-that touches fillet code: `crates/kernel/src/{blend*,fillet*,*corner*,continuity*}.rs`,
-`crates/smlib/**` (`SMLIB_REV` and `SMLIB_PREBUILT` included), `crates/doc/src/eval*.rs`,
-`crates/engine/src/cmd/features.rs`, `tests/kernel-cases/fillets/**` and the rig's own code
-(GitHub filters whole files, so any change to `eval*.rs` or `features.rs` runs it). One release
-build of `solidcraft-cli`, then:
+Every area is a regression suite: each case is one small case of one issue, with its exact
+answer. `.github/workflows/kernel-rig.yml` runs them all, and the ladder, on every pull request
+(not a draft) that touches the kernel surface: `crates/kernel/**`, `crates/geom/**`,
+`crates/smlib/**` (`SMLIB_REV` and `SMLIB_PREBUILT` included), `crates/step/**`,
+`crates/doc/src/eval*.rs`, `crates/engine/src/cmd/features*.rs`, `tests/kernel-cases/**` and the
+rig's own code (GitHub filters whole files, so any change to `eval*.rs` or `features*.rs` runs
+it). Pushes to main and develop on the same paths, merge groups and the release gate
+(`release-gate.yml`) run it too. One job builds `solidcraft-cli` (release, SMLib) and the rig's
+runner, and hands both to a matrix of shards, one per area plus the ladder, that run in
+parallel; the `kernel-rig` check passes when every shard does. (`fillet-rig.yml`, the earlier
+fillet-only gate, folds into it.) Each area's shard runs:
 
 ```sh
-cargo xtask kernel-cases --area fillets --cli target/release/solidcraft-cli \
-  --known-failing tests/kernel-cases/fillets/KNOWN_FAILING
+cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
+  --known-failing tests/kernel-cases/<area>/KNOWN_FAILING
 ```
 
-`fillets/KNOWN_FAILING` lists the cases that fail today, sorted, one a line with its cause
-(`<case> <why it fails today>`; `#` starts a comment). The gate fails on a **regression**, a case
-that fails (or crashes, hangs, or is not supported yet) and is not listed, and on a **fixed** case,
-one listed that passes: a fix removes its line in the same pull request, so the list only shrinks.
-A new case that fails today goes in with its line. With `--known-failing` the run writes no
-report; `docs/kernel-cases.md` stays the full run's.
+`<area>/KNOWN_FAILING` lists the cases of that area that fail today, sorted, one a line with its
+cause (`<case> <why it fails today>`; `#` starts a comment; the header names the baseline: the
+develop commit and SMLib revision it was taken from). The gate fails on a **regression**, a
+case that fails (or crashes, hangs, or is not supported yet) and is not listed, and on a
+**fixed** case, one listed that passes. With `--known-failing` the run writes no report;
+`docs/kernel-cases.md` stays the full run's.
+
+**Updating a list.** The pull request that changes an outcome changes the list in the same pull
+request, so the list only shrinks and never goes stale:
+
+- a fix (yours, or an SMLib pin bump): remove the line of each case the shard reports as
+  `FIXED`;
+- a new case that fails today: add its line, sorted, with the cause from its result
+  (`results.json` in the shard's `kernel-rig-results-<area>` artifact, or a local run);
+- a regression: fix it in the same pull request.
+
+To check a list locally before pushing: `cargo xtask kernel-cases --area <area> --cli
+target/release/solidcraft-cli --known-failing tests/kernel-cases/<area>/KNOWN_FAILING`.
 
 ## The complexity ladder
 
@@ -137,8 +153,16 @@ running part grows one tier at a time through `base`), so the last case carries 
 
 ```sh
 cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli
+cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli --gate
 cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli --record "why"
 ```
+
+The ladder needs no known-failing list: the golden is the reference. Its shard in the kernel rig
+gate runs with `--gate`, which fails on any case whose status or counts differ from the golden,
+better or worse, and on a case with no golden; times are not compared there (they are the
+machine's). A pull request that changes a ladder result re-records the golden with
+`--record "why the golden changes"` and commits `golden.json` and
+`ladder.json` with it.
 
 Ladder runs measure one case at a time (unless `--jobs`) and keep their output in
 `target/kernel-ladder` (`--out`); `--record` rewrites the golden and sorts each tier by time,

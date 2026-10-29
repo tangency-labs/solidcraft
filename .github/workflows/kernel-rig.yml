@@ -1,8 +1,11 @@
-# The kernel rig and the complexity ladder as a regression gate. A pull request that touches the
-# kernel surface (the paths below) builds solidcraft-cli once (release, SMLib prebuilt), hands it
-# to a matrix of shards as an artifact, and each shard runs one area of tests/kernel-cases/ (or
-# the ladder) in parallel, so the wall time is the build plus the slowest shard. See
-# tests/kernel-cases/README.md.
+# The kernel rig and the complexity ladder as a regression gate. A plan job maps a pull request's
+# changed files to the rig areas they can affect (scripts/ci/kernel_rig_plan.py): an area runs
+# when a file its tests/kernel-cases/<area>/PATHS lists changes, or one of its cases; every area
+# runs when the shared core in tests/kernel-cases/PATHS-ALL changes; the ladder runs whenever any
+# area does. One job then builds solidcraft-cli once (release, SMLib prebuilt), checks that every
+# registry command has a case or an exemption (tests/kernel-cases/EXEMPT), and hands the CLI to a
+# matrix of shards as an artifact, one per selected area plus the ladder, in parallel, so the
+# wall time is the build plus the slowest shard. See tests/kernel-cases/README.md.
 #
 # - An area fails on a regression (a case that fails and its tests/kernel-cases/<area>/KNOWN_FAILING
 #   does not list) or on a listed case that passes (it is fixed: remove its line in the same pull
@@ -10,11 +13,13 @@
 # - The ladder fails on any case whose status or counts differ from
 #   tests/kernel-cases/ladder/golden.json; a right change is re-recorded (`--record "why"`).
 #
-# GitHub filters a workflow by whole files, so any change to crates/doc/src/eval*.rs or
-# crates/engine/src/cmd/features*.rs selects it. Pushes to main and develop that touch the same
-# paths run it too and commit the compiler cache (a Blacksmith sticky disk) that every other run
-# mounts read-only. A merge group (once the queue is on) always runs it: it is the last check
-# before the change lands. The release gate (release-gate.yml) calls it (workflow_call).
+# The trigger paths are whole folders that hold every area's PATHS (a self-test,
+# scripts/ci/test_kernel_rig_plan.py, checks they do), so a pull request that touches none of
+# them (the UI, docs, packaging) starts no runner at all, and a new area needs no edit here: the
+# plan finds the areas from the folders. Pushes to main and develop on the same paths, merge groups
+# (once the queue is on), the release gate (release-gate.yml, workflow_call) and a run by hand run
+# every area; those pushes also commit the compiler cache (a Blacksmith sticky disk) that every
+# other run mounts read-only.
 name: Kernel rig
 
 on:
@@ -25,14 +30,17 @@ on:
       - "crates/geom/**"
       - "crates/smlib/**"
       - "crates/step/**"
-      - "crates/doc/src/eval*.rs"
-      - "crates/engine/src/cmd/features*.rs"
+      - "crates/io/src/**"
+      - "crates/doc/src/**"
+      - "crates/engine/src/**"
       - "tests/kernel-cases/**"
-      # The rig itself: the grading, the runner and this workflow.
+      # The rig itself: the grading, the runner, the selection and this workflow.
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
       - "xtask/src/kernel_ladder.rs"
       - "scripts/fetch-smlib.sh"
+      - "scripts/ci/kernel_rig_plan.py"
+      - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
   push:
     branches: [main, develop]
@@ -42,14 +50,17 @@ on:
       - "crates/geom/**"
       - "crates/smlib/**"
       - "crates/step/**"
-      - "crates/doc/src/eval*.rs"
-      - "crates/engine/src/cmd/features*.rs"
+      - "crates/io/src/**"
+      - "crates/doc/src/**"
+      - "crates/engine/src/**"
       - "tests/kernel-cases/**"
-      # The rig itself: the grading, the runner and this workflow.
+      # The rig itself: the grading, the runner, the selection and this workflow.
       - "apps/solidcraft-cli/src/kernel_cases.rs"
       - "xtask/src/kernel_cases.rs"
       - "xtask/src/kernel_ladder.rs"
       - "scripts/fetch-smlib.sh"
+      - "scripts/ci/kernel_rig_plan.py"
+      - "scripts/ci/test_kernel_rig_plan.py"
       - ".github/workflows/kernel-rig.yml"
   merge_group:
   workflow_call:
@@ -67,10 +78,44 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-    name: Build the CLI
+  plan:
+    name: Select the rig areas
     # Draft pull requests run no CI, as in ci.yml.
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      # The shard matrix (JSON list of areas and the ladder; [] when nothing is selected).
+      shards: ${{ steps.plan.outputs.shards }}
+      # Whether the build job, and with it the coverage check, runs.
+      build: ${{ steps.plan.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull request's diff needs its base's history.
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+      - name: Selection self-test
+        run: python3 -I scripts/ci/test_kernel_rig_plan.py
+      - id: plan
+        name: Map the changed files to areas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Pull requests run the areas their diff reaches; pushes, merge groups, the release
+          # gate and a run by hand run every area.
+          if [ "$EVENT_NAME" = pull_request ]; then
+            git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/rig-paths"
+            python3 -I scripts/ci/kernel_rig_plan.py --paths "$RUNNER_TEMP/rig-paths" --github-output "$GITHUB_OUTPUT"
+          else
+            python3 -I scripts/ci/kernel_rig_plan.py --all --github-output "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build the CLI
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 60
     env:
@@ -110,9 +155,15 @@ jobs:
       # A tar keeps the executable bits, which an artifact drops. xtask finds the repository from
       # the path it was built in (CARGO_MANIFEST_DIR), which is the same checkout path in every
       # job of this workflow.
+      # Every registry command is used by a case or listed in tests/kernel-cases/EXEMPT.
+      - name: Every command has a case
+        run: target/debug/xtask kernel-cases --coverage --cli target/release/solidcraft-cli
+      # A coverage-only run (the registry or the cases changed, no area selected) runs no shard.
       - name: Pack the binaries
+        if: needs.plan.outputs.shards != '[]'
         run: tar -cf "$RUNNER_TEMP/kernel-rig-bin.tar" -C target release/solidcraft-cli debug/xtask
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: needs.plan.outputs.shards != '[]'
         with:
           name: kernel-rig-bin
           path: ${{ runner.temp }}/kernel-rig-bin.tar
@@ -123,16 +174,18 @@ jobs:
 
   shard:
     name: Kernel rig (${{ matrix.shard }})
-    needs: build
+    needs: [plan, build]
+    if: needs.plan.outputs.shards != '[]'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        # Every area of tests/kernel-cases/ and the ladder. On the build box (aarch64, 4 cases at
-        # a time) the slowest areas took about 1 minute (booleans, 212 s of cases with one of
-        # 84 s; threads, 161 s) and the ladder, one case at a time, 92 s: no area needs splitting.
-        shard: [booleans, continuity, crashes, fillets, import, ladder, sheet-metal, shell, sweeps, tessellation, threads]
+        # The areas of tests/kernel-cases/ the plan selected, and the ladder. On the build box
+        # (aarch64, 4 cases at a time) the slowest areas took about 1 minute (booleans, 212 s of
+        # cases with one of 84 s; threads, 161 s) and the ladder, one case at a time, 92 s: no area
+        # needs splitting.
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -162,14 +215,20 @@ jobs:
   # One check for the whole gate, for branch protection and the merge queue.
   kernel-rig:
     name: kernel-rig
-    needs: [build, shard]
+    needs: [plan, build, shard]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - name: Every shard passed
+      # A skipped build or shard counts as passed only when the plan selected none.
+      - name: Every selected job passed
         env:
+          PLAN: ${{ needs.plan.result }}
+          WANT_BUILD: ${{ needs.plan.outputs.build }}
+          WANT_SHARDS: ${{ needs.plan.outputs.shards }}
           BUILD: ${{ needs.build.result }}
           SHARDS: ${{ needs.shard.result }}
         run: |
-          test "$BUILD" = success
-          test "$SHARDS" = success
+          echo "plan=$PLAN build=$BUILD shards=$SHARDS selected=$WANT_SHARDS"
+          test "$PLAN" = success
+          if [ "$WANT_BUILD" = true ]; then test "$BUILD" = success; else test "$BUILD" = skipped; fi
+          if [ "$WANT_SHARDS" != '[]' ]; then test "$SHARDS" = success; else test "$SHARDS" = skipped; fi

@@ -241,7 +241,8 @@ the surface itself). Expected values are either worked out in closed form
 (`tools/oracle-analytic/`) or computed by building the same recipe in FreeCAD, run as a separate
 program (`tools/freecad-oracle/`); each file says which. The generated
 [reference test report](docs/oracle.md) has the current case count and results. The reference-test
-CI job runs `cargo xtask oracle` during full validation; pull-request runs skip it. A case that
+CI job runs `cargo xtask oracle` during full validation, and on pull requests that reach
+`solidcraft-cli`. A case that
 fails because of a known bug names its issue in `expected.json` (`"known_failure": "#123"`);
 never change an expected value to match SolidCraft's output.
 

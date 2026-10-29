@@ -25,6 +25,8 @@ A failing test without its fix cannot merge: it turns `main` red for everyone. I
 
 ## Goldens, matrices and skipped tests
 - The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`, `cargo xtask kernel-cases --ladder`, `docs/kernel-ladder.md`).
+- Kernel PRs run the kernel rig gate (`kernel-rig.yml`): each area against its `KNOWN_FAILING`, the ladder against its golden. In the same PR, a fix removes its line, a new failing case adds one, a changed ladder result is re-recorded (`--ladder --record "why"`); see `tests/kernel-cases/README.md`.
+- Maintainers' PRs run the native, GPU path and reference tests on the affected packages; others wait for `approved-for-ci`. `release-gate.yml` runs everything in full before develop replaces main.
 - The action matrix is a ratchet: record a newly passing action with `cargo xtask action-matrix --bless` (`docs/action-matrix.md`).
 - Pull requests skip a few heavy tests, which run in the merge queue, nightly and on `main`. Check that validation after merging. The list is in `.config/nextest.toml` and the testing page.
 - Mutation testing finds behaviour the suites miss: `docs/mutation-testing.md`.

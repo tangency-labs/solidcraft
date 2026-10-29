@@ -1,0 +1,17 @@
+# The source files whose change reruns this area of the kernel rig (scripts/ci/kernel_rig_plan.py),
+# besides the shared core in ../PATHS-ALL. One git pathspec glob a line, relative to the
+# repository root; `#` starts a comment.
+# Seams of designed order: fillets and chamfers, patches, stitches and trims, and the continuity
+# measurement itself (Continuity Analysis).
+crates/doc/src/eval_surface.rs
+crates/engine/src/cmd/delete.rs
+crates/engine/src/cmd/surface.rs
+crates/engine/src/cmd/surface_analysis.rs
+crates/kernel/src/blend*.rs
+crates/kernel/src/continuity.rs
+crates/kernel/src/continuity_order.rs
+crates/kernel/src/corner_g2.rs
+crates/kernel/src/delete_face.rs
+crates/kernel/src/fill.rs
+crates/kernel/src/surface_trim.rs
+crates/kernel/src/surfaces.rs
