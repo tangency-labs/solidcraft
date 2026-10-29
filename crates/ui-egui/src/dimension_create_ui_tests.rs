@@ -1248,15 +1248,17 @@ fn a_driven_shown_dimension_is_read_only() {
     assert_eq!(h.app.session.doc.to_json(), doc);
 }
 
-/// The value applies like any other change: the fillet it breaks reports its error on the
-/// timeline, and Undo brings back the value and the fillet.
+/// The value applies like any other change: the shell it breaks reports its error on the
+/// timeline, and Undo brings back the value and the shell. The plate's 10 width taken to 3 leaves
+/// no room inside two 2 thick walls. (A round wider than its face no longer breaks: a convex
+/// round runs over the face's far edge, cut as if the face went on.)
 #[test]
 fn a_shown_dimension_that_breaks_a_later_feature_reports_it_and_undoes() {
     let (mut h, _) = shown_dimensions();
-    h.app.run("solid.fillet", json!({"edges":[[10,10,5]],"radius":4,"name":"Round"})).unwrap();
+    h.app.run("solid.shell", json!({"faces":[[10,1,5]],"thickness":2,"name":"Hollow"})).unwrap();
     h.settle();
-    let round = h.app.session.doc.features.iter().find(|f| f.name == "Round").unwrap().id;
-    let failed = |h: &Harness| h.app.session.model.result(round).is_some_and(|r| r.error.is_some());
+    let hollow = h.app.session.doc.features.iter().find(|f| f.name == "Hollow").unwrap().id;
+    let failed = |h: &Harness| h.app.session.model.result(hollow).is_some_and(|r| r.error.is_some());
     assert!(!failed(&h));
     let before = h.app.session.doc.to_json();
     let at = model_text(&h, "d2");
@@ -1265,10 +1267,10 @@ fn a_shown_dimension_that_breaks_a_later_feature_reports_it_and_undoes() {
     h.step(&json!({"key":"Enter"})).unwrap();
     h.settle();
     assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "3");
-    assert!(failed(&h), "the fillet no longer fits and says so");
+    assert!(failed(&h), "the shell no longer has room and says so");
     assert_eq!(h.app.session.active_sketch, None);
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert!(!failed(&h), "undo brings the fillet back");
+    assert!(!failed(&h), "undo brings the shell back");
 }
