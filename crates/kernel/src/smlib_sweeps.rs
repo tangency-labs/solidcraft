@@ -275,8 +275,13 @@ mod imp {
         // A cap's points lie on its plane to the evaluation's precision. Sized to the body, the
         // flatness tolerance can exceed the gap between parallel start and end planes (a box
         // 0.1 µm thick in a 14 mm body), which would put each cap in both: it stays under a
-        // quarter of that gap.
-        let gap = end.filter(|e| e.normal().cross(start.normal()).len() < 1e-9).map_or(f64::INFINITY, |e| start.height(e.origin).abs());
+        // quarter of that gap. Planes that coincide (the ends of a half turn) are told apart by
+        // the profile's edges instead.
+        let gap = end
+            .filter(|e| e.normal().cross(start.normal()).len() < 1e-9)
+            .map(|e| start.height(e.origin).abs())
+            .filter(|g| *g > size * 1e-9)
+            .unwrap_or(f64::INFINITY);
         let flat_tol = (size * 1e-5 + 1e-9).min(0.25 * gap);
         let near = 3.0 * mesh_tol + flat_tol;
         let flat = |f: usize, pl: &Plane| {
