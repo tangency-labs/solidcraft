@@ -3,7 +3,7 @@ use crate::{
     SolveApp,
     dialogs::{Kind, shown_expr},
     selection::{PLANAR_FACES, SelInput},
-    ui_kit::{choice_row, expr_row},
+    ui_kit::{IconSegment, choice_row, expr_row, row, segmented_icons},
 };
 use serde_json::{Map, Value, json};
 use solidcraft_engine::{
@@ -53,13 +53,27 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, g: &mut Gusset) -> bool {
     }
     enter |= expr_row(ui, app.tr("ui.gusset.relief"), &mut g.relief);
     enter |= expr_row(ui, app.tr("ui.gusset.offset"), &mut g.offset);
-    choice_row(
-        ui,
-        app.tr("ui.gusset.placement"),
-        "gusset_placement",
-        &mut g.placement,
-        &[app.tr("ui.gusset.center"), app.tr("ui.gusset.positive"), app.tr("ui.gusset.negative")],
-    );
+    // Visual order follows the two sides around the joint plane; stored placement values
+    // retain the command's center/positive/negative order.
+    let mut selected = match g.placement {
+        2 => 0,
+        1 => 2,
+        _ => 1,
+    };
+    let choices = [
+        IconSegment { key: app.tr("ui.gusset.negative"), icon: "gusset_side_negative", tip: app.tr("ui.gusset.negative").into() },
+        IconSegment { key: app.tr("ui.gusset.center"), icon: "gusset_side_center", tip: app.tr("ui.gusset.center").into() },
+        IconSegment { key: app.tr("ui.gusset.positive"), icon: "gusset_side_positive", tip: app.tr("ui.gusset.positive").into() },
+    ];
+    row(ui, app.tr("ui.gusset.placement"), |ui| {
+        if segmented_icons(ui, &mut selected, &choices, &[]) {
+            g.placement = match selected {
+                0 => 2,
+                2 => 1,
+                _ => 0,
+            };
+        }
+    });
     enter
 }
 pub fn commands(app: &SolveApp, g: &Gusset, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {

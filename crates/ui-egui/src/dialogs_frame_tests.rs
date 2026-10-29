@@ -201,8 +201,7 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
 }
 
-#[test]
-fn gusset_preselection_preview_and_edit_keep_exact_supports() {
+fn gusset_with_picked_supports() -> SolveApp {
     let mut app = app_with(&[
         ("solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"})),
         ("solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"})),
@@ -217,6 +216,12 @@ fn gusset_preselection_preview_and_edit_keep_exact_supports() {
             .unwrap();
         app.session.selection.push(Sel::Face { body: name.into(), index, point });
     }
+    app
+}
+
+#[test]
+fn gusset_preselection_preview_and_edit_keep_exact_supports() {
+    let mut app = gusset_with_picked_supports();
     app.start("frame.gusset");
     let mut d = app.dialog.clone().unwrap();
     assert!(d.previews());
@@ -241,4 +246,39 @@ fn gusset_preselection_preview_and_edit_keep_exact_supports() {
     let state = app.session.model.state();
     let body = state.bodies.iter().find(|b| b.feature == fid).unwrap();
     assert!((body.mesh().measure().volume - 32000.).abs() < 1e-5);
+}
+
+#[test]
+fn gusset_placement_icons_select_both_sides_and_center_with_exact_bounds() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = gusset_with_picked_supports();
+    h.app.home.open = false;
+    h.app.start("frame.gusset");
+    h.frames(3);
+    assert!(crate::scenario::rect_of("dialog:segments:Thickness Placement").is_some(), "placement is a visible icon strip");
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for label in ["Negative Side", "Centered", "Positive Side"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(label)), "accessible icon: {label}");
+    }
+    for (label, placement, min, max) in
+        [("Negative Side", "negative", 0., 6.), ("Centered", "center", -3., 3.), ("Positive Side", "positive", -6., 0.)]
+    {
+        crate::test_support::click(&mut h, &format!("dialog:Thickness Placement:{label}"));
+        let d = h.app.dialog.as_ref().unwrap();
+        let commands = crate::dialogs::preview_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["placement"], placement);
+        let mut preview = Session::new(solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap());
+        let result = preview.execute(&commands[0].0, &commands[0].1).unwrap();
+        let state = preview.model.state();
+        let body = state.bodies.iter().find(|b| b.feature == result["feature"].as_u64().unwrap()).unwrap();
+        let bounds = body.mesh().bounds();
+        assert!((bounds.min.y - min).abs() < 1e-6 && (bounds.max.y - max).abs() < 1e-6, "{label}: {bounds:?}");
+    }
+    // Icon-only controls still have translated names for keyboard/screen-reader users.
+    h.app.preferences.language = "de".into();
+    h.frames(3);
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for id in ["ui.gusset.negative", "ui.gusset.center", "ui.gusset.positive"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(h.app.tr(id))), "{id}");
+    }
 }
