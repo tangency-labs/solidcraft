@@ -19,7 +19,8 @@ versions. Two preferences opt into holding the model:
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
 adjust the view with the navigation cube, the cap can rotate it too. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an
-invert switch and a speed for the 3D mouse. The web app reads
+invert switch and a speed for the 3D mouse. The cap's zoom direction comes from its own invert
+switch; **Reverse zoom direction** under Wheel and trackpad reverses the wheel only (#8993). The web app reads
 it too, through the browser; Firefox needs a 3DxWare setting first (see
 [Getting started › 3D mouse in the browser](book/src/guide/getting-started.md#3d-mouse-in-the-browser)).
 

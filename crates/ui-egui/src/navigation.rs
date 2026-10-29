@@ -851,17 +851,7 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
         }
     });
     if let Some(queued) = app.viewport.device_motion.take() {
-        device_camera(
-            &mut app.cam,
-            queued.motion,
-            queued.seconds,
-            height,
-            turn,
-            app.preferences.zoom_reverse,
-            app.preferences.free_orbit,
-            anchor,
-            pivot,
-        );
+        device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, anchor, pivot);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
@@ -920,13 +910,14 @@ pub(crate) fn bridge_camera(
 /// the frame rate. With `turn` off the view keeps its orientation. `anchor` is the model point the
 /// view holds while it zooms, as the wheel's cursor point (none zooms through the model, #7435).
 /// `pivot` is the point the view turns around and keeps still on screen (none: the view's centre).
+/// Reverse zoom direction is a wheel setting and leaves the cap alone: the cap's own direction is
+/// its per-axis invert, already in `motion` (#8993).
 pub(crate) fn device_camera(
     cam: &mut Camera,
     motion: Motion,
     seconds: f64,
     height: f64,
     turn: bool,
-    reverse_zoom: bool,
     free_orbit: bool,
     anchor: Option<Vec3>,
     pivot: Option<Vec3>,
@@ -939,8 +930,7 @@ pub(crate) fn device_camera(
     // Logical 3DxWare coordinates are X = left/right, Y = zoom and Z = up/down. The user's
     // profile can swap the physical forward/back and up/down axes before they reach here.
     cam.pan(x * height * 0.6 * seconds, z * height * 0.6 * seconds, height);
-    let zoom_sign = if reverse_zoom { -1.0 } else { 1.0 };
-    cam.zoom_at((-y * zoom_sign * 1.5 * seconds).exp(), anchor);
+    cam.zoom_at((-y * 1.5 * seconds).exp(), anchor);
     if turn {
         // These are logical 3DxWare coordinates after the profile mapping: Rx is Tilt, Ry is
         // Roll and Rz is Spin. The KMJ profile swaps physical Ry/Rz for the selected navigation
@@ -1710,7 +1700,7 @@ mod tests {
         }
         // Other presets keep the existing upright camera behavior.
         let mut cam = Camera { yaw: 0.0, pitch: 1.5, ..Default::default() };
-        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, false, None, None);
+        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, None, None);
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
     }
 

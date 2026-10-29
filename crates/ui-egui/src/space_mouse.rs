@@ -693,8 +693,8 @@ mod tests {
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
-    fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool, reverse_zoom: bool) {
-        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, reverse_zoom, false, None, None);
+    fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool) {
+        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, false, None, None);
     }
 
     /// A window that has run a frame, with or without focus. A context that has never run one
@@ -1174,14 +1174,14 @@ mod tests {
     fn six_axes_move_the_camera_and_sketches_keep_their_orientation() {
         let mut cam = Camera::default();
         let before = cam;
-        navigate(&mut cam, raw(Axes { translation: [350, 350, 350], rotation: [350, 350, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut cam, raw(Axes { translation: [350, 350, 350], rotation: [350, 350, 350] }), 0.02, 600.0, false);
         assert_ne!(cam.target, before.target);
         assert!(cam.distance < before.distance);
         assert_ne!(cam.yaw, before.yaw);
         assert_ne!(cam.pitch, before.pitch);
         assert_ne!(cam.roll, before.roll);
         let orientation = (cam.yaw, cam.pitch, cam.roll);
-        navigate(&mut cam, raw(Axes { translation: [350, 0, 0], rotation: [350, 350, 350] }), 0.02, 600.0, true, false);
+        navigate(&mut cam, raw(Axes { translation: [350, 0, 0], rotation: [350, 350, 350] }), 0.02, 600.0, true);
         assert_eq!((cam.yaw, cam.pitch, cam.roll), orientation);
         assert!(cam.is_valid());
     }
@@ -1191,57 +1191,79 @@ mod tests {
         let before = Camera::default();
 
         let mut slide = before;
-        navigate(&mut slide, raw(Axes { translation: [350, 0, 0], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut slide, raw(Axes { translation: [350, 0, 0], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_ne!(slide.target, before.target);
         assert_eq!(slide.distance, before.distance);
 
         let mut push = before;
-        navigate(&mut push, raw(Axes { translation: [0, 350, 0], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut push, raw(Axes { translation: [0, 350, 0], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_eq!(push.target, before.target);
         assert!(push.distance < before.distance);
 
         let mut lift = before;
-        navigate(&mut lift, raw(Axes { translation: [0, 0, 350], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut lift, raw(Axes { translation: [0, 0, 350], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_ne!(lift.target, before.target);
         assert_eq!(lift.distance, before.distance);
 
         let mut tilt = before;
-        navigate(&mut tilt, raw(Axes { translation: [0; 3], rotation: [350, 0, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut tilt, raw(Axes { translation: [0; 3], rotation: [350, 0, 0] }), 0.02, 600.0, false);
         assert_eq!((tilt.yaw, tilt.roll), (before.yaw, before.roll));
         assert_ne!(tilt.pitch, before.pitch);
 
         let mut roll = before;
-        navigate(&mut roll, raw(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut roll, raw(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false);
         assert_eq!((roll.pitch, roll.roll), (before.pitch, before.roll));
         assert_ne!(roll.yaw, before.yaw);
 
         let mut twist = before;
-        navigate(&mut twist, raw(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut twist, raw(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false);
         assert_eq!((twist.yaw, twist.pitch), (before.yaw, before.pitch));
         assert_ne!(twist.roll, before.roll);
     }
 
+    /// Reverse zoom direction is a wheel and trackpad setting: it turns the wheel's zoom around
+    /// and leaves the cap's, which has its own invert switch (#8993).
     #[test]
-    fn reverse_zoom_setting_applies_to_spacemouse() {
-        let before = Camera::default();
-        let motion = raw(Axes { translation: [0, 350, 0], rotation: [0; 3] });
-        let mut normal = before;
-        navigate(&mut normal, motion, 0.02, 600.0, false, false);
-        let mut reversed = before;
-        navigate(&mut reversed, motion, 0.02, 600.0, false, true);
-        assert!(normal.distance < before.distance);
-        assert!(reversed.distance > before.distance);
+    fn reverse_zoom_setting_flips_the_wheel_and_leaves_the_cap() {
+        let wheel_zooms_in = |reverse: bool| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.zoom_reverse = reverse;
+            h.app.preferences.smooth_wheel_zoom = false;
+            h.call("ui.move", serde_json::json!({"x":800,"y":500}));
+            let before = h.app.cam.half_height();
+            h.call("ui.scroll", serde_json::json!({"x":800,"y":500,"delta":120}));
+            h.app.cam.half_height() < before
+        };
+        assert!(wheel_zooms_in(false));
+        assert!(!wheel_zooms_in(true), "the wheel turns around");
+        // The cap's zoom axis pushed forward with the wheel reversed or not, and with the cap's own
+        // invert switch for that axis on or off.
+        let cap_distance = |wheel_reversed: bool, cap_inverted: bool| {
+            let mut app = app();
+            app.preferences.zoom_reverse = wheel_reversed;
+            app.preferences.space_mouse_reverse[1] = cap_inverted;
+            let ctx = window(true);
+            app.space_mouse.device = Some("hid 046d:c62b".into());
+            let before = app.cam.distance;
+            frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [0, 350, 0], rotation: [0; 3] }, 0.02);
+            (before, app.cam.distance)
+        };
+        let (before, normal) = cap_distance(false, false);
+        assert!(normal < before, "pushing the cap forward zooms in");
+        assert_eq!(cap_distance(true, false).1, normal, "the cap zooms the same way with the wheel reversed");
+        assert!(cap_distance(false, true).1 > before, "the cap's own invert switch turns it around");
+        assert_eq!(cap_distance(true, true).1, cap_distance(false, true).1);
     }
 
     #[test]
     fn object_mode_tilts_roll_and_twists_spin() {
         let before = Camera::default();
         let mut tilt = before;
-        navigate(&mut tilt, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut tilt, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false);
         assert_eq!((tilt.yaw, tilt.pitch), (before.yaw, before.pitch));
         assert_ne!(tilt.roll, before.roll);
         let mut twist = before;
-        navigate(&mut twist, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut twist, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false);
         assert_ne!(twist.yaw, before.yaw);
         assert_eq!((twist.pitch, twist.roll), (before.pitch, before.roll));
         // The physical tilt right (Ry−) rolls one way and the clockwise twist (Rz+) spins the
