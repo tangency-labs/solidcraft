@@ -18,11 +18,13 @@
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
+#include <SmCircle.h>
 #include <SmCone.h>
 #include <SmContext.h>
 #include <SmCurve.h>
 #include <SmCylinder.h>
 #include <SmExtent2d.h>
+#include <SmLine.h>
 #include <SmLoop.h>
 #include <SmPlane.h>
 #include <SmSurface.h>
@@ -61,6 +63,7 @@ enum : int32_t
     OP_PARTIAL_TORUS = 24,
     OP_SWUNG = 25,
     OP_BLEND_PRIMITIVE = 26,
+    OP_OFFSET_PROFILE = 27,
 };
 
 // Samples per STEP direction of the surface evaluation grid.
@@ -308,9 +311,82 @@ void free_curves(SmTArray<SmCurve*>& cs)
     cs.ReSet();
 }
 
+// One profile curve of OP_OFFSET_PROFILE: `kind` then its values (see the ffi module).
+// A failing constructor is a harness error.
+SmCurve* read_profile_curve(Rd& rd)
+{
+    const SmContext& ctx = *SmApiGetOrCreateContext();
+    int64_t kind = rd.idx(0, 4);
+    SmCurve* made = NULL;
+    SmStatus s = SM_ERR;
+    switch (kind)
+    {
+    case 0:
+    {
+        SmVector3d p0 = rd.vec();
+        SmVector3d p1 = rd.vec();
+        SmLine* line = NULL;
+        s = SmApiCreateLineSegment(p0, p1, line);
+        made = line;
+        break;
+    }
+    case 1:
+    {
+        SmVector3d c = rd.vec();
+        double r = rd.num();
+        double a0 = rd.num();
+        double a1 = rd.num();
+        SmBSplineCurve* arc = NULL;
+        s = SmApiCreateArc(c, r, a0, a1, arc);
+        made = arc;
+        break;
+    }
+    case 2:
+    {
+        SmVector3d c = rd.vec();
+        double r = rd.num();
+        SmCircle* circle = NULL;
+        s = SmApiCreateCircle(c, r, circle);
+        made = circle;
+        break;
+    }
+    case 3:
+    {
+        SmVector3d p0 = rd.vec();
+        SmVector3d p1 = rd.vec();
+        SmBSplineCurve* line = NULL;
+        s = SmBSplineCurve::CreateLineSegment(ctx, 3, p0, p1, line);
+        made = line;
+        break;
+    }
+    default:
+    {
+        SmVector3d origin = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double r = rd.num();
+        double a0 = rd.num();
+        double a1 = rd.num();
+        SmAxis2Placement frame;
+        if (frame.SetCanonical(origin, x, y) != SM_SUCCESS)
+            throw Bad();
+        SmBSplineCurve* circle = NULL;
+        s = SmBSplineCurve::CreateCircleSegment(ctx, 3, frame, r, a0, a1, SM_CO_QUADRATIC, circle);
+        made = circle;
+        break;
+    }
+    }
+    if (s != SM_SUCCESS || made == NULL)
+    {
+        delete made;
+        throw Bad();
+    }
+    return made;
+}
+
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t op = (int32_t)rd.idx(1, 26);
+    int32_t op = (int32_t)rd.idx(1, 27);
     SmBrep* b = NULL;
     switch (op)
     {
@@ -567,6 +643,35 @@ void run(Rd& rd, std::vector<double>& o)
         }
         // `blend` is owned by the B-rep.
         delete b;
+        return;
+    }
+    case OP_OFFSET_PROFILE:
+    {
+        SmTArray<SmCurve*> curves;
+        double distance = 0.0;
+        int64_t type = 0;
+        bool round = false;
+        bool shell = false;
+        try
+        {
+            int64_t k = rd.idx(0, 16);
+            for (int64_t i = 0; i < k; i++)
+                curves.Add(read_profile_curve(rd));
+            distance = rd.num();
+            type = rd.idx(0, 4);
+            round = rd.idx(0, 1) != 0;
+            shell = rd.idx(0, 1) != 0;
+        }
+        catch (...)
+        {
+            free_curves(curves);
+            throw;
+        }
+        // The curves are borrowed: upstream copies them.
+        SmApiStatus s = SmApiCreateOffsetProfile(curves, distance, (ULONG)type, round ? TRUE : FALSE,
+                                                 shell ? TRUE : FALSE, b);
+        free_curves(curves);
+        put_brep(o, s, b);
         return;
     }
     default: throw Bad();

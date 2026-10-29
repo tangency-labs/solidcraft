@@ -2,7 +2,8 @@
 //!
 //! Upstream: `source/SM_API/src/SmApiBrep.cpp` (`SmApiFilletEdges` 2049-2087,
 //! `SmApiFilletEdgesPerEdge` 2094-2135, `SmApiVariableRadiusFillet` 2142-2178,
-//! `SmApiSurfaceSurfaceFillet` 2189-2267, `SmApiSetBevelCorners` 2305-2338),
+//! `SmApiSurfaceSurfaceFillet` 2189-2267, `SmApiSetBevelCorners` 2305-2338,
+//! `SmApiFilletPreview` 2285-2309),
 //! `source/SM_API/src/SmApiFillets.cpp` (`SmApiChamferFillet` 40-113,
 //! `SmApiCircularFillet` 119-185).
 //!
@@ -14,6 +15,7 @@
 //! | [`circular_fillet`] | `SmApiCircularFillet` |
 //! | [`chamfer_fillet`] | `SmApiChamferFillet` |
 //! | [`set_bevel_corners`] | `SmApiSetBevelCorners` |
+//! | [`fillet_preview`] | `SmApiFilletPreview` |
 //! | [`surface_surface_fillet`] | `SmApiSurfaceSurfaceFillet` |
 //!
 //! Deviations: the kernel argument replaces `SmApiGetOrCreateContext()`. Edges are
@@ -45,7 +47,10 @@
 //! has no equivalent step; nothing else changes). Callers can run
 //! [`crate::topology::integrity::check`] immediately, without a manual refresh.
 //! Validation-only returns leave untouched bodies alone. The `create_face_from_surface`
-//! construction helper adds one face; its callers finalize the body. No recursion.
+//! construction helper adds one face; its callers finalize the body. [`fillet_preview`]
+//! returns copies of the preview surfaces (upstream hands out the executive's own, which
+//! it never frees); like upstream it does not check the radius
+//! ([`is_radius_supported`]). No recursion.
 
 use super::p1::is_radius_supported;
 use super::session::FilletSession;
@@ -370,6 +375,37 @@ pub fn set_bevel_corners(
     // the body keeps the edits the executive made before a failure, as upstream)
     brep.refresh_cached_topology();
     result
+}
+
+/// `SmApiFilletPreview`: the untrimmed fillet surfaces a constant circular `radius`
+/// fillet of `edges` of `brep` would use (`SetFilletParameters` with its default
+/// continuity 1 and thumbweight 1.0, then `GetPreviewFilletSurfaces`), without filleting:
+/// each solver's surfaces in order, `None` for a fillet geometry without one. The corners
+/// are built in the session's pseudo-B-rep; `brep` keeps its faces.
+///
+/// # Errors
+/// `SM_ERR_INVALID_INPUT` for an empty edge list; the fillet executive's errors (`SM_ERR`
+/// when no edge gets a solver).
+pub fn fillet_preview(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    edges: &[EdgeId],
+    radius: f64,
+) -> Result<Vec<Option<Surface>>> {
+    if edges.is_empty() {
+        return Err(invalid_input());
+    }
+    let preview = {
+        let mut session = FilletSession::new(k, brep)?;
+        // SetFilletParameters(.., SM_FSG_CIRCULAR, SM_FS_CONST_RADIUS, dRadius, NULL,
+        // -1, -1, -1, -1) with lContinuity = 1, dThumbweight = 1.0 defaulted
+        session
+            .prepare_constant_radius_edges(k, edges, radius, 1, 1, 1.0)
+            .and_then(|()| session.preview_fillet_surfaces(k))
+    };
+    // (not upstream: the port's cached topology fields, true again for the caller)
+    brep.refresh_cached_topology();
+    preview
 }
 
 /// `SmBrep::CreateFaceFromSurface(pSurface, pSurface->GetNaturalUVDomain(), pFace)`:

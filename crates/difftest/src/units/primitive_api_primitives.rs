@@ -15,7 +15,11 @@
 //! `blend_primitive` builds a box, calls `SmApiCreateBlendPrimitive` on the box's
 //! edge/face list indices, and compares the API status, the mutated B-rep's record and
 //! the blend face's own surface record (see the ffi module). A pyramid whose plane fit
-//! reaches UB-119 is rejected (see [`ub_119`]).
+//! reaches UB-119 is rejected (see [`ub_119`]). `offset_profile` builds its `profile`
+//! curves (line segments, arcs, circles, B-spline lines and circle segments) on both sides
+//! and compares `SmApiCreateOffsetProfile`'s B-rep record; its generated cases run on their
+//! own seed stream (`offset0000`, ...: [`MIN_GENERATED_OFFSET`]), so each `gen` case stays
+//! the one the baseline has.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
@@ -27,6 +31,7 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
+use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::primitive::api_curves;
 use solidcore::primitive::api_primitives as api;
@@ -37,7 +42,7 @@ use solidcore::surface::torus::Torus;
 use solidcore::topology::brep::p1;
 use solidcore::topology::{Brep, EdgeId, FaceId};
 use solidcore::SolidError;
-use solidcore_ffi::units::primitive_api_primitives::{self as ffi, Arc, Op};
+use solidcore_ffi::units::primitive_api_primitives::{self as ffi, Arc, Op, ProfileCurve};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -45,6 +50,8 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
+/// Generated `offset_profile` cases per run (their own seed stream).
+pub const MIN_GENERATED_OFFSET: usize = 160;
 
 /// Samples per STEP direction of the surface evaluation grid (as the shim).
 const GRID: usize = 5;
@@ -112,6 +119,7 @@ enum OpName {
     PartialTorus,
     Swung,
     BlendPrimitive,
+    OffsetProfile,
 }
 
 impl OpName {
@@ -138,6 +146,7 @@ impl OpName {
             Self::PartialTorus => Op::PartialTorus,
             Self::Swung => Op::Swung,
             Self::BlendPrimitive => Op::BlendPrimitive,
+            Self::OffsetProfile => Op::OffsetProfile,
         }
     }
 }
@@ -162,6 +171,116 @@ impl ArcIn {
     }
 }
 
+/// A profile curve of `offset_profile` (see [`ProfileCurve`]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CurveIn {
+    /// `SmApiCreateLineSegment`.
+    Line { start: [f64; 3], end: [f64; 3] },
+    /// `SmApiCreateArc`.
+    Arc {
+        center: [f64; 3],
+        radius: f64,
+        start_deg: f64,
+        end_deg: f64,
+    },
+    /// `SmApiCreateCircle` (`SmCircle*&`).
+    Circle { center: [f64; 3], radius: f64 },
+    /// `SmBSplineCurve::CreateLineSegment(ctx, 3, ..)`.
+    BsplineLine { start: [f64; 3], end: [f64; 3] },
+    /// `SmBSplineCurve::CreateCircleSegment(ctx, 3, frame, .., SM_CO_QUADRATIC)`.
+    BsplineCircle {
+        origin: [f64; 3],
+        x_axis: [f64; 3],
+        y_axis: [f64; 3],
+        radius: f64,
+        start_deg: f64,
+        end_deg: f64,
+    },
+}
+
+impl CurveIn {
+    const fn ffi(self) -> ProfileCurve {
+        match self {
+            Self::Line { start, end } => ProfileCurve::Line { start, end },
+            Self::Arc {
+                center,
+                radius,
+                start_deg,
+                end_deg,
+            } => ProfileCurve::Arc(Arc {
+                center,
+                radius,
+                start_deg,
+                end_deg,
+            }),
+            Self::Circle { center, radius } => ProfileCurve::Circle { center, radius },
+            Self::BsplineLine { start, end } => ProfileCurve::BSplineLine { start, end },
+            Self::BsplineCircle {
+                origin,
+                x_axis,
+                y_axis,
+                radius,
+                start_deg,
+                end_deg,
+            } => ProfileCurve::BSplineCircle {
+                origin,
+                x_axis,
+                y_axis,
+                radius,
+                start_deg,
+                end_deg,
+            },
+        }
+    }
+
+    /// The curve the shim builds (a failing constructor is a harness error, as the
+    /// shim's `SC_ERR_ARG`).
+    fn build(self, k: &Kernel) -> Result<SmCurve, HarnessError> {
+        let p = |v: [f64; 3]| Vec3::new(v[0], v[1], v[2]);
+        let made = match self {
+            Self::Line { start, end } => {
+                api_curves::create_line_segment(p(start), p(end)).map(SmCurve::from)
+            }
+            Self::Arc {
+                center,
+                radius,
+                start_deg,
+                end_deg,
+            } => api_curves::create_arc(p(center), radius, start_deg, end_deg).map(SmCurve::from),
+            Self::Circle { center, radius } => {
+                api_curves::create_analytic_circle(k, p(center), radius).map(SmCurve::from)
+            }
+            Self::BsplineLine { start, end } => {
+                BSplineCurve::create_line_segment(3, p(start), p(end)).map(SmCurve::from)
+            }
+            Self::BsplineCircle {
+                origin,
+                x_axis,
+                y_axis,
+                radius,
+                start_deg,
+                end_deg,
+            } => {
+                let mut frame = Axis2Placement::default();
+                frame
+                    .set_canonical(p(origin), p(x_axis), p(y_axis))
+                    .map_err(|e| HarnessError::new(format!("profile frame: {e}")))?;
+                BSplineCurve::create_circle_segment(
+                    3,
+                    &frame,
+                    radius,
+                    start_deg,
+                    end_deg,
+                    NurbCircleParam::Quadratic,
+                )
+                .map(SmCurve::from)
+            }
+        };
+        made.map_err(|e| HarnessError::new(format!("profile curve: {e}")))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Inputs {
     op: OpName,
@@ -170,6 +289,9 @@ struct Inputs {
     xy: Vec<ArcIn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     xz: Vec<ArcIn>,
+    /// The curves of `offset_profile`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    profile: Vec<CurveIn>,
 }
 
 impl Inputs {
@@ -195,6 +317,13 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         ));
     }
     let args: Vec<f64> = i.args.iter().map(|f| f.0).collect();
+    if i.op == OpName::OffsetProfile {
+        let curves: Vec<ProfileCurve> = i.profile.iter().map(|c| c.ffi()).collect();
+        return match ffi::run_offset_profile(&curves, &args) {
+            Ok(rec) => Ok(Output::new().values("rec", rec)),
+            Err(e) => Err(HarnessError::new(e.to_string())),
+        };
+    }
     let xy: Vec<Arc> = i.xy.iter().map(|a| a.ffi()).collect();
     let xz: Vec<Arc> = i.xz.iter().map(|a| a.ffi()).collect();
     let arcs = (i.op == OpName::Swung).then_some((xy.as_slice(), xz.as_slice()));
@@ -622,6 +751,36 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             brep_out(api::create_swung_primitive(k, &xy, &xz, a(0)?))
         }
         OpName::BlendPrimitive => blend_out(i)?,
+        OpName::OffsetProfile => {
+            if i.profile.len() > ffi::MAX_PROFILE_CURVES {
+                return Err(HarnessError::new("offset profile: too many curves"));
+            }
+            let curves = i
+                .profile
+                .iter()
+                .map(|c| c.build(k))
+                .collect::<Result<Vec<_>, _>>()?;
+            let refs: Vec<Option<&SmCurve>> = curves.iter().map(Some).collect();
+            let flag = |n: usize| -> Result<bool, HarnessError> {
+                let v = a(n)?;
+                if v != 0.0 && v != 1.0 {
+                    return Err(HarnessError::new("offset profile: flag"));
+                }
+                Ok(v == 1.0)
+            };
+            let kind = a(1)?;
+            if !(0.0..=ffi::MAX_OFFSET_TYPE as f64).contains(&kind) || kind.fract() != 0.0 {
+                return Err(HarnessError::new("offset profile: offset type"));
+            }
+            brep_out(api::create_offset_profile(
+                k,
+                &refs,
+                a(0)?,
+                kind as u64,
+                flag(2)?,
+                flag(3)?,
+            ))
+        }
     })
 }
 
@@ -696,6 +855,7 @@ fn mk(op: OpName, args: Vec<f64>) -> Inputs {
         args: args.into_iter().map(F).collect(),
         xy: Vec::new(),
         xz: Vec::new(),
+        profile: Vec::new(),
     }
 }
 
@@ -989,11 +1149,137 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                     args: vec![F(rng.uniform(0.5, 2.0))],
                     xy: vec![arc(rng)],
                     xz: vec![arc(rng)],
+                    profile: Vec::new(),
                 }
             }
             _ => blend_case(rng),
         },
     }
+}
+
+/// A closed planar profile at scale `s` around `c` in the XY plane: a rectangle of line
+/// segments (either kind, either orientation, its sides in any order), a circle (either
+/// kind), a slot of two lines and two arcs, or a rectangle with a circular hole.
+fn gen_profile(rng: &mut Rng, s: f64, c: [f64; 3]) -> Vec<CurveIn> {
+    let (w, h) = (s * rng.uniform(0.5, 2.0), s * rng.uniform(0.5, 2.0));
+    let [x0, y0, z] = c;
+    let bspline = rng.chance(0.4);
+    let segment = |start: [f64; 3], end: [f64; 3]| {
+        if bspline {
+            CurveIn::BsplineLine { start, end }
+        } else {
+            CurveIn::Line { start, end }
+        }
+    };
+    let rectangle = |rng: &mut Rng| {
+        let corners = [
+            [x0, y0, z],
+            [x0 + w, y0, z],
+            [x0 + w, y0 + h, z],
+            [x0, y0 + h, z],
+        ];
+        let reverse = rng.chance(0.3);
+        let mut sides: Vec<CurveIn> = (0..4)
+            .map(|i| {
+                let a = corners.get(i).copied().unwrap_or(c);
+                let b = corners.get((i + 1) % 4).copied().unwrap_or(c);
+                if reverse {
+                    segment(b, a)
+                } else {
+                    segment(a, b)
+                }
+            })
+            .collect();
+        if rng.chance(0.3) {
+            sides.rotate_left(1 + rng.below(3) as usize);
+        }
+        sides
+    };
+    let circle = |rng: &mut Rng, center: [f64; 3], radius: f64| {
+        if rng.chance(0.5) {
+            CurveIn::Circle { center, radius }
+        } else {
+            CurveIn::BsplineCircle {
+                origin: center,
+                x_axis: [1.0, 0.0, 0.0],
+                y_axis: if rng.chance(0.5) {
+                    [0.0, 1.0, 0.0]
+                } else {
+                    [0.0, -1.0, 0.0]
+                },
+                radius,
+                start_deg: 0.0,
+                end_deg: 360.0,
+            }
+        }
+    };
+    match rng.below(5) {
+        0 | 1 => rectangle(rng),
+        2 => vec![circle(rng, c, 0.5 * w)],
+        3 => {
+            // a slot: two parallel lines joined by half circles
+            let r = 0.5 * h;
+            vec![
+                segment([x0, y0, z], [x0 + w, y0, z]),
+                CurveIn::Arc {
+                    center: [x0 + w, y0 + r, z],
+                    radius: r,
+                    start_deg: -90.0,
+                    end_deg: 90.0,
+                },
+                segment([x0 + w, y0 + h, z], [x0, y0 + h, z]),
+                CurveIn::Arc {
+                    center: [x0, y0 + r, z],
+                    radius: r,
+                    start_deg: 90.0,
+                    end_deg: 270.0,
+                },
+            ]
+        }
+        _ => {
+            let mut v = rectangle(rng);
+            let r = 0.2 * w.min(h);
+            v.push(circle(rng, [x0 + 0.5 * w, y0 + 0.5 * h, z], r));
+            v
+        }
+    }
+}
+
+/// An `offset_profile` case: a profile, a distance (sometimes negative, sometimes as large
+/// as the profile), an offset type (mostly 1 to 3, sometimes 0 or 4) and the flags.
+fn gen_offset_case(rng: &mut Rng) -> Inputs {
+    let s = match rng.below(10) {
+        0 => rng.uniform(0.01, 0.1),
+        1 => rng.uniform(100.0, 1000.0),
+        _ => rng.uniform(1.0, 20.0),
+    };
+    let c = [
+        rng.uniform(-3.0 * s, 3.0 * s),
+        rng.uniform(-3.0 * s, 3.0 * s),
+        if rng.chance(0.7) {
+            0.0
+        } else {
+            rng.uniform(-s, s)
+        },
+    ];
+    let profile = gen_profile(rng, s, c);
+    let mut distance = s * rng.uniform(0.02, 0.3);
+    if rng.chance(0.2) {
+        distance = -distance;
+    }
+    if rng.chance(0.05) {
+        distance = s * rng.uniform(0.5, 2.0);
+    }
+    let kind = match rng.below(20) {
+        0 => 0.0,
+        1 => 4.0,
+        _ => (1 + rng.below(3)) as f64,
+    };
+    let round = b(rng.chance(0.5));
+    let shell = b(rng.chance(0.5));
+    let mut i = mk(OpName::OffsetProfile, vec![distance, kind, round, shell]);
+    i.profile = profile;
+    i
 }
 
 impl UnitDiff for Runner {
@@ -1014,11 +1300,25 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let gen_ctx = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &gen_ctx)?;
+        // offset profiles under their own names and seeds, so that each `gen` case stays
+        // the one the baseline has
+        let offset_ctx = CaseContext {
+            seeds: ctx.seeds.max(MIN_GENERATED_OFFSET),
+            ..ctx.clone()
+        };
+        for mut c in offset_ctx.generated_cases("primitive.api_primitives:offset", |rng| {
+            serde_json::to_value(gen_offset_case(rng)).ok()
+        }) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "offset", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

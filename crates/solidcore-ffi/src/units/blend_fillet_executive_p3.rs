@@ -937,3 +937,80 @@ mod real_solid_tests {
         assert!(validate_real_solid(&value).is_err());
     }
 }
+
+extern "C" {
+    fn sc_blend_fillet_executive_p3_fillet_preview(
+        path: *const std::ffi::c_char,
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// Validate the [`fillet_preview`] wire: source kind (0 a box at the origin, its size in
+/// the first three parameters; 1 to 4 those of [`validate_real_source`]),
+/// [`SOURCE_PARAMS`] source parameters, the radius, the selected-edge count and the
+/// owning-list edge indices. Every value is finite; box, cylinder and source box sizes
+/// are positive, as the constructors require. The radius is not limited:
+/// `SmApiFilletPreview` does not check it.
+pub fn validate_fillet_preview(input: &[f64], has_path: bool) -> Result<(), FfiError> {
+    if input.iter().any(|v| !v.is_finite()) {
+        return Err(FfiError::InvalidArgument("non-finite preview wire".into()));
+    }
+    let mut r = Cursor::new(input);
+    let kind = r.index(4)?;
+    if (kind == 1) != has_path {
+        return Err(FfiError::InvalidArgument("invalid solid source".into()));
+    }
+    let params = r.slice(SOURCE_PARAMS)?;
+    let positive: &[usize] = match kind {
+        0 => &[0, 1, 2],
+        2 => &[3, 4],
+        3 | 4 => &[3, 4, 5, 9, 10, 11],
+        _ => &[],
+    };
+    for &i in positive {
+        if params.get(i).is_none_or(|v| *v <= 1e-12) {
+            return Err(FfiError::InvalidArgument("non-positive source size".into()));
+        }
+    }
+    r.slice(1)?;
+    let head = 1 + SOURCE_PARAMS + 2;
+    let remaining = input.len().saturating_sub(head);
+    let count = r.index(remaining)?;
+    if count != remaining {
+        return Err(FfiError::InvalidArgument(
+            "invalid edge selection length".into(),
+        ));
+    }
+    for _ in 0..count {
+        r.index(MAX_SOURCE_EDGE)?;
+    }
+    r.done()
+}
+
+/// `SmApiFilletPreview` on a source body (see [`validate_fillet_preview`]); `path` is the
+/// `.smb` file of a file source. The record is the API status, the body's vertex, edge
+/// and face counts after the call, the number of preview surfaces and per surface `has`
+/// then its `GetType`, natural UV domain (`umin vmin umax vmax`) and a 5 x 5 grid over
+/// it of `EvaluatePoint` `status [x y z]`.
+pub fn fillet_preview(input: &[f64], path: Option<&str>) -> Result<Vec<f64>, FfiError> {
+    validate_fillet_preview(input, path.is_some())?;
+    let cpath = path
+        .map(std::ffi::CString::new)
+        .transpose()
+        .map_err(|_| FfiError::InvalidArgument("path has a NUL byte".into()))?;
+    let ptr = cpath.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_fillet_preview(
+            ptr,
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}

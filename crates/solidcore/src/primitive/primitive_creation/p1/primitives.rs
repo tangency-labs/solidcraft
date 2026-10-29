@@ -85,7 +85,7 @@ pub enum Boolean2d {
     Merge = 4,
 }
 
-fn new_brep(k: &mut Kernel) -> Result<Brep> {
+pub(super) fn new_brep(k: &mut Kernel) -> Result<Brep> {
     crate::topology::brep::p3::new_brep(
         k,
         crate::geom::tol::USE_DEFAULT,
@@ -158,7 +158,7 @@ fn planar_face(
         )
     })
 }
-fn planar_faces(
+pub(super) fn planar_faces(
     k: &mut Kernel,
     b: &mut Brep,
     region: Option<RegionId>,

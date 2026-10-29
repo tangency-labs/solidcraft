@@ -2,6 +2,8 @@
 //! Setup, corner creation and direct first-Nx1 topology use actual bodies and
 //! owned production solvers. Full fillet construction remains deferred at the
 //! missing public API; native result records do not claim Rust geometry success.
+//! `fillet_preview` cases run `SmApiFilletPreview` (module `preview`) on their own seed
+//! stream (`preview0000`, ...), so each `gen` case stays the one the baseline has.
 
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
@@ -24,6 +26,8 @@ use std::collections::BTreeMap;
 
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
+#[path = "blend_fillet_executive_p3/preview.rs"]
+mod preview;
 #[path = "blend_fillet_executive_p3/surface_bodies.rs"]
 mod surface_bodies;
 
@@ -42,6 +46,19 @@ struct Inputs {
     surface_surface: Option<end_to_end::SurfaceSurface>,
     #[serde(default)]
     surface_surface_bodies: Option<surface_bodies::SurfaceSurfaceBodies>,
+    #[serde(default)]
+    fillet_preview: Option<preview::FilletPreview>,
+}
+
+impl Inputs {
+    /// Whether any other fixture form accompanies a `fillet_preview` case.
+    fn mixed_with_preview(&self) -> bool {
+        self.surface_surface_bodies.is_some()
+            || self.surface_surface.is_some()
+            || self.real_solid.is_some()
+            || self.upstream_case.is_some()
+            || !self.record.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -916,14 +933,34 @@ impl UnitDiff for Runner {
         "blend.fillet_executive_p3"
     }
     fn cases(&self, ctx: &crate::case::CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = crate::case::CaseContext {
+        let gen_ctx = crate::case::CaseContext {
             seeds: ctx.seeds.max(256),
             ..ctx.clone()
         };
-        crate::runner::default_cases(self, &ctx)
+        let mut v = crate::runner::default_cases(self, &gen_ctx)?;
+        // the SmApiFilletPreview cases under their own names and seeds, so that each
+        // `gen` case stays the one the baseline has
+        let preview_ctx = crate::case::CaseContext {
+            seeds: ctx.seeds.max(preview::MIN_GENERATED),
+            ..ctx.clone()
+        };
+        for mut c in preview_ctx.generated_cases("blend.fillet_executive_p3:preview", |rng| {
+            Some(serde_json::json!({ "fillet_preview": preview::generate(rng) }))
+        }) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "preview", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
+        if let Some(preview) = &input.fillet_preview {
+            if input.mixed_with_preview() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return preview::cpp(preview);
+        }
         if let Some(pair) = &input.surface_surface_bodies {
             if input.surface_surface.is_some()
                 || input.real_solid.is_some()
@@ -965,6 +1002,12 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
+        if let Some(preview) = &input.fillet_preview {
+            if input.mixed_with_preview() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return preview::rust(preview);
+        }
         if let Some(pair) = &input.surface_surface_bodies {
             if input.surface_surface.is_some()
                 || input.real_solid.is_some()

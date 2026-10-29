@@ -1071,3 +1071,82 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_prefix(
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
 }
+
+// SmApiFilletPreview on a source body. Wire: source kind (0 = SmApiCreateBox at the origin
+// with size p0..p2, else the kinds of fillet_real_solid::build_source), 12 source
+// parameters (unused ones 0), radius, selected-edge count, then owning-list edge indices.
+// Output: the API status; the body's vertex, edge and face counts after the call; the
+// number of preview surfaces, then per surface `has` and, for a surface, its GetType, its
+// natural UV domain (umin vmin umax vmax) and a 5 x 5 grid over that domain of
+// EvaluatePoint `status [x y z]`. The caller owns the surfaces (upstream never frees them).
+namespace fillet_real_solid {
+constexpr int PREVIEW_GRID=5;
+void preview_surface(std::vector<double>& out, const SmSurface* s) {
+    out.push_back(s ? 1.0 : 0.0);
+    if (!s) return;
+    out.push_back(double(s->GetType()));
+    const SmExtent2d d=s->GetNaturalUVDomain();
+    const double u0=d.GetMin().x, v0=d.GetMin().y, u1=d.GetMax().x, v1=d.GetMax().y;
+    out.insert(out.end(), {u0, v0, u1, v1});
+    for (int i=0; i<PREVIEW_GRID; ++i)
+        for (int j=0; j<PREVIEW_GRID; ++j) {
+            const double u=u0+(u1-u0)*(double(i)/double(PREVIEW_GRID-1));
+            const double v=v0+(v1-v0)*(double(j)/double(PREVIEW_GRID-1));
+            SmPoint3d p;
+            const SmStatus st=s->EvaluatePoint(SmPoint2d(u,v),p);
+            out.push_back(status(st));
+            if (st == SM_SUCCESS) out.insert(out.end(), {p.x, p.y, p.z});
+        }
+}
+}
+
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_fillet_preview(
+    const char* path, const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    const int64_t head=1+fillet_real_solid::SOURCE_PARAMS;
+    if (!input || n < head+2) return SC_ERR_ARG;
+    for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
+    const double kind=input[0];
+    if (kind != 0 && kind != 1 && kind != 2 && kind != 3 && kind != 4) return SC_ERR_ARG;
+    if ((kind == 1) != (path != nullptr)) return SC_ERR_ARG;
+    const double* p=input+1;
+    if (kind == 0) for (int i : {0,1,2}) if (p[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
+    if (kind == 2 && (p[3] <= SM_EFF_ZERO || p[4] <= SM_EFF_ZERO)) return SC_ERR_ARG;
+    if (kind >= 3) for (int i : {3,4,5,9,10,11}) if (p[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
+    const double radius=input[head];
+    const double count=input[head+1];
+    if (count < 0 || count != std::floor(count) || n != head+2+int64_t(count)) return SC_ERR_ARG;
+    SC_TRY
+    std::unique_ptr<SmBrep> body;
+    if (kind == 0) {
+        SmBrep* raw=nullptr;
+        if (SmApiCreateBox(SmVector3d(0.0,0.0,0.0),p[0],p[1],p[2],raw) != SM_SUCCESS) {
+            delete raw; return SC_ERR_ARG;
+        }
+        body.reset(raw);
+    } else {
+        body.reset(fillet_real_solid::build_source(int(kind),path,p));
+    }
+    if (!body) return SC_ERR_ARG;
+    SmTArray<SmEdge*> edges; body->GetEdges(edges);
+    SmTArray<SmEdge*> selected;
+    for (int64_t i=0; i<int64_t(count); ++i) {
+        const double index=input[head+2+i];
+        if (index < 0 || index != std::floor(index) || index >= double(edges.GetSize())) return SC_ERR_ARG;
+        selected.Add(edges[ULONG(index)]);
+    }
+    SmTArray<SmSurface*> surfaces;
+    const SmStatus stat=SmApiFilletPreview(body.get(),selected,radius,surfaces);
+    std::vector<double> values;
+    values.push_back(fillet_real_solid::status(stat));
+    fillet_real_solid::counts(values,body.get());
+    values.push_back(double(surfaces.GetSize()));
+    for (ULONG i=0; i<surfaces.GetSize(); ++i) fillet_real_solid::preview_surface(values,surfaces[i]);
+    // (each distinct surface once: two geometries of a split could share one)
+    for (ULONG i=0; i<surfaces.GetSize(); ++i) {
+        bool seen=false;
+        for (ULONG j=0; j<i; ++j) seen=seen || surfaces[j] == surfaces[i];
+        if (!seen) delete surfaces[i];
+    }
+    return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
+    SC_CATCH
+}

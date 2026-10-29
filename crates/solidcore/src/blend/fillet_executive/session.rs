@@ -12,6 +12,7 @@
 //! | [`FilletSession::set_bevel_corner`] | `SetBevelCorner` |
 //! | `big_radius::test_and_convert_big_rad_fillet` (private) | `SmFilletExecutive::TestAndConvertBigRadFillet` |
 //! | [`FilletSession::prepare_variable_radius_edges`] | `SetFilletParameters` (same parameters on each edge) with `SM_FS_VARIABLE_RADIUS` |
+//! | [`FilletSession::preview_fillet_surfaces`] | `GetPreviewFilletSurfaces` |
 //!
 //! Deviations: the retained handler's algorithm type is copied into every loaded
 //! solver (on load and on each set), standing in for the solvers' live
@@ -1789,6 +1790,36 @@ impl<'target> FilletSession<'target> {
     ) -> Result<()> {
         self.executive
             .create_fillet_brep(k, &mut self.objects, error_info)
+    }
+
+    /// `GetPreviewFilletSurfaces`: `CreateFilletCorners` (its default null error info),
+    /// then [`FilletExecutive::preview_fillet_geometry`], then the fillet surface of each
+    /// retained solver's fillet geometries in order (`GetFilletGeoms`), `None` for a
+    /// geometry without one (upstream adds the null pointer). The surfaces are exact
+    /// copies: the session's geometries keep the originals, which upstream hands out
+    /// (and never frees).
+    ///
+    /// # Errors
+    /// Those of [`Self::create_corners`] and the preview stages, retaining their
+    /// mutations.
+    pub fn preview_fillet_surfaces(&mut self, k: &mut Kernel) -> Result<Vec<Option<Surface>>> {
+        // NER(m_pTargetBrep) comes first upstream; a session always has its target
+        self.create_corners(k, None)?;
+        self.executive
+            .preview_fillet_geometry(k, &mut self.objects)?;
+        let mut surfaces = Vec::new();
+        let mut index = 0;
+        while let Some(solver) = self.executive.solvers.get(index).copied() {
+            let FilletObject::Solver(id) = solver else {
+                return Err(invalid("preview solver is not an actual solver"));
+            };
+            for geom in self.objects.solver(id)?.base().fillet_geoms() {
+                let surface = self.objects.fillet_surface(geom)?;
+                surfaces.push(surface.map(Surface::clone_for_evaluation).transpose()?);
+            }
+            index += 1;
+        }
+        Ok(surfaces)
     }
 
     /// Map actual pseudo fillet edges to the constructed intermediate body's edges.

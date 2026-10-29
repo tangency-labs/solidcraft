@@ -12,6 +12,7 @@
 //! | [`find_pivot_point`] | `sm_FindPivotPoint` |
 //! | [`extend_path_curves`] | `ExtendPathCurves` |
 //! | [`position_profile_curves`] | `PositionProfileCurves` |
+//! | [`offset_profile`] | static `OffsetProfile` |
 //!
 //! Deviations: owned curves and typed arena ids replace pointers. The four maps
 //! use ordered maps; comparisons observe counts and lookups, never address hash order.
@@ -21,8 +22,10 @@
 //! B-rep edit; it never fabricates faces from arena records.
 
 mod boolean;
+mod offset_profile;
 mod primitives;
 
+pub use offset_profile::offset_profile;
 pub use primitives::{analytic_rotational_sweep, create_circle, create_rectangle, Boolean2d};
 
 use std::collections::BTreeMap;
