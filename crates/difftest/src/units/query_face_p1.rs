@@ -242,7 +242,8 @@ pub(crate) fn model(brep: &Value) -> Result<Model, HarnessError> {
 /// `walk`: [`crate::own_builder`] for shim-built sources, the Rust `.smb` reader for
 /// files), in that traversal order, its geometry owned under the arena identities. No
 /// C++ state reaches it (its face uses are the built ones, so no `FaceFu` patch).
-fn own_model(brep: &Value) -> Result<Result<Model, Output>, HarnessError> {
+/// Shared with the `query.brep` runner's Rust side.
+pub(crate) fn own_model(brep: &Value) -> Result<Result<Model, Output>, HarnessError> {
     use crate::own_builder::{build, failed_output, read_as, Built, Conventions};
     let (path, block) = fixture_input(brep.clone())?;
     let src: BrepIn = serde_json::from_value(brep.clone())

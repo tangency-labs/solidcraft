@@ -17,21 +17,24 @@
 //! attribute, then of its `MakeCopy` (the quadric edge's sort index NaN while unset).
 //!
 //! A `box` case is a B-rep (unit `topology.edgeuse_p1`'s B-rep block, as in the
-//! `query.face_p1` runner: the C++ side builds a real `SmBrep`, the Rust side imports its
-//! export) and up to [`MAX_BOX_STEPS`] steps run on it in order: `box` (the arguments of
+//! `query.face_p1` runner: the C++ side builds a real `SmBrep`; the Rust side builds the
+//! same source with the Rust kernel, or reads an `.smb` file with the Rust reader,
+//! renumbered into the shim's traversal order, `query_face_p1::own_model`) and up to
+//! [`MAX_BOX_STEPS`] steps run on it in order: `box` (the arguments of
 //! `CalculateBoundingBox`, or its defaults), `tight`, `lock` and `unlock`. Both sides
 //! produce every step's status and box (seeded, so what a failing call leaves is
-//! compared). A B-rep with a face surface or edge curve the export carries only as its
-//! B-spline part is deferred, as in that runner.
+//! compared). No C++ state reaches the Rust side.
 //!
 //! A `classify` case is such a B-rep, a point (a vertex's point, a face surface point at
-//! fractions of the face's UV domain, or given coordinates; plus an offset, computed once
-//! from the import for both sides), a tolerance and `do_bnd`. Both sides produce the
+//! fractions of the face's UV domain, or given coordinates; plus an offset, each side
+//! computing it on its own B-rep: the C++ side on the import of its export, the Rust side
+//! on its own build), a tolerance and `do_bnd`. Both sides produce the
 //! status of `SmBrep::Point3DClassify` and the classification (class, object kind and
 //! index, gap, source tolerance, pre-snap parameter, curve and surface parameters,
 //! parameters-set flag, face kind and index); on failure the classification as the
 //! call starts it. The Rust side builds the B-rep cache with
-//! `topology::brep_cache::make_brep_cache` over the import's arena identities.
+//! `topology::brep_cache::make_brep_cache` over its build's arena identities (the
+//! geometry owners the build gave, none added).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -53,7 +56,7 @@ use solidcore_ffi::units::query_brep::{
 
 use super::surface_surface_cache_p1::harness;
 use super::surface_surface_cache_p3::{gen_surf, push_surf, surf_domain, surface_in, SurfIn};
-use super::query_face_p1::{everything, gen_face_brep, inexact, model, Model, NoGeometry};
+use super::query_face_p1::{gen_face_brep, model, own_model, Model, NoGeometry};
 use super::surface_surface_p7::{st, Fail};
 use super::topology_edgeuse_p1::{fixture_input, gen_brep, BrepIn};
 use crate::case::CaseContext;
@@ -321,7 +324,7 @@ fn cpp_box(i: &BoxIn) -> Result<Output, HarnessError> {
     Ok(Output::new().values("steps", flat))
 }
 
-/// The classified point of a `classify` case on the import; `None` when the selected
+/// The classified point of a `classify` case on a side's B-rep; `None` when the selected
 /// kind has no entity.
 fn classify_point(m: &Model, i: &ClassifyIn) -> Result<Option<[f64; 3]>, HarnessError> {
     let b = &m.brep;
@@ -569,11 +572,10 @@ fn rust_box(i: &BoxIn) -> Result<Output, Fail> {
     if i.steps.is_empty() || i.steps.len() > MAX_BOX_STEPS {
         return Err(Fail::Harness(harness("box steps: count")));
     }
-    let mut m = model(&i.brep)?;
-    let (faces, edges) = everything(&m.brep);
-    if let Some(o) = inexact(&m, &faces, &edges) {
-        return Ok(o);
-    }
+    let mut m = match own_model(&i.brep)? {
+        Ok(m) => m,
+        Err(o) => return Ok(o),
+    };
     let k = Kernel::default();
     let flat = run_steps(&k, &mut m.brep, &i.steps)?;
     Ok(Output::new().values("steps", flat))
@@ -611,17 +613,15 @@ fn pc_block(pc: &PointClassification<EntityRef>) -> Vec<f64> {
 }
 
 fn rust_classify(i: &ClassifyIn) -> Result<Output, Fail> {
-    let m = model(&i.brep)?;
+    let m = match own_model(&i.brep)? {
+        Ok(m) => m,
+        Err(o) => return Ok(o),
+    };
     let Some(p) = classify_point(&m, i)? else {
         return Ok(Output::new().values("classify", vec![NO_ENTITY]));
     };
-    let (faces, edges) = everything(&m.brep);
-    if let Some(o) = inexact(&m, &faces, &edges) {
-        return Ok(o);
-    }
     let k = Kernel::default();
     let mut b = m.brep;
-    crate::util::own_arena_geometry(&mut b);
     let query = qb::BrepQuery::new(qb::BrepIdentity::arena(BrepId::from_index(0)));
     let tol = zone_tol3d(&k, i.tol);
     let r = query.point_3d_classify(&k, &mut b, Vec3::new(p[0], p[1], p[2]), tol, i.do_bnd);
