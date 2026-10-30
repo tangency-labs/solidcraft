@@ -147,6 +147,28 @@ fn pictures_drawn_at_once_each_count_their_own() {
     });
 }
 
+/// A section draws each face four times (the count of crossings behind the cut, the cap's
+/// colour, its depth, the faces elsewhere), however many planes it has: a second plane adds no
+/// pass.
+#[test]
+fn one_section_plane_draws_no_hole() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]);
+    let drawn = |s: &Session| {
+        let cam = view::home_camera(s).unwrap();
+        let scene = view::scene_with_guides(s, &cam, &s.section, Guides { grid: false, axes: false }).unwrap();
+        let triangles: usize = scene.meshes.iter().map(|m| m.mesh.triangles.len()).sum();
+        let (_, stats) = c.rgba_with_stats(&scene, &cam, 160, 100).unwrap();
+        (stats.triangles, triangles as u64)
+    };
+    let (none, n) = drawn(&s);
+    s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+    let (one, _) = drawn(&s);
+    s.execute("inspect.section", &json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+    let (two, _) = drawn(&s);
+    assert_eq!((one - none, two - one), (3 * n, 0), "{none}, {one} and {two} triangles drawn for {n}");
+}
+
 /// The ground grid and the origin's axes each change the picture.
 #[test]
 fn guides_change_the_picture() {
