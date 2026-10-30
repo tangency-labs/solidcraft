@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "the top rim of a cylinder that a block is joined to, rounded r2",
+ "source": "analytic",
+ "method": "block 40x10x15 (x 0..40, y -5..5) joined to the cylinder R10 x 30 on the z axis, the block's end on the cylinder's diameter x = 0 so its sides y = +-5 meet the wall at vertical creases: V0 = 6000 + 3000 pi - 15 * (the disc's part with x > 0, |y| <= 5: 2 (y/2 sqrt(100-y^2) + 50 asin(y/10)) at y=5 = 95.661148) = 13989.8607. The rim (rho = 10, z = 30), well above the block, rounded r2 removes the spandrel (1-pi/4) r^2 = 0.858407 revolved once, its centroid at rho = 10 - r (5/6-pi/4)/(1-pi/4) (first moment about the wall r^3 (5/6-pi/4) = 0.383481): Pappus 2 pi (10 A - M) = 51.5258. V = 13938.3349.",
+ "body_count": 1,
+ "volume_mm3": 13938.334904711712,
+ "continuity": {
+  "order": "g1"
+ }
+}
