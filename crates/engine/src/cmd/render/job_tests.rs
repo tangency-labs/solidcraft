@@ -514,7 +514,12 @@ fn preflight_and_start_reject_excessive_pixel_work_without_reserving_a_job() {
         s.execute("render.cancel", &json!({"job":id})).unwrap();
         let status = s.render_job_handle(id).unwrap().wait_timeout(std::time::Duration::from_secs(10)).unwrap();
         assert_eq!(status.progress.phase, solidcraft_render::job::Phase::Cancelled);
-        assert_eq!(raytrace_host.admitted_bytes(), 0);
+        // The worker drops its reservation just after the job turns terminal.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while raytrace_host.admitted_bytes() != 0 {
+            assert!(std::time::Instant::now() < deadline, "worker did not release the cancelled job's reservation");
+            std::thread::yield_now();
+        }
         assert!(Arc::ptr_eq(&doc, &s.doc));
         assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
         s.set_render_job_host(Some(host.clone())).unwrap();
