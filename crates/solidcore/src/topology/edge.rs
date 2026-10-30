@@ -2860,13 +2860,17 @@ pub fn blend_edgeuse(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<Option<Edgeu
     // set max nonTangent angle to 88 degrees
     let max_dot = (88.0 * PI / 180.0).cos();
 
-    // the faces are tangent and can't be filleted
+    // the faces are tangent and can't be filleted. With `fillet_knife_edge_rounds`
+    // (WR-570, fork b7ec55b) only when their binormals point away from each other (the
+    // faces continue each other): binormals pointing the same way are a cusp (a knife
+    // edge), whose ball lies back from the edge, filleted like any other edge
+    let cusp = k.fixes.fillet_knife_edge_rounds && bin_vec.dot(bin_vec2) > 0.0;
     let dot1 = bin_vec2.dot(fu_normal);
-    if dot1.abs() < max_dot {
+    if !cusp && dot1.abs() < max_dot {
         return Ok(None); // Tangent: unable to fillet
     }
     let dot2 = bin_vec.dot(fu_normal2);
-    if dot2.abs() < max_dot {
+    if !cusp && dot2.abs() < max_dot {
         return Ok(None); // Tangent: unable to fillet
     }
 

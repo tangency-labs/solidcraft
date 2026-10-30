@@ -52,6 +52,10 @@
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
+//! - **Knife edges.** With `fixes.fillet_knife_edge_rounds` (WR-570, the fork's
+//!   tangency-labs/smlib `b7ec55b`, not in SMLib at the pin) the edge-use constructors
+//!   orient their offsets by [`sector_sides`] (`sm_SectorSides`), which also sides a
+//!   cusp's faces; off, they keep upstream's tangency refusal.
 //! - **Sections at thirds.** [`BlendCurveCrossSectionFsg::at_thirds`] is the fork's
 //!   `m_bAtThirds` (tangency-labs/smlib `fd3b6a7`, not in SMLib at the pin; off unless
 //!   the executive's `SetBlendCurveAtThirds` is set, so the default is the pinned C++).
@@ -422,6 +426,136 @@ fn edgeuse_orientations(
     Ok(([eu, eu1], orientations))
 }
 
+/// `sm_SectorSides(rpEdgeuses, dLength, rdSides)` (the fork's tangency-labs/smlib
+/// `b7ec55b`, `fixes.fillet_knife_edge_rounds`): the side of each face of the sector
+/// between `eus[0]` and its radial `eus[1]` on which the other face lies, at the middle
+/// of the edge, `+1.0` when face `1 - i` lies on the side face `i`'s surface normal
+/// points to, else `-1.0` (the sign of face `i`'s offset). Where the faces are tangent
+/// at the edge and their binormals point the same way (a cusp) they part to second
+/// order, face `j` at height `s^2/2 kj Nj` along the binormal, and face `1 - i` lies on
+/// the side of face `i` given by `k(1-i) N(1-i).ni - ki Ni.ni`. `None` where upstream
+/// returns a failure status: a smooth edge (tangent faces whose binormals point apart),
+/// osculating faces (the parting below `SM_EFF_ZERO_SQRT` at the blend's size
+/// `length`), a missing radial (`NER`) or a failing binormal or normal-section
+/// evaluation (`SER`).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge use without edge, face use or face surface
+/// where upstream dereferences `NULL`; [`SolidError::Unported`] from the evaluations.
+pub(super) fn sector_sides(
+    k: &Kernel,
+    brep: &mut Brep,
+    eus: [Option<EdgeuseId>; 2],
+    length: f64,
+    op: &'static str,
+) -> Result<Option<[f64; 2]>> {
+    let [Some(eu0), Some(eu1)] = eus else {
+        return Ok(None); // NER
+    };
+    let e = edgeuse::edge(brep, eu0)?
+        .ok_or_else(|| SolidError::invalid_input(op, "edge use without edge"))?;
+    let param = edge::interval(brep, e)?.evaluate(0.5);
+
+    let Some((b0, n0, uv0, d0)) = sector_binormal(k, brep, eu0, param, op)? else {
+        return Ok(None); // SER
+    };
+    let Some((b1, n1, uv1, d1)) = sector_binormal(k, brep, eu1, param, op)? else {
+        return Ok(None); // SER
+    };
+
+    let first = [b1.dot(n0), b0.dot(n1)];
+    if first[0].abs() >= EFF_ZERO_SQRT && first[1].abs() >= EFF_ZERO_SQRT {
+        let side = |d: f64| if d < 0.0 { -1.0 } else { 1.0 };
+        return Ok(Some([side(first[0]), side(first[1])]));
+    }
+    if b0.dot(b1) <= 0.0 {
+        return Ok(None); // smooth: the faces continue each other
+    }
+
+    // a cusp: each face's normal curvature along its binormal, into the face
+    let Some((c0, s0)) = normal_section(k, brep, eu0, uv0, d0, b0, op)? else {
+        return Ok(None); // SER
+    };
+    let Some((c1, s1)) = normal_section(k, brep, eu1, uv1, d1, b1, op)? else {
+        return Ok(None); // SER
+    };
+    let parts = [
+        c1 * s1.dot(n0) - c0 * s0.dot(n0),
+        c0 * s0.dot(n1) - c1 * s1.dot(n1),
+    ];
+    let mut sides = [1.0, 1.0];
+    for (side, part) in sides.iter_mut().zip(parts) {
+        if part.abs() * length < EFF_ZERO_SQRT {
+            return Ok(None); // the faces osculate: no sector to fillet
+        }
+        *side = if part < 0.0 { -1.0 } else { 1.0 };
+    }
+    Ok(Some(sides))
+}
+
+/// [`sector_sides`]' `EvaluateBinormal(dParam, FALSE, ..)` of one edge use: the
+/// binormal, the surface's normal (the face use normal, reversed for an
+/// [`OrientType::Opposite`] face use), the surface parameters and their binormal
+/// direction; `None` for a failing evaluation (`SER`).
+fn sector_binormal(
+    k: &Kernel,
+    brep: &mut Brep,
+    eu: EdgeuseId,
+    param: f64,
+    op: &'static str,
+) -> Result<Option<(Vec3, Vec3, Point2, Vec2)>> {
+    let options = edgeuse_p3::BinormalOptions {
+        want_uv_vector: true,
+    };
+    let Some(r) = ignored(edgeuse_p3::evaluate_binormal_uv(
+        k, brep, eu, param, false, &options,
+    ))?
+    else {
+        return Ok(None);
+    };
+    let mut normal = r.eval.face_normal;
+    let faceuse = edgeuse::faceuse(brep, eu)?
+        .ok_or_else(|| SolidError::invalid_input(op, "edge use without face use"))?;
+    if edgeuse::faceuse_orientation(brep, faceuse)? == OrientType::Opposite {
+        normal = -normal; // the surface's normal
+    }
+    let uv_dir = r.uv_vector.unwrap_or(Vec2::new(0.0, 0.0));
+    Ok(Some((r.eval.binormal, normal, r.eval.uv, uv_dir)))
+}
+
+/// [`sector_sides`]' `EvaluateNormalSection(uv, uvDir.x >= 0, uvDir.y >= 0, binormal,
+/// ..)` on the surface of `eu`'s face: the normal curvature and the unit surface normal;
+/// `None` for a failing evaluation (`SER`).
+fn normal_section(
+    k: &Kernel,
+    brep: &Brep,
+    eu: EdgeuseId,
+    uv: Point2,
+    uv_dir: Vec2,
+    binormal: Vec3,
+    op: &'static str,
+) -> Result<Option<(f64, Vec3)>> {
+    let f = edgeuse::face(brep, eu)?
+        .ok_or_else(|| SolidError::invalid_input(op, "edge use without face"))?;
+    let surface = face::surface(brep, f)?
+        .ok_or_else(|| SolidError::invalid_input(op, "face without surface"))?;
+    let u_side = if uv_dir.x >= 0.0 {
+        Side::Left
+    } else {
+        Side::Right
+    };
+    let v_side = if uv_dir.y >= 0.0 {
+        Side::Left
+    } else {
+        Side::Right
+    };
+    Ok(
+        ignored(surface.evaluate_normal_section(k, uv, u_side, v_side, binormal))?
+            .map(|section| (section.curvature, section.normal)),
+    )
+}
+
 /// The face surface at an edge use as the base of an offset surface.
 fn face_surface(brep: &Brep, eu: EdgeuseId, op: &'static str) -> Result<(Surface, SurfaceId)> {
     let f = edgeuse::face(brep, eu)?
@@ -476,7 +610,25 @@ pub fn constant_radius_from_edgeuse(
     }
 
     // Create offset surfaces of appropriate radius in appropriate direction.
-    let ([eu0, eu1], orientations) = edgeuse_orientations(k, brep, edgeuse, OP)?;
+    let ([eu0, eu1], orientations) = if k.fixes.fillet_knife_edge_rounds {
+        // (fork b7ec55b) offset each surface to the side of it the other face lies on
+        // (sm_SectorSides), a cusp's faces too
+        let radial = edgeuse::radial(brep, edgeuse)?;
+        let [r0, r1] = radii;
+        let length = if r0.abs() > r1.abs() {
+            r0.abs()
+        } else {
+            r1.abs()
+        }; // smos_Max
+        let Some(sides) = sector_sides(k, brep, [Some(edgeuse), radial], length, OP)? else {
+            // Smooth, or no sector: can't fillet this.
+            return Err(SolidError::sm_err(OP));
+        };
+        let eu1 = radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
+        ([edgeuse, eu1], sides)
+    } else {
+        edgeuse_orientations(k, brep, edgeuse, OP)?
+    };
     let (s0, id0) = face_surface(brep, eu0, OP)?;
     let (s1, id1) = face_surface(brep, eu1, OP)?;
     let [r0, r1] = radii;

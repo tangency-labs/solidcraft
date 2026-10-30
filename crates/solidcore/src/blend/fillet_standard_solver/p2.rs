@@ -1290,6 +1290,24 @@ impl ConstantDistanceFs {
         // Create offset surfaces of appropriate radius in appropriate
         // direction.  For now assume that the orientations at the center of the
         // edge work for the rest of the edge.
+        if k.fixes.fillet_knife_edge_rounds {
+            // (fork b7ec55b) offset each surface to the side of it the other face lies
+            // on (sm_SectorSides), a cusp's faces too
+            let mut cd = Self { solver, distance };
+            let radial = cd.solver.edgeuses[1];
+            let Some(sides) =
+                super::p1::sector_sides(k, brep, [Some(edgeuse), radial], cd.distance, OP)?
+            else {
+                // Smooth, or no sector: can't fillet this.
+                cd.solver.edgeuses = [None, None];
+                // (SE(SM_ERR): only signalled)
+                return Ok(cd);
+            };
+            cd.solver.orientations = sides;
+            let eu1 =
+                radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
+            return cd.finish_offsets(k, brep, pseudo, edgeuse, eu1, OP);
+        }
         let fr = edgeuse_frame(k, brep, edgeuse, OP)?;
         let mut cd = Self { solver, distance };
 
@@ -1316,17 +1334,32 @@ impl ConstantDistanceFs {
         let eu1 = fr
             .radial
             .ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
-        let s0 = face_base(brep, edgeuse, OP)?;
-        let s1 = face_base(brep, eu1, OP)?;
-        let approx_radius = cd.distance * 2.0_f64.sqrt() / 2.0;
-        let [o0, o1] = cd.solver.orientations;
-        cd.solver.surfaces = rail_slots(
+        cd.finish_offsets(k, brep, pseudo, edgeuse, eu1, OP)
+    }
+
+    /// The tail of [`ConstantDistanceFs::from_edgeuse`] once the orientations are set:
+    /// offset surfaces of both faces by `dDistance * sqrt(2) / 2` (extension allowed),
+    /// then `FinishConstruction`.
+    fn finish_offsets(
+        mut self,
+        k: &Kernel,
+        brep: &Brep,
+        pseudo: &mut FilletBrep,
+        edgeuse: EdgeuseId,
+        eu1: EdgeuseId,
+        op: &'static str,
+    ) -> Result<Self> {
+        let s0 = face_base(brep, edgeuse, op)?;
+        let s1 = face_base(brep, eu1, op)?;
+        let approx_radius = self.distance * 2.0_f64.sqrt() / 2.0;
+        let [o0, o1] = self.solver.orientations;
+        self.solver.surfaces = rail_slots(
             extending_offset(k, approx_radius * o0, s0)?,
             extending_offset(k, approx_radius * o1, s1)?,
         );
 
-        cd.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
-        Ok(cd)
+        self.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
+        Ok(self)
     }
 }
 
@@ -1404,6 +1437,39 @@ impl VariableRadiusFs {
         set_law_arc_length(k, &original, &law_interval, approx_tol_3d, &mut law)?;
         curve_based.original = Some(original);
 
+        if k.fixes.fillet_knife_edge_rounds {
+            // (fork b7ec55b) the law's radius at the middle first, then each surface
+            // offset to the side of it the other face lies on (sm_SectorSides), a cusp's
+            // faces too
+            let mut vr = Self {
+                curve_based,
+                law,
+                law_orientation,
+                law_interval,
+            };
+            // (SE: a failed law evaluation leaves the radius undefined; only Unported
+            // propagates)
+            let values = ignored(vr.law.evaluate(
+                vr.law_interval.evaluate(0.5),
+                &vr.law_interval,
+                vr.law_orientation,
+            ))?
+            .ok_or_else(|| SolidError::invalid_input(OP, "undefined fillet law radius"))?;
+            let [approx_radius, _, _] = values;
+            let radial = vr.curve_based.solver.edgeuses[1];
+            let Some(sides) =
+                super::p1::sector_sides(k, brep, [Some(edgeuse), radial], approx_radius.abs(), OP)?
+            else {
+                // Smooth, or no sector: can't fillet this.
+                vr.curve_based.solver.edgeuses = [None, None];
+                // (SE(SM_ERR): only signalled)
+                return Ok(vr);
+            };
+            vr.curve_based.solver.orientations = sides;
+            let eu1 =
+                radial.ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
+            return vr.finish_offsets(k, brep, pseudo, edgeuse, eu1, approx_radius, OP);
+        }
         let fr = edgeuse_frame(k, brep, edgeuse, OP)?;
         let mut vr = Self {
             curve_based,
@@ -1443,16 +1509,33 @@ impl VariableRadiusFs {
         let eu1 = fr
             .radial
             .ok_or_else(|| SolidError::invalid_input(OP, "edge use without radial"))?;
-        let s0 = face_base(brep, edgeuse, OP)?;
-        let s1 = face_base(brep, eu1, OP)?;
-        let [o0, o1] = vr.curve_based.solver.orientations;
-        vr.curve_based.solver.surfaces = rail_slots(
+        vr.finish_offsets(k, brep, pseudo, edgeuse, eu1, approx_radius, OP)
+    }
+
+    /// The tail of [`VariableRadiusFs::from_edgeuse`] once the orientations and the
+    /// law's radius at the middle are known: offset surfaces of both faces by that radius
+    /// (extension allowed), then `FinishConstruction`.
+    #[allow(clippy::too_many_arguments)]
+    fn finish_offsets(
+        mut self,
+        k: &Kernel,
+        brep: &Brep,
+        pseudo: &mut FilletBrep,
+        edgeuse: EdgeuseId,
+        eu1: EdgeuseId,
+        approx_radius: f64,
+        op: &'static str,
+    ) -> Result<Self> {
+        let s0 = face_base(brep, edgeuse, op)?;
+        let s1 = face_base(brep, eu1, op)?;
+        let [o0, o1] = self.curve_based.solver.orientations;
+        self.curve_based.solver.surfaces = rail_slots(
             extending_offset(k, approx_radius * o0, s0)?,
             extending_offset(k, approx_radius * o1, s1)?,
         );
 
-        vr.curve_based.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
-        Ok(vr)
+        self.curve_based.solver.finish_construction(k, pseudo)?; // Take care of other things in the base class.
+        Ok(self)
     }
 
     /// `SmVariableRadiusFS(crContext, dThisApproxTol3d, dAngleTolerance,

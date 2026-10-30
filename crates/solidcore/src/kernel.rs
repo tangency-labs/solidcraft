@@ -173,6 +173,15 @@ pub struct UpstreamFixes {
     pub fillet_torus_center_on_axis: bool,
     /// `SmFilletExecutive::CreateFilletBrep` stitches the fillet body keeping a fillet's own edge where an edge of corner-patch faces only meets an edge of other fillet faces only (`SmFilletPatchStitchCallback`): an N-sided corner patch is bounded by its surfaces' isoparametric curves, the approximations it was fitted to, and the default choice between the two near-equal distances left one half of a set-back section the exact arc and the other the polynomial approximation, off the round (WR-546, #1377; the fork's tangency-labs/smlib@1072d1b).
     pub fillet_patch_keeps_fillet_edges: bool,
+    /// A knife edge (a cusp: faces tangent along the edge that fold back on each other,
+    /// their binormals pointing the same way) is rounded with the ball touching both faces
+    /// back from the edge: `SmEdge::GetBlendEdgeuse` no longer takes it for a smooth edge,
+    /// the constant radius, constant distance and variable radius solvers offset each face
+    /// to the side the other lies on, from the difference of the faces' normal curvatures
+    /// across the edge where the faces are tangent (`sm_SectorSides`), and the Nx1
+    /// corner's degeneracy test takes anti-parallel side normals for an ordinary corner.
+    /// Upstream refuses the edge as tangent (WR-570; the fork's tangency-labs/smlib@b7ec55b).
+    pub fillet_knife_edge_rounds: bool,
     /// `DoExtendedOffset` finds the excess offset faces after the merge only, not also on the untrimmed faces before it (WR-341, #977).
     pub offset_excess_faces_after_merge: bool,
     /// `BuildOffsetOfFaceuse` clips a face to its offset domain from its counterclockwise loops (an inset is not turned inside out) (WR-342, #974).
