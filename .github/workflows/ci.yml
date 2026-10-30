@@ -104,24 +104,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
-      # Tests that take minutes unoptimised are skipped here and run once, optimised,
-      # in the next step: tests/primitives_solid.rs (four tests) and
-      # tests/curve_cache_memo.rs (about 10 min unoptimised). Its difftest-profile
-      # solidcore is the one the runner tests below reuse. The two SolidCraft
-      # whole-corpus tests are #[ignore]d and run nightly (nightly.yml).
-      - if: needs.changes.outputs.full == 'true'
-        run: >-
-          cargo test --workspace -- --exact
-          --skip complete_spheres_and_tori_have_analytic_properties
-          --skip primitives_are_closed_solids_with_analytic_properties
-          --skip precise_sphere_properties_scale_and_translate
-          --skip pole_free_sphere_tolerance_is_explicit_and_validated
-          --skip memo_on_and_off_give_bit_identical_results
-      - name: Primitives solid and curve-cache memo tests (difftest profile)
+      # Every test runs once, optimised, in the difftest profile (Cargo.toml
+      # [profile.difftest]: opt-level 3 with overflow-checks and debug-assertions still
+      # on; Rust floating point does not change with opt-level, and this is the build the
+      # difftest gate already measures parity with). Unoptimised, the suite took ~30 of
+      # this job's ~40 minutes; optimised it takes a few. Its solidcore is the one the
+      # solids report and the runner tests below reuse, so it is built once.
+      # cargo-nextest runs the tests of all binaries in parallel (one process per test),
+      # so a binary whose tests are slow no longer holds up the rest. nextest skips
+      # doctests, so they run separately. The two SolidCraft whole-corpus tests are
+      # #[ignore]d and run nightly (nightly.yml), as before.
+      - uses: taiki-e/install-action@v2
         if: needs.changes.outputs.full == 'true'
-        run: >-
-          cargo test --profile difftest -p solidcore
-          --test primitives_solid --test curve_cache_memo
+        with:
+          tool: cargo-nextest@0.9.150
+      - name: Workspace tests (difftest profile)
+        if: needs.changes.outputs.full == 'true'
+        run: cargo nextest run --workspace --cargo-profile difftest --no-fail-fast
+      - name: Doctests (difftest profile)
+        if: needs.changes.outputs.full == 'true'
+        run: cargo test --workspace --profile difftest --doc
       # Solids: the primitives example's per-shape results (built, blocker, checks) for
       # the site's Solids page. It reuses the difftest-profile build above and exits 1
       # while any primitive fails, so only a crash (or a missing JSON) fails the job.
