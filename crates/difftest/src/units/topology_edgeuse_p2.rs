@@ -42,6 +42,7 @@ use super::topology_edgeuse_p1::{
     brep_block_of, gen_brep, gen_curve, harness, import_with_types, path_of, push_curve, sel,
     BrepIn, CrvIn, ImportTypes, FILES,
 };
+use crate::util::trim_curve::put_trim_curve;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// The difftest runner.
@@ -495,20 +496,7 @@ pub(super) fn put_eu_state(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: Option<Ed
     };
     o.push(1.0);
     let r = b.edgeuse(eu)?;
-    match r.uv_trim_curve.as_ref() {
-        None => o.push(-1.0),
-        Some(c) => {
-            o.push(1.0);
-            let ivl = c.natural_interval();
-            o.extend([ivl.min(), ivl.max()]);
-            for t in [ivl.min(), ivl.mid(), ivl.max()] {
-                let p = c
-                    .evaluate_point(k, t)
-                    .unwrap_or(solidcore::math::Vec3::UNDEF);
-                o.extend([p.x, p.y, p.z]);
-            }
-        }
-    }
+    put_trim_curve(k, o, r.uv_trim_curve.as_ref())?;
     // the curve's owner, as the shim's `g.find(6, uv->GetOwner())`
     o.push(crate::own_builder::uv_owner_index(b, eu, None));
     let fail = r.drop_curve_fail.as_deref();

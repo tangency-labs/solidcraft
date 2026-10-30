@@ -53,6 +53,7 @@ use solidcore::topology::{
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::topology_brep_p1::{self as ffi, Op, N_EXTRA_SCALARS, TARGET_TYPES};
 
+use crate::util::trim_curve::put_trim_curve;
 use super::topology_edgeuse_p1::{
     brep_block_of, bspline_of, flag, gen_brep, gen_curve, import_raw_with_types, path_of,
     push_curve, sel, surface_of, BrepIn, CrvIn, ImportTypes, FILES,
@@ -1180,7 +1181,7 @@ fn curve_id(k: &Kernel, c: Option<&Curve>, out: &mut Vec<f64>) {
 fn eu_state(k: &Kernel, b: &Brep, eu: EdgeuseId, out: &mut Vec<f64>) -> Result<(), SolidError> {
     out.push(1.0);
     let r = b.edgeuse(eu)?;
-    curve_id(k, r.uv_trim_curve.as_ref(), out);
+    put_trim_curve(k, out, r.uv_trim_curve.as_ref())?;
     // the curve's owner, as the shim's `g.find(6, uv->GetOwner())`
     out.push(crate::own_builder::uv_owner_index(b, eu, None));
     match r.drop_curve_fail.as_deref() {

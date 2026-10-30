@@ -9,8 +9,8 @@
 //! `-1 status` when the B-rep could not be built. `-2` in an output is "upstream would
 //! dereference null". An edge use state is that of the `topology.edgeuse_p1` `SetUv` op
 //! (`put_eu_state`); the edge state is its interval and tolerance. "The states" are the
-//! edge use's and its mate's state, the edge state, then the full UV trim curve records
-//! (`harness/cpp/shim/sc_trim_curve_record.h`) of the edge use and its mate.
+//! edge use's and its mate's state (its UV trim curve as the full record of
+//! `harness/cpp/shim/sc_trim_curve_record.h`) and the edge state.
 //!
 //! | [`Op`]         | parameters after `eu`                  | outputs |
 //! |----------------|----------------------------------------|---------|

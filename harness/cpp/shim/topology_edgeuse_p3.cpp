@@ -83,15 +83,13 @@ void put_edge_state(std::vector<double>& o, SmEdgeuse* p)
     o.push_back((double)e->GetTolerance());
 }
 
-// The tail every op reports: the edge use's and its mate's state, the edge state, then
-// the full records of the edge use's and its mate's UV trim curves.
+// The tail every op reports: the edge use's and its mate's state, the edge state
+// (`put_eu_state` carries each edge use's full UV trim curve record).
 void put_states(std::vector<double>& o, Graph& g, SmEdgeuse* p, SmEdgeuse* mate)
 {
     put_eu_state(o, g, p);
     put_eu_state(o, g, mate);
     put_edge_state(o, p);
-    sc_trim_curve::put_trim_curve(o, p->*EuPeek::uv());
-    sc_trim_curve::put_trim_curve(o, mate ? mate->*EuPeek::uv() : nullptr);
 }
 
 // Evaluate the newly returned curve without attaching it or changing topology.

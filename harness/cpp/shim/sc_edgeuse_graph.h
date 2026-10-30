@@ -52,6 +52,7 @@
 #include <nurbs.h>
 #include <map>
 #include <vector>
+#include "sc_trim_curve_record.h"
 
 namespace
 {
@@ -865,7 +866,8 @@ void put_curve_id(std::vector<double>& o, const SmBSplineCurve* c)
     }
 }
 
-// The state of an edgeuse after SetUVTrimCurve: its uv curve (fingerprint and owner),
+// The state of an edgeuse after SetUVTrimCurve: its uv curve (full record, see
+// sc_trim_curve_record.h) and owner,
 // drop curve fail (presence, status, B-rep set) and its vertexuse's vertex/face gap.
 void put_eu_state(std::vector<double>& o, Graph& g, SmEdgeuse* p)
 {
@@ -876,7 +878,7 @@ void put_eu_state(std::vector<double>& o, Graph& g, SmEdgeuse* p)
     }
     o.push_back(1.0);
     SmBSplineCurve* uv = p->*EuPeek::uv();
-    put_curve_id(o, uv);
+    sc_trim_curve::put_trim_curve(o, uv);
     o.push_back(uv ? (double)g.find(6, uv->GetOwner()) : -1.0);
     SmDropCurveFail* fail = p->*EuPeek::fail();
     o.push_back(fail ? 1.0 : 0.0);
