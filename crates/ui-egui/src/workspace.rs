@@ -81,6 +81,13 @@ pub fn grouped_commands<'a>(tab: &str, panel: &str, commands: &[&'a CommandSpec]
     out
 }
 
+/// The ids of a panel's commands that are in none of its groups: [`grouped_commands`] puts them
+/// last, without a heading.
+pub fn ungrouped(tab: &str, panel: &str, commands: &[&CommandSpec]) -> Vec<&'static str> {
+    let groups = groups(tab, panel);
+    commands.iter().map(|c| c.id).filter(|id| !groups.iter().any(|g| g.ids.contains(id))).collect()
+}
+
 pub struct Section {
     pub tab: &'static str,
     pub panel: &'static str,

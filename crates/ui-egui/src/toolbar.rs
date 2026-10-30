@@ -1772,7 +1772,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 ui.label(egui::RichText::new(crate::i18n::tr_label("Not available yet")).color(t.text_dim));
                             }
                             if sketch_create && app.preferences.ribbon_icon_grid && !cmds.is_empty() {
-                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds));
+                                let action = dropdown_grid(app, ui, &tab, &sketch_create_grouped(&cmds), &[]);
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
                                 return;
                             }
@@ -1786,7 +1786,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                             let grouped = crate::workspace::grouped_commands(&tab, panel, &cmds);
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
-                                let action = dropdown_grid(app, ui, &tab, &grouped);
+                                let action = dropdown_grid(app, ui, &tab, &grouped, &crate::workspace::ungrouped(&tab, panel, &cmds));
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
                                 return;
                             }
@@ -2272,20 +2272,24 @@ struct GridLayout {
 /// groups side by side, each heading over a column of its icons, [`GROUP_COLUMNS`] across (more
 /// for a group too big for three rows), when that fits in `room` (wide). Any other menu, or one
 /// too wide for the window, fills rows: [`GRID_COLUMNS`] across, more when that would take over
-/// three rows, fewer when the window is narrower; a heading starts a new row.
-fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)], room: f32) -> GridLayout {
+/// three rows, fewer when the window is narrower; a heading starts a new row. `loose` names the
+/// commands in no group (Model › Modify's Delete): they stand apart after the groups, without a
+/// heading, so they stay put when a group is left out (`ribbon_menus_skip_pinned`).
+fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)], loose: &[&str], room: f32) -> GridLayout {
     let mut groups: Vec<(Option<&'static str>, Vec<usize>)> = Vec::new();
-    for (i, (heading, _)) in grouped.iter().enumerate() {
-        if heading.is_some() || groups.is_empty() {
+    for (i, (heading, c)) in grouped.iter().enumerate() {
+        let after_a_group = groups.last().is_some_and(|(h, _)| h.is_some());
+        if heading.is_some() || groups.is_empty() || (after_a_group && loose.contains(&c.id)) {
             groups.push((*heading, Vec::new()));
         }
         if let Some((_, items)) = groups.last_mut() {
             items.push(i);
         }
     }
-    let group_columns = |n: usize| n.div_ceil(GRID_ROWS).max(GROUP_COLUMNS);
+    // A heading needs two icons' width; loose commands only as many columns as they fill.
+    let group_columns = |heading: Option<&str>, n: usize| n.div_ceil(GRID_ROWS).max(if heading.is_some() { GROUP_COLUMNS } else { 1 });
     let headed = groups.iter().filter(|(h, _)| h.is_some()).count();
-    let side_columns: usize = groups.iter().map(|(_, items)| group_columns(items.len())).sum();
+    let side_columns: usize = groups.iter().map(|(h, items)| group_columns(*h, items.len())).sum();
     let side_by_side = headed >= 2 && side_columns as f32 * GRID_CELL <= room;
     let mut cells = vec![(Rect::NOTHING, (0, 0)); grouped.len()];
     let mut headings = Vec::new();
@@ -2294,7 +2298,7 @@ fn grid_layout(grouped: &[(Option<&'static str>, &'static solidcraft_engine::Com
     let size = if side_by_side {
         let (mut first_column, mut rows) = (0, 0);
         for (g, (heading, items)) in groups.iter().enumerate() {
-            let columns = group_columns(items.len());
+            let columns = group_columns(*heading, items.len());
             let x = first_column as f32 * GRID_CELL;
             if g > 0 {
                 separators.push(x);
@@ -2411,10 +2415,11 @@ fn dropdown_grid(
     ui: &mut egui::Ui,
     tab: &str,
     grouped: &[(Option<&'static str>, &'static solidcraft_engine::CommandSpec)],
+    loose: &[&str],
 ) -> Option<(&'static str, RowAction)> {
     // Wide enough for groups side by side, short of the window's edge.
     let room = ui.ctx().content_rect().right() - ui.cursor().left() - 24.0;
-    let layout = grid_layout(grouped, room);
+    let layout = grid_layout(grouped, loose, room);
     let width = layout.size.x.max(200.0);
     // A narrow grid sits in the middle of the drop-down's least width.
     let inset = ((width - layout.size.x) / 2.0).max(0.0);
@@ -3885,12 +3890,12 @@ mod dropdown_tests {
         ];
         // Too narrow for the groups side by side (two icons wide): rows as wide as the window, a
         // heading starting a row.
-        let rows = grid_layout(&grouped, 100.0);
+        let rows = grid_layout(&grouped, &[], 100.0);
         let at = |l: &GridLayout| l.cells.iter().map(|(_, at)| *at).collect::<Vec<_>>();
         assert_eq!(at(&rows), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (3, 0), (3, 1)]);
         assert_eq!(rows.headings.len(), 2);
         // Room enough: each group a column of two under its heading, the groups side by side.
-        let side = grid_layout(&grouped, 1000.0);
+        let side = grid_layout(&grouped, &[], 1000.0);
         assert_eq!(at(&side), [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (0, 2), (0, 3)]);
         let headings: Vec<_> = side.headings.iter().map(|(p, _, h)| (p.x, *h)).collect();
         assert_eq!(headings, [(0.0, "Primitives"), (2.0 * GRID_CELL, "Other")]);
@@ -3900,7 +3905,7 @@ mod dropdown_tests {
         assert!(side.cells.iter().all(|(r, _)| r.top() >= GRID_HEADING), "icons below the headings");
         // A menu without groups keeps its rows of five.
         let plain: Vec<_> = grouped.iter().map(|(_, c)| (None, *c)).collect();
-        assert_eq!(at(&grid_layout(&plain, 1000.0)), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1)]);
+        assert_eq!(at(&grid_layout(&plain, &[], 1000.0)), [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0), (1, 1)]);
         let cells = at(&side);
         // `solid.pipe` (index 4) is disabled: `enabled` holds the others.
         let enabled = [0, 1, 2, 3, 5, 6];
@@ -3915,6 +3920,31 @@ mod dropdown_tests {
         assert_eq!(step(Some(5), GridKey::Up), Some(3), "from the first row Up wraps to the last, nearest column");
         assert_eq!(step(Some(1), GridKey::Up), Some(3));
         assert_eq!(grid_step(&cells, &[], None, GridKey::Down), None);
+    }
+
+    /// A command in no group (Model › Modify's Delete) stands apart after the groups, without a
+    /// heading: leaving out a pinned group (Specialise's Convert to Sheet Metal) must not move it
+    /// under the group before (Bodies) (#4739).
+    #[test]
+    fn a_command_in_no_group_stays_apart_when_a_group_is_left_out() {
+        let specs = solidcraft_engine::command_specs();
+        let (cmds, _) = crate::workspace::layout("MODEL", "MODIFY", &specs).unwrap();
+        let loose = crate::workspace::ungrouped("MODEL", "MODIFY", &cmds);
+        assert_eq!(loose, ["timeline.delete"]);
+        let column_of = |cmds: &[&'static solidcraft_engine::CommandSpec], id: &str| {
+            let grouped = crate::workspace::grouped_commands("MODEL", "MODIFY", cmds);
+            let layout = grid_layout(&grouped, &loose, 4000.0);
+            let x = |id: &str| grouped.iter().position(|(_, c)| c.id == id).and_then(|i| layout.cells.get(i)).map(|(r, _)| r.left());
+            let last_group = layout.separators.last().copied();
+            (x(id), last_group)
+        };
+        let (delete, separator) = column_of(&cmds, "timeline.delete");
+        assert_eq!(delete, separator, "Delete in a column of its own after Specialise");
+        let skipped = skip_on_ribbon(cmds.clone(), &["sheet.convert"]);
+        let (delete, separator) = column_of(&skipped, "timeline.delete");
+        let (remove, _) = column_of(&skipped, "solid.remove");
+        assert_eq!(delete, separator, "still apart without Specialise");
+        assert!(delete > remove, "not under Bodies: {delete:?} vs {remove:?}");
     }
 
     /// Group headings sit below the drop-down's own header in the hierarchy: a smaller font than
@@ -3935,10 +3965,10 @@ mod dropdown_tests {
         for tab in tabs {
             for (panel, cmds, _) in crate::toolbar_custom::panel_lists(tab) {
                 let grouped = crate::workspace::grouped_commands(tab, panel, &cmds);
-                let layout = grid_layout(&grouped, 4000.0);
+                let layout = grid_layout(&grouped, &crate::workspace::ungrouped(tab, panel, &cmds), 4000.0);
                 assert!(rows(&layout) <= GRID_ROWS, "{tab} {panel}: {} rows", rows(&layout));
                 if tab == "SKETCH" && panel == "CREATE" {
-                    let families = grid_layout(&sketch_create_grouped(&cmds), 4000.0);
+                    let families = grid_layout(&sketch_create_grouped(&cmds), &[], 4000.0);
                     assert!(rows(&families) <= GRID_ROWS, "Sketch › Create families: {} rows", rows(&families));
                 }
             }
@@ -3946,10 +3976,10 @@ mod dropdown_tests {
         // A window too narrow for the width wraps into more rows instead of running off it.
         let c = |id| solidcraft_engine::find_command(id).unwrap();
         let many: Vec<_> = solidcraft_engine::command_specs().into_iter().take(30).map(|c| (None, c)).collect();
-        let narrow = grid_layout(&many, 4.0 * GRID_CELL);
+        let narrow = grid_layout(&many, &[], 4.0 * GRID_CELL);
         assert!(narrow.size.x <= 4.0 * GRID_CELL && rows(&narrow) > GRID_ROWS);
         let few = [(None, c("solid.box")), (None, c("solid.sphere"))];
-        assert_eq!(grid_layout(&few, 4000.0).size, vec2(2.0 * GRID_CELL, GRID_CELL), "a small menu is one row");
+        assert_eq!(grid_layout(&few, &[], 4000.0).size, vec2(2.0 * GRID_CELL, GRID_CELL), "a small menu is one row");
     }
 
     /// With `ribbon_icon_grid` on, a panel's drop-down shows the same commands as its list, as
