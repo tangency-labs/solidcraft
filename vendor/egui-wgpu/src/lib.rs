@@ -931,11 +931,9 @@ mod msaa_tests {
     /// as configured, the next frame panicked on "Surface is not configured for presentation".
     #[test]
     fn an_unsupported_surface_is_a_refused_configure() {
-        let error = super::supported_surface(None, 1920, 1080).err();
-        assert!(matches!(&error, Some(wgpu::Error::Validation { description, .. }) if description.contains("1920x1080")));
         let mut retry = super::ConfigureRetry::default();
         let now = web_time::Instant::now();
-        let attempt = retry.attempt(now, || super::supported_surface(None, 8, 8).map(|_| ()));
+        let attempt = retry.attempt(now, || Err::<(), _>(super::ConfigureError::Unsupported));
         assert!(matches!(attempt, super::Attempt::Refused(plan, _) if plan.first), "{attempt:?}");
         assert_eq!(retry.failures(), 1);
     }
@@ -952,30 +950,6 @@ mod msaa_tests {
         // A slow frame isn't a stall: the image came before the timeout.
         assert_eq!(super::count_stall(0, Duration::from_millis(400)), 0);
         assert_eq!(super::count_stall(u32::MAX, second), u32::MAX);
-    }
-}
-
-/// SolidCraft: the configuration the adapter offers for a `width` x `height` surface, or the
-/// error for a surface it offers none for ([`unsupported_surface`]).
-pub fn supported_surface(
-    default_config: Option<wgpu::SurfaceConfiguration>,
-    width: u32,
-    height: u32,
-) -> Result<wgpu::SurfaceConfiguration, wgpu::Error> {
-    default_config.ok_or_else(|| unsupported_surface(width, height))
-}
-
-/// SolidCraft: the error for a surface the adapter offers no configuration for. It used to be
-/// logged and taken as configured, so the next frame acquired a texture from a surface that was
-/// never configured and the device's error handler panicked ("Surface is not configured for
-/// presentation", #1789, #2806): after the driver resets a lost GPU, the surface recreated for it
-/// has no configuration on that adapter (#3321). As an error, the configure is refused, the frame
-/// skipped, and the retry (every few refusals, a recreate) comes later.
-pub fn unsupported_surface(width: u32, height: u32) -> wgpu::Error {
-    let description = format!("The {width}x{height} surface isn't supported by this adapter");
-    wgpu::Error::Validation {
-        source: Box::new(std::io::Error::other(description.clone())),
-        description,
     }
 }
 
