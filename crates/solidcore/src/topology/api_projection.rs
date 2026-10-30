@@ -282,7 +282,7 @@ pub fn project_curve_onto_brep(
 
     // The kernel resets its output array. Keep caller-owned curves out of it.
     // (`CreateParallelProjectionCurves` takes the curve as an SmCurve)
-    let curve = Curve::from(curve.clone());
+    let curve = Curve::from(curve.clone_exact());
     let projected = create_parallel_projection_curves(
         k,
         brep,
