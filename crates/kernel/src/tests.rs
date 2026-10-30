@@ -2327,7 +2327,11 @@ fn tight_bend_counts() {
     ];
     let b = sweep(&Plane::XY, &region, &path).unwrap();
     let m = measure(&b).unwrap().merged;
-    assert_eq!((m.faces, m.edges, m.vertices), (5, 6, 4), "{m:?}");
+    // Two caps and a face per path segment. The circle starts (one closed arc) at (5, 0), which
+    // runs up the first straight to (5, 0, 20) on the bend's axis: the turn leaves it there, so
+    // the bend has no seam, and the second straight's seam runs on from it to (25, 0, 20). Edges:
+    // the four circles and the two straights' seams; vertices: the seams' ends.
+    assert_eq!((m.faces, m.edges, m.vertices), (5, 6, 3), "{m:?}");
 }
 
 #[test]
@@ -2752,3 +2756,4 @@ fn a_box_cut_round_a_small_hole_of_a_long_plate_keeps_the_hole() {
         }
     }
 }
+
