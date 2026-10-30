@@ -2756,4 +2756,3 @@ fn a_box_cut_round_a_small_hole_of_a_long_plate_keeps_the_hole() {
         }
     }
 }
-
