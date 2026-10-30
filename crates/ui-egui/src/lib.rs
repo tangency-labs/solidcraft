@@ -741,6 +741,8 @@ pub struct SolveApp {
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
+    /// A click that came in the same frame as typing before it, held for the next frame.
+    held_click: Vec<egui::Event>,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Control requests that change the design, held while a file loads or an agent's design
     /// change computes.
@@ -927,6 +929,7 @@ impl SolveApp {
             frame_rate: frame_rate::FrameRate::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
+            held_click: Vec::new(),
             control_rx: None,
             agent_chat: Default::default(),
             ai_connect: Default::default(),
@@ -2991,7 +2994,7 @@ impl SolveApp {
         self.return_from_extrude_view();
         agent_cursor::step(self, ctx);
         browser::eye_drag_frame(self, ctx);
-        if !self.synthetic.is_empty() {
+        if !self.synthetic.is_empty() || !self.held_click.is_empty() {
             ctx.request_repaint();
         }
         issue_report::tick(self, ctx);
@@ -3032,7 +3035,25 @@ impl SolveApp {
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         self.synthetic_input(raw);
         finite_input(raw);
+        self.hold_click_after_typing(raw);
         issue_report::hold_input(self, raw);
+    }
+
+    /// A pointer button after typing in the same frame (a slow frame) waits for the next frame,
+    /// with the events after it. egui 0.37 drops a field's focus on a click elsewhere before the
+    /// field reads the frame's typing, which lost what was typed.
+    fn hold_click_after_typing(&mut self, raw: &mut egui::RawInput) {
+        if !self.held_click.is_empty() {
+            let mut events = std::mem::take(&mut self.held_click);
+            events.append(&mut raw.events);
+            raw.events = events;
+        }
+        let button = raw.events.iter().position(|e| matches!(e, egui::Event::PointerButton { .. }));
+        if let Some(i) = button
+            && raw.events[..i].iter().any(issue_report::typing)
+        {
+            self.held_click = raw.events.split_off(i);
+        }
     }
 
     /// Inject synthetic events (one pointer event per frame).

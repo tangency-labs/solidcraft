@@ -809,7 +809,7 @@ pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
 }
 
 /// What [`hold_input`] keeps for the form.
-fn typing(event: &egui::Event) -> bool {
+pub(crate) fn typing(event: &egui::Event) -> bool {
     matches!(
         event,
         egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
@@ -1262,23 +1262,15 @@ mod tests {
                 let [x, y] = h.widget("Open GitHub issue form").unwrap();
                 let pos = egui::pos2(x as f32, y as f32);
                 let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
-                let raw = egui::RawInput {
-                    screen_rect: Some(h.ctx.content_rect()),
-                    focused: true,
-                    events: vec![
-                        egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
-                        egui::Event::Paste("Latest reviewed content".into()),
-                        egui::Event::PointerMoved(pos),
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
-                    ],
-                    ..Default::default()
-                };
-                let app = &mut h.app;
-                let mut output = h.ctx.run_ui(raw, |ui| {
-                    app.logic(ui.ctx());
-                    app.ui(ui);
-                });
+                h.frame_with(vec![
+                    egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+                    egui::Event::Paste("Latest reviewed content".into()),
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+                ]);
+                // The click waits one frame for the typing before it.
+                h.frame();
                 let draft = h.app.issue_report.draft.as_ref().unwrap();
                 let edited = match field {
                     "issue_report_body" => &draft.description,
@@ -1291,13 +1283,12 @@ mod tests {
                 let body = draft.report_body();
                 let (url, copy_needed) = draft_url(&draft.report_title(), &body);
                 assert!(
-                    output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
-                    "handoff must use this frame's edits: {field}, clipboard={clipboard}"
+                    h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
+                    "handoff must use the click frame's edits: {field}, clipboard={clipboard}"
                 );
                 if copy_needed {
-                    assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
+                    assert!(h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
                 }
-                output.textures_delta.clear();
                 assert!(draft.opened_github && !draft.missing_description);
             }
         }
