@@ -9,9 +9,11 @@ use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors};
 fn schemas_and_the_key_check_agree() {
     let keys = [
         "chord_mm",
+        "decimals",
         "display_style",
         "hide",
         "max_error_mm",
+        "measure",
         "position_mm",
         "reference_hides_model",
         "reference_shown_percent",
@@ -21,6 +23,7 @@ fn schemas_and_the_key_check_agree() {
         "sheet",
         "source",
         "tangent_edges",
+        "units",
         "view",
     ];
     assert_keys(input_schema_for::<SnapshotParams>(), &keys);
@@ -72,8 +75,8 @@ fn the_contract_lists_the_view_settings() {
     let settings = serde_json::to_value(ViewSettings { scale: "1:2".parse().ok(), ..ViewSettings::default() }).unwrap_or_default();
     let mut theirs: Vec<String> = settings.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
     // Beside a view's settings, the request's own: where it goes, its page, its lines' chord and
-    // accuracy check, whether it wants the paper scene, and what it draws.
-    theirs.extend(["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide"].map(String::from));
+    // accuracy check, whether it wants the paper scene, what it draws, and what it reads.
+    theirs.extend(["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide", "measure", "units", "decimals"].map(String::from));
     theirs.sort();
     let schema = input_schema_for::<SnapshotParams>();
     let mut ours: Vec<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();

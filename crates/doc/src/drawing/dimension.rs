@@ -72,6 +72,27 @@ use crate::{
     DocError, Document, MAX_PLACEMENT_DEPTH, Mat, Model, ModelBody, ModelState, Result, apply_point, apply_vector, ids, map_plane, mat_inverse,
 };
 
+/// What a reading's number is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LabelKind {
+    Length,
+    Angle,
+    Radius,
+    Diameter,
+}
+
+/// What a reading says: `value`, in model millimetres or radians for an angle, in `units` with
+/// `decimals`. The one rule for a dimension's text and a view's measurements.
+pub fn reading_label(kind: LabelKind, value: f64, units: &str, decimals: u8) -> String {
+    let length = || length_number(value, units, decimals);
+    match kind {
+        LabelKind::Length => length(),
+        LabelKind::Angle => format!("{:.*}°", usize::from(decimals), value.to_degrees()),
+        LabelKind::Radius => format!("R{}", length()),
+        LabelKind::Diameter => format!("{DIAMETER_SIGN}{}", length()),
+    }
+}
+
 /// The most dimensions a drawing may have.
 pub const MAX_DIMENSIONS: usize = 10_000;
 /// The most decimals a dimension shows.
@@ -515,6 +536,13 @@ impl Document {
         }
     }
 
+    /// The radius of the circle or arc `edge` names, on `model` (this design's), as the view through
+    /// `basis` sees it face on, and whether it was found exactly.
+    pub fn radius_on_view(&self, model: &Model, edge: &ModelEdge, basis: &Plane) -> std::result::Result<(f64, bool), Status> {
+        let (radius, _, exact) = Lookup::new(self, model).whole_arc(edge, basis)?;
+        Ok((radius, exact))
+    }
+
     /// The units `drawing` (one of this design's drawings) shows its numbers in.
     pub fn drawing_units<'a>(&'a self, drawing: &'a Drawing) -> &'a str {
         match &drawing.units {
@@ -617,15 +645,15 @@ impl<'a> Lookup<'a> {
         };
         let measured = found.as_ref().map(|f| f.measured);
         let length = |m: Measured| length_number(m.value, units, d.decimals);
-        let number = |m: Measured| match d.kind {
-            DimensionKind::Angle { .. } => Some(format!("{:.*}°", usize::from(d.decimals), m.value.to_degrees())),
-            DimensionKind::Radial { diameter, .. } => {
-                let symbol = if diameter { DIAMETER_SIGN } else { "R" };
-                Some(format!("{symbol}{}", length(m)))
-            }
-            DimensionKind::Chain { .. } => None,
-            DimensionKind::Cylinder { .. } => Some(format!("{DIAMETER_SIGN}{}", length(m))),
-            _ => Some(length(m)),
+        let number = |m: Measured| {
+            let kind = match d.kind {
+                DimensionKind::Angle { .. } => LabelKind::Angle,
+                DimensionKind::Radial { diameter: false, .. } => LabelKind::Radius,
+                DimensionKind::Radial { diameter: true, .. } | DimensionKind::Cylinder { .. } => LabelKind::Diameter,
+                DimensionKind::Chain { .. } => return None,
+                _ => LabelKind::Length,
+            };
+            Some(reading_label(kind, m.value, units, d.decimals))
         };
         let (members, points, exact) = found.map_or_else(Default::default, |f| (f.members, f.points, f.exact));
         Resolved {
@@ -668,15 +696,10 @@ impl<'a> Lookup<'a> {
                 Ok(Found { measured: Measured { value, ..between }, members: Vec::new(), points, exact: exact_a && exact_b })
             }
             DimensionKind::Radial { edge, diameter } => {
-                let found = self.edges(edge)?;
-                // A split edge is several arcs, each drawn in its own place.
-                if !found.whole {
-                    return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
-                }
-                let (radius, points) = self.arc(edge, &found, basis)?;
+                let (radius, points, exact) = self.whole_arc(edge, basis)?;
                 let value = if *diameter { 2.0 * radius } else { radius };
                 let measured = Measured { value, foreshortened: false };
-                Ok(Found { measured, members: Vec::new(), points: points.to_vec(), exact: found.exact })
+                Ok(Found { measured, members: Vec::new(), points: points.to_vec(), exact })
             }
             DimensionKind::Chain { points, direction } => {
                 let found = points.iter().map(|p| self.corner(p)).collect::<std::result::Result<Vec<_>, _>>()?;
@@ -727,6 +750,17 @@ impl<'a> Lookup<'a> {
         let exact = whole && indices.iter().all(|e| names.verified(*e));
         let placed = |e: &usize| names.mesh.edges.get(*e).map(|line| (*e, line.iter().map(|p| apply_point(&frame, *p)).collect()));
         Ok(Edges { pieces: indices.iter().filter_map(placed).collect(), whole, exact, body: i, frame })
+    }
+
+    /// The circle or arc `edge` names, as [`Lookup::arc`] reads it, and whether it was found exactly.
+    /// A split edge is several arcs, each drawn in its own place.
+    fn whole_arc(&mut self, edge: &ModelEdge, basis: &Plane) -> std::result::Result<(f64, [Vec3; 4], bool), Status> {
+        let found = self.edges(edge)?;
+        if !found.whole {
+            return Err(Status::Ambiguous(edge_candidates(&edge.body, &found)));
+        }
+        let (radius, points) = self.arc(edge, &found, basis)?;
+        Ok((radius, points, found.exact))
     }
 
     /// The circle or arc that `found` (one whole edge) is, as the view through `basis` sees it face
