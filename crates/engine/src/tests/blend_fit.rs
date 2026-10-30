@@ -44,3 +44,17 @@ fn chamfer_that_fits_still_builds() {
         assert!((volume(&mut s) - want).abs() < 1e-6, "{d} mm: {} (want {want})", volume(&mut s));
     }
 }
+
+/// A rib 4 mm wide: blends of its two top edges meet in its top's middle at 2 mm and past that
+/// would cross each other. Refused as too large, naming the largest size that fits.
+#[test]
+fn blends_crossing_each_other_are_refused_naming_the_largest_that_fits() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 4, "height": 20}));
+    let edges = json!([[20, 0, 20], [20, 4, 20]]);
+    let e = s.execute("solid.chamfer", &json!({"edges": edges, "distance": 3})).unwrap_err().to_string();
+    assert!(e.contains("the largest distance that fits is 2 mm"), "{e}");
+    let e = s.execute("solid.fillet", &json!({"edges": edges, "radius": 3})).unwrap_err().to_string();
+    assert!(e.contains("the largest radius that fits is 2 mm"), "{e}");
+    assert!((volume(&mut s) - 3200.0).abs() < 1e-6, "the part stays as it was");
+}

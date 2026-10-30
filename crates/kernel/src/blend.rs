@@ -455,17 +455,31 @@ fn radius_step(radius: f64) -> f64 {
 /// The largest radius below `radius` (to three significant digits) at which the fillet of
 /// these edges works, with its result; `Ok(None)` when none does. Each candidate is a real fillet
 /// of the edges, so the radius returned is one that was built; the search runs up to 16 of
-/// them, so it is for an explicit request, not every refusal. Only a refusal as too large
+/// them (a refusal of a fillet feature's exact fit runs it to name the largest that fits, and
+/// so does `fit: reduce`). Only a refusal as too large
 /// ([`KernelError::TooLarge`]) narrows the search: any other failure of a candidate is the
 /// search's error, since a smaller radius would not be the largest that fits.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(f64, Body)>> {
     let _span = solidcraft_profile::span("kernel", "fillet_max");
-    if !(radius.is_finite() && radius > 1e-6) {
+    largest_that_fits(radius, |r| fillet(body, edges, r))
+}
+
+/// [`fillet_max`] for an equal-distance chamfer of these edges: the largest distance below
+/// `distance` (to three significant digits) at which it works, with its result.
+pub fn chamfer_max(body: &Body, edges: &[Vec3], distance: f64) -> Result<Option<(f64, Body)>> {
+    let _span = solidcraft_profile::span("kernel", "chamfer_max");
+    largest_that_fits(distance, |d| chamfer(body, edges, d))
+}
+
+/// The largest size n·q below `size` (q: three significant digits of it) at which `blend` works,
+/// by bisection over at most 16 blends; only [`KernelError::TooLarge`] narrows the search.
+fn largest_that_fits(size: f64, blend: impl Fn(f64) -> Result<Body>) -> Result<Option<(f64, Body)>> {
+    if !(size.is_finite() && size > 1e-6) {
         return Ok(None);
     }
-    let q = radius_step(radius);
-    // Radii n·q for n in [0, hi): hi is too large (it is the request, or above it), lo works.
-    let mut hi = (radius / q).ceil() as u64;
+    let q = radius_step(size);
+    // Sizes n·q for n in [0, hi): hi is too large (it is the request, or above it), lo works.
+    let mut hi = (size / q).ceil() as u64;
     let mut lo = 0u64;
     let mut best: Option<Body> = None;
     // log2(10⁴) steps reach the step size; the cap keeps a slow body from stalling.
@@ -474,7 +488,7 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(f6
             break;
         }
         let mid = lo + (hi - lo) / 2;
-        match fillet(body, edges, mid as f64 * q) {
+        match blend(mid as f64 * q) {
             Ok(b) => {
                 lo = mid;
                 best = Some(b);

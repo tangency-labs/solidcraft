@@ -390,7 +390,8 @@ pub struct SolvedSketch {
 /// A constant fillet of `edges`; with [`FilletFit::Reduce`](crate::FilletFit::Reduce), a radius too
 /// large for the geometry around them is reduced where it doesn't fit, to the largest that works
 /// for each group of edges sharing a face; the radius per edge is returned. With
-/// [`FilletFit::Taper`](crate::FilletFit::Taper) it tapers along each edge it doesn't fit.
+/// [`FilletFit::Taper`](crate::FilletFit::Taper) it tapers along each edge it doesn't fit. With
+/// the exact fit a radius too large is refused, naming the largest that fits ([`with_largest_fit`]).
 fn fillet_fitted(
     body: &kernel::Body,
     edges: &[Vec3],
@@ -398,6 +399,9 @@ fn fillet_fitted(
     fit: crate::FilletFit,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>), kernel::KernelError> {
     match kernel::fillet(body, edges, r) {
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => {
+            Err(with_largest_fit(why, "radius", || kernel::fillet_max(body, edges, r)))
+        }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used))),
@@ -405,6 +409,25 @@ fn fillet_fitted(
         },
         Err(kernel::KernelError::TooLarge(_)) if fit == crate::FilletFit::Taper => kernel::fillet_tapered(body, edges, r).map(|(b, _)| (b, None)),
         other => other.map(|b| (b, None)),
+    }
+}
+
+/// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
+/// as `search` finds it by building candidates ([`kernel::fillet_max`]): the refusal as it is
+/// when none fits or the search itself fails (a candidate failing for another reason says
+/// nothing about the size).
+fn with_largest_fit(
+    why: String,
+    size: &str,
+    search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
+) -> kernel::KernelError {
+    match search() {
+        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; the largest {size} that fits is {} mm", show_mm(largest))),
+        Ok(None) => kernel::KernelError::TooLarge(why),
+        Err(e) => {
+            log::debug!("the largest {size} that fits: {e}");
+            kernel::KernelError::TooLarge(why)
+        }
     }
 }
 
@@ -6298,7 +6321,10 @@ fn chamfer_with(
     };
     Ok(match side {
         Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
-        None => kernel::chamfer(b, edges, d)?,
+        None => match kernel::chamfer(b, edges, d) {
+            Err(kernel::KernelError::TooLarge(why)) => return Err(with_largest_fit(why, "distance", || kernel::chamfer_max(b, edges, d)).into()),
+            other => other?,
+        },
     })
 }
 
