@@ -94,7 +94,7 @@ use crate::geom::context::{Context, MarkLock, ALL_MARKS};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
-use crate::heal::stitch::p1::{DefaultStitchCallback, Stitch};
+use crate::heal::stitch::p1::{DefaultStitchCallback, Stitch, StitchCallback};
 use crate::heal::stitch::p2::MinGapRequest;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3, EFF_ZERO};
@@ -1741,16 +1741,47 @@ pub(crate) fn stitch_faces_with_context<'a>(
     faces: Option<&[Option<FaceId>]>,
     allow_spine_edges: bool,
     identity: Option<crate::query::brep::BrepIdentity<'a>>,
+    edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
+) -> Result<StitchOutcome> {
+    // StitchCallback has SelectTopologyToKeep(): pick KeepItem and DeleteItem
+    let mut callback = DefaultStitchCallback::new();
+    stitch_faces_with_callback(
+        k,
+        b,
+        xsect_tol_3d,
+        faces,
+        allow_spine_edges,
+        identity,
+        edits,
+        &mut callback,
+    )
+}
+
+/// [`stitch_faces_with_context`] with the caller's keep/delete choice for the glued
+/// pairs: the fork's `pOptCallback` argument of `SmBrep::StitchFaces`
+/// (tangency-labs/smlib@1072d1b), `SmStitchCallback`'s own choice when it is
+/// [`DefaultStitchCallback`].
+///
+/// # Errors
+///
+/// Those of [`stitch_faces`] and of `callback`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stitch_faces_with_callback<'a, C: StitchCallback>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    faces: Option<&[Option<FaceId>]>,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'a>>,
     mut edits: Option<&'a mut dyn crate::heal::stitch::p1::StitchEditContext>,
+    callback: &mut C,
 ) -> Result<StitchOutcome> {
     // lock brep bounding box, until goes out of scope
     let mut lockit = LockBrepBox::new(k, b)?;
     let b = lockit.brep();
 
-    // StitchCallback has SelectTopologyToKeep(): pick KeepItem and DeleteItem
-    let mut callback = DefaultStitchCallback::new();
-    // construct Stitch manager using default coincident keep/delete logic
-    let mut stitch = Stitch::new(&mut callback, xsect_tol_3d, true, true);
+    // construct Stitch manager using the caller's keep/delete logic for glue pairs
+    let mut stitch = Stitch::new(callback, xsect_tol_3d, true, true);
     stitch.query_identity = identity;
     stitch.edits = edits
         .as_mut()

@@ -1824,6 +1824,25 @@ pub trait FaceStitchAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Genuine missing context or stitch-operation failures.
     fn stitch_body(&mut self, k: &mut Kernel, body: O, tolerance: f64) -> Result<StitchAttempt>;
+    /// [`FaceStitchAccess::stitch_body`] keeping a fillet's own edge where a corner's
+    /// patch meets it: the fork's stitch with `SmFilletPatchStitchCallback`
+    /// (tangency-labs/smlib@1072d1b, WR-546), whose patch faces are those
+    /// `MakeFaceBrep` built on `corners`' surfaces.
+    /// # Errors
+    /// [`SolidError::Unported`] by default; as [`FaceStitchAccess::stitch_body`].
+    fn stitch_body_keeping_fillet_edges(
+        &mut self,
+        k: &mut Kernel,
+        body: O,
+        tolerance: f64,
+        corners: &[O],
+    ) -> Result<StitchAttempt> {
+        let _ = (k, body, tolerance, corners);
+        Err(SolidError::Unported {
+            upstream: "SmFilletPatchStitchCallback",
+            unit: "blend.fillet_executive_p3",
+        })
+    }
 }
 impl<O, A> FaceStitchAccess<O> for A
 where
@@ -2531,7 +2550,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             ignore(access.stitch_attribute(edge, self.edge_attribute))?;
         }
         let tolerance = access.faces_tolerance(k, fillet)?;
-        let mut attempt = access.stitch_body(k, fillet, tolerance)?;
+        // Opt-in, not upstream (`fixes.fillet_patch_keeps_fillet_edges`, WR-546, #1377;
+        // tangency-labs/smlib@1072d1b): where a corner's patch meets a fillet, the
+        // fillet's edge is kept (`SmFilletPatchStitchCallback`).
+        let mut attempt = if k.fixes.fillet_patch_keeps_fillet_edges {
+            access.stitch_body_keeping_fillet_edges(k, fillet, tolerance, &self.corners)?
+        } else {
+            access.stitch_body(k, fillet, tolerance)?
+        };
         if let Some(error) = attempt.status.take() {
             if error.is_unported() {
                 return Err(error);
