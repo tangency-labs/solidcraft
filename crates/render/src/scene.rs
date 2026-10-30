@@ -43,6 +43,11 @@ impl SceneMesh {
         SceneMesh { mesh, color, face_colors: Vec::new(), opacity: 1.0, closed: true, hatch: Hatch(0) }
     }
 
+    /// An open sheet in `color` (not [`SceneMesh::closed`]).
+    pub fn sheet(mesh: Arc<Mesh>, color: Rgb) -> SceneMesh {
+        SceneMesh { closed: false, ..SceneMesh::solid(mesh, color) }
+    }
+
     /// Is the body drawn see-through? (Its opacity is below [`SEE_THROUGH`].)
     pub fn glass(&self) -> bool {
         self.opacity < SEE_THROUGH

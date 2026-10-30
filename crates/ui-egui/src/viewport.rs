@@ -10873,6 +10873,34 @@ mod tests {
         assert!(!merged.lines.is_empty() || !merged.overlay.is_empty() || !merged.hidden.is_empty(), "the selected edge is lit");
     }
 
+    /// A surface body takes no part in a section's count of the crossings behind its cut, built on
+    /// the CPU or drawn from the body's plan; a solid does.
+    #[test]
+    fn a_surface_bodys_triangles_are_left_out_of_the_section_count() {
+        let mut s = solidcraft_engine::Session::default();
+        for (c, p) in [
+            ("sketch.create", json!({"plane": "XY", "name": "L"})),
+            ("sketch.line", json!({"points": [[-30, -5], [-12, -5]], "ids": ["w"]})),
+            ("sketch.finish", json!({})),
+            ("surface.extrude", json!({"sketch": "L", "curves": ["w"], "distance": "20 mm", "name": "Sheet", "body_name": "Sheet"})),
+            ("solid.box", json!({"length": 15, "width": 10, "height": 20, "corner": [-45, -35, 0], "operation": "new_body"})),
+        ] {
+            s.execute(c, &p).unwrap();
+        }
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let st = app.session.world_state().unwrap();
+        let sheet = st.bodies.iter().find(|b| b.is_surface()).expect("a surface body").mesh().triangles.len();
+        let solid = st.bodies.iter().find(|b| !b.is_surface()).expect("a solid body").mesh().triangles.len();
+        let sc = build_scene(&app);
+        let runs = |r: &[std::ops::Range<u32>]| r.iter().map(|r| r.len()).sum::<usize>();
+        let (opaque, closed) = sc.blocks.iter().fold((0, 0), |(o, c), b| (o + runs(&b.bytes.opaque), c + runs(&b.bytes.closed)));
+        assert_eq!((opaque, closed), (3 * (sheet + solid), 3 * solid), "the solid's vertices, and only those, are counted");
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+        let sc = build_scene(&app);
+        let planned: Vec<(bool, usize)> = sc.planned.iter().map(|p| (p.closed, p.face_colors.len())).collect();
+        assert_eq!(planned, [(false, 1), (true, 6)], "the sheet's plan is open, the box's is not");
+    }
+
     /// A whole highlighted body is lit from the model's own triangles, not by copying every one
     /// of them onto the CPU (a whole assembly lit that way took most of a second a frame): from
     /// its display plan where the model draws one, else from its vertices in the model scene's
