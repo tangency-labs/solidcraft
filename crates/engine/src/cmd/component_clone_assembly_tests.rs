@@ -25,6 +25,7 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         exprs: Default::default(),
         captured: None,
         constraint: None,
+        dynamics: Vec::new(),
     }
 }
 

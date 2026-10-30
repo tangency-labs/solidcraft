@@ -946,6 +946,7 @@ mod tests {
             exprs: Default::default(),
             captured: None,
             constraint: None,
+            dynamics: Vec::new(),
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence {
             id,

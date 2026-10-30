@@ -13,7 +13,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use solidcore_record::Vec3;
-use solidcraft_doc::joints::{self, Joint, JointKind};
+use solidcraft_doc::joints::{self, Joint, JointDynamics, JointKind};
 use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::Mesh;
 
@@ -96,6 +96,8 @@ pub struct UrdfJoint {
     pub limit: Option<(f64, f64)>,
     /// The SolidCraft joint and the index of its value this step follows.
     pub source: Option<(u64, usize)>,
+    /// What the design saves for that value, without what a hand-edited file could hold.
+    pub dynamics: JointDynamics,
 }
 
 impl UrdfModel {
@@ -336,7 +338,17 @@ impl<'a> Tree<'a> {
     fn fixed(&mut self, parent: usize, child: usize, origin: Mat) {
         let n = self.model.links.get(child).map(|l| format!("{}_fixed", l.name)).unwrap_or_default();
         let name = self.names.take(&n);
-        self.model.joints.push(UrdfJoint { name, parent, child, origin, step: Step::Fixed, axis: Vec3::Z, limit: None, source: None });
+        self.model.joints.push(UrdfJoint {
+            name,
+            parent,
+            child,
+            origin,
+            step: Step::Fixed,
+            axis: Vec3::Z,
+            limit: None,
+            source: None,
+            dynamics: JointDynamics::default(),
+        });
     }
 
     /// The link an occurrence fixed in place hangs on, and its frame: `base_link` for the top
@@ -425,6 +437,7 @@ impl<'a> Tree<'a> {
                 axis: Vec3::Z,
                 limit: None,
                 source: None,
+                dynamics: JointDynamics::default(),
             });
             return Some(());
         }
@@ -457,6 +470,11 @@ impl<'a> Tree<'a> {
                 (_, l) => l,
             };
             let name = if k == last { joint_name.clone() } else { self.names.take(&format!("{}_dof{}", j.name, k + 1)) };
+            let saved = j.dynamics.get(dof).copied().flatten().unwrap_or_default();
+            let dynamics = saved.sane();
+            if dynamics != saved {
+                self.warnings.push(format!("joint `{}`: dynamics that are not usable numbers are ignored", j.name));
+            }
             self.model.joints.push(UrdfJoint {
                 name,
                 parent: from,
@@ -466,6 +484,7 @@ impl<'a> Tree<'a> {
                 axis,
                 limit,
                 source: Some((j.id, dof)),
+                dynamics,
             });
             from = to;
         }
@@ -605,10 +624,20 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     }
     tree.copies(&jointed);
 
-    let moving = tree.model.joints.iter().any(|j| j.step != Step::Fixed);
-    if moving && (options.effort.is_none() || options.velocity.is_none()) {
+    let on_fallback: Vec<&str> = tree
+        .model
+        .joints
+        .iter()
+        .filter(|j| {
+            j.step != Step::Fixed
+                && ((j.dynamics.effort.is_none() && options.effort.is_none()) || (j.dynamics.velocity.is_none() && options.velocity.is_none()))
+        })
+        .map(|j| j.name.as_str())
+        .collect();
+    if !on_fallback.is_empty() {
         tree.warnings.push(format!(
-            "joint effort and velocity limits are not given: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (pass effort and velocity)"
+            "joint effort and velocity limits are not given for {}: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (use joint.dynamics, or pass effort and velocity)",
+            on_fallback.join(", ")
         ));
     }
     out.xml = write_xml(&tree.model, &robot, options);
@@ -705,8 +734,8 @@ fn origin_xml(m: &Mat) -> String {
 }
 
 fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
-    let effort = options.effort.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_EFFORT);
-    let velocity = options.velocity.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_VELOCITY);
+    let fallback_effort = options.effort.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_EFFORT);
+    let fallback_velocity = options.velocity.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_VELOCITY);
     let prefix = attr(&options.mesh_prefix);
     let mut s = String::from("<?xml version=\"1.0\"?>\n<!-- Exported by SolidCraft; units: m, kg, rad -->\n");
     s += &format!("<robot name=\"{}\">\n", attr(name));
@@ -767,6 +796,8 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
         if j.step != Step::Fixed {
             s += &format!("    <axis xyz=\"{}\"/>\n", triple(j.axis));
             let scale = if j.step == Step::Prismatic { 1e-3 } else { 1.0 };
+            let effort = j.dynamics.effort.unwrap_or(fallback_effort);
+            let velocity = j.dynamics.velocity.unwrap_or(fallback_velocity);
             match j.limit {
                 Some((lo, hi)) => {
                     s += &format!(
@@ -778,6 +809,16 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
                     );
                 }
                 None => s += &format!("    <limit effort=\"{}\" velocity=\"{}\"/>\n", num(effort), num(velocity)),
+            }
+            if j.dynamics.damping.is_some() || j.dynamics.friction.is_some() {
+                s += "    <dynamics";
+                if let Some(x) = j.dynamics.damping {
+                    s += &format!(" damping=\"{}\"", num(x));
+                }
+                if let Some(x) = j.dynamics.friction {
+                    s += &format!(" friction=\"{}\"", num(x));
+                }
+                s += "/>\n";
             }
         }
         s += "  </joint>\n";
@@ -852,6 +893,7 @@ mod tests {
                 axis: -Vec3::Y,
                 limit: Some((-1.0, 2.0)),
                 source: None,
+                dynamics: JointDynamics::default(),
             });
         }
         let xml = write_xml(&model, "r", &UrdfOptions::default());

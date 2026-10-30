@@ -95,6 +95,7 @@ mod tests {
             exprs: Default::default(),
             captured: None,
             constraint: None,
+            dynamics: Vec::new(),
         }
     }
 

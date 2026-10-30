@@ -2096,3 +2096,51 @@ fn measure_still_takes_sketch_curve_picks() {
     d.pick(&app.session, sketch_sel.clone());
     assert_eq!(d.inputs[0].items, vec![sketch_sel], "Measure takes a sketch curve");
 }
+
+#[test]
+fn the_edit_dialog_sets_and_shows_a_joints_dynamics() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.dynamics[0][0] = "12.5".into();
+        f.dynamics[0][2] = "0.1".into();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let saved = app.session.doc.assembly.joints[0].dynamics[0].unwrap();
+    assert_eq!((saved.effort, saved.damping), (Some(12.5), Some(0.1)));
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        assert_eq!(f.dynamics[0][0], "12.5");
+        f.dynamics[0] = Default::default();
+    }
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert!(app.session.doc.assembly.joints[0].dynamics.is_empty());
+}
+
+#[test]
+fn a_mistyped_dynamics_value_is_refused_with_a_message() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.dynamics[0][0] = "lots".into();
+    }
+    assert!(apply_commands(&app, &d).is_err());
+}
