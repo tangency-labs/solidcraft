@@ -611,3 +611,25 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
     assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");
 }
+
+#[test]
+fn project_dialog_labels_a_straight_line_of_another_sketch_as_that_and_axis_inputs_as_an_axis() {
+    let mut h = fixture();
+    let other = h.app.session.active_sketch.unwrap();
+    let id = h.app.session.doc.sketch(other).unwrap().curves[0].id.clone();
+    h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap();
+    h.frames(3);
+    let line = Hit::SketchCurve { sketch: other, id: id.clone(), straight: true, point: Vec3::ZERO };
+
+    // Project accepts lines of other sketches, so the pick is one (#9207).
+    h.app.start("sketch.project");
+    h.frames(4);
+    let d = h.app.dialog.as_ref().expect("Project opens its dialog");
+    assert_eq!(d.inputs[0].accept, super::PROJECT_GEOMETRY);
+    assert_eq!(d.candidate_on(&h.app.session, &line, None), Some(Sel::ExternalSketchCurve { sketch: other, id: id.clone() }));
+
+    // An axis input, which does not accept lines of other sketches, still takes it as an axis.
+    let mut revolve = Dialog::for_command(&h.app, "solid.revolve").unwrap();
+    revolve.active = 1;
+    assert_eq!(revolve.candidate_on(&h.app.session, &line, None), Some(Sel::SketchCurve { id, sketch: Some(other) }));
+}
