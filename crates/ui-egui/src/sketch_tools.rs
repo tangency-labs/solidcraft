@@ -471,6 +471,18 @@ pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec
     app.session.undo = history;
 }
 
+/// The point of `poly` nearest `p`; None for fewer than two points.
+fn nearest_on_polyline(poly: &[Vec2], p: Vec2) -> Option<Vec2> {
+    poly.windows(2)
+        .map(|w| {
+            let (a, b) = (w[0], w[1]);
+            let ab = b - a;
+            let t = if ab.len2() > 0.0 { ((p - a).dot(ab) / ab.len2()).clamp(0.0, 1.0) } else { 0.0 };
+            a + ab * t
+        })
+        .min_by(|x, y| x.dist(p).total_cmp(&y.dist(p)))
+}
+
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a crossing of
 /// two curves, a line's midpoint, or alignment (horizontal/vertical) with the previous point
 /// of the tool. None: nothing near, use the grid.
@@ -563,13 +575,20 @@ pub fn refine_snap(
         best = Some((i.dist, i.label(), i.at));
         mid_of = i.arg;
     }
-    // On a curve (coincident with it).
+    // On a curve (coincident with it). A spline, ellipse or conic has no exact shape here: the
+    // nearest point of the polyline it is drawn with, which the click's point-on-curve
+    // constraint then puts on the curve itself (#9321).
     if !mid_only && best.is_none() {
         for (i, c) in sk.curves.iter().enumerate() {
-            let Some(sh) = sk.shape(i) else { continue };
-            let d = sh.dist(lp);
+            let (d, q) = match sk.shape(i) {
+                Some(sh) => (sh.dist(lp), sh.project(lp)),
+                None if c.kind.is_freeform() => {
+                    let Some(q) = nearest_on_polyline(&sk.polyline(i), lp) else { continue };
+                    (q.dist(lp), q)
+                }
+                None => continue,
+            };
             if d < tol * 0.8 && best.is_none_or(|x| d < x.0) {
-                let q = sh.project(lp);
                 best = Some((d, "On", q));
                 mid_of = Some(format!("{}:{},{}", c.id, q.x, q.y));
             }

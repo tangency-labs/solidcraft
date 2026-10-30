@@ -361,6 +361,56 @@ fn place_from_the_origin_fully_constrains_new_shapes() {
     assert_eq!(draw(false, true), (0, 4), "placing needs Dimension new shapes");
 }
 
+/// A line ended on a spline, between its fit points (#9321): the cursor snaps On the spline as it
+/// does on a line or a circle, and the click ties the end to the spline.
+#[test]
+fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.spline.fit_point", json!({"points": [[-30, 0], [-10, 18], [10, 6], [30, 20]]})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let (spline, on) = {
+        let st = h.app.session.world_state();
+        let sk = &st.sketch(sid).unwrap().sketch;
+        let ci = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Spline { .. })).unwrap();
+        let poly = sk.polyline(ci);
+        // Partway along the spline, away from its fit points.
+        let w = poly.len() * 3 / 8;
+        (ci, (poly[w] + poly[w + 1]) * 0.5)
+    };
+    h.step(&json!({"start": "sketch.line"})).unwrap();
+    h.step(&json!({"click": {"world": [0, -25, 0]}})).unwrap();
+    h.step(&json!({"move": {"world": [on.x, on.y, 0]}})).unwrap();
+    let hover = h.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    assert!(hover.1.as_deref().is_some_and(|s| s.starts_with("on:")), "{hover:?}");
+    h.step(&json!({"click": {"world": [on.x, on.y, 0]}})).unwrap();
+    let st = h.app.session.world_state();
+    let sk = &st.sketch(sid).unwrap().sketch;
+    let b = sk
+        .curves
+        .iter()
+        .find_map(|c| if let CurveKind::Line { b, .. } = c.kind { Some(b) } else { None })
+        .unwrap_or_else(|| panic!("no line, {:?}", h.app.status));
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == b && c == spline)),
+        "the end is not tied to the spline: {:?}",
+        sk.constraints
+    );
+    let end = sk.point(b).unwrap();
+    let to_segment = |a: solidcraft_engine::geom::Vec2, b: solidcraft_engine::geom::Vec2| {
+        let ab = b - a;
+        let t = ((end - a).dot(ab) / ab.len2().max(1e-300)).clamp(0.0, 1.0);
+        (a + ab * t).dist(end)
+    };
+    // The constraint puts the end on the spline itself; the polyline it is drawn with lies within
+    // a few µm of it between its samples.
+    let off = sk.polyline(spline).windows(2).map(|w| to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
+    assert!(off < 0.02, "the end is {off} mm off the spline at {end:?}");
+    assert!(end.dist(on) < 0.5, "the end moved from the cursor {on:?} to {end:?}");
+}
+
 /// A line from a circle's centre to the circle, ending a little off the quadrant: the preview
 /// snaps to horizontal or vertical, so the click must place exactly that line, on the circle.
 #[test]
