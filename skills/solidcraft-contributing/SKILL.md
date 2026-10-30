@@ -162,6 +162,8 @@ the duplicate. Do not try to claim by editing files.
 
 Explain the intended behaviour, then pick the skill for the area from AGENTS.md's table and
 follow it (never crash, commands, layering, clean-room rules and tests all live there).
+Before editing ACP, MCP or authentication code, preserve any existing local changes and inspect
+the current token writer and lookup path.
 Put synthetic regression tests in the existing test module for the affected area;
 prove a bug test fails before the fix and passes after it.
 
