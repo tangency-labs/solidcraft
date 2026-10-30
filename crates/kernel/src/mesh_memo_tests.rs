@@ -14,8 +14,9 @@ fn plate() -> Body {
     plate
 }
 
-/// Regions cut from a body that keeps its meshes come out as from the body itself, to the bit,
-/// and the body is meshed once for all of them.
+/// Regions cut from a body that keeps its meshes come out as from the body itself, to the bit.
+/// SMLib's booleans read the exact record and mesh neither operand, so they leave the memo
+/// empty; the body's own meshing then fills it once per tolerance and reuses it.
 #[test]
 fn regions_cut_from_a_body_keeping_its_meshes_are_unchanged() {
     let plate = plate();
@@ -35,10 +36,11 @@ fn regions_cut_from_a_body_keeping_its_meshes_are_unchanged() {
         );
     }
     let memo = kept.meshes.as_ref().unwrap();
-    assert_eq!(memo.made.lock().unwrap().len(), 1, "one tolerance, one meshing");
+    assert_eq!(memo.made.lock().unwrap().len(), 0, "a boolean meshes neither operand");
     // A mesh from the memo is the mesh made afresh.
     let (a, b) = (kept.mesh(&crate::MeshTolerance::chord(0.05)).unwrap(), plate.mesh(&crate::MeshTolerance::chord(0.05)).unwrap());
     let (a2, _) = (kept.mesh(&crate::MeshTolerance::chord(0.05)).unwrap(), ());
+    assert_eq!(memo.made.lock().unwrap().len(), 1, "one tolerance, one meshing");
     for m in [&a, &a2] {
         assert_eq!(m.triangles, b.triangles);
         assert!(

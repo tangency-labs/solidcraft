@@ -309,7 +309,10 @@ pub fn offset_origins(result: &Body, input: &Body, thickness: f64, prov: &mut Hi
 
 /// Origins of any swept tool's faces (sweep, loft, pipe; extrude and revolve too) from where
 /// they start: the face lying in the profile's plane is the start cap, a face with an edge in
-/// that plane sweeps the profile segment under the edge, and the rest are end caps.
+/// that plane sweeps the profile segment under the edge, and the rest are end caps. That holds
+/// for a tool whose every wall runs the whole path; one swept piece by piece along its path
+/// (SMLib's sweep along lines and arcs, mitred at each corner) has walls starting further on,
+/// which only the tool's own history names ([`sweep_origins`]).
 pub fn swept_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
     let size = tool.size().max(1e-9);
     let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
@@ -339,32 +342,20 @@ pub fn swept_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<
     Ok(out)
 }
 
-/// Origins of a [`crate::sweep_path`] tool's faces. Its walls come in profile order (once for
-/// smooth walls, once per station for ruled ones) followed by the start and end caps; checked
-/// against the start cap lying in the profile's plane, else found as [`swept_origins`] does.
+/// Origins of a [`crate::sweep_path`] tool's faces: the ones the sweep recorded as it built them
+/// ([`Body::history`]: the start and end caps, each wall from the profile segment it sweeps,
+/// along every piece of the path), the first of each face's; a face the tool names no origin
+/// for (or a tool without a history) found as [`swept_origins`] does.
 pub fn sweep_origins(tool: &Body, plane: &Plane, regions: &[Region2]) -> Result<Vec<FaceOrigin>> {
-    let n = tool.face_count();
-    let k = segments(regions).len();
-    let size = tool.size().max(1e-9);
-    if k > 0 && n >= 2 && (n - 2).is_multiple_of(k) {
-        let m = tool.mesh(&crate::MeshTolerance::chord(size * 2e-4))?;
-        let faces = face_tris(&m);
-        let start_flat = faces.get(n - 2).is_some_and(|f| f.tris.iter().all(|(t, _)| t.iter().all(|p| plane.height(*p).abs() <= size * 1e-6)));
-        if start_flat {
-            return Ok((0..n)
-                .map(|i| {
-                    if i + 2 == n {
-                        FaceOrigin::Cap { end: false }
-                    } else if i + 1 == n {
-                        FaceOrigin::Cap { end: true }
-                    } else {
-                        FaceOrigin::Profile { segment: i % k }
-                    }
-                })
-                .collect());
-        }
+    let recorded: Vec<Option<FaceOrigin>> = match tool.history() {
+        Some(h) if h.faces.len() == tool.face_count() => h.faces.iter().map(|f| f.origins.first().copied()).collect(),
+        _ => vec![None; tool.face_count()],
+    };
+    if recorded.iter().all(Option::is_some) {
+        return Ok(recorded.into_iter().flatten().collect());
     }
-    swept_origins(tool, plane, regions)
+    let found = swept_origins(tool, plane, regions)?;
+    Ok(recorded.into_iter().zip(found).map(|(r, f)| r.unwrap_or(f)).collect())
 }
 
 /// Replace origins on operand `operand` (a tool made by the operation) with that tool's own

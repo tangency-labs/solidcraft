@@ -484,6 +484,30 @@ mod tests {
         assert!(sweep_path(&plane, &region, &[Vec3::ZERO, Vec3::new(f64::NAN, 0.0, 0.0)]).is_err());
     }
 
+    /// A profile at a slant to its path (drawn flat, the path rising steeply from it) swept
+    /// along a polyline whose lines are shorter than the slant: each section reaches past both
+    /// mitres of its line, so each line's walls are carried on far enough past the corner for
+    /// all of it to meet the mitre. The square's centre is on the path, so the volume is the
+    /// section square to the path times the path's length, `16 cos(slant) L`; a line carried
+    /// short of a mitre leaves a notch with a face of its section in it. Every face is named.
+    #[test]
+    fn a_slanted_profile_meets_itself_at_every_mitre() {
+        use crate::history::FaceOrigin;
+        let path: Vec<Vec3> = (0..=20).map(|i| Vec3::new((f64::from(i) * 0.2).sin() * 10.0, 0.0, f64::from(i))).collect();
+        let b = sweep_path(&Plane::XY, &square(2.0), &path).unwrap();
+        let len: f64 = path.windows(2).map(|w| w[0].dist(w[1])).sum();
+        let slant = (path[1] - path[0]).normalized().unwrap().z;
+        let want = 16.0 * slant * len;
+        let v = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
+        assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+        let h = b.history().unwrap();
+        let caps = |end: bool| h.faces.iter().filter(|f| f.origins == [FaceOrigin::Cap { end }]).count();
+        assert_eq!((caps(false), caps(true)), (1, 1));
+        for (i, f) in h.faces.iter().enumerate() {
+            assert!(matches!(f.origins[..], [FaceOrigin::Profile { .. }] | [FaceOrigin::Cap { .. }]), "face {i}: {f:?}");
+        }
+    }
+
     fn square(h: f64) -> Region2 {
         Region2 { outer: Loop2::polygon(&[Vec2::new(-h, -h), Vec2::new(h, -h), Vec2::new(h, h), Vec2::new(-h, h)]), holes: Vec::new() }
     }
