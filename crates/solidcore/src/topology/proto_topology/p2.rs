@@ -1953,7 +1953,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let calling_pv = self.vd_ref(calling_vd)?.proto_vertex();
         let tol = self.raw_tolerance();
 
-        for ed in eds {
+        // (with WR-533 the upper parts of definitions split below are classified in their
+        // turn, appended to the list)
+        let mut eds = eds;
+        let mut next = 0;
+        while let Some(&ed) = eds.get(next) {
+            next += 1;
             let d = self.ed_ref(ed)?;
             let this_pe = self.pe_live(d.proto_edge())?;
             let pe = self
@@ -2015,6 +2020,61 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             if edge != Some(old_edge) {
                 continue;
             }
+
+            // Not upstream (WR-533), opt-in `boolean_splits_definition_across_split` (the
+            // fork's tangency-labs/smlib@f11d0ac): a coincident EdgeDefinition that runs
+            // across the split point (an edge along the whole of an arc that another
+            // edge's ends split twice in its middle) is split there too, with its
+            // ProtoEdge (which finds the calling ProtoVertex at that point), so each part
+            // lies on one of the two pieces of the edge. Re-pointed whole to the piece
+            // under its midpoint, its ends were not that piece's vertices, and Imprint
+            // found no vertex for them. The upper part, a new EdgeDefinition still on the
+            // old edge, is classified in its turn.
+            if k.fixes.boolean_splits_definition_across_split {
+                let split_vtx = self.vd_ref(calling_vd)?.final_vertex(which);
+                let tol_3d = xsect_tol_of(k, brep, Some(old_edge), split_vtx)?;
+                let ed_ivl = d.xsect_interval();
+                let ed_start = d.end_position(k, &*brep, true)?;
+                let ed_end = d.end_position(k, &*brep, false)?;
+                if split_pt.distance(ed_start) > tol_3d && split_pt.distance(ed_end) > tol_3d {
+                    let dropped = curve_of(brep, d.xsect_curve_3d())?.drop_point(
+                        k,
+                        &ed_ivl,
+                        split_pt,
+                        None,
+                        tol_3d,
+                        Some(ed_ivl.mid()),
+                        SolverOperation::Minimize,
+                    );
+                    let at = match dropped {
+                        Ok(drop)
+                            if drop.success
+                                && drop.distance <= tol_3d
+                                && ed_ivl.contains_value(drop.parameter, -EFF_ZERO) =>
+                        {
+                            Some(drop.parameter)
+                        }
+                        Err(e) if e.is_unported() => return Err(e),
+                        _ => None,
+                    };
+                    if let Some(at) = at {
+                        let (_, new_pe) = self.proto_edge_split(k, brep, this_pe, at)?;
+                        if let Some(new_pe) = new_pe {
+                            let upper = self
+                                .proto_edge(new_pe)
+                                .ok_or(dangling("proto edge is deleted"))?
+                                .edge_definitions()
+                                .to_vec();
+                            for part in upper {
+                                if !eds.contains(&part) {
+                                    eds.push(part);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let d = self.ed_ref(ed)?;
 
             // Found a ProtoEdge on the edge that was split: drop the midpoint of the
             // definition to both edges' curves.
@@ -3092,5 +3152,91 @@ mod tests {
         // receives the new split edge definition without error.
         assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
         assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
+    }
+
+    /// WR-533 (the fork's tangency-labs/smlib@f11d0ac): an edge definition along the
+    /// whole of an edge that is split in its middle is split there too with the opt-in,
+    /// each part on its own piece; without it the whole definition stays on the old
+    /// edge, its midpoint at the split point.
+    #[test]
+    fn update_edges_splits_a_definition_across_the_split_point() {
+        for fixed in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.boolean_splits_definition_across_split = fixed;
+            let mut geo = Geo::default();
+            geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+            let c0 = H(0, ClassObjectKind::Curve);
+            let ivl = geo.curves[0].natural_interval();
+            let (a, b, mid) = (ivl.min(), ivl.max(), ivl.mid());
+            let e_old = H(20, ClassObjectKind::Edge);
+            let e_new = H(21, ClassObjectKind::Edge);
+            geo.edge_ivl
+                .push((20, Extent1d::from_min_max(a, mid), 1e-6, 0));
+            geo.edge_ivl
+                .push((21, Extent1d::from_min_max(mid, b), 1e-6, 0));
+
+            let mut m = manager();
+            let v0 = m
+                .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            let v1 = m
+                .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            m.add_proto_vertex(v0);
+            m.add_proto_vertex(v1);
+
+            // the definition along the whole curve, on the old edge in B-rep 1
+            let mut cc = CurveClassification::new(&k);
+            cc.set_curve(Some(c0), false);
+            let mut on_edge = PointClassification::new(1e-5);
+            on_edge.set_class_object(PointClassType::Edge, Some(e_old));
+            on_edge.set_t_param(mid, false);
+            let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci1.mid = on_edge;
+            let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+            ci2.mid = region_pc(R1);
+            let pe = m
+                .create_proto_edge(&k, &mut geo, Some(v0), Some(v1), &cc, &ci1, &cc, &ci2)
+                .unwrap();
+            let ed = m.proto_edge(pe).unwrap().edge_definitions()[0];
+            assert_eq!(m.edge_def(ed).unwrap().src_topo(1), Some(e_old));
+
+            // the vertex definition that split the edge at (1, 0, 0)
+            let calling = m
+                .insert_vertex_definition(
+                    VertexDefinition::new(
+                        &k,
+                        &geo,
+                        &region_pc(R0),
+                        &region_pc(R1),
+                        Point3::new(1.0, 0.0, 0.0),
+                        1e-5,
+                        1e-6,
+                        None,
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            let pv = m
+                .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+                .unwrap();
+            m.add_proto_vertex(pv);
+            m.add_vertex_definition(pv, calling).unwrap();
+
+            m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_old, e_new], Some(calling))
+                .unwrap();
+            let mut on: Vec<Option<H>> = m
+                .all_edge_definitions()
+                .unwrap()
+                .into_iter()
+                .map(|d| m.edge_def(d).unwrap().src_topo(1))
+                .collect();
+            on.sort_by_key(|h| h.map(|h| h.0));
+            if fixed {
+                assert_eq!(on, [Some(e_old), Some(e_new)]);
+            } else {
+                assert_eq!(on.len(), 1);
+            }
+        }
     }
 }
