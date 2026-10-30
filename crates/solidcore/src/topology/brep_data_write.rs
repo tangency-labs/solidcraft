@@ -507,8 +507,14 @@ fn bspline_curve_part_mut(c: &mut Curve) -> Option<&mut BSplineCurve> {
 
 /// `SM_CAST_PTR(SmBSplineSurface, pSrf)`: the B-spline part of the kinds derived from
 /// `SmBSplineSurface` (a plane's made with its NURB when missing), `None` for the
-/// others.
-fn bspline_surface_part(s: &Surface) -> Result<Option<Cow<'_, BSplineSurface>>> {
+/// others. Public for exporters that write a surface as its B-spline part, as
+/// `smu_AddSmBSplineSurface` does (#1767).
+///
+/// # Errors
+///
+/// Those of [`Plane::base_with_nurb`](crate::surface::plane::Plane::base_with_nurb) for a
+/// plane without its NURB.
+pub fn bspline_surface_part(s: &Surface) -> Result<Option<Cow<'_, BSplineSurface>>> {
     Ok(match s.kind() {
         SurfaceKind::BSpline(b) => Some(Cow::Borrowed(b)),
         SurfaceKind::Plane(p) => Some(p.base_with_nurb()?),
