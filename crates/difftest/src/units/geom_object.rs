@@ -15,9 +15,12 @@
 //!   type double (`ty` 0), `SmBoolean` (1) or `ULONG` (2); output is the variable
 //!   after every step and after each remaining guard is destroyed.
 //! - `shape`: `SmShape` from a B-rep (none, the `SmApiCreateBox` solid, or an ASCII
-//!   `.smb` file, both built by the shared topology fixture; the Rust side imports the
-//!   C++ export) and a selection of the whole B-rep / faces / edges / vertices, by index
-//!   into the fixture walk's lists (the import's arena order).
+//!   `.smb` file, both built by the shared topology fixture; the Rust side builds the box
+//!   with the Rust kernel and reads the file with the Rust reader, renumbered into the
+//!   fixture walk's order, `query_face_p1::own_model`, its face, edge and vertex lists
+//!   the build's own) and a selection of the whole B-rep / faces / edges / vertices, by
+//!   index into the fixture walk's lists (the Rust B-rep's arena order). No C++ state
+//!   reaches the Rust side.
 
 use std::sync::{Arc, Mutex};
 
@@ -37,7 +40,7 @@ use solidcore_ffi::units::geom_object::{
     self as ffi, tcv_op, NotifyStep, ShapeSelection, ShapeSource, MAX_NOTIFY_OP, NUM_OBJECTS,
 };
 
-use super::query_face_p1::{everything, inexact, model};
+use super::query_face_p1::own_model;
 use super::topology_edgeuse_p1::fixture_input;
 use crate::case::CaseContext;
 use crate::json::num;
@@ -133,31 +136,6 @@ fn tcv_inputs(
 
 fn rust_err(e: &SolidError) -> Output {
     Output::unported(e).unwrap_or_else(|| Output::err(format!("rust_error: {e}")))
-}
-
-/// Gives the import the B-rep's face, edge and vertex list orders (`GetFaces` /
-/// `GetEdges` / `GetVertices`, which order the members of a whole B-rep); the walk
-/// numbers faces and vertices in another order.
-fn set_list_orders(b: &mut Brep, path: &str, block: &[f64]) -> Result<(), HarnessError> {
-    let orders = ffi::list_orders(path, block).map_err(|e| harness(format!("c++ list orders: {e}")))?;
-    let mut at = 0;
-    let mut next = || -> Result<Vec<u32>, HarnessError> {
-        let n = *orders.get(at).ok_or_else(|| harness("short list orders"))? as usize;
-        let list = orders
-            .get(at + 1..at + 1 + n)
-            .ok_or_else(|| harness("short list orders"))?
-            .iter()
-            .map(|&i| i as u32)
-            .collect();
-        at += 1 + n;
-        Ok(list)
-    };
-    let (faces, edges, vertices) = (next()?, next()?, next()?);
-    let bad = |e: SolidError| harness(format!("list order: {e}"));
-    b.set_face_list(faces.into_iter().map(FaceId::from_index).collect()).map_err(bad)?;
-    b.set_edge_list(edges.into_iter().map(EdgeId::from_index).collect()).map_err(bad)?;
-    b.set_vertex_list(vertices.into_iter().map(VertexId::from_index).collect()).map_err(bad)?;
-    Ok(())
 }
 
 /// The shared topology fixture of a shape's B-rep (`None` without one).
@@ -513,7 +491,7 @@ fn rust_shape(
         shape.edges().len() as f64,
         shape.vertices().len() as f64,
     ];
-    // walk indices of the members (the import's arena ids)
+    // walk indices of the members (the Rust B-rep's arena ids)
     o.extend(shape.faces().iter().map(|k| f64::from(k.1.index())));
     o.extend(shape.edges().iter().map(|k| f64::from(k.1.index())));
     o.extend(shape.vertices().iter().map(|k| f64::from(k.1.index())));
@@ -552,15 +530,10 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let model = match fixture_brep(source)? {
                 None if !empty => return Err(harness("selection without B-rep")),
                 None => None,
-                Some(brep) => {
-                    let mut m = model(&brep)?;
-                    set_list_orders(&mut m.brep, &m.path, &m.block)?;
-                    let (all_faces, all_edges) = everything(&m.brep);
-                    if let Some(o) = inexact(&m, &all_faces, &all_edges) {
-                        return Ok(o);
-                    }
-                    Some(m)
-                }
+                Some(brep) => match own_model(&brep)? {
+                    Ok(m) => Some(m),
+                    Err(o) => return Ok(o),
+                },
             };
             let brep = model.as_ref().map(|m| &m.brep);
             Ok(match rust_shape(brep, *whole_brep, faces, edges, vertices) {

@@ -19,8 +19,7 @@
 //!
 //! The classified 3D point is computed by each side from its own B-rep: the face
 //! surface at a fraction of the face's UV domain plus an offset. The Rust geometry is
-//! native (every surface and curve kind), so no case is deferred on a lossy import
-//! ([`inexact`] remains for the runners that still import).
+//! native (every surface and curve kind), so no case is deferred on a lossy import.
 //!
 //! **Outputs.** Boxes: status and the box (seeded with a sentinel box, so what a failing
 //! call leaves is compared). `Point3DClassify`: status and the classification (class,
@@ -33,7 +32,6 @@ use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solidcore::curve::curve::p2::{BSPLINE_CURVE_TYPE, CRV_ON_SURF_TYPE, LINE_TYPE};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::line::Line;
@@ -57,9 +55,7 @@ use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::query_face_p1::{self as ffi, Op};
 use solidcore_ffi::units::topology_edgeuse_p1 as graph;
 
-use super::topology_edgeuse_p1::{
-    domain, fixture_input, gen_brep, gen_surface, import_with_types, BrepIn, ImportTypes,
-};
+use super::topology_edgeuse_p1::{domain, fixture_input, gen_brep, gen_surface, import, BrepIn};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1200;
@@ -188,14 +184,13 @@ pub(crate) struct Model {
     pub(crate) path: String,
     pub(crate) block: Vec<f64>,
     pub(crate) brep: Brep,
-    pub(crate) types: ImportTypes,
 }
 
 pub(crate) fn model(brep: &Value) -> Result<Model, HarnessError> {
     let (path, block) = fixture_input(brep.clone())?;
     let export = graph::eval(graph::Op::Export, &path, &block)
         .map_err(|e| harness(format!("c++ export: {e}")))?;
-    let (mut b, types) = import_with_types(&export)?;
+    let mut b = import(&export)?;
     let fus = ffi::eval(Op::FaceFu, &path, &block, &[])
         .map_err(|e| harness(format!("c++ face uses: {e}")))?;
     if fus.len() != b.faces().len() {
@@ -233,7 +228,6 @@ pub(crate) fn model(brep: &Value) -> Result<Model, HarnessError> {
         path,
         block,
         brep: b,
-        types,
     })
 }
 
@@ -270,7 +264,6 @@ pub(crate) fn own_model(brep: &Value) -> Result<Result<Model, Output>, HarnessEr
         path,
         block,
         brep: b,
-        types: ImportTypes::default(),
     }))
 }
 
@@ -286,59 +279,6 @@ fn side_model(brep: &Value, cpp: bool) -> Result<Result<Model, Output>, HarnessE
 
 fn pick(sel: usize, n: usize) -> Option<u32> {
     (n > 0).then(|| (sel % n) as u32)
-}
-
-const EXACT_SURFACES: [i64; 2] = [15002, 15011];
-
-/// The deferral label of geometry the shared B-rep export flattens to its B-spline part
-/// (a harness limitation, as in `topology.brep_p1`).
-const HARNESS_ANALYTIC_IMPORT: &str = "harness:analytic-geometry-export";
-
-/// The deferral of a case that reads a face surface or edge curve the import holds only
-/// as its B-spline part (see the module docs).
-pub(crate) fn inexact(m: &Model, faces: &[FaceId], edges: &[EdgeId]) -> Option<Output> {
-    for f in faces {
-        let st = m.types.inexact_surface(f.index() as usize).unwrap_or(-1);
-        if st >= 0 && !EXACT_SURFACES.contains(&st) {
-            let (unit, symbol) = match st {
-                // the gap is the missing `SurfaceKind` variant (the `SmSurface` dispatch,
-                // unit `surface.surface_p2`; #76), not the kinds' own units (all ported)
-                15012 | 15013 => ("surface.surface_p2", "SurfaceKind::Cone (SmCone)"),
-                15014 => ("surface.surface_p2", "SurfaceKind::Sphere (SmSphere)"),
-                15015 => ("surface.surface_p2", "SurfaceKind::Torus (SmTorus)"),
-                15030 => (
-                "harness:analytic-geometry-export",
-                "SmSurfOfExtrusion face surface not exported exactly",
-            ),
-                _ => (
-                    HARNESS_ANALYTIC_IMPORT,
-                    "analytic face surface in the B-rep export",
-                ),
-            };
-            return Some(Output::deferred(unit, symbol));
-        }
-    }
-    for e in edges {
-        let ct = m
-            .types
-            .inexact_curve(e.index() as usize)
-            .unwrap_or(-1);
-        if ct >= 0 && ![BSPLINE_CURVE_TYPE, LINE_TYPE, CRV_ON_SURF_TYPE].contains(&ct) {
-            return Some(Output::deferred(
-                HARNESS_ANALYTIC_IMPORT,
-                "analytic edge curve in the B-rep export",
-            ));
-        }
-    }
-    None
-}
-
-/// Every face and edge of the B-rep.
-pub(crate) fn everything(b: &Brep) -> (Vec<FaceId>, Vec<EdgeId>) {
-    (
-        b.faces().iter().map(|(id, _)| id).collect(),
-        b.edges().iter().map(|(id, _)| id).collect(),
-    )
 }
 
 fn none_output() -> Output {
