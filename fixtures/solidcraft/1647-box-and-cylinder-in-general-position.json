@@ -1,0 +1,108 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1647",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/1863",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the issue's property test (`generic_box_cylinder_intersect`, ignored) reproduces it; the numbers here are analytic",
+ "summary": "A box and a cylinder in general position (nothing coincident or tangent), found by the `identity_generic` property test, had Intersect refused on SolidCraft's kernel as 'boolean Intersect: implausible result volume 7.1625'. The box is at (11.483767761089219, 4.801612107504224, 3.6313476467611787) with size (4.789088988834864, 3.0, 10.419335961063835); the cylinder has base (29.2480632732879, 8.3683289461485, 6.947922225984966), axis +Z, radius 13.502884497756853, height 19.719218725477496. The common part is a prism of the box's rectangle clipped by the cylinder's disc, so its volume is that area times the shared height: 7.2393 mm^3 (the kernel's 7.1625 is 1 % low, which is what the result check refused). The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "intersection",
+   "note": "#1647: the intersection, refused as implausible on SolidCraft's kernel.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "a",
+     "origin": [
+      11.483767761089219,
+      4.801612107504224,
+      3.6313476467611787
+     ],
+     "size": [
+      4.789088988834864,
+      3.0,
+      10.419335961063835
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      29.2480632732879,
+      8.3683289461485,
+      6.947922225984966
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 13.502884497756853,
+     "height": 19.719218725477496
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7.23925355,
+     "tol": 0.01,
+     "formula": "V = the box and the cylinder (axis +Z, radius 13.502884497756853) share z in [6.947922225984966, 14.050...], and there the common area is the part of the box's rectangle x in [11.4838, 16.2729], y in [4.8016, 7.8016] inside the disc of centre (29.2481, 8.3683): A_xy = int over x of the chord length [max(y0, cy - d), min(y1, cy + d)], d = sqrt(r^2 - (x - cx)^2) (adaptive quadrature with breakpoints at the chord's kinks, error 6e-14) = 1.019216775, times the height 7.102761382"
+    }
+   }
+  },
+  {
+   "name": "union",
+   "note": "#1647: the union of the same two bodies.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "a",
+     "origin": [
+      11.483767761089219,
+      4.801612107504224,
+      3.6313476467611787
+     ],
+     "size": [
+      4.789088988834864,
+      3.0,
+      10.419335961063835
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "b",
+     "origin": [
+      29.2480632732879,
+      8.3683289461485,
+      6.947922225984966
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 13.502884497756853,
+     "height": 19.719218725477496
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "a",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 11437.625805554,
+     "tol": 0.01,
+     "formula": "V = box + cylinder - I; box = 4.789088988834864*3.0*10.419335961063835, cylinder = pi*r^2*h, I as in the intersection case"
+    }
+   }
+  }
+ ]
+}
