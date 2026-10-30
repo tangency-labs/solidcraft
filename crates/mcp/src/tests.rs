@@ -2322,6 +2322,58 @@ fn describe_command_and_strict_parameter_checking() {
     assert_eq!(m["body_count"], json!(0), "{m}");
 }
 
+/// Bridged to an app (#9072), the server checks each call against its command's contract before
+/// sending it, as a headless session does: the app's own session checks nothing. `strict` sends
+/// nothing that breaks a contract, `warn` adds `param_warnings` to the app's reply, and a command
+/// this server has no contract for goes to the app unchecked.
+#[test]
+fn a_bridged_server_checks_calls_at_its_param_check_level() {
+    use solidcraft_engine::schema::ParamCheck;
+    let (addr, seen) = scripted_app(|req| match req["method"].as_str() {
+        Some("engine.batch") => {
+            let n = req["params"]["commands"].as_array().map_or(0, Vec::len);
+            json!({"ok": true, "result": {"completed": n, "results": vec![json!({}); n], "undone": 0}})
+        }
+        _ => json!({"ok": true, "result": {"created_bodies": ["Box1"]}}),
+    });
+    let bridged = |level| {
+        let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap().with_param_check(level);
+        Server::new(Box::new(remote))
+    };
+    let sent = |what: &str| seen.lock().unwrap().1.iter().filter(|w| w.as_str() == what).count();
+    let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    let misspelt = json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "operaton": "cut"}});
+    let good = json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}});
+    let warning = "unknown key `operaton`; did you mean `operation`?";
+
+    let mut s = bridged(ParamCheck::Strict);
+    let r = raw_tool(&mut s, "execute", misspelt.clone());
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
+    assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.fillet", "params": {"nonsense": 1}}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    assert_eq!(sent("engine.execute solid.fillet"), 1, "no contract here: the app decides");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let reply: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!((&reply["failed"]["index"], &reply["completed"], &reply["not_run"]), (&json!(1), &json!(0), &json!([0, 1])), "{reply}");
+    assert!(reply["failed"]["error"].as_str().unwrap_or_default().contains(warning), "{reply}");
+    assert_eq!(sent("engine.batch"), 0, "refused unsent");
+
+    let mut s = bridged(ParamCheck::Warn);
+    let r = tool(&mut s, "execute", misspelt.clone());
+    assert_eq!(r["param_warnings"], json!([warning]), "{r}");
+    assert_eq!(sent("engine.execute solid.box"), 1);
+    let r = tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
+    assert_eq!((r["results"][0].get("param_warnings"), &r["results"][1]["param_warnings"]), (None, &json!([warning])), "{r}");
+    assert_eq!(sent("engine.batch"), 1);
+
+    let mut s = bridged(ParamCheck::Off);
+    let r = tool(&mut s, "execute", misspelt);
+    assert_eq!(r.get("param_warnings"), None, "{r}");
+}
+
 /// Plain `mcp` with no app running: the session is headless, says so on every result, and bridges
 /// to the app once one runs, but only while it holds no work of its own.
 #[test]
@@ -2345,6 +2397,13 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     assert!(!text(&r).contains("headless session because"), "{r}");
     assert!(s.backend().has_ui());
     assert!(s.backend().describe().contains("connected to the SolidCraft app"));
+    // The headless session's `--param-check` level goes on checking the bridged calls.
+    let mut headless = Headless::default();
+    headless.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let mut strict = Server::new(Box::new(crate::Auto::new(headless, Box::new(|| Some(1)), None)));
+    raw_tool(&mut strict, "inspect_design", json!({}));
+    assert!(strict.backend().has_ui());
+    assert_eq!(strict.backend().param_check(), solidcraft_engine::schema::ParamCheck::Strict);
 
     // With work in the headless session, the app showing up changes nothing.
     port.set(None);

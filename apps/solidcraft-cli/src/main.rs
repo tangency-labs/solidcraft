@@ -720,11 +720,8 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             eprintln!("solidcraft mcp: the design's folder is left out because {why}; add it with --allow-path if you mean it");
         }
     }
-    // How a headless session treats calls that break a command's parameter contract.
+    // How calls that break a command's parameter contract are treated, headless or bridged.
     let param_check = parse_param_check("mcp", args)?;
-    if param_check != solidcraft_engine::schema::ParamCheck::Off && flag(args, "--connect").is_some() {
-        eprintln!("solidcraft mcp: --param-check applies to headless sessions; calls to the app are not checked yet");
-    }
     let backend: Box<dyn solidcraft_mcp::Backend> = match (flag(args, "--connect"), flag(args, "--in")) {
         (Some(_), Some(_)) => return Err("mcp: use either --connect or --in, not both".into()),
         (Some(addr), None) => {
@@ -732,7 +729,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
                 return Err(format!("mcp: --connect wants HOST:PORT, such as 127.0.0.1:7878, not `{addr}`"));
             };
             // Serve without the app too: the tools connect once it runs, and say it isn't until then.
-            let mut remote = solidcraft_mcp::Remote::new(addr, flag(args, "--token"));
+            let mut remote = solidcraft_mcp::Remote::new(addr, flag(args, "--token")).with_param_check(param_check);
             if let Err(e) = remote.try_connect() {
                 eprintln!(
                     "solidcraft mcp: no SolidCraft app at {addr} yet ({e}); start it with `solidcraft --control {port}` \
@@ -752,7 +749,8 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             let auto = !args.iter().any(|a| a == "--headless");
             if auto && let Some(port) = discover_app() {
                 eprintln!("solidcraft mcp: bridged to the running app at 127.0.0.1:{port} (--headless starts a session of its own)");
-                return serve_mcp(Box::new(solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token"))), scope);
+                let remote = solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token")).with_param_check(param_check);
+                return serve_mcp(Box::new(remote), scope);
             }
             let mut headless = solidcraft_mcp::Headless::default();
             headless.session.param_check = param_check;

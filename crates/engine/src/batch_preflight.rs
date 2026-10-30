@@ -19,7 +19,7 @@
 use serde_json::{Value, json};
 
 use crate::schema::ParamCheck;
-use crate::{EngineError, find_command};
+use crate::{CommandSpec, EngineError, find_command};
 
 /// The first step a batch would refuse at its turn.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,13 +61,29 @@ pub fn check(steps: &[Value], level: ParamCheck, host: &[&str]) -> Option<Refusa
             return Some(Refusal { index, command: Some(id.to_string()), error: EngineError::UnknownCommand(id.to_string()).to_string() });
         };
         if level == ParamCheck::Strict
-            && let Some(contract) = spec.contract
-            && let Some(first) = contract.check(step.get("params").unwrap_or(&Value::Null)).into_iter().next()
+            && let Some(refusal) = contract_refusal(index, id, spec, step)
         {
-            return Some(Refusal { index, command: Some(id.to_string()), error: crate::params::bad(id, first.message).to_string() });
+            return Some(refusal);
         }
     }
     None
+}
+
+/// The first of `steps` whose parameters break its command's typed contract, for a runner in
+/// another process that checks the rest itself (the MCP server bridged to an app at
+/// [`ParamCheck::Strict`]): a step naming no command, or one this registry lacks (the app may be
+/// another version), is left to it.
+pub fn contracts(steps: &[Value]) -> Option<Refusal> {
+    steps.iter().enumerate().find_map(|(index, step)| {
+        let id = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)?;
+        contract_refusal(index, id, find_command(id)?, step)
+    })
+}
+
+/// Step `index`'s refusal when its parameters break `spec`'s typed contract.
+fn contract_refusal(index: usize, id: &str, spec: &CommandSpec, step: &Value) -> Option<Refusal> {
+    let first = spec.contract?.check(step.get("params").unwrap_or(&Value::Null)).into_iter().next()?;
+    Some(Refusal { index, command: Some(id.to_string()), error: crate::params::bad(id, first.message).to_string() })
 }
 
 #[cfg(test)]
@@ -130,5 +146,9 @@ mod tests {
         let mut s = crate::Session { param_check: ParamCheck::Strict, ..crate::Session::default() };
         let at_turn = s.execute("solid.box", &steps[1]["params"]).unwrap_err().to_string();
         assert_eq!(r.error, at_turn);
+        // Another process's runner gets the same refusal, and keeps what it checks itself.
+        assert_eq!(contracts(&steps), Some(r));
+        let theirs = vec![json!({"params": {}}), step("app.only", json!({"x": 1})), step("view.pick", json!({}))];
+        assert_eq!(contracts(&theirs), None);
     }
 }

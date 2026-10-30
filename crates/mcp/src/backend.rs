@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::control_pending;
 use solidcraft_engine::render::StandardView;
+use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::view::Guides;
 
 /// Something that answers control-channel methods: `engine.execute`, `engine.commands`,
@@ -33,10 +34,10 @@ pub trait Backend {
     fn notice(&self) -> Option<String> {
         None
     }
-    /// How this side's session checks commands' typed contracts (`--param-check`), when this
-    /// process holds it. A running app checks its own (`engine.batch`), so `Remote` says off.
-    fn param_check(&self) -> solidcraft_engine::schema::ParamCheck {
-        solidcraft_engine::schema::ParamCheck::Off
+    /// How calls are checked against their commands' typed contracts (`--param-check`): by the
+    /// headless session, or by `Remote` before it sends them to the app.
+    fn param_check(&self) -> ParamCheck {
+        ParamCheck::Off
     }
 }
 
@@ -135,6 +136,8 @@ pub struct Remote {
     /// An outstanding request's end, once a later call waited for it (for `pending`).
     settled: Option<Settled>,
     waits: Waits,
+    /// How calls are checked before they are sent (`--param-check`).
+    param_check: ParamCheck,
 }
 
 /// How a tool error starts when no app listens at the bridged address. The agent reads it, and
@@ -160,7 +163,17 @@ impl Remote {
     pub fn new(addr: &str, token: Option<&str>) -> Self {
         let port = addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(0);
         let explicit_token = token.map(str::to_string);
-        Self { addr: addr.to_string(), port, conn: None, next_id: 1, explicit_token, outstanding: None, settled: None, waits: WAITS }
+        Self {
+            addr: addr.to_string(),
+            port,
+            conn: None,
+            next_id: 1,
+            explicit_token,
+            outstanding: None,
+            settled: None,
+            waits: WAITS,
+            param_check: ParamCheck::Off,
+        }
     }
 
     /// Shorter waits for requests still running (tests).
@@ -444,12 +457,85 @@ impl Remote {
     }
 }
 
+/// The issues `params` raise against the typed contract of `id` in this server's registry; none
+/// when it has no contract for `id` (the app may have commands this server lacks).
+fn contract_issues(id: &str, params: &Value) -> Vec<String> {
+    let contract = solidcraft_engine::find_command(id).and_then(|c| c.contract);
+    contract.map(|c| c.check(params).into_iter().map(|i| i.message).collect()).unwrap_or_default()
+}
+
+/// `reply` with `issues` as its `param_warnings`, as a headless session at the warn level adds
+/// them; a reply that has its own (an app that checked the call itself) keeps those.
+fn with_param_warnings(mut reply: Value, issues: Vec<String>) -> Value {
+    if !issues.is_empty()
+        && let Some(o) = reply.as_object_mut()
+    {
+        o.entry("param_warnings").or_insert_with(|| json!(issues));
+    }
+    reply
+}
+
+impl Remote {
+    /// Check calls against their commands' contracts at `level` before sending them
+    /// (`--param-check`): the app's own session checks nothing.
+    pub fn with_param_check(mut self, level: ParamCheck) -> Self {
+        self.param_check = level;
+        self
+    }
+
+    /// `engine.execute` checked here: `strict` refuses a call that breaks its command's contract
+    /// without sending it, and `warn` sends it and adds the issues to the app's reply.
+    fn execute_checked(&mut self, params: Value) -> Result<Value, String> {
+        let id = params.get("command").and_then(Value::as_str).unwrap_or_default();
+        let issues = contract_issues(id, params.get("params").unwrap_or(&Value::Null));
+        if self.param_check == ParamCheck::Strict
+            && let Some(first) = issues.first()
+        {
+            return Err(solidcraft_engine::params::bad(id, first.as_str()).to_string());
+        }
+        let reply = self.call_once("engine.execute", params, true)?;
+        Ok(with_param_warnings(reply, issues))
+    }
+
+    /// `engine.batch` checked here: `strict` refuses a batch with a step that breaks its command's
+    /// contract before anything is sent, as the app would refuse it unrun, and `warn` adds each
+    /// step's issues to its result.
+    fn batch_checked(&mut self, params: Value) -> Result<Value, String> {
+        let steps = params.get("commands").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        if self.param_check == ParamCheck::Strict {
+            if let Some(refusal) = solidcraft_engine::batch_preflight::contracts(steps) {
+                return Ok(refusal.reply(steps.len()));
+            }
+            return self.call_once("engine.batch", params, true);
+        }
+        let issues: Vec<Vec<String>> = steps
+            .iter()
+            .map(|step| {
+                let id = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).unwrap_or_default();
+                contract_issues(id, step.get("params").unwrap_or(&Value::Null))
+            })
+            .collect();
+        let mut reply = self.call_once("engine.batch", params, true)?;
+        if let Some(results) = reply.get_mut("results").and_then(Value::as_array_mut) {
+            for (result, issues) in results.iter_mut().zip(issues) {
+                *result = with_param_warnings(std::mem::take(result), issues);
+            }
+        }
+        Ok(reply)
+    }
+}
+
 impl Backend for Remote {
     fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        if method == "control.pending" {
-            return self.pending_status();
+        match method {
+            "control.pending" => self.pending_status(),
+            "engine.execute" if self.param_check != ParamCheck::Off => self.execute_checked(params),
+            "engine.batch" if self.param_check != ParamCheck::Off => self.batch_checked(params),
+            _ => self.call_once(method, params, true),
         }
-        self.call_once(method, params, true)
+    }
+    fn param_check(&self) -> ParamCheck {
+        self.param_check
     }
     fn has_ui(&self) -> bool {
         true
@@ -576,7 +662,7 @@ impl Backend for Headless {
     fn in_process(&self) -> bool {
         true
     }
-    fn param_check(&self) -> solidcraft_engine::schema::ParamCheck {
+    fn param_check(&self) -> ParamCheck {
         self.session.param_check
     }
 }
@@ -605,7 +691,8 @@ impl Auto {
         }
         if let Some(port) = (self.discover)() {
             eprintln!("solidcraft mcp: the SolidCraft app is running now; bridged to 127.0.0.1:{port}");
-            self.remote = Some(Remote::new(&format!("127.0.0.1:{port}"), self.token.as_deref()));
+            let level = self.param_check();
+            self.remote = Some(Remote::new(&format!("127.0.0.1:{port}"), self.token.as_deref()).with_param_check(level));
             self.headless = None;
         }
     }
@@ -642,10 +729,11 @@ impl Backend for Auto {
     fn in_process(&self) -> bool {
         self.remote.is_none()
     }
-    fn param_check(&self) -> solidcraft_engine::schema::ParamCheck {
+    fn param_check(&self) -> ParamCheck {
         match (&self.remote, &self.headless) {
+            (Some(r), _) => r.param_check(),
             (None, Some(h)) => h.param_check(),
-            _ => solidcraft_engine::schema::ParamCheck::Off,
+            (None, None) => ParamCheck::Off,
         }
     }
     fn notice(&self) -> Option<String> {
