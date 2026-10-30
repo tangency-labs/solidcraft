@@ -38,7 +38,7 @@ use std::collections::{HashMap, HashSet};
 use std::f64::consts::TAU;
 
 use solidcraft_geom::Vec3;
-use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
+use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
 use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 use solidcraft_geom::brep::{
     self, Brep, Curve as BCurve, Curve2, Edge, EdgeUseRef, Face, Frame, Loop, Natural, OrientedEdge, OrientedFace, Region, Shell,
@@ -950,6 +950,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
         }
+        self.start_splines_clear_of_faces()?;
         let seams = self.add_seams()?;
         if seams > 0 {
             notes.push(format!("{seams} seam edges added to faces that wind around their surface"));
@@ -1033,6 +1034,42 @@ impl<'b, 'a> Builder<'b, 'a> {
 
         // Regions: which shells are closed (every edge used at least twice among its faces).
         let closed: Vec<bool> = shells.iter().map(|s| self.closed(s)).collect();
+        // A void's faces face into the cavity, out of the material: it encloses volume of the
+        // opposite sign to the outer shell's. The ORIENTED_CLOSED_SHELL flag alone doesn't say
+        // so: some exporters write .F. over a shell already facing into the cavity (#3730),
+        // SolidCraft .T.; read by the flag, such a void added its cavity's volume to the solid's.
+        // A void enclosing volume of the outer shell's sign is turned inside out, the signs the
+        // faces' own surfaces and pcurves give (`face_flux` of p / 3, the divergence theorem).
+        let shells = if kind == Kind::Voids && closed.iter().all(|c| *c) {
+            let volume = |s: &[(u32, bool)]| -> Option<f64> {
+                let mut sum = 0.0;
+                for &(f, forward) in s {
+                    let face = self.faces.get(f as usize)?;
+                    let on = face_forms.get(f as usize)?.as_ref().unwrap_or(&face.surface);
+                    let eval = SurfaceEval::new(on).ok()?;
+                    let edge_loops = face.loops.iter().filter_map(|l| match l {
+                        LoopB::Edges(es) => Some(es),
+                        LoopB::Vertex(_) => None,
+                    });
+                    let uses: Vec<Vec<(&Curve2, bool)>> =
+                        edge_loops.zip(pcs.get(f as usize)?).map(|(es, pc)| pc.iter().zip(es).map(|(c, (_, fwd))| (c, *fwd)).collect()).collect();
+                    let flux = face_flux(&eval, domains.get(f as usize)?[1][0], &uses, &|p| p * (1.0 / 3.0))?;
+                    sum += if forward { flux } else { -flux };
+                }
+                sum.is_finite().then_some(sum)
+            };
+            let outside = shells.first().and_then(|s| volume(s));
+            shells
+                .into_iter()
+                .enumerate()
+                .map(|(k, s)| match (outside, k > 0) {
+                    (Some(o), true) if volume(&s).is_some_and(|v| v * o > 0.0) => s.into_iter().map(|(f, fwd)| (f, !fwd)).collect(),
+                    _ => s,
+                })
+                .collect()
+        } else {
+            shells
+        };
         let mut regions = vec![Region { shells: Vec::new(), void: false }];
         match kind {
             Kind::Solid | Kind::Voids => {
