@@ -25,6 +25,7 @@ pub mod env;
 pub mod fill;
 pub mod fill_general;
 mod grid;
+pub mod hatch;
 pub mod hlr;
 pub mod ids;
 mod mesh;
