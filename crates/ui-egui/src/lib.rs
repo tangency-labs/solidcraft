@@ -2781,6 +2781,7 @@ impl SolveApp {
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
 
         dialogs::prepare_tab(self, ui.ctx());
+        dialog_focus::prepare_active(ui.ctx());
         let t0 = now_ms();
         // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
         // faces are read on a thread; the fonts are installed again once they are there.
