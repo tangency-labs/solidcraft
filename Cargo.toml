@@ -15,6 +15,7 @@ repository = "https://github.com/bherbruck/solidcraft"
 [workspace.dependencies]
 robust = "1.2"
 # internal
+solidcraft-cloud = { path = "crates/cloud" }
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-sketch = { path = "crates/sketch" }
 solidcraft-kernel = { path = "crates/kernel" }

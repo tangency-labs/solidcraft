@@ -3,11 +3,13 @@ use crate::Session;
 use solidcraft_geom::Aabb3;
 use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
-pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {
-    let (scene, camera) = scene(s)?;
-    let [width, height] = solidcraft_io::THUMBNAIL_SIZE;
+mod meshes;
+
+pub(crate) fn saved(s: &Session) -> Option<Vec<u8>> {
     // Drawn by the renderer the host installed (the GPU); none installed, no thumbnail.
     let renderer = crate::capture::installed()?;
+    let (scene, camera) = scene(s)?;
+    let [width, height] = solidcraft_io::THUMBNAIL_SIZE;
     crate::capture::png_with(Some(&*renderer), &scene, &camera, u32::try_from(width).ok()?, u32::try_from(height).ok()?).ok().map(|p| p.bytes)
 }
 
@@ -22,15 +24,9 @@ fn scene(s: &Session) -> Option<(Scene, Camera)> {
     }
     let mut scene = Scene::default();
     let mut bounds = Aabb3::EMPTY;
-    let mut triangles = 0usize;
-    let mut points = 0usize;
+    let mut budget = meshes::Budget::default();
     for body in world.bodies.iter().filter(|b| s.body_visible(&b.name)) {
-        let mesh = body.cached_mesh()?;
-        triangles = triangles.saturating_add(mesh.triangles.len());
-        points = points.saturating_add(mesh.positions.len());
-        if triangles > 100_000 || points > 100_000 {
-            return None;
-        }
+        let mesh = budget.placed(body)?;
         bounds = bounds.union(&mesh.bounds());
         let channel = |x: f32| (x.clamp(0., 1.) * 255.).round() as u8;
         let color = s.doc.body_color(body).map_or(crate::view::colors::BODY, |[r, g, b]| Rgb(channel(r), channel(g), channel(b)));
@@ -81,6 +77,54 @@ mod tests {
     }
 
     #[test]
+    fn assembly_thumbnail_uses_shared_meshes_in_their_world_placements() {
+        crate::capture::install_test_renderer();
+        let mut session = Session::default();
+        let part = session.execute("component.create", &serde_json::json!({"name":"Bracket","grounded":false})).unwrap();
+        session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
+        session
+            .execute("occurrence.move", &serde_json::json!({"occurrence":part["occurrence"],"translate":[40,10,5],"axis":[0,0,1],"angle":"30 deg"}))
+            .unwrap();
+        let world = session.world_state();
+        assert!(scene(&session).is_none(), "cold geometry stays cold");
+        assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
+        let (shared, placement) = world.bodies[0].mesh_in_place();
+        let (picture, _) = scene(&session).expect("a warm placed body gets a thumbnail");
+        let shown = &picture.meshes[0].mesh;
+        for (source, drawn) in shared.positions.iter().zip(&shown.positions) {
+            assert!(solidcraft_doc::apply_point(&placement, *source).dist(*drawn) < 1e-9);
+        }
+        assert_eq!(shown.triangles, shared.triangles);
+        assert!(saved(&session).is_some());
+        assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "capture does not fill placed mesh caches");
+    }
+
+    #[test]
+    fn large_warm_meshes_get_a_thumbnail_within_a_bounded_memory_budget() {
+        crate::capture::install_test_renderer();
+        let mut doc = solidcraft_doc::Document::new("Large mesh preview");
+        doc.add_feature(
+            solidcraft_doc::FeatureKind::MeshImport {
+                file: "public-safe.stl".into(),
+                meshes: vec![solidcraft_doc::MeshData {
+                    name: "Panel".into(),
+                    positions: vec![0., 0., 0., 10., 0., 0., 0., 10., 0.].into(),
+                    triangles: [0, 1, 2].repeat(900_001).into(),
+                    color: None,
+                }],
+            },
+            None,
+        )
+        .unwrap();
+        let session = Session::new(doc);
+        for body in &session.world_state().bodies {
+            body.mesh_in_place();
+        }
+        assert!(scene(&session).is_some(), "100,000 triangles is not a thumbnail format limit");
+        assert!(saved(&session).is_some());
+    }
+
+    #[test]
     fn portable_thumbnail_never_forces_cold_evaluation_or_meshing() {
         crate::capture::install_test_renderer();
         let mut session = Session::default();
@@ -100,7 +144,7 @@ mod tests {
         assert!(solidcraft_io::read_design_thumbnail(&disabled).is_none());
     }
 
-    /// Without a renderer installed (a browser, a tool that draws nothing) a save has no
+    /// Without a renderer installed (a tool that draws nothing) a save has no
     /// thumbnail and does not fail.
     #[test]
     fn without_a_renderer_a_save_has_no_thumbnail() {

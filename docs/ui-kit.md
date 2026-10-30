@@ -205,6 +205,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `color_swatch`, `swatch_grid`, `color_thumbnail` | 30 pt draggable samples, 6 pt grid step gap, selected outer ring and checker pattern under transparent colours; caller payloads retained; local-library thumbnails use 16 pt | `control_height/radius`, `border`, `form_primary`, `control_fill`, `space_2/6/8` |
 | `assistant_entry`, `AssistantEntryState` | Application-bar chat icon with quiet, ready, busy, auth, stopped and approval count marks; caller owns state and target | `app_bar`, `agent_ok/busy`, `warning/error`, `font_badge` |
 | actions: `button`, `Button` | Secondary action: `Normal`, `Small`, or `Enabled(bool)` | native sizing, form font/control tokens |
+| `busy_button(ui, label, icon, enabled, busy)` | Asynchronous action with a leading icon replaced by a spinner while busy; fixed width and text position. Disabled while busy. Caller owns operation completion and command submission. | form font/control tokens, `space_16/6` |
 | `primary_button` | Accent action outside a footer | `accent`, `on_accent`, form tokens |
 | navigation: `NavigationMetrics`, `navigation_surface`, `navigation_button`, `navigation_separator` | Shared live/editor navigation painter, button states, upward menu chevron and separator; approved board dimensions below | `dialog_body/border`, `form_ink/dim/primary`, `control_border`, `selected_bg`, `nav_hover/press` |
 | `ReorderPayload<T>`, `insertion_marker`, `drop_index` | Typed drag origin, insertion chrome and horizontal gap selection shared by the ribbon and navigation editor | `accent` |
@@ -606,6 +607,12 @@ transient automation override.
 icon ids and cached thumbnail textures; callers retain commands, document state,
 persistence, thumbnail jobs and recovery decisions.
 
+`recent_row_with_status` adds a `FileStatus` label and semantic colored dot. It
+retains the status at narrow widths and includes it in the accessible label.
+`FileStatusTone` selects pending, current, attention or available token colors.
+The optional `pulse` presentation gently fades the dot over two seconds, preserves
+label geometry, and respects disabled animations.
+
 - `page`, `content` and `rail` own the page background, responsive insets and
   full-height rail fill/clip. `navigation` also supports the narrow navigation menu.
   Callers supply layout rectangles, scrolling and entry order.
@@ -616,6 +623,8 @@ persistence, thumbnail jobs and recovery decisions.
 - `title`, `subtitle`, `detail` and `section` own typography. `section` accepts a
   token-based heading/body gap: `space_12` for New, `space_10` for Recent/Samples.
   Callers retain semantic section order and the larger `file_section_gap`.
+- `control_row` gives buttons and dropdowns the shared form height, centers their
+  content and wraps controls with equal horizontal and vertical gaps.
 - `grid` provides responsive columns with 14 pt gutters and no trailing row gap.
   `action_tile` supplies an 84 pt card with 44 pt original artwork and vertically
   centered label/subtitle. `tile_min_width` informs responsive columns.

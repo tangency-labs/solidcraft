@@ -502,7 +502,7 @@ pub fn button(ui: &mut Ui, label: impl Into<egui::WidgetText>, options: Button) 
         return crate::prefs_search::hidden_response(ui);
     }
     let response = match options {
-        Button::Enabled(enabled) => ui.add_enabled_ui(enabled, |ui| ui.add(button_widget(crate::i18n::tr_label(&key).into(), options))).inner,
+        Button::Enabled(enabled) => ui.add_enabled(enabled, button_widget(crate::i18n::tr_label(&key).into(), options)),
         _ => ui.add(button_widget(label, options)),
     };
     if !matches!(options, Button::Ghost) {
@@ -511,6 +511,32 @@ pub fn button(ui: &mut Ui, label: impl Into<egui::WidgetText>, options: Button) 
     pointer_on_hover(ui, &response);
     let key = if matches!(options, Button::Enabled(_)) { crate::i18n::tr_label(&key) } else { &key };
     publish_button(ui, &response, key);
+    response
+}
+
+/// An action icon becomes a spinner while busy, keeping allocation and text fixed.
+/// The native button owns focus, keyboard and enabled behavior.
+pub(crate) fn busy_button(ui: &mut Ui, label: &str, icon: &str, enabled: bool, busy: bool) -> Response {
+    let t = Tokens::get();
+    let label = crate::i18n::tr_label(label);
+    let ink = if enabled && !busy && ui.is_enabled() { t.form_ink } else { t.form_dim };
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), egui::FontId::proportional(t.font_label), ink);
+    let padding = ui.spacing().button_padding;
+    let slot = t.space_16;
+    let width = galley.size().x + padding.x * 2.0 + t.space_6 + slot;
+    let response = ui.add_enabled(enabled && !busy, button_widget("".into(), Button::Normal).min_size(vec2(width, ui.spacing().interact_size.y)));
+    t.button_bevel(ui, &response, false);
+    let left = egui::pos2(response.rect.left() + padding.x + slot + t.space_6, response.rect.center().y - galley.size().y / 2.0);
+    ui.painter().with_clip_rect(ui.clip_rect().intersect(response.rect)).galley(left, galley, ink);
+    let rect = egui::Rect::from_center_size(egui::pos2(response.rect.left() + padding.x + slot / 2.0, response.rect.center().y), vec2(slot, slot));
+    if busy {
+        egui::Spinner::new().color(t.form_dim).paint_at(ui, rect);
+    } else {
+        crate::icons::paint_icon(ui.painter(), rect, icon, if enabled && ui.is_enabled() { 1.0 } else { 0.55 });
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label));
+    pointer_on_hover(ui, &response);
+    publish_button(ui, &response, label);
     response
 }
 

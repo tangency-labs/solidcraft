@@ -61,7 +61,7 @@ pub(crate) use disclosure::*;
 pub(crate) use drag::*;
 pub use fields::cell_editor;
 pub(crate) use fields::*;
-pub(crate) use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
+pub(crate) use file_view::{FileStatus, FileStatusTone, FileView, RecentRow, RecoveryMessage, SampleCard};
 pub(crate) use framing::*;
 pub(crate) use history::*;
 pub(crate) use layout::*;

@@ -74,6 +74,9 @@ impl NativeMenu {
             Some(Accelerator::new(Modifiers::META | Modifiers::SHIFT, Code::KeyS)),
         )?;
         add(&file, app.tr_label("Save As JSON\u{2026}"), FileAction::SaveJson, None)?;
+        if app.services.cloud_host.is_some() {
+            add(&file, app.tr("cmd.cloud.save"), FileAction::Command("cloud.save"), None)?;
+        }
         file.append(&PredefinedMenuItem::separator())?;
         for (label, action) in [
             ("Export STL\u{2026}", FileAction::ExportMesh("stl")),

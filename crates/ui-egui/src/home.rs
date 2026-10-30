@@ -136,7 +136,7 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
     let scene = solidcraft_engine::view::scene(s, &cam);
-    // Drawn on the GPU by the renderer the app installs; none (a browser): no picture.
+    // Drawn by the picture renderer the host installed.
     let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
 }
@@ -167,7 +167,7 @@ fn cached(key: &str) -> Option<egui::ColorImage> {
     decode_thumbnail(bytes)
 }
 
-fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
+pub(crate) fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
     if bytes.len() > 512 * 1024 {
         return None;
     }
@@ -577,6 +577,7 @@ enum FileAction {
     Import,
     Save,
     SaveAs,
+    SaveCloud,
     Export(&'static str),
     Mesh,
     ViewDxf,
@@ -716,6 +717,7 @@ fn navigation(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>
         ("home:recover", recover.as_str(), String::new(), Some(Section::Recovery), true, FileAction::Section(Section::Recovery)),
         ("home:save", app.tr("ui.save"), format!("{primary}S"), None, design, FileAction::Save),
         ("home:save_as", app.tr("ui.save_as"), format!("{primary}{shift}S"), None, design, FileAction::SaveAs),
+        ("home:save_cloud", app.tr("cmd.cloud.save"), String::new(), None, design && !app.session.cloud_save_pending(), FileAction::SaveCloud),
         ("home:export", app.tr("home.export"), String::new(), Some(Section::Export), design, FileAction::Section(Section::Export)),
         ("home:properties", app.tr("home.properties"), String::new(), None, design, FileAction::Properties),
         ("home:settings", app.tr("home.settings"), format!("{primary},"), None, true, FileAction::Settings),
@@ -723,8 +725,11 @@ fn navigation(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAction>
         ("home:crashes", app.tr("home.crashes"), String::new(), None, true, FileAction::Crashes),
         ("home:about", app.tr_label("About SolidCraft"), String::new(), None, true, FileAction::About),
     ];
-    for (index, (id, label, key, section, enabled, picked)) in nav.into_iter().enumerate() {
-        if index == 4 || index == 8 {
+    for (id, label, key, section, enabled, picked) in nav {
+        if id == "home:save_cloud" && app.services.cloud_host.is_none() {
+            continue;
+        }
+        if matches!(id, "home:save" | "home:settings") {
             FileView::separator(ui);
         }
         let response = FileView::nav_row(ui, id, label, &key, section == Some(app.home.section), enabled && !busy);
@@ -821,6 +826,7 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
         });
     });
     ui.add_space(t.file_section_gap);
+    crate::cloud_browser::home(app, ui);
     FileView::section(ui, app.tr("home.recent"), t.space_10, |ui| {
         if app.home.recent.is_empty() {
             FileView::detail(ui, app.tr("home.recent_empty"));
@@ -1039,6 +1045,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         FileAction::SaveAs => {
             app.home.open = false;
             crate::toolbar::save_as(app);
+        }
+        FileAction::SaveCloud => {
+            app.home.open = false;
+            app.start("cloud.save");
         }
         FileAction::Export(ext) => {
             app.home.open = false;

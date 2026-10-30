@@ -273,6 +273,7 @@ star	false
 status_error	false
 status_pin	false
 status_recovery	false
+stop	false
 style	false
 style_hidden_edges	false
 style_shaded	false
@@ -301,6 +302,7 @@ surface_unstitch	false
 surface_untrim	false
 svg	false
 sweep	false
+sync	false
 text	false
 thread	false
 timeline_play	false

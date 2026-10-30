@@ -463,7 +463,8 @@ fn snapshot_runs_its_script_on_the_in_design() {
 fn unknown_command_suggests_the_closest_id() {
     let output = cli().args(["exec", "file.open"]).output().unwrap();
     assert_eq!(output.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("did you mean `doc.open`?"), "{}", String::from_utf8_lossy(&output.stderr));
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(message.contains("did you mean `doc.open`"), "{message}");
 }
 
 /// #1833: `--timings` reports each command's time instead of the measurement, `--profile` adds

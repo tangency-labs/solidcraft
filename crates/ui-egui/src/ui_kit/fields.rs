@@ -192,6 +192,7 @@ fn searchable_dropdown_with(
     let row = label(ui).to_owned();
     let combo = egui::ComboBox::from_id_salt(id)
         .width(if icon.is_some() { Tokens::get().control_height } else { dimension(ui.available_width()) })
+        .truncate()
         .height(Tokens::get().space_24 * 14.0)
         .selected_text(if icon.is_some() { "" } else { current })
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
@@ -504,8 +505,63 @@ pub(crate) fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String,
     cell_editor_frame(ui, id, value, hint, invalid, limit, true)
 }
 
-fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
+/// Inline validation occupies a reserved slot inside an input; text and row geometry
+/// stay fixed through idle, checking and terminal states. The tooltip is also accessible text.
+pub(crate) enum InputStatus<'a> {
+    Checking(&'a str),
+    Valid(&'a str),
+    Warning(&'a str),
+    Invalid(&'a str),
+}
+
+pub(crate) fn checked_cell_editor(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut String,
+    hint: &str,
+    limit: usize,
+    status: Option<InputStatus<'_>>,
+) -> Response {
     let t = Tokens::get();
+    let response = cell_editor_status(ui, id, value, hint, false, limit, CellFrame::Checked);
+    let rect = egui::Rect::from_center_size(
+        egui::pos2(response.rect.right() - t.form_inset - t.space_16 / 2.0, response.rect.center().y),
+        vec2(t.space_16, t.space_16),
+    );
+    if let Some(status) = status {
+        let (text, color) = match status {
+            InputStatus::Checking(text) => {
+                egui::Spinner::new().color(t.form_dim).paint_at(ui, rect);
+                (text, None)
+            }
+            InputStatus::Valid(text) => (text, Some(t.form_success)),
+            InputStatus::Warning(text) => (text, Some(t.warning)),
+            InputStatus::Invalid(text) => (text, Some(t.form_error)),
+        };
+        if let Some(color) = color {
+            ui.painter().circle_filled(rect.center(), t.space_3, color);
+        }
+        ui.interact(rect, id.with("status"), egui::Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+        scenario::publish_target("dialog:input_status", rect);
+        return response.on_hover_text(text);
+    }
+    response
+}
+
+fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
+    cell_editor_status(ui, id, value, hint, invalid, limit, if frame { CellFrame::Input } else { CellFrame::Plain })
+}
+
+enum CellFrame {
+    Input,
+    Plain,
+    Checked,
+}
+
+fn cell_editor_status(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, kind: CellFrame) -> Response {
+    let t = Tokens::get();
+    let frame = !matches!(kind, CellFrame::Plain);
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
         .id(id)
@@ -526,6 +582,12 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
         editor
     } else {
         editor.frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_8 as i8, 0)))
+    };
+    let editor = if matches!(kind, CellFrame::Checked) {
+        let inset = t.form_inset.round() as i8;
+        editor.margin(egui::Margin { left: inset, right: inset.saturating_add((t.space_16 + t.space_4).round() as i8), top: 0, bottom: 0 })
+    } else {
+        editor
     };
     let mut response = ui.add_sized(vec2(dimension(ui.available_width()), row_height()), editor);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
@@ -837,12 +899,18 @@ pub(crate) fn text_area(ui: &mut Ui, label: &str, id: egui::Id, value: &mut Stri
 /// Secret input with a stable ID. Never publishes its value in accessibility/scenario metadata.
 /// Tokens: cell_editor tokens.
 pub(crate) fn password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -> Response {
+    bounded_password_field(ui, id, value, hint, usize::MAX)
+}
+
+/// Secret input with an application-specific character cap; keeps values out of metadata.
+pub(crate) fn bounded_password_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, limit: usize) -> Response {
     let t = Tokens::get();
     let mut response = ui.add_sized(
         vec2(dimension(ui.available_width()), row_height()),
         text_input(egui::TextEdit::singleline(value))
             .id(id)
             .password(true)
+            .char_limit(limit)
             .hint_text(hint)
             .font(egui::FontId::monospace(t.font_label))
             .background_color(t.input_fill()),

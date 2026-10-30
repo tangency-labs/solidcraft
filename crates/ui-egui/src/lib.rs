@@ -20,6 +20,10 @@ pub mod browser_canvas;
 pub mod browser_prompts;
 pub mod canvas;
 pub mod cli_link;
+mod cloud;
+mod cloud_browser;
+mod cloud_settings;
+mod cloud_setup;
 #[cfg(test)]
 mod colour_tokens_tests;
 #[cfg(test)]
@@ -391,6 +395,8 @@ impl Default for UiState {
 /// Host services injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
+    /// Asynchronous repository storage, injected by the desktop or browser app.
+    pub cloud_host: Option<std::sync::Arc<dyn solidcraft_cloud::jobs::Host>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -401,6 +407,8 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Choose an existing directory; absent on browser hosts.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -474,6 +482,7 @@ pub struct SolveApp {
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
     pub services: Services,
+    pub(crate) cloud: cloud::State,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
@@ -697,6 +706,12 @@ impl Drop for SolveApp {
 
 impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
+        if let Some(host) = &services.cloud_host {
+            session.set_cloud_host(Some(host.clone()));
+            if let Err(error) = session.execute("cloud.settings", &serde_json::json!({"reload":true})) {
+                log::error!("cloud settings: {error}");
+            }
+        }
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
@@ -720,6 +735,7 @@ impl SolveApp {
             pre_sketch_cam: None,
             pre_sketch_component: None,
             services,
+            cloud: Default::default(),
             file_picker: None,
             slicer_wait: None,
             easyprint: Default::default(),
@@ -1052,18 +1068,38 @@ impl SolveApp {
 
     /// Run a command programmatically (JSON parameters, no dialogs).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if (self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some())
+            && !matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
+        {
             return Err("a file operation is in progress".into());
         }
         // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
+        if let Some(error) = cloud::configuration::refusal(self, id, &params) {
+            return Err(error.into());
+        }
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
             timeline::request_playback(self, action)?;
             return Ok(reply);
+        }
+        // Global cloud operations can outlive the tab from which they were started.
+        if matches!(id, "cloud.cancel" | "cloud.status" | "cloud.thumbnail.finish")
+            && let Some(operation) = params.get("operation").and_then(Value::as_str)
+            && !self.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation)
+        {
+            for slot in self.docs.background_mut() {
+                if slot.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
+                    let result = slot.session.execute(id, &params).map_err(|e| e.to_string());
+                    if result.is_ok() && id == "cloud.cancel" {
+                        self.cloud.operations.cancel_requested(operation);
+                    }
+                    return result;
+                }
+            }
         }
         let t0 = now_ms();
         let revision = self.session.revision;
@@ -1081,6 +1117,9 @@ impl SolveApp {
         if self.status_undo && revision != self.session.revision {
             self.status_undo = false;
             self.status = None;
+        }
+        if let Ok(value) = &r {
+            cloud::operations::submitted(self, id, &params, value);
         }
         let done = self.command_completed(id, r);
         if self.session.revision != revision {
@@ -1335,7 +1374,7 @@ impl SolveApp {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
-                if matches!(id, "file.new" | "doc.open" | "doc.recover") {
+                if matches!(id, "file.new" | "doc.open" | "doc.recover" | "cloud.open.finish") {
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -1444,6 +1483,27 @@ impl SolveApp {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
             }
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if id == "cloud.configure" {
+            cloud_settings::git::open(self);
+            return;
+        }
+        if id == "cloud.settings" {
+            prefs::open_at(self, prefs::PAGE_CLOUD);
+            return;
+        }
+        if id == "cloud.connect" {
+            cloud_setup::open(self);
+            return;
+        }
+        if matches!(id, "cloud.list" | "cloud.save") {
+            cloud_browser::start(self, id);
+            return;
+        }
+        if matches!(id, "cloud.history" | "cloud.trash" | "cloud.rename" | "cloud.delete" | "cloud.restore" | "cloud.discard") {
+            cloud_browser::management::start(self, id);
             return;
         }
         if id == "ui.palette" {
@@ -2465,6 +2525,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         file_load::tick(self, ctx);
         save_job::tick(self, false);
+        cloud::tick(self, ctx);
         edit_in_place::tick(self);
         let typing = ctx.egui_wants_keyboard_input();
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
@@ -2604,6 +2665,10 @@ impl SolveApp {
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         self.cad_ui(ui, &mut report_input);
+        cloud_setup::show(self, ui.ctx());
+        #[cfg(not(target_arch = "wasm32"))]
+        cloud_settings::git::show(self, ui.ctx());
+        cloud_browser::show(self, ui.ctx());
         drop(report_input);
         // After everything else, on every page (the start page too, which returns early from
         // `cad_ui`): the window's edges resize it (#1381).

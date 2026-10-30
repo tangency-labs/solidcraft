@@ -4,7 +4,7 @@ pub const THUMBNAIL_SIZE: [usize; 2] = [240, 150];
 const MAX_BYTES: usize = 256 << 10;
 const FORMAT: &str = "solidcraft-thumbnail/1";
 
-fn valid_header(bytes: &[u8]) -> bool {
+pub(crate) fn valid_header(bytes: &[u8]) -> bool {
     bytes.len() <= MAX_BYTES
         && bytes.get(..8) == Some(b"\x89PNG\r\n\x1a\n")
         && bytes.get(8..16) == Some(b"\0\0\0\rIHDR")

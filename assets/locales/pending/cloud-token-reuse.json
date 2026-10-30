@@ -1,0 +1,158 @@
+{
+  "en": {
+    "cloud.token_new": "New…",
+    "cloud.token_enter": "On GitHub, choose Generate token, then paste it here.",
+    "cloud.token_reuse": "Reuse the saved token. On GitHub, make sure it also grants access to this repository.",
+    "cloud.token_value": "New token"
+  },
+  "en-GB": {
+    "cloud.token_new": "New…",
+    "cloud.token_enter": "On GitHub, choose Generate token, then paste it here.",
+    "cloud.token_reuse": "Reuse the saved token. On GitHub, make sure it also grants access to this repository.",
+    "cloud.token_value": "New token"
+  },
+  "cs": {
+    "cloud.token_new": "Nový…",
+    "cloud.token_enter": "Na GitHubu zvolte Generate token a vložte jej sem.",
+    "cloud.token_reuse": "Použijte uložený token. Na GitHubu ověřte, že má přístup i k tomuto repozitáři.",
+    "cloud.token_value": "Nový token"
+  },
+  "da": {
+    "cloud.token_new": "Ny…",
+    "cloud.token_enter": "Vælg Generate token på GitHub, og indsæt det her.",
+    "cloud.token_reuse": "Genbrug det gemte token. Kontrollér på GitHub, at det også giver adgang til dette repository.",
+    "cloud.token_value": "Nyt token"
+  },
+  "de": {
+    "cloud.token_new": "Neu…",
+    "cloud.token_enter": "Wählen Sie auf GitHub Generate token und fügen Sie das Token hier ein.",
+    "cloud.token_reuse": "Gespeichertes Token verwenden. Stellen Sie auf GitHub sicher, dass es auch Zugriff auf dieses Repository gewährt.",
+    "cloud.token_value": "Neues Token"
+  },
+  "es": {
+    "cloud.token_new": "Nuevo…",
+    "cloud.token_enter": "En GitHub, elige Generate token y pégalo aquí.",
+    "cloud.token_reuse": "Reutiliza el token guardado. Comprueba en GitHub que también permita acceder a este repositorio.",
+    "cloud.token_value": "Nuevo token"
+  },
+  "fr": {
+    "cloud.token_new": "Nouveau…",
+    "cloud.token_enter": "Sur GitHub, choisissez Generate token, puis collez-le ici.",
+    "cloud.token_reuse": "Réutilisez le jeton enregistré. Sur GitHub, vérifiez qu’il donne aussi accès à ce dépôt.",
+    "cloud.token_value": "Nouveau jeton"
+  },
+  "gl": {
+    "cloud.token_new": "Novo…",
+    "cloud.token_enter": "En GitHub, escolle Generate token e pégao aquí.",
+    "cloud.token_reuse": "Reutiliza o token gardado. Comproba en GitHub que tamén permita acceder a este repositorio.",
+    "cloud.token_value": "Novo token"
+  },
+  "hu": {
+    "cloud.token_new": "Új…",
+    "cloud.token_enter": "A GitHubon válassza a Generate token lehetőséget, majd illessze be ide.",
+    "cloud.token_reuse": "A mentett token újrafelhasználása. A GitHubon ellenőrizze, hogy ehhez a tárolóhoz is hozzáférést biztosít.",
+    "cloud.token_value": "Új token"
+  },
+  "id": {
+    "cloud.token_new": "Baru…",
+    "cloud.token_enter": "Di GitHub, pilih Generate token, lalu tempelkan di sini.",
+    "cloud.token_reuse": "Gunakan kembali token tersimpan. Pastikan di GitHub bahwa token juga memberi akses ke repositori ini.",
+    "cloud.token_value": "Token baru"
+  },
+  "it": {
+    "cloud.token_new": "Nuovo…",
+    "cloud.token_enter": "Su GitHub, scegli Generate token e incollalo qui.",
+    "cloud.token_reuse": "Riutilizza il token salvato. Su GitHub, verifica che consenta anche l’accesso a questo repository.",
+    "cloud.token_value": "Nuovo token"
+  },
+  "ja": {
+    "cloud.token_new": "新規…",
+    "cloud.token_enter": "GitHub で Generate token を選び、ここに貼り付けてください。",
+    "cloud.token_reuse": "保存済みトークンを再利用します。GitHub でこのリポジトリへのアクセスも許可されていることを確認してください。",
+    "cloud.token_value": "新しいトークン"
+  },
+  "ko": {
+    "cloud.token_new": "새로 만들기…",
+    "cloud.token_enter": "GitHub에서 Generate token을 선택한 다음 여기에 붙여 넣으세요.",
+    "cloud.token_reuse": "저장된 토큰을 재사용합니다. GitHub에서 이 저장소에 대한 접근 권한도 있는지 확인하세요.",
+    "cloud.token_value": "새 토큰"
+  },
+  "ms": {
+    "cloud.token_new": "Baharu…",
+    "cloud.token_enter": "Di GitHub, pilih Generate token, kemudian tampalkannya di sini.",
+    "cloud.token_reuse": "Guna semula token yang disimpan. Pastikan di GitHub bahawa token itu turut memberikan akses kepada repositori ini.",
+    "cloud.token_value": "Token baharu"
+  },
+  "nb": {
+    "cloud.token_new": "Nytt…",
+    "cloud.token_enter": "Velg Generate token på GitHub, og lim det inn her.",
+    "cloud.token_reuse": "Bruk det lagrede tokenet på nytt. Kontroller på GitHub at det også gir tilgang til dette repositoriet.",
+    "cloud.token_value": "Nytt token"
+  },
+  "nl": {
+    "cloud.token_new": "Nieuw…",
+    "cloud.token_enter": "Kies op GitHub Generate token en plak het hier.",
+    "cloud.token_reuse": "Gebruik het opgeslagen token opnieuw. Controleer op GitHub of het ook toegang geeft tot deze repository.",
+    "cloud.token_value": "Nieuw token"
+  },
+  "pl": {
+    "cloud.token_new": "Nowy…",
+    "cloud.token_enter": "Na GitHubie wybierz Generate token, a następnie wklej go tutaj.",
+    "cloud.token_reuse": "Użyj zapisanego tokena. Sprawdź na GitHubie, czy zapewnia on również dostęp do tego repozytorium.",
+    "cloud.token_value": "Nowy token"
+  },
+  "pt-BR": {
+    "cloud.token_new": "Novo…",
+    "cloud.token_enter": "No GitHub, escolha Generate token e cole-o aqui.",
+    "cloud.token_reuse": "Reutilize o token salvo. No GitHub, verifique se ele também permite acessar este repositório.",
+    "cloud.token_value": "Novo token"
+  },
+  "ro": {
+    "cloud.token_new": "Nou…",
+    "cloud.token_enter": "Pe GitHub, alegeți Generate token, apoi lipiți-l aici.",
+    "cloud.token_reuse": "Reutilizați tokenul salvat. Pe GitHub, verificați că oferă acces și la acest depozit.",
+    "cloud.token_value": "Token nou"
+  },
+  "ru": {
+    "cloud.token_new": "Новый…",
+    "cloud.token_enter": "На GitHub выберите Generate token, затем вставьте его сюда.",
+    "cloud.token_reuse": "Используйте сохранённый токен. Убедитесь на GitHub, что он также предоставляет доступ к этому репозиторию.",
+    "cloud.token_value": "Новый токен"
+  },
+  "sv": {
+    "cloud.token_new": "Ny…",
+    "cloud.token_enter": "Välj Generate token på GitHub och klistra sedan in det här.",
+    "cloud.token_reuse": "Återanvänd det sparade tokenet. Kontrollera på GitHub att det även ger åtkomst till detta arkiv.",
+    "cloud.token_value": "Nytt token"
+  },
+  "tr": {
+    "cloud.token_new": "Yeni…",
+    "cloud.token_enter": "GitHub’da Generate token seçeneğini seçin ve buraya yapıştırın.",
+    "cloud.token_reuse": "Kayıtlı belirteci yeniden kullanın. GitHub’da bu depoya da erişim sağladığından emin olun.",
+    "cloud.token_value": "Yeni belirteç"
+  },
+  "uk": {
+    "cloud.token_new": "Новий…",
+    "cloud.token_enter": "На GitHub виберіть Generate token, а потім вставте його сюди.",
+    "cloud.token_reuse": "Використовуйте збережений токен. Переконайтеся на GitHub, що він також надає доступ до цього репозиторію.",
+    "cloud.token_value": "Новий токен"
+  },
+  "vi": {
+    "cloud.token_new": "Mới…",
+    "cloud.token_enter": "Trên GitHub, chọn Generate token rồi dán vào đây.",
+    "cloud.token_reuse": "Dùng lại mã truy cập đã lưu. Trên GitHub, hãy đảm bảo mã cũng cấp quyền truy cập vào kho lưu trữ này.",
+    "cloud.token_value": "Mã truy cập mới"
+  },
+  "zh-TW": {
+    "cloud.token_new": "新增…",
+    "cloud.token_enter": "在 GitHub 選擇 Generate token，然後貼到這裡。",
+    "cloud.token_reuse": "重複使用已儲存的權杖。請在 GitHub 確認它也有權存取此儲存庫。",
+    "cloud.token_value": "新權杖"
+  },
+  "zh": {
+    "cloud.token_new": "新建…",
+    "cloud.token_enter": "在 GitHub 选择 Generate token，然后粘贴到这里。",
+    "cloud.token_reuse": "重复使用已保存的令牌。请在 GitHub 确认它也有权访问此仓库。",
+    "cloud.token_value": "新令牌"
+  }
+}

@@ -20,6 +20,7 @@
 #[cfg(not(target_os = "macos"))]
 #[path = "../../../assets/icons/app/shared/source/app_icon.rs"]
 mod app_icon;
+mod cloud;
 mod come_forward;
 mod control_server;
 mod device_lost;
@@ -29,6 +30,7 @@ mod native_crash;
 mod native_crash_macos;
 #[cfg(target_os = "windows")]
 mod native_frame;
+mod native_http;
 #[cfg(target_os = "macos")]
 mod native_menu;
 mod nav_bridge;
@@ -362,7 +364,13 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
-    Services {
+    let folder_parent = parent.clone();
+    let mut services = Services {
+        cloud_host: None,
+        pick_folder: Some(Box::new(move || {
+            let future = folder_parent.clone().pick_folder();
+            Box::pin(async move { future.await.map(|p| p.path().to_string_lossy().into_owned()) })
+        })),
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_folder.start(open_parent.clone());
@@ -450,7 +458,9 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             }
             let _ = command.spawn();
         })),
-    }
+    };
+    cloud::install(&mut services);
+    services
 }
 
 /// HTTPS GET for the update check (docs/updates.md): certificates from the operating system, a
@@ -494,16 +504,9 @@ fn http_download(url: &str, to: &std::path::Path, progress: &dyn Fn(u64, Option<
 /// redirects (a key must not follow one elsewhere), at most 16 MB back.
 fn agent_http(r: &solidcraft_ui_egui::agent_chat::backend::HttpRequest) -> Result<(u16, Vec<u8>), String> {
     use std::time::Duration;
-    let tls = ureq::tls::TlsConfig::builder()
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
-        .build();
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .tls_config(tls)
-        .http_status_as_error(false)
+    let agent: ureq::Agent = native_http::config()
         .timeout_global(Some(Duration::from_secs(r.timeout_s.clamp(1, 3600))))
         .timeout_connect(Some(Duration::from_secs(10)))
-        .user_agent("SolidCraft")
         .max_redirects(0)
         .build()
         .into();
@@ -576,14 +579,8 @@ impl solidcraft_ui_egui::agent_chat::backend::Secrets for Keychain {
 fn http_call(url: &str, timeout: std::time::Duration) -> Result<ureq::http::Response<ureq::Body>, solidcraft_ui_egui::update::FetchError> {
     use solidcraft_ui_egui::update::FetchError;
     use std::time::Duration;
-    let tls = ureq::tls::TlsConfig::builder()
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .unversioned_rustls_crypto_provider(std::sync::Arc::new(rustls::crypto::ring::default_provider()))
-        .build();
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .tls_config(tls)
+    let agent: ureq::Agent = native_http::config()
         .https_only(true)
-        .http_status_as_error(false)
         .timeout_global(Some(timeout))
         .timeout_connect(Some(Duration::from_secs(5)))
         .user_agent("SolidCraft-update-check")
@@ -747,6 +744,9 @@ impl Drop for DriverClient {
 }
 
 fn main() -> eframe::Result {
+    if let Some(code) = cloud::askpass() {
+        std::process::exit(code);
+    }
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
