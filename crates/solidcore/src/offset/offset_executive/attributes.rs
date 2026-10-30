@@ -35,7 +35,7 @@ use crate::geom::object::ObjectRef;
 use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::loopuse;
 use crate::topology::topology::{NotifyRecords, Topology};
-use crate::topology::{Brep, BrepId, EdgeId, Region, RegionId, Shell};
+use crate::topology::{Brep, BrepId, EdgeId, NamingScheme, Region, RegionId, Shell};
 
 const OP_SEED: &str = "offset::offset_executive::attributes::seed_attributes";
 
@@ -120,7 +120,78 @@ pub(crate) fn finish_attributes(
     } else {
         notifications.result_key_of
     };
-    write_back_attributes(result, key_of, notifications.attributes)
+    write_back_attributes(result, key_of, notifications.attributes)?;
+    record_result_owners(result, key_of)
+}
+
+/// (not upstream: upstream's geometry owners are the result's own entities.) Names
+/// the returned B-rep by the identities its geometry is owned under
+/// (tangency-labs/solidcore#1670). The offset binds each result entity's geometry
+/// under the caller's name of it, `key_of` (as [`finish_attributes`] picks it), and a
+/// merged result's under the identities the merge's store recorded for it
+/// (`Brep::geometry_owner_key`); its scheme (unknown, or the merge copy's notification
+/// scheme) names none of them. So when some geometry is owned under such a key, the
+/// B-rep becomes [`NamingScheme::Caller`] with each edge's, face's and edge use's
+/// key recorded where its geometry is owned under it: `key_of`'s name, the recorded
+/// key, or the entity's identity in the previous scheme ([`Brep::owner_identity`]).
+/// An edge use whose UV trim curve has no owner (or no trim yet) records its
+/// `key_of` name and its trim takes it (`pUVTrimCurve->SetOwner(eu)`, which the
+/// B-rep's own routines leave undone under an unknown scheme). Any other owner is
+/// left unrecorded, so a foreign owner stays detectable. Geometry and owners are not
+/// otherwise changed.
+///
+/// # Errors
+/// None in practice (every id comes from the B-rep's own arenas).
+pub(crate) fn record_result_owners(
+    result: &mut Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<()> {
+    let mut recorded: Vec<(EntityRef, ObjectRef)> = Vec::new();
+    let mut caller_named = false;
+    let mut proven = |b: &Brep, e: EntityRef, owner: Option<ObjectRef>| {
+        let scheme = b.owner_identity(e);
+        match owner {
+            // a UV trim the offset's routines left unowned, or none made yet
+            None => recorded.push((e, key_of(e))),
+            Some(owner) if owner == scheme => recorded.push((e, owner)),
+            Some(owner) if owner == key_of(e) || Some(owner) == b.geometry_owner_key(e) => {
+                caller_named = true;
+                recorded.push((e, owner));
+            }
+            Some(_) => {}
+        }
+    };
+    for (id, edge) in result.edges().iter() {
+        let owner = edge.curve.as_ref().and_then(Curve::owner);
+        proven(result, EntityRef::Edge(id), owner);
+    }
+    for (id, face) in result.faces().iter() {
+        let owner = face
+            .surface
+            .as_ref()
+            .and_then(crate::surface::surface::Surface::owner);
+        proven(result, EntityRef::Face(id), owner);
+    }
+    for (id, eu) in result.edgeuses().iter() {
+        let owner = eu.uv_trim_curve.as_ref().and_then(Curve::owner);
+        proven(result, EntityRef::Edgeuse(id), owner);
+    }
+    if !caller_named {
+        // the B-rep's own scheme names its geometry: it keeps that scheme
+        return Ok(());
+    }
+    for (e, owner) in recorded {
+        result.set_geometry_owner_key(e, Some(owner));
+        if let EntityRef::Edgeuse(id) = e {
+            if let Some(trim) = result.edgeuse_mut(id)?.uv_trim_curve.as_mut() {
+                if trim.owner().is_none() {
+                    trim.set_owner(Some(owner), None);
+                }
+            }
+        }
+    }
+    result.set_naming(NamingScheme::Caller);
+    Ok(())
 }
 
 // ---- the identities of the simple wrappers ---------------------------------------

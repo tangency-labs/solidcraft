@@ -95,8 +95,13 @@ pub trait PrimitiveAccess: SweepAccess {
             .ok_or_else(|| SolidError::null_pointer("primitive::primitive_creation::p3::wire"))?
             .clone();
         let interval = input.natural_interval();
-        let edge = self.with_brep_mut(brep, |kernel, model, _, _| {
-            crate::topology::brep::p5::create_wire_edge_from_curve(kernel, model, input, interval)
+        // under the primitive's own notification environment, like every face it
+        // builds, so the edge's curve is owned by the edge's identity in the result
+        // (upstream: `pCurve->SetOwner(pEdge)`; #1671)
+        let edge = self.with_brep_mut(brep, |kernel, model, _, env| {
+            crate::topology::brep::p5::create_wire_edge_from_curve_notified(
+                kernel, model, input, interval, env,
+            )
         })?;
         *curve = None;
         Ok(edge)
