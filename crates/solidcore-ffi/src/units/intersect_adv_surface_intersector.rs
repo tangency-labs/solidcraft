@@ -11,6 +11,14 @@
 //! those trees, and a point arena; then runs the [`Op`]s in order. The record is, per op,
 //! `op status [values]`, then the state.
 //!
+//! With [`Program::build_trees`] (and no hand-built trees) each surface gets a fresh
+//! surface cache whose tree `SmSurfaceCache::GetTree` builds, as
+//! `SmSurfaceIntersector::Intersect` does (`GetTree` on A's cache, then on B's, the same
+//! cache when B is A), before the ops; the record then starts with the `GetTree` status
+//! (`0`, or `SM_ERR_NULL_POINTER` for a NULL tree, as `NER`) and, on success, both
+//! trees: `n` then per node, in node allocation order, `parent c1 c2 aux bbox[6]`
+//! (indices, `-1` null). Branch ops may then name node `0` only.
+//!
 //! The state is `closest uvs[0] uvs[1] node[0] node[1] separate trace_dir ang_tol
 //! approx_tol tol3d operation ncurvepoints` (nodes as indices into tree 0 / tree 1, `-1`
 //! null). A point is the 80 values of
@@ -168,6 +176,8 @@ pub struct Program {
     pub fillet: bool,
     /// Trees of A and B (`None` for B when B is A).
     pub trees: Option<(Vec<NodeIn>, Option<Vec<NodeIn>>)>,
+    /// Without `trees`: build the trees with `GetTree` (see the module docs).
+    pub build_trees: bool,
     /// Points ([`POINT_LEN`] values each).
     pub points: Vec<Vec<f64>>,
     /// Ops.
@@ -434,6 +444,10 @@ pub fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
     e.nums(&prog.dom2)?;
     e.flag(prog.fillet);
     match &prog.trees {
+        None if prog.build_trees => {
+            e.int(2);
+            e.sizes = Some((1, 1));
+        }
         None => e.flag(false),
         Some((t0, t1)) => {
             e.flag(true);

@@ -11,7 +11,7 @@
 //! |----------------------------------------------------------|---------------------------------------------------|
 //! | [`AdvSurfaceIntersector`], [`AdvSurfaceIntersector::new`] | `SmAdvSurfaceIntersector`, its constructor       |
 //! | `Drop` (implicit)                                        | `~SmAdvSurfaceIntersector`                        |
-//! | [`AdvSurfaceIntersector::set_surface_caches`]            | `m_apTrees[i] = smsurf_GetSurfaceCache(..)->GetTree()` of the callers |
+//! | [`AdvSurfaceIntersector::set_surface_caches`]            | `pSC->GetTree()`, `m_apTrees[i]` of `SmSurfaceIntersector::Intersect` |
 //! | `add_sing_dir` (private)                                 | `sm_AddSingDir` (static)                          |
 //! | [`AdvSurfaceIntersector::compute_singularity_point`], [`AdvSurfaceIntersector::compute_singularity_point_on`] | `ComputeSingularityPoint` |
 //! | [`AdvSurfaceIntersector::make_dupin`], [`Dupin`]         | `MakeDupin`                                       |
@@ -36,10 +36,12 @@
 //!   `m_pData` and its surface through the tree's owner (asserted to be
 //!   `m_cpSurface[i]`). Here the trees are those of the two surface caches given to
 //!   [`AdvSurfaceIntersector::set_surface_caches`]; a node's patch is read from its
-//!   cache and its surface is [`SurfaceIntersector::surface`]. A cache without a
-//!   tree (upstream `GetTree` would build it) returns [`SolidError::Unported`]
-//!   (`surface.surface_cache_p3`). Without caches the nodes have no data
-//!   (`NER`, `SM_ERR_NULL_POINTER`).
+//!   cache and its surface is [`SurfaceIntersector::surface`].
+//!   [`AdvSurfaceIntersector::set_surface_caches`] asks each cache for its tree
+//!   ([`SurfaceCache::get_tree`], which builds a missing one) as
+//!   `SmSurfaceIntersector::Intersect` does; a one-cache slice is the cache of both
+//!   surfaces (same surface: `GetTree` runs on it twice, as upstream). Without caches
+//!   the nodes have no data (`NER`, `SM_ERR_NULL_POINTER`).
 //! - **Polar boxes.** `BranchIsGaussSeparate` builds a missing polar box lazily
 //!   (`GetPolarBox`); the caches are shared here, so a missing box is built without
 //!   storing it ([`SurfaceCache::polar_box_unstored`]; the values are the same). (`SolveBranch` resets
@@ -121,6 +123,8 @@ mod tangent_contacts;
 
 const OP_SING: &str =
     "intersect::adv_surface_intersector::AdvSurfaceIntersector::compute_singularity_point";
+const OP_SET_CACHES: &str =
+    "intersect::adv_surface_intersector::AdvSurfaceIntersector::set_surface_caches";
 const OP_LOCAL: &str = "intersect::adv_surface_intersector::AdvSurfaceIntersector::local_solve";
 const OP_SOLVE: &str = "intersect::adv_surface_intersector::AdvSurfaceIntersector::solve_branch";
 const OP_GAUSS: &str =
@@ -339,25 +343,60 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         })
     }
 
-    /// Uses the decomposition trees of `cache1` and `cache2` (the caches of the first
-    /// and second surface) as the solver trees (upstream `m_apTrees[i] =
-    /// smsurf_GetSurfaceCache(m_cpSurface[i])->GetTree()`).
+    /// Asks the caches of the first and second surface for their decomposition trees
+    /// (`SmSurfaceCache::GetTree`, [`SurfaceCache::get_tree`]: built when missing) and
+    /// uses them as the solver trees (upstream `SmSurfaceIntersector::Intersect`:
+    /// `pTree1 = pSC1->GetTree(); NER(pTree1); pTree2 = ...; m_apTrees[0..2]`).
+    /// `caches` holds the first surface's cache and then the second's; a single cache
+    /// serves both surfaces (B is A, so upstream calls `GetTree` on it twice).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for a cache without tree (`SmSurfaceCache::GetTree`
-    /// would build it, `surface.surface_cache_p3`).
+    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) without caches or when a
+    /// tree cannot be built (`NER`); [`SolidError::Unported`] from a build that reaches unported code.
     pub fn set_surface_caches(
+        &mut self,
+        k: &Kernel,
+        caches: &'t mut [SurfaceCache<O>],
+    ) -> Result<()> {
+        if caches.is_empty() {
+            return Err(SolidError::null_pointer(OP_SET_CACHES));
+        }
+        let second = usize::from(caches.len() > 1);
+        for i in [0, second] {
+            let c = caches
+                .get_mut(i)
+                .ok_or(SolidError::null_pointer(OP_SET_CACHES))?;
+            c.get_tree(k).map_err(|e| {
+                if e.is_unported() {
+                    e
+                } else {
+                    SolidError::null_pointer(OP_SET_CACHES)
+                }
+            })?;
+        }
+        let caches: &'t [SurfaceCache<O>] = caches;
+        let cache1 = caches
+            .first()
+            .ok_or(SolidError::null_pointer(OP_SET_CACHES))?;
+        let cache2 = caches.get(second).unwrap_or(cache1);
+        self.bind_caches(cache1, cache2)
+    }
+
+    /// Uses the trees `cache1` and `cache2` already hold as the solver trees (the
+    /// `m_apTrees` assignment of `SmSurfaceIntersector::Intersect`, for a caller that
+    /// has just run `GetTree` on both caches itself).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` ([`SolidError::null_pointer`]) for a cache without tree
+    /// (`NER(pTree)`).
+    pub(crate) fn bind_caches(
         &mut self,
         cache1: &'t SurfaceCache<O>,
         cache2: &'t SurfaceCache<O>,
     ) -> Result<()> {
-        let tree = |c: &'t SurfaceCache<O>| {
-            c.tree().ok_or_else(|| {
-                // UNPORTED(surface.surface_cache_p3): SmSurfaceCache::GetTree
-                SolidError::unported("SmSurfaceCache::GetTree", "surface.surface_cache_p3")
-            })
-        };
+        let tree = |c: &'t SurfaceCache<O>| c.tree().ok_or(SolidError::null_pointer(OP_SET_CACHES));
         let t1 = tree(cache1)?;
         let t2 = tree(cache2)?;
         self.solver.trees[0] = Some(t1);

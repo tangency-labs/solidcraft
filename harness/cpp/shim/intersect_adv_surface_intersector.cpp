@@ -6,7 +6,12 @@
 // m_bSeperateGaussMaps) is read through member pointers obtained by explicit template
 // instantiation. The decomposition trees are built by hand in SmSurfaceCache objects of the
 // two surfaces (the tree construction belongs to unit surface.surface_cache_p3); the solver
-// trees m_apTrees are set to them, as SmSurfaceIntersector::Intersect does.
+// trees m_apTrees are set to them, as SmSurfaceIntersector::Intersect does. In build mode (trees
+// flag 2) the trees are instead built by SmSurfaceCache::GetTree on fresh caches of the two
+// surfaces (the same cache when B is A), exactly as SmSurfaceIntersector::Intersect asks for them.
+// The intersector's m_cpContext is set to the program's context, as
+// SmSurfaceIntersector::DoIntersection does before FindInteriorCurves (whose FlushCurve makes the
+// curves in *m_cpContext; left NULL, the curves have no context and their DropPoint fails).
 //
 // One entry point, sc_intersect_adv_surface_intersector_run(in, n_in, out, cap, out_len). `in`
 // is a program (layout in crates/solidcore-ffi/src/units/intersect_adv_surface_intersector.rs);
@@ -407,6 +412,9 @@ struct Peek : SmAdvSurfaceIntersector
         m_apTrees[1] = t1;
     }
     SmTList<SmTsectPnt>& curve_points() { return m_vCurvePoints; }
+    // SmSurfaceIntersector::DoIntersection stores the context (`m_cpContext = &crContext`)
+    // before FindInteriorCurves, whose FlushCurve makes its curves in `*m_cpContext`.
+    void set_context(const SmContext& c) { m_cpContext = &c; }
     const SmExtent2d& domain(int i) const { return m_vUVDomain[i]; }
     double trace_dir() const { return m_dCurveTraceDirection; }
     void set(double dir, double ang, double approx, double tol, int64_t op)
@@ -520,6 +528,7 @@ struct Prog
     std::vector<SmTsectPnt*> pts;
     Tree trees[2];
     bool has_trees = false;
+    bool build = false; // trees built by GetTree (trees flag 2)
     bool same = false;
     SmSolutionArray sols; // the solution array of OP_LOCAL / OP_SOLVE_BRANCH
     ~Prog()
@@ -791,7 +800,15 @@ SC_EXPORT int32_t sc_intersect_adv_surface_intersector_run(const double* in, int
         {
             Prog pr;
             pr.same = same;
-            if (rd.flag())
+            int64_t tmode = rd.idx(0, 2);
+            if (tmode == 2)
+            {
+                pr.has_trees = true;
+                pr.build = true;
+                pr.trees[0].cache = new (ctx) CachePeek(*a, a->GetNaturalUVDomain());
+                pr.trees[1].cache = same ? pr.trees[0].cache : new (ctx) CachePeek(*b, b->GetNaturalUVDomain());
+            }
+            else if (tmode == 1)
             {
                 pr.has_trees = true;
                 read_tree(rd, pr.trees[0], a, ctx);
@@ -810,9 +827,49 @@ SC_EXPORT int32_t sc_intersect_adv_surface_intersector_run(const double* in, int
             int64_t nops = rd.idx(0, 64);
             {
                 Peek si(*a, d1, *b, d2, fillet ? TRUE : FALSE);
-                if (pr.has_trees)
+                si.set_context(ctx);
+                bool run_ops = true;
+                if (pr.build)
+                {
+                    // SmSurfaceIntersector::Intersect: GetTree of each cache, NER on each
+                    SmTree* t0 = pr.trees[0].cache->GetTree();
+                    SmTree* t1 = t0 ? pr.trees[1].cache->GetTree() : NULL;
+                    if (t0 == NULL || t1 == NULL)
+                    {
+                        o.push_back((double)SM_ERR_NULL_POINTER);
+                        run_ops = false;
+                    }
+                    else
+                    {
+                        o.push_back(0.0);
+                        for (int i = 0; i < 2; i++)
+                        {
+                            SmTArray<void*> all;
+                            ((TreePeek*)(i == 0 ? t0 : t1))->node_mgr().GetActiveElements(all);
+                            pr.trees[i].nodes.clear();
+                            for (ULONG k = 0; k < all.GetSize(); k++)
+                                pr.trees[i].nodes.push_back((SmTreeNode*)all[k]);
+                        }
+                        for (int i = 0; i < 2; i++)
+                        {
+                            const Tree& t = pr.tree(i);
+                            o.push_back((double)t.nodes.size());
+                            for (const SmTreeNode* nd : t.nodes)
+                            {
+                                o.push_back((double)t.index_of(nd->m_pParent));
+                                o.push_back((double)t.index_of(nd->m_pChild1));
+                                o.push_back((double)t.index_of(nd->m_pChild2));
+                                o.push_back((double)nd->m_eAuxDataType);
+                                put_vec(o, nd->m_sBBox.GetMin());
+                                put_vec(o, nd->m_sBBox.GetMax());
+                            }
+                        }
+                        si.set_trees(t0, t1);
+                    }
+                }
+                else if (pr.has_trees)
                     si.set_trees(pr.trees[0].cache->tree(), pr.trees[1].cache->tree());
-                for (int64_t i = 0; i < nops; i++)
+                for (int64_t i = 0; run_ops && i < nops; i++)
                 {
                     int32_t op = (int32_t)rd.idx(1, OP_LAST);
                     o.push_back((double)op);

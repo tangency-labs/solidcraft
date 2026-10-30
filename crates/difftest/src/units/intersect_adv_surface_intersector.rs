@@ -188,6 +188,10 @@ struct Inputs {
     fillet: bool,
     /// Tree of A and (unless B is A) of B.
     trees: Option<(Vec<NodeIn>, Option<Vec<NodeIn>>)>,
+    /// Without `trees`: the trees are built by `SmSurfaceCache::GetTree` (Rust
+    /// [`AdvSurfaceIntersector::set_surface_caches`]) on fresh caches.
+    #[serde(default)]
+    build_trees: bool,
     /// [`p1ffi::POINT_LEN`] values each.
     points: Vec<Vec<f64>>,
     ops: Vec<OpIn>,
@@ -289,6 +293,7 @@ fn ffi_program(i: &Inputs) -> ffi::Program {
                 t1.as_ref().map(|t| t.iter().map(ffi_node).collect()),
             )
         }),
+        build_trees: i.build_trees,
         points: i.points.clone(),
         ops: i.ops.iter().map(ffi_op).collect(),
     }
@@ -739,12 +744,17 @@ fn rust_inner(i: &Inputs) -> Result<Vec<f64>, Fail> {
         Some((t0, t1)) => (Some(t0.as_slice()), t1.as_deref()),
         None => (None, None),
     };
-    let cache_a = rust_cache(sa, t0, H(0))?;
-    let cache_b = match &i.b {
-        Some(sb) => Some(rust_cache(rust_surface(sb)?, t1, H(1))?),
+    let mut caches = vec![rust_cache(sa, t0, H(0))?];
+    if let Some(sb) = &i.b {
+        caches.push(rust_cache(rust_surface(sb)?, t1, H(1))?);
+    }
+    // the intersector's own surfaces (equal to the caches' ones, which
+    // `set_surface_caches` borrows mutably to build their trees)
+    let surf_a = rust_surface(&i.a)?;
+    let surf_b = match &i.b {
+        Some(sb) => Some(rust_surface(sb)?),
         None => None,
     };
-    let cb = cache_b.as_ref().unwrap_or(&cache_a);
     let aux_of = |t: Option<&[NodeIn]>| -> Vec<AuxDataType> {
         t.unwrap_or(&[])
             .iter()
@@ -758,9 +768,10 @@ fn rust_inner(i: &Inputs) -> Result<Vec<f64>, Fail> {
     };
 
     let mut si: Si<'_> = match AdvSurfaceIntersector::new(
-        &k, cache_a.surface(),
+        &k,
+        &surf_a,
         &ext(i.dom1),
-        cb.surface(),
+        surf_b.as_ref().unwrap_or(&surf_a),
         &ext(i.dom2),
         i.fillet,
     ) {
@@ -772,20 +783,59 @@ fn rust_inner(i: &Inputs) -> Result<Vec<f64>, Fail> {
             })
         }
     };
+    let mut o = Vec::new();
+    let mut run_ops = true;
     if i.trees.is_some() {
-        si.set_surface_caches(&cache_a, cb)
+        si.set_surface_caches(&k, &mut caches)
             .map_err(|e| Fail::Harness(harness(format!("caches: {e}"))))?;
+    } else if i.build_trees {
+        match si.set_surface_caches(&k, &mut caches) {
+            Ok(()) => {
+                o.push(0.0);
+                for t in 0..2 {
+                    let tree = si
+                        .solver
+                        .tree(t)
+                        .map_err(|e| Fail::Harness(harness(format!("tree: {e}"))))?;
+                    put_tree(&mut o, tree);
+                    if let Some(a) = cx.aux.get_mut(t) {
+                        *a = tree.nodes().iter().map(|n| n.aux_type).collect();
+                    }
+                }
+            }
+            Err(e) => {
+                if let Some(d) = Output::unported(&e) {
+                    return Err(Fail::Deferred(Box::new(d)));
+                }
+                // `NER(pTree)`: SM_ERR_NULL_POINTER
+                o.push(status(&e));
+                run_ops = false;
+            }
+        }
     }
     for p in &i.points {
         si.base.alloc_point(rust_point(p)?);
     }
-    let mut o = Vec::new();
-    for op in &i.ops {
-        o.push(op_code(op));
-        run_op(&k, &mut cx, &mut si, op, &mut o)?;
+    if run_ops {
+        for op in &i.ops {
+            o.push(op_code(op));
+            run_op(&k, &mut cx, &mut si, op, &mut o)?;
+        }
     }
     put_state(&mut o, &si);
     Ok(o)
+}
+
+/// A built tree as the shim writes it: `n`, then per node (allocation order)
+/// `parent c1 c2 aux bbox[6]`.
+fn put_tree(o: &mut Vec<f64>, tree: &Tree<H>) {
+    o.push(tree.nodes().len() as f64);
+    for n in tree.nodes() {
+        o.extend([node_index(n.parent), node_index(n.child1), node_index(n.child2)]);
+        o.push(f64::from(n.aux_type.code()));
+        put_vec(o, n.bbox.min());
+        put_vec(o, n.bbox.max());
+    }
 }
 
 fn op_code(op: &OpIn) -> f64 {
@@ -1239,6 +1289,7 @@ fn gen_sing_case(rng: &mut Rng) -> Inputs {
         dom2,
         fillet: false,
         trees: None,
+        build_trees: false,
         points,
         ops,
     }
@@ -1284,6 +1335,7 @@ fn gen_dupin_case(rng: &mut Rng) -> Inputs {
         dom2,
         fillet: false,
         trees: None,
+        build_trees: false,
         points: Vec::new(),
         ops,
     }
@@ -1551,6 +1603,7 @@ fn gen_tree_case(rng: &mut Rng) -> Option<Inputs> {
         dom2,
         fillet: rng.chance(0.1),
         trees: Some((ta, tb)),
+        build_trees: false,
         points: Vec::new(),
         ops,
     })
@@ -1647,6 +1700,7 @@ fn edge_cases() -> Vec<(String, Value)> {
                 dom2: [-1.0, -1.0, 1.0, 1.0],
                 fillet: false,
                 trees: None,
+        build_trees: false,
                 points,
                 ops,
             };
@@ -1672,6 +1726,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         }
     }
     out.extend(size_ratio_cases());
+    out.extend(built_tree_cases());
     out.push((
         "edge_dupin_kinds".into(),
         inputs_json(&Inputs {
@@ -1681,6 +1736,7 @@ fn edge_cases() -> Vec<(String, Value)> {
             dom2: [-1.0, -1.0, 1.0, 1.0],
             fillet: false,
             trees: None,
+        build_trees: false,
             points: Vec::new(),
             ops,
         }),
@@ -1691,6 +1747,99 @@ fn edge_cases() -> Vec<(String, Value)> {
 /// `LocalSolve` (and a full `SolveIt`) on leaf pairs more than four times apart in
 /// size, so the Newton step through `SmSurface::DropPointsToTangentPlane` runs on
 /// either surface: one tree is a single patch, the other is subdivided five times.
+/// Programs over trees the caches build themselves (`SmSurfaceCache::GetTree` from
+/// `SmSurfaceIntersector::Intersect`, Rust [`AdvSurfaceIntersector::set_surface_caches`]
+/// on caches without tree): crossing planes, a plane through a B-spline, two B-splines,
+/// a plane and a B-spline against themselves and parallel planes apart, at unit, tiny and
+/// huge scale; the built trees are compared node by node, then solves over them.
+fn built_tree_cases() -> Vec<(String, Value)> {
+    let mut out = Vec::new();
+    let mut rng = Rng::new(0x6e7_7ee5);
+    let x = [1.0, 0.0, 0.0];
+    let y = [0.0, 1.0, 0.0];
+    let z = [0.0, 0.0, 1.0];
+    for (scale_name, sc) in [("", 1.0), ("_tiny", 1e-3), ("_huge", 1e3)] {
+        let m = |v: V| mul(sc, v);
+        let pairs: [(&str, SurfaceIn, Option<SurfaceIn>); 6] = [
+            (
+                "planes",
+                plane_at(m([-1.0, -1.0, 0.0]), x, y, 2.0 * sc),
+                Some(plane_at(m([-1.0, 0.1, -1.0]), x, z, 2.0 * sc)),
+            ),
+            (
+                "parallel_planes",
+                plane_at(m([-1.0, -1.0, 0.0]), x, y, 2.0 * sc),
+                Some(plane_at(m([-1.0, -1.0, 0.5]), x, y, 2.0 * sc)),
+            ),
+            (
+                "bspline_plane",
+                gen_bspline(&mut rng, 2.0 * sc, m([0.0, 0.0, 0.0])),
+                Some(plane_at(m([-1.0, -1.0, 0.0]), x, y, 4.0 * sc)),
+            ),
+            (
+                "bsplines",
+                gen_bspline(&mut rng, 2.0 * sc, m([0.0, 0.0, 0.0])),
+                Some(gen_bspline(&mut rng, 2.0 * sc, m([0.1, 0.2, 0.0]))),
+            ),
+            ("self_plane", plane_at(m([-1.0, -1.0, 0.0]), x, y, 2.0 * sc), None),
+            (
+                "self_bspline",
+                gen_bspline(&mut rng, 2.0 * sc, m([0.0, 0.0, 0.0])),
+                None,
+            ),
+        ];
+        for (name, a, bsurf) in pairs {
+            let tol = 1e-3 * sc;
+            let ops = vec![
+                OpIn::Set {
+                    dir: 1.0,
+                    ang: 0.3,
+                    approx: tol,
+                    tol,
+                    sop: 0,
+                },
+                OpIn::BestSub { a: 0, b: 0 },
+                OpIn::Gauss { a: 0, b: 0 },
+                OpIn::Local { a: 0, b: 0 },
+                OpIn::Solve {
+                    sop: 0,
+                    req: 1,
+                    tol,
+                    best: BIG,
+                },
+                OpIn::Solve {
+                    sop: 2,
+                    req: 0,
+                    tol,
+                    best: BIG,
+                },
+                OpIn::Solve {
+                    sop: 3,
+                    req: 1,
+                    tol: 0.0,
+                    best: BIG,
+                },
+                OpIn::SolveBranch { a: 0, b: 0 },
+                OpIn::Interior,
+                OpIn::State,
+            ];
+            let i = Inputs {
+                dom1: natural(&a),
+                dom2: natural(bsurf.as_ref().unwrap_or(&a)),
+                a,
+                b: bsurf,
+                fillet: false,
+                trees: None,
+                build_trees: true,
+                points: Vec::new(),
+                ops,
+            };
+            out.push((format!("edge_built_tree_{name}{scale_name}"), inputs_json(&i)));
+        }
+    }
+    out
+}
+
 fn size_ratio_cases() -> Vec<(String, Value)> {
     let mut out = Vec::new();
     let mut rng = Rng::new(0x5121_e7a7);
@@ -1763,6 +1912,7 @@ fn size_ratio_cases() -> Vec<(String, Value)> {
                 dom2: natural(&bsurf),
                 fillet: false,
                 trees: Some((ta, Some(tb))),
+                build_trees: false,
                 points: Vec::new(),
                 ops,
             };

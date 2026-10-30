@@ -547,7 +547,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         let caches: &'t [SurfaceCache<O>] = caches;
         let cache1 = caches.first().ok_or(SolidError::null_pointer(OP_DI))?;
         let cache2 = caches.get(1).unwrap_or(cache1);
-        self.set_surface_caches(cache1, cache2)?;
+        self.bind_caches(cache1, cache2)?;
 
         // no work - root treeNode bounding boxes are disjoint
         let root_box = |c: &SurfaceCache<O>| -> Result<Extent3d> {
