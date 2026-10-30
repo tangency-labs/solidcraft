@@ -427,6 +427,72 @@ fn fillet_the_edges_between_two_overlapping_cylinders() {
     assert!(rel(v, expect) < 2e-4, "{v} vs {expect}");
 }
 
+/// A bar 40 long, 16 wide and 10 tall whose far end is a half disc of radius 8 about (40, 8),
+/// with a disc of radius 8 about the same centre sketched on its top (the top's outline
+/// projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder.
+/// V0 = 40·16·10 + π·8²·10/2 + π·8²·10.
+fn peg(s: &mut Session) -> f64 {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Peg"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [40, 0]]}));
+    run(s, "sketch.arc.center_point", json!({"center": [40, 8], "start": [40, 0], "end": [40, 16]}));
+    run(s, "sketch.line", json!({"points": [[40, 16], [0, 16]]}));
+    run(s, "sketch.line", json!({"points": [[0, 16], [0, 0]]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "solid.extrude", json!({"sketch": "Peg", "distance": 10, "body_name": "Peg"}));
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Top"}));
+    run(s, "sketch.project", json!({"refs": [{"face": [2, 8, 10]}]}));
+    run(s, "sketch.circle.center", json!({"center": [40, 8], "radius": 8}));
+    run(s, "sketch.finish", json!({}));
+    run(
+        s,
+        "solid.extrude",
+        json!({"sketch": "Top", "distance": 10, "operation": "join", "targets": ["Peg"], "profiles": [{"point": [40, 8]}], "exact_regions": true}),
+    );
+    6400.0 + 960.0 * PI
+}
+
+/// Simpson's rule over [a, b] with `n` (even) intervals.
+fn simpson(f: impl Fn(f64) -> f64, a: f64, b: f64, n: usize) -> f64 {
+    let h = (b - a) / n as f64;
+    let inner: f64 = (1..n).map(|i| if i % 2 == 1 { 4.0 } else { 2.0 } * f(a + h * i as f64)).sum();
+    (f(a) + f(b) + inner) * h / 3.0
+}
+
+/// The material an r2 round of the peg's front top edge (y = 0, z = 10) takes off: the spandrel
+/// (height 2 - sqrt(4 - (2 - y)²) above the round at y) from x = `from` to where the cylinder's
+/// wall, x = 40 - sqrt(64 - (8 - y)²), takes over (the round runs into the wall there).
+fn peg_front_round(from: f64) -> f64 {
+    let spandrel = |y: f64| 2.0 - (4.0 - (2.0 - y) * (2.0 - y)).max(0.0).sqrt();
+    let wall = |y: f64| 40.0 - (64.0 - (8.0 - y) * (8.0 - y)).max(0.0).sqrt();
+    simpson(|y| spandrel(y) * (wall(y) - from), 0.0, 2.0, 20_000)
+}
+
+/// The peg's front top edge rounded r2: SMLib's result holds the cylinder's wall as a rational
+/// spline whose parameter range runs more than a turn round. As a cylinder over that range (past
+/// 360°) SMLib refused it on the way back (SM_ERR_INVALID_INPUT), so the round seemed to build
+/// and the body could not be measured or changed. It stays the spline: the body measures, and a
+/// round of the three edges at the bar's other top corner builds on it.
+#[test]
+fn rounds_on_a_bar_running_tangent_into_a_cylinder() {
+    let mut s = Session::default();
+    let v0 = peg(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2}));
+    let (v, expect) = (volume(&mut s), v0 - peg_front_round(0.0));
+    assert!(rel(v, expect) < 1e-7, "{v} vs {expect}");
+    // The vertical edge, the left top edge and the round's end arc on the left face: each
+    // spandrel (1 - π/4)·r² along the edge outside the corner cube of side 2, the cube less the
+    // rolling ball's eighth, 8 - 4π/3.
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 4], [0, 9, 10], [0, 0.5858, 9.4142]], "radius": 2}));
+    let strip = (1.0 - PI / 4.0) * 4.0;
+    let expect = v0 - peg_front_round(2.0) - strip * (8.0 + 14.0) - (8.0 - 4.0 * PI / 3.0);
+    let v = volume(&mut s);
+    assert!(rel(v, expect) < 1e-7, "{v} vs {expect}");
+    for b in &s.model.state().bodies {
+        let bad = b.body.validity();
+        assert!(bad.is_empty(), "{}: {bad:?}", b.name);
+    }
+}
+
 /// The top outline of two overlapping cylinders whose concave edges were rounded: the walls of
 /// the rounds meet the cylinders along the rolling-ball contact lines, straight but not lines.
 #[test]

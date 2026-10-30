@@ -76,7 +76,7 @@ pub(super) fn analytic(brep: &b::Brep) -> R<Cow<'_, b::Brep>> {
 /// A rational spline that is a circular arc swept straight along the arc's axis, as a cylinder
 /// with the face's range on it: one direction linear (two rows of control points), the second
 /// row the first moved by one vector at right angles to the circle the first row runs on, the
-/// weights alike. `None` where it is not.
+/// weights alike. `None` where it is not, or where its range runs more than one turn round.
 fn extruded_circle(u_knots: &[f64], v_knots: &[f64], net: &[Vec<[f64; 4]>], domain: [[f64; 2]; 2], tol: f64) -> Option<(b::Surface, [[f64; 2]; 2])> {
     let linear = |k: &[f64]| k.len() == 4 && k[0] == k[1] && k[2] == k[3] && k[1] < k[2];
     let (rows, arc_knots, arc_range, line_knots, line_range): ([Vec<[f64; 4]>; 2], &[f64], [f64; 2], &[f64], [f64; 2]) =
@@ -116,6 +116,12 @@ fn extruded_circle(u_knots: &[f64], v_knots: &[f64], net: &[Vec<[f64; 4]>], doma
         }
         prev = a;
         angle = a;
+    }
+    // A cylinder's range is at most one turn (SMLib refuses more). A spline whose range runs
+    // further round (SMLib's own, its parameter range past the face's trims) has no such range:
+    // it stays the exact spline it is.
+    if angle.abs() > TAU * (1.0 + 1e-9) {
+        return None;
     }
     let height = |s: f64| (s - line_knots[1]) / (line_knots[2] - line_knots[1]) * d.len();
     let sorted = |a: f64, b: f64| if a <= b { [a, b] } else { [b, a] };
