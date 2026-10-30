@@ -305,6 +305,16 @@ impl OffsetExecutive {
                     return Err(SolidError::sm_err(OP_SHELL));
                 }
             }
+            // Opt-in (WR-578): with the loop gaps closed, an offset of a solid that is still no
+            // closed solid is refused rather than handed back as it is (as WR-454's opt-in
+            // does for an inset): the gap closing must never turn upstream's refusal into a
+            // success on a broken body
+            if kernel.fixes.offset_closes_loop_gaps
+                && input_is_manifold
+                && !brep_is_manifold_solid(&shell)?
+            {
+                return Err(SolidError::sm_err(OP_SHELL));
+            }
             if !brep_is_manifold_solid(&shell)? && !options.create_offset_solid {
                 return Ok(shell);
             }
@@ -771,13 +781,14 @@ impl OffsetExecutive {
                 }
             }
 
-            // Not upstream (opt-in, fork tangency-labs/smlib 5d428ae and 7ff0a94): a local
-            // operation closes the loop gaps its step walls leave at their ends, then splits
+            // Not upstream (opt-in, fork tangency-labs/smlib 5d428ae and 7ff0a94): close the
+            // loop gaps the offset leaves (a local operation's step walls' ends, a solid
+            // offset's vertex where two consecutive edges' offsets run parallel), then split
             // the edges that run past a step wall's corner (after WR-531's caps below, in the
             // fork's order)
-            let step_walls = kernel.fixes.local_operation_step_walls
-                && self.operation() == OffsetOperation::LocalOperation;
-            if step_walls {
+            let local = self.operation() == OffsetOperation::LocalOperation;
+            let step_walls = kernel.fixes.local_operation_step_walls && local;
+            if kernel.fixes.offset_closes_loop_gaps || step_walls {
                 self.close_loop_gaps(kernel, original, notifications)?;
             }
 

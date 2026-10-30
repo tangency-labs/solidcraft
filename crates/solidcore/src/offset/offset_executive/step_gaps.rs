@@ -97,10 +97,11 @@ fn closest_on(
 }
 
 impl OffsetExecutive {
-    /// `CloseLoopGaps` (fork, opt-in `Kernel::fixes.local_operation_step_walls`, local
-    /// operations only; the fork runs it for every extended offset since 7ff0a94, not
-    /// ported yet): where consecutive edge uses of an offset face no longer meet at their
-    /// shared vertex (a local operation's step left an edge behind), the edge whose end lies away from the
+    /// `CloseLoopGaps` (fork, opt-in `Kernel::fixes.local_operation_step_walls` for a
+    /// local operation, `Kernel::fixes.offset_closes_loop_gaps` for every extended
+    /// offset): where consecutive edge uses of an offset face no longer meet at their
+    /// shared vertex (a local operation's step left an edge behind; a solid offset's two
+    /// consecutive edges whose offsets run parallel), the edge whose end lies away from the
     /// vertex gets the straight segment to it (which must lie on the face's extended
     /// surface) and is split there, or is trimmed to it when the vertex moved into it.
     /// Each face is searched again after each gap closed.
