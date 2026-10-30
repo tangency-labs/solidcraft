@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.tab_double_click_renames": "Double-click a design tab to rename it",
+    "prefs.tab_double_click_renames_note": "Type the new name, then press Enter or click elsewhere to keep it, or Esc to cancel. Off: a double-click on a tab maximizes the window, as on the empty part of the bar."
+  },
+  "ar": {
+    "prefs.tab_double_click_renames": "انقر نقرًا مزدوجًا على تبويب التصميم لإعادة تسميته",
+    "prefs.tab_double_click_renames_note": "اكتب الاسم الجديد، ثم اضغط Enter أو انقر في مكان آخر للاحتفاظ به، أو Esc للإلغاء. عند الإيقاف: يؤدي النقر المزدوج على التبويب إلى تكبير النافذة، كما في الجزء الفارغ من الشريط."
+  },
+  "de": {
+    "prefs.tab_double_click_renames": "Entwurfsregisterkarte per Doppelklick umbenennen",
+    "prefs.tab_double_click_renames_note": "Geben Sie den neuen Namen ein und drücken Sie Enter oder klicken Sie woanders hin, um ihn zu übernehmen, oder Esc zum Abbrechen. Aus: Ein Doppelklick auf eine Registerkarte maximiert das Fenster, wie auf dem leeren Teil der Leiste."
+  },
+  "he": {
+    "prefs.tab_double_click_renames": "לחיצה כפולה על לשונית עיצוב משנה את שמו",
+    "prefs.tab_double_click_renames_note": "הקלידו את השם החדש ואז הקישו Enter או לחצו במקום אחר כדי לשמור אותו, או Esc כדי לבטל. כבוי: לחיצה כפולה על לשונית מגדילה את החלון, כמו בחלק הריק של הסרגל."
+  },
+  "ja": {
+    "prefs.tab_double_click_renames": "デザインのタブをダブルクリックして名前を変更",
+    "prefs.tab_double_click_renames_note": "新しい名前を入力し、Enter キーを押すか別の場所をクリックすると確定し、Esc でキャンセルします。オフ: タブをダブルクリックすると、バーの空いている部分と同じようにウィンドウを最大化します。"
+  },
+  "ko": {
+    "prefs.tab_double_click_renames": "디자인 탭을 두 번 클릭하여 이름 바꾸기",
+    "prefs.tab_double_click_renames_note": "새 이름을 입력한 뒤 Enter 키를 누르거나 다른 곳을 클릭하면 적용되고, Esc 키를 누르면 취소됩니다. 끄면: 탭을 두 번 클릭할 때 막대의 빈 부분처럼 창이 최대화됩니다."
+  },
+  "vi": {
+    "prefs.tab_double_click_renames": "Nhấp đúp vào thẻ thiết kế để đổi tên",
+    "prefs.tab_double_click_renames_note": "Nhập tên mới, rồi nhấn Enter hoặc nhấp ra chỗ khác để giữ, hoặc Esc để hủy. Khi tắt: nhấp đúp vào thẻ sẽ phóng to cửa sổ, như ở phần trống của thanh."
+  },
+  "zh": {
+    "prefs.tab_double_click_renames": "双击设计选项卡以重命名",
+    "prefs.tab_double_click_renames_note": "输入新名称，然后按 Enter 或点击别处即可保留，按 Esc 取消。关闭时：双击选项卡会最大化窗口，与栏的空白处相同。"
+  }
+}
