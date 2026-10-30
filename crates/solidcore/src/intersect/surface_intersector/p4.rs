@@ -708,7 +708,10 @@ impl SurfaceIntersector<'_> {
 
             // an open curve from an unbounded point, not reversed by the trace: trace
             // the other way too
-            if !self.curve_is_closed
+            // (opt-in, WR-80: nothing traced, nothing to reverse)
+            let traced = !k.fixes.ssi_no_reverse_of_empty_trace || !self.curve_points.is_empty();
+            if traced
+                && !self.curve_is_closed
                 && !self.point(start)?.is_bounded()
                 && input_trace_direction == self.curve_trace_direction
             {

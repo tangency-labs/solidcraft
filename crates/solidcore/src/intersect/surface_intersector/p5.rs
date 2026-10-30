@@ -697,7 +697,13 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                         && (sp.v_param_type(srf) == ExtentPointType::Inside
                             || is_zero_to_tol(sp.uv_deriv(srf).y, EFF_ZERO))
                 };
-                if !self.base.curve_is_closed
+                // (opt-in, WR-80: a trace that added no point, its start already on a
+                // found curve, has nothing to trace back from; upstream reverses the empty
+                // list and fails with SM_ERR_NULL_POINTER)
+                let traced =
+                    !k.fixes.ssi_no_reverse_of_empty_trace || !self.base.curve_points.is_empty();
+                if traced
+                    && !self.base.curve_is_closed
                     && input_trace_direction == self.base.curve_trace_direction
                     && along(SrfIndex::First)
                     && along(SrfIndex::Second)
