@@ -9,10 +9,11 @@
 //! - **Sources** are the designs it draws. For now a drawing draws the design it is in: at most one
 //!   source, an id and nothing else. What the design was when the drawing last saw it is not saved
 //!   here.
-//! - **Sheets**: the paper, a copy of its drawing border and of its title block, the resolution its
-//!   pictures are rendered at, the component it documents, and whether it is left out of the sheet
-//!   count or of printing. The border and the block are copies of what they were made with, never
-//!   names, so a later built-in never changes a saved drawing.
+//! - **Sheets**: the paper, a copy of its drawing border and of its title block with the text typed
+//!   over its cells' values, the resolution its pictures are rendered at, the component it
+//!   documents, and whether it is left out of the sheet count or of printing. The border and the
+//!   block are copies of what they were made with, never names, so a later built-in never changes a
+//!   saved drawing.
 //! - **Units** follow each view's design or are one length unit for the whole drawing. The
 //!   **language** is the content's, a BCP 47 tag chosen when the drawing is made, whatever the
 //!   interface's is. **Properties** follow [`Metadata`]'s rules.
@@ -46,7 +47,7 @@
 //! ([`Drawing::check_image_files`]); [`Drawing::from_value`] the same from the format check on.
 
 use std::borrow::Cow;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,7 @@ use crate::{DocError, Metadata, Result, expr};
 pub mod balloon;
 pub mod by_id;
 pub mod dimension;
+pub mod fields;
 pub mod image;
 pub mod view;
 
@@ -178,6 +180,10 @@ pub struct Sheet {
     /// lower-right corner, so only a sheet with a border has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_block: Option<TitleBlock>,
+    /// Text shown in place of a title block cell's value, by the cell's name: the value is still
+    /// worked out, so it can be shown beside it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub title_block_overrides: BTreeMap<String, String>,
     /// The resolution its pictures (its shaded views) are rendered at, in dots per inch.
     #[serde(default = "default_dpi")]
     pub dpi: f64,
@@ -264,6 +270,7 @@ impl Drawing {
             sheet: paper,
             border,
             title_block: None,
+            title_block_overrides: BTreeMap::new(),
             dpi: DEFAULT_DPI,
             documents: None,
             excluded: Excluded::default(),
@@ -448,7 +455,15 @@ impl Drawing {
         if let Some(block) = &sheet.title_block {
             let border = border.ok_or_else(|| DocError::Invalid("its title block sits on a drawing border, and it has none".into()))?;
             block.layout(&border).map_err(|e| DocError::Invalid(e.to_string()))?;
+            fields::check_block(block)?;
         }
+        // Each override names a text cell of its block, and its text is a cell's.
+        for name in sheet.title_block_overrides.keys() {
+            let named = || format!("its title block has no text cell `{name}` to override");
+            require(fields::overridable(sheet.title_block.as_ref(), name), named)?;
+        }
+        let texts = sheet.title_block_overrides.values().map(String::as_str);
+        solidcraft_geom::cell::check_text(texts).map_err(|e| DocError::Invalid(e.to_string()))?;
         require((MIN_DPI..=MAX_DPI).contains(&sheet.dpi), || format!("its pictures are {MIN_DPI} to {MAX_DPI} dpi"))?;
         match sheet.documents {
             Some(SheetComponent { source, .. }) => {

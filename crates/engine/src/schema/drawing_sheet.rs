@@ -90,6 +90,16 @@ fn excluded<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Map<String, Value>
     Ok(Some(o))
 }
 
+/// Text over a title block's cells: `{cell: text or null}`, or `null` for none.
+fn overrides<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let shaped = v.is_null() || v.as_object().is_some_and(|o| o.values().all(|text| text.is_null() || text.is_string()));
+    if !shaped {
+        return Err(serde::de::Error::custom(whole("`title_block_overrides` is {cell: text or null} or null")));
+    }
+    Ok(Some(v))
+}
+
 /// Every sheet's id once, in a new order.
 fn every_sheet<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     let every = || serde::de::Error::custom(whole("`sheets` must list every sheet's id once"));
@@ -162,6 +172,13 @@ pub struct SheetSettings {
     #[serde(default, deserialize_with = "excluded", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Map<String, Value>")]
     pub excluded: Option<Map<String, Value>>,
+    /// Text shown in place of its title block cells' values, by cell name (each a text cell of
+    /// its block): `{cell: text}`, merged into the ones it has; `null` for a cell drops its
+    /// override, `null` for all of them drops them all. The values are still worked out, and
+    /// `drawing.inspect` shows them beside.
+    #[serde(default, deserialize_with = "overrides", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Value")]
+    pub title_block_overrides: Option<Value>,
 }
 
 /// Put the sheets in a new order. One undo step, none when the order is the same.

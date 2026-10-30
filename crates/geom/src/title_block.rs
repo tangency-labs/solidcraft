@@ -267,6 +267,13 @@ impl TitleBlock {
                 text.content.validate().map_err(|cell::Invalid(message)| Invalid(message))?;
                 let row = text.content.0.iter().any(|part| matches!(part, Part::Field { source: Source::Row, .. }));
                 require(!row, "a title block's cells have no row to read")?;
+                // A unit or decimals would be dropped: nothing applies them to a title block yet (#4867).
+                let formatted = text
+                    .content
+                    .0
+                    .iter()
+                    .any(|part| matches!(part, Part::Field { format, .. } if format.unit.is_some() || format.decimals.is_some()));
+                require(!formatted, "a title block's field is shown as its source gives it")?;
             }
         }
         self.place_cells(Vec2::ZERO, None)?;

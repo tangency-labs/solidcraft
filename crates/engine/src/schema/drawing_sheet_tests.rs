@@ -6,7 +6,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let settings = ["documents", "dpi", "excluded", "name", "orientation", "size", "title_block"];
+    let settings = ["documents", "dpi", "excluded", "name", "orientation", "size", "title_block", "title_block_overrides"];
     let with = |key: &'static str| -> Vec<&'static str> {
         let mut keys: Vec<&str> = settings.iter().copied().chain([key]).collect();
         keys.sort_unstable();
@@ -45,6 +45,19 @@ fn strict_keeps_todays_errors() {
         let off = error(ParamCheck::Off);
         assert!(off.is_some(), "{command} {p} should fail today");
         assert_eq!(error(ParamCheck::Strict), off, "{command} {p}");
+    }
+}
+
+/// Strict refuses overrides of any other shape before the command looks for the sheet; with the
+/// check off the command refuses them itself, once it has the sheet.
+#[test]
+fn strict_refuses_overrides_of_another_shape() {
+    let want = "`title_block_overrides` is {cell: text or null} or null";
+    for overrides in [json!("See note 3"), json!({"material": 3})] {
+        let p = json!({"sheet": "No such sheet", "title_block_overrides": overrides});
+        let error = |level| drawing_session(level).0.execute("drawing.sheet.set", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error(ParamCheck::Strict).ends_with(want), "{p}");
+        assert!(!error(ParamCheck::Off).contains(want), "{p}");
     }
 }
 
