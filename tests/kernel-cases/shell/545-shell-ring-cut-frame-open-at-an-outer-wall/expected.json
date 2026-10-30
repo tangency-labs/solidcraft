@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#545"
+ ],
+ "what": "the frame of examples/regressions/ring_cut_below_recess_thin_floor (a recess from the top, a ring cut from the bottom, a 0.5 mm floor between) shelled 0.5 mm open at the ring cut's outer wall (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): regressions/ring_cut_below_recess_thin_floor, Frame/F6:side:l2 face.shell)",
+ "source": "invariants",
+ "method": "every wall of the frame is at least 0.5 thick except the 0.5 mm floor, which a 0.5 shell hollows to nothing there: whether that floor's cavity closes is the offset's choice, so no closed form: one closed valid solid is the right answer",
+ "body_count": 1
+}

@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a 42.5 x 20 x 27.5 plate closed by a half-round side (r10), a blind hole r5 drilled in through that side, shelled 2 mm open at the far end: the edge where the hole's wall meets the arc side is neither a line nor an arc",
+ "source": "invariants",
+ "method": "the hole's wall moved 2 out meets the arc side moved 2 in along a curve of two cylinders; whether the cavity's corner at the hole's bottom is sharp or rounded is the offset's choice, so no closed form: one closed valid solid is the right answer",
+ "body_count": 1
+}

@@ -39,21 +39,6 @@ fn shell_with_a_shallow_arc_side() {
     ]));
 }
 
-/// Shell of a plate with a hole whose wall meets the plate's arc side: the edge where the two
-/// cylinders meet is neither a line nor an arc, and is rebuilt through its moved points.
-#[test]
-fn shell_with_a_hole_through_a_curved_side() {
-    script(json!([
-        {"command": "sketch.create", "params": {"plane": "XY"}},
-        {"command": "sketch.line", "params": {"points": [[0, 0], [42.5, 0], [42.5, 20.0], [0, 20.0]]}},
-        {"command": "sketch.arc.three_point", "params": {"end": [0, 0], "start": [0, 20.0], "through": [-10.0, 10.0]}},
-        {"command": "sketch.finish", "params": {}},
-        {"command": "solid.extrude", "params": {"distance": 27.5}},
-        {"command": "solid.cylinder", "params": {"axis": [1.0, 0.0, 0.0], "base": [-10.000000000000002, 12.5, 12.5], "height": 17.5, "operation": "cut", "radius": 5.0}},
-        {"command": "solid.shell", "params": {"faces": [[42.5, 10.0, 13.75]], "thickness": 2.0}}
-    ]));
-}
-
 /// A cut whose end only touches the plate's arc side (#897, robustness seed 14): the end lies
 /// tangent to the arc at its apex, the direct boolean fails, and the last-resort nudge used to
 /// push the end into the arc, leaving a sliver of it a tenth of a millimetre wide that a shell

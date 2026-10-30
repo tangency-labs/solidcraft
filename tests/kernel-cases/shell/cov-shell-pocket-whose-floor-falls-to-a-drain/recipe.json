@@ -1,0 +1,151 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 140.0,
+    "width": 90.0,
+    "height": 50.0,
+    "body_name": "Slab"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 100.0,
+    "width": 60.0,
+    "height": 40,
+    "corner": [
+     20.0,
+     15.0,
+     20.0
+    ],
+    "body_name": "Pocket"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "name": "FallX"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      20.0,
+      -20.0
+     ],
+     [
+      120.0,
+      -20.0
+     ],
+     [
+      70.0,
+      -19.476348052153472
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "FallX",
+    "distance": 75.0,
+    "operation": "new",
+    "body_name": "FallX"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ",
+    "name": "FallY"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      15.0,
+      20.0
+     ],
+     [
+      75.0,
+      20.0
+     ],
+     [
+      45.0,
+      19.476348052153472
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "FallY",
+    "distance": 120.0,
+    "operation": "new",
+    "body_name": "FallY"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "FallX",
+    "tools": [
+     "FallY"
+    ],
+    "operation": "intersect"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Pocket",
+    "tools": [
+     "FallX"
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Slab",
+    "tools": [
+     "Pocket"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "body": "Slab",
+    "faces": [
+     [
+      5,
+      5,
+      50.0
+     ]
+    ],
+    "thickness": 3.0
+   }
+  }
+ ]
+}

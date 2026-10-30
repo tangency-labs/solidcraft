@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a 70 x 50 x 30 box with R6 vertical rounds shelled 2 mm open on top, shelled again 0.5 mm open at an inner wall: its 2 mm walls hollowed (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): typical/filleted-shelled-box, Body1/F4:inner:F2:side:l1 face.shell)",
+ "source": "invariants",
+ "method": "the 2 mm walls take a 0.5 shell (a 1 mm cavity inside them, open at the picked inner wall); the rounds' offsets are concentric, but the rim and the open faces' cavity ends are the offset's own: one closed valid solid is the right answer",
+ "body_count": 1
+}
