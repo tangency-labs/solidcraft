@@ -1,0 +1,33 @@
+{
+  "bs": {
+    "browser.calibrate_click_a": "Kliknite sliku da zadate tačku A ili upišite njene koordinate.",
+    "browser.calibrate_click_b": "Kliknite sliku da zadate tačku B ili upišite njene koordinate.",
+    "help.sketch.construction_line": "Napravite beskonačnu pomoćnu pravu kroz dvije tačke. Koristite je da rasporedite skicu bez razdvajanja profila.",
+    "help.sketch.construction_line.angle": "Napravite beskonačnu pomoćnu pravu pod uglom od ose X skice. Izaberite tačku i upišite ugao ili izaberite smjer.",
+    "help.sketch.construction_line.bisector": "Izaberite dvije prave linije skice koje se sijeku, pa jednu od dvije simetrale ugla. Rezultat prati izvorne linije.",
+    "help.sketch.construction_line.horizontal": "Napravite beskonačnu horizontalnu pomoćnu pravu kroz tačku. Njeno ograničenje horizontalnosti ostaje na snazi pri kasnijim izmjenama.",
+    "help.sketch.construction_line.parallel": "Izaberite pravu liniju skice, pa postavite paralelnu beskonačnu pomoćnu pravu. Desnim klikom izaberite drugu referencu.",
+    "help.sketch.construction_line.perpendicular": "Izaberite pravu liniju skice, pa postavite okomitu beskonačnu pomoćnu pravu. Desnim klikom izaberite drugu referencu.",
+    "help.sketch.construction_line.tangent_at": "Napravite tangentu u tački na krugu ili kružnom luku, ili u krajnjoj tački otvorenog splajna ili konike. Izaberite krivu, pa tačku dodira.",
+    "help.sketch.construction_line.tangent_external": "Izaberite krug ili kružni luk, pa vanjsku tačku i rješenje tangente. Pregledi prikazuju samo dodirne tačke na nacrtanom luku.",
+    "help.sketch.construction_line.tangent_two": "Izaberite dva kruga ili kružna luka, pa u pregledu izaberite zajedničku tangentu. Dodirne tačke moraju ležati na nacrtanim krivama.",
+    "help.sketch.construction_line.vertical": "Napravite beskonačnu vertikalnu pomoćnu pravu kroz tačku. Njeno ograničenje vertikalnosti ostaje na snazi pri kasnijim izmjenama.",
+    "prefs.persistent_ribbon_pressed": "Istakni aktivne komande na traci",
+    "prefs.persistent_ribbon_pressed_help": "Ističe komande na traci dok su njihovi efekti uključeni. Isključite da biste zadržali prethodni neutralni izgled i pomoć za komande.",
+    "prefs.sketch_construction_lines": "Prošireni alati za pomoćne prave",
+    "prefs.sketch_open_look_at": "Okreni kameru prema skici kad se otvori",
+    "prefs.sketch_open_look_at_note": "Isključeno: kad napravite ili uredite skicu, prikaz ostaje onakav kakav jest. Pogledaj okreće prikaz prema skici kad to želite.",
+    "recovery.discard_all": "Odbaci sve",
+    "recovery.discard_all_detail": "Ovo se ne može poništiti.",
+    "recovery.discard_all_title": "Odbaciti automatska čuvanja ({count})?",
+    "recovery.discard_all_title_one": "Odbaciti 1 automatsko čuvanje?",
+    "ui.construction.angle_hint": "Pomoćna prava: kliknite tačku, pa upišite ugao ili izaberite smjer",
+    "ui.construction.bisector_hint": "Simetrala: izaberite dvije prave linije koje se sijeku, pa željeno rješenje",
+    "ui.construction.common_hint": "Zajednička tangenta: izaberite dva kruga ili luka, pa željeno rješenje",
+    "ui.construction.contact_hint": "Tangenta: izaberite krug/luk ili otvoreni splajn/koniku, pa tačku dodira (krive slobodnog oblika: krajnje tačke)",
+    "ui.construction.external_hint": "Tangenta: izaberite krug ili luk, vanjsku tačku, pa željeno rješenje",
+    "ui.construction.free_hint": "Pomoćna prava: kliknite dvije tačke; desnim klikom počnite ispočetka",
+    "ui.construction.point_hint": "Pomoćna prava: kliknite tačku kroz koju prolazi",
+    "ui.construction.reference_hint": "Pomoćna prava: izaberite pravu liniju, pa tačku; desnim klikom promijenite referencu"
+  }
+}
