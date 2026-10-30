@@ -165,6 +165,12 @@ enum OpIn {
         #[serde(default)]
         props: Option<PropsIn>,
     },
+    /// `DeleteInnerLoop` of each loop in turn (1 to 4 distinct loop selectors).
+    DeleteInnerLoop {
+        loops: Vec<i64>,
+        #[serde(default)]
+        attributed: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,7 +271,30 @@ fn op_args(op: &OpIn) -> (Op, Vec<f64>) {
             v.extend([0.0, 0.0]);
             (Op::SplitAtSeam, v)
         }
+        OpIn::DeleteInnerLoop { loops, attributed } => {
+            let mut v = vec![flag(*attributed), loops.len() as f64];
+            v.extend((0..4).map(|i| loops.get(i).map_or(-1.0, |&l| l as f64)));
+            (Op::DeleteInnerLoop, v)
+        }
     }
+}
+
+/// The file of a B-rep: under `TestFiles/pt_TestFiles`, or with the prefix `fixture:`
+/// one of this unit's hand-built files in `fixtures/topology.face_p1` (planar plates with
+/// holes for `DeleteInnerLoop`).
+fn path_of(brep: &BrepIn) -> Result<String, HarnessError> {
+    if let BrepIn::File { file, .. } = brep {
+        if let Some(name) = file.strip_prefix("fixture:") {
+            if name.contains(['/', '\\']) {
+                return Err(harness("fixture file names have no directories"));
+            }
+            let p = crate::case::repo_root()
+                .join("fixtures/topology.face_p1")
+                .join(name);
+            return Ok(p.to_string_lossy().into_owned());
+        }
+    }
+    shared::path_of(brep)
 }
 
 /// A cached export with its key (the `.smb` path and the block's bits).
@@ -278,7 +307,7 @@ thread_local! {
 
 /// The export of a B-rep.
 fn export_of(brep: &BrepIn) -> Result<Rc<Vec<f64>>, HarnessError> {
-    let path = shared::path_of(brep)?;
+    let path = path_of(brep)?;
     let block = brep_block(brep)?;
     let bits: Vec<u64> = block.iter().map(|x| x.to_bits()).collect();
     if let Some(e) = EXPORTS.with(|c| {
@@ -340,6 +369,20 @@ fn resolve_with(i: &Inputs, c: [usize; 10]) -> Result<Inputs, Box<Output>> {
             }
             *loop_ = shared::sel((*loop_).max(0), n_l);
         }
+        OpIn::DeleteInnerLoop { loops, .. } => {
+            if n_l == 0 || loops.is_empty() {
+                return Err(Box::new(Output::err("no_loop")));
+            }
+            // distinct selectors, at most four (a deleted loop cannot be named again)
+            let mut kept: Vec<i64> = Vec::new();
+            for l in loops.iter() {
+                let l = shared::sel((*l).max(0), n_l);
+                if !kept.contains(&l) && kept.len() < 4 {
+                    kept.push(l);
+                }
+            }
+            *loops = kept;
+        }
         _ => {}
     }
     Ok(r)
@@ -350,7 +393,7 @@ fn input_of(i: &Inputs) -> Result<(Op, String, Vec<f64>), HarnessError> {
     let mut v = vec![i.face as f64];
     v.extend(args);
     v.extend(brep_block(&i.brep)?);
-    Ok((op, shared::path_of(&i.brep)?, v))
+    Ok((op, path_of(&i.brep)?, v))
 }
 
 // ---- C++ side ---------------------------------------------------------------------------
@@ -919,8 +962,178 @@ fn rust_record(i: &Inputs, mut b: Brep) -> Result<Vec<f64>, Fail> {
                 r.vertices.len() as f64,
             ]);
         }
+        OpIn::DeleteInnerLoop { loops, attributed } => {
+            delete_inner_loop_record(&mut k, &mut b, f, loops, *attributed, &mut o)?;
+        }
     }
     Ok(o)
+}
+
+/// The identity of every topology entity for `DeleteInnerLoop` ([`key_of`]'s for faces,
+/// edges, edge uses and loops, so the edge curves' owners agree).
+fn delete_key_of(e: EntityRef) -> ObjectRef {
+    let (type_code, key) = match e {
+        EntityRef::Vertex(x) => (16021, 5 << 40 | u64::from(x.index())),
+        EntityRef::Vertexuse(x) => (16006, 6 << 40 | u64::from(x.index())),
+        EntityRef::Loopuse(x) => (16004, 7 << 40 | u64::from(x.index())),
+        EntityRef::Faceuse(x) => (16002, 8 << 40 | u64::from(x.index())),
+        EntityRef::Shell(x) => (16008, 9 << 40 | u64::from(x.index())),
+        EntityRef::Region(x) => (16009, 10 << 40 | u64::from(x.index())),
+        e => return key_of(e),
+    };
+    ObjectRef {
+        type_code,
+        key: ObjectKey(key),
+    }
+}
+
+/// `DeleteInnerLoop`'s attributes, as the shim gives them (see the ffi module docs).
+const ATTR_BASE: u64 = 20000;
+const ATTR_STRIDE: u64 = 100_000;
+const ATTR_REF: u64 = 10001;
+const ATTR_STANDALONE: u64 = 10002;
+
+/// The `DeleteInnerLoop` record (the ffi module's layout): the shim's guards, the
+/// attributes, a status per loop, then the B-rep after.
+fn delete_inner_loop_record(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    loops: &[i64],
+    attributed: bool,
+    o: &mut Vec<f64>,
+) -> Result<(), Fail> {
+    use solidcore::geom::attribute::{Attribute, AttributeHandle, AttributeStore, Behavior};
+    let e = |e: SolidError| fail(&e);
+    let ls: Vec<LoopId> = loops.iter().map(|&l| LoopId::from_index(l as u32)).collect();
+    // the shim's guards: upstream reads the face's first loop and both loop uses
+    let mut guard = fp2::loops(b, f, false, None).map_err(e)?.is_empty();
+    for &l in &ls {
+        let lu = b.loop_(l).map_err(e)?.loopuse;
+        let mate = match lu {
+            Some(lu) => b.loopuse(lu).map_err(e)?.mate,
+            None => None,
+        };
+        guard |= mate.is_none();
+    }
+    if guard {
+        o.push(NULL_DEREF);
+        return Ok(());
+    }
+    let mut store = AttributeStore::default();
+    let mut shared: Option<(AttributeHandle, AttributeHandle)> = None;
+    if attributed {
+        let r = store
+            .insert(Attribute::new(ATTR_REF, Behavior::Reference))
+            .map_err(e)?;
+        let st = store
+            .insert(Attribute::new(ATTR_STANDALONE, Behavior::StandaloneReference))
+            .map_err(e)?;
+        shared = Some((r, st));
+        let give = |store: &mut AttributeStore,
+                        kind: u64,
+                        all: Vec<(u32, EntityRef)>,
+                        with_ref: bool,
+                        with_standalone: bool|
+         -> Result<(), SolidError> {
+            for (i, ent) in all {
+                let key = delete_key_of(ent).key;
+                let own = store.insert(Attribute::new(
+                    ATTR_BASE + kind * ATTR_STRIDE + u64::from(i),
+                    Behavior::Copy,
+                ))?;
+                store.add_attribute(key, own)?;
+                if with_ref {
+                    store.add_attribute(key, r)?;
+                }
+                if with_standalone {
+                    store.add_attribute(key, st)?;
+                }
+            }
+            Ok(())
+        };
+        let fus = b.faceuses().ids().map(|x| (x.index(), EntityRef::Faceuse(x))).collect();
+        give(&mut store, 2, fus, false, false).map_err(e)?;
+        let fs = b.faces().ids().map(|x| (x.index(), EntityRef::Face(x))).collect();
+        give(&mut store, 3, fs, false, false).map_err(e)?;
+        store
+            .add_attribute(delete_key_of(EntityRef::Face(f)).key, r)
+            .map_err(e)?;
+        let lus = b.loopuses().ids().map(|x| (x.index(), EntityRef::Loopuse(x))).collect();
+        give(&mut store, 4, lus, true, false).map_err(e)?;
+        let lps = b.loops().ids().map(|x| (x.index(), EntityRef::Loop(x))).collect();
+        give(&mut store, 5, lps, true, false).map_err(e)?;
+        let eus = b.edgeuses().ids().map(|x| (x.index(), EntityRef::Edgeuse(x))).collect();
+        give(&mut store, 6, eus, true, false).map_err(e)?;
+        let es = b.edges().ids().map(|x| (x.index(), EntityRef::Edge(x))).collect();
+        give(&mut store, 7, es, true, true).map_err(e)?;
+        let vus = b.vertexuses().ids().map(|x| (x.index(), EntityRef::Vertexuse(x))).collect();
+        give(&mut store, 8, vus, true, false).map_err(e)?;
+        let vs = b.vertices().ids().map(|x| (x.index(), EntityRef::Vertex(x))).collect();
+        give(&mut store, 9, vs, true, true).map_err(e)?;
+    }
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
+    {
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut store,
+            context: None,
+            key_of: &delete_key_of,
+        };
+        for &l in &ls {
+            let r = fp1::delete_inner_loop(k, b, &mut env, f, l);
+            o.push(status(&r)?);
+        }
+    }
+    // the B-rep after
+    o.extend(crate::own_builder::counts(b).iter().map(|&n| n as f64));
+    let face_loops = fp2::loops(b, f, false, None).map_err(e)?;
+    o.push(face_loops.len() as f64);
+    for &l in &face_loops {
+        o.push(f64::from(l.index()));
+        let n = match b.loop_(l).map_err(e)?.loopuse {
+            Some(lu) => solidcore::topology::loopuse::edgeuses(b, lu, None, None)
+                .map_err(e)?
+                .len(),
+            None => 0,
+        };
+        o.push(n as f64);
+    }
+    let mut es: Vec<EdgeId> = b.edges().ids().collect();
+    es.sort_by_key(|x| x.index());
+    o.push(es.len() as f64);
+    o.extend(es.iter().map(|x| f64::from(x.index())));
+    let mut vs: Vec<VertexId> = b.vertices().ids().collect();
+    vs.sort_by_key(|x| x.index());
+    o.push(vs.len() as f64);
+    o.extend(vs.iter().map(|x| f64::from(x.index())));
+    let Some((r, st)) = shared else {
+        return Ok(());
+    };
+    let put_ids = |o: &mut Vec<f64>, ent: EntityRef| {
+        let key = delete_key_of(ent).key;
+        let mut ids: Vec<f64> = store
+            .attributes(key)
+            .into_iter()
+            .filter_map(|h| store.get(h).map(|a| a.attribute_id() as f64))
+            .collect();
+        ids.sort_by(f64::total_cmp);
+        o.push(ids.len() as f64);
+        o.extend(ids);
+    };
+    put_ids(o, EntityRef::Face(f));
+    for &l in &face_loops {
+        put_ids(o, EntityRef::Loop(l));
+    }
+    for &x in &es {
+        put_ids(o, EntityRef::Edge(x));
+    }
+    for &x in &vs {
+        put_ids(o, EntityRef::Vertex(x));
+    }
+    o.push(store.users(r).map_err(e)?.len() as f64);
+    o.push(store.users(st).map_err(e)?.len() as f64);
+    Ok(())
 }
 
 /// The Rust B-rep of a `topology.vertexuse` B-rep block, built by the Rust kernel as
@@ -944,7 +1157,7 @@ pub(super) fn own_built(
         return build_as(&mut k, src, validate_only, init_gaps, conv)?
             .ok_or_else(|| harness("own builder: no build for a shim-built source"));
     };
-    let path = shared::path_of(src)?;
+    let path = path_of(src)?;
     if init_gaps {
         // the gap walk may leave size estimates a copy does not carry: read afresh
         return read_as(&mut k, &path, *rebuild, validate_only, init_gaps, conv);
@@ -1078,6 +1291,10 @@ fn ops_for(s: i64, v: usize) -> Vec<OpIn> {
         OpIn::SplitAtSeam {
             props: props_of(PROPS.get((v + 3) % PROPS.len()).copied().flatten()),
         },
+        OpIn::DeleteInnerLoop {
+            loops: vec![s, s + 1 + (v as i64 & 3)],
+            attributed: bit(3),
+        },
     ]
 }
 
@@ -1194,6 +1411,91 @@ impl UnitDiff for Runner {
                                 .map_err(|e| harness(e.to_string()))?,
                         });
                     }
+                }
+            }
+        }
+        // DeleteInnerLoop: the plates of fixtures/topology.face_p1 (one face, 1 to 3
+        // square holes; a hole touching the outer loop at a vertex; a vertex loop; two
+        // holes sharing an edge, not lamina) and upstream files (ellips_ts2: a face with
+        // two holes; box_with_large_fillet: faces of a solid, a loop of another face),
+        // each loop alone and the inner loops in turn, with and without attributes
+        let plate = |name: &str| format!("fixture:{name}");
+        let mut delete_cases: Vec<(String, i64, Vec<Vec<i64>>)> = vec![
+            (plate("plate_1hole.smb"), 0, vec![vec![0], vec![1], vec![1, 0]]),
+            (
+                plate("plate_2holes.smb"),
+                0,
+                vec![vec![0], vec![1], vec![2], vec![1, 2], vec![2, 1], vec![0, 2, 1]],
+            ),
+            (
+                plate("plate_3holes.smb"),
+                0,
+                vec![
+                    vec![1],
+                    vec![2],
+                    vec![3],
+                    vec![1, 2, 3],
+                    vec![3, 2, 1],
+                    vec![2, 3, 1, 0],
+                ],
+            ),
+            (
+                plate("plate_touching_hole.smb"),
+                0,
+                vec![vec![1], vec![2], vec![1, 2], vec![2, 1]],
+            ),
+            (plate("plate_vertex_loop.smb"), 0, vec![vec![1], vec![2], vec![2, 1]]),
+            (
+                plate("two_holes_shared_edge.smb"),
+                0,
+                vec![vec![1], vec![2], vec![0, 1, 2]],
+            ),
+            (
+                "ellips_ts2.smb".to_string(),
+                0,
+                vec![vec![0], vec![1], vec![2], vec![1, 2], vec![2, 1]],
+            ),
+            (
+                "box_with_large_fillet.smb".to_string(),
+                0,
+                vec![vec![0], vec![1], vec![3]],
+            ),
+        ];
+        delete_cases.push(("Mouse.smb".to_string(), 1, vec![vec![0], vec![2]]));
+        for (file, face, sequences) in delete_cases {
+            for attributed in [false, true] {
+                for loops in &sequences {
+                    let inputs = Inputs {
+                        brep: BrepIn::File {
+                            file: file.clone(),
+                            rebuild: false,
+                        },
+                        face,
+                        op: OpIn::DeleteInnerLoop {
+                            loops: loops.clone(),
+                            attributed,
+                        },
+                    };
+                    let seq: Vec<String> = loops.iter().map(i64::to_string).collect();
+                    v.push(Case {
+                        unit: self.id().to_string(),
+                        name: format!(
+                            "delete_inner_loop_{}_f{face}_l{}_{}",
+                            file.trim_start_matches("fixture:"),
+                            seq.join("-"),
+                            u8::from(attributed)
+                        ),
+                        source: crate::CaseSource::Fixture {
+                            path: "built-in: DeleteInnerLoop cases".to_string(),
+                            index: v.len(),
+                            upstream_ref: Some(
+                                "source/SMLib/src/SmFace.cpp (SmFace::DeleteInnerLoop)"
+                                    .to_string(),
+                            ),
+                        },
+                        inputs: serde_json::to_value(inputs)
+                            .map_err(|e| harness(e.to_string()))?,
+                    });
                 }
             }
         }

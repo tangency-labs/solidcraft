@@ -16,8 +16,11 @@
 // crashed, `-3` one the shim skipped because it cannot fork (see fp1_trapped).
 #include "sc_topology_fixture.h"
 
+#include <SmAttribute.h>
 #include <SmCurveClass.h>
 #include <SmFaceProps.h>
+
+#include <algorithm>
 
 #ifndef _WIN32
 #ifdef __linux__
@@ -46,6 +49,7 @@ enum : int32_t
     OP_MOVE_SEAM = 11,
     OP_SPLIT_AT_SEAM = 12,
     OP_UV_DOMAIN_AFTER_TRIM_SHIFT = 13,
+    OP_DELETE_INNER_LOOP = 14,
 };
 
 const double FP1_NULL_DEREF = -2.0;
@@ -260,6 +264,102 @@ void fp1_put_split(std::vector<double>& o, SmTArray<SmFace*>& fs, SmTArray<SmEdg
 }
 
 // The number of op arguments after the face selector.
+// DeleteInnerLoop's attributes (`attributed`): every face, loop, edge, vertex and use gets
+// its own SM_AB_COPY attribute (FP1_ATTR_BASE + kind * FP1_ATTR_STRIDE + traversal
+// index, kinds in Graph order), one SM_AB_REFERENCE attribute (FP1_ATTR_REF) is shared by
+// the face and every loop, edge, vertex and use, and one SM_AB_STANDALONE_REFERENCE
+// attribute (FP1_ATTR_STANDALONE) by every edge and vertex.
+const ULONG FP1_ATTR_BASE = 20000;
+const ULONG FP1_ATTR_STRIDE = 100000;
+const ULONG FP1_ATTR_REF = 10001;
+const ULONG FP1_ATTR_STANDALONE = 10002;
+
+template <class T> void fp1_attr_each(std::vector<T*>& v, int kind, SmAttribute* ref, SmAttribute* standalone)
+{
+    for (size_t i = 0; i < v.size(); i++)
+    {
+        v[i]->AddAttribute(
+            new (the_context()) SmAttribute(FP1_ATTR_BASE + (ULONG)kind * FP1_ATTR_STRIDE + (ULONG)i, SM_AB_COPY));
+        if (ref)
+            v[i]->AddAttribute(ref);
+        if (standalone)
+            v[i]->AddAttribute(standalone);
+    }
+}
+
+// The sorted attribute ids of an object.
+void fp1_put_attr_ids(std::vector<double>& o, const SmAObject* p)
+{
+    SmTArray<SmAttribute*> as;
+    p->GetAttributes(as);
+    std::vector<double> ids;
+    for (ULONG i = 0; i < as.GetSize(); i++)
+        ids.push_back((double)as[i]->GetAttributeID());
+    std::sort(ids.begin(), ids.end());
+    o.push_back((double)ids.size());
+    o.insert(o.end(), ids.begin(), ids.end());
+}
+
+// The B-rep after DeleteInnerLoop: the ten record counts of a fresh walk; the face's
+// loops (pre-op traversal index, edge use count of the primary loop use); the sorted
+// pre-op indices of the B-rep's edges and vertices; with `attributed` the attribute ids
+// of the face, its loops, the edges and the vertices (in that order) and the user counts
+// of the shared attributes.
+void fp1_put_after_delete(std::vector<double>& o, SmBrep* brep, SmFace* f, Graph& g, bool attributed,
+                          SmAttribute* ref, SmAttribute* standalone)
+{
+    Graph after;
+    walk(brep, after);
+    for (size_t n : {after.regions.size(), after.shells.size(), after.faceuses.size(), after.faces.size(),
+                     after.loopuses.size(), after.loops.size(), after.edgeuses.size(), after.edges.size(),
+                     after.vertexuses.size(), after.vertices.size()})
+        o.push_back((double)n);
+    SmTArray<SmLoop*> ls;
+    f->GetLoops(ls);
+    o.push_back((double)ls.GetSize());
+    for (ULONG i = 0; i < ls.GetSize(); i++)
+    {
+        o.push_back((double)g.find(5, ls[i]));
+        SmTArray<SmEdgeuse*> eus;
+        SmLoopuse* lu = ls[i]->GetLoopuse();
+        if (lu)
+            lu->GetEdgeuses(eus);
+        o.push_back((double)eus.GetSize());
+    }
+    SmTArray<SmEdge*> es;
+    brep->GetEdges(es);
+    std::vector<SmEdge*> ev;
+    for (ULONG i = 0; i < es.GetSize(); i++)
+        ev.push_back(es[i]);
+    std::sort(ev.begin(), ev.end(), [&](SmEdge* a, SmEdge* b) { return g.find(7, a) < g.find(7, b); });
+    o.push_back((double)ev.size());
+    for (SmEdge* e : ev)
+        o.push_back((double)g.find(7, e));
+    SmTArray<SmVertex*> vs;
+    brep->GetVertices(vs);
+    std::vector<SmVertex*> vv;
+    for (ULONG i = 0; i < vs.GetSize(); i++)
+        vv.push_back(vs[i]);
+    std::sort(vv.begin(), vv.end(), [&](SmVertex* a, SmVertex* b) { return g.find(9, a) < g.find(9, b); });
+    o.push_back((double)vv.size());
+    for (SmVertex* v : vv)
+        o.push_back((double)g.find(9, v));
+    if (!attributed)
+        return;
+    fp1_put_attr_ids(o, f);
+    for (ULONG i = 0; i < ls.GetSize(); i++)
+        fp1_put_attr_ids(o, ls[i]);
+    for (SmEdge* e : ev)
+        fp1_put_attr_ids(o, e);
+    for (SmVertex* v : vv)
+        fp1_put_attr_ids(o, v);
+    SmTArray<SmAObject*> users;
+    ref->GetUsers(users);
+    o.push_back((double)users.GetSize());
+    standalone->GetUsers(users);
+    o.push_back((double)users.GetSize());
+}
+
 int64_t fp1_nargs(int32_t op)
 {
     switch (op)
@@ -271,6 +371,7 @@ int64_t fp1_nargs(int32_t op)
     case OP_LOOP_ROUND_TRIP: return 1;
     case OP_MOVE_SEAM:
     case OP_SPLIT_AT_SEAM: return 8;
+    case OP_DELETE_INNER_LOOP: return 6;
     default: return 0;
     }
 }
@@ -577,6 +678,50 @@ void fp1_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             }
             fp1_put_split(to, fs, es, vs);
         });
+        break;
+    }
+    case OP_DELETE_INNER_LOOP:
+    {
+        bool attributed = ad.flag();
+        int64_t n = ad.idx();
+        std::vector<SmLoop*> ls;
+        for (int64_t i = 0; i < 4; i++)
+        {
+            int64_t li = ad.idx();
+            if (i < n)
+                ls.push_back((li >= 0 && li < (int64_t)g.loops.size()) ? g.loops[(size_t)li] : nullptr);
+        }
+        // upstream reads sFaceLoops[0] of the face's loops and the loop's two loop uses
+        SmTArray<SmLoop*> fl;
+        f->GetLoops(fl);
+        bool guard = fl.GetSize() == 0;
+        for (SmLoop* l : ls)
+            if (l == nullptr || l->GetLoopuse() == nullptr || l->GetLoopuse()->GetOtherLoopuse() == nullptr)
+                guard = true;
+        if (guard)
+        {
+            o.push_back(FP1_NULL_DEREF);
+            break;
+        }
+        SmAttribute* ref = nullptr;
+        SmAttribute* standalone = nullptr;
+        if (attributed)
+        {
+            ref = new (ctx) SmAttribute(FP1_ATTR_REF, SM_AB_REFERENCE);
+            standalone = new (ctx) SmAttribute(FP1_ATTR_STANDALONE, SM_AB_STANDALONE_REFERENCE);
+            fp1_attr_each(g.faceuses, 2, nullptr, nullptr);
+            fp1_attr_each(g.faces, 3, nullptr, nullptr);
+            f->AddAttribute(ref);
+            fp1_attr_each(g.loopuses, 4, ref, nullptr);
+            fp1_attr_each(g.loops, 5, ref, nullptr);
+            fp1_attr_each(g.edgeuses, 6, ref, nullptr);
+            fp1_attr_each(g.edges, 7, ref, standalone);
+            fp1_attr_each(g.vertexuses, 8, ref, nullptr);
+            fp1_attr_each(g.vertices, 9, ref, standalone);
+        }
+        for (SmLoop* l : ls)
+            o.push_back(st(f->DeleteInnerLoop(l)));
+        fp1_put_after_delete(o, built.brep, f, g, attributed, ref, standalone);
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

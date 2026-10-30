@@ -28,12 +28,24 @@
 //! | `Shrink`        | - | `status domain (surface_domain \| -1)` (`ShrinkGeometry`) |
 //! | `MoveSeam`      | `props crossed missing near closed_u closed_v center split` | `-2 \| -3 \| -4 \| seam status res_u res_v n_faces n_edges n_vertices` |
 //! | `SplitAtSeam`   | as `MoveSeam` | `-2 \| -3 \| -4 \| seam status n_faces n_edges n_vertices` |
+//! | `DeleteInnerLoop` | `attributed n l0 l1 l2 l3` (`n` loops, the rest `-1`) | `-2 \| status*n after` (`DeleteInnerLoop` of each loop in turn) |
 //!
 //! The seam ops classify the face's seams with `HasSeamProblem` first, record what it
 //! found (`seam` = `has crossed missing near_miss class_u class_v`, a class being
 //! `tgt_only n mid_class*n`) and pass its classifications and enums on; with `props` an `SmFaceProps` carrying the given
 //! `m_eBadCrossedSeam`, `m_eBadMissingSeam`, `m_eBadNearMissSeam` (`SmSurfParamType`
 //! values) and `m_bClosedU` / `m_bClosedV` (`SmBoolean`) is passed too.
+//!
+//! `DeleteInnerLoop` deletes `n` (1 to 4) distinct loops (traversal indices) one after
+//! another; `-2` when the face has no loop or a loop lacks a loop use or its mate (upstream
+//! dereferences them). `after` is the ten record counts of a fresh walk, the face's loops
+//! (`n` then per loop its pre-op index and primary loop use's edge use count), the sorted
+//! pre-op indices of the B-rep's edges and of its vertices (each list with its length),
+//! and with `attributed` (the shim gives every object its own `SM_AB_COPY` attribute, the
+//! face and every loop, edge, vertex and use one shared `SM_AB_REFERENCE` attribute and
+//! every edge and vertex one `SM_AB_STANDALONE_REFERENCE` attribute) the attribute ids of
+//! the face, its loops, the edges and the vertices (`n id*n` each) and the user counts of
+//! the two shared attributes.
 
 use super::topology_vertexuse as fixture;
 use crate::validate::bad;
@@ -55,6 +67,7 @@ pub enum Op {
     MoveSeam = 11,
     SplitAtSeam = 12,
     UvDomainAfterTrimShift = 13,
+    DeleteInnerLoop = 14,
 }
 
 impl Op {
@@ -69,6 +82,7 @@ impl Op {
     pub fn n_args(self) -> usize {
         match self {
             Self::UvDomainAfterTrimShift => 9,
+            Self::DeleteInnerLoop => 6,
             Self::UvDomain | Self::Oriented => 3,
             Self::SetSurface | Self::LoopRoundTrip => 1,
             Self::MoveSeam | Self::SplitAtSeam => 8,
@@ -174,6 +188,31 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             tri(*cv)?;
             flag(*center, "center")?;
             flag(*split, "split")?;
+        }
+        (Op::DeleteInnerLoop, [a, n, loops @ ..]) => {
+            flag(*a, "attributed")?;
+            let n = index(*n, 4, "loop count")?;
+            if n == 0 {
+                return Err(bad("no loop to delete"));
+            }
+            let mut seen = Vec::new();
+            for (i, l) in loops.iter().enumerate() {
+                if i >= n {
+                    if *l != -1.0 {
+                        return Err(bad("unused loop slot not -1"));
+                    }
+                    continue;
+                }
+                let l = index(*l, usize::MAX >> 12, "loop")?;
+                if l >= n_l {
+                    return Err(bad("loop index out of range"));
+                }
+                // (a loop deleted by an earlier step would be a dangling pointer)
+                if seen.contains(&l) {
+                    return Err(bad("loop deleted twice"));
+                }
+                seen.push(l);
+            }
         }
         (Op::Rect | Op::Flip | Op::RemoveUv | Op::SwapUv | Op::Shrink, []) => {}
         _ => return Err(bad("wrong argument count")),
