@@ -717,6 +717,30 @@ mod tests {
         assert_eq!(ids(&mut s), vec![SurfaceAnalysis, Section], "redone after Zebra, it comes after it");
     }
 
+    /// A plane made or brought on show, or the section undone back, makes it the newest effect;
+    /// hiding a plane does not.
+    #[test]
+    fn newest_status_follows_section_planes_made_or_shown() {
+        use crate::status_items::StatusId::{Continuity, Section, SurfaceAnalysis};
+        let all = [SurfaceAnalysis, Continuity, Section];
+        let mut s = Session::default();
+        s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+        s.execute("inspect.section", &json!({"plane": "XZ", "add": true})).unwrap();
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        s.execute("inspect.section", &json!({"hide": 2})).unwrap();
+        assert_eq!(s.newest_status_item(&all).unwrap().command, "inspect.zebra", "hiding a plane activates nothing");
+        s.execute("inspect.section", &json!({"show": 2})).unwrap();
+        assert_eq!(s.newest_status_item(&all).unwrap().id, Section);
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        s.execute("inspect.section", &json!({"plane": "YZ", "add": true})).unwrap();
+        assert_eq!(s.newest_status_item(&all).unwrap().id, Section);
+        s.execute("inspect.zebra", &json!({})).unwrap();
+        s.execute("inspect.section", &json!({"clear": true})).unwrap();
+        assert_eq!(s.newest_status_item(&all).unwrap().command, "inspect.zebra");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.newest_status_item(&all).unwrap().id, Section, "undone back on show");
+    }
+
     #[test]
     fn status_items_continuity_shares_the_analysis_slot_and_failures_keep_effects() {
         use crate::status_items::{StatusId, StatusSetting};

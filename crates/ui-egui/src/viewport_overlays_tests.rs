@@ -75,9 +75,11 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
         o.iter().zip(&n).map(|(o, n)| o * n).sum::<f64>()
     };
     assert!((offset(&params) + 25.4).abs() < 1e-9, "{params}");
+    assert_eq!(params["replace"], h.app.session.section[0].id, "the plane shown moves, others stay");
     assert_eq!(params["hatch"], true);
     assert_eq!(params["flip"], !current_flip);
     h.app.run("inspect.section", params).unwrap();
+    assert_eq!(h.app.session.section.len(), 1);
     assert!((plane(&h).1 - flipped.1).len() < 1e-9);
 }
 

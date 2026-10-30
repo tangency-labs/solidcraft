@@ -311,6 +311,35 @@ fn section_ribbon_toggle_and_setting_edit_have_separate_intent_and_compatibility
     assert_eq!(h.app.session.section, cut);
 }
 
+/// The Section status shows the first plane on show; with several, its setting edits that plane
+/// in place from where it stands, keeping the others.
+#[test]
+fn section_status_setting_edits_the_plane_it_shows() {
+    let mut h = harness();
+    h.app.preferences.viewport_status_details = false;
+    h.app.run("inspect.section", json!({"plane":"XY","at":4})).unwrap();
+    h.app.run("inspect.section", json!({"plane":"YZ","at":2,"add":true})).unwrap();
+    h.frames(3);
+    let effect = h.app.session.status_items().into_iter().find(|e| e.command == "inspect.section").unwrap();
+    let item = crate::viewport_status::presentation(&h.app, &effect).unwrap();
+    assert!(item.setting.starts_with("Z "), "{}", item.setting);
+    h.step(&json!({"click":{"handle":format!("viewport_status:{}:setting",item.id)}})).unwrap();
+    let kind = h.app.dialog.as_ref().map(|d| d.kind.clone());
+    assert!(matches!(kind, Some(crate::dialogs::Kind::Section { edit: Some(1), .. })), "{kind:?}");
+    assert_eq!(h.app.session.section.len(), 2, "opening the dialog keeps every plane");
+    let cmds = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let mut scratch = h.app.session.scratch();
+    scratch.section = h.app.session.section.clone();
+    scratch.execute(&cmds[0].0, &cmds[0].1).unwrap();
+    let same = scratch.section.len() == 2
+        && scratch
+            .section
+            .iter()
+            .zip(&h.app.session.section)
+            .all(|(a, b)| a.id == b.id && (a.origin - b.origin).len() < 1e-9 && (a.normal - b.normal).len() < 1e-9);
+    assert!(same, "the form is the plane where it stands: {:?}", scratch.section);
+}
+
 /// A box seen from the home view, the window drawn.
 fn box_in_view() -> Harness {
     let mut h = harness();
@@ -645,8 +674,9 @@ fn edit_moves_one_plane_of_several() {
     let after = h.app.session.section.clone();
     assert!(after.len() == 2 && after[0] == before[0] && after[1].id == before[1].id && (after[1].origin.x - 10.0).abs() < 1e-9, "{after:?}");
 
-    // A section of several planes made some other way: Edit moves the plane, and OK with none
-    // picked asks for one instead of turning the section off.
+    // Without the Section status, a section of several planes made some other way: Edit moves
+    // the plane, and OK with none picked asks for one instead of turning the section off.
+    h.app.preferences.viewport_section_status = false;
     h.app.run("inspect.section", json!({"plane": "XZ", "offset": 15})).unwrap();
     h.app.run("inspect.section", json!({"plane": "YZ", "offset": 20, "add": true})).unwrap();
     h.frames(3);

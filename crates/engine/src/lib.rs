@@ -677,8 +677,12 @@ impl Session {
     }
 
     pub fn set_section_state(&mut self, state: SectionState) {
+        let was_on = !self.section.is_empty();
         (self.section, self.section_hidden, self.section_hatch, self.section_folder) = (state.planes, state.hidden, state.hatch, state.folder);
         self.status_slot(crate::status_items::StatusId::Section, !self.section.is_empty());
+        if !was_on && !self.section.is_empty() {
+            self.status_activated(crate::status_items::StatusId::Section);
+        }
         self.revision += 1;
     }
 }

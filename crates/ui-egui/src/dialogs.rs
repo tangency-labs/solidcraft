@@ -4208,10 +4208,10 @@ pub fn edit_section(app: &mut SolveApp) {
 }
 
 /// Edit one plane of the section (`plane`, else its last): the dialog where the dialog that made
-/// that plane left it. A section of one plane made some other way opens it afresh, as the toolbar
-/// always does (a new section, in place of the old), or with the viewport's Section status, in
-/// the same form from its actual geometry. A plane of several moves in place, keeping the others;
-/// a hidden one is shown by OK.
+/// that plane left it. A plane made some other way opens with the viewport's Section status from
+/// its actual geometry; without it, a section of one plane opens afresh, as the toolbar always
+/// does (a new section, in place of the old). A plane of several moves in place, keeping the
+/// others; a hidden one is shown by OK.
 pub fn edit_section_plane(app: &mut SolveApp, plane: Option<u64>) {
     let mut planes: Vec<solidcraft_engine::SectionPlane> = app.session.section.iter().chain(&app.session.section_hidden).copied().collect();
     planes.sort_by_key(|c| c.id);

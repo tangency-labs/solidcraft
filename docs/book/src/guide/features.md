@@ -216,6 +216,10 @@ others' hatch as it is.
   and **Distance** move the cut. A positive distance cuts more away: into the part from a face,
   against the normal of a plane (below XY, for instance). A negative one moves the cut the other
   way. **Flip** hides the other side of the plane being edited and leaves it where it is.
+  With a section on show, the toolbar button turns the section off instead (unless
+  Preferences › Interface › **Show viewport section status** is off).
+- While a plane is on show, the view's status shows the section: the first plane on show and
+  whether it is hatched. Click it to edit that plane; its × removes every plane.
 - Right-click a planar face and choose **Section View**: the dialog starts on the face's plane,
   so dragging the arrow inward cuts into the part. With a section on, the face's plane joins it
   as another plane, cutting the same way: at distance 0 it hides nothing more, so the cut on show
