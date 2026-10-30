@@ -509,6 +509,96 @@ fn rules_are_parameters() {
     assert!(s.execute("sheet.manage_rules", &json!({"name": "Bad", "k_factor": 3})).is_err());
 }
 
+/// A rule that unfolds by a press brake chart's 90° bend deduction (#6794): a channel flattens to
+/// its outside lengths less one deduction per bend, other angles follow from the K-factor the
+/// deduction works out to, and the setting is checked, saved, reopened and undone.
+#[test]
+fn a_90_degree_bend_deduction_rule_flattens_to_the_outside_lengths_less_the_deductions() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "CRS 1.6", "thickness": "1.6 mm", "k_factor": 0.44, "bend_radius": "Thickness"}));
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 1.6], [40, 0, 1.6]], "height": 20}));
+    // 20 + 50 + 20 over the outside, less two deductions: with K 0.44, BD = 6.4 − (π/2)(1.6 + 0.704).
+    let width = |s: &mut Session| flat(s)["flat_size_mm"][1].as_f64().unwrap_or(0.0);
+    let k_deduction = 6.4 - FRAC_PI_2 * (1.6 + 0.44 * 1.6);
+    assert!((width(&mut s) - (90.0 - 2.0 * k_deduction)).abs() < 1e-6, "{}", width(&mut s));
+    let before = s.doc.to_json();
+    assert!(!before.contains("unfold_method") && !before.contains("unfold_value"), "{before}");
+    let undo = s.undo.len();
+    // The method reads a 90° value: without one it is refused, and nothing changes.
+    let e = s.execute("sheet.manage_rules", &json!({"name": "CRS 1.6", "unfold_method": "allowance"})).map(|_| ()).unwrap_err().to_string();
+    assert!(e.contains("the allowance method needs the 90° value"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // The chart's 2.83 mm: 90 − 2 × 2.83 = 84.34, and each bend's allowance is 6.4 − 2.83.
+    let r = run(&mut s, "sheet.manage_rules", json!({"name": "CRS 1.6", "unfold_method": " Deduction ", "unfold_value": "2.83 mm"}));
+    assert_eq!((&r["rule"]["unfold_method"], &r["rule"]["unfold_value"]), (&json!("deduction"), &json!("2.83 mm")));
+    assert_eq!(r["values"]["unfold_method"], "deduction");
+    let k = r["values"]["k_factor"].as_f64().unwrap_or(0.0);
+    assert!((k - (3.57 / FRAC_PI_2 - 1.6) / 1.6).abs() < 1e-12, "{r}");
+    assert!((width(&mut s) - 84.34).abs() < 1e-6, "{}", width(&mut s));
+    let f = flat(&mut s);
+    for bend in f["bends"].as_array().into_iter().flatten() {
+        assert!((bend["allowance"].as_f64().unwrap_or(0.0) - 3.57).abs() < 1e-9, "{bend}");
+    }
+    // The K-factor stays the rule's own while another method sets it, and the list says both.
+    let l = run(&mut s, "sheet.rules", json!({}));
+    assert_eq!((&l["rules"][0]["rule"]["k_factor"], &l["rules"][0]["values"]["k_factor"]), (&json!("0.44"), &json!(k)), "{l}");
+    // A 45° bend gets half the 90° allowance, from the same K-factor.
+    let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
+    run(&mut s, "parameters.change", json!({"name": names[1], "expression": "45 deg"}));
+    let f = flat(&mut s);
+    assert!(f["bends"].as_array().is_some_and(|b| b.len() == 2), "{f}");
+    for bend in f["bends"].as_array().into_iter().flatten() {
+        assert!((bend["allowance"].as_f64().unwrap_or(0.0) - 3.57 / 2.0).abs() < 1e-9, "{bend}");
+    }
+    run(&mut s, "parameters.change", json!({"name": names[1], "expression": "90 deg"}));
+
+    // Refused: a word that is no method, a deduction past the inner arc, and the method with no
+    // value. A refused change leaves the design as it was. A flange can't set the method either.
+    let after = s.doc.to_json();
+    for (p, says) in [
+        (json!({"unfold_method": "table"}), "`unfold_method` must be k_factor, deduction or allowance"),
+        (json!({"unfold_method": 2}), "`unfold_method` must be k_factor, deduction or allowance"),
+        (json!({"unfold_value": "4 mm"}), "the 90° bend deduction must be at most 3.886726 mm"),
+    ] {
+        let mut p = p;
+        p["name"] = json!("CRS 1.6");
+        let e = s.execute("sheet.manage_rules", &p).map(|_| ()).unwrap_err().to_string();
+        assert!(e.contains(says), "{p}: {e}");
+        assert_eq!(s.doc.to_json(), after, "{p}");
+    }
+    for key in ["unfold_method", "unfold_value"] {
+        let mut p = json!({"edges": [[0, 25, 1.6]], "height": 20});
+        p[key] = json!("2 mm");
+        let e = s.execute("sheet.flange", &p).map(|_| ()).unwrap_err().to_string();
+        assert!(e.contains(&format!("`{key}` is not a sheet.flange parameter")), "{e}");
+    }
+
+    // Saved with the design and read back; a design saved without it unfolds by the K-factor.
+    let mut saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    assert_eq!((&saved["sheet"]["rules"][0]["unfold_method"], &saved["sheet"]["rules"][0]["unfold_value"]), (&json!("deduction"), &json!("2.83 mm")));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!((width(&mut reopened) - 84.34).abs() < 1e-6, "{}", width(&mut reopened));
+    if let Some(rule) = saved["sheet"]["rules"][0].as_object_mut() {
+        rule.remove("unfold_method");
+        rule.remove("unfold_value");
+    }
+    let mut older = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+    assert!((width(&mut older) - (90.0 - 2.0 * k_deduction)).abs() < 1e-6, "{}", width(&mut older));
+
+    // Back to the K-factor: the 90° value stays in the rule, unused.
+    run(&mut s, "sheet.manage_rules", json!({"name": "CRS 1.6", "unfold_method": "k_factor"}));
+    assert!((width(&mut s) - (90.0 - 2.0 * k_deduction)).abs() < 1e-6, "{}", width(&mut s));
+    assert_eq!(s.doc.sheet_rule(None).unfold_value, "2.83 mm");
+    // Undone like the rule's other changes.
+    assert_eq!(s.undo.len(), undo + 4);
+    for _ in 0..4 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(s.doc.to_json(), before);
+}
+
 #[test]
 fn contour_flange_hem_and_tray() {
     // Oracle 72.
