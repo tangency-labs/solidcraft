@@ -15,7 +15,7 @@ use solidcore_record::Seg2;
 use solidcraft_doc::drawing_view::{TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
-use solidcraft_geom::paper::ObjectKind;
+use solidcraft_geom::paper::{MAX_DASH_MM, ObjectKind};
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_render::VisualStyle;
 
@@ -802,9 +802,25 @@ impl JsonSchema for SceneResult {
 pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
     let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
     let segment = generator.subschema_for::<PathSegResult>();
+    // A dashed stroke's pattern, as `solidcraft_geom::paper::Dashes` checks it; a solid one has none.
+    let dashes = json!({
+        "type": "object",
+        "properties": {
+            "lengths_mm": {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0, "maximum": MAX_DASH_MM}, "minItems": 2, "maxItems": 12},
+            "phase_mm": {"type": "number", "minimum": 0}
+        },
+        "required": ["lengths_mm", "phase_mm"],
+        "additionalProperties": false
+    });
     let stroke = json!({
         "type": "object",
-        "properties": {"kind": {"const": "stroke"}, "path": {"type": "array", "items": segment}, "closed": {"type": "boolean"}, "width_mm": {"type": "number", "exclusiveMinimum": 0}},
+        "properties": {
+            "kind": {"const": "stroke"},
+            "path": {"type": "array", "items": segment},
+            "closed": {"type": "boolean"},
+            "width_mm": {"type": "number", "exclusiveMinimum": 0},
+            "pattern": dashes
+        },
         "required": ["kind", "path", "closed", "width_mm"],
         "additionalProperties": false
     });

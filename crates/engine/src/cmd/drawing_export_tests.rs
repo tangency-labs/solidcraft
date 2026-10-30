@@ -68,6 +68,26 @@ fn a_path_gets_the_svg_written_to_it() {
     );
 }
 
+/// A view drawing hidden lines exports with the rest of its sheet, dashed: a style that used to
+/// refuse the whole sheet. The top view is projected from the front one, so it follows its style:
+/// 4 dashes for the pocket seen from the front, 3 from above (its fourth edge is on the outline).
+#[test]
+fn a_view_with_hidden_lines_exports_dashed() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!(!String::from_utf8(scene_svg(&s, sheet)).unwrap().contains("stroke-dasharray"));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": "visible_hidden"}}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let statuses: Vec<_> = reply["views"].as_array().unwrap().iter().map(|v| v["status"].clone()).collect();
+    assert_eq!(statuses, [json!("drawn"), json!("drawn")], "{reply}");
+    let svg = reply["svg"].as_str().unwrap();
+    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 7, "{svg}");
+    assert_eq!(svg.as_bytes(), scene_svg(&s, sheet).as_slice());
+}
+
 /// A view that failed stops the export, and the refusal names it with why; a placeholder draws
 /// nothing and is exported all the same.
 #[test]

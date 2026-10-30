@@ -976,7 +976,7 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
             "scale": scale,
             "chord_mm": chord,
             "display_style": style,
-            "scene": style == "visible",
+            "scene": true,
             "tangent_edges": tangent,
         });
         let v = snap(&mut s, p.clone());
@@ -987,12 +987,12 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
         assert!(!visible.is_empty(), "{p}");
         assert!(visible.iter().chain(&hidden).all(|seg| reach(seg).iter().all(inside)), "{p}: a line leaves the boundary");
         assert!(!hidden.iter().any(|h| visible.iter().any(|w| share_a_stretch(h, w))), "{p}: a stretch is both visible and hidden");
-        if style == "visible" {
-            let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
-            assert!(scene.validate().is_ok(), "{p}");
-            let pieces = v["lines"].as_array().unwrap().iter().flat_map(|l| l["pieces"].as_array().unwrap()).count();
-            assert_eq!(strokes(&v).len(), pieces, "{p}: a stroke per piece");
-        }
+        let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+        assert!(scene.validate().is_ok(), "{p}");
+        let pieces = v["lines"].as_array().unwrap().iter().flat_map(|l| l["pieces"].as_array().unwrap()).count();
+        assert_eq!(strokes(&v).len(), pieces, "{p}: a stroke per piece");
+        let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
+        assert!(widths.is_sorted(), "{p}: hidden lines first, under the visible ones");
     }
 }
 
@@ -1152,6 +1152,45 @@ fn a_views_scene_is_its_visible_lines_as_strokes() {
     assert_eq!(counts, (1, strokes.len()), "{svg}");
 }
 
+/// The pocket behind the front face as a paper scene at 1:1: its four hidden edges are dashed 0.25 mm
+/// strokes under the block's outline, 100 mm of them beside its 240 mm, and the SVG writer dashes
+/// those and only those. In `visible` the same view has no dashes.
+#[test]
+fn a_views_hidden_lines_are_dashed_strokes_under_its_outline() {
+    use solidcraft_geom::paper::{Dashes, Item, Scene};
+    let mut s = block();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
+    let v = snap(&mut s, json!({"scale": "1:1", "scene": true, "display_style": "visible_hidden"}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+    let mut dashed = (0usize, 0.0);
+    let mut solid = 0.0;
+    for item in &scene.groups[0].items {
+        let Item::Stroke { path, width_mm, pattern, .. } = item else { panic!("{item:?}") };
+        let length: f64 = path.iter().map(|seg| seg.length()).sum();
+        match pattern {
+            Some(dashes) => {
+                assert_eq!((dashes, *width_mm), (&Dashes { lengths_mm: vec![3.0, 0.75], phase_mm: 0.0 }, 0.25), "{v}");
+                assert_eq!(solid, 0.0, "a dashed stroke after a solid one would paint over it: {v}");
+                dashed = (dashed.0 + 1, dashed.1 + length);
+            }
+            None => {
+                assert_eq!(*width_mm, 0.5, "{v}");
+                solid += length;
+            }
+        }
+    }
+    assert_eq!(dashed.0, 4, "{v}");
+    assert!((dashed.1 - 100.0).abs() < 1e-6 && (solid - 240.0).abs() < 1e-6, "{dashed:?} {solid}");
+    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
+    let svg = String::from_utf8(svg).unwrap();
+    assert_eq!(svg.matches("stroke-dasharray=\"3 0.75\"").count(), 4, "{svg}");
+    let plain = snap(&mut s, json!({"scale": "1:1", "scene": true}));
+    assert!(strokes(&plain).iter().all(|(_, _, width)| *width == 0.5), "{plain}");
+    assert_eq!(plain["scene"].to_string().matches("lengths_mm").count(), 0, "{plain}");
+}
+
 /// The plate's hole in the scene, from above at 1:1: its rim's strokes are arcs of radius 5 round
 /// the sheet's centre, 2π × 5 mm in all, and a stroke that is a whole circle is closed.
 #[test]
@@ -1172,17 +1211,12 @@ fn a_holes_rim_is_arcs_in_the_scene() {
     assert!((round - std::f64::consts::TAU * 5.0).abs() < 1e-6, "{round}: {v}");
 }
 
-/// `scene` is true or false, and with `visible_hidden` it waits for dashed lines (V7b).
+/// `scene` is true or false.
 #[test]
-fn a_scene_with_hidden_lines_or_a_bad_flag_is_refused() {
+fn a_bad_scene_flag_is_refused() {
     let mut s = block();
     let doc = s.doc.clone();
-    for (p, says) in [
-        (json!({"scene": "yes"}), "scene"),
-        (json!({"scene": 1}), "scene"),
-        (json!({"scene": null}), "scene"),
-        (json!({"scene": true, "display_style": "visible_hidden"}), "not supported yet: hidden lines in the paper scene"),
-    ] {
+    for (p, says) in [(json!({"scene": "yes"}), "scene"), (json!({"scene": 1}), "scene"), (json!({"scene": null}), "scene")] {
         let e = refused(&mut s, p.clone());
         assert!(e.contains(says), "{p}: {e}");
         assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "{p}");
@@ -1438,12 +1472,33 @@ fn a_scene_draws_reference_parts_thin_under_the_model() {
     assert!(thin > 0 && widths[thin..].iter().all(|w| *w == crate::drawing_view::VISIBLE_MM), "{widths:?}");
 }
 
-/// Hidden reference lines wait for dashed lines on paper as the model's do.
+/// A scene's hidden reference lines are dashed as the model's are, by the reference parts' own
+/// style: with the block below the plate, its 40 mm under the plate (worked by hand above) is drawn
+/// dashed, 0.25 mm wide, before every solid stroke; with the reference parts in `visible`, not at all.
 #[test]
-fn a_scene_with_hidden_reference_lines_is_refused() {
-    let (mut s, _) = plate_and_block(5.0);
-    let e = refused(&mut s, json!({"scene": true, "reference_style": "visible_hidden"}));
-    assert!(e.contains("not supported yet: hidden lines"), "{e}");
+fn a_scenes_hidden_reference_lines_are_dashed_by_their_own_style() {
+    use solidcraft_geom::paper::{Item, Scene};
+    let (mut s, _) = plate_and_block(-10.0);
+    let mut dashed = |style: &str| {
+        let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_style": style, "reference_shown_percent": 100}));
+        let schema = output_schema_for::<SnapshotResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+        let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+        let (mut length, mut solid) = (0.0, false);
+        for item in &scene.groups[0].items {
+            let Item::Stroke { path, width_mm, pattern, .. } = item else { panic!("{item:?}") };
+            match pattern {
+                Some(_) => {
+                    assert!(!solid && *width_mm == 0.25, "{v}");
+                    length += path.iter().map(|seg| seg.length()).sum::<f64>();
+                }
+                None => solid = true,
+            }
+        }
+        length
+    };
+    assert!((dashed("visible_hidden") - 40.0).abs() < 1e-6);
+    assert_eq!(dashed("visible"), 0.0);
 }
 
 /// The readings of `measure` on `v`, each (value, label).

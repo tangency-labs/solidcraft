@@ -11,7 +11,7 @@ use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{Source, Visibility};
-use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind};
+use solidcraft_geom::paper::{Dashes, Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
@@ -196,23 +196,31 @@ fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
 pub const VISIBLE_MM: f64 = 0.5;
 /// A reference part's line on paper until D2 does: the thin line of the same group.
 pub const REFERENCE_MM: f64 = 0.25;
+/// A hidden line's width on paper until D2 does: the thin line of the same group.
+pub const HIDDEN_MM: f64 = 0.25;
+/// A hidden line's dash and gap on paper: ISO 128's dashed line, 12 and 3 line widths.
+pub const HIDDEN_DASHES_MM: [f64; 2] = [12.0 * HIDDEN_MM, 3.0 * HIDDEN_MM];
 
-/// `lines` as the paper scene group of the view `object`: each visible piece one stroke, closed when
-/// it ends where it starts, reference parts' [`REFERENCE_MM`] wide and under the model's,
-/// [`VISIBLE_MM`] wide. Hidden pieces are left out until the paper scene has dashed lines (V7b).
+/// `lines` as the paper scene group of the view `object`: each piece one stroke, closed when it ends
+/// where it starts. Painted from the bottom: hidden pieces, dashed and [`HIDDEN_MM`] wide, then
+/// reference parts' visible ones, [`REFERENCE_MM`] wide, then the model's, [`VISIBLE_MM`] wide.
 pub fn paper_group(lines: &Lines, object: u64) -> Group {
     let stroke = |piece: &Piece, width_mm: f64| {
         let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
         let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
-        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern: None })
+        let hidden = piece.visibility == Visibility::Hidden;
+        let pattern = hidden.then(|| Dashes { lengths_mm: HIDDEN_DASHES_MM.to_vec(), phase_mm: 0.0 });
+        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
     };
-    let strokes = |reference: bool, width_mm: f64| {
+    let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
         let pieces = lines.lines.iter().filter(move |l| l.reference == reference).flat_map(|l| &l.pieces);
-        pieces.filter(|p| p.visibility == Visibility::Visible).filter_map(move |p| stroke(p, width_mm))
+        pieces.filter(move |p| p.visibility == visibility).filter_map(move |p| stroke(p, width_mm))
     };
-    Group { object, kind: ObjectKind::View, items: strokes(true, REFERENCE_MM).chain(strokes(false, VISIBLE_MM)).collect() }
+    let hidden = strokes(true, Visibility::Hidden, HIDDEN_MM).chain(strokes(false, Visibility::Hidden, HIDDEN_MM));
+    let visible = strokes(true, Visibility::Visible, REFERENCE_MM).chain(strokes(false, Visibility::Visible, VISIBLE_MM));
+    Group { object, kind: ObjectKind::View, items: hidden.chain(visible).collect() }
 }
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
@@ -400,8 +408,7 @@ mod tests {
 
     /// Each visible piece is one stroke of the view's kind, 0.5 mm wide; a whole circle and a run
     /// that comes back to its start are closed; a line with no length is left out of its stroke,
-    /// and a piece with nothing left is no stroke; an arc too short to sweep is its chord; hidden
-    /// pieces aren't drawn yet.
+    /// and a piece with nothing left is no stroke; an arc too short to sweep is its chord.
     #[test]
     fn visible_pieces_are_strokes_and_closed_ones_join() {
         let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 5.0));
@@ -412,7 +419,6 @@ mod tests {
             piece(Visibility::Visible, vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: c }, Seg2::Line { a: c, b: a }]),
             piece(Visibility::Visible, vec![Seg2::Line { a: c, b: c }]),
             piece(Visibility::Visible, vec![Seg2::Arc { center: a, radius: 5.0, start: 0.0, sweep: 1e-13 }]),
-            piece(Visibility::Hidden, vec![Seg2::Line { a, b: c }]),
         ]);
         let group = paper_group(&lines, 7);
         assert_eq!((group.object, group.kind), (7, ObjectKind::View));
@@ -455,6 +461,48 @@ mod tests {
             })
             .collect();
         assert_eq!(widths, [REFERENCE_MM, VISIBLE_MM, VISIBLE_MM]);
+    }
+
+    /// Hidden pieces come first, the reference parts' and then the model's, whatever order they were
+    /// found in, so every visible line paints over them: each dashed, 0.25 mm wide, and closed by the
+    /// same rule; a visible piece stays solid, and a hidden piece with nothing left is no stroke.
+    #[test]
+    fn hidden_pieces_are_dashed_strokes_under_the_visible_ones() {
+        let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 5.0));
+        let line = |reference: bool, pieces: Vec<Piece>| ViewLine { shown: 0, reference, source: Source::Edge { edge: 0, tangent: false }, pieces };
+        let model = line(
+            false,
+            vec![
+                piece(Visibility::Visible, vec![Seg2::Line { a, b }]),
+                piece(Visibility::Hidden, vec![Seg2::Line { a: b, b: c }]),
+                piece(Visibility::Hidden, vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: c }, Seg2::Line { a: c, b: a }]),
+                piece(Visibility::Hidden, vec![Seg2::Line { a: c, b: c }]),
+            ],
+        );
+        let reference =
+            line(true, vec![piece(Visibility::Visible, vec![Seg2::Line { a: b, b: c }]), piece(Visibility::Hidden, vec![Seg2::Line { a, b: c }])]);
+        let lines = Lines { lines: vec![model, reference], covered: 0, model_chord_mm: 0.01, stats: Stats::default() };
+        let group = paper_group(&lines, 7);
+        let dashes = Dashes { lengths_mm: vec![3.0, 0.75], phase_mm: 0.0 };
+        let strokes: Vec<(usize, bool, f64, Option<&Dashes>)> = group
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { path, closed, width_mm, pattern } => Some((path.len(), *closed, *width_mm, pattern.as_ref())),
+                Item::Fill { .. } | Item::Text(_) | Item::Picture(_) => None,
+            })
+            .collect();
+        let hidden = (0.25, Some(&dashes));
+        let want = [
+            (1, false, hidden.0, hidden.1),
+            (1, false, hidden.0, hidden.1),
+            (3, true, hidden.0, hidden.1),
+            (1, false, REFERENCE_MM, None),
+            (1, false, VISIBLE_MM, None),
+        ];
+        assert_eq!(strokes, want);
+        let scene = solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), vec![group]);
+        assert!(scene.validate().is_ok());
     }
 
     /// A view's group past the paper scene's 100,000 records is caught by the scene's own check.
