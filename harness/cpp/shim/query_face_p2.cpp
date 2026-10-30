@@ -23,6 +23,9 @@
 // traversal order (the Rust side imports it with that unit's importer). They read raw
 // members (protected ones through pointer-to-member access), never the functions under
 // test. Ops whose upstream path would dereference null are refused by the FFI wrapper.
+// The classification ops take their selectors and parameter points as specifications
+// (`spec` below) and resolve them on the live, edited SmBrep, as the Rust runner resolves
+// them on its own B-rep: no point is computed from the flattened export.
 // Before classifying, the trimmed surface cache of each face surface involved is deleted
 // (SmCacheMgr::DeleteObjectsCache): reading a file can leave one, and the port has no
 // object caches, so both sides classify through the loops.
@@ -73,6 +76,7 @@
 #include <SmVertexuse.h>
 #include <nurbs.h>
 
+#include <cmath>
 #include <map>
 #include <vector>
 
@@ -866,6 +870,106 @@ struct SurfaceCachePeek : SmSurfaceCache
     static SmTree* SmSurfaceCache::*tree() { return &SurfaceCachePeek::m_pTree; }
 };
 
+// ---- selectors and points resolved on the live B-rep ----------------------------------
+
+// The Rust runner's `sel`: `s` modulo `n`, `-1` for a negative selector or none.
+int64_t sel_mod(int64_t s, size_t n)
+{
+    if (s < 0 || n == 0)
+        return -1;
+    return (int64_t)((uint64_t)s % (uint64_t)n);
+}
+
+// A parameter point specification `mode a b sel du dv`: mode 0 a fraction (a, b) of the
+// face's UV domain, 1 the normalised parameter a of the UV trim curve of loop edge use
+// `sel` (the domain centre without one), 2 the coordinates (a, b); plus (du, dv).
+struct AtSpec
+{
+    int64_t mode;
+    double a, b;
+    int64_t sel;
+    double du, dv;
+};
+
+AtSpec read_at(Rd& rd)
+{
+    AtSpec s;
+    s.mode = rd.idx();
+    s.a = rd.num();
+    s.b = rd.num();
+    s.sel = rd.idx();
+    s.du = rd.num();
+    s.dv = rd.num();
+    return s;
+}
+
+// The face selected by `s` (the FFI wrapper refuses a negative selector or a B-rep
+// without faces).
+SmFace* face_sel(Graph& g, int64_t s)
+{
+    int64_t i = sel_mod(s, g.faces.size());
+    if (i < 0)
+        throw std::runtime_error("no face");
+    return g.faces[(size_t)i];
+}
+
+// The parameter point `at` on face `f` (the Rust runner's `point_of`, operation for
+// operation): the face's stored UV domain, its face use's edge uses
+// (SmFaceuse::GetEdgeuses) and their UV trim curves (GetUVTrimCurve).
+SmPoint2d point_of(SmFace* f, const AtSpec& at)
+{
+    SmExtent2d dom = f->*FPeek::dom();
+    SmPoint2d mn = dom.GetMin();
+    SmPoint2d mx = dom.GetMax();
+    double u, v;
+    if (at.mode == 0)
+    {
+        u = mn.x + at.a * (mx.x - mn.x);
+        v = mn.y + at.b * (mx.y - mn.y);
+    }
+    else if (at.mode == 2)
+    {
+        u = at.a;
+        v = at.b;
+    }
+    else
+    {
+        SmFaceuse* fu = f->*FPeek::fu();
+        if (fu == nullptr)
+            throw std::runtime_error("face without face use");
+        SmTArray<SmEdgeuse*> eus;
+        fu->GetEdgeuses(eus, FALSE, NULL);
+        int64_t i = sel_mod(at.sel, eus.GetSize());
+        SmBSplineCurve* c = i < 0 ? nullptr : eus[(ULONG)i]->GetUVTrimCurve();
+        if (c != nullptr)
+        {
+            SmExtent1d ivl = c->GetNaturalInterval();
+            double t = ivl.GetMin() + at.a * (ivl.GetMax() - ivl.GetMin());
+            SmPoint3d p;
+            if (c->EvaluatePoint(t, p) != SM_SUCCESS)
+                throw std::runtime_error("trim curve evaluation failed");
+            u = p.x;
+            v = p.y;
+        }
+        else
+        {
+            // no trim curve: the domain centre
+            u = mn.x + 0.5 * (mx.x - mn.x);
+            v = mn.y + 0.5 * (mx.y - mn.y);
+        }
+    }
+    return SmPoint2d(u + at.du, v + at.dv);
+}
+
+// A computed coordinate the classification ops take: finite and at most 1e300 in size
+// (what the FFI wrapper accepted when the points were given).
+bool in_range(double x) { return std::isfinite(x) && std::fabs(x) <= 1.0e300; }
+
+// The outputs of a case whose computed points cannot be classified: a point out of range,
+// a degenerate classified line (both sides report these the same way).
+const double POINT_OUT_OF_RANGE = -102.0;
+const double DEGENERATE_LINE = -101.0;
+
 void put_cache_state(std::vector<double>& o, SmSurface* surface)
 {
     auto* c = (SmSurfaceCache*)SmCacheMgr::GetObjectCache(SM_OC_TRIMSRF, surface);
@@ -953,9 +1057,11 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     {
     case OP_POINT_CLASSIFY:
     {
-        // `f u v src_tol do_bnd use_uv tgt_only has_loops n loop* pc_tol uv_ok`
-        SmFace* f = g.faces[(size_t)rd.idx()];
-        SmPoint2d uv = rd.uv();
+        // `face at[6] src_tol do_bnd use_uv tgt_only has_loops n loop* pc_tol uv_ok
+        // cache_mode repeats` (selectors modulo the counts; a negative loop selector
+        // selects none)
+        SmFace* f = face_sel(g, rd.idx());
+        AtSpec at = read_at(rd);
         double src_tol = rd.num();
         SmBoolean do_bnd = rd.bflag();
         SmBoolean use_uv = rd.bflag();
@@ -964,10 +1070,20 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         int64_t nl = rd.idx();
         SmTArray<SmLoop*> loops;
         for (int64_t k = 0; k < nl; k++)
-            loops.Add(g.loops[(size_t)rd.idx()]);
+        {
+            int64_t l = sel_mod(rd.idx(), g.loops.size());
+            if (l >= 0)
+                loops.Add(g.loops[(size_t)l]);
+        }
         double pc_tol = rd.num();
         SmBoolean uv_ok = rd.bflag();
         int64_t cache_mode = rd.idx(), repeats = rd.idx();
+        SmPoint2d uv = point_of(f, at);
+        if (!in_range(uv.x) || !in_range(uv.y))
+        {
+            o.push_back(POINT_OUT_OF_RANGE);
+            break;
+        }
         drop_trim_cache(f);
         SmSurface* srf = f->GetSurface();
         const bool traced = cache_mode != 0 || repeats != 1;
@@ -995,13 +1111,28 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     }
     case OP_CLASSIFY_PARAM:
     {
-        // `u v tol f1 dom1[4] f2 dom2[4]`
-        SmPoint2d uv = rd.uv();
+        // `face1 face2 at[6] tol has_dom1 dom1[4] has_dom2 dom2[4]`: the point on face1;
+        // a domain not given is the face's own UV domain
+        SmFace* f1 = face_sel(g, rd.idx());
+        SmFace* f2 = face_sel(g, rd.idx());
+        AtSpec at = read_at(rd);
         double tol = rd.num();
-        SmFace* f1 = g.faces[(size_t)rd.idx()];
-        SmPoint2d a1 = rd.uv(), b1 = rd.uv();
-        SmFace* f2 = g.faces[(size_t)rd.idx()];
-        SmPoint2d a2 = rd.uv(), b2 = rd.uv();
+        auto dom_of = [&](SmFace* f, SmPoint2d& a, SmPoint2d& b) {
+            bool given = rd.flag();
+            SmPoint2d ga = rd.uv(), gb = rd.uv();
+            SmExtent2d d = f->*FPeek::dom();
+            a = given ? ga : d.GetMin();
+            b = given ? gb : d.GetMax();
+        };
+        SmPoint2d a1, b1, a2, b2;
+        dom_of(f1, a1, b1);
+        dom_of(f2, a2, b2);
+        SmPoint2d uv = point_of(f1, at);
+        if (!in_range(uv.x) || !in_range(uv.y))
+        {
+            o.push_back(POINT_OUT_OF_RANGE);
+            break;
+        }
         drop_trim_cache(f1);
         drop_trim_cache(f2);
         int r = sc_face_q2::sm_ClassifyParamOnFaces(uv, SmZoneTol3d(tol), f1, SmExtent2d(a1, b1), f2,
@@ -1011,15 +1142,43 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     }
     case OP_CURVE_ON_CLASSIFY:
     {
-        // `f dim P[3] Q[3] tol do_pc big_gaps check3d uv_ok`: the classified curve is the
-        // line segment P -> Q (SmBSplineCurve::CreateLineSegment, dimension `dim`; a 2D
-        // segment in the face's parameter space ignores z)
-        SmFace* f = g.faces[(size_t)rd.idx()];
-        drop_trim_cache(f);
+        // `face dim from[6] to[6] tol do_pc big_gaps check3d uv_ok`: the classified curve
+        // is the line segment P -> Q (SmBSplineCurve::CreateLineSegment, dimension `dim`)
+        // between the points `from` and `to` on the face: in its parameter space (z 0) for
+        // dimension 2, on its surface for 3
+        SmFace* f = face_sel(g, rd.idx());
         ULONG dim = (ULONG)rd.idx();
-        SmPoint3d p = rd.vec();
-        SmPoint3d q = rd.vec();
+        AtSpec from = read_at(rd);
+        AtSpec to = read_at(rd);
         double tol = rd.num();
+        SmPoint2d a = point_of(f, from);
+        SmPoint2d bb = point_of(f, to);
+        SmPoint3d p, q;
+        if (dim == 2)
+        {
+            p = SmPoint3d(a.x, a.y, 0.0);
+            q = SmPoint3d(bb.x, bb.y, 0.0);
+        }
+        else
+        {
+            SmSurface* s = f->*FPeek::srf();
+            if (s == nullptr)
+                throw std::runtime_error("face without surface");
+            if (s->EvaluatePoint(a, p) != SM_SUCCESS || s->EvaluatePoint(bb, q) != SM_SUCCESS)
+                throw std::runtime_error("surface evaluation failed");
+        }
+        if (!in_range(p.x) || !in_range(p.y) || !in_range(p.z) || !in_range(q.x) || !in_range(q.y) ||
+            !in_range(q.z))
+        {
+            o.push_back(POINT_OUT_OF_RANGE);
+            break;
+        }
+        if (p.x == q.x && p.y == q.y && p.z == q.z)
+        {
+            o.push_back(DEGENERATE_LINE);
+            break;
+        }
+        drop_trim_cache(f);
         SmBoolean do_pc = rd.bflag();
         SmBoolean big = rd.bflag();
         SmBoolean check3d = rd.bflag();

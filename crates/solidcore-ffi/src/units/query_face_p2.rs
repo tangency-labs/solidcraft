@@ -29,9 +29,20 @@
 //! | [`Op`]            | parameters after the blocks | outputs |
 //! |-------------------|-----------------------------|---------|
 //! | `Export`          |                             | the graph (see [`counts`]) |
-//! | `PointClassify`   | `f u v src_tol do_bnd use_uv tgt_only has_loops n loop* pc_tol uv_ok cache_mode repeats` | `status has_trim_cache pc`; cached/repeated cases wrap each query in five cache flags before/after (present, trimmed, containment, modified, tree) |
-//! | `ClassifyParam`   | `u v tol f1 dom1[4] f2 dom2[4]` | `which` |
-//! | `CurveOnClassify` | `f dim P[3] Q[3] tol do_pc big_gaps check3d uv_ok` | `status modified n (t0 t1 pc pc pc)*`, or `-3 status` when the line could not be made |
+//! | `PointClassify`   | `face at src_tol do_bnd use_uv tgt_only has_loops n loop* pc_tol uv_ok cache_mode repeats` | `status has_trim_cache pc`; cached/repeated cases wrap each query in five cache flags before/after (present, trimmed, containment, modified, tree) |
+//! | `ClassifyParam`   | `face1 face2 at tol has_dom1 dom1[4] has_dom2 dom2[4]` | `which` |
+//! | `CurveOnClassify` | `face dim from to tol do_pc big_gaps check3d uv_ok` | `status modified n (t0 t1 pc pc pc)*`, or `-3 status` when the line could not be made |
+//!
+//! The classification ops resolve their selectors and points on the live, edited
+//! B-rep: `face` and `loop` are selectors (taken modulo the count; a negative loop
+//! selector selects none), and a point `at` is `mode a b sel du dv`: mode `0` the
+//! fraction `(a, b)` of the face's UV domain, `1` the normalised parameter `a` of the UV
+//! trim curve of the face use's edge use `sel` (modulo their count; the domain centre
+//! without a curve), `2` the coordinates `(a, b)`; plus `(du, dv)`. A `CurveOnClassify`
+//! line runs from `from` to `to` in the face's parameter space (dimension 2, `z = 0`) or
+//! between their surface points (dimension 3); a domain not given is the face's own. An
+//! op whose computed point has a coordinate that is not finite or exceeds `MAX_COORD`
+//! outputs `-102`, a line whose ends coincide `-101` (after the leading `0`).
 //!
 //! Geometry op (no B-rep block, no leading `0`):
 //!
@@ -40,8 +51,9 @@
 //! | `ProtoVertex` | `approx_tol capture override P[3] tol Q[3]` | `contains distance pv_capture mgr_capture` |
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: existing
-//! `.smb` files, well-formed clamped B-splines, planes with a non-zero normal, indices
-//! inside the B-rep's export (it builds the B-rep once more to count), finite inputs.
+//! `.smb` files, well-formed clamped B-splines, planes with a non-zero normal, face
+//! selectors only on a B-rep with faces (it builds the B-rep once more to count), finite
+//! inputs.
 
 use std::path::Path;
 
@@ -133,17 +145,34 @@ impl Reader<'_> {
         Ok(v as usize)
     }
 
-    /// An index below `count`.
-    fn below(&mut self, count: usize) -> Result<usize, FfiError> {
-        let i = self.index(usize::MAX >> 12)?;
-        if i >= count {
-            return Err(bad(format!("index {i} out of range ({count})")));
-        }
-        Ok(i)
-    }
-
     fn flag(&mut self) -> Result<bool, FfiError> {
         Ok(self.index(1)? == 1)
+    }
+
+    /// A signed selector: an integer of magnitude at most `2^52`.
+    fn selector(&mut self) -> Result<i64, FfiError> {
+        let v = self.num()?;
+        if v.fract() != 0.0 || v.abs() > (1u64 << 52) as f64 {
+            return Err(bad(format!("bad selector {v}")));
+        }
+        Ok(v as i64)
+    }
+
+    /// A face selector: non-negative, on a B-rep with faces.
+    fn face(&mut self, n_faces: usize) -> Result<(), FfiError> {
+        if self.selector()? < 0 || n_faces == 0 {
+            return Err(bad("no face"));
+        }
+        Ok(())
+    }
+
+    /// A point specification `mode a b sel du dv`.
+    fn at(&mut self) -> Result<(), FfiError> {
+        self.index(2)?;
+        self.finites(2)?;
+        self.selector()?;
+        self.finites(2)?;
+        Ok(())
     }
 }
 
@@ -316,12 +345,11 @@ fn edits(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 /// The parameters of a B-rep op after the blocks.
 fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError> {
     let n_faces = c[3];
-    let n_loops = c[5];
     match op {
         Op::Export | Op::ProtoVertex => {}
         Op::PointClassify => {
-            rd.below(n_faces)?;
-            rd.finites(2)?;
+            rd.face(n_faces)?;
+            rd.at()?;
             tol(rd)?;
             rd.flag()?;
             rd.flag()?;
@@ -329,7 +357,7 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
             rd.flag()?;
             let n = rd.index(MAX_LIST)?;
             for _ in 0..n {
-                rd.below(n_loops)?;
+                rd.selector()?;
             }
             tol(rd)?;
             rd.flag()?;
@@ -340,24 +368,23 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
             }
         }
         Op::ClassifyParam => {
-            rd.finites(2)?;
+            rd.face(n_faces)?;
+            rd.face(n_faces)?;
+            rd.at()?;
             tol(rd)?;
             for _ in 0..2 {
-                rd.below(n_faces)?;
+                rd.flag()?;
                 rd.finites(4)?;
             }
         }
         Op::CurveOnClassify => {
-            rd.below(n_faces)?;
+            rd.face(n_faces)?;
             let dim = rd.index(3)?;
             if dim < 2 {
                 return Err(bad("curve dimension must be 2 or 3"));
             }
-            let p = rd.vec3()?;
-            let q = rd.vec3()?;
-            if p == q {
-                return Err(bad("degenerate line"));
-            }
+            rd.at()?;
+            rd.at()?;
             tol(rd)?;
             for _ in 0..4 {
                 rd.flag()?;

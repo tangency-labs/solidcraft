@@ -15,10 +15,10 @@
 //! selectors and reports a failed build from its own export.
 //!
 //! **Export importer.** [`import`] still decodes the shim's export (used by the C++
-//! side here and by unit `query.face_p2`): plain B-spline surfaces, `SmPlane`s,
+//! side here to resolve its selectors): plain B-spline surfaces, `SmPlane`s,
 //! B-spline curves and `SmLine`s as regular blocks, eligible analytic surfaces and
 //! ellipse/circle edge curves from their exact records (`sc_analytic_export.h`,
-//! `sc_exact_curve_export.h`), other subclasses as their B-spline part ([`Exact`]).
+//! `sc_exact_curve_export.h`), other subclasses as their B-spline part.
 //! Since the Rust B-rep is native, no operation is skipped as `inexact_geometry` here.
 //!
 //! **`GetPointsInFace` with more than one point** draws its V dither from
@@ -569,18 +569,8 @@ fn read_surface(rd: &mut Rd<'_>) -> Result<(Option<Surface>, bool), HarnessError
     Ok((Some(Surface::from(b)), exact))
 }
 
-/// Whether each face's surface and each edge's curve was imported exactly (an
-/// `SmBSplineSurface` subclass other than `SmPlane`, or an `SmBSplineCurve` subclass
-/// other than `SmLine`, is imported as its B-spline part unless the export put its exact
-/// record before it).
-pub(crate) struct Exact {
-    pub(crate) faces: Vec<bool>,
-    pub(crate) edges: Vec<bool>,
-}
-
-/// Builds the Rust B-rep from the shim's export (see the module docs; shared with unit
-/// `query.face_p2`, whose shim exports the same layout).
-pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
+/// Builds the Rust B-rep from the shim's export (see the module docs).
+pub(crate) fn import(ex: &[f64]) -> Result<Brep, HarnessError> {
     let c = ffi::counts(ex).ok_or_else(|| harness("import of a failed build"))?;
     let [n_r, n_s, n_fu, n_f, n_lu, n_l, n_eu, n_e, n_vu, n_v] = c;
     let mut rd = Rd { v: ex, at: 1 };
@@ -632,10 +622,8 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
         });
     }
     let mut surfaces = Vec::new();
-    let mut exact_faces = Vec::new();
     for f in 0..n_f {
-        let (mut surface, exact) = read_face_surface(&mut rd)?;
-        exact_faces.push(exact);
+        let (mut surface, _) = read_face_surface(&mut rd)?;
         let faceuse = opt(rd.idx()?, FaceuseId::from_index)?;
         let dom = Extent2d::from_bounds(rd.num()?, rd.num()?, rd.num()?, rd.num()?);
         let rect = rd.idx()?;
@@ -730,7 +718,6 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
         edgeuses.push(r);
     }
     let mut edges = Vec::new();
-    let mut exact_edges = Vec::new();
     for _ in 0..n_e {
         let tolerance = rd.num()?;
         let a = rd.num()?;
@@ -740,8 +727,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
             .into_iter()
             .map(|x| opt(x, EdgeuseId::from_index)?.ok_or_else(|| harness("null edge use")))
             .collect::<Result<Vec<_>, _>>()?;
-        let (curve, exact_curve) = read_edge_curve(&mut rd)?;
-        exact_edges.push(exact_curve);
+        let (curve, _) = read_edge_curve(&mut rd)?;
         let interval = Extent1d::from_raw(a, b);
         edges.push((tolerance, interval, list, curve));
     }
@@ -884,13 +870,7 @@ pub(crate) fn import(ex: &[f64]) -> Result<(Brep, Exact), HarnessError> {
     for vu in vertexuses {
         b.add_vertexuse_record(vu).map_err(|e| harness(e.to_string()))?;
     }
-    Ok((
-        b,
-        Exact {
-            faces: exact_faces,
-            edges: exact_edges,
-        },
-    ))
+    Ok(b)
 }
 
 // ---- generation -------------------------------------------------------------------------
@@ -1487,7 +1467,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(op) => op,
         Err(name) => return Ok(Output::err(name)),
     };
-    let (b, _) = import(&ex)?;
+    let b = import(&ex)?;
     let (code, args) = op_args(&op)?;
     let mut input = brep_block(i)?;
     input.extend(args);
