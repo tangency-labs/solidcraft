@@ -82,8 +82,8 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
     use crate::own_builder::{build_as, Built, Conventions};
     let (path, _) = p4::block(&i.brep)?;
     // The fixture B-rep made by the Rust kernel in the shim's traversal order (an `.smb`
-    // file by the Rust reader), geometry owned under the arena identities
-    // `p4::own_surfaces` gives; no C++ state reaches the Rust side.
+    // file by the Rust reader), its geometry owned as the build left it (no owner is
+    // added); no C++ state reaches the Rust side.
     let mut k = Kernel::default();
     let conv = &Conventions::EDGEUSE_GRAPH;
     let built = match &i.brep {
@@ -98,7 +98,7 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
         // the C++ side reports a fixture that does not build as rejected
         Built::Failed(e) => return Ok(Output::unported(&e).unwrap_or_default()),
     };
-    p4::own_surfaces(&mut b)?;
+    p4::sync_face_tolerances(&mut b)?;
     b.set_editing_enabled(i.editing);
     let edges: Vec<Option<EdgeId>> = i
         .edges

@@ -2,23 +2,26 @@
 //! `DeleteVertex`, `ShrinkGeometry`, `StitchFaces` and `~SmBrep` on real B-reps.
 //!
 //! The B-rep comes from the shared fixture (`sc_topology_fixture.h`): the C++ side
-//! builds it, the Rust side imports the `topology.topology_traverser` export of the same
-//! block record by record (with the vertex use lists), so the target indices name the
-//! same objects on both sides. Compared: the status, and on success (for the edits also
+//! builds it; the Rust side builds the same source with the Rust kernel
+//! ([`crate::own_builder`]) or reads an `.smb` file with the Rust reader, renumbered into
+//! the shim's walk order, so the target indices name the same objects on both sides. No
+//! C++ state reaches the Rust side: its vertex use lists are in the Rust build's order.
+//! Compared: the status, and on success (for the edits also
 //! after a failed status, which can come after part of the topology changed) the ten
 //! record counts of the B-rep afterwards (`StitchFaces` adds its outputs; the
 //! destructor its context flag) and every record of the B-rep, field by field (see
 //! [`Rec`]): links
 //! (labels), lists in their order, orientations, flags, domains, tolerances, points,
 //! intervals, UV points. Cases whose Rust path reaches an unported callee are deferred.
+//! A source the Rust kernel fails to build reports that failure (the shim's NULL build
+//! reports its status).
 //!
 //! **Record naming.** A record that existed before the operation keeps the index of
 //! the first walk on both sides (the Rust arena id; the shim tags the C++ object).
 //! Records the operation made are renumbered by [`canonicalize`] (the same function on
 //! both sides) from their contents and links, so the order the two sides created or
 //! reached them in does not matter. The `Check` operation runs nothing and compares
-//! the imported model with the C++ records, which proves the encodings agree while the
-//! operations still defer.
+//! the Rust-built B-rep with the C++ records.
 //!
 //! Deviations: the runner-local native record decoder validates finite,
 //! nonnegative integral counts below the exclusive `2^usize::BITS` bound and
@@ -49,8 +52,7 @@ use solidcore::topology::brep::p4::{self, DeleteEnv};
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};
 use solidcore::topology::shell::ShellMembers;
 use solidcore::topology::{
-    ArenaId, Brep, EdgeId, EdgeuseOwner, FaceId, LoopuseStart, ShellId, VertexId, VertexuseId,
-    VertexuseOwner,
+    ArenaId, Brep, EdgeId, EdgeuseOwner, FaceId, LoopuseStart, ShellId, VertexId, VertexuseOwner,
 };
 use solidcore_ffi::units::topology_brep_p4::{self as ffi, Damage, Op, Request, NULL_DEREFERENCE};
 use solidcore_ffi::units::topology_vertexuse::counts;
@@ -198,17 +200,25 @@ fn request(i: &Inputs) -> Request {
     }
 }
 
-/// The imported fixture with the vertex use lists in their raw order.
-pub(crate) fn import(
-    f: &solidcore_ffi::units::topology_topology_traverser::Fixture,
-) -> Result<Brep, HarnessError> {
-    let (mut b, _) = shared::import(&f.graph)?;
-    for (i, list) in f.vertexuses.iter().enumerate() {
-        b.vertex_mut(VertexId::from_index(i as u32))
-            .map_err(|e| err(&e))?
-            .vertexuses = list.iter().map(|&j| VertexuseId::from_index(j)).collect();
-    }
-    Ok(b)
+/// The Rust side's B-rep: the case's source built by the Rust kernel as the shim builds
+/// it ([`crate::own_builder::build_as`]), or its `.smb` file read by the Rust reader
+/// ([`crate::own_builder::read_with`]), renumbered into the shim's walk order under
+/// `Conventions::EDGEUSE_GRAPH` (the fixture's walk; face and edge geometry owned under
+/// their arena identities, which `GetSurfaces` / `GetCurves` test the owner against).
+/// The vertex use lists are in the order the Rust build made them. A failed build is
+/// its output (an unported callee's deferral, else its status).
+fn own_brep(k: &mut Kernel, src: &BrepIn) -> Result<Result<Brep, Output>, HarnessError> {
+    use crate::own_builder::{build_as, failed_output, read_with, Built, Conventions};
+    let conv = &Conventions::EDGEUSE_GRAPH;
+    let built = match src {
+        BrepIn::File { rebuild, .. } => read_with(k, &path_of(src)?, *rebuild, false, false, conv)?,
+        other => build_as(k, other, false, false, conv)?
+            .ok_or_else(|| err("B-rep source not built"))?,
+    };
+    Ok(match built {
+        Built::Brep(b) => Ok(*b),
+        Built::Failed(e) => Err(failed_output(&e)),
+    })
 }
 
 /// The record counts of the shim's walk, in its kind order.
@@ -607,35 +617,13 @@ fn face_owner(index: u32) -> ObjectRef {
     arena_identity(CacheObject::Face(FaceId::from_index(index)))
 }
 
-/// The importer names an owned surface's face `1 + index`; the B-rep names it by its
-/// arena identity ([`face_owner`]). Surfaces the C++ face owns stay owned.
-pub(crate) fn own_surfaces(b: &mut Brep) -> Result<(), HarnessError> {
+/// Each face's tolerance recorded on its surface, as the face upstream answers
+/// `GetTolerance` with. The geometry owners are the ones the build gave (no owner is
+/// added).
+pub(crate) fn sync_face_tolerances(b: &mut Brep) -> Result<(), HarnessError> {
     let ids: Vec<FaceId> = b.faces().ids().collect();
     for f in ids {
-        let imported = ObjectRef {
-            type_code: solidcore::topology::face::p2::TYPE,
-            key: ObjectKey(1 + u64::from(f.index())),
-        };
-        if let Some(s) = b.face_mut(f).map_err(|e| err(&e))?.surface.as_mut() {
-            if s.owner() == Some(imported) {
-                let _ = s.set_owner(Some(face_owner(f.index())));
-            }
-        }
-        // the face's tolerance, as the face upstream answers GetTolerance with
         b.sync_face_surface_tolerance(f).map_err(|e| err(&e))?;
-    }
-    // the edge curves' owners (`SmCurve::GetOwner`/`GetEdge`, set by the B-rep build
-    // upstream): the edge's arena identity, which `SmBrep::GetCurves`
-    // (`topology::brep::p1::curves`) tests the owner against; `ShrinkGeometry` trims the
-    // curves that name an edge
-    let edges: Vec<EdgeId> = b.edges().ids().collect();
-    for e in edges {
-        if let Some(c) = b.edge_mut(e).map_err(|e| err(&e))?.curve.as_mut() {
-            let _ = c.set_owner(
-                Some(arena_identity(CacheObject::Edge(e))),
-                Some(arena_identity(CacheObject::Brep)),
-            );
-        }
     }
     Ok(())
 }
@@ -678,7 +666,7 @@ fn key_of(e: EntityRef) -> ObjectRef {
         EntityRef::Vertex(x) => (2, u64::from(x.index())),
         EntityRef::Edgeuse(x) => (3, u64::from(x.index())),
         EntityRef::Vertexuse(x) => (4, u64::from(x.index())),
-        // the owner the importer gives a face's surface (`import` in `topology_vertexuse`)
+        // the owner the build gives a face's surface (`Conventions::EDGEUSE_GRAPH`)
         EntityRef::Face(x) => return face_owner(x.index()),
         _ => (6, 0),
     };
@@ -732,30 +720,17 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let (path, blk) = block(&i.brep)?;
-        let f = ffi::export(&path, &blk).map_err(|e| err(&e))?;
-        if counts(&f.graph).is_none() {
-            return Ok(Output::new());
-        }
-        let mut b = import(&f)?;
-        own_surfaces(&mut b)?;
-        // reading a file heals the B-rep during a Boolean operation, which leaves its
-        // face surfaces with trimmed caches whose trees are not built (and that later
-        // smsurf_GetSurfaceCache calls reuse): the face surfaces' cache states as the
-        // C++ read left them
-        if let BrepIn::File { .. } = &i.brep {
-            use super::topology_edgeuse_p1 as eu1;
-            let file = eu1::BrepIn::File {
-                file: String::new(),
-                rebuild: false,
-            };
-            let blk = eu1::brep_block_of(Some(&file), false, false)?;
-            eu1::seed_cache_tree_states(&b, &path, &blk)?;
-        }
+        let mut k = Kernel::default();
+        // the B-rep built (or read) by the Rust kernel; a read keeps the face surfaces'
+        // cache states the Rust read left (the renumbered copy keeps their slots)
+        let mut b = match own_brep(&mut k, &i.brep)? {
+            Ok(b) => b,
+            Err(o) => return Ok(o),
+        };
+        sync_face_tolerances(&mut b)?;
         damage(&mut b, i.damage)?;
         b.set_editing_enabled(i.editing);
         let pre = record_counts(&b);
-        let mut k = Kernel::default();
         let mut records: solidcore::topology::topology::NotifyRecords = solidcore::topology::topology::NotifyRecords::new();
         let mut attributes = AttributeStore::default();
         let mut env = DeleteEnv {

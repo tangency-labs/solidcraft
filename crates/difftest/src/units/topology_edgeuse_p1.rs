@@ -1053,39 +1053,6 @@ pub(crate) fn import_with_types(ex: &[f64]) -> Result<(Brep, ImportTypes), Harne
     Ok((b, types))
 }
 
-/// Restores the cache slot of every face surface of `b` (imported from the export of
-/// the same `path` and `block`) to its state after the C++ build (`Op::CacheStates`):
-/// reading a file builds the B-rep while doing a Boolean operation, so its healing
-/// (`SmVertexuse::ComputeUVPoint` -> `smsurf_GetSurfaceCache`) can leave face surfaces
-/// with trimmed surface caches whose trees were never built. Upstream reuses such a
-/// cache, so a later `smsurf_GetSurfaceCache` (as `SmEdgeuse::EvaluateBinormal`'s)
-/// does not build the face's UV trim curves.
-pub(crate) fn seed_cache_tree_states(
-    b: &Brep,
-    path: &str,
-    block: &[f64],
-) -> Result<(), HarnessError> {
-    use solidcore::surface::surface::CacheTreeState;
-    let out = ffi::eval(Op::CacheStates, path, block)
-        .map_err(|e| harness(format!("c++ cache states: {e}")))?;
-    let states = ffi::cache_states(&out).ok_or_else(|| harness("malformed cache states"))?;
-    if states.len() != b.faces().len() {
-        return Err(harness("cache states do not match the face list"));
-    }
-    for (i, &s) in states.iter().enumerate() {
-        let f = FaceId::from_index(u32::try_from(i).map_err(|_| harness("face index"))?);
-        let state = match s {
-            0 => CacheTreeState::NoCache,
-            1 => CacheTreeState::Unbuilt,
-            _ => CacheTreeState::Built,
-        };
-        if let Some(surface) = b.face(f).map_err(|e| harness(e.to_string()))?.surface.as_ref() {
-            surface.set_cache_tree_state(state);
-        }
-    }
-    Ok(())
-}
-
 /// [`import_with_types`] without refilling the cached gaps: they stay marked as set
 /// with `SM_UNDEF_DOUBLE` placeholder values. For the C++ side (which only resolves
 /// selectors on the import) and for Rust-side callers that change the geometry after
