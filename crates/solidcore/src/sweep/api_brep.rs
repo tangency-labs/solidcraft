@@ -493,6 +493,12 @@ pub fn create_curve_sweep_with_placements(
 /// `path_curve` (`SmApiCreateCurveSweepFromFaces`), scaled and optioned as
 /// [`create_curve_sweep`]. The faces and their curves are not changed.
 ///
+/// Only the faces' edge curves are swept, so the result is closed into a solid only
+/// with [`SweepOptions::cap_ends`] set (upstream `bCapEndsArg`, default false). With
+/// `options` `None` or uncapped, as upstream, a box face swept along a straight path
+/// gives the open tube of its 4 side faces (no start or end face, volume 0); capped,
+/// the 6-face prism.
+///
 /// # Errors
 ///
 /// `InvalidInput` for no faces or no path curve; those of

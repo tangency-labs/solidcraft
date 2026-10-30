@@ -7,7 +7,8 @@
 //! way on both sides: the `SM_API` curve constructors (`SmApiCreateCurve`,
 //! `SmApiCreateArc`, `SmApiCreateCircle`, `SmApiCreateLineSegment`, ported in
 //! `primitive.api_curves`), or a 3D `SmHermiteCurve` (a curve without `Copy`). Faces
-//! and edges come from `SmApiCreatePlanarCircle` B-reps on both sides. Both sides
+//! and edges come from `SmApiCreatePlanarCircle` B-reps on both sides (fixture op
+//! `from_box_face`: one face of an `SmApiCreateBox` B-rep, plus the result's volume). Both sides
 //! produce the flat record documented in the FFI module, split into keys: `status`
 //! (`0` = `SM_SUCCESS`, else the `SmStatus`: `1001` `SM_ERR`, `1007`
 //! `SM_ERR_INVALID_INPUT`; `-1` on the Rust side for an error upstream cannot produce),
@@ -158,6 +159,13 @@ enum Inputs {
         sweep: SweepIn,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attributed: Option<u8>,
+    },
+    /// Fixtures only: face `face` of `SmApiCreateBox(origin, size)`, then the volume.
+    FromBoxFace {
+        origin: P3,
+        size: P3,
+        face: u64,
+        sweep: SweepIn,
     },
     Taper {
         curves: Vec<CrvIn>,
@@ -314,6 +322,17 @@ fn call_of(i: &Inputs) -> Call {
             args: sweep_args(sweep),
             attributed: *attributed,
         },
+        Inputs::FromBoxFace {
+            origin,
+            size,
+            face,
+            sweep,
+        } => Call::FromBoxFace {
+            origin: *origin,
+            size: *size,
+            face: *face,
+            args: sweep_args(sweep),
+        },
         Inputs::Taper {
             curves,
             height,
@@ -393,9 +412,20 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
         }
         if matches!(
             i,
-            Inputs::CurveSweep { .. } | Inputs::FromFaces { .. } | Inputs::FromEdges { .. }
+            Inputs::CurveSweep { .. }
+                | Inputs::FromFaces { .. }
+                | Inputs::FromEdges { .. }
+                | Inputs::FromBoxFace { .. }
         ) {
             out = out.values("faces", take(flat, &mut at, 3)?.to_vec());
+        }
+        if matches!(i, Inputs::FromBoxFace { .. }) && has.first().copied() == Some(1.0) {
+            let [volume_status, volume] = take(flat, &mut at, 2)? else {
+                return Err(harness("missing volume record"));
+            };
+            out = out
+                .int("volume_status", *volume_status as i64)
+                .scalar("volume", *volume);
         }
     }
     if attributed(i).is_some() {
@@ -693,6 +723,41 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 }
             })()
         }
+        Inputs::FromBoxFace {
+            origin,
+            size,
+            face,
+            sweep,
+        } => {
+            let path = curve(&k, &sweep.path)?;
+            let sref = curve(&k, &sweep.scale_reference)?;
+            let scl = curve(&k, &sweep.scale_curve)?;
+            let opts = options_of(sweep.options);
+            let bx = built(
+                solidcore::primitive::api_primitives::create_box(
+                    &mut k,
+                    pt(origin),
+                    size[0],
+                    size[1],
+                    size[2],
+                ),
+                "box",
+            )?;
+            let faces = built(solidcore::topology::brep::p1::faces(&bx, None), "box faces")?;
+            let f = usize::try_from(*face)
+                .ok()
+                .and_then(|i| faces.get(i).copied())
+                .ok_or_else(|| harness("box face index out of range"))?;
+            api::create_curve_sweep_from_faces(
+                &mut k,
+                &[(&bx, f)],
+                path.as_ref(),
+                sref.as_ref(),
+                scl.as_ref(),
+                opts.as_ref(),
+            )
+            .map(Swept::CurveSweep)
+        }
         Inputs::Taper {
             curves: cs,
             height,
@@ -746,6 +811,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match res {
         Ok(mut s) => {
             let out = success(&s);
+            if let (Inputs::FromBoxFace { .. }, Swept::CurveSweep(c)) = (i, &mut s) {
+                return Ok(match box_volume(&k, &mut c.brep) {
+                    Ok((st, v)) => out.int("volume_status", st).scalar("volume", v),
+                    Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
+                });
+            }
             if !observes(i) {
                 return Ok(out);
             }
@@ -957,6 +1028,22 @@ fn decode_observation(
         return Err(harness("trailing observation values"));
     }
     Ok(out)
+}
+
+/// `SmApiBrepComputeVolume(body, 1e-6)`: its status and, on success, the volume.
+fn box_volume(k: &Kernel, body: &mut Brep) -> solidcore::Result<(i64, f64)> {
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    match brep_volume(k, body, 1e-6, &attrs) {
+        Ok(v) => Ok((0, v)),
+        Err(e) if e.is_unported() => Err(e),
+        Err(e) => Ok((status(&e) as i64, 0.0)),
+    }
 }
 
 fn rust_observation(k: &Kernel, body: &mut Brep) -> solidcore::Result<Vec<f64>> {

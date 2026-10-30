@@ -38,10 +38,13 @@
 //! | `Taper`            | 9  | curves `height angle fillet caps`             |
 //! | `LinearReps`       | 10 | curves `D[3] dist reps cap`                   |
 //! | `RotationalReps`   | 11 | curves `B[3] A[3] angle reps cap`             |
+//! | `FromBoxFace`      | 14 | `O[3] l w h face`, sweep-args                 |
 //!
 //! The output is the API status (`0` = `SM_SUCCESS`, else the `SmStatus`), then on
 //! success `has` and, when there is a B-rep, its face, edge and vertex counts; the
-//! curve sweeps then add the start, side and end face counts.
+//! curve sweeps then add the start, side and end face counts. `FromBoxFace` then adds,
+//! when there is a B-rep, the `SmApiBrepComputeVolume` status and volume (accuracy
+//! `1e-6`; `0` unless it succeeds).
 //!
 //! `FromFaces` / `FromEdges` with `attributed` are ops `12` / `13`: `behavior`, then
 //! the args of op `7` / `8`. They first give every face (`GetFaces` order) and edge
@@ -264,6 +267,18 @@ pub enum Call {
         args: SweepArgs,
         /// `Some(behavior)`: op `13` (see the module docs).
         attributed: Option<u8>,
+    },
+    /// `SmApiCreateCurveSweepFromFaces` on face `face` (in `GetFaces` order) of an
+    /// `SmApiCreateBox(origin, size)` B-rep, then the result's volume.
+    FromBoxFace {
+        /// Box corner.
+        origin: [f64; 3],
+        /// Box length, width and height.
+        size: [f64; 3],
+        /// The box face index (`0..6`).
+        face: u64,
+        /// Path, scale curves and options.
+        args: SweepArgs,
     },
     /// `SmApiCreateTaperExtrude(curves, height, angle, caps, fillet)`.
     Taper {
@@ -672,6 +687,26 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
                 Some(_) => return Err(bad("behavior is not an SmAttributeBehaviorType value")),
             }
             push_discs(&mut o, circles)?;
+            push_sweep_args(&mut o, args)?;
+        }
+        Call::FromBoxFace {
+            origin,
+            size,
+            face,
+            args,
+        } => {
+            finite(origin, "box")?;
+            finite(size, "box")?;
+            if size.iter().any(|d| *d <= 0.0) {
+                return Err(bad("box: sizes must be positive"));
+            }
+            if *face >= 6 {
+                return Err(bad("box: face index must be below 6"));
+            }
+            o.push(14.0);
+            o.extend_from_slice(origin);
+            o.extend_from_slice(size);
+            o.push(*face as f64);
             push_sweep_args(&mut o, args)?;
         }
     }
