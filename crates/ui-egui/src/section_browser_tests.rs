@@ -340,6 +340,34 @@ fn section_status_setting_edits_the_plane_it_shows() {
     assert!(same, "the form is the plane where it stands: {:?}", scratch.section);
 }
 
+/// With the Section status on, a plane made in the dialog reopens as it was typed, from the
+/// status item's setting and from its row, not from its geometry.
+#[test]
+fn a_plane_made_in_the_dialog_reopens_from_its_draft_with_the_status_item_on() {
+    let mut h = box_in_view();
+    h.app.preferences.viewport_section_status = true;
+    h.app.preferences.viewport_status_details = false;
+    menu_at(&mut h, [20.0, 15.0, 20.0]);
+    pick(&mut h, "Section View");
+    let face = section_dialog(&h).2;
+    assert!(matches!(face[..], [solidcraft_engine::Sel::Face { .. }]), "{face:?}");
+    set_offset(&mut h, "7 mm");
+    ok(&mut h);
+    assert!((only_cut(&h).0.z - 13.0).abs() < 1e-9, "{:?}", only_cut(&h));
+
+    let effect = h.app.session.status_items().into_iter().find(|e| e.command == "inspect.section").unwrap();
+    let item = crate::viewport_status::presentation(&h.app, &effect).unwrap();
+    h.step(&json!({"click":{"handle":format!("viewport_status:{}:setting",item.id)}})).unwrap();
+    assert_eq!(section_dialog(&h), ("7 mm".to_owned(), false, face.clone()), "the status item's setting");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| !d.extra.contains_key("plane")), "not the geometry form");
+    crate::dialogs::cancel(&mut h.app);
+    h.frames(2);
+
+    menu(&mut h, 1, "Edit Section Analysis");
+    assert_eq!(section_dialog(&h), ("7 mm".to_owned(), false, face), "the row's Edit");
+    assert!(h.app.dialog.as_ref().is_some_and(|d| !d.extra.contains_key("plane")), "not the geometry form");
+}
+
 /// A box seen from the home view, the window drawn.
 fn box_in_view() -> Harness {
     let mut h = harness();
