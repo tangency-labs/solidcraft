@@ -1,0 +1,237 @@
+{
+ "cases": [
+  {
+   "name": "issue1517_tube_ends_union_checked",
+   "note": "#1517 / WR-579: a bicycle frame's top tube (r 16, (-150, 0, 820) to (600, 0, 860), seam at -y) united with its seat tube (r 16, from (0, 0, 300) towards (-150, 0, 820), 3.7e-4 short, seam at +y), each SmApiCreateCylinder turned about Z for its seam, about Y onto its axis and moved to its base, as crates/solidcore/tests/wr579_near_coincident_tube_ends_join.rs builds them. At the default fixes (upstream behaviour) this compares the port with the C++ on the defect: upstream's SmProtoEdge::Resolve keeps an edge whole past a third vertex definition of its own proto vertex and the union fails; Kernel::fixes.proto_edge_splits_at_captured_vertices splits it. Compares the union's status and SMLib's capi check (level 2) of the result.",
+   "inputs": {
+    "api": "checked",
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": -90.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 86.94711748520757
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -150.0,
+         0.0,
+         820.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 751.0659092250161
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 90.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": -16.09081634885217
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         0.0,
+         300.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 541.2019951093923
+     }
+    },
+    "operation": 1,
+    "level": 2
+   }
+  },
+  {
+   "name": "issue1517_tube_ends_union_measured",
+   "note": "#1517 / WR-579: a bicycle frame's top tube (r 16, (-150, 0, 820) to (600, 0, 860), seam at -y) united with its seat tube (r 16, from (0, 0, 300) towards (-150, 0, 820), 3.7e-4 short, seam at +y), each SmApiCreateCylinder turned about Z for its seam, about Y onto its axis and moved to its base, as crates/solidcore/tests/wr579_near_coincident_tube_ends_join.rs builds them. At the default fixes (upstream behaviour) this compares the port with the C++ on the defect: upstream's SmProtoEdge::Resolve keeps an edge whole past a third vertex definition of its own proto vertex and the union fails; Kernel::fixes.proto_edge_splits_at_captured_vertices splits it. Compares the union's status, counts, volume and face areas.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": -90.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": 86.94711748520757
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         -150.0,
+         0.0,
+         820.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 751.0659092250161
+     }
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 90.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": -16.09081634885217
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         0.0,
+         0.0,
+         300.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "cylinder",
+      "origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "radius": 16.0,
+      "height": 541.2019951093923
+     }
+    },
+    "operation": 1
+   }
+  }
+ ]
+}
