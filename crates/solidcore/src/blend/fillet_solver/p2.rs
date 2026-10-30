@@ -58,6 +58,11 @@
 //! - **Iteration.** `sm_FindRolloverSideEdge`'s `while (TRUE)` advances its interval
 //!   index on every pass that does not return, so it runs at most `pCC.len()` times;
 //!   there is no recursion.
+//! - **Revolved blend curves (WR-581, #919).** With
+//!   `fixes.fillet_blend_curve_revolved_on_arc`, `CalcTorusFilletGeom` also takes a
+//!   blend-curve section whose centre line is a point on the arc's axis and revolves the
+//!   blend curve of `CreateSurfaceFromCurves` (shared:
+//!   `BlendCurveCrossSectionFsg::cross_section_through`) at the start point.
 
 use crate::blend::fillet_custom_solver::OffsetSurface;
 use crate::blend::fillet_executive::p3::ErrorInfo;
@@ -73,6 +78,7 @@ use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGenerator,
     FilletSurfaceGeneratorType, RailRailIntersectEnfo, RailUvCurveIntersectEnfo,
 };
+use crate::blend::fillet_standard_solver::p1::SectionUv;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
@@ -339,6 +345,84 @@ fn fsg_type(s: &FilletSolver) -> Result<FilletSurfaceGeneratorType> {
         .as_ref()
         .map(FilletSurfaceGenerator::fillet_surface_generator_type)
         .ok_or_else(|| invalid("no fillet surface generator"))
+}
+
+/// Not upstream (WR-581): whether every centre-line point lies on the axis of `frame`, to
+/// `dAnalyticTol` scaled by one plus the arc's radius `arc_radius`. Each point is the
+/// first offset surface's point at the fillet point's first UV position
+/// (`GetSurface(0)->EvaluatePoint`, as the section's centre `sArcCenter` is taken), an
+/// evaluation that keeps no extension, so a blend that is refused here leaves the solver
+/// as it was; a point that does not evaluate is not on the axis.
+///
+/// # Errors
+///
+/// `SM_ERR_INVALID_INPUT` from `Unitize` of a zero axis; [`SolidError::InvalidInput`]
+/// without the offset surface; [`SolidError::Unported`] from the evaluation.
+fn centre_line_on_axis(
+    k: &Kernel,
+    s: &FilletSolver,
+    frame: &Axis2Placement,
+    arc_radius: f64,
+    tsects: &[TsectPnt],
+) -> Result<bool> {
+    let axis = frame.z_axis().unitize()?;
+    let origin = frame.origin();
+    let tol = ANALYTIC_TOL * (1.0 + arc_radius);
+    let slot = s.surface(0)?.ok_or_else(|| invalid("no offset surface"))?;
+    for t in tsects {
+        let centre = match slot
+            .surface
+            .surface
+            .evaluate_point(k, t.uv_pos(SrfIndex::First))
+        {
+            Ok(p) => p,
+            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(_) => return Ok(false),
+        };
+        let off = centre - origin;
+        if (off - axis * off.dot(axis)).length() >= tol {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Not upstream (WR-581): the blend curve cross section of the solver's
+/// `SmBlendCurveCrossSectionFSG` about `centre` through the rail points `rails`, whose UV
+/// positions on the offset surfaces `GetSurface(0)`, `GetSurface(1)` are `uvs`
+/// (`BlendCurveCrossSectionFsg::cross_section_through`, as `CreateSurfaceFromCurves`
+/// builds each section of a marched blend).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a solver without a blend-curve generator or an
+/// offset surface; those of the section.
+fn blend_curve_section(
+    k: &Kernel,
+    s: &FilletSolver,
+    centre: Point3,
+    rails: [Point3; 2],
+    uvs: [Point2; 2],
+) -> Result<BSplineCurve> {
+    let Some(FilletSurfaceGenerator::BlendCurve(fsg)) = s.fsg.as_ref() else {
+        return Err(invalid("no blend-curve surface generator"));
+    };
+    let offset = |rail: usize| -> Result<Surface> {
+        let slot = s
+            .surface(rail)?
+            .ok_or_else(|| invalid("no offset surface"))?;
+        Ok(Surface::from(slot.surface.surface.clone()))
+    };
+    let (sur0, sur1) = (offset(0)?, offset(1)?);
+    let [uv0, uv1] = uvs;
+    fsg.cross_section_through(
+        k,
+        centre,
+        rails,
+        s.approx_tol_3d,
+        [Some(&sur0), Some(&sur1)],
+        SectionUv::Points(uv0, uv1),
+    )
 }
 
 /// `sm_TurnIntoHalfPlane` (fork addition): turns `point` about the axis (through `origin`,
@@ -883,14 +967,23 @@ impl FilletSolver {
         let section = fsg_type(s)?;
         let linear_section =
             k.fixes.fillet_chamfer_cone_on_arc && section == FilletSurfaceGeneratorType::Linear;
-        if section != FilletSurfaceGeneratorType::Circular && !linear_section {
+        // Not upstream (WR-581, #919), opt-in `fixes.fillet_blend_curve_revolved_on_arc`: a
+        // blend-curve section whose centre line is a point on the arc's axis (a blend as
+        // wide as the face it uses up, whose marched centre line has no length to march)
+        // is revolved too; any other blend-curve section is still refused here
+        let blend_section = k.fixes.fillet_blend_curve_revolved_on_arc
+            && section == FilletSurfaceGeneratorType::BlendCurve;
+        if section != FilletSurfaceGeneratorType::Circular && !linear_section && !blend_section {
             return Err(sm_err());
         }
-        let Some((ref_frame, _arc_radius, start_ang, _end_ang)) =
+        let Some((ref_frame, arc_radius, start_ang, _end_ang)) =
             curve.is_arc(k, 11, ANALYTIC_TOL)?
         else {
             return Err(sm_err());
         };
+        if blend_section && !centre_line_on_axis(k, s, &ref_frame, arc_radius, tsects)? {
+            return Err(sm_err());
+        }
 
         // select new fillet surface storage spot
         let fillet_geom = match fillet_geom {
@@ -949,9 +1042,18 @@ impl FilletSolver {
         };
 
         // allocate the arc from the points [centerPoint, sP0, sP1] (a linear section: the
-        // line from rail to rail)
+        // line from rail to rail; WR-581's blend-curve section: the blend curve the
+        // marched surface has at each of its sections, here at the start point)
         let mut arc = if linear_section {
             BSplineCurve::create_line_segment(3, p0, p1)?
+        } else if blend_section {
+            blend_curve_section(
+                k,
+                ops.solver(),
+                arc_center,
+                [p0, p1],
+                [start_uv0, start_uv1],
+            )?
         } else {
             BSplineCurve::create_arc_from_points(arc_center, p0, p1, NurbCircleParam::Quadratic)?
         };
