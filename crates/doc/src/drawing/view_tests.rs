@@ -196,6 +196,7 @@ fn the_views_rules_are_kept_on_reading() {
         name: "Other".into(),
         sheet: a4,
         border: None,
+        title_block: None,
         dpi: 300.0,
         documents: None,
         excluded: Excluded::default(),

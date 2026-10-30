@@ -42,6 +42,16 @@ fn orientation<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
     }
 }
 
+/// A title block's definition, as `TitleBlock` reads it, or `null` for none.
+fn title_block<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if !v.is_null() {
+        serde_json::from_value::<solidcraft_geom::title_block::TitleBlock>(v.clone())
+            .map_err(|e| serde::de::Error::custom(whole(format!("`title_block`: {e}"))))?;
+    }
+    Ok(Some(v))
+}
+
 /// A finite number below 1e9 in size, as `params::num` reads it.
 fn number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     match Value::deserialize(d)?.as_f64().and_then(crate::params::finite) {
@@ -90,8 +100,9 @@ fn every_sheet<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error>
         .ok_or_else(every)
 }
 
-/// Add a sheet after another: it takes that sheet's paper, border and resolution, unless told
-/// otherwise, and a name of its own; it documents nothing and leaves nothing out unless told.
+/// Add a sheet after another: it takes that sheet's paper, border, title block and resolution,
+/// unless told otherwise, and a name of its own; it documents nothing and leaves nothing out unless
+/// told.
 /// One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -132,6 +143,11 @@ pub struct SheetSettings {
     #[serde(default, deserialize_with = "orientation", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub orientation: Option<String>,
+    /// Its title block: a definition (`size_mm`, `outline_line_mm`, `cell_line_mm`, `cells`) that
+    /// sits on the drawing border's lower-right corner and must fit inside it, or `null` for none.
+    #[serde(default, deserialize_with = "title_block", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Value")]
+    pub title_block: Option<Value>,
     /// The resolution its pictures are rendered at: 25 to 2400 dots per inch.
     #[serde(default, deserialize_with = "number", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
