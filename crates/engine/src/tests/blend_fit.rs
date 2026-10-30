@@ -1,5 +1,6 @@
-//! #1080: a fillet or chamfer too large for the geometry beside its edge is refused, naming the
-//! largest size that fits, and one that fits still builds.
+//! #1080: a fillet or chamfer running past the faces beside its edge into an opening is built
+//! as if the faces went on and cut by the opening (the blend-overflow decision, 237f0ae74), so it
+//! never bridges it; one that stops short builds as it always did.
 
 use std::path::Path;
 
@@ -21,15 +22,14 @@ fn chamfer_error(s: &Session) -> Option<String> {
 
 /// The report's design: a 20 mm cube with a 10 mm square opening into each of three faces,
 /// then a 9 mm chamfer on the top edge over one side opening. The openings are 5 mm from the
-/// edge, so the chamfer would cut through their rims. It is refused, naming 5 mm, and the part
-/// is left as it was.
+/// edge, so the chamfer runs over their rims: it is cut by them. Of its section, the triangle
+/// y + (20 − z) <= 9 (area 40.5, along 20: 810), the two openings crossing it hold 80 each
+/// (the rig's fillets/1080-chamfer-runs-into-openings-refused): 4000 − (810 − 160) = 3350.
 #[test]
-fn chamfer_through_the_openings_is_refused() {
+fn chamfer_through_the_openings_is_cut_by_them() {
     let mut s = open_fixture();
-    let err = chamfer_error(&s).expect("the 9 mm chamfer cuts through two openings: it must be refused");
-    assert!(err.contains("runs past the faces beside the edge"), "{err}");
-    assert!(err.contains("the largest size that fits is 5 mm"), "{err}");
-    assert!((volume(&mut s) - 4000.0).abs() < 1e-6, "the part stays as it was without the chamfer");
+    assert_eq!(chamfer_error(&s), None);
+    assert!((volume(&mut s) - 3350.0).abs() < 1e-6, "{}", volume(&mut s));
 }
 
 /// Sizes that stop short of the openings build, and take away exactly the chamfer's triangle

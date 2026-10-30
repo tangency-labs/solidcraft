@@ -282,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn sloped_rim_fillets_cannot_extend_outside_the_material() {
+    fn sloped_rim_fillets_stay_inside_the_material() {
         use solidcraft_geom::{Loop2, Plane, Vec2};
         for margin in [0.5, 1.0] {
             let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
@@ -294,9 +294,21 @@ mod tests {
             .unwrap();
             let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
             let picks = [Vec3::new(50.0, margin, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
+            // R4 runs over the thin rim's top past the slab's front edge (a cliff): it is built
+            // as if the top went on and cut from the slab (the blend-overflow decision,
+            // 237f0ae74), so nothing of it lies outside the slab.
             for count in [1, 2, 4] {
-                assert!(fillet(&basin, &picks[..count], 4.0).is_err());
-                assert!(fillet(&basin, &picks[..count], margin * 0.5).is_ok());
+                for r in [4.0, margin * 0.5] {
+                    let result = fillet(&basin, &picks[..count], r).unwrap_or_else(|e| panic!("{margin}, {count}, {r}: {e}"));
+                    assert!(result.validity().is_empty(), "{margin}, {count}, {r}: {:?}", result.validity());
+                    assert!(vol(&result) < vol(&basin));
+                    for p in vertices(&result) {
+                        assert!(
+                            p.x >= 0.0 && p.x <= 100.0 && p.y >= 0.0 && p.y <= 60.0 && p.z >= 0.0 && p.z <= 30.0 + 1e-8,
+                            "{margin}, {count}, {r}: {p:?}"
+                        );
+                    }
+                }
             }
         }
     }
@@ -343,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn equal_slope_rim_loops_cannot_escape_the_face() {
+    fn equal_slope_rim_loops_stay_inside_the_material() {
         use solidcraft_geom::{Loop2, Plane, Vec2};
         let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
@@ -352,9 +364,16 @@ mod tests {
                 .unwrap();
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 1.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-        assert!(crate::chamfer(&basin, &picks, 2.0).is_err());
-        assert!(fillet(&basin, &picks, 4.0).is_err());
-        assert!(crate::chamfer(&basin, &picks, 0.5).is_ok());
-        assert!(fillet(&basin, &picks, 0.5).is_ok());
+        // Past the 1 mm rim the blends run over the slab's front edge (a cliff) and are cut from
+        // the slab (the blend-overflow decision, 237f0ae74): nothing escapes it.
+        for (round, size) in [(false, 2.0), (true, 4.0), (false, 0.5), (true, 0.5)] {
+            let result = if round { fillet(&basin, &picks, size) } else { crate::chamfer(&basin, &picks, size) };
+            let result = result.unwrap_or_else(|e| panic!("round={round}, {size}: {e}"));
+            assert!(result.validity().is_empty(), "round={round}, {size}: {:?}", result.validity());
+            assert!(vol(&result) < vol(&basin));
+            for p in vertices(&result) {
+                assert!(p.x >= 0.0 && p.x <= 100.0 && p.y >= 0.0 && p.y <= 60.0 && p.z >= 0.0 && p.z <= 30.0 + 1e-8, "round={round}, {size}: {p:?}");
+            }
+        }
     }
 }

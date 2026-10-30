@@ -364,13 +364,46 @@ fn fillet_max_finds_the_largest_radius_that_works() {
     let (r, body) = fillet_max(&b, &mids, 3.5).unwrap().unwrap();
     assert_eq!(r, 3.0);
     assert!(rel(measure(&body).unwrap().volume, 840.0 - (4.0 - PI) * 90.0) < 2e-4);
-    // A 2 mm disc's top edge: up to 2 (the wall used up).
+    // No edge there: the fillet's own error, not a smaller radius (only a refusal as too large
+    // narrows the search).
+    let e = fillet(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err();
+    assert!(!matches!(e, KernelError::TooLarge(_)), "{e}");
+    assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err().to_string(), e.to_string());
+}
+
+/// Rounds past the bottom of a wall (a cliff) are built as if the wall went on and cut from the
+/// part (the blend-overflow decision, 237f0ae74), never refused as too large: a disc's top edge
+/// past its 2 mm wall, and a block's top outline past the 7 mm wall over a notch.
+#[test]
+fn rounds_past_the_bottom_of_a_wall_are_cut_from_the_part() {
+    // A 2 mm disc's top edge at 2.5 runs past the wall's bottom edge (a cliff): the round is
+    // built as if the wall went on down and cut from the disc (the blend-overflow decision,
+    // 237f0ae74), not refused. Its section in (ρ, z), the 2.5 square at the edge outside the
+    // circle about (10.5, -0.5) above z = 0, turned about the axis: with t = z + 0.5 =
+    // 2.5 sin θ, the round's inner radius ρ(θ) = 10.5 + 2.5 cos θ, the disc keeps
+    // π (169·2 − ∫ (169 − ρ²) dz) (2 mm: Pappus, as `loop_fillet_as_tall_as_its_wall_consumes_it`).
+    use std::f64::consts::FRAC_PI_2;
     let disc = cylinder(Vec3::ZERO, Vec3::Z, 13.0, 2.0).unwrap();
     let top = [Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)];
-    assert!(too_large(&disc, &top, 2.5));
-    assert_eq!(fillet_max(&disc, &top, 2.5).unwrap().map(|x| x.0), Some(2.0));
-    // Walls of different heights: at the shortest one's height only that wall would be used up,
-    // which is refused, so the largest radius is just below it (to the search's 3 digits).
+    let past = fillet(&disc, &top, 2.5).unwrap();
+    let (n, lo) = (20000, (0.5f64 / 2.5).asin());
+    let taken: f64 = (0..n)
+        .map(|i| {
+            let th = lo + (i as f64 + 0.5) * (FRAC_PI_2 - lo) / n as f64;
+            let rho = 10.5 + 2.5 * th.cos();
+            (169.0 - rho * rho) * 2.5 * th.cos()
+        })
+        .sum::<f64>()
+        * (FRAC_PI_2 - lo)
+        / n as f64;
+    let want = PI * (169.0 * 2.0 - taken);
+    assert!(rel(measure(&past).unwrap().volume, want) < 1e-6, "{} vs {want}", measure(&past).unwrap().volume);
+    // Walls of different heights, a 7 mm one over a notch: R7 uses that wall up (a round may),
+    // and R8 runs past its bottom edge into the notch (a cliff) and is cut by it. The outline's
+    // mitred round takes (1 − π/4) r² along the outline less 8 times its centroid's distance
+    // from the faces, r (10 − 3π) / (3 (4 − π)); at R8 less its part inside the notch
+    // [35, 40] × [0, 5] × [2, 3], where each of the corner's two rounds reaches g = 8 − √(64 − t²)
+    // in from its face at t = z − 2 on its side of the mitre: ∫₀¹ 2 (5g − g²/2) dt.
     let notched = boolean(
         &box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap(),
         &box_solid(Vec3::new(35.0, -1.0, -1.0), Vec3::new(41.0, 5.0, 3.0)).unwrap(),
@@ -379,14 +412,20 @@ fn fillet_max_finds_the_largest_radius_that_works() {
     .unwrap()
     .unwrap();
     let outline = [Vec3::new(20.0, 0.0, 10.0), Vec3::new(40.0, 15.0, 10.0), Vec3::new(20.0, 30.0, 10.0), Vec3::new(0.0, 15.0, 10.0)];
-    assert!(too_large(&notched, &outline, 8.0));
-    let (r, _) = fillet_max(&notched, &outline, 8.0).unwrap().unwrap();
-    assert!((r - 6.999).abs() < 1e-9, "{r}");
-    // No edge there: the fillet's own error, not a smaller radius (only a refusal as too large
-    // narrows the search).
-    let e = fillet(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err();
-    assert!(!matches!(e, KernelError::TooLarge(_)), "{e}");
-    assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err().to_string(), e.to_string());
+    let mitred = |r: f64| (1.0 - PI / 4.0) * r * r * (140.0 - 8.0 * r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
+    let in_notch: f64 = (0..n)
+        .map(|i| {
+            let t = (i as f64 + 0.5) / n as f64;
+            let g = 8.0 - (64.0 - t * t).sqrt();
+            2.0 * (5.0 * g - g * g / 2.0)
+        })
+        .sum::<f64>()
+        / n as f64;
+    for (r, want) in [(7.0, 11925.0 - mitred(7.0)), (8.0, 11925.0 - (mitred(8.0) - in_notch))] {
+        let b = fillet(&notched, &outline, r).unwrap();
+        assert!(b.validity().is_empty(), "{r}: {:?}", b.validity());
+        assert!(rel(measure(&b).unwrap().volume, want) < 1e-6, "{r}: {} vs {want}", measure(&b).unwrap().volume);
+    }
 }
 
 /// Edges that share no face get their own largest radius: a 2 mm fin's top edge takes at most
@@ -1134,21 +1173,63 @@ fn chamfer_sloped_basin_rim() {
     assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
 }
 
+/// The removal of an equal-distance chamfer `d` of the rim edge at y = `margin` of
+/// `chamfer_sloped_basin_rim`'s basin, cut from the slab as if its top went on past y = 0 (the
+/// blend-overflow decision, 237f0ae74): the triangle between the edge (margin, 30), the top's
+/// contact (margin − d, 30) and the wall's contact d down the wall towards (20, 10), clipped to
+/// y >= 0, times the chamfer's length at its depth h, 60 − h between the sloped end walls:
+/// area · (30 + z̄) over the clipped polygon (shoelace).
+fn basin_rim_chamfer_removed(margin: f64, d: f64) -> f64 {
+    let len = ((20.0 - margin).powi(2) + 400.0).sqrt();
+    let (e, t) = ((margin, 30.0), (margin - d, 30.0));
+    let w = (margin + d * (20.0 - margin) / len, 30.0 - d * 20.0 / len);
+    let poly = if t.0 >= 0.0 {
+        vec![e, t, w]
+    } else {
+        let s = -t.0 / (w.0 - t.0);
+        vec![e, (0.0, 30.0), (0.0, t.1 + s * (w.1 - t.1)), w]
+    };
+    let (mut area, mut moment) = (0.0, 0.0);
+    for i in 0..poly.len() {
+        let ((y0, z0), (y1, z1)) = (poly[i], poly[(i + 1) % poly.len()]);
+        let c = y0 * z1 - y1 * z0;
+        area += c / 2.0;
+        moment += (z0 + z1) * c / 6.0;
+    }
+    area.abs() * 30.0 + moment.abs()
+}
+
 #[test]
-fn chamfer_wider_than_sloped_basin_rim_is_refused() {
-    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0), (1.0, 1.0)] {
+fn chamfer_wider_than_sloped_basin_rim_is_cut_and_a_full_width_one_refused() {
+    let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+    let basin = |margin: f64| {
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
-        let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
         let pocket =
             loft(&[(Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))])
                 .unwrap();
-        let basin = boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap();
-        let before = measure(&basin).unwrap();
-        let error = chamfer(&basin, &[Vec3::new(50.0, margin, 30.0)], distance).unwrap_err();
-        assert!(error.to_string().contains("larger than the neighbouring faces"), "{margin}, {distance}: {error}");
-        assert_eq!(measure(&basin).unwrap().volume, before.volume);
-        // A smaller chamfer on the same thin rim is still supported.
-        let smaller = chamfer(&basin, &[Vec3::new(50.0, margin, 30.0)], margin * 0.5).unwrap();
+        boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap()
+    };
+    // The formula reads the fitting chamfer of `chamfer_sloped_basin_rim` as it does.
+    let drop = 2.0 / (1.0 + 0.8f64.powi(2)).sqrt();
+    assert!(rel(basin_rim_chamfer_removed(4.0, 2.0), drop * (60.0 - drop / 3.0)) < 1e-12);
+    // Wider than the rim: the chamfer runs over the slab's front edge (a cliff) and is cut.
+    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0)] {
+        let b = basin(margin);
+        let before = measure(&b).unwrap().volume;
+        let made = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance).unwrap_or_else(|e| panic!("{margin}, {distance}: {e}"));
+        assert!(made.validity().is_empty(), "{margin}, {distance}: {:?}", made.validity());
+        let want = before - basin_rim_chamfer_removed(margin, distance);
+        assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}, {distance}: {} vs {want}", measure(&made).unwrap().volume);
+    }
+    // As wide as the rim it would use the rim's top up: a full-width chamfer is refused, the
+    // body unchanged. A smaller chamfer on the same thin rim is still supported.
+    for margin in [0.5, 1.0] {
+        let b = basin(margin);
+        let before = measure(&b).unwrap();
+        let error = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin).unwrap_err();
+        assert!(matches!(error, KernelError::TooLarge(_)), "{margin}: {error}");
+        assert_eq!(measure(&b).unwrap().volume, before.volume);
+        let smaller = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin * 0.5).unwrap();
         assert!(smaller.validity().is_empty());
         assert!(measure(&smaller).unwrap().volume < before.volume);
     }
