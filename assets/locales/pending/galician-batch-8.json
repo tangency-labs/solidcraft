@@ -1,0 +1,33 @@
+{
+  "gl": {
+    "browser.calibrate_click_a": "Fai clic na imaxe para o punto A, ou escribe as súas coordenadas.",
+    "browser.calibrate_click_b": "Fai clic na imaxe para o punto B, ou escribe as súas coordenadas.",
+    "help.sketch.construction_line": "Crea unha recta de construción infinita por dous puntos. Úsaa para organizar un bosquexo sen dividir os perfís.",
+    "help.sketch.construction_line.angle": "Crea unha recta de construción infinita cun ángulo respecto do eixe X do bosquexo. Escolle o punto e escribe o ángulo, ou escolle a súa dirección.",
+    "help.sketch.construction_line.bisector": "Escolle dúas rectas do bosquexo que se crucen e despois unha das dúas bisectrices. O resultado segue as súas rectas de orixe.",
+    "help.sketch.construction_line.horizontal": "Crea unha recta de construción horizontal infinita por un punto. A súa restrición horizontal mantense nas edicións posteriores.",
+    "help.sketch.construction_line.parallel": "Escolle unha recta do bosquexo e despois coloca unha recta de construción infinita paralela. Fai clic co botón dereito para escoller outra referencia.",
+    "help.sketch.construction_line.perpendicular": "Escolle unha recta do bosquexo e despois coloca unha recta de construción infinita perpendicular. Fai clic co botón dereito para escoller outra referencia.",
+    "help.sketch.construction_line.tangent_at": "Crea unha tanxente nun punto dun círculo ou dun arco circular, ou no extremo dunha spline ou dunha cónica abertas. Escolle a curva e despois o seu punto de tanxencia.",
+    "help.sketch.construction_line.tangent_external": "Escolle un círculo ou un arco circular e despois un punto exterior e unha solución de tanxente. As vistas previas só mostran os puntos de tanxencia sobre o arco debuxado.",
+    "help.sketch.construction_line.tangent_two": "Escolle dous círculos ou arcos circulares e despois unha tanxente común na vista previa. Os puntos de tanxencia deben estar sobre as curvas debuxadas.",
+    "help.sketch.construction_line.vertical": "Crea unha recta de construción vertical infinita por un punto. A súa restrición vertical mantense nas edicións posteriores.",
+    "prefs.persistent_ribbon_pressed": "Resaltar as ordes activas da cinta",
+    "prefs.persistent_ribbon_pressed_help": "Resalta as ordes da cinta mentres os seus efectos están activados. Desactívao para manter o aspecto neutro e a axuda das ordes anteriores.",
+    "prefs.sketch_construction_lines": "Ferramentas ampliadas de rectas de construción",
+    "prefs.sketch_open_look_at": "Xirar para mirar cara ao bosquexo cando se abre",
+    "prefs.sketch_open_look_at_note": "Desactivado: crear ou editar un bosquexo deixa a vista tal e como está. Mirar cara a orienta a vista cara ao bosquexo cando o queres.",
+    "recovery.discard_all": "Descartar todo",
+    "recovery.discard_all_detail": "Esta acción non se pode desfacer.",
+    "recovery.discard_all_title": "Descartar {count} gardados automáticos?",
+    "recovery.discard_all_title_one": "Descartar 1 gardado automático?",
+    "ui.construction.angle_hint": "Recta de construción: fai clic nun punto e despois escribe un ángulo ou escolle unha dirección",
+    "ui.construction.bisector_hint": "Bisectriz: escolle dúas rectas que se crucen e despois a solución desexada",
+    "ui.construction.common_hint": "Tanxente común: escolle dous círculos/arcos e despois a solución desexada",
+    "ui.construction.contact_hint": "Tanxente: escolle un círculo/arco ou unha spline/cónica aberta e despois o punto de tanxencia (curvas de forma libre: extremos)",
+    "ui.construction.external_hint": "Tanxente: escolle un círculo ou arco, un punto exterior e despois a solución desexada",
+    "ui.construction.free_hint": "Recta de construción: fai clic en dous puntos; clic dereito para reiniciar",
+    "ui.construction.point_hint": "Recta de construción: fai clic no punto polo que debe pasar",
+    "ui.construction.reference_hint": "Recta de construción: escolle unha recta e despois un punto; clic dereito para cambiar a referencia"
+  }
+}
