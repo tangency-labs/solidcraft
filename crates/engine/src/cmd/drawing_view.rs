@@ -659,7 +659,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         staged.validate().map_err(|e| bad(BASE, e.to_string()))?;
         let space = crate::drawing_view::sheet(&staged, sheet, BASE)?.drawing_space().map_err(|e| bad(BASE, e.to_string()))?;
         let basis = staged.resolve_view(id).map_err(|e| bad(BASE, e.to_string()))?.basis;
-        let measured = crate::drawing_view::measure(s, &basis).ok();
+        let measured = crate::drawing_view::shown(s).and_then(|set| crate::drawing_view::measure(&set, &basis)).ok();
         fitted = measured.is_some();
         view.settings.scale = Some(match measured {
             Some(extents) => fit(extents.model.inflated(view.reference_margin_mm).size(), position, space, BASE)?,

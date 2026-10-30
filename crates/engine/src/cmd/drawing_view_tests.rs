@@ -368,9 +368,12 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
     assert_eq!(saved(&s, of_right).settings, own, "the copy follows nothing");
 }
 
-/// `cmd` makes a view as `p` says: its reply, which matches its schema, and the new view's id.
+/// `cmd` makes a view as `p` says, in one undo step: its reply, which matches its schema, and the
+/// new view's id.
 fn create(s: &mut Session, cmd: &str, p: Value) -> (Value, u64) {
+    let steps = s.undo.len();
     let reply = run(s, cmd, p);
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
     let schema = output_schema_for::<CreateResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
     let id = ids::decode(reply["view"].as_str().unwrap()).unwrap();
@@ -394,15 +397,14 @@ fn block_drawing() -> Session {
 
 /// A base view with no scale takes the largest preset at which it lies inside the sheet's drawing
 /// space (not the paper), centred where it goes, its margin included: the 100 x 20 front view on A3
-/// at 2:1, as the snapshot fits it; that scale is saved as the view's own. A scale given is kept, the settings given are the view's own,
-/// each view is one undo step, and with nothing to measure the view takes 1:1.
+/// at 2:1, as the snapshot fits it; that scale is saved as the view's own. A scale given is kept,
+/// the settings given are the view's own, each view is one undo step ([`create`]), and with nothing
+/// to measure the view takes 1:1.
 #[test]
 fn a_base_view_fits_its_sheet_and_saves_the_scale() {
     let mut s = block_drawing();
     let source = s.drawing("test").unwrap().sources[0].id;
-    let steps = s.undo.len();
     let (made, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1"}));
-    assert_eq!(s.undo.len(), steps + 1);
     assert_eq!((made["scale"]["text"].as_str(), made["scale"]["fitted"].as_bool()), (Some("2:1"), Some(true)));
     assert_box(&made, [110.0, 128.5], [310.0, 168.5]);
     assert!(made.get("outside").is_none(), "{made}");
@@ -428,10 +430,13 @@ fn a_base_view_fits_its_sheet_and_saves_the_scale() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.drawing("test").unwrap().views.len(), before - 1, "one undo takes the view away");
     assert!(s.drawing("test").unwrap().views.iter().all(|v| v.id != top));
-    // Nothing to measure: a design with no bodies.
-    let mut empty = Session::default();
-    run(&mut empty, "drawing.create", json!({}));
-    let (placeholder, _) = create(&mut empty, BASE, json!({"sheet": "Sheet 1"}));
+    // Nothing to measure: one sketch, something to draw (an empty design isn't), and no bodies.
+    let mut sketch_only = Session::default();
+    run(&mut sketch_only, "sketch.create", json!({"plane": "XY"}));
+    run(&mut sketch_only, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 5]}));
+    run(&mut sketch_only, "sketch.finish", json!({}));
+    run(&mut sketch_only, "drawing.create", json!({}));
+    let (placeholder, _) = create(&mut sketch_only, BASE, json!({"sheet": "Sheet 1"}));
     assert_eq!((placeholder["scale"]["text"].as_str(), placeholder["scale"]["fitted"].as_bool()), (Some("1:1"), Some(false)));
     assert_box(&placeholder, [200.0, 138.5], [220.0, 158.5]);
 }
