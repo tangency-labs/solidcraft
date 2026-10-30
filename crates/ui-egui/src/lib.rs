@@ -1657,6 +1657,12 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        // Finish must see the pending spline before another command clears its tool.
+        if id == "sketch.finish" {
+            self.home.open = false;
+            self.finish_sketch();
+            return;
+        }
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;
@@ -1751,10 +1757,6 @@ impl SolveApp {
         // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).
         if matches!(id, "component.properties" | "occurrence.properties") {
             design_properties::open_selected(self);
-            return;
-        }
-        if id == "sketch.finish" {
-            self.finish_sketch();
             return;
         }
         if id == "sketch.cancel" {
@@ -2079,6 +2081,9 @@ impl SolveApp {
             dialogs::cancel(self);
         }
         dim_view::cancel();
+        if command == "sketch.finish" && !sketch_tools::commit_pending_spline(self) {
+            return;
+        }
         self.tool = None;
         let open = self.session.active_sketch;
         if self.run(command, json!({})).is_err() && command != "sketch.finish" {

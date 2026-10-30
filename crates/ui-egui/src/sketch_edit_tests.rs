@@ -453,3 +453,119 @@ mod open_view_preference {
         assert_eq!(app.settled_cam(), before);
     }
 }
+
+/// Finishing the sketch must not throw away a fully placed spline preview. Exercise
+/// both a solid and construction endpoint through real clicks, then save/reopen.
+#[test]
+fn finish_sketch_keeps_a_pending_spline_on_a_construction_endpoint() {
+    use crate::scenario::Harness;
+    use serde_json::json;
+    use solidcraft_engine::Session;
+    use solidcraft_engine::doc::Document;
+    use solidcraft_engine::sketch::CurveKind;
+
+    for (construction, midpoint) in [(true, false), (true, true), (false, false), (false, true)] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[60,22.6],[152,22.6]],"ids":["l1"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[60,22.6],[60,62.6]],"construction":construction,"ids":["l2"]})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        h.call(
+            "ui.camera",
+            json!({"target":[0,106.02686454780334,22.61032974932498],"yaw":-std::f64::consts::FRAC_PI_2,"pitch":0,"distance":228.29423225080123}),
+        );
+        h.settle();
+        h.step(&json!({"start":"sketch.spline.fit_point"})).unwrap();
+        for (index, world) in [[0.0, 152.0, 22.6], [0.0, 110.0, 45.0], [0.0, 60.0, 62.6]].into_iter().enumerate() {
+            if index == 1 && !midpoint {
+                continue;
+            }
+            let screen = h.at(&json!({"world":world})).unwrap();
+            let pos = egui::pos2(screen[0] as f32, screen[1] as f32);
+            assert!(h.app.viewport.rect.unwrap().contains(pos));
+            assert!(!crate::shell::covered(&h.app, pos));
+            h.step(&json!({"click":{"world":world}})).unwrap();
+        }
+        let count = if midpoint { 3 } else { 2 };
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), count);
+        h.step(&json!({"click":{"handle":"button:sketch.finish"}})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none());
+        h.step(&json!({"shot": if construction {"finished-spline-construction"} else {"finished-spline-solid"}})).unwrap();
+        let saved = h.app.session.doc.to_json();
+        let reopened = Session::new(Document::from_json(&saved).unwrap());
+        let state = reopened.model.state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let spline = sk
+            .curves
+            .iter()
+            .find_map(|c| match &c.kind {
+                CurveKind::Spline { pts, .. } => Some(pts),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("Finish Sketch lost the placed spline; construction={construction}; status={:?}", h.app.status));
+        assert_eq!(spline.len(), count);
+        for (at, id) in [(0, "l1"), (count - 1, "l2")] {
+            let curve = &sk.curves[sk.curve_index(id).unwrap()];
+            let CurveKind::Line { b, .. } = curve.kind else { panic!("line") };
+            assert_eq!(spline[at], b, "spline must share {id}'s endpoint");
+        }
+        assert_eq!(sk.curves[sk.curve_index("l2").unwrap()].construction, construction);
+    }
+}
+
+#[test]
+fn a_failed_spline_finish_keeps_pending_points_and_cancel_still_discards() {
+    use crate::scenario::Harness;
+    use serde_json::json;
+    use solidcraft_engine::geom::Vec2;
+
+    for command in ["sketch.spline.fit_point", "sketch.spline.control_point", "sketch.spline.control_point_5"] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sid = h.app.session.active_sketch;
+        h.app.start(command);
+        // A snap reference can become stale before finishing. A command error must
+        // leave the sketch and the user's points intact, not silently cancel them.
+        let points = vec![(Vec2::ZERO, Some("missing-point".to_string())), (Vec2::new(20.0, 10.0), None)];
+        h.app.tool.as_mut().unwrap().pts = points.clone();
+        let before = h.app.session.doc.to_json();
+        h.app.finish_sketch();
+        assert_eq!(h.app.session.active_sketch, sid);
+        assert_eq!(h.app.tool.as_ref().unwrap().pts, points);
+        assert!(h.app.status.as_ref().unwrap().2);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        h.app.start("sketch.finish");
+        assert_eq!(h.app.session.active_sketch, sid);
+        assert_eq!(h.app.tool.as_ref().unwrap().pts, points, "toolbar finish keeps a failed spline");
+        assert!(h.app.status.as_ref().unwrap().2);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        crate::tools::finish(&mut h.app);
+        assert_eq!(h.app.tool.as_ref().unwrap().pts, points, "right-click also keeps a failed spline");
+        assert!(h.app.status.as_ref().unwrap().2);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        h.app.cancel_sketch();
+        assert!(h.app.session.active_sketch.is_none());
+        assert!(h.app.tool.is_none());
+        assert!(h.app.session.doc.features.is_empty());
+    }
+}
+
+#[test]
+fn finish_sketch_drops_an_incomplete_spline_without_creating_a_curve() {
+    use crate::scenario::Harness;
+    use serde_json::json;
+    use solidcraft_engine::geom::Vec2;
+
+    for count in [0, 1] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        h.app.start("sketch.spline.fit_point");
+        h.app.tool.as_mut().unwrap().pts = vec![(Vec2::ZERO, None); count];
+        h.app.finish_sketch();
+        assert!(h.app.session.active_sketch.is_none());
+        assert!(h.app.tool.is_none());
+        assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curves.is_empty());
+    }
+}
