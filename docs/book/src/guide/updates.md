@@ -126,7 +126,7 @@ and SolidCraft picks the one matching how it was installed:
 | Windows installer | under Program Files, or in the folder the installer recorded | `solidcraft-windows-<arch>.msi` | Run the installer |
 | Windows portable | `solidcraft-cli.exe` beside it | `solidcraft-windows-<arch>-portable.zip` | Unzip over the old copy |
 | Windows `.exe` | anywhere else on Windows | `SolidCraft-<version>-windows-x64.exe` | Replace the old `.exe` |
-| macOS | inside `SolidCraft.app` | `solidcraft-macos-universal.dmg` | Drag the new app to Applications |
+| macOS | inside `SolidCraft.app` | `solidcraft-macos-<arch>.dmg` (`solidcraft-macos-universal.dmg` when a release has none) | Drag the new app to Applications |
 
 The window shows the command for Snap, `.deb` and `.rpm` installations, with a Copy button. The
 Flatpak has no network permission and Flatpak itself (or your software center) offers its

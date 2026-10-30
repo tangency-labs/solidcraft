@@ -11,9 +11,9 @@
 #        packaging/macos/package.sh --build-only <rust-target>
 #
 # --build-only builds just that target (aarch64-apple-darwin or x86_64-apple-darwin) and stops,
-# so the release workflow can build the two halves of the universal binary on separate runners;
-# a later `--arch universal --skip-build` run joins the binaries it finds under
-# $CARGO_TARGET_DIR/<target>/release/ and packages them.
+# so the release workflow can build the two architectures on separate runners; later
+# `--skip-build` runs package the binaries they find under $CARGO_TARGET_DIR/<target>/release/:
+# joined for `--arch universal`, alone for `--arch aarch64` or `--arch x86_64`.
 #
 # Signing: with --sign, MACOS_SIGN_IDENTITY (a "Developer ID Application: ..." name or its SHA-1
 # hash, found in the keychain) signs the app, the CLI and the DMG with the hardened runtime and a
@@ -118,6 +118,16 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Whether this Mac can run what it packages: an Intel-only build needs Rosetta on Apple silicon,
+# an Apple silicon build doesn't run on Intel. Without it, the checks that start the programs are
+# skipped; the rest still run.
+RUNS_HERE=1
+case "$ARCH:$(uname -m)" in
+  x86_64:arm64) arch -x86_64 /usr/bin/true 2>/dev/null || RUNS_HERE=0 ;;
+  aarch64:x86_64) RUNS_HERE=0 ;;
+esac
+if [ "$RUNS_HERE" = 0 ]; then warn "this Mac can't run $ARCH programs: their --version checks are skipped"; fi
+
 # Keep in sync with LSMinimumSystemVersion in Info.plist.in.
 export MACOSX_DEPLOYMENT_TARGET=11.0
 SHORT_VERSION="${VERSION%%-*}"
@@ -149,6 +159,10 @@ for bin in solidcraft solidcraft-cli solvecraft-cli; do
   inputs=()
   for t in "${TARGETS[@]}"; do inputs+=("$CARGO_TARGET_DIR/$t/release/$bin"); done
   lipo -create -output "$WORK/bin/$bin" "${inputs[@]}"
+  # -S drops only the debug map: entries naming the runner's object files, which hold the line
+  # tables and never ship. Function names stay, so crash backtraces read the same (about 27 MB off
+  # the app). It can leave these copies' signatures stale, so only the signed copies below are run.
+  strip -S "$WORK/bin/$bin"
   lipo -info "$WORK/bin/$bin"
 done
 
@@ -231,7 +245,7 @@ done
 test -s "$MNT/SolidCraft.app/Contents/Resources/Licenses/THIRD-PARTY-LICENSES.txt"
 # Not --strict: the mounted HFS volume adds Finder info, which strict verification rejects.
 codesign --verify --deep --verbose=2 "$MNT/SolidCraft.app"
-"$MNT/SolidCraft.app/Contents/MacOS/SolidCraft" --version
+if [ "$RUNS_HERE" = 1 ]; then "$MNT/SolidCraft.app/Contents/MacOS/SolidCraft" --version; fi
 hdiutil detach "$MNT"
 
 if [ -n "$SIGN_IDENTITY" ]; then
@@ -269,6 +283,6 @@ if [ "$NOTARIZE" = 1 ]; then
   notarize "$CLI_ZIP"
 fi
 
-"$WORK/bin/solidcraft-cli" --version
+if [ "$RUNS_HERE" = 1 ]; then "$CLI_DIR/solidcraft-cli" --version; fi
 echo "==> done"
 ls -lh "$DMG" "$CLI_ZIP"

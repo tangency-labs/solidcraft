@@ -139,3 +139,6 @@ Windows) still gets the startup step. Windows can also keep its own dumps of eve
 
 Release builds keep line tables (`debug = "line-tables-only"`), so backtraces name the file
 and line. Stripping a binary (`strip`) removes them, and the function names too.
+On macOS the linker leaves the line tables in the build's object files, so the downloaded app
+never had them: its backtraces name functions only. `packaging/macos/package.sh` removes just
+the debug map that points at those files (`strip -S`); the function names stay.

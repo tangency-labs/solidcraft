@@ -12,7 +12,7 @@
 #   Linux x86_64, aarch64   AppImage (+ .zsync), .deb, .rpm, .flatpak, .snap, .tar.gz packaging/linux
 #   Arch Linux x86_64, aarch64  .pkg.tar.zst, repackaged from the .tar.gz         the arch job
 #   FreeBSD x86_64          .tar.gz (built in a FreeBSD VM)                        packaging/freebsd
-#   macOS universal         .dmg, and the CLI as a .zip (both archs built in parallel)  packaging/macos
+#   macOS universal, aarch64, x86_64  .dmg, and the CLI as a .zip (archs built in parallel) packaging/macos
 #   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
 #   Web                     a .zip of the static site                              packaging/web
 #
@@ -344,8 +344,9 @@ jobs:
           path: dist/release/*
           if-no-files-found: error
 
-  # The two halves of the universal binary build in parallel on their own runners (each alone
-  # took about half of the old single job's 45 minutes); `macos` below joins and packages them.
+  # The two architectures build in parallel on their own runners (each alone took about half of
+  # the old single job's 45 minutes); `macos` below packages them: joined into the universal app,
+  # and each alone for a download half the size (#2354).
   macos-build:
     name: macOS build ${{ matrix.arch }}
     needs: version
@@ -381,10 +382,14 @@ jobs:
           if-no-files-found: error
 
   macos:
-    name: macOS universal
+    name: macOS ${{ matrix.arch }}
     needs: [version, macos-build]
     if: needs.version.outputs.build == 'true'
     runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [universal, aarch64, x86_64]
     env:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
@@ -408,17 +413,17 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: packaging/macos/signing.sh --setup
-      - name: Join, sign, package and check (dmg, CLI zip; the dmg is mounted and checked)
+      - name: Join or pick, sign, package and check (dmg, CLI zip; the dmg is mounted and checked)
         run: |
           # Artifacts don't keep the executable bit.
           chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli target/*-apple-darwin/release/solvecraft-cli
-          packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
+          packaging/macos/package.sh --arch ${{ matrix.arch }} --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
       - name: Remove the signing keychain and API key
         if: always()
         run: packaging/macos/signing.sh --cleanup
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-macos
+          name: release-macos-${{ matrix.arch }}
           path: dist/release/*
           if-no-files-found: error
 
@@ -642,6 +647,7 @@ jobs:
             esac
           done
           for f in solidcraft-windows-x64.msi solidcraft-macos-universal.dmg \
+            solidcraft-macos-aarch64.dmg solidcraft-macos-x86_64.dmg \
             solidcraft-linux-x86_64.AppImage solidcraft-linux-x86_64.deb solidcraft-linux-x86_64.rpm; do
             test -s "$f" || { echo "::error::missing version-less copy $f"; exit 1; }
           done
