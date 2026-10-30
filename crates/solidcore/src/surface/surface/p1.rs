@@ -2509,6 +2509,19 @@ impl Surface {
             SurfaceKind::Plane(p) => Ok(Some(Self::from(
                 p.create_offset_surface(k, signed_offset_distance)?,
             ))),
+            // `Kernel::fixes.revolution_round_offset_collapses` (WR-567): an offset that
+            // shrinks the generatrix arc onto its centre or past it is no surface
+            SurfaceKind::SurfOfRevolution(s)
+                if k.fixes.revolution_round_offset_collapses
+                    && self.revolution_offset_collapses(
+                        k,
+                        s,
+                        signed_offset_distance,
+                        approx_tol_3d,
+                    )? =>
+            {
+                Ok(None)
+            }
             SurfaceKind::SurfOfRevolution(s) => Ok(Some(Self::from(s.create_offset_surface(
                 k,
                 signed_offset_distance,
@@ -2540,7 +2553,9 @@ impl Surface {
     /// Not upstream (`SmSurface::OffsetCollapses`, WR-464): whether the offset by
     /// `signed_offset_distance` shrinks a cone, cylinder, sphere or torus onto its spine
     /// (radius below `tol`), the only case where [`Self::create_offset_surface`] gives no
-    /// surface. `false` for every other surface.
+    /// surface. With `Kernel::fixes.revolution_round_offset_collapses` (WR-567) also a
+    /// surface of revolution of one circular arc moved in past the arc's radius
+    /// (`revolution_offset_collapses`). `false` for every other surface.
     ///
     /// # Errors
     ///
@@ -2555,8 +2570,74 @@ impl Surface {
             SurfaceKind::Cone(s) => s.offset_collapses(k, signed_offset_distance, tol),
             SurfaceKind::Sphere(s) => s.offset_collapses(signed_offset_distance, tol),
             SurfaceKind::Torus(s) => s.offset_collapses(signed_offset_distance, tol),
+            SurfaceKind::SurfOfRevolution(s) if k.fixes.revolution_round_offset_collapses => {
+                self.revolution_offset_collapses(k, s, signed_offset_distance, tol)?
+            }
             _ => false,
         })
+    }
+
+    /// Not upstream (the fork's `SmSurfOfRevolution::OffsetCollapses`, WR-567): whether
+    /// the offset by `signed_offset_distance` shrinks this surface of revolution `s`
+    /// onto its spine or past it. Its generatrix is one circular arc of radius `r`
+    /// (`IsArc(9, tol)`, `r > tol`; a fillet's round along a circular edge), and the
+    /// offset leaves a radius `r - d (N . k) r` below `tol`, with `k` the curvature
+    /// vector of the generatrix-direction iso-curve (the arc revolved: `|k| = 1/r`,
+    /// pointing at the arc's centre) and `N` the surface normal, both at the middle of
+    /// the natural UV domain. A failed arc test or evaluation, or a pole there, is
+    /// `false`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the arc test or the evaluations; those of the
+    /// natural UV domain.
+    fn revolution_offset_collapses(
+        &self,
+        k: &Kernel,
+        s: &crate::surface::surf_of_revolution::SurfOfRevolution,
+        signed_offset_distance: f64,
+        tol: f64,
+    ) -> Result<bool> {
+        // a failure upstream answers FALSE (except an unported call here)
+        fn or_false<T>(r: Result<T>) -> Result<Option<T>> {
+            match r {
+                Ok(v) => Ok(Some(v)),
+                Err(e) if e.is_unported() => Err(e),
+                Err(_) => Ok(None),
+            }
+        }
+        let Some(gen) = s.gen_curve() else {
+            return Ok(false);
+        };
+        let Some(Some((_, radius, _, _))) = or_false(gen.is_arc(k, 9, tol))? else {
+            return Ok(false);
+        };
+        if radius <= tol {
+            return Ok(false);
+        }
+
+        // the curvature of the generatrix direction's iso-curve, at the middle of the domain
+        let uv = self.natural_uv_domain_with_nurb(k)?.mid();
+        let Some([_, du, dv, _, duu, dvv]) =
+            or_false(self.evaluate_2nd_derivatives(k, uv, true, true))?
+        else {
+            return Ok(false);
+        };
+        let Some(normal) = or_false(self.evaluate_normal(k, uv, side(true), side(true)))? else {
+            return Ok(false);
+        };
+        let (d1, d2) = if s.swap_uv() { (du, duu) } else { (dv, dvv) };
+        let speed_sq = d1.length_squared();
+        if speed_sq < EFF_ZERO_SQ {
+            // at a pole: no generatrix tangent to measure
+            return Ok(false);
+        }
+        let curvature = (d2 - d1 * (d2.dot(d1) / speed_sq)) / speed_sq;
+
+        // radius r - d (N . k) r: N . k r is +1 where the normal points at the centre, -1
+        // away from it
+        let towards_centre = normal.dot(curvature) * radius;
+        Ok(radius - signed_offset_distance * towards_centre < tol)
     }
 
     /// The silhouette curves of the surface over `uv_domain` for a parallel
