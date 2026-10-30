@@ -258,7 +258,7 @@ pub(crate) fn assistant_input(ui: &mut Ui, id: egui::Id, value: &mut String, hin
 #[cfg(any(not(target_arch = "wasm32"), test))]
 pub(crate) fn assistant_hint_galley(ui: &Ui, hint: &str, width: f32) -> std::sync::Arc<egui::Galley> {
     let t = Tokens::get();
-    let mut job = egui::text::LayoutJob::simple_singleline(hint.to_owned(), egui::FontId::proportional(t.font_label), egui::Color32::WHITE);
+    let mut job = egui::text::LayoutJob::simple_singleline(hint.to_owned(), egui::FontId::proportional(t.font_label), ui.visuals().weak_text_color());
     job.wrap = egui::text::TextWrapping { max_width: width, max_rows: 1, break_anywhere: true, overflow_character: Some('\u{2026}') };
     ui.fonts_mut(|f| f.layout_job(job))
 }
