@@ -269,6 +269,17 @@ impl AssertReport {
     /// (upstream reads out of bounds).
     pub fn new(spec: ReportSpec) -> Result<Self> {
         let list = assert_label_list(spec.test_class, spec.list_index);
+        Self::with_labels(spec, list)
+    }
+
+    /// [`AssertReport::new`] with check `spec.test_index` taken from `list` instead of
+    /// the class's table (not upstream: a check an opt-in fix adds to a class, such as
+    /// [`labels::TORUS_WITH_SPINDLE_APEX`], reports from its own extended table, so
+    /// `SM_GetAssertLabelList` keeps upstream's).
+    ///
+    /// # Errors
+    /// [`SolidError::InvalidInput`] when `spec.test_index` is past the end of `list`.
+    pub fn with_labels(spec: ReportSpec, list: &'static [AssertReportLabel]) -> Result<Self> {
         let label = usize::try_from(spec.test_index)
             .ok()
             .and_then(|i| list.get(i))

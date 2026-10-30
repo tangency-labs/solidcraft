@@ -595,6 +595,43 @@ pub const TORUS: &[AssertReportLabel] = &[
     ),
 ];
 
+/// Not upstream (WR-539, the fork's tangency-labs/smlib@daba678): [`TORUS`] with the
+/// fork's test 5, "Self Intersection". Only the torus check with
+/// `Kernel::fixes.torus_check_spindle_apex` reports from it; `SM_GetAssertLabelList`
+/// ([`label_list`]) keeps upstream's [`TORUS`].
+pub const TORUS_WITH_SPINDLE_APEX: &[AssertReportLabel] = &[
+    l(
+        AssertType::Radius,
+        "Major Radius",
+        Some("m_dMajorRadius is greater than zero"),
+    ),
+    l(
+        AssertType::Radius,
+        "Minor Radius",
+        Some("m_dMinorRadius is greater than zero"),
+    ),
+    l(
+        AssertType::Parameterization,
+        "Same Parameterization",
+        Some("Curve and Surface have same paramterization"),
+    ),
+    l(
+        AssertType::Geometric,
+        "Overlapping Domain",
+        Some("Analytic U Direction Domain too large: Tori can't overlap themselves"),
+    ),
+    l(
+        AssertType::Geometric,
+        "Overlapping Domain",
+        Some("Analytic V Direction Domain too large: Tori can't overlap themselves"),
+    ),
+    l(
+        AssertType::Geometric,
+        "Self Intersection",
+        Some("Spindle torus: Analytic V Direction Domain runs through an apex on the axis"),
+    ),
+];
+
 /// `sAssertSurfOfRevolution_list` (`source/SMLib/src/SmSurfOfRevolution.cpp`).
 pub const SURF_OF_REVOLUTION: &[AssertReportLabel] = &[
     l(AssertType::Pointer, "Context", Some("Bad m_pGenCurve does not share same context")),
