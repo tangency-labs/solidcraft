@@ -412,6 +412,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "rows": super::drawing_revision::rows(&d.revisions),
             "next": d.revisions.next_revision(None),
             "issued": super::drawing_revision::issued(&d.revisions),
+            "tags": super::drawing_revision::tags(&d.revisions),
         },
     }))
 }

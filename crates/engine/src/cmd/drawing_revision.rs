@@ -10,13 +10,15 @@
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::ids;
-use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow};
+use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow, Tag, TagText};
 
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::drawing_revision::{
-    ReviseParams, RevisionAddParams, RevisionDeleteParams, RevisionEditParams, RevisionsResult, RowResult, RowSet, VersionResult,
+    ReviseParams, RevisionAddParams, RevisionDeleteParams, RevisionEditParams, RevisionsResult, RowResult, RowSet, TagAddParams, TagDeleteParams,
+    TagEditParams, TagResult, VersionResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -27,6 +29,12 @@ const EDIT: &str = "drawing.revision.edit";
 const EDIT_CONTRACT: TypedContract<RevisionEditParams> = TypedContract::new();
 const DELETE: &str = "drawing.revision.delete";
 const DELETE_CONTRACT: TypedContract<RevisionDeleteParams> = TypedContract::new();
+const TAG_ADD: &str = "drawing.revision.tag.add";
+const TAG_ADD_CONTRACT: TypedContract<TagAddParams> = TypedContract::new();
+const TAG_EDIT: &str = "drawing.revision.tag.edit";
+const TAG_EDIT_CONTRACT: TypedContract<TagEditParams> = TypedContract::new();
+const TAG_DELETE: &str = "drawing.revision.tag.delete";
+const TAG_DELETE_CONTRACT: TypedContract<TagDeleteParams> = TypedContract::new();
 const REVISE: &str = "drawing.revise";
 const REVISE_CONTRACT: TypedContract<ReviseParams> = TypedContract::new();
 
@@ -38,6 +46,27 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ADD_CONTRACT)
         .output(output_schema_for::<RevisionsResult>)
         .params("set?: {revision?, description?, designer?, checker?, date?, hidden?}: the new row's texts (the revision, when not given, the next one: after the highest the drawing has given) → {row: its id, rows, next}. One undo step."),
+    CommandSpec::new(TAG_ADD, "Add Revision Tag", crate::checked!("drawing.revision.tag.add", tag_add))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&TAG_ADD_CONTRACT)
+        .output(output_schema_for::<RevisionsResult>)
+        .params("row: a row's id; sheet: id or name; at: [x, y] on paper; size_mm?: its side, 1 to 50 (default 5); text?: shown in place of the row's revision → {tag, rows, next, tags: [{tag, row, sheet, at, size_mm, shows, lost}]}. A triangle on the sheet once scene text lands."),
+    CommandSpec::new(TAG_EDIT, "Edit Revision Tag", crate::checked!("drawing.revision.tag.edit", tag_edit))
+        .icon("edit")
+        .in_drawing()
+        .doc_only()
+        .contract(&TAG_EDIT_CONTRACT)
+        .output(output_schema_for::<RevisionsResult>)
+        .params("tag: a tag's id; set: {sheet?, at?, size_mm?, text?: text, or null to show the row's revision again} → as tag.add. One undo step, none when nothing changes."),
+    CommandSpec::new(TAG_DELETE, "Delete Revision Tag", crate::checked!("drawing.revision.tag.delete", tag_delete))
+        .icon("delete")
+        .in_drawing()
+        .doc_only()
+        .contract(&TAG_DELETE_CONTRACT)
+        .output(output_schema_for::<RevisionsResult>)
+        .params("tag: a tag's id → as tag.add. A row's delete leaves its tags, showing the revision they had; a sheet's delete takes the tags on it."),
     CommandSpec::new(REVISE, "Issue Revision", crate::checked!("drawing.revise", revise))
         .icon("new")
         .in_drawing()
@@ -131,6 +160,73 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     answer(s, DELETE, RevisionsResult { row: Some(ids::encode(id)), tags_lost: lost.into_iter().map(ids::encode).collect(), ..Default::default() })
 }
 
+/// The id of the sheet `named` names in `d`, for `cmd`.
+fn sheet_named(d: &Drawing, named: &str, cmd: &str) -> Result<u64> {
+    crate::drawing_scene::sheet_id(d, named, cmd)
+}
+
+fn tag_add(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: TagAddParams = crate::schema::read(TAG_ADD, p)?;
+    let id = s.drawing(TAG_ADD)?.clone().allocate_id(&mut s.ids).map_err(|e| bad(TAG_ADD, e.to_string()))?;
+    s.edit_drawing(TAG_ADD, |d| {
+        let sheet = sheet_named(d, &request.sheet, TAG_ADD)?;
+        let record = Arc::make_mut(&mut d.revisions);
+        record.add_tag(request.row.0, id, sheet, request.at).map_err(|e| bad(TAG_ADD, e.to_string()))?;
+        record
+            .edit_tag(id, |tag| {
+                tag.size_mm = request.size_mm.unwrap_or(tag.size_mm);
+                tag.text = request.text;
+            })
+            .map_err(|e| bad(TAG_ADD, e.to_string()))
+    })?;
+    answer(s, TAG_ADD, RevisionsResult { tag: Some(ids::encode(id)), ..Default::default() })
+}
+
+fn tag_edit(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: TagEditParams = crate::schema::read(TAG_EDIT, p)?;
+    let id = request.tag.0;
+    s.edit_drawing(TAG_EDIT, |d| {
+        let set = request.set;
+        let sheet = set.sheet.as_deref().map(|named| sheet_named(d, named, TAG_EDIT)).transpose()?;
+        let change = |tag: &mut Tag| {
+            tag.sheet = sheet.unwrap_or(tag.sheet);
+            tag.at = set.at.unwrap_or(tag.at);
+            tag.size_mm = set.size_mm.unwrap_or(tag.size_mm);
+            if let Some(text) = set.text {
+                tag.text = text;
+            }
+        };
+        Arc::make_mut(&mut d.revisions).edit_tag(id, change).map_err(|e| bad(TAG_EDIT, e.to_string()))
+    })?;
+    answer(s, TAG_EDIT, RevisionsResult { tag: Some(ids::encode(id)), ..Default::default() })
+}
+
+fn tag_delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: TagDeleteParams = crate::schema::read(TAG_DELETE, p)?;
+    let id = request.tag.0;
+    s.edit_drawing(TAG_DELETE, |d| Arc::make_mut(&mut d.revisions).delete_tag(id).map_err(|e| bad(TAG_DELETE, e.to_string())))?;
+    answer(s, TAG_DELETE, RevisionsResult { tag: Some(ids::encode(id)), ..Default::default() })
+}
+
+/// Every tag of `record`: what the revision commands and `drawing.inspect` list.
+pub(super) fn tags(record: &RevisionRecord) -> Vec<TagResult> {
+    let tag = |t: &Tag| {
+        let shows = match record.tag_text(t) {
+            TagText::Revision(text) | TagText::Override(text) | TagText::Lost(text) => text,
+        };
+        TagResult {
+            tag: ids::encode(t.id),
+            row: ids::encode(t.row),
+            sheet: ids::encode(t.sheet),
+            at: t.at,
+            size_mm: t.size_mm,
+            shows,
+            lost: t.lost.is_some(),
+        }
+    };
+    record.tags().iter().map(tag).collect()
+}
+
 /// Sets what `set` gives on row `id`.
 fn apply(record: &mut RevisionRecord, id: u64, set: &RowSet, cmd: &str) -> Result<()> {
     let texts = [
@@ -157,7 +253,7 @@ fn row<'a>(record: &'a RevisionRecord, id: u64, cmd: &str) -> Result<&'a Revisio
 /// `reply` with the drawing's rows and its next revision, as every revision command answers.
 fn answer(s: &Session, cmd: &str, reply: RevisionsResult) -> Result<Value> {
     let record = &s.drawing(cmd)?.revisions;
-    let reply = RevisionsResult { rows: rows(record), next: record.next_revision(None), issued: issued(record), ..reply };
+    let reply = RevisionsResult { rows: rows(record), next: record.next_revision(None), issued: issued(record), tags: tags(record), ..reply };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 

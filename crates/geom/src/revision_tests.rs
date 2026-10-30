@@ -18,7 +18,7 @@ fn add(record: &mut RevisionRecord, sheet: Option<u64>) -> Result<u64> {
 /// Adds a tag with a fresh id: its id.
 fn add_tag(record: &mut RevisionRecord, row: u64) -> Result<u64> {
     let id = fresh();
-    record.add_tag(row, id).map(|()| id)
+    record.add_tag(row, id, 77, [10.0, 20.0]).map(|()| id)
 }
 
 fn labels(record: &RevisionRecord) -> Vec<&str> {
@@ -117,7 +117,7 @@ fn hiding_and_deleting_keep_the_issued_history() {
     for taken in [one, two, tag] {
         assert_eq!(record.add(None, taken), Err(Invalid("that id is taken")), "{taken}");
     }
-    assert_eq!(record.add_tag(one, tag), Err(Invalid("that id is taken")));
+    assert_eq!(record.add_tag(one, tag, 77, [0.0, 0.0]), Err(Invalid("that id is taken")));
     assert_eq!(record.delete(two), Err(Invalid("no row has that id")));
     assert_eq!(record.issue(two, None), Err(Invalid("no row has that id")));
 }
@@ -244,6 +244,7 @@ fn a_record_round_trips_through_json_and_damaged_ones_are_refused() {
         (&|v| v["rows"][0]["sheet"] = json!(crate::ids::encode(3)), "a row has a sheet when the record is kept per sheet, and only then"),
         (&|v| v["tags"][0]["size_mm"] = json!(0.5), "a tag's side is 1 to 50 mm"),
         (&|v| v["tags"][0]["size_mm"] = json!(50.001), "a tag's side is 1 to 50 mm"),
+        (&|v| v["tags"][0]["at"] = json!([6000.0, 0.0]), "a tag is on paper"),
         (&|v| v["tags"][1]["row"] = json!(crate::ids::encode(99)), "a tag is bound to a row"),
         (&|v| v["rows"] = json!([]), "a tag is bound to a row"),
         (&|v| v["rows"][0]["revision"] = json!("A\nB"), "a label is one line of at most 4096 bytes"),
@@ -278,4 +279,31 @@ fn the_caps_hold() {
     assert_eq!(record.issue(first, None), Err(Invalid("a record's issued history holds at most 10,000 entries")));
     assert_eq!(add_tag(&mut record, first), Err(Invalid("a record has at most 10,000 tags")));
     record.validate().unwrap();
+}
+
+/// A tag's place, size and text keep their rules through an edit, which changes nothing when refused.
+#[test]
+fn a_tags_edit_keeps_its_rules() {
+    let mut record = RevisionRecord::default();
+    let row = add(&mut record, None).unwrap();
+    let tag = add_tag(&mut record, row).unwrap();
+    record.edit_tag(tag, |t| t.at = [100.0, 50.0]).unwrap();
+    assert_eq!(record.tags()[0].at, [100.0, 50.0]);
+    let before = record.clone();
+    for (bad, why) in [
+        (&(|t: &mut Tag| t.at = [f64::NAN, 0.0]) as &dyn Fn(&mut Tag), "a tag is on paper"),
+        (&|t: &mut Tag| t.at = [0.0, 5001.0], "a tag is on paper"),
+        (&|t: &mut Tag| t.sheet = 0, "a tag is on a sheet"),
+        (&|t: &mut Tag| t.size_mm = 0.5, "a tag's side is 1 to 50 mm"),
+        (&|t: &mut Tag| t.size_mm = f64::INFINITY, "a tag's side is 1 to 50 mm"),
+        (&|t: &mut Tag| t.text = Some("x\ny".into()), "a label is one line of at most 4096 bytes"),
+    ] {
+        assert_eq!(record.edit_tag(tag, |t| bad(t)), Err(Invalid(why)), "{why}");
+    }
+    assert_eq!(record, before);
+    assert_eq!(record.edit_tag(9, |_| ()), Err(Invalid("no tag has that id")));
+    assert_eq!(record.delete_tag(9), Err(Invalid("no tag has that id")));
+    assert_eq!(record.add_tag(row, fresh(), 77, [f64::INFINITY, 0.0]), Err(Invalid("a tag is on paper")));
+    record.delete_tag(tag).unwrap();
+    assert!(record.tags().is_empty());
 }
