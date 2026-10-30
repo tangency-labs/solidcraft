@@ -1,10 +1,10 @@
 [package]
 name = "solidcore"
-description = "B-rep solid modeling kernel: a Rust port of NVIDIA's SMLib (early work in progress)"
+description = "B-rep solid modeling kernel: a pure-Rust port of NVIDIA's SMLib (usd-brep v1.0.1), matched against the C++ to 1e-9"
 edition.workspace = true
 license.workspace = true
-# 0.0.x until it is usable end to end (primitives, booleans, fillets).
-version = "0.0.1"
+# Tracks the upstream SMLib release it is ported from and matched against (usd-brep v1.0.1).
+version = "1.0.1"
 rust-version.workspace = true
 repository = "https://github.com/tangency-labs/solidcore"
 readme = "README.md"
