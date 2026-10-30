@@ -98,6 +98,47 @@ fn fillet_and_chamfer_corners() {
     assert!((area(&s) - (a0 - 8.0)).abs() < 1e-6, "{}", area(&s));
 }
 
+/// Each chamfer cuts several corners at once (`points`), as a fillet rounds them: every corner
+/// alike, in one edit, and a corner that can't be cut, or is named twice, refuses them all.
+#[test]
+fn chamfers_cut_several_corners() {
+    let corners = json!(["l1.start", "l1.end", "l2.end", "l3.end"]);
+    for (cmd, sizes, cut) in [
+        ("sketch.chamfer.equal_distance", json!({"distance": 4}), 8.0),
+        ("sketch.chamfer.two_distance", json!({"distance": 2, "distance2": 6}), 6.0),
+        ("sketch.chamfer.distance_angle", json!({"distance": 3, "angle": 45}), 4.5),
+    ] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        let mut p = sizes.clone();
+        p["points"] = corners.clone();
+        let out = run(&mut s, cmd, p);
+        assert_eq!(curves(&out).len(), 4, "{cmd}: {out}");
+        assert_eq!(sk(&s).curves.len(), 8, "{cmd}");
+        assert!(solved(&s), "{cmd}");
+        assert!((area(&s) - (1200.0 - 4.0 * cut)).abs() < 1e-6, "{cmd}: {}", area(&s));
+    }
+    // A corner named by its two lines, beside one named by its point.
+    let mut s = new_sketch();
+    let c = curves(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})));
+    run(&mut s, "sketch.chamfer.equal_distance", json!({"points": [{"a": c[0], "b": c[1]}, "l3.end"], "distance": 4}));
+    assert!((area(&s) - (1200.0 - 2.0 * 8.0)).abs() < 1e-6, "{}", area(&s));
+    let refused = [
+        // 20 mm back from both ends of a 30 mm side: the second corner doesn't fit.
+        json!({"points": corners, "distance": 20}),
+        // One corner by both of its lines' ends: cut once, the second name would be a new corner.
+        json!({"points": ["l1.end", "l2.start"], "distance": 4}),
+        json!({"points": [], "distance": 1}),
+    ];
+    for p in refused {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        assert!(s.execute("sketch.chamfer.equal_distance", &p).is_err(), "{p}");
+        assert_eq!(sk(&s).curves.len(), 4, "{p}");
+        assert!((area(&s) - 1200.0).abs() < 1e-6, "{p}");
+    }
+}
+
 /// A chamfer where the two lines have no corner is refused, as a fillet there is: two lines
 /// lying on each other made a chamfer line of no length between their cut-back ends (found by a
 /// local trim fuzzer), and two lines in line with each other have no corner either.

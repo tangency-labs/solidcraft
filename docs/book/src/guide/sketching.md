@@ -57,7 +57,9 @@ fit-point and control-point splines, conics, points and text. **Construction** (
 into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
-and all go when you let go, in one undo step (`sketch.trim.path`).
+and all go when you let go, in one undo step (`sketch.trim.path`). Fillet and chamfer take
+several corners at once: pick the corners, set the size once, and every corner is rounded or
+cut alike in one undo step.
 
 Line draws a chain: each click adds a segment from the last point, and a right-click or Esc
 ends the chain. To draw one separate line with a press, a drag and the release instead, turn on

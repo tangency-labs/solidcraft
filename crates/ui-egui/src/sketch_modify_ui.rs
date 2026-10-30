@@ -200,11 +200,10 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         ],
         // The centre is required: `sketch.pattern.circular` has no default for it.
         Mod::PatternCirc { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS, true), SelInput::new("Center", SKETCH_POINTS, false)],
-        // A fillet rounds any number of corners to one radius (`points`). Each chamfer command
-        // cuts one corner: its point, or its two lines. Two lines name the corner between them
-        // where more lines meet at its point (#1824), for both.
-        Mod::Corner { chamfer: false, .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
-        Mod::Corner { .. } => vec![SelInput::new("Corner", SKETCH_POINTS | CURVES, true)],
+        // A fillet rounds any number of corners to one radius, and a chamfer cuts any number
+        // alike (`points`). Two lines name the corner between them where more lines meet at its
+        // point (#1824), for both.
+        Mod::Corner { .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
         Mod::Equation { .. } => Vec::new(),
     }
 }
@@ -988,11 +987,15 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let flipped = *flip && *ctype > 0;
             let mut p = match (corner_ids(app, inputs, 0).as_slice(), line_ids(inputs, 0).as_slice()) {
                 ([point], []) => corner_ref(app, point, flipped)?,
+                // Several corners are cut alike, each flipped as one alone would be.
+                (points, []) if !points.is_empty() => {
+                    json!({"points": points.iter().map(|point| corner_ref(app, point, flipped)).collect::<Result<Vec<_>, _>>()?})
+                }
                 // Flip swaps the lines, so `distance` applies to the other leg.
                 ([], [a, b]) if flipped => json!({"a": b, "b": a}),
                 ([], [a, b]) => json!({"a": a, "b": b}),
                 ([], []) => return Err("select the corner to cut first".into()),
-                _ => return Err("select one corner point, or the two lines of one corner".into()),
+                _ => return Err("select corner points, or the two lines of one corner".into()),
             };
             p["distance"] = json!(corner_size(app, size_label(true, *ctype), size, ValueKind::Length)?);
             match ctype {
