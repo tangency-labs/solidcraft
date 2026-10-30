@@ -493,6 +493,24 @@ fn rounds_on_a_bar_running_tangent_into_a_cylinder() {
     }
 }
 
+/// After the peg's front top round, the edge where that round runs into the cylinder's wall: its
+/// faces are tangent at its lower end (40, 0, 8), where the round's contact with the front face
+/// meets the wall's tangent line with it, and meet at a crease everywhere else. It is no smooth
+/// edge (it was refused as one, judged at that end alone); the wall's seam with the front face,
+/// tangent all along, still is.
+#[test]
+fn an_edge_tangent_at_one_end_only_is_not_smooth() {
+    let mut s = Session::default();
+    peg(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2}));
+    let fillet = |s: &mut Session, at: [f64; 3]| s.execute("solid.fillet", &json!({"edges": [at], "radius": 1, "tangent_chain": false}));
+    if let Err(e) = fillet(&mut s, [37.2641, 0.4827, 9.3025]) {
+        assert!(!e.to_string().contains("is smooth"), "{e}");
+    }
+    let seam = fillet(&mut s, [40.0, 0.0, 4.0]).unwrap_err().to_string();
+    assert!(seam.contains("is smooth: its faces meet tangentially"), "{seam}");
+}
+
 /// The top outline of two overlapping cylinders whose concave edges were rounded: the walls of
 /// the rounds meet the cylinders along the rolling-ball contact lines, straight but not lines.
 #[test]
