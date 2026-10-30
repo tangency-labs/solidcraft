@@ -71,6 +71,7 @@ pub mod clip;
 pub mod cubic_pieces;
 pub mod flatten;
 pub mod grid;
+pub mod line;
 pub mod text;
 
 pub use flatten::flatten;
