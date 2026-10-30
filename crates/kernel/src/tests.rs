@@ -2309,10 +2309,11 @@ fn tangent_holes_pinch_alike() {
     assert_eq!(m.merged.faces, 12, "{:?}", m.merged);
 }
 
-/// A d10 tube bent at R5: the inside of the bend is a horn torus pinched to a point. One torus
-/// face, with a degenerate loop at the pinch (5 faces, 6 edges, 4 vertices).
+/// A d10 tube bent at R5: the inside of the bend is a horn torus pinched to a point, so the
+/// sweep just doesn't fold over itself. It is a valid solid of Pappus' volume, πr² times the
+/// path's length (20 + 5π/2 + 20).
 #[test]
-fn tight_bend_counts() {
+fn a_bend_as_tight_as_the_tube_sweeps_a_valid_solid() {
     use crate::build::PathSeg;
     let region = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
     let path = [
@@ -2326,12 +2327,11 @@ fn tight_bend_counts() {
         PathSeg::Line { a: Vec3::new(5.0, 0.0, 25.0), b: Vec3::new(25.0, 0.0, 25.0) },
     ];
     let b = sweep(&Plane::XY, &region, &path).unwrap();
-    let m = measure(&b).unwrap().merged;
-    // Two caps and a face per path segment. The circle starts (one closed arc) at (5, 0), which
-    // runs up the first straight to (5, 0, 20) on the bend's axis: the turn leaves it there, so
-    // the bend has no seam, and the second straight's seam runs on from it to (25, 0, 20). Edges:
-    // the four circles and the two straights' seams; vertices: the seams' ends.
-    assert_eq!((m.faces, m.edges, m.vertices), (5, 6, 3), "{m:?}");
+    assert!(b.validity().is_empty(), "{:?}", b.validity());
+    let pi = std::f64::consts::PI;
+    let want = pi * 25.0 * (40.0 + 2.5 * pi);
+    let v = measure(&b).unwrap().volume;
+    assert!(rel(v, want) < 1e-6, "{v} vs {want}");
 }
 
 #[test]

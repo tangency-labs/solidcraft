@@ -478,8 +478,14 @@ mod tests {
             })
             .collect();
         assert_eq!(fit_loop(&points, 0.001, 1e-6).segs.len(), 16);
-        // A circle is one closed arc.
-        assert_eq!(fit_loop(&points, 0.2, 1e-6).segs.len(), 1);
+        assert_exact_circle(&fit_loop(&points, 0.2, 1e-6), Vec2::ZERO, 10.);
+    }
+
+    /// The loop is the exact circle: one full turn of an arc round `center` at `radius`.
+    fn assert_exact_circle(fitted: &Loop2, center: Vec2, radius: f64) {
+        let [solidcraft_geom::Seg2::Arc { center: c, radius: r, sweep, .. }] = fitted.segs.as_slice() else { panic!("not one arc: {fitted:?}") };
+        assert!(c.dist(center) < 1e-9 && (r - radius).abs() < 1e-9, "centre {c:?}, radius {r}");
+        assert!((sweep.abs() - std::f64::consts::TAU).abs() < 1e-9, "sweep {sweep}");
     }
 
     #[test]
@@ -550,8 +556,7 @@ mod tests {
             .collect();
         let inner = Loop2::polygon(&points);
         let fitted = fit_loop(&points, 0.05, 1e-6);
-        // Fitted as a circle: one closed arc.
-        assert_eq!(fitted.segs.len(), 1);
+        assert_exact_circle(&fitted, Vec2::ZERO, 1.02);
         assert!(certify_nesting(&[outer.clone(), inner], &[outer, fitted], 1e-6, 3.).is_err());
     }
 

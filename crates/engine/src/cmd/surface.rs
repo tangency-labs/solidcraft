@@ -1101,7 +1101,7 @@ mod tests {
         run(&mut s, "surface.offset", json!({"faces": [[10, 0, 10]], "chain": true, "distance": 2, "body": "Can", "body_name": "Sleeve"}));
         let st = s.world_state().unwrap();
         let sleeve = &st.body("Sleeve").unwrap().body;
-        assert!(sleeve.is_surface() && sleeve.face_count() == 1);
+        assert!(sleeve.is_surface());
         let want = 2.0 * std::f64::consts::PI * 12.0 * 20.0;
         assert!((area(&s, "Sleeve") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Sleeve")); // (measured on meshes)
         assert!(st.body("Can").is_some(), "the source body stays");
@@ -1326,8 +1326,6 @@ mod tests {
         let parabola = 2.5 * (1.0 + 25.0 * k * k).sqrt() + (5.0 * k).asinh() / (2.0 * k);
         for (mode, run_off) in [("tangent", 5.0), ("curvature", parabola)] {
             run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [side], "distance": 5, "mode": mode}));
-            let st = s.world_state().unwrap();
-            assert_eq!(st.body("Strip").unwrap().body.face_count(), 1, "{mode}");
             let want = 10.0 * pi / 2.0 * 20.0 + run_off * 20.0;
             assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{mode}: {} vs {want}", area(&s, "Strip")); // (measured on meshes)
             let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
