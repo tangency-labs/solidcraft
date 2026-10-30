@@ -132,7 +132,7 @@ pub(crate) fn register_panel(app: &mut SolveApp, id: &'static str, rect: Option<
 /// Shared workspace-card bounds below the ribbon and above a floating bottom strip.
 pub(crate) fn panel_bounds(app: &SolveApp, mut available: Rect) -> Rect {
     for card in &app.shell.cards {
-        available.min.y = card.bottom().clamp(available.top(), available.bottom());
+        available.min.y = within(card.bottom(), available.top(), available.bottom());
     }
     if crate::render_workspace::active(app) {
         let bottom = app.shell.cards.iter().map(|r| r.bottom()).fold(available.top() - Tokens::get().space_8, f32::max);
@@ -140,7 +140,7 @@ pub(crate) fn panel_bounds(app: &SolveApp, mut available: Rect) -> Rect {
     }
     for (rect, edge) in app.shell.workspace_panels.values() {
         if matches!(edge, Some(crate::ui_kit::Edge::Bottom)) {
-            available.max.y = rect.top().clamp(available.top(), available.bottom());
+            available.max.y = within(rect.top(), available.top(), available.bottom());
         }
     }
     available
@@ -205,7 +205,17 @@ pub(crate) fn bottom_overlay_rect(app: &SolveApp, mut viewport: Rect) -> Rect {
 
 /// The former central panel remains the anchor for controls and docked panels.
 pub(crate) fn content_rect(app: &SolveApp, viewport: Rect) -> Rect {
-    app.shell.content.unwrap_or(viewport).intersect(viewport)
+    // The content kept from the last frame can lie outside a viewport that has shrunk or moved
+    // since (a resize, a new scale): the intersection is then turned inside out, its min past
+    // its max. The viewport stands in for it.
+    let content = app.shell.content.unwrap_or(viewport).intersect(viewport);
+    if content.is_positive() { content } else { viewport }
+}
+
+/// `v` kept within `lo..=hi`, or `lo` when that range is empty: `f32::clamp` panics on
+/// `lo > hi`, which a rect squeezed to nothing between cards gives.
+fn within(v: f32, lo: f32, hi: f32) -> f32 {
+    if lo <= hi { v.clamp(lo, hi) } else { lo }
 }
 
 /// Free anchor space shared by both layouts. Compact edge hosts have already consumed
@@ -218,10 +228,10 @@ pub(crate) fn workspace_content(app: &SolveApp, mut content: Rect) -> Rect {
         let gap = Container::floating_card(Surface::Panel).gap();
         for (rect, edge) in app.shell.workspace_panels.values() {
             match edge {
-                Some(crate::ui_kit::Edge::Left) => content.min.x = (rect.right() + gap).clamp(content.left(), content.right()),
-                Some(crate::ui_kit::Edge::Right) => content.max.x = (rect.left() - gap).clamp(content.left(), content.right()),
-                Some(crate::ui_kit::Edge::Bottom) => content.max.y = (rect.top() - gap).clamp(content.top(), content.bottom()),
-                Some(crate::ui_kit::Edge::Top) => content.min.y = (rect.bottom() + gap).clamp(content.top(), content.bottom()),
+                Some(crate::ui_kit::Edge::Left) => content.min.x = within(rect.right() + gap, content.left(), content.right()),
+                Some(crate::ui_kit::Edge::Right) => content.max.x = within(rect.left() - gap, content.left(), content.right()),
+                Some(crate::ui_kit::Edge::Bottom) => content.max.y = within(rect.top() - gap, content.top(), content.bottom()),
+                Some(crate::ui_kit::Edge::Top) => content.min.y = within(rect.bottom() + gap, content.top(), content.bottom()),
                 None => {}
             }
         }
@@ -230,16 +240,16 @@ pub(crate) fn workspace_content(app: &SolveApp, mut content: Rect) -> Rect {
     let gap = Container::for_layout(app.ui.layout, Surface::Panel).gap();
     if let Some(history) = app.shell.history {
         if app.preferences.timeline_left {
-            content.min.x = (history.right() + gap).clamp(content.left(), content.right());
+            content.min.x = within(history.right() + gap, content.left(), content.right());
         } else {
-            content.max.y = (history.top() - gap).clamp(content.top(), content.bottom());
+            content.max.y = within(history.top() - gap, content.top(), content.bottom());
         }
     }
     if let Some(browser) = app.shell.browser {
-        content.min.x = (browser.right() + gap).clamp(content.left(), content.right());
+        content.min.x = within(browser.right() + gap, content.left(), content.right());
     }
     if let Some(column) = app.shell.dialog_column {
-        content.min.x = (column.right() + gap).clamp(content.left(), content.right());
+        content.min.x = within(column.right() + gap, content.left(), content.right());
     }
     content
 }
@@ -250,7 +260,7 @@ pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {
     let gap = Container::for_layout(app.ui.layout, Surface::Feature).gap();
     let mut bounds = crate::agent_chat::tool_space(app, app.viewport.rect.unwrap_or(placement));
     for card in app.shell.cards.iter().filter(|r| r.is_finite() && r.is_positive()) {
-        bounds.min.y = (card.bottom() + gap).clamp(bounds.top(), bounds.bottom());
+        bounds.min.y = within(card.bottom() + gap, bounds.top(), bounds.bottom());
     }
     bounds
 }

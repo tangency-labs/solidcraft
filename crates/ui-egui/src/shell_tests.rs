@@ -1190,3 +1190,24 @@ fn status_bar_stays_out_of_the_embed() {
     assert!(!crate::status_bar::shown(&h.app));
     assert!(rect_of("status:bar").is_none() && h.app.shell.status_bar.is_none());
 }
+
+/// Content kept from an earlier frame that lies outside the viewport now (the window shrank, the
+/// scale grew) gave an inside-out content rect, min past max, and the Render workspace's frame
+/// overlay panicked clamping into it: `min > max, or either was NaN. min = 1004.0, max = 937.8125`.
+/// The viewport stands in for such content, and the space left beside cards never panics.
+#[test]
+fn content_outside_a_shrunk_viewport_gives_way_to_the_viewport() {
+    let mut h = Harness::new();
+    let viewport = Rect::from_min_max(pos2(0.0, 0.0), pos2(800.0, 600.0));
+    h.app.shell.content = Some(Rect::from_min_max(pos2(900.0, 650.0), pos2(1600.0, 1000.0)));
+    assert_eq!(content_rect(&h.app, viewport), viewport);
+    // A rect already turned inside out, with History and Browser cards at its edges.
+    let inside_out = Rect::from_min_max(pos2(500.0, 1004.0), pos2(300.0, 938.0));
+    h.app.shell.history = Some(Rect::from_min_max(pos2(0.0, 900.0), pos2(800.0, 1000.0)));
+    h.app.shell.browser = Some(Rect::from_min_max(pos2(0.0, 0.0), pos2(200.0, 800.0)));
+    for left in [false, true] {
+        h.app.preferences.timeline_left = left;
+        let free = workspace_content(&h.app, inside_out);
+        assert!(free.min.x.is_finite() && free.min.y.is_finite(), "{free:?}");
+    }
+}
