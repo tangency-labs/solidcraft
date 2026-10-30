@@ -77,6 +77,7 @@
   "307": "issue, closed",
   "308": "issue, closed",
   "311": "issue, open",
+  "316": "merged PR",
   "317": "merged PR",
   "318": "merged PR",
   "324": "issue, open",
@@ -151,6 +152,7 @@
   "539": "merged PR",
   "541": "issue, closed",
   "542": "issue, closed",
+  "545": "issue, closed",
   "550": "merged PR",
   "552": "merged PR",
   "556": "issue, closed",
@@ -175,6 +177,7 @@
   "612": "issue, closed",
   "613": "issue, closed",
   "615": "issue, open",
+  "616": "issue, closed",
   "618": "merged PR",
   "620": "issue, open",
   "622": "issue, open",
@@ -2124,5 +2127,6 @@
   "5457": "issue, closed",
   "5458": "issue, open",
   "5460": "issue, open",
-  "5462": "issue, open"
+  "5462": "issue, open",
+  "5835": "merged PR"
 }
