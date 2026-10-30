@@ -492,9 +492,12 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
         Surf::Revolve { angle, symmetric, axis } => {
             need(0, "profiles or curves to revolve")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
+            // Same as a solid revolve: a bare curve id is resolved on this profile sketch, where
+            // it can name a different line than the one the pick highlights (#7452, #3726).
+            let profile_sketch = p.get("sketch").and_then(Value::as_u64);
             p["axis"] = match items(inputs, 1).first() {
                 Some(Sel::Axis { name }) => json!(name),
-                Some(Sel::SketchCurve { id, .. }) => json!(id),
+                Some(curve @ Sel::SketchCurve { .. }) => crate::dialogs::sketch_curve_axis(app, curve, profile_sketch)?,
                 Some(x) => crate::dialogs::axis_param(app, x)?,
                 None => axis.clone().ok_or("select an axis")?,
             };
