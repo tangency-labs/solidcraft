@@ -1422,6 +1422,13 @@ fn sheet_prism_cut(
             }
             let (a, b) = nominal_depth.unwrap_or((a, b));
             let (z0, z1) = (a.min(b).max(0.0), a.max(b).min(sh.t));
+            // A depth within a few units in the last place of the numbers it is worked out from
+            // is on the face: a flange panel's frame, turned by the cosine and sine of its angle,
+            // puts its faces an ulp (2e-16 mm) off the tool's cap they meet. A thinner layer is
+            // the tool's own and stays (refused below when under the resolution).
+            let ulps =
+                4.0 * f64::EPSILON * (apply_point(&w, Vec3::ZERO).len() + plane.origin.len() + span.0.abs() + span.1.abs() + sh.t) / sign.abs();
+            let (z0, z1) = (if z0 <= ulps { 0.0 } else { z0 }, if sh.t - z1 <= ulps { sh.t } else { z1 });
             // Sub-resolution layers must not be silently erased by endpoint snapping.
             let depth_resolved = ![z0, sh.t - z1, z1 - z0].into_iter().any(|d| d > 0.0 && d < 1e-6);
             labels.extend(letters.iter().filter_map(|r| sh.region_to_flat(pi, plane, r).ok()));
