@@ -54,7 +54,10 @@ fn shell_of_a_revolved_barrel() {
     assert!((volume - full).abs() < full * 1e-3, "{volume} vs {full}");
     for turn in [0.0, 1.0, 2.5, 4.0] {
         let (c, s) = (f64::cos(turn), f64::sin(turn));
-        assert!(barrel.contains(Vec3::new(13.8 * c, 13.8 * s, HALF_HEIGHT)) && !barrel.contains(Vec3::new(14.2 * c, 14.2 * s, HALF_HEIGHT)));
+        assert!(
+            barrel.classify_point(Vec3::new(13.8 * c, 13.8 * s, HALF_HEIGHT)).unwrap() == solidcraft_kernel::PointClass::Inside
+                && barrel.classify_point(Vec3::new(14.2 * c, 14.2 * s, HALF_HEIGHT)).unwrap() == solidcraft_kernel::PointClass::Outside
+        );
     }
     let result = shell(&barrel, &[Vec3::new(0.0, 0.0, 2.0 * HALF_HEIGHT)], 2.0).unwrap();
     assert!(result.validity().is_empty(), "{:?}", result.validity());

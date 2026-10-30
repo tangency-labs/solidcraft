@@ -73,9 +73,9 @@ fn chamfer_the_top_lip_at_a_tangent_wall_junction() {
     let expected = expected_removed(2.0);
     eprintln!("removed {removed:.8} mm³, expected {expected:.8} mm³");
     assert!((removed - expected).abs() < 0.03, "removed {removed}, expected {expected}");
-    assert!(!made.contains(Vec3::new(10.0, 9.5, 59.5)), "the old corner was removed");
-    assert!(made.contains(Vec3::new(10.0, 7.0, 59.5)), "material behind the bevel remains");
-    assert!(made.contains(Vec3::new(10.0, 10.0, 55.0)), "material below the bevel remains");
+    assert_eq!(made.classify_point(Vec3::new(10.0, 9.5, 59.5)).unwrap(), solidcraft_kernel::PointClass::Outside, "the old corner was removed");
+    assert_eq!(made.classify_point(Vec3::new(10.0, 7.0, 59.5)).unwrap(), solidcraft_kernel::PointClass::Inside, "material behind the bevel remains");
+    assert_eq!(made.classify_point(Vec3::new(10.0, 10.0, 55.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "material below the bevel remains");
     // A closed mesh's signed volume is independent of the origin.
     let volume_about = |origin: Vec3| {
         after

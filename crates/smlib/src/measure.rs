@@ -1,5 +1,6 @@
 //! Exact mass properties from SMLib: area, volume, centroid and inertia, integrated on the exact
-//! surfaces rather than a tessellation; the exact box; how far an edge lies from a face's surface.
+//! surfaces rather than a tessellation; the exact box; how far an edge lies from a face's surface;
+//! where a point lies against a body.
 
 use crate::{Brep, Result, error, ffi};
 
@@ -31,7 +32,33 @@ impl MassProperties {
     }
 }
 
+/// Where a point lies against a body ([`Brep::classify_point`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PointClass {
+    /// In a void region: outside the material, or in a cavity.
+    Outside,
+    /// In a material region.
+    Inside,
+    /// Within the body's tolerance of a face, an edge or a vertex.
+    OnBoundary,
+}
+
 impl Brep {
+    /// Where `p` (mm) lies against this body, decided exactly on its curves and surfaces (no
+    /// tessellation) by SMLib's `SmBrep::Point3DClassify` at the body's own zone tolerance: on
+    /// the boundary when within that tolerance of a face, an edge or a vertex (sheet faces too),
+    /// else inside a material region or outside. A body with no material (a sheet, an open shell)
+    /// has no inside. A non-finite coordinate is [`Error::Argument`](crate::Error::Argument).
+    pub fn classify_point(&self, p: [f64; 3]) -> Result<PointClass> {
+        match ffi::measure::classify_point(&self.0, p).map_err(error)? {
+            ffi::measure::POINT_OUTSIDE => Ok(PointClass::Outside),
+            ffi::measure::POINT_INSIDE => Ok(PointClass::Inside),
+            ffi::measure::POINT_ON_BOUNDARY => Ok(PointClass::OnBoundary),
+            // The C API writes only the three above; any other value is passed on as it came.
+            other => Err(crate::Error::Status(other)),
+        }
+    }
+
     /// Mass properties at `relative_accuracy` (clamped to [1e-8, 1e-1]; [`MEASURE_ACCURACY`] is
     /// the finest): the sum over the body's material regions, so several lumps, or lumps
     /// touching along edges or at points, measure too. A body with no material (a sheet, an open
@@ -241,6 +268,26 @@ mod tests {
                 assert!(m.products[i].abs() < 1e-6 * imax, "{name}: {m:?}");
             }
         }
+    }
+
+    /// A 10 × 20 × 30 box: inside, outside, on a face, an edge and a vertex; a cylinder of radius
+    /// 5 just off its curved wall, within the tolerance (on it) and beyond (inside or outside).
+    #[test]
+    fn points_classify_exactly() {
+        let b = Brep::make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+        assert_eq!(b.classify_point([5.0, 10.0, 15.0]).unwrap(), PointClass::Inside);
+        assert_eq!(b.classify_point([5.0, 10.0, 30.0 + 1e-4]).unwrap(), PointClass::Outside);
+        assert_eq!(b.classify_point([5.0, 10.0, 30.0 - 1e-4]).unwrap(), PointClass::Inside);
+        assert_eq!(b.classify_point([5.0, 10.0, 30.0]).unwrap(), PointClass::OnBoundary);
+        assert_eq!(b.classify_point([10.0, 10.0, 30.0]).unwrap(), PointClass::OnBoundary);
+        assert_eq!(b.classify_point([10.0, 20.0, 30.0]).unwrap(), PointClass::OnBoundary);
+        assert_eq!(b.classify_point([5.0, 10.0, f64::NAN]).unwrap_err(), Error::Argument);
+        let c = Brep::make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+        let at = |r: f64| [r * std::f64::consts::FRAC_1_SQRT_2, r * std::f64::consts::FRAC_1_SQRT_2, 5.0];
+        assert_eq!(c.classify_point(at(5.0 + 1e-8)).unwrap(), PointClass::OnBoundary);
+        assert_eq!(c.classify_point(at(5.0 - 1e-8)).unwrap(), PointClass::OnBoundary);
+        assert_eq!(c.classify_point(at(5.0 + 1e-4)).unwrap(), PointClass::Outside);
+        assert_eq!(c.classify_point(at(5.0 - 1e-4)).unwrap(), PointClass::Inside);
     }
 
     #[test]

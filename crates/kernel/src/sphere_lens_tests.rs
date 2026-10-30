@@ -48,8 +48,8 @@ fn projected_spherical_outline_does_not_block_a_lens_cut() {
     let measured = crate::measure(&result).unwrap();
     assert!((measured.volume - 8810.08973246).abs() < 2., "{measured:?}");
     assert!(measured.bbox.max.z < 20.01, "no thin lid may remain above the cut: {measured:?}");
-    assert!(result.contains(Vec3::new(0., -10., 2.)));
-    assert!(!result.contains(Vec3::new(0., -10., 15.)));
+    assert_eq!(result.classify_point(Vec3::new(0., -10., 2.)).unwrap(), crate::PointClass::Inside);
+    assert_eq!(result.classify_point(Vec3::new(0., -10., 15.)).unwrap(), crate::PointClass::Outside);
     assert_eq!(measured.merged.face_types.get("cylinder"), Some(&1));
     let history = result.history().expect("the cut has a face history");
     history.check(&result, &[&target, &cutter]).unwrap();

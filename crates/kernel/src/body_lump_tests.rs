@@ -259,3 +259,52 @@ fn a_long_thin_cylinder_comes_out_outward() {
         assert!((volume - want).abs() < want * 0.02, "{lo} {seam}: {volume} vs {want}");
     }
 }
+
+/// Exact point classification: a box's inside, outside, faces, edges and corners; a cylinder's
+/// curved wall within its tolerance (on it), 5 µm inside it (inside: the old mesh test, at a
+/// chord of 2e-3 of the size, missed this band) and just beyond; a cavity is outside.
+#[test]
+fn points_classify_exactly_against_the_body() {
+    use crate::{PointClass::*, cylinder};
+    let b = box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    for (p, want) in [
+        (Vec3::new(5.0, 10.0, 15.0), Inside),
+        (Vec3::new(5.0, 10.0, 31.0), Outside),
+        (Vec3::new(5.0, 10.0, 30.0 + 1e-4), Outside),
+        (Vec3::new(5.0, 10.0, 30.0 - 1e-4), Inside),
+        (Vec3::new(5.0, 10.0, 30.0), OnBoundary),
+        (Vec3::new(10.0, 10.0, 30.0), OnBoundary),
+        (Vec3::new(10.0, 20.0, 30.0), OnBoundary),
+        (Vec3::ZERO, OnBoundary),
+    ] {
+        assert_eq!(b.classify_point(p).unwrap(), want, "{p:?}");
+    }
+    assert!(b.classify_point(Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
+
+    let c = cylinder(Vec3::ZERO, Vec3::Z, 5.0, 10.0).unwrap();
+    let tol = c.record().tolerance;
+    let at = |r: f64| Vec3::new(r * std::f64::consts::FRAC_1_SQRT_2, r * std::f64::consts::FRAC_1_SQRT_2, 5.0);
+    assert_eq!(c.classify_point(at(5.0 + 0.5 * tol)).unwrap(), OnBoundary);
+    assert_eq!(c.classify_point(at(5.0 - 0.5 * tol)).unwrap(), OnBoundary);
+    assert_eq!(c.classify_point(at(5.0 - 5e-3)).unwrap(), Inside);
+    assert_eq!(c.classify_point(at(5.0 + 1e-4)).unwrap(), Outside);
+    assert_eq!(c.classify_point(Vec3::new(0.0, 0.0, 10.0)).unwrap(), OnBoundary);
+
+    let hollow = boolean(&cube(50.0), &cube(40.0), BoolOp::Cut).unwrap().unwrap();
+    assert_eq!(hollow.classify_point(Vec3::ZERO).unwrap(), Outside, "the cavity");
+    assert_eq!(hollow.classify_point(Vec3::X * 45.0).unwrap(), Inside);
+    assert_eq!(hollow.classify_point(Vec3::X * 40.0).unwrap(), OnBoundary, "the cavity's wall");
+}
+
+/// A mesh body's triangles are its shape: on them within the record's tolerance, else inside or
+/// outside by the rays' crossings.
+#[test]
+fn points_classify_against_a_mesh_body() {
+    use crate::PointClass::*;
+    let p = [Vec3::ZERO, Vec3::X * 10.0, Vec3::Y * 10.0, Vec3::Z * 10.0];
+    let m = crate::mesh_body(&p, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]).unwrap();
+    assert_eq!(m.classify_point(Vec3::new(1.0, 1.0, 1.0)).unwrap(), Inside);
+    assert_eq!(m.classify_point(Vec3::new(5.0, 5.0, 5.0)).unwrap(), Outside);
+    assert_eq!(m.classify_point(Vec3::new(1.0, 1.0, 0.0)).unwrap(), OnBoundary);
+    assert_eq!(m.classify_point(Vec3::X * 10.0).unwrap(), OnBoundary);
+}

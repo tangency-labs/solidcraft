@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(restored.face_count(), 6);
         assert_eq!(restored.unmeshed_faces(), 0);
         assert!((volume(&restored) - 6250.0).abs() < 1e-6);
-        assert!(restored.contains(Vec3::new(0.1, 0.1, 0.1)));
+        assert_eq!(restored.classify_point(Vec3::new(0.1, 0.1, 0.1)).unwrap(), crate::PointClass::Inside);
     }
 
     #[test]

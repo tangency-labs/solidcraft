@@ -404,8 +404,8 @@ mod tests {
             assert_eq!(result.unmeshed_faces(), 0);
             assert!(result.validity().is_empty(), "{:?}", result.validity());
             assert!((vol(&result) - vol(&reference)).abs() < 0.05);
-            assert!(!result.contains(Vec3::new(24.9, 0.1, 5.0)));
-            assert!(result.contains(Vec3::new(24.0, 1.0, 5.0)));
+            assert_eq!(result.classify_point(Vec3::new(24.9, 0.1, 5.0)).unwrap(), crate::PointClass::Outside);
+            assert_eq!(result.classify_point(Vec3::new(24.0, 1.0, 5.0)).unwrap(), crate::PointClass::Inside);
         }
     }
 
@@ -424,8 +424,8 @@ mod tests {
             assert!(result.validity().is_empty(), "{:?}", result.validity());
             assert!((vol(&result) - vol(&reference)).abs() < 0.05, "radius {radius}");
             // The old bottom radius is still 2, away from the newly rounded corner.
-            assert!(!result.contains(Vec3::new(12.5, 0.5, 0.5)));
-            assert!(result.contains(Vec3::new(12.5, 1.0, 1.0)));
+            assert_eq!(result.classify_point(Vec3::new(12.5, 0.5, 0.5)).unwrap(), crate::PointClass::Outside);
+            assert_eq!(result.classify_point(Vec3::new(12.5, 1.0, 1.0)).unwrap(), crate::PointClass::Inside);
         }
         // A tangent boundary of an earlier round is not a sharp edge, and cannot be
         // reinterpreted as the sharp edge exposed when that round is taken off.
@@ -470,8 +470,8 @@ mod tests {
                 let result = fillet(&rounded, &crate::tangent_chain(&rounded, selection).unwrap(), 2.0).unwrap();
                 assert!(result.validity().is_empty(), "{:?}", result.validity());
                 assert!((vol(&result) - want).abs() < 1e-6 * want, "{selection:?}: {} vs {want}", vol(&result));
-                assert!(!result.contains(Vec3::new(-4.9, 87.1, 10.0)));
-                assert!(result.contains(Vec3::new(-4.1, 86.3, 10.0)));
+                assert_eq!(result.classify_point(Vec3::new(-4.9, 87.1, 10.0)).unwrap(), crate::PointClass::Outside);
+                assert_eq!(result.classify_point(Vec3::new(-4.1, 86.3, 10.0)).unwrap(), crate::PointClass::Inside);
             }
         }
     }

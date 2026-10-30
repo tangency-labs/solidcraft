@@ -422,6 +422,17 @@ pub struct Refusal {
     pub why: String,
 }
 
+/// Where a point lies against a body ([`Body::classify_point`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PointClass {
+    /// In the body's material.
+    Inside,
+    /// Outside the material, or in a cavity.
+    Outside,
+    /// Within the body's tolerance of a face, an edge or a vertex.
+    OnBoundary,
+}
+
 /// The kind of surface a face lies on, as a person modelling would name it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SurfaceKind {
@@ -1346,6 +1357,39 @@ impl Body {
     /// Is the point inside the solid?
     pub fn contains(&self, p: Vec3) -> bool {
         self.mesh(&MeshTolerance::chord(self.size() * 2e-3)).map(|m| m.contains(p)).unwrap_or(false)
+    }
+
+    /// Where `p` lies against the body, decided exactly on its faces' surfaces and edges' curves
+    /// (SMLib's point classification at the body's own tolerance, no mesh): on the boundary when
+    /// within that tolerance of a face, an edge or a vertex, else inside its material or outside
+    /// (a cavity is outside). A mesh body's triangles are its exact shape: on its boundary
+    /// within the record's tolerance of a triangle, else inside when rays from the point cross
+    /// it an odd number of times.
+    pub fn classify_point(&self, p: Vec3) -> Result<PointClass> {
+        if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite()) {
+            return Err(KernelError::Invalid(format!("point classification: the point {p:?} is not finite")));
+        }
+        if let Some(m) = &self.mesh {
+            let mesh = m.to_mesh();
+            let near = mesh
+                .triangles
+                .iter()
+                .filter_map(|t| mesh.tri(t))
+                .any(|[a, b, c]| solidcraft_geom::compare::closest_on_triangle(p, a, b, c).dist(p) <= self.record.tolerance);
+            return Ok(if near {
+                PointClass::OnBoundary
+            } else if mesh.contains(p) {
+                PointClass::Inside
+            } else {
+                PointClass::Outside
+            });
+        }
+        let class = self.smlib()?.classify_point([p.x, p.y, p.z]).map_err(|e| KernelError::Failed(format!("SMLib point classification: {e}")))?;
+        Ok(match class {
+            solidcraft_smlib::PointClass::Inside => PointClass::Inside,
+            solidcraft_smlib::PointClass::Outside => PointClass::Outside,
+            solidcraft_smlib::PointClass::OnBoundary => PointClass::OnBoundary,
+        })
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).

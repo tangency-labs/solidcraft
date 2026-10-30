@@ -4247,8 +4247,13 @@ fn hole_tools_and_prisms(
             // face, which would lie on the drill point's shoulder (a through hole, as drilled).
             let at = |h: f64| *position + dir * (-h);
             let eps = size * 1e-6;
-            let solid_at = |h: f64| st.bodies.iter().any(|b| b.body.contains(at(h)));
-            let exits_at_shoulder = solid_at(bottom + eps) && !solid_at(bottom - eps);
+            // Exact classification against every body: material where one has the point inside,
+            // air where all have it outside; a point within a body's tolerance of its boundary is
+            // neither, and the hole is then not taken to exit at its shoulder.
+            let classes = |h: f64| st.bodies.iter().map(|b| b.body.classify_point(at(h))).collect::<std::result::Result<Vec<_>, _>>();
+            let solid = classes(bottom + eps)?.contains(&kernel::PointClass::Inside);
+            let air = classes(bottom - eps)?.iter().all(|c| *c == kernel::PointClass::Outside);
+            let exits_at_shoulder = solid && air;
             if depth.is_some() && half > 1e-3 && half < std::f64::consts::FRAC_PI_2 && !exits_at_shoulder {
                 // One revolved tool (cylinder with a drill point).
                 let tip = r / half.tan();
