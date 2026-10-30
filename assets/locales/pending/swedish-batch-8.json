@@ -1,0 +1,33 @@
+{
+  "sv": {
+    "browser.calibrate_click_a": "Klicka på bilden för punkt A eller skriv dess koordinater.",
+    "browser.calibrate_click_b": "Klicka på bilden för punkt B eller skriv dess koordinater.",
+    "help.sketch.construction_line": "Skapa en oändlig konstruktionslinje genom två punkter. Använd den för att lägga upp en skiss utan att dela profilerna.",
+    "help.sketch.construction_line.angle": "Skapa en oändlig konstruktionslinje i en vinkel mot skissens X-axel. Välj punkten och skriv vinkeln, eller välj dess riktning.",
+    "help.sketch.construction_line.bisector": "Välj två skärande raka skisslinjer och välj sedan någon av vinkelbisektriserna. Resultatet följer sina källlinjer.",
+    "help.sketch.construction_line.horizontal": "Skapa en oändlig horisontell konstruktionslinje genom en punkt. Det horisontella villkoret gäller även efter senare ändringar.",
+    "help.sketch.construction_line.parallel": "Välj en rak skisslinje och placera sedan en parallell, oändlig konstruktionslinje. Högerklicka för att välja en annan referens.",
+    "help.sketch.construction_line.perpendicular": "Välj en rak skisslinje och placera sedan en vinkelrät, oändlig konstruktionslinje. Högerklicka för att välja en annan referens.",
+    "help.sketch.construction_line.tangent_at": "Skapa en tangent i en punkt på en cirkel eller cirkelbåge, eller i en ändpunkt på en öppen spline eller konisk kurva. Välj kurvan och sedan beröringspunkten.",
+    "help.sketch.construction_line.tangent_external": "Välj en cirkel eller cirkelbåge, sedan en yttre punkt och en tangentlösning. Förhandsvisningarna visar bara beröringspunkter på den ritade bågen.",
+    "help.sketch.construction_line.tangent_two": "Välj två cirklar eller cirkelbågar och välj sedan en gemensam tangent i förhandsvisningen. Beröringspunkterna måste ligga på de ritade kurvorna.",
+    "help.sketch.construction_line.vertical": "Skapa en oändlig vertikal konstruktionslinje genom en punkt. Det vertikala villkoret gäller även efter senare ändringar.",
+    "prefs.persistent_ribbon_pressed": "Framhäv aktiva kommandon i menyfliksområdet",
+    "prefs.persistent_ribbon_pressed_help": "Framhäv kommandon i menyfliksområdet medan deras effekter är aktiva. Stäng av för att behålla det tidigare neutrala utseendet och kommandohjälpen.",
+    "prefs.sketch_construction_lines": "Utökade verktyg för konstruktionslinjer",
+    "prefs.sketch_open_look_at": "Vrid vyn mot en skiss när den öppnas",
+    "prefs.sketch_open_look_at_note": "Av: att skapa eller redigera en skiss lämnar vyn som den är. Titta på riktar vyn mot skissen när du vill.",
+    "recovery.discard_all": "Förkasta alla",
+    "recovery.discard_all_detail": "Det går inte att ångra.",
+    "recovery.discard_all_title": "Förkasta {count} autospar?",
+    "recovery.discard_all_title_one": "Förkasta 1 autospar?",
+    "ui.construction.angle_hint": "Konstruktionslinje: klicka på en punkt och skriv sedan en vinkel eller välj en riktning",
+    "ui.construction.bisector_hint": "Vinkelbisektris: välj två skärande raka linjer och sedan önskad lösning",
+    "ui.construction.common_hint": "Gemensam tangent: välj två cirklar/bågar och sedan önskad lösning",
+    "ui.construction.contact_hint": "Tangent: välj en cirkel/båge eller öppen spline/konisk kurva och sedan beröringspunkten (friformskurvor: ändpunkter)",
+    "ui.construction.external_hint": "Tangent: välj en cirkel eller båge, en yttre punkt och sedan önskad lösning",
+    "ui.construction.free_hint": "Konstruktionslinje: klicka på två punkter; högerklicka för att börja om",
+    "ui.construction.point_hint": "Konstruktionslinje: klicka på punkten som linjen ska gå genom",
+    "ui.construction.reference_hint": "Konstruktionslinje: välj en rak linje och sedan en punkt; högerklicka för att byta referens"
+  }
+}
