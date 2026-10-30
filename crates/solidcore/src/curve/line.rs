@@ -1502,7 +1502,7 @@ impl Line {
     }
 
     /// `GetOrCreateGwNurbPointer`: makes the NURB when missing (status ignored).
-    fn ensure_nurb(&mut self, owner: Option<ObjectRef>) -> Result<()> {
+    pub(crate) fn ensure_nurb(&mut self, owner: Option<ObjectRef>) -> Result<()> {
         if self.base.nurb.is_none() {
             ignore_status(self.make_nurb_owned(owner))?;
         }
