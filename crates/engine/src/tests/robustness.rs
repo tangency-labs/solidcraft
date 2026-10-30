@@ -500,18 +500,20 @@ fn planned_volume(s: &Session) -> f64 {
 /// #851: the knife edge where the wall runs out has opposite normals on its two faces. It rounds
 /// to the ball that fits there and chamfers with the plane through that ball's contacts (the cusp
 /// area less the wall's sector and the ball's, or the chord triangle less the wall's segment,
-/// times the 10 mm height).
+/// times the 10 mm height). The ball 2 from both faces sits at (62⅙ − √168, −2); the round takes
+/// 10 (11.5 √168 − 220.5 θ − 2 (π − θ)), θ = acos(19/23), within 5e-4 of it.
 #[test]
 fn blend_a_knife_edge_where_a_curved_wall_runs_out() {
     let knife = json!([[62.1667, 0, 5]]);
-    for (command, params, removed) in
-        [("solid.fillet", json!({"edges": knife, "radius": 2}), 119.648_812), ("solid.chamfer", json!({"edges": knife, "distance": 2}), 159.236_451)]
-    {
+    for (command, params, removed, within) in [
+        ("solid.fillet", json!({"edges": knife, "radius": 2}), 119.648_812, 119.648_812 * 5e-4),
+        ("solid.chamfer", json!({"edges": knife, "distance": 2}), 159.236_451, 0.5),
+    ] {
         let mut s = knife_edge_part();
         let before = planned_volume(&s);
         s.execute(command, &params).unwrap_or_else(|e| panic!("{command}: {e}"));
         let after = planned_volume(&s);
-        assert!((before - after - removed).abs() < 0.5, "{command}: removed {}, expected {removed}", before - after);
+        assert!((before - after - removed).abs() < within, "{command}: removed {}, expected {removed}", before - after);
         for b in &s.model.state().bodies {
             assert!(b.body.validity().is_empty(), "{command}: {:?}", b.body.validity());
         }
