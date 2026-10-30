@@ -3983,7 +3983,9 @@ fn fillet_fit_reduce_uses_the_largest_radius_that_fits() {
     run(&mut s, "parameters.add", json!({"name": "w", "expression": "6 mm"}));
     run(&mut s, "solid.box", json!({"length": 14, "width": "w", "height": 10, "corner": [14, 0, 0]}));
     let mids = json!([[14, 0, 5], [28, 0, 5], [14, 6, 5], [28, 6, 5]]);
-    assert!(s.execute("solid.fillet", &json!({"edges": mids, "radius": 3.5})).is_err());
+    // The exact fit refuses it, naming the largest radius that fits.
+    let e = s.execute("solid.fillet", &json!({"edges": mids, "radius": 3.5})).unwrap_err().to_string();
+    assert!(e.contains("the largest radius that fits is 3 mm"), "{e}");
     let out = run(&mut s, "solid.fillet", json!({"edges": mids, "radius": 3.5, "fit": "reduce", "name": "Round"}));
     assert_eq!(out["radius_applied"].as_f64(), Some(3.0), "{out}");
     let full = 840.0 - (4.0 - PI) * 9.0 * 10.0;

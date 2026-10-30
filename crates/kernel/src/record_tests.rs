@@ -393,9 +393,10 @@ fn loft_sections() {
     assert_eq!(origins(&b), want);
 }
 
-/// Faces of a sweep: the start cap in the profile's plane; each segment's faces run the whole
-/// path, the first one standing on that segment.
-fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<usize>) {
+/// Faces of a sweep: the start cap in the profile's plane; each segment's faces run along the
+/// path, the first one standing on that segment; `faces_per_segment`, if given, the number of
+/// faces each segment sweeps, in segment order.
+fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<&[usize]>) {
     let loops: Vec<&Loop2> = std::iter::once(&r.outer).chain(&r.holes).collect();
     let n: usize = loops.iter().map(|l| l.segs.len()).sum();
     let got = origins(b);
@@ -420,7 +421,7 @@ fn check_sweep(b: &Body, plane: &Plane, r: &Region2, faces_per_segment: Option<u
     }
     let counts: Vec<usize> = (0..n).map(|k| got.iter().filter(|o| **o == [P(k)]).count()).collect();
     match faces_per_segment {
-        Some(c) => assert!(counts.iter().all(|x| *x == c), "{counts:?}"),
+        Some(c) => assert_eq!(counts, c),
         None => assert!(counts.windows(2).all(|w| w[0] == w[1] && w[0] > 0), "{counts:?}"),
     }
 }
@@ -434,8 +435,10 @@ fn sweeps_along_paths() {
         PathSeg::Arc { a: Vec3::new(0.0, 0.0, 10.0), center: Vec3::new(20.0, 0.0, 10.0), axis: Vec3::Y, angle: FRAC_PI_2 },
     ];
     let b = crate::sweep(&Plane::XY, &r, &path).unwrap();
-    check_sweep(&b, &Plane::XY, &r, Some(2));
-    // Along a smooth 3D path: one wall per segment.
+    check_sweep(&b, &Plane::XY, &r, Some(&[2; 4]));
+    // Along 41 points of a smooth 3D curve: a point path is the polyline its points make, swept
+    // line by line and mitred at each point (43e8b0349), so the circle (one segment, one closed
+    // arc in SMLib) has a wall along each of the 40 lines.
     let curve: Vec<Vec3> = (0..=40)
         .map(|i| {
             let t = i as f64 / 40.0 * FRAC_PI_2;
@@ -445,16 +448,19 @@ fn sweeps_along_paths() {
     let plane = Plane::from_normal(curve[0], (curve[1] - curve[0]).normalized().unwrap()).unwrap();
     let circle = Region2 { outer: Loop2::circle(Vec2::ZERO, 2.0), holes: vec![] };
     let b = crate::sweep_path(&plane, &circle, &curve).unwrap();
-    check_sweep(&b, &plane, &circle, Some(1));
-    // A path with a corner, a holed profile: ruled walls station to station.
+    check_sweep(&b, &plane, &circle, Some(&[40]));
+    // A path with a corner, a holed profile: a wall along each leg, mitred at the corner. The
+    // corner turns the profile about Y, so each line at a constant y (segments 0 and 2 of the
+    // outer loop, 1 and 3 of the hole, drawn the other way round) sweeps the plane it lies in
+    // along both legs: one L-shaped planar face. The lines at a constant x make two each.
     let holed = Region2 { outer: rect(-3.0, -3.0, 3.0, 3.0), holes: vec![rect(-1.0, -1.0, 1.0, 1.0).reversed()] };
     let b = crate::sweep_path(&Plane::XY, &holed, &[Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0), Vec3::new(20.0, 0.0, 20.0)]).unwrap();
-    check_sweep(&b, &Plane::XY, &holed, Some(2));
+    check_sweep(&b, &Plane::XY, &holed, Some(&[1, 2, 1, 2, 2, 1, 2, 1]));
     // A coil: a smooth wall per segment.
     let side = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
     let ring = Region2 { outer: Loop2::circle(Vec2::new(20.0, 0.0), 2.0), holes: vec![] };
     let b = crate::sweep_helix(&side, &ring, Vec3::ZERO, Vec3::Z, 8.0, 3.0).unwrap();
-    check_sweep(&b, &side, &ring, Some(1));
+    check_sweep(&b, &side, &ring, Some(&[1]));
 }
 
 /// Kept faces are their origins, unchanged; each edge an operand still owns is that edge (a new

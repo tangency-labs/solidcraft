@@ -1,5 +1,5 @@
-//! #324: a round on a block's top edge that would overlap a through hole is refused, and the
-//! largest radius the refusal offers fits.
+//! #324: a round on a block's top edge that runs over a through hole: built as if the top went
+//! on, and cut by the hole.
 
 use solidcraft_geom::Vec3;
 
@@ -13,25 +13,34 @@ fn block_with_hole(y: f64) -> Body {
 }
 
 /// The round on the top edge at y = 20 covers the top face from y = 20 - r, and the hole's
-/// wall reaches y = 17.5: a radius over 2.5 runs into the hole. The refusal of 4 mm offered
-/// 2.721 mm, which was refused the same way: the curved wall's mesh, with its tolerance, was
-/// first seen inside the round's region 0.22 mm past where the wall really enters it.
+/// wall reaches y = 17.5: a radius over 2.5 runs into the hole. R4 is built as if the top went
+/// on over the hole and cut from the block (the blend-overflow decision, 237f0ae74): the round
+/// takes 16 (1 - π/4) of the section along 40, less its part over the hole, where the round's
+/// height above its arc, 4 - √(16 - (y - 16)²), stands over the hole's width
+/// 2 √(9 - (y - 14.5)²) for y in [16, 17.5] (integrated with y = 17.5 - s², smooth in s).
 #[test]
-fn the_radius_offered_beside_a_hole_fits() {
+fn a_round_into_a_hole_is_cut_by_it() {
+    use std::f64::consts::{FRAC_PI_4, PI};
     let b = block_with_hole(14.5);
     let edge = Vec3::new(10.0, 20.0, 10.0);
-    let m = crate::fillet(&b, &[edge], 4.0).unwrap_err().to_string();
-    let offered: f64 = m
-        .split("the largest radius that fits is ")
-        .nth(1)
-        .and_then(|s| s.split(' ').next())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| panic!("no radius offered: {m}"));
-    assert!(offered > 2.0 && offered <= 2.5, "{m}");
-    let r = crate::fillet(&b, &[edge], offered).unwrap();
+    let r = crate::fillet(&b, &[edge], 4.0).unwrap();
     assert!(r.validity().is_empty(), "{:?}", r.validity());
-    // The block, the hole and the round's corner: the round stays clear of the hole.
-    let want = 8000.0 - std::f64::consts::PI * 9.0 * 10.0 - 40.0 * offered * offered * (1.0 - std::f64::consts::FRAC_PI_4);
+    let (n, top) = (20000, 1.5f64.sqrt());
+    let over: f64 = (0..n)
+        .map(|i| {
+            let s = (i as f64 + 0.5) * top / n as f64;
+            let y = 17.5 - s * s;
+            2.0 * (9.0 - (y - 14.5).powi(2)).sqrt() * (4.0 - (16.0 - (y - 16.0).powi(2)).sqrt()) * 2.0 * s
+        })
+        .sum::<f64>()
+        * top
+        / n as f64;
+    let want = 8000.0 - PI * 9.0 * 10.0 - (40.0 * 16.0 * (1.0 - FRAC_PI_4) - over);
+    let v = crate::measure(&r).unwrap().volume;
+    assert!((v - want).abs() < 1e-7 * want, "{v} against {want}");
+    // Clear of the hole (up to 2.5) the round keeps its whole section.
+    let r = crate::fillet(&b, &[edge], 2.5).unwrap();
+    let want = 8000.0 - PI * 9.0 * 10.0 - 40.0 * 2.5 * 2.5 * (1.0 - FRAC_PI_4);
     let v = r.volume_at(0.005).unwrap();
     assert!((v - want).abs() < 0.05, "{v} against {want}");
 }
