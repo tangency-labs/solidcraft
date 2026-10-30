@@ -1,0 +1,26 @@
+{
+  "en": {
+    "operations.failed": "Failed"
+  },
+  "de": {
+    "operations.failed": "Fehlgeschlagen"
+  },
+  "ja": {
+    "operations.failed": "失敗"
+  },
+  "ko": {
+    "operations.failed": "실패"
+  },
+  "zh": {
+    "operations.failed": "失败"
+  },
+  "ar": {
+    "operations.failed": "فشل"
+  },
+  "he": {
+    "operations.failed": "נכשל"
+  },
+  "vi": {
+    "operations.failed": "Thất bại"
+  }
+}

@@ -73,6 +73,11 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         Some((_, Err(e))) => Err(e),
         None => Err(format!("{command}: the save stopped")),
     };
+    let outcome = match &r {
+        Ok(_) => crate::operations::Outcome::Done,
+        Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(command, e)),
+    };
+    crate::operations::ended(app, &format!("save:{command}"), outcome);
     app.finish_command(command, &r);
     // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
     // around: then the save says what went.

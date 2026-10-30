@@ -39,6 +39,7 @@ use solidcraft_engine::{Session, doc::Document, doc::progress::Progress};
 
 use crate::SolveApp;
 use crate::control::ControlResponse;
+use crate::operations::Outcome;
 use crate::ui_kit;
 
 /// What a file operation does with its file.
@@ -278,6 +279,10 @@ impl Running {
 pub struct FileLoad {
     queued: VecDeque<Request>,
     running: Option<Running>,
+    /// Results that are in and wait to land: their design's tab is not shown, or the person is in
+    /// the middle of something. They do not hold the worker, so the next request starts while
+    /// they wait, and they land as soon as they can.
+    waiting: Vec<Running>,
     /// The result of an insert that runs again for the design as it is now, kept until it is in:
     /// the file it read stays cached ([`solidcraft_engine::kernel::step_import_shared`]), so the
     /// second run doesn't read it again.
@@ -308,14 +313,19 @@ impl FileLoad {
     }
     /// No active or queued request; cancelled import workers may still be unwinding.
     pub fn idle(&self) -> bool {
-        self.running.is_none() && self.queued.is_empty()
+        self.running.is_none() && self.waiting.is_empty() && self.queued.is_empty()
     }
     /// Signal cancellation, release the import slot and drop queued requests.
     pub fn cancel(&mut self) {
         self.cancel_running();
-        for q in self.queued.drain(..) {
+        for w in std::mem::take(&mut self.waiting) {
+            w.request.answer(Err("file operation cancelled".into()));
+        }
+        for q in std::mem::take(&mut self.queued) {
             q.answer(Err("file operation cancelled".into()));
         }
+        // Nothing is left to run again for.
+        self.warm = None;
     }
     /// Signal the running request's cancellation and release its slot; queued requests go on.
     pub(crate) fn cancel_running(&mut self) {
@@ -337,7 +347,14 @@ impl FileLoad {
     /// Drop the `index`th queued request (from 0), answering it as cancelled.
     pub(crate) fn cancel_queued(&mut self, index: usize) {
         if let Some(q) = self.queued.remove(index) {
+            self.drop_warm(q.serial);
             q.answer(Err("file operation cancelled".into()));
+        }
+    }
+    /// Forget a retry's cached session once its request is gone (cancelled, or its tab closed).
+    fn drop_warm(&mut self, serial: u64) {
+        if self.warm.as_ref().is_some_and(|(warm, _)| *warm == serial) {
+            self.warm = None;
         }
     }
     /// The operations panel's view of the requests: the running one (if any), then the queued
@@ -363,7 +380,14 @@ impl FileLoad {
             waiting: r.ready.as_ref().is_some_and(Result::is_ok),
             ..entry(&r.request)
         });
-        running.into_iter().chain(self.queued.iter().map(entry)).collect()
+        let waiting = self.waiting.iter().map(|r| FileOperation {
+            steps: steps(r),
+            queued: false,
+            cancelled: r.cancelled(),
+            waiting: true,
+            ..entry(&r.request)
+        });
+        running.into_iter().chain(waiting).chain(self.queued.iter().map(entry)).collect()
     }
 }
 
@@ -653,6 +677,19 @@ fn start(app: &mut SolveApp) {
     if app.file_load.running.is_some() {
         return;
     }
+    // A request for a tab that was closed has nowhere to land: answer it so it does not wait for
+    // a tab number that will never match again and hold the queue.
+    let mut at = 0;
+    while at < app.file_load.queued.len() {
+        let orphan = app.file_load.queued[at].tab.is_some_and(|tab| !app.docs.tab_open(tab));
+        if orphan {
+            if let Some(request) = app.file_load.queued.remove(at) {
+                orphaned_request(app, request);
+            }
+        } else {
+            at += 1;
+        }
+    }
     // The first that can start: one for a design in a tab not shown waits for it.
     let shown = app.docs.active_tab();
     let Some(next) = app.file_load.queued.iter().position(|r| r.tab.is_none_or(|tab| tab == shown)) else { return };
@@ -665,6 +702,7 @@ fn start(app: &mut SolveApp) {
         return;
     }
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed("the design it was for is no longer shown".into()));
         request.answer(Err("the design it was for is no longer shown".into()));
         return;
     }
@@ -673,6 +711,7 @@ fn start(app: &mut SolveApp) {
         && !crate::documents::active_is_blank(app)
     {
         let e = "too many open designs; close a tab before opening another";
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.into()));
         app.set_status(e, true);
         if let Kind::Recover { id, dir } = &request.kind {
             reoffer(app, id, dir.as_deref());
@@ -800,6 +839,7 @@ fn start(app: &mut SolveApp) {
         }
         Err(e) => {
             let e = format!("could not start file operation: {e}");
+            crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.clone()));
             request.answer(Err(e.clone()));
             app.set_status(e, true);
         }
@@ -1257,12 +1297,57 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             Err(TryRecvError::Disconnected) => Some(Err("the file operation stopped; the current design is unchanged".into())),
         };
     }
-    let land = app.file_load.running.as_ref().and_then(|r| r.ready.as_ref().map(|job| landing(app, r, job)));
-    match land {
-        None | Some(Land::Wait) => {}
-        Some(Land::Again) => again(app),
-        Some(Land::Behind) => behind(app),
-        Some(Land::Now) => land_now(app),
+    // A ready result that cannot land yet (its design's tab is not shown, or the person is busy)
+    // leaves `running` for `waiting`: it stops holding the worker, so the next request starts
+    // while it waits, and it lands the moment it can.
+    if let Some(r) = app.file_load.running.as_ref()
+        && r.ready.is_some()
+    {
+        let land = landing(app, r);
+        match land {
+            Land::Wait => {
+                if let Some(running) = app.file_load.running.take() {
+                    app.file_load.waiting.push(running);
+                }
+            }
+            Land::Now => {
+                if let Some(running) = app.file_load.running.take() {
+                    land_now(app, running);
+                }
+            }
+            Land::Again => {
+                if let Some(running) = app.file_load.running.take() {
+                    again(app, running);
+                }
+            }
+            Land::Behind => {
+                if let Some(running) = app.file_load.running.take() {
+                    behind(app, running);
+                }
+            }
+            Land::Gone => {
+                if let Some(running) = app.file_load.running.take() {
+                    gone(app, running);
+                }
+            }
+        }
+    }
+    // Land each waiting result that can go now, oldest first.
+    let mut at = 0;
+    while at < app.file_load.waiting.len() {
+        let land = landing(app, &app.file_load.waiting[at]);
+        if land == Land::Wait {
+            at += 1;
+            continue;
+        }
+        let running = app.file_load.waiting.remove(at);
+        match land {
+            Land::Now => land_now(app, running),
+            Land::Again => again(app, running),
+            Land::Behind => behind(app, running),
+            Land::Gone => gone(app, running),
+            Land::Wait => {}
+        }
     }
     #[cfg(not(target_arch = "wasm32"))]
     start(app);
@@ -1284,6 +1369,8 @@ enum Land {
     Again,
     /// A design opened while the person is busy: in a new tab behind the one shown.
     Behind,
+    /// Its design's tab was closed (or replaced): nothing is left to land in.
+    Gone,
 }
 
 /// How many times an insert runs again for a design that keeps changing before it gives up.
@@ -1308,7 +1395,8 @@ fn quiet(app: &SolveApp, r: &Running) -> bool {
         && app.docs.batch.is_none()
 }
 
-fn landing(app: &SolveApp, r: &Running, job: &Job) -> Land {
+fn landing(app: &SolveApp, r: &Running) -> Land {
+    let Some(job) = r.ready.as_ref() else { return Land::Wait };
     // As it always was: the design waited for it.
     if app.preferences.file_operations_wait || r.cancelled() || job.is_err() || r.request.kind == Kind::ExportDxf {
         return Land::Now;
@@ -1317,6 +1405,10 @@ fn landing(app: &SolveApp, r: &Running, job: &Job) -> Land {
     // design behind would insert a slot and shift the indices those hold. Wait until it is over.
     if app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
         return Land::Wait;
+    }
+    // Its design's tab was closed (or replaced): there is nothing left to land in.
+    if r.request.tab.is_some_and(|tab| !app.docs.tab_open(tab)) {
+        return Land::Gone;
     }
     match r.request.kind {
         Kind::Open | Kind::Recover { .. } if quiet(app, r) => Land::Now,
@@ -1329,8 +1421,7 @@ fn landing(app: &SolveApp, r: &Running, job: &Job) -> Land {
 
 /// Run an insert (or Update Links) again for the design as it is now, first in line; its first
 /// result is kept meanwhile, so the file it read is still cached.
-fn again(app: &mut SolveApp) {
-    let Some(mut running) = app.file_load.running.take() else { return };
+fn again(app: &mut SolveApp, mut running: Running) {
     let mut request = std::mem::replace(&mut running.request, Request::new("", Kind::Open));
     request.tries += 1;
     if let Some(Ok(made)) = running.ready.take() {
@@ -1340,12 +1431,13 @@ fn again(app: &mut SolveApp) {
 }
 
 /// A design opened while the person is busy goes in a new tab behind the one shown.
-fn behind(app: &mut SolveApp) {
-    let Some(mut running) = app.file_load.running.take() else { return };
+fn behind(app: &mut SolveApp, mut running: Running) {
     let Some(Ok(made)) = running.ready.take() else { return };
     let request = &running.request;
+    let key = format!("file:{}", request.serial);
     match crate::documents::open_tab_behind(app, made.session) {
         Ok(()) => {
+            crate::operations::ended(app, &key, Outcome::Done);
             if request.kind == Kind::Open {
                 app.home.add_recent(&request.path);
             }
@@ -1354,6 +1446,7 @@ fn behind(app: &mut SolveApp) {
             request.answer(Ok(made.result));
         }
         Err(e) => {
+            crate::operations::ended(app, &key, Outcome::Failed(e.clone()));
             app.set_status(e.clone(), true);
             request.answer(Err(e));
         }
@@ -1367,15 +1460,45 @@ fn behind(app: &mut SolveApp) {
     }
 }
 
+/// Answer a result whose design's tab was closed: nothing is left to land in.
+fn gone(app: &mut SolveApp, running: Running) {
+    app.file_load.drop_warm(running.request.serial);
+    let e = "the design it was for was closed";
+    crate::operations::ended(app, &format!("file:{}", running.request.serial), Outcome::Failed(e.into()));
+    app.set_status(e, false);
+    running.request.answer(Err(e.into()));
+}
+
+/// Answer a queued request whose design's tab was closed: it would wait for a number that never
+/// matches again, holding the queue.
+fn orphaned_request(app: &mut SolveApp, request: Request) {
+    app.file_load.drop_warm(request.serial);
+    let e = "the design it was for was closed";
+    crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(e.into()));
+    app.set_status(e, false);
+    request.answer(Err(e.into()));
+}
+
+/// Cancel a result that is in and waits to land (its row's X in the operations panel).
+pub(crate) fn cancel_waiting(app: &mut SolveApp, serial: u64) {
+    let Some(at) = app.file_load.waiting.iter().position(|r| r.request.serial == serial) else { return };
+    let running = app.file_load.waiting.remove(at);
+    app.file_load.drop_warm(serial);
+    crate::operations::ended(app, &format!("file:{serial}"), Outcome::Cancelled);
+    app.set_status("file operation cancelled", false);
+    running.request.answer(Err("file operation cancelled".into()));
+}
+
 /// Take up a finished file operation now.
-fn land_now(app: &mut SolveApp) {
-    let Some(mut running) = app.file_load.running.take() else { return };
+fn land_now(app: &mut SolveApp, mut running: Running) {
     let Some(job) = running.ready.take() else { return };
     if app.file_load.warm.as_ref().is_some_and(|(serial, _)| *serial == running.request.serial) {
         app.file_load.warm = None;
     }
     // Opened while the person kept working: it lands, whatever they changed in the design shown.
     let opens = !app.preferences.file_operations_wait && matches!(running.request.kind, Kind::Open | Kind::Recover { .. });
+    let key = format!("file:{}", running.request.serial);
+    let mut outcome = Outcome::Done;
     {
         let request = &running.request;
         match job {
@@ -1385,7 +1508,10 @@ fn land_now(app: &mut SolveApp) {
                 }
                 request.answer(Ok(made.result));
             }
-            _ if running.cancelled() => request.answer(Err("file operation cancelled".into())),
+            _ if running.cancelled() => {
+                outcome = Outcome::Cancelled;
+                request.answer(Err("file operation cancelled".into()));
+            }
             Ok(made) if request.reads_again() && running.matches(&app.session) => {
                 let (id, _) = request.command();
                 app.session.accept_computed(made.session);
@@ -1500,10 +1626,13 @@ fn land_now(app: &mut SolveApp) {
             }
             Ok(_) => {
                 let e = "the active design changed while loading; the file operation was discarded";
+                outcome = Outcome::Failed(e.into());
                 request.answer(Err(e.into()));
                 app.set_status(e, true);
             }
             Err(e) => {
+                // A real cancel took the `running.cancelled()` arm above; this is a failure.
+                outcome = Outcome::Failed(e.clone());
                 request.answer(Err(e.clone()));
                 if request.reads_again() {
                     // Said as when the command ran here (the status line, the run's messages).
@@ -1524,6 +1653,7 @@ fn land_now(app: &mut SolveApp) {
             solidcraft_engine::recovery::reopen_finished(dir, &request.path);
         }
     }
+    crate::operations::ended(app, &key, outcome);
 }
 
 /// The light overlay over everything under the title bar while a file loads. The title bar,
@@ -1583,7 +1713,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.file_load.card_shown {
         return;
     }
-    let Some(r) = &app.file_load.running else { return };
+    let Some(r) = app.file_load.running.as_ref().or_else(|| app.file_load.waiting.first()) else { return };
     let cancelled = r.cancelled();
     if cancelled && app.file_load.queued.is_empty() {
         return;
@@ -1730,6 +1860,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if cancel && !cancelled {
         // The worker stops at its next cancellation checkpoint; its scratch design and
         // result channels are isolated from any file operation started afterwards.
+        for op in app.file_load.operations() {
+            crate::operations::ended(app, &format!("file:{}", op.serial), Outcome::Cancelled);
+        }
         app.file_load.cancel();
         app.set_status(if export { solidcraft_ui_text::tr_label("dxf.cancelled") } else { "file operation cancelled" }, false);
     }
@@ -1738,6 +1871,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cancelling the queued retry forgets the session it read the file into: nothing runs again
+    /// for a request that is gone.
+    #[test]
+    fn cancelling_the_queued_retry_forgets_its_cached_session() {
+        let mut load = FileLoad::default();
+        let mut request = Request::new("part.step", Kind::Insert);
+        request.serial = 7;
+        load.queued.push_back(request);
+        load.warm = Some((7, Box::new(Session::default())));
+        load.cancel_queued(0);
+        assert!(load.warm.is_none(), "the cached session goes with its cancelled request");
+    }
 
     /// A STEP file goes through its three steps in order as the kernel reports them, and stays
     /// on the last once the parts are done; a design's steps follow its features.
