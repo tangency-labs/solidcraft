@@ -493,13 +493,19 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
         }
     }
     breaks.push((t1, *angles.last()?));
-    // A crossing within rounding of another break (or of an end) is that break.
+    let size = points.iter().fold(1.0f64, |m, h| [h[0], h[1], h[2]].iter().fold(m, |m, c| m.max((c / h[3]).abs())));
+    // A crossing within rounding of another break (or of an end), or nearer to it on the edge
+    // than the pcurve lifts onto the edge (`FOLD_TOL`), is that break; the end never goes into
+    // the start. An edge starting 3e-12 of its parameter short of a quarter had pieces 1.6e-12
+    // long, whose knots SMLib took as one, past a multiplicity of the degree + 1.
     let close = 1e-12 * (t1 - t0).abs().max(1.0);
+    let lifts = |a: f64, b: f64| matches!((edge.point(a), edge.point(b)), (Some(p), Some(q)) if p.dist(q) <= FOLD_TOL * size);
     let mut kept: Vec<(f64, f64)> = Vec::with_capacity(breaks.len());
     for (i, b) in breaks.iter().enumerate() {
         let is_end = i + 1 == breaks.len();
+        let both_ends = is_end && kept.len() == 1;
         match kept.last_mut() {
-            Some(last) if (b.0 - last.0).abs() <= close => {
+            Some(last) if (b.0 - last.0).abs() <= close || (!both_ends && lifts(last.0, b.0)) => {
                 if is_end {
                     *last = *b;
                 }
@@ -535,7 +541,6 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
         };
         Some([0, 1, 2, 3].map(|k| [u[k], h[k]]))
     };
-    let size = points.iter().fold(1.0f64, |m, h| [h[0], h[1], h[2]].iter().fold(m, |m, c| m.max((c / h[3]).abs())));
     let mut pieces = 1usize;
     while pieces * breaks.len() <= FOLD_PIECES {
         let mut knots2 = vec![t0; 8];
