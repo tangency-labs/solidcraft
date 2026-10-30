@@ -102,17 +102,19 @@ fn import(input: &Operand) -> Result<Option<Brep>, HarnessError> {
     }
 }
 
-/// Give the imported geometry the owners the library's arena adapter keys its B-rep
-/// cache by (`arena_identity`): each edge's curve is owned by its edge, as natively,
-/// and each surface the importer marked as owned by its face keeps that face. Without
-/// this the cache would leave every curve and owned surface out of its trees.
+/// Relabels the geometry the build owns under the identities the library's arena adapter
+/// keys its B-rep cache by (`arena_identity`): each owned curve by its edge and each
+/// owned surface by its face, as natively. Geometry the build left without owner stays
+/// unowned (no owner is taken from the holder).
 fn own_geometry(b: &mut Brep) -> Result<(), HarnessError> {
     use solidcore::topology::brep_cache::{arena_identity, CacheObject};
     let edges: Vec<_> = b.edges().ids().collect();
     for e in edges {
         let edge = b.edge_mut(e).map_err(|x| error(&x.to_string()))?;
         if let Some(curve) = edge.curve.as_mut() {
-            curve.set_owner(Some(arena_identity(CacheObject::Edge(e))), None);
+            if curve.owner().is_some() {
+                curve.set_owner(Some(arena_identity(CacheObject::Edge(e))), None);
+            }
         }
     }
     let faces: Vec<_> = b.faces().ids().collect();
