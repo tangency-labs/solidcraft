@@ -7775,13 +7775,14 @@ mod tests {
         // will have settled (with no input to wake the window, the full count must follow).
         let at = |app: &mut SolveApp, time: f64, x: f32| {
             let mut n = 0;
-            let out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| n = ao_samples(app, ui.ctx(), view(x), size));
+            let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| n = ao_samples(app, ui.ctx(), view(x), size));
+            out.textures_delta.clear();
             let delay = out.viewport_output.get(&egui::ViewportId::ROOT).map_or(std::time::Duration::MAX, |v| v.repaint_delay);
             (n, delay <= std::time::Duration::from_secs_f64(SS_SETTLE + 0.02))
         };
         // A new context asks for its own first repaints: let it settle.
         for _ in 0..3 {
-            let _ = ctx.run_ui(egui::RawInput { time: Some(0.0), ..Default::default() }, |_| {});
+            ctx.run_ui(egui::RawInput { time: Some(0.0), ..Default::default() }, |_| {}).textures_delta.clear();
         }
         app.preferences.ambient_occlusion = false;
         assert_eq!(at(&mut app, 0.0, 0.0), (AO_SAMPLES, false), "AO off");

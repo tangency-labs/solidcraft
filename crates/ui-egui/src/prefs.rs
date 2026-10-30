@@ -6661,10 +6661,11 @@ mod tests {
                 ..Default::default()
             };
             let app = &mut h.app;
-            let out = h.ctx.run_ui(raw, |ui| {
+            let mut out = h.ctx.run_ui(raw, |ui| {
                 app.logic(ui.ctx());
                 app.ui(ui);
             });
+            out.textures_delta.clear();
             let commands = out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default();
             commands.into_iter().filter_map(|c| if let egui::ViewportCommand::SetTheme(t) = c { Some(t) } else { None }).collect::<Vec<_>>()
         };

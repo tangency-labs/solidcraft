@@ -983,11 +983,13 @@ mod contribution_tests {
             let mut designation = original.to_string();
             let mut custom = None;
             let doc = Document::default();
-            let _ = ctx.run_ui(Default::default(), |ui| {
+            ctx.run_ui(Default::default(), |ui| {
                 egui::Grid::new("hole_catalogue").show(ui, |ui| {
                     hole_rows(ui, &doc, &mut designation, &mut custom, &mut None);
                 });
-            });
+            })
+            .textures_delta
+            .clear();
             assert_eq!(designation, original);
         }
     }
