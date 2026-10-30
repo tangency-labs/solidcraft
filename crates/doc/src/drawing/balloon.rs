@@ -18,15 +18,14 @@
 //! [`Document::resolve_balloons`] finds each balloon's edge again as a dimension's is found
 //! ([`super::dimension::Status`]): by name, strictly, and what it can't decide it says.
 
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec3;
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
 
+use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, Status, check_edge, edge_candidates};
-use super::{Drawing, add_by_id, in_id_order, require};
+use super::{Drawing, require};
 use crate::{DocError, Document, Model, Result, ids};
 
 /// The most balloons a drawing may have.
@@ -54,31 +53,17 @@ impl Balloon {
     }
 }
 
+impl Record for Balloon {
+    fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 impl Drawing {
-    /// Adds `balloons`, each where its id puts it, as [`Drawing::add_dimensions`] adds dimensions.
-    pub fn add_balloons(&mut self, balloons: impl IntoIterator<Item = Arc<Balloon>>) {
-        add_by_id(&mut self.balloons, balloons, |b| b.id);
-    }
-
-    /// Balloon `id`, found by halves in the balloons' id order.
-    pub fn balloon(&self, id: u64) -> Option<&Balloon> {
-        self.balloon_index(id).and_then(|i| self.balloons.get(i)).map(|b| &**b)
-    }
-
-    /// Where balloon `id` is in [`Drawing::balloons`].
-    pub fn balloon_index(&self, id: u64) -> Option<usize> {
-        self.balloons.binary_search_by_key(&id, |b| b.id).ok()
-    }
-
     /// The balloons' rules (the module's notes). The views are checked first, so they are in id
     /// order here.
     pub(super) fn check_balloons(&self) -> Result<()> {
-        require(self.balloons.len() <= MAX_BALLOONS, || format!("a drawing has at most {MAX_BALLOONS} balloons"))?;
-        require(in_id_order(&self.balloons, |b| b.id), || "a drawing lists its balloons by id".into())?;
-        for balloon in &self.balloons {
-            self.check_balloon(balloon).map_err(|e| DocError::Invalid(format!("balloon {}: {e}", ids::encode(balloon.id))))?;
-        }
-        Ok(())
+        self.balloons.check(MAX_BALLOONS, "balloon", |b| self.check_balloon(b))
     }
 
     fn check_balloon(&self, b: &Balloon) -> Result<()> {
@@ -110,7 +95,7 @@ impl Document {
         wanted
             .iter()
             .map(|id| {
-                let b = drawing.balloon(*id).ok_or_else(|| DocError::Unknown(format!("balloon {}", ids::encode(*id))))?;
+                let b = drawing.balloons.by_id(*id).ok_or_else(|| DocError::Unknown(format!("balloon {}", ids::encode(*id))))?;
                 Ok(match lookup.edges(&b.edge) {
                     // A split edge has no one middle: the pieces are listed, and none is chosen.
                     Ok(found) if !found.whole => {

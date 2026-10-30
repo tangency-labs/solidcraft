@@ -66,7 +66,7 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
             views.insert(*object);
         } else if open.dimension(*object).is_some() {
             dimensions.push(*object);
-        } else if open.balloon(*object).is_some() {
+        } else if open.balloons.by_id(*object).is_some() {
             balloons.push(*object);
         } else {
             return Err(bad(cmd, format!("the drawing open has no view, dimension or balloon {}", ids::encode(*object))));

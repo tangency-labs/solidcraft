@@ -536,7 +536,7 @@ fn inspect_lists_each_sheets_views_in_order() {
     })]);
     // Inspect only lists it, so the part it numbers needn't be in the design.
     let edge = ModelEdge { body: "Block".into(), origin_feature: s.doc.features[0].id, name: "edge".into(), path: vec![1] };
-    d.add_balloons([Arc::new(Balloon { id: balloon, view: right, edge, at: [20.0, 20.0] })]);
+    d.balloons.add([Arc::new(Balloon { id: balloon, view: right, edge, at: [20.0, 20.0] })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     let [front_id, right_id, top_id, left_id] = [front, right, top, left].map(ids::encode);
