@@ -1,11 +1,7 @@
 {
- "sources": [
-  "tangency-labs/solidcraft#1207"
- ],
- "what": "an r2 round of the concave arc where a bar's top meets a cylinder its sides run tangent into",
+ "what": "an r2 round of the concave arc where a bar's top meets a cylinder its sides run tangent into; reported from the app (2026-10-30, test-peg part)",
  "source": "analytic",
  "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; the concave arc where the bar's top meets the cylinder's wall rounded r2: the spandrel ring added, clipped by the bar's sides y = 0 and y = 16 (as 1207-fillet-concave-arc-at-boss): integral over rho in [8, 10] of [2 - sqrt(4 - (10 - rho)^2)] rho 2 asin(8 / rho) = 18.4553684491 (Simpson)",
  "body_count": 1,
- "faces": 8,
  "volume_mm3": 9434.384315895273
 }
