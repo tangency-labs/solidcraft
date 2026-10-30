@@ -1,0 +1,33 @@
+{
+  "cs": {
+    "browser.calibrate_click_a": "Klikněte do obrázku na bod A, nebo zadejte jeho souřadnice.",
+    "browser.calibrate_click_b": "Klikněte do obrázku na bod B, nebo zadejte jeho souřadnice.",
+    "help.sketch.construction_line": "Vytvoří nekonečnou konstrukční přímku procházející dvěma body. Použijte ji k rozvržení náčrtu bez rozdělování profilů.",
+    "help.sketch.construction_line.angle": "Vytvoří nekonečnou konstrukční přímku pod úhlem od osy X náčrtu. Vyberte bod a zadejte úhel, nebo vyberte jeho směr.",
+    "help.sketch.construction_line.bisector": "Vyberte dvě protínající se přímé úsečky náčrtu a pak jednu ze dvou os úhlu. Výsledek sleduje své zdrojové úsečky.",
+    "help.sketch.construction_line.horizontal": "Vytvoří nekonečnou vodorovnou konstrukční přímku procházející bodem. Její vodorovná vazba platí i při pozdějších úpravách.",
+    "help.sketch.construction_line.parallel": "Vyberte přímou úsečku náčrtu a pak umístěte rovnoběžnou nekonečnou konstrukční přímku. Jinou referenci vyberete kliknutím pravým tlačítkem.",
+    "help.sketch.construction_line.perpendicular": "Vyberte přímou úsečku náčrtu a pak umístěte kolmou nekonečnou konstrukční přímku. Jinou referenci vyberete kliknutím pravým tlačítkem.",
+    "help.sketch.construction_line.tangent_at": "Vytvoří tečnu v bodě kružnice nebo kruhového oblouku, případně v koncovém bodě otevřeného splajnu nebo kuželosečky. Vyberte křivku a pak bod dotyku.",
+    "help.sketch.construction_line.tangent_external": "Vyberte kružnici nebo kruhový oblouk, pak vnější bod a řešení tečny. Náhledy ukazují jen body dotyku na nakresleném oblouku.",
+    "help.sketch.construction_line.tangent_two": "Vyberte dvě kružnice nebo kruhové oblouky a pak v náhledu zvolte společnou tečnu. Body dotyku musí ležet na nakreslených křivkách.",
+    "help.sketch.construction_line.vertical": "Vytvoří nekonečnou svislou konstrukční přímku procházející bodem. Její svislá vazba platí i při pozdějších úpravách.",
+    "prefs.persistent_ribbon_pressed": "Zvýrazňovat aktivní příkazy na pásu karet",
+    "prefs.persistent_ribbon_pressed_help": "Zvýrazní příkazy na pásu karet, dokud jsou jejich účinky zapnuté. Vypnutím zachováte dřívější neutrální vzhled a nápovědu k příkazům.",
+    "prefs.sketch_construction_lines": "Rozšířené nástroje konstrukčních přímek",
+    "prefs.sketch_open_look_at": "Při otevření náčrtu natočit pohled k němu",
+    "prefs.sketch_open_look_at_note": "Vypnuto: vytvoření nebo úprava náčrtu ponechá pohled beze změny. Pohled kolmo natočí pohled k náčrtu, kdykoli ho chcete.",
+    "recovery.discard_all": "Zahodit vše",
+    "recovery.discard_all_detail": "Tuto akci nelze vrátit zpět.",
+    "recovery.discard_all_title": "Zahodit automatická uložení: {count}?",
+    "recovery.discard_all_title_one": "Zahodit 1 automatické uložení?",
+    "ui.construction.angle_hint": "Konstrukční přímka: klikněte na bod, pak zadejte úhel nebo vyberte směr",
+    "ui.construction.bisector_hint": "Osa úhlu: vyberte dvě protínající se přímky, pak požadované řešení",
+    "ui.construction.common_hint": "Společná tečna: vyberte dvě kružnice/oblouky, pak požadované řešení",
+    "ui.construction.contact_hint": "Tečna: vyberte kružnici/oblouk nebo otevřený splajn/kuželosečku, pak bod dotyku (volné křivky: koncové body)",
+    "ui.construction.external_hint": "Tečna: vyberte kružnici nebo oblouk, vnější bod, pak požadované řešení",
+    "ui.construction.free_hint": "Konstrukční přímka: klikněte na dva body; pravým tlačítkem začnete znovu",
+    "ui.construction.point_hint": "Konstrukční přímka: klikněte na bod, kterým má procházet",
+    "ui.construction.reference_hint": "Konstrukční přímka: vyberte přímku, pak bod; pravým tlačítkem změníte referenci"
+  }
+}
