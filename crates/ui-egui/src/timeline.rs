@@ -1099,6 +1099,8 @@ mod tests {
             let mut h = Harness::new();
             h.app.home.open = false;
             h.app.preferences.timeline_left = left;
+            h.app.preferences.history_group_joints = true;
+            h.app.preferences.history_bar_groups = true;
             h.app.run("component.create", json!({"name":"Part"})).unwrap();
             let mut joints = Vec::new();
             for index in 0..50 {
@@ -1716,6 +1718,7 @@ mod tests {
     fn a_long_history_folds_a_components_features_into_one_chip() {
         use crate::scenario::{handle_at, rect_of};
         let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.app.run("component.create", json!({"name": "Rig"})).unwrap();
@@ -1782,9 +1785,11 @@ mod tests {
     }
 
     /// A root sketch, then a component Rig holding Arm (`arm` sketches) and Leg (25): Rig's run is
-    /// deep. Returns the harness, editing the root again, and the components' ids by name.
+    /// deep. The bar's groups are on. Returns the harness, editing the root again, and the
+    /// components' ids by name.
     fn rig_with_arm_and_leg(arm: usize) -> (Harness, std::collections::HashMap<&'static str, u64>) {
         let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         let rig = h.app.run("component.create", json!({"name": "Rig"})).unwrap()["component"].as_u64().unwrap();
@@ -2138,6 +2143,7 @@ mod tests {
     #[test]
     fn shift_click_selects_the_features_in_between() {
         let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         for (i, name) in ["A", "B", "C", "D", "E", "F"].into_iter().enumerate() {
             let corner = [i as f64 * 15.0, 0.0, 0.0];
             h.app
@@ -2529,6 +2535,7 @@ mod tests {
     fn a_folder_chip_opens_renames_ungroups_and_both_histories_agree() {
         use crate::scenario::handle_at;
         let mut h = boxes(&["A", "B", "C"]);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         h.app.run("timeline.group", json!({"name": "Pair", "features": ["A", "B"]})).unwrap();
         h.frames(2);
         assert!(handle_at("timeline:A").is_none(), "a folder starts folded");
@@ -2578,6 +2585,7 @@ mod tests {
     fn the_marker_and_a_dropped_feature_go_around_a_folded_folder() {
         use crate::scenario::{handle_at, rect_of};
         let mut h = boxes(&["A", "B", "C", "D"]);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         h.app.run("timeline.group", json!({"name": "Mid", "features": ["B", "C"]})).unwrap();
         h.app.run("timeline.roll_to", json!({"position": 2})).unwrap();
         h.frames(2);
@@ -2619,6 +2627,7 @@ mod tests {
         let corpus = |name: &str| format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"));
         let mut h = Harness::new();
         assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         let one = h.app.run("file.insert_step", json!({"path": corpus("cylinder")})).unwrap();
         let two = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice")})).unwrap();
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
@@ -2642,15 +2651,16 @@ mod tests {
         assert!(shown.iter().all(|(_, at)| at.x > import.x));
     }
 
-    /// With "Fold the History bar into groups" off, the bar shows each feature as it did before: a
-    /// long run of one component's features doesn't fold, a feature folder starts open (a click
-    /// still folds it), and a STEP assembly the app inserts gets no `Group #N` folder.
+    /// With "Fold the History bar into groups" off, as it is by default, the bar shows each feature
+    /// as it always has: a long run of one component's features doesn't fold, a feature folder
+    /// starts open (a click still folds it), and a STEP assembly the app inserts gets no `Group #N`
+    /// folder. Turned on, the run folds; turned off again, each feature shows.
     #[test]
     fn with_its_groups_off_the_bar_shows_each_feature_and_a_step_insert_makes_no_folder() {
         use crate::scenario::handle_at;
         let corpus = |name: &str| format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"));
         let mut h = Harness::new();
-        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": false}))["ok"], true);
+        assert!(!h.app.preferences.history_bar_groups, "the bar's groups are off by default");
         h.app.run("component.create", json!({"name": "Rig"})).unwrap();
         for i in 0..crate::timeline_fold::FOLD_FROM {
             h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
@@ -2675,6 +2685,9 @@ mod tests {
         assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
         h.frames(4);
-        assert!(handle_at("timeline-group:Rig").is_some(), "turned back on, the run folds again");
+        assert!(handle_at("timeline-group:Rig").is_some(), "turned on, the run folds");
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": false}))["ok"], true);
+        h.frames(4);
+        assert!(handle_at("timeline-group:Rig").is_none() && handle_at("timeline:S49").is_some(), "off again, each feature shows");
     }
 }
