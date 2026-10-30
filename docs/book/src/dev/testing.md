@@ -76,6 +76,11 @@ share the machine instead of each defaulting to one worker per CPU. Setting
 `RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` yourself overrides that split, and leaving
 `SOLIDCRAFT_TEST_JOBS` unset keeps the original all-at-once behaviour.
 
+Like CI on pull requests and pushes to `main`, `cargo xtask test` and `cargo xtask ci` skip the
+kernel's `boolean_props` property tests: their inputs are random on every run, so a known kernel
+bug would fail the local gate at random (#7212). `cargo xtask test --property-tests` runs them
+too, and `cargo test -p solidcraft-kernel --profile ci --test boolean_props` runs them alone.
+
 ## Test-level scheduling for full local CI
 
 Install [cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/), then set
@@ -90,7 +95,8 @@ This optional backend builds the workspace tests once, then schedules individual
 the `local-ci` nextest profile, which inherits `ci`. The action matrix runs first, then the longest geometry
 cases start before the other costly tests, so the ordinary queue does not stall behind an
 all-slot reservation. It **ignores the default filter**,
-so the heavy tests below still run, does not stop after a test failure, and does not retry failures.
+so the heavy tests below still run (all but the `boolean_props` property tests, which it leaves
+out as a push to `main` does), does not stop after a test failure, and does not retry failures.
 Tests marked `#[ignore]` remain ignored, as with the ordinary full local CI.
 The default concurrency is at most four tests; `NEXTEST_TEST_THREADS` overrides it. The action
 matrix's child workers default to the smaller of that budget and the host CPU count;
@@ -102,7 +108,7 @@ and the web-offline gate still follows a successful native/Wasm/doc run.
 The backend keeps Cargo and binary metadata under `target/xtask-nextest/` and reuses it for the
 native run, freeing Cargo to run the side gates. Nextest prints each test's result and duration
 as it finishes. `SOLIDCRAFT_TEST_RUNNER=libtest` (or leaving it unset) retains the original runner;
-`cargo xtask test` and its Cargo/libtest argument forwarding are unchanged. Unknown runner names
+`cargo xtask test` and its Cargo/libtest argument forwarding do not depend on this setting. Unknown runner names
 fail explicitly.
 
 ## CI sharding and heavy tests
@@ -121,7 +127,8 @@ Pull requests skip a few heavy tests (each takes one to twelve minutes); they ru
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
 - `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives`,
   `tspline::tests::hostile_tsplines_never_panic`, and the `boolean_props` property tests
-  (these run only in the nightly "Property tests" job: their inputs are random, so main skips them too)
+  (these run only in the nightly "Property tests" job: their inputs are random, so main and the local
+  gate skip them too; `cargo xtask test --property-tests` runs them)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 
 The **action matrix** (`apps/solidcraft-cli/tests/action_matrix.rs`) tries every ordinary action
