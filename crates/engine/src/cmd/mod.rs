@@ -35,6 +35,7 @@ mod drawing;
 mod drawing_balloon;
 mod drawing_dimension;
 mod drawing_export;
+mod drawing_image;
 mod drawing_revision;
 mod drawing_scene;
 mod drawing_sheet;
@@ -386,6 +387,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(drawing::COMMANDS.iter());
     v.extend(drawing_balloon::COMMANDS.iter());
+    v.extend(drawing_image::COMMANDS.iter());
     v.extend(drawing_dimension::COMMANDS.iter());
     v.extend(drawing_export::COMMANDS.iter());
     v.extend(drawing_revision::COMMANDS.iter());
