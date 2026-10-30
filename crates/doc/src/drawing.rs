@@ -58,6 +58,7 @@ use crate::{DocError, Metadata, Result, expr};
 
 pub mod balloon;
 pub mod dimension;
+pub mod sheet_set;
 pub mod view;
 
 use balloon::Balloon;
