@@ -937,6 +937,8 @@ impl FilletSolver {
     /// With `Kernel::fixes.fillet_torus_center_on_axis` (WR-422), a section centred on the
     /// arc's axis has its rail points turned into the half-planes through the edge's ends and
     /// takes the edge's start for the nearest point.
+    /// With `Kernel::fixes.fillet_torus_rail_on_axis` (WR-592), a start rail point within
+    /// the solver's tolerance of the arc's axis is moved onto the axis.
     ///
     /// `SM_ERR` when the generator is not circular, the edge curve is not an arc, the
     /// radius is tiny or changes, or the nearest point on the edge is not unique; those
@@ -1040,6 +1042,19 @@ impl FilletSolver {
         } else {
             None
         };
+
+        // `fixes.fillet_torus_rail_on_axis` (WR-592): a rail point within the tolerance of
+        // the axis turns round it in a circle smaller than the tolerance, a point: it is
+        // the axis's point, so the surface is exactly singular there.
+        if k.fixes.fillet_torus_rail_on_axis {
+            for rail_pnt in [&mut p0, &mut p1] {
+                let off = *rail_pnt - axis_pnt;
+                let on_axis = axis_pnt + unit_axis * off.dot(unit_axis);
+                if on_axis.distance(*rail_pnt) < center_tol {
+                    *rail_pnt = on_axis;
+                }
+            }
+        }
 
         // allocate the arc from the points [centerPoint, sP0, sP1] (a linear section: the
         // line from rail to rail; WR-581's blend-curve section: the blend curve the

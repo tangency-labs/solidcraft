@@ -177,6 +177,8 @@ pub struct UpstreamFixes {
     pub corner_blend_coons_patch_tangent_to_sides: bool,
     /// A torus blend whose section centre is on the arc's axis turns rail points into the edge ends' half-planes (WR-422, #417).
     pub fillet_torus_center_on_axis: bool,
+    /// `CalcTorusFilletGeom` moves a section's rail point that lies within the solver's tolerance (`GetThisApproxTol3d`) of the edge arc's axis onto the axis: it turns about the axis in a circle smaller than the tolerance, so the rail collapses to the axis's point and the surface of revolution is exactly singular there, where upstream left the point off the axis by the model's residues (1.2e-11 after a sketch's 1e-10) and the surface nearly singular, which `smlib_brep_check` refused (`SmSurface` #5, Bad Surf Pole Approximation; a round along an earlier round's end arc of the ball's own radius) (WR-592; the fork's tangency-labs/smlib@994f129).
+    pub fillet_torus_rail_on_axis: bool,
     /// `SmFilletExecutive::CreateFilletBrep` stitches the fillet body keeping a fillet's own edge where an edge of corner-patch faces only meets an edge of other fillet faces only (`SmFilletPatchStitchCallback`): an N-sided corner patch is bounded by its surfaces' isoparametric curves, the approximations it was fitted to, and the default choice between the two near-equal distances left one half of a set-back section the exact arc and the other the polynomial approximation, off the round (WR-546, #1377; the fork's tangency-labs/smlib@1072d1b).
     pub fillet_patch_keeps_fillet_edges: bool,
     /// A knife edge (a cusp: faces tangent along the edge that fold back on each other,
