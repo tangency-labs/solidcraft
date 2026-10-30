@@ -57,6 +57,11 @@
 //!   samples of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails
 //!   (the faces keep the edge between them) instead of merging onto a continuation that
 //!   is not one sheet. tangency-labs/solidcore#434.
+//! - **A face across a wrapped seam is covered** (opt-in
+//!   `Kernel::fixes.cover_wraps_across_closed_seam`, WR-599; the fork's
+//!   tangency-labs/smlib@16bf1cb). A boundary step across this surface's seam in a
+//!   direction it is closed in over its natural domain is no failure, and the domain
+//!   keeps its period there; an open direction or a pole still refuses.
 
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::labels;
@@ -84,7 +89,7 @@ use crate::surface::plane::Plane;
 use super::p1::{
     crossed_seam_or_pole, evaluate_1st_derivatives, evaluate_2nd_derivatives,
     evaluate_normal_section as smsurf_evaluate_normal_section, FindPsNormalEnfo, SsNormalizeEnfo,
-    SspIntersectEnfo, SssIntersectEnfo, SurfaceSolveContext,
+    SspIntersectEnfo, SssIntersectEnfo, SurfaceSolveContext, MAX_STEP_RATIO,
 };
 use super::p2::evaluate_geometric as smsurf_evaluate_geometric;
 use super::p2::{GeometricProperties, SurfaceEvaluate};
@@ -1169,6 +1174,43 @@ impl Surface {
         let dom_u = other_dom.u_interval();
         let dom_v = other_dom.v_interval();
 
+        // SolidCraft fork, tangency-labs/smlib@16bf1cb (WR-599): a surface whose domain
+        // already closes on itself in a direction (a cylinder's full turn, the face on it
+        // wrapping all the way round) covers a face that straddles its seam: that face's
+        // points lie on it on both sides of the seam, and the face merged into it is the
+        // periodic face whose seam runs on through the covered part (the merge adds that
+        // piece of the seam, `SmFace::SplitAtSeam`). A step of the boundary walk across the
+        // seam in such a direction is no failure; the domain in it stays the period it
+        // already spans. In any other direction, or across a pole, a crossing still means
+        // the other face does not fit inside this one. Opt-in
+        // (`Kernel::fixes.cover_wraps_across_closed_seam`); upstream refuses every crossing.
+        let wraps_across_seam = k.fixes.cover_wraps_across_closed_seam;
+        let (wraps_u, wraps_v) = if wraps_across_seam {
+            let this_domain = self.natural_uv_domain_with_nurb(k)?;
+            (
+                self.is_closed(
+                    k,
+                    &this_domain,
+                    crate::nurbs::b_spline_surface::SurfParamType::U,
+                    None,
+                    false,
+                )?
+                .0,
+                self.is_closed(
+                    k,
+                    &this_domain,
+                    crate::nurbs::b_spline_surface::SurfParamType::V,
+                    None,
+                    false,
+                )?
+                .0,
+            )
+        } else {
+            (false, false)
+        };
+        let mut crossed_u = false;
+        let mut crossed_v = false;
+
         for ii in 0..4_usize {
             // Get the corner guess.  (Sorry, a bit slick:)
             let (row, col) = (if ii < 2 { ii } else { 3 - ii }, ii / 2);
@@ -1228,7 +1270,22 @@ impl Surface {
 
                 // Here we check seams/poles.
                 if crossed_seam_or_pole(k, self, guess_uv, drop_uv, &big_domain)? {
-                    return Ok(failure);
+                    if !wraps_across_seam {
+                        return Ok(failure);
+                    }
+                    // WR-599: across which seam: a step longer than the helper allows
+                    // (`sdMaxStepRatio`).
+                    let step = drop_uv - guess_uv;
+                    let jump_u = step.x.abs() > MAX_STEP_RATIO * big_domain.u_interval().length();
+                    let jump_v = step.y.abs() > MAX_STEP_RATIO * big_domain.v_interval().length();
+                    if (jump_u && !wraps_u)
+                        || (jump_v && !wraps_v)
+                        || location == LocationType::Pole
+                    {
+                        return Ok(failure);
+                    }
+                    crossed_u = crossed_u || jump_u;
+                    crossed_v = crossed_v || jump_v;
                 }
 
                 // Check max distance.
@@ -1263,7 +1320,28 @@ impl Surface {
         // Now union the projection of Other surface on our domain with our original
         // domain, and update our domain to it.
         let orig_domain = self.step_uv_domain();
-        let update_domain = orig_domain.union(&new_domain);
+        let mut update_domain = orig_domain.union(&new_domain);
+        // WR-599: across a seam it already wraps, this surface keeps its period (see above).
+        if crossed_u {
+            update_domain = Extent2d::from_points(
+                Point2::new(orig_domain.min().x, update_domain.min().y),
+                Point2::new(orig_domain.max().x, update_domain.max().y),
+            );
+            new_domain = Extent2d::from_points(
+                Point2::new(orig_domain.min().x, new_domain.min().y),
+                Point2::new(orig_domain.max().x, new_domain.max().y),
+            );
+        }
+        if crossed_v {
+            update_domain = Extent2d::from_points(
+                Point2::new(update_domain.min().x, orig_domain.min().y),
+                Point2::new(update_domain.max().x, orig_domain.max().y),
+            );
+            new_domain = Extent2d::from_points(
+                Point2::new(new_domain.min().x, orig_domain.min().y),
+                Point2::new(new_domain.max().x, orig_domain.max().y),
+            );
+        }
 
         // SolidCraft change, tangency-labs/smlib 1b6f5fa (tangency-labs/solidcore#434): a
         // B-spline surface covers past its natural domain by continuing its end spans, and

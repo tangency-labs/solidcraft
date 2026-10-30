@@ -30,7 +30,7 @@
 //! | [`RescueSurfaceOwner`]                  | `SmRescueSurfaceOwner` (constructor, destructor)  |
 //! | [`remove_suspect_split_at_seam_uv_trim_curves`] | `sm_RemoveSuspectSplitAtSeamUVTrimCurves` |
 //! | [`points_in_face`], [`PointsInFace`]    | `SmFace::GetPointsInFace`                         |
-//! | `vertex_edges` (private)                | `SmVertex::GetEdges` without face filter (CO-PORTED, `topology.vertex`) |
+//! | `vertex_edges` (private)                | `SmVertex::GetEdges` without face filter (`topology::vertex::edges`) |
 //! | `edge_edgeuses` (private)               | `SmEdge::GetEdgeuses` without filters (CO-PORTED, `topology.edge`) |
 //! | `loopuse_vertexuses` (private)          | `SmLoopuse::GetVertexuses` without filter (unit `topology.loopuse`) |
 //!
@@ -93,11 +93,9 @@
 //!   face-properties (debug only) arguments, and returns which end classifications
 //!   remain (upstream: pointers into the classification). An empty classification is
 //!   [`SolidError::InvalidInput`] (upstream reads `[0]` and `[-1]`).
-//! - **`SmVertex::GetEdges`** walks the vertex's use list; the port's vertices keep no
-//!   list, so the vertex uses are the B-rep's whose `vertex` it is, in arena order.
-//!   Its only caller here deletes UV trim curves, which is not order dependent.
-//!   `GetEdges` also evaluates each edge use's face for the (absent) face filter; that
-//!   unused call is not made.
+//! - **`SmVertex::GetEdges`** is [`crate::topology::vertex::edges`], which walks the
+//!   vertex's use list as upstream does (the co-port here scanned the B-rep's vertex uses
+//!   naming the vertex, which also met stale ones whose edge use was gone).
 //! - **`GetPointsInFace`** draws its V dither from `kernel.rng` instead of
 //!   `srand(time(NULL))` / `rand()` (a uniform integer in `[0, RAND_MAX]`, glibc's
 //!   `RAND_MAX`), so results asked for more than one point are not reproducible
@@ -164,7 +162,7 @@ use crate::topology::topology as topo;
 use crate::topology::vertexuse as vu1;
 use crate::topology::{
     Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, LoopuseStart, VertexId,
-    VertexuseId, VertexuseOwner,
+    VertexuseId,
 };
 
 const OP: &str = "topology::face::p2";
@@ -348,27 +346,13 @@ fn edge_edgeuses(b: &Brep, e: EdgeId) -> Result<Vec<EdgeuseId>> {
     Ok(b.edge(e)?.edgeuses.clone())
 }
 
-/// `SmVertex::GetEdges` without face filter (CO-PORTED from unit `topology.vertex`): the
-/// distinct edges of the vertex's edge vertex uses.
+/// `SmVertex::GetEdges` without face filter (unit `topology.vertex`): the distinct edges
+/// of the vertex's edge vertex uses, walked from the vertex's own vertex use list as
+/// upstream does. (The co-port here walked every vertex use in the arena naming the
+/// vertex, which also met vertex uses no longer on the vertex's list, whose edge use was
+/// gone.)
 fn vertex_edges(b: &Brep, v: VertexId) -> Result<Vec<EdgeId>> {
-    let mut out: Vec<EdgeId> = Vec::new();
-    for (_, vu) in b.vertexuses().iter() {
-        if vu.vertex != Some(v) {
-            continue;
-        }
-        // when vertexuse is an edgeVertexuse type
-        if let VertexuseOwner::Edgeuse(eu) = vu.owner {
-            let eu = eu.ok_or_else(|| null("GetEdges: edge vertex use without edge use"))?;
-            let e = b
-                .edgeuse(eu)?
-                .edge
-                .ok_or_else(|| null("GetEdges: edge use without edge"))?;
-            if !out.contains(&e) {
-                out.push(e);
-            }
-        }
-    }
-    Ok(out)
+    crate::topology::vertex::edges(b, v, None)
 }
 
 /// `SmLoopuse::GetVertexuses` without filter (unit `topology.loopuse`).

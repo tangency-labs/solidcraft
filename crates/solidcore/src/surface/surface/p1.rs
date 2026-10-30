@@ -3568,6 +3568,13 @@ pub(crate) fn convert_domain_from_nurbs_to_step_with(
     Ok(d)
 }
 
+/// The fraction of the domain, in `u` and in `v`, a step of `CoverCoincidentSurface`'s
+/// drops may cover before [`crossed_seam_or_pole`] calls it a crossing of a seam or a pole
+/// (`sdMaxStepRatio`, local to `sm_CrossedSeamOrPole` upstream; at file scope in the
+/// SolidCraft fork, tangency-labs/smlib@16bf1cb, so the seam-jump test of
+/// `Kernel::fixes.cover_wraps_across_closed_seam` reads the same limit).
+pub(crate) const MAX_STEP_RATIO: f64 = 0.4;
+
 /// Whether a step from `prev_uv` to `curr_uv` crossed a seam or a pole
 /// (`sm_CrossedSeamOrPole`): never on planes and bilinear B-splines (the B-spline kinds'
 /// `GetDegree`, which makes a missing NURB: [`Surface::degree_with_nurb`]); else a step
@@ -3583,8 +3590,6 @@ pub fn crossed_seam_or_pole(
     curr_uv: Point2,
     domain: &Extent2d,
 ) -> Result<bool> {
-    const MAX_STEP_RATIO: f64 = 0.4;
-
     // First special cases: SmPlane or bilinear.
     match surface.kind() {
         SurfaceKind::Plane(_) => return Ok(false),
