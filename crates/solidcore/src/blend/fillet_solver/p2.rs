@@ -846,7 +846,10 @@ impl FilletSolver {
     /// # Errors
     ///
     /// With the opt-in `Kernel::fixes.fillet_chamfer_cone_on_arc` (not upstream, WR-421) a
-    /// linear generator is revolved too, into a cone.
+    /// linear generator is revolved too, into a cone; with
+    /// `Kernel::fixes.fillet_chamfer_cone_stored_as_cone` as well (WR-572) that revolution
+    /// is stored as the cone `CopyAndAddAnalytics` finds in its NURBS form, the rails made on
+    /// it.
     /// With `Kernel::fixes.fillet_torus_center_on_axis` (WR-422), a section centred on the
     /// arc's axis has its rail points turned into the half-planes through the edge's ends and
     /// takes the edge's start for the nearest point.
@@ -1159,9 +1162,24 @@ impl FilletSolver {
             trans.translate(origin);
             torus.transform(k, &trans, None)?;
         }
-        let torus = Surface::from(torus);
+        // `fixes.fillet_chamfer_cone_stored_as_cone` (WR-572, the fork's b5743ec): a linear
+        // section revolved is a cone, and is stored as one (SmCone), as a straight edge's
+        // round is stored as its cylinder: the revolution's NURBS form (its
+        // `SmBSplineSurface::Copy`) through `CopyAndAddAnalytics`, kept when that gives a
+        // cone; anything else stays the revolution
+        let torus = if linear_section && k.fixes.fillet_chamfer_cone_stored_as_cone {
+            let cone = torus.base().copy().copy_and_add_analytics(k)?;
+            if matches!(cone.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
+                cone
+            } else {
+                Surface::from(torus)
+            }
+        } else {
+            Surface::from(torus)
+        };
 
-        // Calc rails: the min and max SM_SP_V isoParameter curves
+        // Calc rails (on the surface stored: the cone, or the revolution): the min and max
+        // SM_SP_V isoParameter curves
         let uv_domain = torus.natural_uv_domain_with_nurb(k)?;
         let rail_crv0 = torus
             .create_iso_parametric_curve(k, SurfParamType::V, uv_domain.min.y, 0.0, None, false)?
