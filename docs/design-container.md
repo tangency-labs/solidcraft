@@ -177,6 +177,31 @@ one that changed any of it (a kernel fix, the codec, a dependency) evaluates the
 again, once, and the next save writes a cache of its own. A build of unknown source
 (a tarball without git) never reads a cache.
 
+Nearly every release changes that source (the `doc` crate holds the timeline's
+features), so a design saved by another release is usually evaluated again. Its STEP
+imports, which take longest to evaluate (seconds to minutes for an assembly), are
+kept apart for that case (#9456): `cache/imports.json` and `cache/imports.bin` hold
+what each distinct STEP text the design imports was read as (its bodies in the
+native encoding, their names, colours, assembly paths and face entities, the
+assembly tree and the warnings), keyed by the SHA-256 of the text. The manifest
+records `solidcraft-import-cache/1`, the producer revision, the application version,
+the build, the importer source (`SOLIDCRAFT_IMPORT_SOURCE`, with the CPU architecture
+and OS) and the SHA-256 of `cache/imports.bin`. The importer source is a digest of the
+committed source a STEP file is read with: the `kernel` crate and every crate of the
+workspace or `vendor/` it is built from (from `Cargo.lock`), every `Cargo.toml` (they
+choose the dependencies' features), the locked versions of every other dependency,
+the workspace `Cargo.toml` without the application's version, `.cargo/config.toml`,
+`crates/io/build.rs` and the import cache's reader. The imports are read back only
+when the format, the producer, the importer source, the platform and the payload's
+digest match; the application version, the commit and the evaluation source are
+recorded, not compared. A release that evaluates the timeline again then evaluates
+each Import feature from the import the file kept (decoded when the feature asks for
+it, `imports_reused` in `solidcraft-cli bench-open --debug`), which the Import feature
+turns into bodies as that release does. A save keeps the imports of the texts the
+design still imports: those read in the session are encoded, those it was opened
+with are copied unread. They are optional like the model: written after it, within
+the room it leaves, or left out. Releases before them ignore the two entries.
+
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
 manifest and a payload within the container's part budget (256 MiB), leaving room

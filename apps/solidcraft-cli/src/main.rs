@@ -887,7 +887,10 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
         solidcraft_engine::io::read_design_file(path, None::<fn(solidcraft_engine::io::DesignPreview)>).map_err(|e| e.to_string())?
     };
     let parse_ms = t.elapsed().as_secs_f64() * 1000.0;
-    println!("{}", json!({"step": "parse", "ms": parse_ms, "features": doc.features.len(), "saved_model": saved.is_some()}));
+    println!(
+        "{}",
+        json!({"step": "parse", "ms": parse_ms, "features": doc.features.len(), "saved_model": saved.as_ref().is_some_and(|m| m.has_model()), "saved_imports": saved.as_ref().is_some_and(|m| m.imports.stored.is_some())})
+    );
     if args.iter().any(|a| a == "--parse-only") {
         return Ok(());
     }
@@ -896,8 +899,11 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
     drop(read);
     // Taken from the file: nothing evaluated (SOLIDCRAFT_NO_MODEL_CACHE evaluates anyway), or
     // only the features whose state a thinned file left out.
-    let adopted = saved.is_some() && s.model.last_recomputed == 0;
-    println!("{}", json!({"step": "evaluate", "ms": t.elapsed().as_secs_f64() * 1000.0, "adopted": adopted, "recomputed": s.model.last_recomputed}));
+    let adopted = saved.as_ref().is_some_and(|m| m.has_model()) && s.model.last_recomputed == 0;
+    println!(
+        "{}",
+        json!({"step": "evaluate", "ms": t.elapsed().as_secs_f64() * 1000.0, "adopted": adopted, "recomputed": s.model.last_recomputed, "imports_reused": s.model.imports.reused()})
+    );
     for r in &s.model.results {
         println!("{}", json!({"step": "feature", "id": r.id, "name": r.name, "ms": r.ms, "error": r.error}));
     }
