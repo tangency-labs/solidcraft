@@ -330,6 +330,7 @@ fn searchable_dropdown_with(
     crate::prefs_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
+    closed_dropdown_enter(ui, ui.make_persistent_id(egui::IdSalt::new(id)));
     let combo = egui::ComboBox::from_id_salt(id)
         .width(if icon.is_some() { Tokens::get().control_height } else { dimension(ui.available_width()) })
         .height(Tokens::get().space_24 * 14.0)
@@ -990,6 +991,13 @@ pub(crate) fn compact_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, curren
     dropdown_menu_width(ui, id, current, None, true, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// A closed value dropdown leaves Enter for OK; an open popup owns its own keys.
+fn closed_dropdown_enter(ui: &Ui, id: egui::Id) {
+    if ui.is_enabled() && ui.memory(|m| m.has_focus(id)) && !egui::Popup::is_any_open(ui.ctx()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        ui.memory_mut(|m| m.surrender_focus(id));
+    }
+}
+
 fn dropdown_menu_width(
     ui: &mut Ui,
     id: impl egui::AsIdSalt,
@@ -1013,6 +1021,7 @@ fn dropdown_menu_width(
     } else {
         dimension(ui.available_width())
     };
+    closed_dropdown_enter(ui, ui.make_persistent_id(egui::IdSalt::new(&id)));
     let selected_text = if leading_icon.is_some() { egui::WidgetText::from(dropdown_icon_text(current)) } else { current.into() };
     let widget = ui.make_persistent_id(egui::IdSalt::new(&id));
     let combo = egui::ComboBox::from_id_salt(id)

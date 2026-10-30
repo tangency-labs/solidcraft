@@ -1,5 +1,14 @@
 //! Bridge canvas selection into egui's ordinary Tab order.
 
+/// egui's `shift_only` also accepts physical Ctrl+Shift on macOS; dialog traversal must not.
+fn tab_direction(modifiers: &egui::Modifiers) -> Option<egui::FocusDirection> {
+    if modifiers.ctrl || modifiers.alt || modifiers.command || modifiers.mac_cmd {
+        None
+    } else {
+        Some(if modifiers.shift { egui::FocusDirection::Previous } else { egui::FocusDirection::Next })
+    }
+}
+
 /// Remember selection widgets without defining a second order for value fields or actions.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TabThrough {
@@ -13,10 +22,7 @@ impl TabThrough {
     pub(crate) fn begin(&self, ctx: &egui::Context, active: usize, canvas_value: egui::Id) {
         let direction = ctx.input(|input| {
             input.events.iter().find_map(|event| match event {
-                egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if !modifiers.any() => Some(egui::FocusDirection::Next),
-                egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if modifiers.shift_only() => {
-                    Some(egui::FocusDirection::Previous)
-                }
+                egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } => tab_direction(modifiers),
                 _ => None,
             })
         });
@@ -93,20 +99,25 @@ fn prepare(ctx: &egui::Context, scope: Scope) {
     if egui::Popup::is_any_open(ctx) && scope.layer.order != egui::Order::Foreground {
         return;
     }
-    let backwards = ctx.input(|i| {
+    let direction = ctx.input(|i| {
         i.events.iter().find_map(|event| match event {
-            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if !modifiers.any() => Some(false),
-            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if modifiers.shift_only() => Some(true),
+            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } => Some(tab_direction(modifiers)),
             _ => None,
         })
     });
-    let Some(backwards) = backwards else { return };
+    let Some(direction) = direction else { return };
+    let Some(direction) = direction else {
+        // Cancel egui's automatic Ctrl+Shift+Tab traversal without consuming the shortcut.
+        ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+        return;
+    };
+    let backwards = direction == egui::FocusDirection::Previous;
     ctx.data_mut(|d| d.insert_temp(traversal(scope.id), Traversal { backwards, pending: true }));
     let inside = ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.layer_id == scope.layer);
     ctx.input_mut(|i| {
         i.events.retain(|event| {
             !matches!(event,
-                egui::Event::Key { key: egui::Key::Tab, modifiers, .. } if !modifiers.any() || modifiers.shift_only()
+                egui::Event::Key { key: egui::Key::Tab, modifiers, .. } if tab_direction(modifiers).is_some()
             )
         })
     });
