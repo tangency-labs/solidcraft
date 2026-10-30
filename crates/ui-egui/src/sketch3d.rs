@@ -260,7 +260,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             );
         }
         painter.text(
-            s + vec2(10.0, 10.0),
+            crate::tool_cursor::readout_at(painter, proj.rect, s),
             egui::Align2::LEFT_TOP,
             format!("{}, {}, {}", crate::prefs::show_mm(app, h.x, 1), crate::prefs::show_mm(app, h.y, 1), crate::prefs::show_mm(app, h.z, 1)),
             egui::FontId::proportional(crate::theme::Tokens::get().font_small),

@@ -19,10 +19,19 @@ const ICON: f32 = 20.0;
 /// right of it, and so does the sketch tools' coordinate readout (`tools::preview`, drawn from
 /// [`READOUT`] below right). From the hot spot to the badge's bottom-left corner:
 const OFFSET: Vec2 = vec2(12.0, -8.0);
-/// Where the sketch tools' coordinate readout starts, down and right of the hot spot.
-const READOUT: f32 = 10.0;
+/// Where the sketch tools' coordinate readout starts, down and right of the hot spot: right of
+/// the system arrow, which hangs about 12 points wide below it and would cover the first value
+/// (#9480).
+pub(crate) const READOUT: Vec2 = vec2(18.0, 10.0);
 /// The gap to the hot spot when the badge flips to the left of the pointer.
 const FLIPPED_GAP: f32 = 6.0;
+
+/// Where the coordinate readout of a sketch tool's point at `point` (screen) starts: [`READOUT`]
+/// from the pointer while it is over `view`, else from the point. The point snaps away from the
+/// pointer, so a readout placed from it could still slide under the arrow.
+pub(crate) fn readout_at(painter: &egui::Painter, view: Rect, point: Pos2) -> Pos2 {
+    painter.ctx().pointer_hover_pos().filter(|p| view.contains(*p)).unwrap_or(point) + READOUT
+}
 
 /// The command whose tool or dialog is running: the one a click in the viewport goes to.
 pub(crate) fn command(app: &SolveApp) -> Option<&'static str> {
@@ -50,7 +59,7 @@ fn badge_rect(at: Pos2, bounds: Rect, readout_height: f32) -> Rect {
         min.x = at.x - FLIPPED_GAP - BADGE;
     }
     if min.y < bounds.top() {
-        min.y = at.y + READOUT + readout_height + FLIPPED_GAP;
+        min.y = at.y + READOUT.y + readout_height + FLIPPED_GAP;
     }
     Rect::from_min_size(min, vec2(BADGE, BADGE))
 }
@@ -141,7 +150,7 @@ mod tests {
         assert_eq!(icon(&h.app), Some(icon_of("sketch.circle.center")));
         let badge = badge.unwrap();
         // The coordinate readout starts READOUT below and right of the pointer: no overlap.
-        assert!(badge.bottom() < at.y + READOUT, "the badge {badge:?} covers the readout under {at:?}");
+        assert!(badge.bottom() < at.y + READOUT.y, "the badge {badge:?} covers the readout under {at:?}");
 
         // Turned off in Navigation preferences.
         h.app.ui.tool_cursor = false;
@@ -173,10 +182,32 @@ mod tests {
         for at in [middle, pos2(795.0, 300.0), pos2(400.0, 5.0), pos2(795.0, 5.0), pos2(5.0, 595.0), pos2(795.0, 595.0)] {
             let badge = badge_rect(at, bounds, line);
             assert!(bounds.contains_rect(badge), "at {at:?}: {badge:?} leaves {bounds:?}");
-            let readout = Rect::from_min_size(at + vec2(READOUT, READOUT), vec2(120.0, line));
+            let readout = Rect::from_min_size(at + READOUT, vec2(120.0, line));
             assert!(!badge.intersects(readout), "at {at:?}: {badge:?} covers the readout {readout:?}");
             assert!(!badge.contains(at), "at {at:?}: {badge:?} covers the hot spot");
         }
+    }
+
+    /// A line's coordinate readout starts right of the system arrow, which hangs below and
+    /// right of the hot spot about 12 points wide and 19 high, wherever the point snaps (#9480).
+    #[test]
+    fn the_coordinate_readout_starts_right_of_the_pointer_arrow() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        h.step(&json!({"start": "sketch.line"})).unwrap();
+        let c = h.app.viewport.rect.map(|r| r.center()).unwrap();
+        // Off a grid point, so the point snaps away from the pointer.
+        for at in [c, c + vec2(5.0, 3.0), c + vec2(-4.0, 6.0)] {
+            h.step(&json!({"move": [at.x, at.y]})).unwrap();
+            h.frames(2);
+            let readout = rect_of("viewport:readout").expect("the readout is drawn");
+            let arrow = Rect::from_min_size(at, vec2(13.0, 20.0));
+            assert!(!readout.intersects(arrow), "at {at:?}: the readout {readout:?} is under the arrow {arrow:?}");
+            assert!(readout.top() > at.y, "at {at:?}: the readout {readout:?} is not below the hot spot");
+        }
+        h.step(&json!({"key": "Escape"})).unwrap();
     }
 
     /// Every interactive tool's command has an icon to show.
