@@ -821,15 +821,19 @@ impl SurfaceEval<'_> {
     /// (`EvalNormal`, co-ported from unit `surface.surface_p3`): `Du x Dv`, at a
     /// singular point the mixed partial's cross product, then `EvaluateNormal`.
     ///
+    /// A failed evaluation does not stop it: as upstream, which ignores `Eval`'s
+    /// status, the normal is made from the matrix the failed evaluation wrote (the
+    /// derivatives before a failed zero-tangent correction).
+    ///
     /// # Errors
     ///
-    /// Those of [`SurfaceEval::eval`] (upstream ignores that status and reads the
-    /// stale matrix) and of `EvaluateNormal`.
+    /// [`SolidError::Unported`] from [`SurfaceEval::eval`]; those of `EvaluateNormal`.
     pub fn eval_normal(&mut self, k: &Kernel) -> Result<()> {
         if *self.state_mut().normal_set {
             return Ok(());
         }
-        self.eval()?;
+        // upstream ignores the status (`Eval();`) and reads the matrix as it stands
+        ignore_status(self.eval())?;
 
         let uv = self.uv();
         let (u_left, v_left) = self.sides();

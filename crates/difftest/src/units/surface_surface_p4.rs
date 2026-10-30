@@ -17,6 +17,12 @@
 //! `StepInv` runs only on planes (`SmBSplineSurface::STEPInversion` dispatching to the
 //! plane's virtual `IsSingularity` / `IsClosed`); a guess defers it (`LocalPointSolve`).
 //!
+//! [`THIN_GENERATED`] `thin####` cases, seeded apart from the `gen####` ones, run the global
+//! point solve on flat patches squashed to a width of `1e-12`..`1e-7` along one parameter
+//! (as a body flattened by a near-singular transform leaves them). There the evaluator's
+//! zero-tangent correction fails and `SmSurfaceEval::EvalNormal` reads the matrix that the
+//! failed evaluation wrote; the local solve's starting `Converged` test reads that normal.
+//!
 //! Deferred cases: the global point solve of face-owned surfaces (`SmFace::PointClassify`)
 //! and what needs the unported `surface.surface_p5` (`LocalPointSolve`, the base
 //! `IsSingularity`), e.g. a drop point or a guessed inversion.
@@ -49,7 +55,7 @@ use solidcore_ffi::units::surface_surface_p4::{self as ffi, Op};
 use super::surface_surface_p7::{
     b, curve_of, dom_of, gen_boundary_uv, gen_curve, gen_dom, gen_param, gen_plane, gen_point_near,
     gen_surface, gen_uv, harness, p2, param_of, push_crv, push_srf, push_vecs, pv,
-    req_of, sop_of, st, surface_of, unit_scale, v3, CrvIn, Fail, SrfIn,
+    req_of, sop_of, st, surface_of, unit_scale, v3, BssIn, CrvIn, Fail, SrfIn,
 };
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -57,6 +63,9 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
+
+/// Generated `thin####` global point solves on near-flat patches (their own seed stream).
+pub const THIN_GENERATED: usize = 160;
 
 /// `surface.surface_p4` runner.
 pub struct Runner;
@@ -363,11 +372,15 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
     match &i.op {
         OpIn::NormalEval { uv } => {
             let mut e = SurfaceEval::with_uv(k, Some(&s), uv[0], uv[1]);
-            match stat(e.normal(k))? {
-                Ok(n) => {
-                    o.push(0.0);
-                    pv(&mut o, n);
-                }
+            // the shim checks `FailsEval()` first (`Normal()` itself ignores it)
+            match stat(e.eval())? {
+                Ok(()) => match stat(e.normal(k))? {
+                    Ok(n) => {
+                        o.push(0.0);
+                        pv(&mut o, n);
+                    }
+                    Err(c) => o.push(c),
+                },
                 Err(c) => o.push(c),
             }
         }
@@ -883,10 +896,116 @@ fn gen_case(k: &Kernel, rng: &mut Rng) -> Inputs {
     Inputs { surface, op }
 }
 
-/// Whether the C++ global point solve can run on this input in reasonable time: only planes
-/// and unit-scale surfaces.
+/// Whether the C++ global point solve can run on this input in reasonable time: only planes,
+/// unit-scale surfaces and thin patches of low degree.
 fn gps_ok(i: &Inputs) -> bool {
-    !matches!(i.op, OpIn::Gps { .. }) || matches!(i.surface, SrfIn::Plane { .. }) || unit_scale(&i.surface)
+    !matches!(i.op, OpIn::Gps { .. })
+        || matches!(i.surface, SrfIn::Plane { .. })
+        || unit_scale(&i.surface)
+        || thin_patch(&i.surface)
+}
+
+/// A B-spline patch of degree at most 2 in each direction whose net spans less than `1e-6`
+/// of its extent across one parameter direction (a nearly flattened patch).
+fn thin_patch(s: &SrfIn) -> bool {
+    let SrfIn::Bspline(bs) = s else {
+        return false;
+    };
+    if bs.p > 2 || bs.q > 2 {
+        return false;
+    }
+    let pts: Vec<[f64; 3]> = bs.net.iter().flatten().map(|p| [p[0], p[1], p[2]]).collect();
+    let span = |a: &[f64; 3], b: &[f64; 3]| {
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    };
+    let extent = pts
+        .iter()
+        .flat_map(|a| pts.iter().map(move |b| span(a, b)))
+        .fold(0.0, f64::max);
+    // the largest distance between neighbours along v in one row (u fixed), or along u
+    let across = |along_v: bool| {
+        let mut m: f64 = 0.0;
+        for (i, row) in bs.net.iter().enumerate() {
+            for (j, p) in row.iter().enumerate() {
+                let q = if along_v {
+                    row.get(j + 1)
+                } else {
+                    bs.net.get(i + 1).and_then(|r| r.get(j))
+                };
+                if let Some(q) = q {
+                    m = m.max(span(&[p[0], p[1], p[2]], &[q[0], q[1], q[2]]));
+                }
+            }
+        }
+        m
+    };
+    extent > 0.0 && (across(true) < 1e-6 * extent || across(false) < 1e-6 * extent)
+}
+
+/// A `thin####` case: a global point solve on a flat patch of degree 1 or 2 squashed to a
+/// width of `1e-12`..`1e-7` (times its length) along one parameter direction, over its
+/// natural domain or a sub-domain, for a point on, near or off the patch.
+fn gen_thin(k: &Kernel, rng: &mut Rng) -> Option<Inputs> {
+    let deg = if rng.chance(0.6) { 1 } else { 2 };
+    let n = deg + 1;
+    let o = rng.point3(-10.0, 10.0);
+    let a = rng.point3(-12.0, 12.0);
+    let dir = rng.point3(-1.0, 1.0);
+    let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();
+    if len < 1e-3 {
+        return None;
+    }
+    let width = *rng.choose(&[1e-12, 1e-11, 5.6e-11, 1e-10, 1e-9, 1e-7])? * 12.0;
+    let b = dir.map(|x| x / len * width);
+    // a bump across the long direction keeps degree-2 patches curved but still thin
+    let bump = rng.point3(-2.0, 2.0);
+    let thin_in_v = rng.chance(0.5);
+    let mut net = Vec::new();
+    for i in 0..n {
+        let mut row = Vec::new();
+        for j in 0..n {
+            let (s_long, s_thin) = if thin_in_v { (i, j) } else { (j, i) };
+            let t_long = s_long as f64 / deg as f64;
+            let t_thin = s_thin as f64 / deg as f64;
+            let curve = if deg == 2 && s_long == 1 { 1.0 } else { 0.0 };
+            let at = |o: f64, a: f64, b: f64, m: f64| o + a * t_long + b * t_thin + m * curve;
+            let ([ox, oy, oz], [ax, ay, az], [bx, by, bz], [mx, my, mz]) = (o, a, b, bump);
+            row.push([at(ox, ax, bx, mx), at(oy, ay, by, my), at(oz, az, bz, mz), NOW]);
+        }
+        net.push(row);
+    }
+    let knots = |rng: &mut Rng| {
+        let lo = rng.uniform(-15.0, 2.0);
+        let hi = lo + rng.uniform(1.0, 15.0);
+        let mut v = vec![lo; deg + 1];
+        v.extend(std::iter::repeat_n(hi, deg + 1));
+        v
+    };
+    let (u, v) = (knots(rng), knots(rng));
+    let surface = SrfIn::Bspline(BssIn {
+        oob: false,
+        form: super::surface_surface_p7::default_form(),
+        net,
+        p: deg,
+        q: deg,
+        u,
+        v,
+    });
+    let dom = if rng.chance(0.5) {
+        super::surface_surface_p7::natural(&surface)
+    } else {
+        gen_solve_dom(rng, &surface)
+    };
+    let op = OpIn::Gps {
+        dom,
+        sop: *rng.choose(&[3u8, 3, 3, 0])?,
+        p: gen_point_near(k, rng, &surface),
+        tol: *rng.choose(&[1e-5, 1e-6, 1e-9])?,
+        target: None,
+        req: *rng.choose(&[1u8, 1, 0])?,
+    };
+    let i = Inputs { surface, op };
+    (thin_patch(&i.surface) && gps_ok(&i)).then_some(i)
 }
 
 impl UnitDiff for Runner {
@@ -920,7 +1039,28 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        let k = &Kernel::default();
+        for n in 0..THIN_GENERATED {
+            let seed = CaseContext::seed_for("surface.surface_p4.thin", n);
+            let mut rng = Rng::new(seed);
+            let Some(i) = (0..64).find_map(|_| {
+                let i = gen_thin(k, &mut rng)?;
+                let (op, input) = cpp_input(&i).ok()?;
+                ffi::validate(op, &input).ok()?;
+                Some(i)
+            }) else {
+                continue;
+            };
+            let inputs = serde_json::to_value(i).map_err(|e| harness(format!("thin case: {e}")))?;
+            cases.push(Case {
+                unit: self.id().to_string(),
+                name: format!("thin{n:04}"),
+                source: crate::case::CaseSource::Generated { seed },
+                inputs,
+            });
+        }
+        Ok(cases)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
