@@ -14,7 +14,11 @@ use crate::{KernelError, Result, guard};
 const MAX_SEGS: usize = 20_000;
 
 fn finite(x: f64, what: &str) -> Result<f64> {
-    if x.is_finite() && x.abs() < 1e7 { Ok(x) } else { Err(KernelError::Invalid(format!("{what} = {x}"))) }
+    if x.is_finite() && x.abs() < 1e7 {
+        Ok(x)
+    } else {
+        Err(KernelError::Invalid(format!("the extrusion is too long: its {what} is {x} mm from the sketch plane, past the limit of 10000000 mm")))
+    }
 }
 
 /// A closed wire in 3D from a sketch loop, with each edge's segment and that segment's

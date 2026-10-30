@@ -449,6 +449,9 @@ pub struct RuleValues {
     pub angle_display: AngleDisplay,
 }
 
+/// A sheet rule's thickness is less than this (mm).
+const MAX_SHEET_THICKNESS: f64 = 1e4;
+
 impl Document {
     /// A rule by name, the active one, or the default steel rule.
     pub fn sheet_rule(&self, name: Option<&str>) -> SheetRule {
@@ -463,8 +466,8 @@ impl Document {
     pub fn rule_values(&self, vals: &std::collections::BTreeMap<String, Value>, r: &SheetRule) -> Result<RuleValues> {
         let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
         let t = expr::eval_with(&r.thickness, &look)?.to_kind(Kind::Length)?;
-        if !(t > 0.0 && t < 1e4) {
-            return Err(DocError::Invalid("the sheet thickness must be positive".into()));
+        if !(t > 0.0 && t < MAX_SHEET_THICKNESS) {
+            return Err(DocError::Invalid("the sheet thickness must be more than 0 and less than 10000 mm".into()));
         }
         let with_t = |e: &str, k: Kind| -> Result<f64> {
             let f = |n: &str| if n == "Thickness" && !vals.contains_key("Thickness") { Ok(Value::length(t)) } else { look(n) };
@@ -485,8 +488,12 @@ impl Document {
             angle_display: AngleDisplay::parse(&r.angle_display)
                 .ok_or_else(|| DocError::Invalid(format!("unknown bend angle display `{}` (bend or included)", r.angle_display)))?,
         };
-        if !(0.0..=1.0).contains(&v.k_factor) || v.bend_radius < 0.0 {
-            return Err(DocError::Invalid("the K-factor must be 0…1 and the bend radius positive".into()));
+        // Each value named on its own: a sharp bend (radius 0) is allowed (#9625).
+        if !(0.0..=1.0).contains(&v.k_factor) {
+            return Err(DocError::Invalid("the K-factor must be between 0 and 1".into()));
+        }
+        if !(v.bend_radius >= 0.0) {
+            return Err(DocError::Invalid("the bend radius must not be negative".into()));
         }
         Ok(v)
     }

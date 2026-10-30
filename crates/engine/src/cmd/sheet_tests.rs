@@ -509,6 +509,25 @@ fn rules_are_parameters() {
     assert!(s.execute("sheet.manage_rules", &json!({"name": "Bad", "k_factor": 3})).is_err());
 }
 
+/// A refused rule names the value at fault and its range (#9625): a thickness too large is not
+/// "not positive", and a negative bend radius is not blamed on the K-factor (or the other way).
+#[test]
+fn a_refused_rule_names_the_value_at_fault() {
+    let mut s = Session::default();
+    let refused =
+        |s: &mut Session, p: Value| s.execute("sheet.manage_rules", &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{p} was accepted"));
+    let e = refused(&mut s, json!({"name": "R", "thickness": 10000}));
+    assert!(e.contains("the sheet thickness must be more than 0 and less than 10000 mm") && !e.contains("positive"), "{e}");
+    let e = refused(&mut s, json!({"name": "R", "thickness": 0}));
+    assert!(e.contains("the sheet thickness must be more than 0 and less than 10000 mm"), "{e}");
+    let e = refused(&mut s, json!({"name": "R", "thickness": 2, "bend_radius": -1}));
+    assert!(e.contains("the bend radius must not be negative") && !e.contains("K-factor"), "{e}");
+    let e = refused(&mut s, json!({"name": "R", "thickness": 2, "k_factor": 3}));
+    assert!(e.contains("the K-factor must be between 0 and 1") && !e.contains("bend radius"), "{e}");
+    // A sharp bend (radius 0) is allowed, and the message no longer says otherwise.
+    run(&mut s, "sheet.manage_rules", json!({"name": "R", "thickness": 2, "bend_radius": 0}));
+}
+
 #[test]
 fn contour_flange_hem_and_tray() {
     // Oracle 72.

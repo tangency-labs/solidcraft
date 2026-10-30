@@ -1411,6 +1411,21 @@ fn preview_of_an_edit() {
     assert!(Arc::ptr_eq(&doc, &s.doc));
 }
 
+/// An extrusion too long says so and gives the limit, not `end = 1000000000` (#9625), whether
+/// the distance is typed as text or as a number inside the parameter range.
+#[test]
+fn an_extrude_too_long_says_so() {
+    for distance in [json!("1e9 mm"), json!(5e8), json!("-2e7")] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let e = s.execute("solid.extrude", &json!({"distance": distance})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("the extrusion is too long") && e.contains("10000000 mm") && !e.contains("end ="), "{distance}: {e}");
+        assert!(s.model.state().bodies.is_empty(), "{distance}");
+    }
+}
+
 /// `operation: "auto"`: into a body cuts; additions default to Join when a solid exists.
 #[test]
 fn extrude_auto_operation() {

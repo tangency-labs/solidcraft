@@ -491,7 +491,7 @@ fn thread_on_impl(
         (major - dia).abs() < 0.15 * major || (turned && dia > major)
     };
     if !fits {
-        return Err(DocError::Invalid(format!("an {} thread does not fit a {dia:.2} mm {}", name, if cyl.internal { "hole" } else { "shaft" })));
+        return Err(DocError::Invalid(format!("an {} thread does not fit this {dia:.2} mm {}", name, if cyl.internal { "hole" } else { "shaft" })));
     }
     // From the end of the face nearest the point.
     let s = (p - cyl.axis_point).dot(cyl.axis);
@@ -4927,7 +4927,15 @@ fn hole_tools_and_prisms(
         }
         HoleKind::Countersink { cs_diameter, cs_angle, tip_angle } => {
             let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
-            if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+            // The angle and the width are told apart: an angle out of range is not a countersink
+            // too narrow (#9625).
+            if !(half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
+                return Err(DocError::Invalid(format!(
+                    "the countersink angle must be more than 0° and less than 180°, not {}°",
+                    ((2.0 * half).to_degrees() * 1e6).round() / 1e6
+                )));
+            }
+            if !(rc > r) {
                 return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
             }
             // Cone from above the face to just inside the hole radius, then the hole.
