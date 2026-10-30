@@ -7,7 +7,7 @@
     solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
                                                        (+ the solvecraft-cli.exe compatibility alias)
-    SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
+    solidcraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
 
   The binaries link the C runtime statically (+crt-static), so nothing else needs installing.
   The icon comes from $env:SOLIDCRAFT_ICONS (solidcraft.ico, made by `solidcraft-cli icon`), or
@@ -137,7 +137,7 @@ Compress-Archive -Path $Portable -DestinationPath $Zip
 # ---- the app as a plain download (x64) ---------------------------------------------------------
 $Outputs = @($Msi, $Zip)
 if ($Arch -eq 'x64') {
-  $Exe = Join-Path $Dist "SolidCraft-$Version-windows-$Arch.exe"
+  $Exe = Join-Path $Dist "solidcraft-$Version-windows-$Arch.exe"
   Copy-Item (Join-Path $Stage 'solidcraft.exe') $Exe
   $Outputs += $Exe
 }
