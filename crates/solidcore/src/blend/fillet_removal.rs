@@ -35,6 +35,9 @@
 //!   B-rep's own surfaces for its intersections and restores it; the port intersects
 //!   evaluation copies of the surfaces with the flag on, leaving the B-rep's surfaces
 //!   alone.
+//! - **Ring fillets (not upstream).** With `Kernel::fixes.fillet_removal_takes_ring_fillets`
+//!   (WR-605, the SolidCraft fork's tangency-labs/smlib 52bfef0) [`delete_fillet_face`]
+//!   hands a ring fillet to [`ring::RingFilletRemoval`].
 //! - **Notifications.** Each B-rep edit notifies through the kernel's callbacks
 //!   (`with_kernel_callbacks`), one edit at a time, as upstream's objects notify their
 //!   context.
@@ -85,6 +88,8 @@ use crate::topology::edgeuse::p1::{self as eu1, UvTrimCurveArg};
 use crate::topology::edgeuse::p3::get_or_create_uv_trim_curve;
 use crate::topology::topology_traverser::Marks;
 use crate::topology::{vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, LoopuseStart, VertexId};
+
+pub mod ring;
 
 const OP: &str = "blend::fillet_removal";
 
@@ -1822,7 +1827,9 @@ pub fn glue_edges(
 
 /// `SmBrep::DeleteFilletFace(pFilletFace, pd3dTol)`: removes the four-sided fillet face
 /// `fillet_face` and closes the hole with the sharp edge where its tangent faces meet
-/// ([`FilletRemoval::remove_face`]); `tol_3d` defaults to the face's tolerance.
+/// ([`FilletRemoval::remove_face`]); `tol_3d` defaults to the face's tolerance. With
+/// `Kernel::fixes.fillet_removal_takes_ring_fillets` (WR-605, not upstream) a ring
+/// fillet goes to [`ring::RingFilletRemoval`] instead.
 ///
 /// # Errors
 ///
@@ -1842,6 +1849,18 @@ pub fn delete_fillet_face(
         Some(t) => t,
         None => crate::topology::face::p2::tolerance(b, fillet_face)?,
     };
+    // Not upstream (WR-605, `fixes.fillet_removal_takes_ring_fillets`; SolidCraft change,
+    // tangency-labs/smlib 52bfef0): a ring fillet (closed rails, no ends) has its own
+    // removal.
+    if k.fixes.fillet_removal_takes_ring_fillets
+        && ring::RingFilletRemoval::is_ring(k, b, Some(fillet_face), 2.0)?
+    {
+        let mut removal = ring::RingFilletRemoval::new(fillet_face, tol_3d);
+        let r = removal.remove_face(k, b);
+        // (not upstream: the port's cached topology fields, true again for the caller)
+        b.refresh_cached_topology();
+        return r;
+    }
     let mut removal = FilletRemoval::new(fillet_face, tol_3d);
     let r = removal.remove_face(k, b);
     // (not upstream: the port's cached topology fields, true again for the caller)

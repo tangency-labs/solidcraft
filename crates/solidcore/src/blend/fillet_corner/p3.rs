@@ -3021,17 +3021,33 @@ pub(crate) fn join_with(
     other: &mut Curve,
     other_at_end: bool,
 ) -> Result<()> {
+    join_with_gap(k, this, this_at_end, other, other_at_end, None)
+}
+
+/// [`join_with`] with `JoinWith`'s optional `pGapTolerance` (`None`: the curves'
+/// default).
+pub(crate) fn join_with_gap(
+    k: &Kernel,
+    this: &mut Curve,
+    this_at_end: bool,
+    other: &mut Curve,
+    other_at_end: bool,
+    gap_tolerance: Option<f64>,
+) -> Result<()> {
     let owner = this.owner();
     match this.kind_mut() {
-        CurveKind::Line(l) => {
-            l.join_with(u64::from(this_at_end), other, u64::from(other_at_end), None)
-        }
+        CurveKind::Line(l) => l.join_with(
+            u64::from(this_at_end),
+            other,
+            u64::from(other_at_end),
+            gap_tolerance,
+        ),
         CurveKind::Ellipse(e) => e.join_with(
             k,
             u64::from(this_at_end),
             other,
             u64::from(other_at_end),
-            None,
+            gap_tolerance,
             owner,
         ),
         kind => {
@@ -3039,7 +3055,7 @@ pub(crate) fn join_with(
                 bspline_part_mut(kind).ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
             let other_base = bspline_part_mut(other.kind_mut())
                 .ok_or_else(|| SolidError::null_pointer(OP_3X2))?;
-            this_base.join_with(k, this_at_end, other_base, other_at_end, None)
+            this_base.join_with(k, this_at_end, other_base, other_at_end, gap_tolerance)
         }
     }
 }

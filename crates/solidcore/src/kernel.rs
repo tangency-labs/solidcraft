@@ -515,6 +515,8 @@ pub struct UpstreamFixes {
     /// turn on) collapses to one NURBS parameter and the surface built on it gets NaN knots
     /// and fails with `SM_ERR` (WR-211, #428; the fork's tangency-labs/smlib@5c0b5ed).
     pub ellipse_adjust_step_interval_keeps_turns: bool,
+    /// `SmBrep::DeleteFilletFace` removes a ring fillet (a round all the way round a boss's foot or rim: two closed tangent rails, one vertex each, and at most one seam) with the fork's `SmRingFilletRemoval`: the sharp edge is the intersection of the two tangent faces' surfaces within their natural domains (an exact circle for a boss), the tangent face's seam runs on to it along its line, and the rails become it; a removal that would need a surface or a curved edge continued past its domain is refused before the B-rep changes. Upstream takes four-sided fillets only, and fails on a ring (WR-605; SolidCraft change, tangency-labs/smlib 52bfef0, with 661f79c under `glue_vertices_joins_every_region`).
+    pub fillet_removal_takes_ring_fillets: bool,
 }
 
 /// Options for [`Kernel::new`].
