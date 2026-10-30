@@ -299,11 +299,11 @@ mod tests {
     }
 
     /// A chamfer of a basin's rim loop whose leg would run off the 1 mm rim over the slab's front
-    /// edge is refused as too large, naming the largest that fits, just below the rim's width
-    /// (the fit search's step). (The loop's blends that fit, with their exact mitred volumes,
-    /// are the rig's fillets/1080-*-equal-slope-basin-* cases.)
+    /// edge is refused as too large, the kind a fit can reduce. (The largest size that fits is
+    /// the doc layer's to name; it and the loop's blends that fit, with their exact mitred
+    /// volumes, are graded by the rig's fillets/1080-*-equal-slope-basin-* cases.)
     #[test]
-    fn a_rim_loop_chamfer_running_off_its_rim_is_refused_naming_the_largest() {
+    fn a_rim_loop_chamfer_running_off_its_rim_is_refused() {
         use solidcraft_geom::{Loop2, Plane, Vec2};
         let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
@@ -312,12 +312,10 @@ mod tests {
                 .unwrap();
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 1.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-        let message = match crate::chamfer(&basin, &picks, 2.0) {
-            Err(KernelError::TooLarge(m)) => m,
+        match crate::chamfer(&basin, &picks, 2.0) {
+            Err(KernelError::TooLarge(_)) => {}
             Err(e) => panic!("refused, but not as too large: {e}"),
             Ok(_) => panic!("a chamfer whose leg runs off the rim was built"),
-        };
-        let largest: f64 = message.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
-        assert!((1.0 - 1e-3 - 1e-12..1.0).contains(&largest), "{message}");
+        }
     }
 }
