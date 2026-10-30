@@ -280,6 +280,11 @@ fn op_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError> 
 }
 
 fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    raw_code(op.code(), path, input)
+}
+
+/// [`raw`] with the shim's op code (`op + 100` for a tagged op).
+fn raw_code(code: i32, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let cpath = std::ffi::CString::new(path).map_err(|_| bad("path has a NUL byte"))?;
     call_with_buffer(4096, |buf, len| {
         // SAFETY: cpath is a valid NUL-terminated string; input is valid for
@@ -288,7 +293,7 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
         // capacity; len is valid.
         unsafe {
             sys::sc_heal_stitch_p1_eval(
-                op.code(),
+                code,
                 cpath.as_ptr(),
                 input.as_ptr(),
                 input.len() as i64,
@@ -308,6 +313,26 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// [`FfiError::InvalidArgument`] for input the shim would read out of bounds or that
 /// is undefined upstream; the shim's status otherwise.
 pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    eval_with(op, path, input, false)
+}
+
+/// [`eval`] with every face and edge of the built B-rep (traversal order) first given
+/// its own `SmLongAttribute` (id `10007 + index`, edges `10507 + index`, `SM_AB_COPY`),
+/// the output then ending (on every way out of the op) with `nf (n id*)* ne (n id*)*`,
+/// the ascending attribute ids of every face (`GetFaces` order) and edge (`GetEdges`
+/// order) after it (issue #1462; `sc_attribute_tags.h`).
+///
+/// # Errors
+///
+/// Those of [`eval`]; [`FfiError::InvalidArgument`] for [`Op::Export`].
+pub fn eval_tagged(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    if op == Op::Export {
+        return Err(bad("an export is not tagged"));
+    }
+    eval_with(op, path, input, true)
+}
+
+fn eval_with(op: Op, path: &str, input: &[f64], tagged: bool) -> Result<Vec<f64>, FfiError> {
     let mut rd = Reader { input, at: 0 };
     block(&mut rd, path)?;
     let block_in = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
@@ -333,7 +358,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             return Err(bad("full stitch on a sheet value beyond 1e150 (HANG-30)"));
         }
     }
-    raw(op, path, input)
+    raw_code(op.code() + if tagged { 100 } else { 0 }, path, input)
 }
 
 /// The largest block value the full upstream stitches are given (HANG-30).

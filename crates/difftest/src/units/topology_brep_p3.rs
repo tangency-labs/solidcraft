@@ -359,7 +359,7 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
 
 /// The identity each entity is notified and attributed under: its type code and
 /// `(kind << 32) | (1 + index)`, so records of different kinds never share a key.
-fn key_of(e: EntityRef) -> ObjectRef {
+pub(super) fn key_of(e: EntityRef) -> ObjectRef {
     let (kind, type_code, i) = match e {
         EntityRef::Region(x) => (1u64, 16012, x.index()),
         EntityRef::Shell(x) => (2, 16013, x.index()),
@@ -399,7 +399,7 @@ fn entity_of_key(key: ObjectKey) -> Option<EntityRef> {
 
 /// The identity of the source B-rep's entities in a copy or merge into another B-rep
 /// (its ids overlap the destination's, which are notified under [`key_of`]).
-fn source_key_of(e: EntityRef) -> ObjectRef {
+pub(super) fn source_key_of(e: EntityRef) -> ObjectRef {
     let r = key_of(e);
     ObjectRef {
         type_code: r.type_code,

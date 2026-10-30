@@ -6,7 +6,11 @@
 //! `LocalOperation` and returns `record_len record* 0 graph`, the record being the status,
 //! then samples of every edge curve, its edge uses' UV trim curves and every face surface
 //! (type, natural interval or domain, five or nine evaluated points) and the raw graph of
-//! the changed B-rep. A failed fixture build returns `-999 status`; a replacement the shim
+//! the changed B-rep. Op 3 is op 1 with every face (`GetFaces` order) and edge (`GetEdges`
+//! order) first given its own `SmLongAttribute` (id `10007 + 500 kind + index`, kind 0
+//! face, 1 edge, `SM_AB_COPY`), the record then ending with `nf (n id*)* ne (n id*)*`, the
+//! ascending attribute ids each face and edge of the changed B-rep carries (issue #1462).
+//! A failed fixture build returns `-999 status`; a replacement the shim
 //! cannot build (face index out of range, face without surface, degenerate normal) `-998`.
 
 use super::topology_edgeuse_p1::{brep_block, Reader};
@@ -46,7 +50,8 @@ pub struct Replacement {
 }
 
 /// Op 0 exports the fixture graph, op 1 runs `LocalOperation`, op 2 exports the native
-/// face and vertex lists (`nf face* nv vertex*`, indices of the graph).
+/// face and vertex lists (`nf face* nv vertex*`, indices of the graph), op 3 runs the
+/// tagged `LocalOperation`.
 ///
 /// `block`: the B-rep block. `replaced`: at most [`MAX_REPLACED`] faces, every number
 /// finite.
@@ -58,7 +63,7 @@ pub fn eval(
 ) -> Result<Vec<f64>, FfiError> {
     let bad = |m: &str| FfiError::InvalidArgument(m.into());
     let finite = |r: &Replacement| r.offset.is_finite() && r.tilt.iter().all(|x| x.is_finite());
-    if op > 2 || replaced.len() > MAX_REPLACED || !replaced.iter().all(finite) {
+    if op > 3 || replaced.len() > MAX_REPLACED || !replaced.iter().all(finite) {
         return Err(bad("replacement list"));
     }
     let mut args = vec![replaced.len() as f64];

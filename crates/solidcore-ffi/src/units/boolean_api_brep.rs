@@ -40,7 +40,7 @@
 //! | `Piecewise`     | 14 | brep brep `create_new`                 | `has [is_first brep brep]`                      |
 //! | `Sweep`         | 15 | brep `D[3] dist stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)         |
 //! | `RotationalSweep` | 16 | brep `P[3] A[3] angle stitch merge region` sel | brep (also on `SM_ERR_INVALID_INPUT`)  |
-//! | `Attributed`    | 17 | brep brep `operation` `behavior`       | two-B-rep record, then the attribute rows       |
+//! | `Attributed`    | 17 | brep brep `operation` `behavior` [`copy_first` flags] | two-B-rep record, then the attribute rows |
 //! | `TessellateBoundaries` | 18 | brep `angle_tol_deg` `nd`, `nd` edge indices | (also after `SM_ERR`) `ne` edge indices, `nc` counts, `np` points `x y z` |
 //! | `AttributedList` | 19 | `behavior`, a `MergeBreps` / `Lists` / `Trees` call | its record, then the attribute rows |
 //!
@@ -80,7 +80,10 @@
 //! `Attributed` gives every face (`GetFaces` order) and edge (`GetEdges` order) of the first
 //! (operand 0) and second (operand 1) B-rep its own `SmLongAttribute`: id
 //! [`ATTRIBUTE_BASE`] `+ 1000 operand + 500 kind + index` (kind 0 face, 1 edge), value the
-//! id, behaviour `behavior` (`SmAttributeBehaviorType`, 0 to 4); then `SmApiBoolean`. On
+//! id, behaviour `behavior` (`SmAttributeBehaviorType`, 0 to 4); then `SmApiBoolean`, or
+//! with `options` (the optional tail `copy_first` and the five flags)
+//! `SmApiBooleanWithOptions`, the first operand first replaced by its `SmApiBrepCopy`
+//! when `copy_first` (a kept second operand follows `bKeepOtherBrep` too). On
 //! success the two-B-rep record is followed by `faces rows... edges rows...` of the result
 //! and, when upstream keeps it, of the second B-rep, then the number of those values
 //! ([`split_measures`]). A row is `measure n` then per attribute (in ascending order)
@@ -521,6 +524,9 @@ pub enum Call {
         operation: i32,
         /// `SmAttributeBehaviorType` value of the tags (0 to 4).
         behavior: u8,
+        /// `SmApiBooleanWithOptions` instead of `SmApiBoolean`: whether the first operand
+        /// is first replaced by its `SmApiBrepCopy`, and the merge flags.
+        options: Option<(bool, Flags)>,
     },
     /// `SmApiTessellateBoundaries` of `brep`, the edges at `drop_curves` (`GetEdges`
     /// indices) first left without curve.
@@ -946,6 +952,7 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             b,
             operation,
             behavior,
+            options,
         } => {
             check_op(*operation)?;
             if *behavior > 4 {
@@ -956,6 +963,16 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             push_spec(&mut o, b)?;
             o.push(f64::from(*operation));
             o.push(f64::from(*behavior));
+            if let Some((copy_first, flags)) = options {
+                o.extend([
+                    flag(*copy_first),
+                    flag(flags.cookie_cutter),
+                    flag(flags.imprinting),
+                    flag(flags.boolean_post_process),
+                    flag(flags.imprint_and_classify_faces),
+                    flag(flags.keep_other_brep),
+                ]);
+            }
         }
         Call::TessellateBoundaries {
             brep,

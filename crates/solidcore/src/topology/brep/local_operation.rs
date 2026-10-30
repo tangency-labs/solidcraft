@@ -13,14 +13,21 @@
 //! holds ([`OffsetExecutive::set_local_surfaces`]). The executive's notifications are
 //! the caller's ([`OffsetNotifications`]). Upstream removes every face of the B-rep and
 //! copies the faces of the offset B-rep in with a merge (`RemoveFaces`, `CopyFaces`), as
-//! here; the copy notifies through an arena-only store. `SmTemporaryChangeValue` of
+//! here; the copy notifies through an arena-only store. (not upstream) The B-rep's own
+//! attributes ([`Brep::add_attribute`]) are lent to the offset under the caller's
+//! original identities, the offset B-rep takes what the offset leaves on its objects,
+//! and the copy back gives them to the B-rep (SMLib's Copy handler), so each face keeps
+//! its attributes as upstream's do. `SmTemporaryChangeValue` of
 //! `m_bEditingEnabled` is a set and restore of the flag. The debug drawing code is omitted. No
 //! recursion is introduced here. Opt-in (WR-534,
 //! `Kernel::fixes.local_operation_box_holds_new_surfaces`, the fork's
 //! tangency-labs/smlib@a1ee273): the box that sizes the executive's offset distance also
 //! holds the replacement surfaces.
 
+use std::collections::BTreeSet;
+
 use crate::error::{Result, SolidError};
+use crate::geom::attribute::ObjectKey;
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::knots::Side;
@@ -29,9 +36,8 @@ use crate::offset::offset_executive::p2::OffsetNotifications;
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1 as bp1;
-use crate::topology::brep::p2::ArenaNotifyState;
+use crate::topology::brep::p2;
 use crate::topology::brep::p5;
-use crate::topology::brep::p7;
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::face::p2 as face_ops;
 use crate::topology::{Brep, FaceId};
@@ -140,8 +146,22 @@ pub fn local_operation(
     // extend/intersect to fill new convex edge gaps rather than adding a fillet
     executive.set_extend_convex_edges(true);
 
+    // (not upstream) `b`'s own attributes go to the offset under the original
+    // identities, as upstream's live on the faces it copies (`SM_NO_COPY` of each
+    // source face); the caller's store does not keep them afterwards
+    let seeded: BTreeSet<ObjectKey> = b
+        .attributed_entities()
+        .into_iter()
+        .map(|e| (notifications.original_key_of)(e).key)
+        .collect();
+    p2::seed_brep_attributes(
+        notifications.attributes,
+        b.attribute_store().clone(),
+        notifications.original_key_of,
+    )?;
+
     // Build a new Brep by merging in all the faces with their new surfaces
-    let mut new_brep = executive
+    let offset = executive
         .do_extended_offset(k, Some(&mut *b), notifications)
         .map_err(|e| {
             if e.is_unported() || k.fixes.local_operation_offset_status {
@@ -149,8 +169,23 @@ pub fn local_operation(
             } else {
                 SolidError::sm_err(OP)
             }
-        })?;
+        });
     drop(executive);
+    let new_brep = offset.and_then(|mut new_brep| {
+        // the offset B-rep's objects carry what the offset gave them
+        p2::restore_keyed_attributes(
+            &mut new_brep,
+            notifications.attributes,
+            notifications.result_key_of,
+        )?;
+        Ok(new_brep)
+    });
+    if !seeded.is_empty() {
+        notifications
+            .attributes
+            .retain_rekeyed(&|key| (!seeded.contains(&key)).then_some(key))?;
+    }
+    let mut new_brep = new_brep?;
 
     // remove all faces from this Brep, then move all faces of the new Brep into it
     // (`CopyFaces` with a merge, which also grows this Brep's tolerance to the new one's)
@@ -168,19 +203,10 @@ fn move_faces(k: &mut Kernel, b: &mut Brep, new_brep: &mut Brep) -> Result<()> {
     let new_faces = bp1::faces(new_brep, None)?;
     let face_ref = |face| arena_identity(CacheObject::Face(face));
     // the arena entry carries no attribute records: the copy notifies through an
-    // arena-only store (a default record per object of both B-reps)
-    let mut state = ArenaNotifyState::new(new_brep);
-    state.seed(b);
-    p7::copy_faces(
-        k,
-        new_brep,
-        &new_faces,
-        b,
-        true,
-        &face_ref,
-        &mut state.env(None),
-    )?;
-    Ok(())
+    // arena-only store (a default record per object of both B-reps) whose source
+    // identities are distinct from `b`'s, holding both B-reps' attributes; `b` gets the
+    // attributes its objects end with (the merge branch of `p7::copy_faces`)
+    crate::boolean::merge::p3::copy_component(k, new_brep, &new_faces, b, &face_ref)
 }
 
 #[cfg(test)]

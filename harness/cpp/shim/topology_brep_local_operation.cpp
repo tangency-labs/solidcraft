@@ -5,6 +5,7 @@
 // (read only from SMLib). Layout in
 // crates/solidcore-ffi/src/units/topology_brep_local_operation.rs.
 #include "sc_topology_fixture.h"
+#include "sc_attribute_tags.h"
 #include <memory>
 
 namespace {
@@ -63,18 +64,20 @@ void put_geometry(std::vector<double>& o, SmBrep* b) {
     for (ULONG i = 0; i < faces.GetSize(); ++i)
         put_surface_samples(o, faces[i]->GetSurface());
 }
+
 }
 
 // Args: `count` then per replaced face `index offset tx ty tz`: the new surface is the plane
 // through the face's surface point at the middle of the face's UV domain, moved `offset`
 // along the surface normal there, with the normal plus `(tx,ty,tz)`. Op 0 exports the fixture
 // graph (`0 graph`), op 2 its native face and vertex lists (`nf face* nv vertex*`); op 1 runs
-// LocalOperation: `record_len status geometry... 0 graph` of the changed B-rep. A face
-// without surface or a degenerate normal returns `-998`.
+// LocalOperation: `record_len status geometry... 0 graph` of the changed B-rep; op 3 is op 1
+// with every face and edge tagged first (`tag_objects`, GetFaces / GetEdges order) and the
+// record ending with their tags after (`put_tags`, sc_attribute_tags.h). A face without surface or a degenerate normal returns `-998`.
 SC_EXPORT int32_t sc_topology_brep_local_operation_eval(int32_t op, const char* path,
         const double* input, int64_t n, const double* a, int64_t na, double* out, int64_t cap,
         int64_t* out_len) {
-    if (op < 0 || op > 2 || !input || n < 1 || !a || na < 1 || !path || !out_len) return SC_ERR_ARG;
+    if (op < 0 || op > 3 || !input || n < 1 || !a || na < 1 || !path || !out_len) return SC_ERR_ARG;
     int64_t count = (int64_t)a[0];
     if (count < 0 || na != 1 + 5 * count) return SC_ERR_ARG;
     SC_TRY
@@ -135,9 +138,15 @@ SC_EXPORT int32_t sc_topology_brep_local_operation_eval(int32_t op, const char* 
         replaced.Add(f);
         surfaces.Add(new (the_context()) SmPlane(origin, tilted, &the_context()));
     }
+    if (op == 3) {
+        SmTArray<SmEdge*> edges;
+        b->GetEdges(edges);
+        tag_objects(the_context(), faces, edges);
+    }
     status = b->LocalOperation(replaced, surfaces);
     std::vector<double> record = {st(status)};
     put_geometry(record, b);
+    if (op == 3) put_tags(record, b);
     std::vector<double> result = {(double)record.size()};
     result.insert(result.end(), record.begin(), record.end());
     result.push_back(0.0);

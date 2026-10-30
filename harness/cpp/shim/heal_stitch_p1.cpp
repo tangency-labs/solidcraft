@@ -29,6 +29,7 @@
 
 #include "sc_edgeuse_graph.h"
 #include "sc_stitch_digest.h"
+#include "sc_attribute_tags.h"
 
 #include <SmApiBrep.h>
 #include <SmApiGeneral.h>
@@ -475,7 +476,21 @@ void put_curve_cache(SmEdge* e, std::vector<double>& o)
     }
 }
 
-void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
+// A tagged op's tail (issue #1462): on every way out of run_op after the build, the tags
+// the B-rep's faces and edges carry (put_tags), before the B-rep is deleted.
+struct TagTail
+{
+    SmBrep* brep;
+    std::vector<double>& o;
+    bool tagged;
+    ~TagTail()
+    {
+        if (tagged)
+            put_tags(o, brep);
+    }
+};
+
+void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o, bool tagged)
 {
     SmStatus bst;
     Built b;
@@ -491,6 +506,18 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     Graph g;
     walk(brep, g);
     walk_more(brep, g);
+    // tagged: every face and edge (traversal order) its own tag first
+    if (tagged)
+    {
+        SmTArray<SmFace*> faces;
+        SmTArray<SmEdge*> edges;
+        for (SmFace* f : g.faces)
+            faces.Add(f);
+        for (SmEdge* e : g.edges)
+            edges.Add(e);
+        tag_objects(the_context(), faces, edges);
+    }
+    TagTail tail{brep, o, tagged};
     switch (op)
     {
     case OP_EXPORT:
@@ -807,7 +834,9 @@ SC_EXPORT int32_t sc_heal_stitch_p1_eval(int32_t op, const char* path, const dou
     SC_TRY
     Rd rd{in, 0};
     std::vector<double> o;
-    run_op(op, rd, path, o);
+    // op + 100: the op tagged (TagTail)
+    const bool tagged = op >= 100;
+    run_op(tagged ? op - 100 : op, rd, path, o, tagged);
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH
 }

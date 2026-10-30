@@ -374,6 +374,12 @@ enum Inputs {
         operation: i32,
         #[serde(default)]
         behavior: u8,
+        /// `SmApiBooleanWithOptions` with these flags instead of `SmApiBoolean`.
+        #[serde(default)]
+        flags: Option<FlagsIn>,
+        /// With `flags`: the first operand is first replaced by its `SmApiBrepCopy`.
+        #[serde(default)]
+        copy_first: bool,
     },
     /// `SmApiTessellateBoundaries` of `brep`, the edges at `drop_curves` (`GetEdges`
     /// indices) first left without curve.
@@ -602,11 +608,25 @@ fn to_call(i: &Inputs) -> Call {
             b,
             operation,
             behavior,
+            flags,
+            copy_first,
         } => Call::Attributed {
             a: spec(a),
             b: spec(b),
             operation: *operation,
             behavior: *behavior,
+            options: flags.map(|f| {
+                (
+                    *copy_first,
+                    Flags {
+                        cookie_cutter: f.cookie_cutter,
+                        imprinting: f.imprinting,
+                        boolean_post_process: f.boolean_post_process,
+                        imprint_and_classify_faces: f.imprint_and_classify_faces,
+                        keep_other_brep: f.keep_other_brep,
+                    },
+                )
+            }),
         },
         Inputs::TessellateBoundaries {
             brep,
@@ -1476,14 +1496,40 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
             b,
             operation,
             behavior,
+            flags,
+            copy_first,
         } => {
             let behavior = Behavior::from_code(i32::from(*behavior))
                 .map_err(|e| Stop::Harness(harness(format!("behavior: {e}"))))?;
             let (mut a, mut b) = (build(k, a)?, build(k, b)?);
             tag_operand(&mut a, 0, behavior)?;
             tag_operand(&mut b, 1, behavior)?;
-            let kept = keeps_other(*operation, false);
-            match api::boolean(k, a, b, op(*operation)?) {
+            let kept = keeps_other(*operation, flags.is_some_and(|f| f.keep_other_brep));
+            let run = match flags {
+                None => api::boolean(k, a, b, op(*operation)?),
+                Some(f) => {
+                    let a = if *copy_first {
+                        // SmApiBrepCopy of the tagged operand (an arena-only store,
+                        // as the topology.brep_p3 copy runner's)
+                        let mut state = solidcore::topology::brep::p2::ArenaNotifyState::default();
+                        let mut env = state.env(None);
+                        env.key_of = &super::topology_brep_p3::key_of;
+                        match solidcore::topology::brep::p3::api_brep_copy(
+                            k,
+                            &mut env,
+                            Some(&a),
+                            &super::topology_brep_p3::source_key_of,
+                        ) {
+                            Ok(c) => c,
+                            Err(e) => return Ok(err_output(&e)),
+                        }
+                    } else {
+                        a
+                    };
+                    api::boolean_with_options(k, a, b, op(*operation)?, options(*f))
+                }
+            };
+            match run {
                 Ok(mut out) => {
                     let rec = two_record(&out, kept)?;
                     let mut rows = Vec::new();

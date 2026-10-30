@@ -2478,37 +2478,33 @@ pub(crate) fn squeeze_edge_to(
 }
 
 /// `SmBrep::MakeVertexSplitEdge(edge, t, rpE1, rpE2, rpNewV)` (unit `topology.brep_p9`),
-/// with its notifications on records local to the call (as [`set_point`]). A refused
-/// split (`SM_ERR` with the nearby endpoint) is an `SM_ERR` error: the caller only
-/// tests for `SM_SUCCESS`.
+/// with its notifications on an arena-only state local to the call
+/// ([`crate::topology::brep::p2::ArenaNotifyState`]). A refused split (`SM_ERR` with
+/// the nearby endpoint) is an `SM_ERR` error: the caller only tests for `SM_SUCCESS`.
+///
+/// (not upstream) The state holds `b`'s own attributes for the split and gives them
+/// back afterwards, so both pieces of a split edge keep its attributes
+/// (`SM_NO_SPLIT_IN_BREP`), as upstream's live on the edge.
 pub(crate) fn make_vertex_split_edge(
     k: &mut Kernel,
     b: &mut Brep,
     e: EdgeId,
     t: f64,
 ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
-    let mut records = crate::topology::topology::NotifyRecords::new();
-    let mut attributes = AttributeStore::default();
-    let key_of = |entity: EntityRef| match entity {
-        EntityRef::Edge(id) => arena_identity(CacheObject::Edge(id)),
-        EntityRef::Face(id) => arena_identity(CacheObject::Face(id)),
-        EntityRef::Vertex(id) => arena_identity(CacheObject::Vertex(id)),
-        EntityRef::Edgeuse(id) => local_identity(crate::topology::edgeuse::p1::TYPE, id.index()),
-        EntityRef::Vertexuse(id) => local_identity(vertexuse::TYPE, id.index()),
-        EntityRef::Loopuse(id) => local_identity(crate::topology::loopuse::TYPE, id.index()),
-        _ => local_identity(crate::topology::topology::TYPE, 0),
-    };
+    // a default record per object (upstream every object has its `SmTopology` part)
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::with_attributes_of(b);
     // The kernel's context is the split's own `k`; no separate object context.
-    let mut env = edge::NotifyEnv {
-        records: &mut records,
-        attributes: &mut attributes,
-        context: None,
-        key_of: &key_of,
-    };
-    let out =
-        crate::topology::brep::p9::make_vertex_split_edge(k, b, e, t, &mut env, &|edge, kind| {
-            local_identity(kind, edge.index())
-        })?;
+    let out = crate::topology::brep::p9::make_vertex_split_edge(
+        k,
+        b,
+        e,
+        t,
+        &mut state.env(None),
+        &|edge, kind| local_identity(kind, edge.index()),
+    );
+    let restored = state.restore_attributes(b);
+    let out = out?;
+    restored?;
     if !out.split {
         return Err(SolidError::sm_err(OP));
     }

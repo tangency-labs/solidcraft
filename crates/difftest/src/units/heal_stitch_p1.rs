@@ -215,6 +215,10 @@ enum OpIn {
 struct Inputs {
     brep: StitchBrep,
     op: OpIn,
+    /// Every face and edge first tagged with its own attribute, and the attributes the
+    /// faces and edges carry after the op appended to `out` (issue #1462).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    attributed: bool,
 }
 
 pub(crate) fn block_of(b: &StitchBrep) -> Result<Vec<f64>, HarnessError> {
@@ -826,7 +830,13 @@ fn run_cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let mut input = block_of(&i.brep)?;
     input.extend(a);
     let p = path(&i.brep)?;
-    let call = || ffi::eval(code, &p, &input);
+    let call = || {
+        if i.attributed {
+            ffi::eval_tagged(code, &p, &input)
+        } else {
+            ffi::eval(code, &p, &input)
+        }
+    };
     // A file B-rep's op runs in a fresh process: after a stitch of an `.smb` B-rep, the
     // next read of a file in the same process exports differently (state the shim's
     // context keeps), so a case's C++ result would depend on the cases before it.
@@ -897,6 +907,50 @@ pub(crate) fn digest(k: &mut Kernel, b: &Brep, o: &mut Vec<f64>) -> solidcore::R
         o.extend([p.x, p.y, p.z, vertex::tolerance(b, v)?]);
     }
     topology_digest(k, b, o)
+}
+
+/// The tags of an attributed case (`sc_attribute_tags.h`'s `tag_objects`): face `i` and
+/// edge `i` of the build (the shim's traversal order: arena order here) each get their own
+/// copy attribute, `10007 + i` and `10507 + i`.
+fn tag_objects(b: &mut Brep) -> solidcore::Result<()> {
+    use solidcore::geom::attribute::{Attribute, Behavior};
+    let faces: Vec<_> = b.faces().ids().collect();
+    for (i, f) in faces.into_iter().enumerate() {
+        let id = 10007 + i as u64;
+        b.add_attribute(EntityRef::Face(f), Attribute::long(id, id as i64, Behavior::Copy))?;
+    }
+    let edges: Vec<_> = b.edges().ids().collect();
+    for (i, e) in edges.into_iter().enumerate() {
+        let id = 10507 + i as u64;
+        b.add_attribute(EntityRef::Edge(e), Attribute::long(id, id as i64, Behavior::Copy))?;
+    }
+    Ok(())
+}
+
+/// An attributed case's tail (`sc_attribute_tags.h`'s `put_tags`): `nf (n id*)* ne
+/// (n id*)*`, the ascending attribute ids of every face and edge in list order.
+pub(crate) fn put_tags(o: &mut Vec<f64>, b: &Brep) -> solidcore::Result<()> {
+    let ids = |o: &mut Vec<f64>, e: EntityRef| {
+        let mut v: Vec<u64> = b
+            .entity_attributes(e)
+            .into_iter()
+            .map(|(_, a)| a.attribute_id())
+            .collect();
+        v.sort_unstable();
+        o.push(v.len() as f64);
+        o.extend(v.into_iter().map(|x| x as f64));
+    };
+    let fs = bp1::faces(b, None)?;
+    o.push(fs.len() as f64);
+    for f in fs {
+        ids(o, EntityRef::Face(f));
+    }
+    let es = bp1::edges(b, None)?;
+    o.push(es.len() as f64);
+    for e in es {
+        ids(o, EntityRef::Edge(e));
+    }
+    Ok(())
 }
 
 /// The topology after a stitch, in list order (the shim's `put_topology`,
@@ -1206,8 +1260,16 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if matches!(op, Resolved::Export) {
         return Ok(Output::new().values("out", Vec::new()));
     }
+    if i.attributed {
+        tag_objects(&mut b).map_err(|e| harness(format!("rust tags: {e}")))?;
+    }
     match run_rust_op(&mut k, &mut b, &op) {
-        Ok(o) => Ok(guarded_output(o)),
+        Ok(mut o) => {
+            if i.attributed {
+                put_tags(&mut o, &b).map_err(|e| harness(format!("rust tags: {e}")))?;
+            }
+            Ok(guarded_output(o))
+        }
         Err(e) => match Output::unported(&e) {
             Some(o) => Ok(o),
             None => Err(harness(format!("rust: {e}"))),
@@ -1409,6 +1471,7 @@ impl UnitDiff for Runner {
         serde_json::to_value(Inputs {
             brep,
             op: gen_op(rng),
+            attributed: false,
         })
         .ok()
     }

@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::error::EntityRef;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::kernel::Kernel;
 use solidcore::math::{Point3, Vec3};
@@ -72,6 +72,9 @@ struct Inputs {
     rebuild: bool,
     /// The faces to give new surfaces.
     replaced: Vec<Rep>,
+    /// Every face and edge first tagged with its own attribute, and the attributes of
+    /// the result's faces and edges recorded (shim op 3; issue #1462).
+    attributed: bool,
 }
 
 impl Default for Inputs {
@@ -84,6 +87,7 @@ impl Default for Inputs {
                 offset: 0.5,
                 tilt: [0.; 3],
             }],
+            attributed: false,
         }
     }
 }
@@ -251,7 +255,7 @@ impl UnitDiff for Runner {
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        let raw = match native(&i, 1)? {
+        let raw = match native(&i, if i.attributed { 3 } else { 1 })? {
             Ok(raw) => raw,
             Err(refused) => return Ok(refused),
         };
@@ -279,11 +283,17 @@ impl UnitDiff for Runner {
             let Some((faces, surfaces)) = planes(&k, &b, &i)? else {
                 return Ok(None);
             };
+            if i.attributed {
+                tag(&mut b)?;
+            }
             let st = status(with_notifications(&mut b, |b, notes| {
                 local_operation(&mut k, b, &faces, surfaces, notes)
             }))?;
             let mut record = vec![st];
             record.extend(geometry(&k, &b, true)?);
+            if i.attributed {
+                put_tags(&mut record, &b)?;
+            }
             Ok(Some(record))
         };
         match run() {
@@ -361,8 +371,55 @@ fn generate_on(rng: &mut Rng, solids: &[&&str]) -> Option<Value> {
         file: (**file).into(),
         rebuild: false,
         replaced,
+        attributed: false,
     })
     .ok()
+}
+
+/// The shim's op 3 tags: every face (`GetFaces` order) and edge (`GetEdges` order) its
+/// own copy attribute `10007 + 500 kind + index` (kind 0 face, 1 edge).
+fn tag(b: &mut Brep) -> SolidResult<()> {
+    for (i, f) in bp1::faces(b, None)?.into_iter().enumerate() {
+        let id = 10007 + i as u64;
+        b.add_attribute(
+            EntityRef::Face(f),
+            Attribute::long(id, id as i64, Behavior::Copy),
+        )?;
+    }
+    for (i, e) in bp1::edges(b, None)?.into_iter().enumerate() {
+        let id = 10507 + i as u64;
+        b.add_attribute(
+            EntityRef::Edge(e),
+            Attribute::long(id, id as i64, Behavior::Copy),
+        )?;
+    }
+    Ok(())
+}
+
+/// The shim's op 3 tail: `nf (n id*)* ne (n id*)*`, the ascending attribute ids of every
+/// face and edge in list order.
+fn put_tags(o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
+    let ids = |o: &mut Vec<f64>, e: EntityRef| {
+        let mut v: Vec<u64> = b
+            .entity_attributes(e)
+            .into_iter()
+            .map(|(_, a)| a.attribute_id())
+            .collect();
+        v.sort_unstable();
+        o.push(v.len() as f64);
+        o.extend(v.into_iter().map(|x| x as f64));
+    };
+    let faces = bp1::faces(b, None)?;
+    o.push(faces.len() as f64);
+    for f in faces {
+        ids(o, EntityRef::Face(f));
+    }
+    let edges = bp1::edges(b, None)?;
+    o.push(edges.len() as f64);
+    for e in edges {
+        ids(o, EntityRef::Edge(e));
+    }
+    Ok(())
 }
 
 /// Drops what the comparison does not record: the faces' `loops` lists (Rust-only

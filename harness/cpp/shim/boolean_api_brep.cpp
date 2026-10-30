@@ -675,16 +675,27 @@ void put_attributes(std::vector<double>& o, SmBrep* b, bool scoped = false)
     put_rows(o, rows);
 }
 
-// OP_ATTRIBUTED `brep brep operation behavior`: tags both operands (tag_operand, operand 0
-// and 1), runs SmApiBoolean, and records `status` then on success the two-B-rep record of
-// run_two followed by the attribute rows of the result and of a kept second operand
-// (put_attributes) and the number of those values last (as OP_MEASURED's tail).
+// OP_ATTRIBUTED `brep brep operation behavior [copy_first flags x5]`: tags both operands
+// (tag_operand, operand 0 and 1), runs SmApiBoolean (or, with the optional tail,
+// SmApiBooleanWithOptions with those five flags, the first operand first replaced by its
+// SmApiBrepCopy when `copy_first`), and records `status` then on success the two-B-rep
+// record of run_two followed by the attribute rows of the result and of a kept second
+// operand (put_attributes) and the number of those values last (as OP_MEASURED's tail).
 void run_attributed(Rd& rd, std::vector<double>& o)
 {
     BrepSpec a = read_spec(rd);
     BrepSpec b = read_spec(rd);
     int32_t op = (int32_t)rd.idx(0, 10);
     SmAttributeBehaviorType behavior = (SmAttributeBehaviorType)rd.idx(0, 4);
+    bool with_options = rd.at != rd.n;
+    bool copy_first = false;
+    bool flags[5] = {false, false, true, false, false};
+    if (with_options)
+    {
+        copy_first = rd.flag();
+        for (int i = 0; i < 5; i++)
+            flags[i] = rd.flag();
+    }
     if (rd.at != rd.n)
         throw Bad();
     std::vector<BrepSpec> specs;
@@ -695,8 +706,24 @@ void run_attributed(Rd& rd, std::vector<double>& o)
     SmBrep* b2 = bs[1];
     tag_operand(b1, 0, behavior);
     tag_operand(b2, 1, behavior);
+    if (copy_first)
+    {
+        SmBrep* copy = NULL;
+        SmApiStatus cstat = SmApiBrepCopy(b1, copy);
+        delete b1;
+        if (cstat != SM_SUCCESS || copy == NULL)
+        {
+            o.push_back(st(cstat != SM_SUCCESS ? cstat : SM_ERR));
+            delete b2;
+            return;
+        }
+        b1 = copy;
+    }
     SmBrep* res = b1;
-    SmApiStatus stat = SmApiBoolean(b1, b2, (SmBooleanOperationType)op, res);
+    SmApiStatus stat = with_options
+        ? SmApiBooleanWithOptions(b1, b2, (SmBooleanOperationType)op, flags[0], flags[1],
+                                  flags[2], flags[3], flags[4], res)
+        : SmApiBoolean(b1, b2, (SmBooleanOperationType)op, res);
     o.push_back(st(stat));
     if (stat != SM_SUCCESS)
     {
@@ -706,7 +733,7 @@ void run_attributed(Rd& rd, std::vector<double>& o)
         delete b2;
         return;
     }
-    bool kept = keeps_other(op, false);
+    bool kept = keeps_other(op, with_options && flags[4]);
     o.push_back(flg(res != NULL));
     if (res == NULL)
         return;

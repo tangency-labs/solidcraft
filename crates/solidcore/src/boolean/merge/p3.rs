@@ -1040,9 +1040,9 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
 /// (`topology::brep::p7::copy_faces`'s merge branch): the copy notifies through an
 /// arena-only store whose source identities ([`source_ref`]) are distinct from the
 /// component's (`loopuse::notify_ref`, faces by `face_ref`), seeded with `result`'s own
-/// attributes; the component gets the attributes its objects end with. The ordinary
-/// status is not acted on, as `copy_faces`' merge branch does not.
-fn copy_component(
+/// attributes and the component's; the component gets the attributes its objects end
+/// with. The ordinary status is not acted on, as `copy_faces`' merge branch does not.
+pub(crate) fn copy_component(
     k: &mut Kernel,
     result: &mut Brep,
     connected: &[FaceId],
@@ -1059,6 +1059,12 @@ fn copy_component(
         result.attribute_store().clone(),
         &source_ref,
     )?;
+    // the component's own attributes (none for a new component), under its names
+    let own = component.take_attributes();
+    crate::topology::brep::p2::seed_brep_attributes(&mut state.attributes, own, &|e| match e {
+        EntityRef::Face(f) => face_ref(f),
+        _ => notify_ref(e),
+    })?;
     {
         let mut copy = super::p2::TopologyCopy {
             vertices: super::p1::VertexCopy {
