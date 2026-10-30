@@ -346,6 +346,9 @@ impl JointOrigin {
 pub struct NamedOrigin {
     pub name: String,
     pub origin: JointOrigin,
+    /// Robot exports write it as a frame of its own (a tool tip, a sensor mount).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub export_frame: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
