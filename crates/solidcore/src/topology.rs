@@ -819,14 +819,32 @@ pub struct Brep {
     attributes: AttributeStore,
 }
 
-/// A copy of the arenas whose curves and surfaces have no owner (the geometry's copy
-/// constructor resets it). Operations that find a curve's edge or a surface's face
-/// through its owner (the fillet merge, B-rep ray-fire caches, transforms of a body's
-/// geometry) therefore do not see the clone's topology: `fillet_edges` of a clone fails
-/// in its merge (#1144). To copy a body that is edited later (undo, history, preview),
-/// use [`brep::p3::api_brep_copy`] (`SmApiBrepCopy`), whose geometry the copy owns.
-/// [`Brep::clone_standing_for_self`] is a private stand-in for this B-rep (its geometry
-/// keeps this B-rep's owners) and not an independent body.
+/// A copy of the arenas whose curves and surfaces have **no owner**.
+///
+/// # Warning
+///
+/// The geometry's copy constructor resets every curve's and surface's owner, so a clone's
+/// geometry no longer names its edges and faces. Every kernel call that finds a curve's
+/// edge or a surface's face through the owner then silently skips them on the clone,
+/// with no error:
+/// - topology solves over the clone ([`crate::query::brep::LiveBrepObjects`],
+///   `query::api_queries::face_closest_point_in_shape` and the other shape and B-rep
+///   point, curve and ray solves): no face or edge answers, only vertices (a point on a
+///   face gets a corner);
+/// - `SmBrep::GetSurfaces` / `GetCurves` ([`brep::p1::surfaces`], [`brep::p1::curves`])
+///   and the `.smb` writer (`brep_data_write`'s `FromBrep`): the surfaces and curves are
+///   left out, the faces written without surface;
+/// - B-rep caches and ray-fire caches built from the clone (no curve or surface in their
+///   trees), the fillet merge (`fillet_edges` of a clone fails, #1144) and transforms of a
+///   body's geometry.
+///
+/// Use instead:
+/// - [`brep::p3::api_brep_copy`] (`SmApiBrepCopy`) for an independent body that is
+///   queried or edited later (undo, history, preview): the copy owns its geometry;
+/// - [`Brep::clone_standing_for_self`] for a private read-only stand-in for this B-rep
+///   (its geometry keeps this B-rep's owners), not an independent body.
+///
+/// See `plan/findings/topology--brep-clone-drops-geometry-owners.md`.
 impl Clone for Brep {
     fn clone(&self) -> Self {
         self.copy(false)
