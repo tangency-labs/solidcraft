@@ -314,12 +314,20 @@ mod tests {
     }
 
     #[test]
-    fn global_cylinder_target_does_not_use_cone_analytic_guard() {
+    fn global_cylinder_target_uses_cone_analytic_guard() {
         let a = cone();
         let mut b = cone();
         b[16] = 1.0;
         // SmCylinder_TYPE reaches IntersectWithCone through the native global
-        // switch; the tolerance guard applies only when both are cylinders.
+        // switch (v1.0.1 SmCone.cpp:2377), so a coincident cylinder without a
+        // tolerance takes the same guard as a cone target; with one it runs.
+        assert!(matches!(
+            intersect(3, &a, &b, &DOMAINS, None, false),
+            Err(FfiError::Status(crate::SC_ERR_ARG))
+        ));
+        assert!(intersect(3, &a, &b, &DOMAINS, Some(1e-7), false).is_ok());
+        // A disjoint cylinder needs no tolerance.
+        b[0] = 10.0;
         assert!(intersect(3, &a, &b, &DOMAINS, None, false).is_ok());
     }
 

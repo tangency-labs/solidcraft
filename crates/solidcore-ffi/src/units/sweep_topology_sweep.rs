@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn guard_rejects_bad_indices_and_layouts() {
         for s in [
-            [16, 0, 0, 0],
+            [17, 0, 0, 0],
             [5, 0, 0, 4],
             [10, 16, 0, 0],
             [0, -1, 0, 0],

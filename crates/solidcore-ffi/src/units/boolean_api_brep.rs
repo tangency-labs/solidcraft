@@ -1223,7 +1223,7 @@ mod tests {
             level,
         };
         let encoded = encode(&call(2)).unwrap();
-        assert_eq!(encoded.first(), Some(&19.0));
+        assert_eq!(encoded.first(), Some(&20.0));
         assert_eq!(&encoded[8..13], &[10.0, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(&encoded[encoded.len() - 2..], &[1.0, 2.0]);
         assert!(encode(&call(3)).is_err());

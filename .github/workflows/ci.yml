@@ -149,7 +149,7 @@ jobs:
         if: needs.changes.outputs.full == 'true'
       - name: Difftest runner tests
         if: needs.changes.outputs.full == 'true'
-        run: cargo test --profile difftest -p difftest --features cpp
+        run: cargo test --profile difftest -p difftest -p solidcore-ffi --features cpp
 
   wasm:
     needs: changes
