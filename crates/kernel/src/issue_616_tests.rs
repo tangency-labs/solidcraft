@@ -72,7 +72,12 @@ fn assert_local(target: &Body, tool: &Body, joined: &Body, what: &str) {
 #[test]
 fn ribs_joined_flush_to_the_lid_change_nothing_else() {
     let mut b = lid();
-    assert!((volume(&b) - 6703.5222).abs() < 1e-3, "{}", volume(&b));
+    // The plate less its four 3 mm corner rounds, the skirt ring, less the window and the slot
+    // through the plate and the notch through the skirt's wall (1.5 thick, 3 high, 22 long).
+    let plate = (76.8 * 89.3 - 4.0 * 9.0 * (1.0 - std::f64::consts::FRAC_PI_4)) * 2.4;
+    let ring = (71.5 * 84.0 - 68.5 * 81.0) * 3.0;
+    let want = plate + ring - 68.0 * 61.0 * 2.4 - 44.0 * 10.0 * 2.4 - 22.0 * 1.5 * 3.0;
+    assert!((volume(&b) - want).abs() < 1e-6, "{} vs {want}", volume(&b));
     for c in [[102.8, 14., 2.4], [102.8, 48., 2.4], [172.4, 14., 2.4], [172.4, 48., 2.4]] {
         let tool = bx(c, [1.6, 6., 11.7]);
         let r = boolean(&b, &tool, BoolOp::Union).unwrap().unwrap();
