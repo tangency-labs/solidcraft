@@ -735,7 +735,7 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
                 &mut b,
                 &penv,
                 &mut notify,
-                &curve,
+                &Curve::from(curve),
                 v(dir),
                 v(reference),
                 trim_type,

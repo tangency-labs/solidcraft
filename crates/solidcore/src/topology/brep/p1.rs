@@ -3321,7 +3321,7 @@ pub struct ParallelProjectionCurves {
 /// `CreateParallelProjectionCurves`: projects `curve` along `projection_vector` onto
 /// every face (or `subset_faces`) of the B-rep (`SmSurface::CreateParallelProjectionCurves`
 /// over the face's UV domain, then `SmFace::CreateCurvesByTrimming`), collecting the
-/// outputs asked for in `opts`.
+/// outputs asked for in `opts`. `curve` is one of the `SmBSplineCurve` classes.
 ///
 /// # Errors
 ///
@@ -3331,7 +3331,7 @@ pub struct ParallelProjectionCurves {
 pub fn create_parallel_projection_curves(
     k: &Kernel,
     b: &mut Brep,
-    curve: &BSplineCurve,
+    curve: &Curve,
     projection_vector: Vec3,
     opts: &ParallelProjectionOptions<'_>,
 ) -> Result<ParallelProjectionCurves> {

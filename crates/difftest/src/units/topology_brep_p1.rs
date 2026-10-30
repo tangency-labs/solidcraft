@@ -2110,7 +2110,7 @@ fn run_rust_op(
             if let Some(d) = inexact(types, None, Some(&[])) {
                 return Ok(Err(d));
             }
-            let c = bspline_of(curve)?;
+            let c = Curve::from(bspline_of(curve)?);
             let opts = bp1::ParallelProjectionOptions {
                 projection_distance: *dist,
                 approx_tol_3d: *tol,

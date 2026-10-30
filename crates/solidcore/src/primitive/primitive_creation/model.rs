@@ -565,12 +565,14 @@ impl PrimitiveCreationAccess for PrimitiveModel<'_> {
         // the merges' edits notify the B-rep's records under the same identities
         let mut state = ArenaNotifyState::new(b);
         let mut notify = state.env(None);
+        // `const SmBSplineCurve&` of the B-spline class itself (its knots untouched)
+        let curve = crate::curve::curve::Curve::from(curve.clone_exact());
         crate::topology::brep::p10::project_and_trim(
             self.k,
             b,
             &env,
             &mut notify,
-            curve,
+            &curve,
             direction,
             reference,
             trim_type,

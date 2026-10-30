@@ -1096,7 +1096,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
                 .collect();
             let cur = Curve::new(pw, curve.p, curve.u.clone())
                 .map_err(|e| harness(format!("curve input: {e}")))?;
-            let bc = BSplineCurve::from_nurb(cur, curve.dim, false);
+            let bc = SmCurve::from(BSplineCurve::from_nurb(cur, curve.dim, false));
             let k = Kernel::default();
             match st(s.create_parallel_projection_curves(&k, &dom_of(*dom), &bc, v3(*vec), *dist, None, None))? {
                 Ok((c3d, _)) => o.extend([0.0, c3d.len() as f64]),

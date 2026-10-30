@@ -1,0 +1,12 @@
+id = "primitive.api_trim_ops"
+upstream = ["source/SM_API/src/SmApiTrimmedSurfaces.cpp", "source/SM_API/src/SmApiBrep.cpp"]
+rust_module = "primitive::api_trim_ops"
+depends_on = ["primitive.api_curves", "primitive.api_primitives", "primitive.api_surface_ops", "topology.brep_p10", "topology.brep_p3", "topology.brep_p8", "topology.trimming_tools"]
+soft_depends_on = ["topology.brep_p2"]
+est_lines = 200
+layer = 50
+tests = ["SM_API_test:TestSmTrimSurfaceWith3dCurves", "SM_API_test:TestSmTrimProjectParallel", "SM_API_test:TestSmCreatePlanarFaces", "SM_API_test:TestSmPlanarFacesFailureCleanup", "SM_API_test:TestSmProjectAndTrim"]
+status = "green"
+claimed_by = "fixer-3 (PR #1538)"
+claimed_at = "2026-10-29T00:00:00Z"
+notes = "NOT IN callgraph/units.json: wrapper-only SM_API functions (1.0.1 parity batch 3, trimming): SmApiTrimSurfaceWith3dCurves, SmApiTrimProjectParallel, SmApiCreatePlanarFaces (SmApiTrimmedSurfaces.cpp), SmApiProjectAndTrim (SmApiBrep.cpp); every callee is ported (SmTrimmingTools::TrimSurfaceWithModelSpaceCurves, SmBrep::CreateFaceFromSurface, CreatePlanarFacesWith3DCurves, ProjectAndTrim). The projected curve is any SmBSplineCurve class: the ProjectAndTrim chain (topology::brep::p10::project_and_trim, p1::create_parallel_projection_curves, Surface::create_parallel_projection_curves) takes &Curve and dispatches the box and continuities on the class (an SmLine as in the upstream tests), the sweep on its NURB. Inputs are made by the SM_API constructors on both sides (boxes by SmApiCreateBox, filleted by SmApiCircularFillet as in TestSmProjectAndTrim). Status set by the gate."
