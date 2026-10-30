@@ -765,6 +765,7 @@ mod imp {
             s.and_then(crate::PathSeg::tangents).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))
         };
         let (first_t, _) = tangent(path.first())?;
+        let offsets = section_offsets(plane, pieces, start, first_t, 1.0);
         let (_, last_t) = tangent(path.last())?;
         let end = path.last().map(seg_ends).transpose()?.map(|(_, b)| b).ok_or_else(|| KernelError::Invalid("empty path".into()))?;
         // A closed path ends where it starts, with no caps; at a corner there the last run and the
@@ -803,12 +804,10 @@ mod imp {
                 inside.extend(seeds(&pose, pieces, |q| apply(&middle, q)));
                 (piece, placed(&pose, &last))
             } else {
-                // On past each mitre: the profile's reach times the tangent of half the turn takes
-                // every point of it to the mitre's plane; a little further, so the cut back runs
-                // through the walls, never along the run's own end.
-                let over = |turn: f64| reach * (turn * 0.5).tan() * 1.1 + reach * 1e-3 + 1e-6;
-                let pre = entry.map_or(0.0, |(_, _, turn)| over(turn));
-                let post = exit.map(|(_, turn)| over(turn)).unwrap_or(0.0);
+                // On past each mitre, far enough to take every point of the section to the
+                // mitre's plane ([`mitre_lead`]).
+                let pre = entry.map_or(0.0, |(_, _, turn)| mitre_lead(&offsets, reach, turn, false));
+                let post = exit.map(|(_, turn)| mitre_lead(&offsets, reach, turn, true)).unwrap_or(0.0);
                 let mut route = Vec::with_capacity(segs.len() + 2);
                 if pre > 0.0 {
                     route.push(crate::PathSeg::Line { a: a0 - t0 * pre, b: a0 });
@@ -819,7 +818,18 @@ mod imp {
                 }
                 let from = moved_plane(&pose, t0 * -pre);
                 let (mut piece, [_, middle, last]) = swept(&from, pieces, &route, false)?;
-                inside.extend(seeds(&from, pieces, |q| apply(&middle, q)));
+                // Each wall is known by its piece's middle half way along the stretch of the run
+                // that point keeps between the mitres: a point standing `s` ahead of the path
+                // keeps the stretch `s` back from the run's (a profile at a slant to a run shorter
+                // than its slant reaches past the mitres from the run's middle section).
+                let run_length: f64 = segs.iter().map(seg_len).sum();
+                let origin = a0 - t0 * pre;
+                inside.extend(pieces.iter().enumerate().map(|(piece, x)| {
+                    let q = from.to_world(x.seg.point_at(0.5));
+                    let ahead = (q - origin).dot(t0);
+                    let at = carried_along(&route, pre + 0.5 * run_length - ahead).map_or_else(|| apply(&middle, q), |m| apply(&m, q));
+                    Seed { at, piece }
+                }));
                 if let Some((at, toward, _)) = entry {
                     piece = combined(&piece, &half_space(at, -toward, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
@@ -845,6 +855,31 @@ mod imp {
         let body = body_of(&brep, "sweep")?;
         let roles = roles(&body, plane, (!closed).then_some(&pose), &seeds(plane, pieces, |q| q), &inside, false)?;
         with_history(body, &roles, pieces)
+    }
+
+    /// The rigid motion carrying a section from the start of `route` to `along` (clamped to the
+    /// route) along it, as SMLib's sweep turning with a path of lines and arcs carries it: moved
+    /// along each line, turned about each arc's axis. None for a route with another curve before
+    /// that point, whose frame only the sweep knows.
+    fn carried_along(route: &[crate::PathSeg], along: f64) -> Option<Affine> {
+        let mut m = IDENTITY;
+        let mut left = along.max(0.0);
+        for s in route {
+            if left <= 0.0 {
+                break;
+            }
+            let length = seg_len(s);
+            let d = left.min(length);
+            m = match *s {
+                crate::PathSeg::Line { a, b } => affine_moved(&m, (b - a).normalized()? * d),
+                crate::PathSeg::Arc { center, axis, angle, .. } if length > 0.0 => {
+                    affine_after(&affine_turned(center, axis.normalized()?, angle * d / length), &m)
+                }
+                _ => return None,
+            };
+            left -= d;
+        }
+        Some(m)
     }
 
     /// The length of a path segment.
@@ -1074,6 +1109,7 @@ mod imp {
             .flat_map(|x| (0..=8).map(move |i| x.seg.point_at(f64::from(i) / 8.0)))
             .map(|q| plane.to_world(q).dist(start) * ctl.scale.max(1.0))
             .fold(0.0f64, f64::max);
+        let offsets = section_offsets(plane, &pieces, start, first_t, ctl.scale.max(1.0));
         let size = 4.0 * (total + reach) + 1.0;
         let law = |u: f64| 1.0 + (ctl.scale - 1.0) * u;
         let n0 = plane.normal().normalized().ok_or_else(|| KernelError::Invalid("profile plane".into()))?;
@@ -1129,8 +1165,18 @@ mod imp {
                 })
                 .collect();
             let (Some(&first_map), Some(&end_map)) = (maps.first(), maps.last()) else { return Err(KernelError::Invalid("sweep path".into())) };
-            let mid = maps.get(maps.len() / 2).copied().unwrap_or(end_map);
-            inside.extend(seeds(plane, &pieces, |q| affine_apply(&mid, q)));
+            // Each wall is known by its piece's middle at the station half way along the stretch
+            // of the run that point keeps between the mitres (the stations are evenly spaced by
+            // length): a point standing `s` ahead of the path keeps the stretch `s` back from the
+            // run's, as in the plain sweep ([`cornered`]).
+            let last_station = maps.len().saturating_sub(1);
+            inside.extend(pieces.iter().enumerate().map(|(piece, x)| {
+                let q = plane.to_world(x.seg.point_at(0.5));
+                let ahead = (affine_apply(&first_map, q) - a0).dot(t0);
+                let share = if translate || !(length > 0.0) { 0.5 } else { (0.5 - ahead / length).clamp(0.0, 1.0) };
+                let station = ((share * last_station as f64).round() as usize).min(last_station);
+                Seed { at: affine_apply(maps.get(station).unwrap_or(&end_map), q), piece }
+            }));
             let mut piece = Brep::sweep_stations(&c, &maps, Ends::Capped).map_err(|e| failed("sweep", e))?;
             let next = match runs.get(ri + 1).and_then(|r| path.get(r.start)) {
                 Some(s) => Some(tangent(Some(s))?.0),
@@ -1138,18 +1184,19 @@ mod imp {
             };
             let exit = next.map(|t2| mitre_of(t1, t2)).transpose()?;
             if !translate {
-                // On past each mitre, the run's section there held still.
-                let over = |turn: f64| reach * (turn * 0.5).tan() * 1.1 + reach * 1e-3 + 1e-6;
+                // On past each mitre, the run's section there held still, far enough to take
+                // every point of it to the mitre's plane ([`mitre_lead`]).
                 let prism = |map: Affine, toward: Vec3, by: f64| -> Result<Brep> {
                     Brep::sweep_stations(&c, &[map, affine_moved(&map, toward * by)], Ends::Capped).map_err(|e| failed("sweep corner", e))
                 };
                 if let Some((at, m, turn)) = entry {
-                    let lead = prism(affine_moved(&first_map, t0 * -over(turn)), t0, over(turn))?;
+                    let pre = mitre_lead(&offsets, reach, turn, false);
+                    let lead = prism(affine_moved(&first_map, t0 * -pre), t0, pre)?;
                     piece = combined(&piece, &lead, solidcraft_smlib::BooleanOp::Union, "sweep corner")?;
                     piece = combined(&piece, &half_space(at, -m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
                 if let Some((m, turn)) = exit {
-                    let tail = prism(end_map, t1, over(turn))?;
+                    let tail = prism(end_map, t1, mitre_lead(&offsets, reach, turn, true))?;
                     piece = combined(&piece, &tail, solidcraft_smlib::BooleanOp::Union, "sweep corner")?;
                     piece = combined(&piece, &half_space(b1, m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
@@ -1273,6 +1320,39 @@ mod imp {
         }
         out.push(rest);
         Ok(out)
+    }
+
+    /// Where the profile's points sit from the path, as a section carries them along it: for
+    /// each sampled point of `pieces` on `plane`, its distance ahead of the path's `start` along
+    /// the unit direction of travel `t` there, and its distance square to that direction, both
+    /// times `scale`. A section that turns with the path (along a smooth run, and through a
+    /// corner about the line square to both directions) keeps both, a twist keeps both, and an
+    /// end scale grows them by at most its largest scale.
+    fn section_offsets(plane: &Plane, pieces: &[Piece], start: Vec3, t: Vec3, scale: f64) -> Vec<(f64, f64)> {
+        pieces
+            .iter()
+            .flat_map(|x| (0..=8).map(move |i| x.seg.point_at(f64::from(i) / 8.0)))
+            .map(|q| {
+                let d = plane.to_world(q) - start;
+                let s = d.dot(t);
+                (s * scale, (d - t * s).len() * scale)
+            })
+            .collect()
+    }
+
+    /// How far a run's section is carried straight on past a corner turning by `turn` (`ahead`),
+    /// or back before one (else), so that each of its points reaches the plane halving the
+    /// corner. A point `s` ahead of the path and `w` from it, the plane's unit normal `m` at half
+    /// the turn from the direction of travel `t`: `m · (s t + w) >= s cos(turn / 2) - w sin(turn /
+    /// 2)`, so carried on `e` along `t` it reaches the plane once `e >= w tan(turn / 2) - s` (and
+    /// back before the corner once `e >= w tan(turn / 2) + s`). A profile square to the path has
+    /// `s = 0`: its reach times the tangent of half the turn; one standing at a slant to the path
+    /// reaches across the mitre by its slant as well. A little further than the farthest point,
+    /// so the cut back runs through the walls, never along the run's own end.
+    fn mitre_lead(offsets: &[(f64, f64)], reach: f64, turn: f64, ahead: bool) -> f64 {
+        let k = (turn * 0.5).tan();
+        let need = offsets.iter().map(|(s, w)| w * k + if ahead { -s } else { *s }).fold(0.0f64, f64::max);
+        need * 1.1 + reach * 1e-3 + 1e-6
     }
 
     /// The plane halving the corner from direction `t1` to `t2` (its unit normal) and the turn
