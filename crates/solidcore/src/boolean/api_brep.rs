@@ -25,6 +25,7 @@
 //! | [`piecewise_merge`], [`PiecewiseMergeOutcome`] | `SmApiPiecewiseMerge`                       |
 //! | [`boolean_lists`], [`BooleanListsResult`]     | `SmApiBooleanLists`                          |
 //! | [`boolean_trees`]                             | `SmApiBooleanTrees`                          |
+//! | [`tessellate_boundaries`]                     | `SmApiTessellateBoundaries`                  |
 //!
 //! Deviations:
 //! - **Ownership.** Upstream passes `SmBrep*` operands that the kernel modifies in
@@ -78,6 +79,10 @@
 //!   returned B-reps becomes one attribute per B-rep. The list, tree and
 //!   [`merge_breps`] entry points do not carry attributes yet.
 //! - The debug drawing (`SM_DEBUG_CODE`) and `SM_ASSERT_VALID` checks are not ported.
+//! - **`SmApiTessellateBoundaries`.** The B-rep is a reference (no `NULL` check); its
+//!   out-arrays are the returned [`BoundaryTessellation`], whose `complete` flag is
+//!   upstream's `SM_ERR` with partial output. An invalid angle tolerance is
+//!   [`SolidError::InvalidInput`] (upstream clears the arrays).
 //! - **Cached topology.** Every returned B-rep has the port's own cached fields
 //!   ([`crate::topology::Edge::vertices`], `Face::shell`, ..., which topology edits
 //!   inside the merge do not maintain) rewritten from its use links by
@@ -90,6 +95,7 @@ use crate::kernel::Kernel;
 use crate::primitive::primitive_creation::model::PrimitiveModel;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::surface::surface::Surface;
+use crate::topology::brep::p1::{self as brep_p1, BoundaryTessellation};
 use crate::topology::brep::p2::ArenaNotifyState;
 use crate::topology::{Brep, EdgeId};
 
@@ -585,10 +591,59 @@ pub fn boolean_trees(
     Ok(())
 }
 
+/// `SmApiTessellateBoundaries`: the edges of `b` as polylines within
+/// `angle_tol_deg` ([`brep_p1::tessellate_boundaries`], `SmBrep::TessellateBoundaries`).
+///
+/// # Errors
+///
+/// Those of [`brep_p1::tessellate_boundaries`].
+pub fn tessellate_boundaries(
+    k: &Kernel,
+    b: &Brep,
+    angle_tol_deg: f64,
+) -> Result<BoundaryTessellation> {
+    brep_p1::tessellate_boundaries(k, b, angle_tol_deg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::geom::context::MarkType;
+
+    /// `TestSmTessellateBoundaries` (`tests/SM_API_test/src/TestSmBrep.cpp:1328`): a
+    /// box's 12 edges are 2 points each; an edge without curve has none and makes the
+    /// result incomplete; an invalid angle tolerance is refused.
+    #[test]
+    fn tessellate_boundaries_of_a_box() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::ZERO,
+            10.0,
+            10.0,
+            10.0,
+        )
+        .unwrap();
+        let t = tessellate_boundaries(&k, &b, 5.0).unwrap();
+        assert!(t.complete);
+        assert_eq!(t.edges.len(), 12);
+        assert_eq!(t.vertex_counts, vec![2; 12]);
+        assert_eq!(t.points.len(), 24);
+
+        b.edge_mut(t.edges[0]).unwrap().curve = None;
+        let t = tessellate_boundaries(&k, &b, 5.0).unwrap();
+        assert!(!t.complete);
+        assert_eq!(t.vertex_counts.len(), 12);
+        assert_eq!(t.vertex_counts[0], 0);
+        assert_eq!(t.points.len(), 22);
+
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(matches!(
+                tessellate_boundaries(&k, &b, bad),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+    }
 
     const ALL: [BooleanOperation; 11] = [
         BooleanOperation::Unknown,

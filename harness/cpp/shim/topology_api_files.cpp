@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // topology.api_files: the SM_API files and conversion wrappers SmApiReadBrepFromFile,
-// SmApiReadPartFromFile (source/SM_API/src/SmApiImportExport.cpp) and SmApiTurnToNurbs
+// SmApiReadPartFromFile, SmApiWriteBrepToFile (source/SM_API/src/SmApiImportExport.cpp) and SmApiTurnToNurbs
 // (source/SM_API/src/SmApiBrep.cpp), called as the library exports them. The bodies are
 // the shim's own: an upstream file read by the API, SmApiCreateBox optionally filleted
 // by SmApiCircularFillet, the analytic primitives of SM_API_test TestSmBrepCopy and its
@@ -22,6 +22,7 @@
 #include <SmFace.h>
 #include <SmSurface.h>
 #include <SmVertex.h>
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -309,5 +310,96 @@ SC_EXPORT int32_t sc_topology_api_files_eval(int32_t op, const char* path, const
     }
     delete b;
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+// The byte-for-byte write (sc_topology_api_files_write): SmApiWriteBrepToFile of a B-rep
+// read from an upstream test file (SmBrep::ReadFromFile, ASCII) or made by an SM_API
+// primitive constructor, to `tmp` (inside a directory the runner made for it), read back
+// byte for byte and removed.
+namespace
+{
+// Sources (keep in sync with `Source` in crates/solidcore-ffi/src/units/topology_api_files.rs).
+enum : int32_t
+{
+    SRC_FILE = 0,     // SmBrep::ReadFromFile(ctx, path, SM_ASCII, rebuild)
+    SRC_BOX = 1,      // SmApiCreateBox(O, length, width, height)
+    SRC_SPHERE = 2,   // SmApiCreateSphere(C, radius)
+    SRC_CYLINDER = 3, // SmApiCreateCylinder(O, radius, height)
+    SRC_CONE = 4,     // SmApiCreateCone(O, radius_base, radius_top, height)
+    SRC_TORUS = 5,    // SmApiCreateTorus(C, major, minor)
+    SRC_PLANE = 6,    // SmApiCreatePlane(O, x, y)
+};
+
+// Arguments of each source.
+const int64_t WRITE_ARGS[] = {0, 6, 4, 5, 6, 5, 5};
+
+// The whole file `path`, or false when it cannot be read.
+bool read_file_bytes(const char* path, std::vector<double>& o)
+{
+    FILE* f = std::fopen(path, "rb");
+    if (f == nullptr)
+        return false;
+    std::vector<unsigned char> bytes;
+    unsigned char buf[4096];
+    size_t got;
+    while ((got = std::fread(buf, 1, sizeof(buf), f)) > 0)
+        bytes.insert(bytes.end(), buf, buf + got);
+    std::fclose(f);
+    o.push_back((double)bytes.size());
+    for (unsigned char c : bytes)
+        o.push_back((double)c);
+    return true;
+}
+} // namespace
+
+// Output: `source_status`, then on success `write_status`, then on success `n` and the
+// file's `n` bytes. Statuses are 0 (SM_SUCCESS) or the SmStatus.
+SC_EXPORT int32_t sc_topology_api_files_write(const char* path, const char* tmp,
+                                                       int32_t kind, const double* a, int64_t n,
+                                                       int32_t ascii, int32_t rebuild,
+                                                       double* out, int64_t cap,
+                                                       int64_t* out_len)
+{
+    if (tmp == nullptr || kind < SRC_FILE || kind > SRC_PLANE || (kind == SRC_FILE && path == nullptr) ||
+        n != WRITE_ARGS[kind] || (n > 0 && a == nullptr))
+        return SC_ERR_ARG;
+    for (int64_t i = 0; i < n; i++)
+        if (!std::isfinite(a[i]))
+            return SC_ERR_ARG;
+    SC_TRY
+    const SmContext& ctx = *SmApiGetOrCreateContext();
+    SmBrep* b = nullptr;
+    SmStatus cs = SM_SUCCESS;
+    SmVector3d o = n >= 3 ? SmVector3d(a[0], a[1], a[2]) : SmVector3d(0.0, 0.0, 0.0);
+    switch (kind)
+    {
+    case SRC_FILE:
+        b = new (ctx) SmBrep();
+        cs = b->ReadFromFile(ctx, path, SM_ASCII, rebuild ? TRUE : FALSE);
+        break;
+    case SRC_BOX: cs = SmApiCreateBox(o, a[3], a[4], a[5], b); break;
+    case SRC_SPHERE: cs = SmApiCreateSphere(o, a[3], b); break;
+    case SRC_CYLINDER: cs = SmApiCreateCylinder(o, a[3], a[4], b); break;
+    case SRC_CONE: cs = SmApiCreateCone(o, a[3], a[4], a[5], b); break;
+    case SRC_TORUS: cs = SmApiCreateTorus(o, a[3], a[4], b); break;
+    default: cs = SmApiCreatePlane(o, a[3], a[4], b); break;
+    }
+    std::vector<double> rec;
+    rec.push_back(st(cs));
+    if (cs == SM_SUCCESS && b != nullptr)
+    {
+        SmStatus ws = SmApiWriteBrepToFile(b, tmp, ascii ? TRUE : FALSE);
+        rec.push_back(st(ws));
+        if (ws == SM_SUCCESS && !read_file_bytes(tmp, rec))
+        {
+            delete b;
+            std::remove(tmp);
+            return SC_ERR_ARG;
+        }
+        std::remove(tmp);
+    }
+    delete b;
+    return sc_copy_out(rec.data(), (int64_t)rec.size(), out, cap, out_len);
     SC_CATCH
 }

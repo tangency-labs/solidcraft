@@ -11,6 +11,18 @@
 //! the status (`status`) and the record (`record`, layout in
 //! `solidcore_ffi::units::topology_api_files`). The native side runs in a fresh child
 //! process. Inputs the native build or the FFI guard refuse are `rejected`.
+//!
+//! A `write_bytes` case (`SmApiWriteBrepToFile`) writes one B-rep, ASCII or binary, and
+//! compares the file byte for byte (`rec`: the source's status, then on success the
+//! write's status, then on success the file's length and bytes): an upstream B-rep test
+//! file read with `SmBrep::ReadFromFile` (the Rust side reads it with its own reader,
+//! under per-object identities, as `corpus.parity`) or a B-rep made by an `SM_API`
+//! primitive constructor (the Rust side's `primitive::api_primitives`, its records read
+//! under the kernel's identities). The C++ side writes into a directory of its own and
+//! runs in this process. Primitive arguments the constructor guards of
+//! `primitive.api_primitives` fence off are rejected on both sides. Besides the
+//! fixtures, [`WRITE_GENERATED`] such cases are generated from their own seeds (the
+//! other generated cases do not move).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,7 +31,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector2d::Point2;
 use solidcore::kernel::Kernel;
-use solidcore::math::Vec3;
+use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::primitive::api_primitives;
@@ -27,17 +39,28 @@ use solidcore::surface::surface::Surface;
 use solidcore::topology::api_files;
 use solidcore::topology::brep::p1 as bl;
 use solidcore::topology::brep::p10::TopologyEnv;
+use solidcore::topology::brep::p3::topology_ref;
+use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::brep_data::{BrepData, Keyed};
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2 as fl;
 use solidcore::topology::part_file::{Part, PartEnv};
+use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId};
 use solidcore::{EntityRef, Result as SolidResult, SolidError};
-use solidcore_ffi::units::topology_api_files::{self as ffi, NARGS};
+use solidcore_ffi::units::primitive_api_primitives::{guard, Op as PrimOp};
+use solidcore_ffi::units::topology_api_files::{self as ffi, Source, NARGS};
 use solidcore_ffi::FfiError;
 
+use super::corpus_parity::PrivateDir;
+use super::topology_brep_mirror::FILES as WRITE_FILES;
+use crate::case::{CaseContext, CaseSource};
+use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
+
+/// Generated `write_bytes` cases per run.
+pub const WRITE_GENERATED: usize = 200;
 
 /// The runner of the `SM_API` files and conversion wrappers.
 pub struct Runner;
@@ -127,6 +150,8 @@ enum Op {
         ascii: bool,
         rebuild: bool,
     },
+    /// `SmApiWriteBrepToFile(brep, file, ascii)`, the file compared byte for byte.
+    WriteBytes { brep: WriteSrc, ascii: bool },
 }
 
 const fn ascii_default() -> bool {
@@ -236,6 +261,7 @@ fn native_args(op: &Op, case: &str) -> Result<(u8, String, [f64; NARGS]), Harnes
             a[7] = size[2];
             (4, temp_path(case))
         }
+        Op::WriteBytes { .. } => return Err(herr("write_bytes has its own entry point")),
     };
     Ok((code, path, a))
 }
@@ -438,7 +464,7 @@ fn read_record(
     rebuild: bool,
 ) -> SolidResult<Vec<f64>> {
     let mut attributes = AttributeStore::default();
-    let mut records = solidcore::topology::topology::NotifyRecords::new();
+    let mut records = NotifyRecords::new();
     let mut env = TopologyEnv {
         all_attributes: &[],
         attributes: &mut attributes,
@@ -515,7 +541,7 @@ fn build_mixed_box(k: &mut Kernel, size: [f64; 3]) -> SolidResult<Brep> {
 fn part_record(k: &mut Kernel, data: Option<Vec<u8>>, prefill: u8) -> SolidResult<Vec<f64>> {
     let mut part = prefilled(prefill)?;
     let mut store = AttributeStore::new();
-    let mut records = solidcore::topology::topology::NotifyRecords::new();
+    let mut records = NotifyRecords::new();
     let mut env = PartEnv {
         attributes: &mut store,
         key_of: &part_key_of,
@@ -532,7 +558,7 @@ fn part_record(k: &mut Kernel, data: Option<Vec<u8>>, prefill: u8) -> SolidResul
 /// `BrepData::from_brep`, then `write_to_file_with_nurbs` (as `corpus.parity` writes).
 fn write_bytes(k: &Kernel, b: &Brep, file_type: FileType) -> SolidResult<Vec<u8>> {
     let attributes = AttributeStore::default();
-    let records = solidcore::topology::topology::NotifyRecords::new();
+    let records = NotifyRecords::new();
     // `FromBrep` keeps the surfaces and curves their faces and edges own: a face's (an
     // edge's) identity is the owner its geometry records under the box's own naming
     let key_of = |e: EntityRef| -> ObjectRef {
@@ -639,6 +665,375 @@ fn rust(op: &Op) -> Result<Output, HarnessError> {
             };
             finish(read_record(&mut k, Some(bytes), *ascii, *rebuild))
         }
+        Op::WriteBytes { brep, ascii } => rust_write(brep, *ascii),
+    }
+}
+
+// ---- the byte-for-byte write ---------------------------------------------------------
+
+/// The B-rep a `write_bytes` case writes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "source")]
+enum WriteSrc {
+    /// An upstream test file, relative to `upstream/TestFiles/pt_TestFiles`, read ASCII.
+    File {
+        file: String,
+        #[serde(default)]
+        rebuild: bool,
+    },
+    Box {
+        origin: [f64; 3],
+        size: [f64; 3],
+    },
+    Sphere {
+        center: [f64; 3],
+        radius: f64,
+    },
+    Cylinder {
+        origin: [f64; 3],
+        radius: f64,
+        height: f64,
+    },
+    Cone {
+        origin: [f64; 3],
+        radius_base: f64,
+        radius_top: f64,
+        height: f64,
+    },
+    Torus {
+        center: [f64; 3],
+        major: f64,
+        minor: f64,
+    },
+    Plane {
+        origin: [f64; 3],
+        size: [f64; 2],
+    },
+}
+
+/// The FFI source of `s`.
+fn write_source(s: &WriteSrc) -> Result<Source, HarnessError> {
+    Ok(match s {
+        WriteSrc::File { file, rebuild } => Source::File {
+            path: upstream_path(file)?,
+            rebuild: *rebuild,
+        },
+        WriteSrc::Box { origin, size } => Source::Box {
+            origin: *origin,
+            size: *size,
+        },
+        WriteSrc::Sphere { center, radius } => Source::Sphere {
+            center: *center,
+            radius: *radius,
+        },
+        WriteSrc::Cylinder {
+            origin,
+            radius,
+            height,
+        } => Source::Cylinder {
+            origin: *origin,
+            radius: *radius,
+            height: *height,
+        },
+        WriteSrc::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => Source::Cone {
+            origin: *origin,
+            radius_base: *radius_base,
+            radius_top: *radius_top,
+            height: *height,
+        },
+        WriteSrc::Torus {
+            center,
+            major,
+            minor,
+        } => Source::Torus {
+            center: *center,
+            major: *major,
+            minor: *minor,
+        },
+        WriteSrc::Plane { origin, size } => Source::Plane {
+            origin: *origin,
+            size: *size,
+        },
+    })
+}
+
+/// Why both sides reject `s` (the FFI's checks): a non-finite or guarded primitive
+/// argument.
+fn write_rejection(s: &WriteSrc) -> Option<String> {
+    let (op, args): (PrimOp, Vec<f64>) = match s {
+        WriteSrc::File { .. } => return None,
+        WriteSrc::Box { origin, size } => (PrimOp::Box, [&origin[..], &size[..]].concat()),
+        WriteSrc::Sphere { center, radius } => {
+            (PrimOp::Sphere, [&center[..], &[*radius]].concat())
+        }
+        WriteSrc::Cylinder {
+            origin,
+            radius,
+            height,
+        } => (PrimOp::Cylinder, [&origin[..], &[*radius, *height]].concat()),
+        WriteSrc::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => (
+            PrimOp::Cone,
+            [&origin[..], &[*radius_base, *radius_top, *height]].concat(),
+        ),
+        WriteSrc::Torus {
+            center,
+            major,
+            minor,
+        } => (PrimOp::Torus, [&center[..], &[*major, *minor]].concat()),
+        WriteSrc::Plane { origin, size } => (PrimOp::PlaneBrep, [&origin[..], &size[..]].concat()),
+    };
+    if !args.iter().all(|a| a.is_finite()) {
+        return Some("ffi guard: invalid argument: non-finite primitive argument".into());
+    }
+    guard(op, &args, None).err().map(|e| format!("ffi guard: {e}"))
+}
+
+fn cpp_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
+    if let Some(why) = write_rejection(s) {
+        return Ok(Output::rejected(why));
+    }
+    let src = write_source(s)?;
+    // (the shim writes and reads the file by name: only inside a directory of our own)
+    let dir = PrivateDir::new().map_err(herr)?;
+    let tmp = dir.0.join("written.smb");
+    match ffi::write(&src, &tmp.to_string_lossy(), ascii) {
+        Ok(v) => Ok(Output::new().ints(
+            "rec",
+            v.iter().map(|&x| x as i64).collect::<Vec<_>>(),
+        )),
+        Err(e @ FfiError::InvalidArgument(_)) => Ok(Output::rejected(format!("ffi guard: {e}"))),
+        Err(e) => Err(herr(e)),
+    }
+}
+
+/// The `SmStatus` of a Rust error; `1007` for `InvalidInput`, `-1` for one upstream
+/// cannot return.
+fn write_status(e: &SolidError) -> i64 {
+    match e {
+        SolidError::InvalidInput { .. } => 1007,
+        SolidError::Upstream { code, .. } => i64::from(*code),
+        _ => -1,
+    }
+}
+
+/// A distinct identity for every topology object of the B-rep read from a file (as
+/// `corpus.parity`'s).
+fn write_file_key(e: EntityRef) -> ObjectRef {
+    let (type_code, kind, i) = match e {
+        EntityRef::Brep(x) => (16011, 0, x.index()),
+        EntityRef::Region(x) => (16012, 1, x.index()),
+        EntityRef::Shell(x) => (16013, 2, x.index()),
+        EntityRef::Faceuse(x) => (16022, 3, x.index()),
+        EntityRef::Face(x) => (16002, 4, x.index()),
+        EntityRef::Loopuse(x) => (16004, 5, x.index()),
+        EntityRef::Loop(x) => (16003, 6, x.index()),
+        EntityRef::Edgeuse(x) => (16005, 7, x.index()),
+        EntityRef::Edge(x) => (16016, 8, x.index()),
+        EntityRef::Vertexuse(x) => (16006, 9, x.index()),
+        EntityRef::Vertex(x) => (16021, 10, x.index()),
+    };
+    ObjectRef {
+        type_code,
+        key: ObjectKey((1 << 36) | ((kind + 1) << 32) | u64::from(i)),
+    }
+}
+
+/// The first key of the geometry the readers name (above every topology key).
+const WRITE_GEOMETRY_KEYS: u64 = 1 << 62;
+
+/// The write of `b` under `key_of`, `records` and `attributes`: `[0, write_status, n,
+/// bytes...]` (the source succeeded).
+fn write_rec(
+    k: &Kernel,
+    b: &Brep,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    records: &NotifyRecords,
+    attributes: &AttributeStore,
+    ascii: bool,
+) -> Output {
+    let env = FromBrepEnv {
+        attributes,
+        key_of,
+        records,
+        curve_key: &|_: EdgeId| ObjectKey(0),
+        uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
+        surface_key: &|_: FaceId| ObjectKey(0),
+    };
+    match api_files::write_brep_to_file(k, Some(b), &env, ascii) {
+        Ok(bytes) => {
+            let mut rec = vec![0, 0, bytes.len() as i64];
+            rec.extend(bytes.iter().map(|&c| i64::from(c)));
+            Output::new().ints("rec", rec)
+        }
+        Err(e) => Output::unported(&e)
+            .unwrap_or_else(|| Output::new().ints("rec", vec![0, write_status(&e)])),
+    }
+}
+
+fn rust_write(s: &WriteSrc, ascii: bool) -> Result<Output, HarnessError> {
+    if let Some(why) = write_rejection(s) {
+        return Ok(Output::rejected(why));
+    }
+    let mut k = Kernel::default();
+    let made = match s {
+        WriteSrc::File { file, rebuild } => {
+            let bytes = read_bytes(file)?;
+            let mut records = NotifyRecords::new();
+            let mut attributes = AttributeStore::default();
+            let mut b = Brep::new_with_infinite_region().map_err(herr)?;
+            let read = {
+                let mut env = TopologyEnv {
+                    all_attributes: &[],
+                    attributes: &mut attributes,
+                    key_of: &write_file_key,
+                    records: &mut records,
+                    next_key: WRITE_GEOMETRY_KEYS,
+                };
+                read_from_file(&mut k, &mut b, bytes, FileType::Ascii, *rebuild, &mut env)
+            };
+            return Ok(match read {
+                Ok(()) => write_rec(&k, &b, &write_file_key, &records, &attributes, ascii),
+                Err(e) => Output::unported(&e)
+                    .unwrap_or_else(|| Output::new().ints("rec", vec![write_status(&e)])),
+            });
+        }
+        WriteSrc::Box { origin, size } => api_primitives::create_box(
+            &mut k,
+            Point3::from_array(*origin),
+            size[0],
+            size[1],
+            size[2],
+        ),
+        WriteSrc::Sphere { center, radius } => {
+            api_primitives::create_sphere(&mut k, Point3::from_array(*center), *radius)
+        }
+        WriteSrc::Cylinder {
+            origin,
+            radius,
+            height,
+        } => api_primitives::create_cylinder(&mut k, Point3::from_array(*origin), *radius, *height),
+        WriteSrc::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => api_primitives::create_cone(
+            &mut k,
+            Point3::from_array(*origin),
+            *radius_base,
+            *radius_top,
+            *height,
+        ),
+        WriteSrc::Torus {
+            center,
+            major,
+            minor,
+        } => api_primitives::create_torus(&mut k, Point3::from_array(*center), *major, *minor),
+        WriteSrc::Plane { origin, size } => {
+            api_primitives::create_plane(&mut k, Point3::from_array(*origin), size[0], size[1])
+        }
+    };
+    let b = match made {
+        Ok(b) => b,
+        Err(e) => {
+            return Ok(Output::unported(&e)
+                .unwrap_or_else(|| Output::new().ints("rec", vec![write_status(&e)])));
+        }
+    };
+    // the primitive's records are the kernel's, under its identities
+    let serial = b.notify_serial();
+    // `FromBrep` keeps the surfaces and curves their faces and edges own: a face's (an
+    // edge's) identity is the owner its geometry records
+    let key_of = |e: EntityRef| -> ObjectRef {
+        let owner = match e {
+            EntityRef::Face(f) => b.face(f).ok().and_then(|x| x.surface.as_ref()?.owner()),
+            EntityRef::Edge(x) => b.edge(x).ok().and_then(|y| y.curve.as_ref()?.owner()),
+            _ => None,
+        };
+        owner.unwrap_or_else(|| match serial {
+            Some(s) => topology_ref(s, e),
+            None => write_file_key(e),
+        })
+    };
+    let attributes = AttributeStore::default();
+    Ok(write_rec(
+        &k,
+        &b,
+        &key_of,
+        &k.notify_records,
+        &attributes,
+        ascii,
+    ))
+}
+
+/// A primitive at scale `s` (an origin up to `20 s` from the world origin).
+fn gen_write_primitive(rng: &mut Rng) -> WriteSrc {
+    let s = *rng.choose(&[1.0e-3, 1.0, 1.0, 1.0, 1.0e3]).unwrap_or(&1.0);
+    let o = rng.point3(-20.0 * s, 20.0 * s);
+    let dim = |rng: &mut Rng| rng.uniform(0.1, 10.0) * s;
+    match rng.below(6) {
+        0 => WriteSrc::Box {
+            origin: o,
+            size: [dim(rng), dim(rng), dim(rng)],
+        },
+        1 => WriteSrc::Sphere {
+            center: o,
+            radius: dim(rng),
+        },
+        2 => WriteSrc::Cylinder {
+            origin: o,
+            radius: dim(rng),
+            height: dim(rng),
+        },
+        3 => {
+            let base = dim(rng);
+            let top = if rng.chance(0.3) { 0.0 } else { dim(rng) };
+            WriteSrc::Cone {
+                origin: o,
+                radius_base: base,
+                radius_top: top,
+                height: dim(rng),
+            }
+        }
+        4 => {
+            let major = dim(rng);
+            WriteSrc::Torus {
+                center: o,
+                major,
+                minor: major * rng.uniform(0.05, 0.9),
+            }
+        }
+        _ => WriteSrc::Plane {
+            origin: o,
+            size: [dim(rng), dim(rng)],
+        },
+    }
+}
+
+/// One generated `write_bytes` case: a primitive, or (30%) an upstream B-rep file.
+fn gen_write(rng: &mut Rng) -> Op {
+    let brep = if rng.chance(0.3) {
+        let file = rng.choose(&WRITE_FILES).copied().unwrap_or("Solids/box.smb");
+        WriteSrc::File {
+            file: file.to_string(),
+            rebuild: rng.chance(0.2),
+        }
+    } else {
+        gen_write_primitive(rng)
+    };
+    Op::WriteBytes {
+        brep,
+        ascii: rng.chance(0.5),
     }
 }
 
@@ -647,8 +1042,28 @@ impl UnitDiff for Runner {
         "topology.api_files"
     }
 
+    fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+        let mut cases = default_cases(self, ctx)?;
+        let unit = "topology.api_files/write_bytes";
+        for i in 0..WRITE_GENERATED {
+            let seed = CaseContext::seed_for(unit, i);
+            let mut rng = Rng::new(seed);
+            let inputs = serde_json::to_value(gen_write(&mut rng)).map_err(herr)?;
+            cases.push(Case {
+                unit: self.id().to_string(),
+                name: format!("write_bytes{i:04}"),
+                source: CaseSource::Generated { seed },
+                inputs,
+            });
+        }
+        Ok(cases)
+    }
+
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let op: Op = case.parse()?;
+        if let Op::WriteBytes { brep, ascii } = &op {
+            return cpp_write(brep, *ascii);
+        }
         let (code, path, args) = native_args(&op, &case.name)?;
         match ffi::eval(code, &path, &args) {
             Ok(raw) if raw.first() == Some(&-999.) => Ok(Output::rejected(format!(

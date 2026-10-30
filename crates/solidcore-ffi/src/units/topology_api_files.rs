@@ -42,10 +42,20 @@
 //! sizes in `1e-6..=1e6` and a fillet radius `0` or positive below a quarter of the
 //! smallest size. A primitive body (op 3) has its sizes in `1e-6..=1e6`, a torus its
 //! minor radius below its major one.
+//!
+//! # Byte-for-byte write
+//!
+//! [`write`] (`sc_topology_api_files_write`) builds a B-rep from a [`Source`] (an upstream
+//! test file read by `SmBrep::ReadFromFile`, ASCII, or an `SM_API` primitive:
+//! `SmApiCreateBox`, `SmApiCreateSphere`, and the `SmBrep*&` overloads of
+//! `SmApiCreateCylinder`, `SmApiCreateCone`, `SmApiCreateTorus`, `SmApiCreatePlane`),
+//! writes it with `SmApiWriteBrepToFile` to a file the caller names and returns the file's
+//! bytes (see [`write`]).
 
 use std::ffi::CString;
 use std::path::{Component, Path};
 
+use super::primitive_api_primitives::{guard, Op};
 use crate::{call_with_buffer, FfiError};
 
 mod sys {
@@ -55,6 +65,18 @@ mod sys {
             path: *const std::ffi::c_char,
             args: *const f64,
             na: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_topology_api_files_write(
+            path: *const std::ffi::c_char,
+            tmp: *const std::ffi::c_char,
+            kind: i32,
+            args: *const f64,
+            n_args: i64,
+            ascii: i32,
+            rebuild: i32,
             out: *mut f64,
             cap: i64,
             out_len: *mut i64,
@@ -176,5 +198,155 @@ pub fn eval(op: u8, path: &str, args: &[f64; NARGS]) -> Result<Vec<f64>, FfiErro
                 )
             }
         })
+    })
+}
+
+/// The B-rep [`write`] writes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Source {
+    /// `SmBrep::ReadFromFile(ctx, path, SM_ASCII, rebuild)` of an upstream test file.
+    File {
+        /// The file's absolute path.
+        path: String,
+        /// Rebuild the UV trim curves on reading.
+        rebuild: bool,
+    },
+    /// `SmApiCreateBox(origin, size[0], size[1], size[2])`.
+    Box {
+        /// Lower-left corner.
+        origin: [f64; 3],
+        /// Length, width and height.
+        size: [f64; 3],
+    },
+    /// `SmApiCreateSphere(center, radius)`.
+    Sphere {
+        /// Center.
+        center: [f64; 3],
+        /// Radius.
+        radius: f64,
+    },
+    /// `SmApiCreateCylinder(origin, radius, height)`.
+    Cylinder {
+        /// Base center.
+        origin: [f64; 3],
+        /// Radius.
+        radius: f64,
+        /// Height.
+        height: f64,
+    },
+    /// `SmApiCreateCone(origin, radius_base, radius_top, height)`.
+    Cone {
+        /// Base center.
+        origin: [f64; 3],
+        /// Base radius.
+        radius_base: f64,
+        /// Top radius.
+        radius_top: f64,
+        /// Height.
+        height: f64,
+    },
+    /// `SmApiCreateTorus(center, major, minor)`.
+    Torus {
+        /// Center.
+        center: [f64; 3],
+        /// Major radius.
+        major: f64,
+        /// Minor radius.
+        minor: f64,
+    },
+    /// `SmApiCreatePlane(origin, x, y)`: a rectangular sheet.
+    Plane {
+        /// Lower-left corner.
+        origin: [f64; 3],
+        /// Extents along x and y.
+        size: [f64; 2],
+    },
+}
+
+/// The kind, the constructor's [`Op`] (for the guard) and the arguments of a primitive
+/// source; `None` for a file.
+fn primitive(s: &Source) -> Option<(i32, Op, Vec<f64>)> {
+    let with = |o: &[f64; 3], rest: &[f64]| {
+        let mut v = o.to_vec();
+        v.extend_from_slice(rest);
+        v
+    };
+    Some(match s {
+        Source::File { .. } => return None,
+        Source::Box { origin, size } => (1, Op::Box, with(origin, size)),
+        Source::Sphere { center, radius } => (2, Op::Sphere, with(center, &[*radius])),
+        Source::Cylinder {
+            origin,
+            radius,
+            height,
+        } => (3, Op::Cylinder, with(origin, &[*radius, *height])),
+        Source::Cone {
+            origin,
+            radius_base,
+            radius_top,
+            height,
+        } => (
+            4,
+            Op::Cone,
+            with(origin, &[*radius_base, *radius_top, *height]),
+        ),
+        Source::Torus {
+            center,
+            major,
+            minor,
+        } => (5, Op::Torus, with(center, &[*major, *minor])),
+        Source::Plane { origin, size } => (6, Op::PlaneBrep, with(origin, size)),
+    })
+}
+
+/// `SmApiWriteBrepToFile` of the B-rep of `source`, ASCII (`ascii`) or binary, to the
+/// file `tmp` (read back and removed by the shim): `source_status`, then on success
+/// `write_status`, then on success `n` and the file's `n` bytes (one value per byte).
+/// Statuses are `0` (`SM_SUCCESS`) or the `SmStatus`. Primitive arguments must be finite
+/// and pass the constructor guards of `primitive.api_primitives` ([`guard`]: the inputs
+/// on which the constructors crash or hang upstream). Runs in this process (no static
+/// state is latched).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a non-finite or guarded primitive argument or a
+/// NUL byte in a path; the shim's status otherwise.
+pub fn write(source: &Source, tmp: &str, ascii: bool) -> Result<Vec<f64>, FfiError> {
+    let (kind, args, path, rebuild) = match primitive(source) {
+        Some((kind, op, args)) => {
+            if !args.iter().all(|a| a.is_finite()) {
+                return Err(bad("non-finite primitive argument"));
+            }
+            guard(op, &args, None)?;
+            (kind, args, String::new(), false)
+        }
+        None => match source {
+            Source::File { path, rebuild } => {
+                upstream_file(path, false)?;
+                (0, Vec::new(), path.clone(), *rebuild)
+            }
+            _ => return Err(bad("source")),
+        },
+    };
+    let cpath = CString::new(path).map_err(|_| bad("path has a NUL byte"))?;
+    let ctmp = CString::new(tmp).map_err(|_| bad("tmp has a NUL byte"))?;
+    call_with_buffer(1 << 16, |buf: &mut [f64], len| {
+        // SAFETY: cpath, ctmp and args stay live through the call (args valid for
+        // args.len() reads); buf is valid for buf.len() writes and the shim honours the
+        // capacity; len is valid; nothing is retained.
+        unsafe {
+            sys::sc_topology_api_files_write(
+                cpath.as_ptr(),
+                ctmp.as_ptr(),
+                kind,
+                args.as_ptr(),
+                args.len() as i64,
+                i32::from(ascii),
+                i32::from(rebuild),
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
     })
 }

@@ -54,6 +54,14 @@
 //! callee. Every run has at least [`MIN_GENERATED`] generated cases, plus
 //! [`MIN_GENERATED_MORE`] cases of the entry points added later (`more0000`, ...: their
 //! own stream, so each `gen` case stays the one the baseline has).
+//!
+//! A `tessellate_boundaries` call (`SmApiTessellateBoundaries`) tessellates one operand's
+//! edges, some of them first left without curve (`drop_curves`, `GetEdges` indices):
+//! `status` (also `SM_ERR` with partial output), `record` (the edges as `GetEdges`
+//! indices, then the vertex counts, each list after its length) and `points` (`x y z` per
+//! point). Besides the fixtures, [`MIN_GENERATED_TESSELLATE`] such calls are generated on
+//! their own stream (`tess0000`, ...): every operand kind at small, moderate and large
+//! scales, angle tolerances from `0.5` to `90` degrees and invalid ones.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -76,6 +84,8 @@ use solidcore::sweep::api_brep::{
     non_manifold_rotational_sweep, non_manifold_sweep, RegionBrep, SweepSelection,
 };
 use solidcore::sweep::api_surfaces::create_skin_primitive;
+use solidcore::error::SM_ERR;
+use solidcore::topology::brep::p1::BoundaryTessellation;
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::edgeuse::p1 as edgeuse_p1;
 use solidcore::topology::proto_topology::p1::api_transform::{
@@ -97,6 +107,9 @@ pub const MIN_GENERATED: usize = 240;
 /// Generated cases of the later entry points (with curves, 2D, non-manifold, piecewise
 /// and the sweeps) per run, whatever `--seeds` says.
 pub const MIN_GENERATED_MORE: usize = 160;
+
+/// Generated `tessellate_boundaries` calls per run (their own stream).
+pub const MIN_GENERATED_TESSELLATE: usize = 160;
 
 /// `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: i64 = 1007;
@@ -362,6 +375,14 @@ enum Inputs {
         #[serde(default)]
         behavior: u8,
     },
+    /// `SmApiTessellateBoundaries` of `brep`, the edges at `drop_curves` (`GetEdges`
+    /// indices) first left without curve.
+    TessellateBoundaries {
+        brep: BrepIn,
+        angle_tol_deg: f64,
+        #[serde(default)]
+        drop_curves: Vec<u64>,
+    },
 }
 
 fn spec(b: &BrepIn) -> BrepSpec {
@@ -579,6 +600,15 @@ fn to_call(i: &Inputs) -> Call {
             operation: *operation,
             behavior: *behavior,
         },
+        Inputs::TessellateBoundaries {
+            brep,
+            angle_tol_deg,
+            drop_curves,
+        } => Call::TessellateBoundaries {
+            brep: spec(brep),
+            angle_tol_deg: *angle_tol_deg,
+            drop_curves: drop_curves.clone(),
+        },
     }
 }
 
@@ -618,6 +648,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             Inputs::Sweep { .. } | Inputs::RotationalSweep { .. } => {
                 areas_output(&o, o.first() == Some(&0.0))
             }
+            Inputs::TessellateBoundaries { .. } => tessellate_output(&o),
             _ => to_output(&o),
         },
         Err(e) => Err(harness(format!("cpp: {e}"))),
@@ -646,6 +677,44 @@ fn areas_output(o: &[f64], has_areas: bool) -> Result<Output, HarnessError> {
     let (head, areas) =
         ffi::split_measures(o).ok_or_else(|| harness("cpp: areas record too short"))?;
     Ok(to_output(head)?.values("areas", areas.to_vec()))
+}
+
+/// A `tessellate_boundaries` record: `status ne edges.. nc counts.. np xyz..` (a failed
+/// torus operand: `status 2`).
+fn tessellate_output(o: &[f64]) -> Result<Output, HarnessError> {
+    if o.len() == 2 && o.get(1) == Some(&2.0) {
+        return to_output(o);
+    }
+    let short = || harness("cpp: tessellate record too short");
+    let (&status, rest) = o.split_first().ok_or_else(short)?;
+    let int = |x: f64| {
+        if x.fract() == 0.0 && x.abs() < 1e15 {
+            Ok(x as i64)
+        } else {
+            Err(harness(format!("non-integer record entry {x}")))
+        }
+    };
+    let mut ints = Vec::new();
+    let mut at = 0usize;
+    // the edge and count lists, each after its length
+    for _ in 0..2 {
+        let n = int(*rest.get(at).ok_or_else(short)?)?;
+        let len = usize::try_from(n).map_err(|_| short())?;
+        let list = rest.get(at..at + 1 + len).ok_or_else(short)?;
+        for &x in list {
+            ints.push(int(x)?);
+        }
+        at += 1 + len;
+    }
+    let np = usize::try_from(int(*rest.get(at).ok_or_else(short)?)?).map_err(|_| short())?;
+    let points = rest
+        .get(at + 1..at + 1 + 3 * np)
+        .ok_or_else(short)?
+        .to_vec();
+    Ok(Output::new()
+        .int("status", int(status)?)
+        .ints("record", ints)
+        .values("points", points))
 }
 
 /// Whether the Boolean reaches UB-242 (`plan/upstream-issues/`): an imprint in
@@ -1409,6 +1478,41 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
             );
             sweep_record(k, r, &mut b, seen)
         }
+        Inputs::TessellateBoundaries {
+            brep,
+            angle_tol_deg,
+            drop_curves,
+        } => {
+            let mut b = build(k, brep)?;
+            let all = brep_p1::edges(&b, None).map_err(|e| stop("GetEdges", &e))?;
+            for &d in drop_curves {
+                let e = usize::try_from(d)
+                    .ok()
+                    .and_then(|d| all.get(d).copied())
+                    .ok_or_else(|| Stop::Harness(harness("dropped edge index out of range")))?;
+                // SetCurve(NULL, TRUE, FALSE, FALSE)
+                b.edge_mut(e).map_err(|e| stop("SetCurve", &e))?.curve = None;
+            }
+            let (status, t) = match api::tessellate_boundaries(k, &b, *angle_tol_deg) {
+                Ok(t) => (if t.complete { 0 } else { i64::from(SM_ERR) }, t),
+                Err(e) if matches!(e, SolidError::InvalidInput { .. }) => {
+                    seen(&e);
+                    (status(&e), BoundaryTessellation::default())
+                }
+                Err(e) => return Ok(err_output(&e)),
+            };
+            let mut o = vec![count(t.edges.len())?];
+            for e in &t.edges {
+                let at = all.iter().position(|x| x == e).map_or(Ok(-1), count)?;
+                o.push(at);
+            }
+            o.push(count(t.vertex_counts.len())?);
+            for &n in &t.vertex_counts {
+                o.push(count(n)?);
+            }
+            let points: Vec<f64> = t.points.iter().flat_map(|p| [p.x, p.y, p.z]).collect();
+            Ok(record(status, o).values("points", points))
+        }
         Inputs::Trees { breps: list, tree } => {
             let mut v: Vec<Option<Brep>> = build_all(k, list)?.into_iter().map(Some).collect();
             match api::boolean_trees(k, &mut v, tree) {
@@ -1772,6 +1876,62 @@ fn gen_more(rng: &mut Rng) -> Inputs {
     }
 }
 
+/// One generated `tessellate_boundaries` call: any operand kind the generator makes, at
+/// any scale, sometimes with edges left without curve, with a tolerance from `0.5` to
+/// `90` degrees or an invalid one.
+fn gen_tessellate(rng: &mut Rng) -> Inputs {
+    let s = gen_scale(rng);
+    let c = rng.point3(-2.0 * s, 2.0 * s);
+    let brep = match rng.below(5) {
+        0 | 1 => gen_brep(rng, s, c),
+        2 => BrepIn::Plane {
+            origin: c,
+            size: [s * rng.uniform(0.3, 1.5), s * rng.uniform(0.3, 1.5)],
+        },
+        3 => {
+            let major = s * rng.uniform(0.5, 1.5);
+            BrepIn::Torus {
+                center: c,
+                major,
+                minor: major * rng.uniform(0.1, 0.8),
+            }
+        }
+        _ => BrepIn::Boolean {
+            operation: 1,
+            a: Box::new(gen_brep(rng, s, c)),
+            b: Box::new(gen_brep(rng, s, c)),
+        },
+    };
+    let angle_tol_deg = match rng.below(12) {
+        0 => *rng.choose(&[0.0, -5.0, -1.0e-9]).unwrap_or(&0.0),
+        1 => 90.0,
+        _ => rng.uniform(0.5, 30.0),
+    };
+    let drop_curves: Vec<u64> = if rng.chance(0.2) {
+        (0..=rng.below(3)).map(|_| rng.below(4)).collect()
+    } else {
+        Vec::new()
+    };
+    // only edges the operand has: a torus or a sphere has fewer than four, and an index
+    // past `GetEdges` is a harness error on both sides, not an API answer (the draws
+    // above are kept, so the rest of the stream is unchanged)
+    let drop_curves = if drop_curves.is_empty() {
+        drop_curves
+    } else {
+        let mut k = Kernel::default();
+        let num_edges = build(&mut k, &brep)
+            .ok()
+            .and_then(|b| brep_p1::edges(&b, None).ok())
+            .map_or(0, |edges| edges.len() as u64);
+        drop_curves.into_iter().filter(|&d| d < num_edges).collect()
+    };
+    Inputs::TessellateBoundaries {
+        brep,
+        angle_tol_deg,
+        drop_curves,
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "boolean.api_brep"
@@ -1798,6 +1958,17 @@ impl UnitDiff for Runner {
         }) {
             c.unit = self.id().to_string();
             c.name = c.name.replacen("gen", "more", 1);
+            v.push(c);
+        }
+        let tess_ctx = CaseContext {
+            seeds: ctx.seeds.max(MIN_GENERATED_TESSELLATE),
+            ..ctx.clone()
+        };
+        for mut c in tess_ctx.generated_cases("boolean.api_brep:tessellate", |rng| {
+            serde_json::to_value(gen_tessellate(rng)).ok()
+        }) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "tess", 1);
             v.push(c);
         }
         Ok(v)

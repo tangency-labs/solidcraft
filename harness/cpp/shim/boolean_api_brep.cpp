@@ -4,8 +4,8 @@
 // SmApiBooleanIntersection, SmApiBooleanMerge, SmApiMergeBreps, SmApiBooleanWithOptions,
 // SmApiBooleanLists, SmApiBooleanTrees, SmApiBooleanWithCurves, SmApiBoolean2d,
 // SmApiNonManifoldBoolean, SmApiPiecewiseMerge) and its non-manifold sweeps of a B-rep
-// (SmApiNonManifoldSweep, SmApiNonManifoldRotationalSweep), called exactly as a caller of
-// the API would.
+// (SmApiNonManifoldSweep, SmApiNonManifoldRotationalSweep), and SmApiTessellateBoundaries of
+// an operand, called exactly as a caller of the API would.
 //
 // One entry point, sc_boolean_api_brep_run(in, n_in, out, cap, out_len). `in` is
 // `op args...`; layouts are documented in crates/solidcore-ffi/src/units/boolean_api_brep.rs,
@@ -80,6 +80,7 @@ enum : int32_t
     OP_NM_SWEEP = 15,
     OP_NM_ROTATIONAL_SWEEP = 16,
     OP_ATTRIBUTED = 17,
+    OP_TESSELLATE_BOUNDARIES = 18,
 };
 
 // Most entries of one non-manifold sweep selection array (MAX_SELECTION in the Rust module).
@@ -1008,9 +1009,68 @@ void run_sweep(Rd& rd, int32_t api, std::vector<double>& o)
     delete other;
 }
 
+// SmApiTessellateBoundaries of an operand whose `GetEdges` edges at the listed indices
+// first lose their curve (SetCurve(NULL, TRUE, FALSE, FALSE), as upstream's test): the
+// status, then (outputs are kept on SM_ERR) the edges as `GetEdges` indices, the vertex
+// counts and the points.
+void run_tessellate_boundaries(Rd& rd, std::vector<double>& o)
+{
+    BrepSpec spec = read_spec(rd);
+    double tol = rd.num();
+    int64_t nd = rd.idx(0, 64);
+    std::vector<int64_t> drop;
+    for (int64_t i = 0; i < nd; i++)
+        drop.push_back(rd.idx(0, 4095));
+    if (rd.at != rd.n)
+        throw Bad();
+    std::vector<BrepSpec> specs;
+    specs.push_back(spec);
+    std::vector<SmBrep*> bs = build_all(specs);
+    SmBrep* b = bs[0];
+    SmTArray<SmEdge*> all;
+    b->GetEdges(all);
+    for (int64_t d : drop)
+    {
+        if (d >= (int64_t)all.GetSize())
+        {
+            delete b;
+            throw Bad();
+        }
+        all[(ULONG)d]->SetCurve(NULL, TRUE, FALSE, FALSE);
+    }
+    SmTArray<SmPoint3d> points;
+    SmTArray<ULONG> counts;
+    SmTArray<SmEdge*> edges;
+    SmApiStatus stat = SmApiTessellateBoundaries(b, tol, points, counts, edges);
+    o.push_back(st(stat));
+    o.push_back((double)edges.GetSize());
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+    {
+        double at = -1.0;
+        for (ULONG j = 0; j < all.GetSize(); j++)
+            if (all[j] == edges[i])
+            {
+                at = (double)j;
+                break;
+            }
+        o.push_back(at);
+    }
+    o.push_back((double)counts.GetSize());
+    for (ULONG i = 0; i < counts.GetSize(); i++)
+        o.push_back((double)counts[i]);
+    o.push_back((double)points.GetSize());
+    for (ULONG i = 0; i < points.GetSize(); i++)
+    {
+        o.push_back(points[i].x);
+        o.push_back(points[i].y);
+        o.push_back(points[i].z);
+    }
+    delete b;
+}
+
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t api = (int32_t)rd.idx(1, 17);
+    int32_t api = (int32_t)rd.idx(1, 18);
     switch (api)
     {
     case OP_BOOLEAN:
@@ -1030,6 +1090,7 @@ void run(Rd& rd, std::vector<double>& o)
     case OP_NM_SWEEP:
     case OP_NM_ROTATIONAL_SWEEP: run_sweep(rd, api, o); break;
     case OP_ATTRIBUTED: run_attributed(rd, o); break;
+    case OP_TESSELLATE_BOUNDARIES: run_tessellate_boundaries(rd, o); break;
     default: throw Bad();
     }
 }

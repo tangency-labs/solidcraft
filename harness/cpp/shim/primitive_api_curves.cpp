@@ -3,7 +3,8 @@
 // source/SM_API/src/SmApiCurves.cpp (SmApiCreateLineSegment, SmApiCreateLine, both
 // SmApiCreateCircle overloads, SmApiCreateEllipse, SmApiCreateArc, SmApiCreateHelix,
 // SmApiCreateRectangle, SmApiCreateRegularPolygon, SmApiCreateCurve,
-// SmApiCreateCanonicalCurve), called exactly as a caller of the API would.
+// SmApiCreateCanonicalCurve) and SmApiRemoveCurveKnots on a curve one of them made,
+// called exactly as a caller of the API would.
 //
 // One entry point, sc_primitive_api_curves_run(in, n_in, out, cap, out_len). `in` is
 // `op args...`; layouts are documented in crates/solidcore-ffi/src/units/primitive_api_curves.rs.
@@ -51,7 +52,19 @@ enum : int32_t
     OP_POLYGON = 9,
     OP_CURVE = 10,
     OP_CANONICAL = 11,
+    OP_REMOVE_KNOTS = 12,
 };
+
+// Set by OP_REMOVE_KNOTS: the created curve is passed to SmApiRemoveCurveKnots, whose
+// status precedes its state.
+bool g_remove_knots = false;
+
+// SmApiRemoveCurveKnots on a created curve, when asked: its status.
+void maybe_remove_knots(std::vector<double>& o, SmCurve* c)
+{
+    if (g_remove_knots)
+        o.push_back(st(SmApiRemoveCurveKnots(c)));
+}
 
 // Access to private / protected members through explicit instantiation.
 template <typename Tag, typename Tag::type M>
@@ -227,13 +240,25 @@ void put_result(std::vector<double>& o, SmStatus s, SmBSplineCurve* c)
 {
     o.push_back(st(s));
     if (s == SM_SUCCESS && c)
+    {
+        maybe_remove_knots(o, c);
         put_bspline(o, c);
+    }
     delete c;
 }
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int64_t op = rd.idx(OP_LINE_SEGMENT, OP_CANONICAL);
+    int64_t op = rd.idx(OP_LINE_SEGMENT, OP_REMOVE_KNOTS);
+    g_remove_knots = false;
+    if (op == OP_REMOVE_KNOTS)
+    {
+        // a curve of one call (not the segment arrays), then SmApiRemoveCurveKnots
+        g_remove_knots = true;
+        op = rd.idx(OP_LINE_SEGMENT, OP_CANONICAL);
+        if (op == OP_RECTANGLE || op == OP_POLYGON)
+            throw Bad();
+    }
     switch (op)
     {
     case OP_LINE_SEGMENT:
@@ -245,7 +270,10 @@ void run(Rd& rd, std::vector<double>& o)
         SmStatus s = op == OP_LINE ? SmApiCreateLine(a, b, l) : SmApiCreateLineSegment(a, b, l);
         o.push_back(st(s));
         if (s == SM_SUCCESS && l)
+        {
+            maybe_remove_knots(o, l);
             put_line(o, l);
+        }
         delete l;
         return;
     }
@@ -277,6 +305,7 @@ void run(Rd& rd, std::vector<double>& o)
         o.push_back(st(s));
         if (s == SM_SUCCESS && e)
         {
+            maybe_remove_knots(o, e);
             o.push_back((double)e->GetType());
             put_ellipse(o, e);
         }

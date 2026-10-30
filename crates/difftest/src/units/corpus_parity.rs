@@ -474,10 +474,10 @@ pub fn run_child(args: &[String]) -> ExitCode {
 /// system temp directory for the C++ round trip's file and removed with everything in it
 /// when dropped (on every return path). `create_dir` fails on any existing entry,
 /// a planted symlink included, and the next name is tried.
-struct PrivateDir(PathBuf);
+pub(super) struct PrivateDir(pub(super) PathBuf);
 
 impl PrivateDir {
-    fn new() -> std::io::Result<Self> {
+    pub(super) fn new() -> std::io::Result<Self> {
         let base = std::env::temp_dir();
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

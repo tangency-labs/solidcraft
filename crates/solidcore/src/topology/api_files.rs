@@ -1,5 +1,5 @@
 //! `SM_API` files and conversion: reading a B-rep or a part from a database file,
-//! turning a B-rep's geometry into NURBS, and growing a caller's curve output array.
+//! writing a B-rep to one, turning a B-rep's geometry into NURBS, and growing a caller's curve output array.
 //!
 //! Upstream: `source/SM_API/src/SmApiImportExport.cpp`, `source/SM_API/src/SmApiBrep.cpp`,
 //! `source/SM_API/inc/SmApiImportExport.h`, `source/SM_API/inc/SmApiBrep.h`.
@@ -8,6 +8,7 @@
 //! |------------------------------|-------------------------------------------|
 //! | [`read_brep_from_file`]      | `SmApiReadBrepFromFile`                   |
 //! | [`read_part_from_file`]      | `SmApiReadPartFromFile`                   |
+//! | [`write_brep_to_file`]       | `SmApiWriteBrepToFile`                    |
 //! | [`turn_to_nurbs`]            | `SmApiTurnToNurbs`                        |
 //! | [`add_curve_output_slots`]   | `SmApiAddCurveOutputSlots` (file static)  |
 //!
@@ -16,6 +17,9 @@
 //! - **Files.** The readers take the file's contents (the library reads no files: it
 //!   must build for `wasm32-unknown-unknown`); `None` is upstream's null file name
 //!   (`SM_ERR_INVALID_INPUT`). A file that cannot be opened is the caller's error.
+//!   [`write_brep_to_file`] returns the file's contents (`pFileName` has no
+//!   counterpart, so neither has its `NULL` check); the B-rep's topology records and
+//!   attributes are the caller's ([`FromBrepEnv`]).
 //! - **Identities.** The new objects are named through the caller's environment
 //!   ([`TopologyEnv`], [`PartEnv`]), as [`p7::read_from_file`] and
 //!   [`part_file::read_part_from_file`] take it. [`turn_to_nurbs`] is a plain entry
@@ -39,6 +43,7 @@ use crate::geom::tol::USE_DEFAULT;
 use crate::kernel::Kernel;
 use crate::topology::brep::p10::TopologyEnv;
 use crate::topology::brep::{p3, p5, p7};
+use crate::topology::brep_data_write::{self, FromBrepEnv};
 use crate::topology::database_io::FileType;
 use crate::topology::part_file::{self, Part, PartEnv};
 use crate::topology::Brep;
@@ -46,6 +51,7 @@ use crate::topology::Brep;
 const OP_READ_BREP: &str = "topology::api_files::read_brep_from_file";
 const OP_READ_PART: &str = "topology::api_files::read_part_from_file";
 const OP_TURN: &str = "topology::api_files::turn_to_nurbs";
+const OP_WRITE_BREP: &str = "topology::api_files::write_brep_to_file";
 const OP_SLOTS: &str = "topology::api_files::add_curve_output_slots";
 
 /// `SM_BIG_ULONG` (`SmMath.h`): the size no `SmTArray` reaches.
@@ -149,6 +155,26 @@ pub fn read_part_from_file(
     out.boolean_tree_nodes.extend(part.boolean_tree_nodes);
     out.breps.extend(part.breps);
     Ok(())
+}
+
+/// `SmApiWriteBrepToFile`: `brep` as an SMLib B-rep file, ASCII (`ascii`) or binary, in
+/// native formats (`SmBrep::WriteToFile(name, type, TRUE, FALSE, 0.0)`,
+/// [`brep_data_write::write_brep_to_file`]); returns the file's contents.
+///
+/// # Errors
+///
+/// `SM_ERR_INVALID_INPUT` for no B-rep; those of
+/// [`brep_data_write::write_brep_to_file`].
+pub fn write_brep_to_file(
+    k: &Kernel,
+    brep: Option<&Brep>,
+    env: &FromBrepEnv<'_>,
+    ascii: bool,
+) -> Result<Vec<u8>> {
+    let Some(brep) = brep else {
+        return Err(status(OP_WRITE_BREP, SM_ERR_INVALID_INPUT));
+    };
+    brep_data_write::write_brep_to_file(k, brep, env, file_type(ascii))
 }
 
 /// `SmApiTurnToNurbs`: replaces the analytic and periodic surfaces and the edge curves

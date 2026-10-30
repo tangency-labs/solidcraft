@@ -3,7 +3,8 @@
 //! `source/SM_API/src/SmApiCurves.cpp` (`SmApiCreateLineSegment`, `SmApiCreateLine`,
 //! `SmApiCreateCircle` (both overloads), `SmApiCreateEllipse`, `SmApiCreateArc`,
 //! `SmApiCreateHelix`, `SmApiCreateRectangle`, `SmApiCreateRegularPolygon`,
-//! `SmApiCreateCurve`, `SmApiCreateCanonicalCurve`).
+//! `SmApiCreateCurve`, `SmApiCreateCanonicalCurve`, and `SmApiRemoveCurveKnots` on a
+//! curve one of them made).
 //!
 //! Program layout (all `f64`): `op args...`, with `op` the [`Call`] discriminant:
 //!
@@ -20,13 +21,16 @@
 //! | 9 regular polygon | `center(3) sides radius` |
 //! | 10 cubic curve | `n pts(3n)` |
 //! | 11 canonical curve | `n pts(3n) nk knots(nk) mults(nk) has_w nw w(nw) degree form` |
+//! | 12 remove knots | `op args...` of one of ops 1-7, 10, 11 |
 //!
 //! Output: the API status (`0` = `SM_SUCCESS`, else the `SmStatus`), then on success
 //! the created curve: a B-spline is `type dim knot_type form has_nurb [n p m Pw(4(n+1))
 //! U(m+1) natural_interval(2)]`; a line is `point(3) vector(3) step_interval(2) scale
 //! inside_out` then its B-spline part; a circle / ellipse is `type origin(3) x(3) y(3)
 //! step_interval(2) rx ry inside_out polar_possible nk knots na angles nx exact` then
-//! its B-spline part; rectangle and polygon give `count` then each line.
+//! its B-spline part; rectangle and polygon give `count` then each line. Under op 12
+//! the creation status is followed, on success, by `SmApiRemoveCurveKnots`'s status and
+//! then the curve's state after it.
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -157,11 +161,24 @@ pub enum Call {
         /// `SmBSplineCurveForm` code (0 to 6).
         form: u32,
     },
+    /// `SmApiRemoveCurveKnots` on the curve of one call (not a rectangle, polygon or
+    /// another removal).
+    RemoveKnots(Box<Call>),
 }
 
 fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
     let mut o = Vec::new();
     match call {
+        Call::RemoveKnots(inner) => {
+            if matches!(
+                **inner,
+                Call::Rectangle { .. } | Call::Polygon { .. } | Call::RemoveKnots(_)
+            ) {
+                return Err(bad("knot removal of a segment array or a removal"));
+            }
+            o.push(12.0);
+            o.extend(encode(inner)?);
+        }
         Call::LineSegment { start, end } => {
             o.push(1.0);
             o.extend_from_slice(start);

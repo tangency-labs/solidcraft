@@ -21,6 +21,7 @@
 //! | [`is_live_topology_member`]                       | `SmBrep::IsLiveTopologyMember`                |
 //! | [`regions`], [`faces`], [`edges`], [`vertices`]   | `SmBrep::GetRegions`, `GetFaces`, `GetEdges`, `GetVertices` |
 //! | [`shells`]                                        | `SmBrep::GetShells`                           |
+//! | [`tessellate_boundaries`], [`BoundaryTessellation`] | `SmBrep::TessellateBoundaries`              |
 //! | [`surfaces`], [`curves`]                          | `SmBrep::GetSurfaces`, `GetCurves`            |
 //! | [`wire_edges`], [`topological_edges`], [`topological_vertices`] | `SmBrep::GetWireEdges`, `GetTopologicalEdges`, `GetTopologicalVertices` |
 //! | [`is_degenerate`]                                 | `SmBrep::IsDegenerate`                        |
@@ -483,6 +484,71 @@ pub fn edges(b: &Brep, attribute: Option<&AttributeFilter<'_>>) -> Result<Vec<Ed
         attribute,
         EntityRef::Edge,
     ))
+}
+
+/// The polylines of a B-rep's edges ([`tessellate_boundaries`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BoundaryTessellation {
+    /// Every edge's points, edge after edge (`rPoints`).
+    pub points: Vec<Point3>,
+    /// The number of points of each edge, `0` for one that failed (`rVertexCounts`).
+    pub vertex_counts: Vec<usize>,
+    /// The edges, in [`edges`] order (`rEdges`).
+    pub edges: Vec<EdgeId>,
+    /// Every edge was tessellated (`SM_SUCCESS`); `false` is upstream's `SM_ERR`, which
+    /// comes with the other edges' points.
+    pub complete: bool,
+}
+
+/// `TessellateBoundaries`: each edge's curve over the edge's interval as points
+/// ([`Curve::tessellate`] with no chord height, `angle_tol_deg`, at least one segment),
+/// in [`edges`] order. An edge without curve, whose tessellation fails or gives no
+/// point, has no points and makes the result incomplete.
+///
+/// # Errors
+///
+/// `InvalidInput` for an angle tolerance that is not finite and positive (upstream:
+/// `SM_ERR_INVALID_INPUT` with empty outputs); [`SolidError::Unported`] from a
+/// tessellation.
+pub fn tessellate_boundaries(
+    k: &Kernel,
+    b: &Brep,
+    angle_tol_deg: f64,
+) -> Result<BoundaryTessellation> {
+    const OP: &str = "topology::brep::p1::tessellate_boundaries";
+    if !angle_tol_deg.is_finite() || angle_tol_deg <= 0.0 {
+        return Err(SolidError::invalid_input(
+            OP,
+            "angle tolerance must be finite and positive",
+        ));
+    }
+
+    let mut out = BoundaryTessellation {
+        edges: edges(b, None)?,
+        complete: true,
+        ..BoundaryTessellation::default()
+    };
+    for &e in &out.edges {
+        let edge = b.edge(e)?;
+        let points = match edge.curve.as_ref() {
+            None => None,
+            Some(curve) => match curve.tessellate(k, &edge.interval, 0.0, angle_tol_deg, 1) {
+                Ok(t) if !t.points.is_empty() => Some(t.points),
+                Err(
+                    err @ (SolidError::Unported { .. } | SolidError::PreparationRequired { .. }),
+                ) => return Err(err),
+                Ok(_) | Err(_) => None,
+            },
+        };
+        if let Some(points) = points {
+            out.vertex_counts.push(points.len());
+            out.points.extend(points);
+        } else {
+            out.complete = false;
+            out.vertex_counts.push(0);
+        }
+    }
+    Ok(out)
 }
 
 /// `GetVertices`: every vertex in list order, those carrying `attribute` when given.

@@ -1,4 +1,5 @@
-//! Runner for unit `primitive.api_curves`: the `SM_API` curve constructors.
+//! Runner for unit `primitive.api_curves`: the `SM_API` curve constructors, and
+//! `SmApiRemoveCurveKnots` on a curve one of them made.
 //!
 //! C++: `solidcore_ffi::units::primitive_api_curves` (upstream
 //! `source/SM_API/src/SmApiCurves.cpp`). Rust: `solidcore::primitive::api_curves`.
@@ -8,10 +9,19 @@
 //! (`0` = `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`, `-1`
 //! for a Rust error upstream cannot produce), then the created curve(s), reported as
 //! the values `rec`. A case whose Rust side reaches an unported unit is deferred.
+//!
+//! A `remove_knots` case wraps one constructor call (not a rectangle or polygon): its
+//! record is the creation status, then on success the removal's status and the curve's
+//! state after it. Besides the fixtures, [`REMOVE_KNOTS_GENERATED`] such cases are
+//! generated from their own seeds (the constructor generator's cases do not move):
+//! constructor curves, and B-splines made by inserting knots into a Bezier curve (so
+//! that the knots are removable), with one control point moved by up to about the
+//! tolerance, at small, moderate and large scales.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
+use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::Ellipse;
 use solidcore::curve::line::Line;
 use solidcore::geom::extent1d::Extent1d;
@@ -28,6 +38,9 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 1500;
+
+/// Generated `remove_knots` cases per run.
+pub const REMOVE_KNOTS_GENERATED: usize = 400;
 
 /// `primitive.api_curves` runner.
 pub struct Runner;
@@ -136,6 +149,9 @@ enum In {
         #[serde(default = "six")]
         form: u32,
     },
+    RemoveKnots {
+        curve: Box<In>,
+    },
 }
 
 fn six() -> u32 {
@@ -156,6 +172,7 @@ fn fs(v: &[F]) -> Vec<f64> {
 
 fn to_call(i: &In) -> Call {
     match i {
+        In::RemoveKnots { curve } => Call::RemoveKnots(Box::new(to_call(curve))),
         In::LineSegment { start, end } => Call::LineSegment {
             start: a3(start),
             end: a3(end),
@@ -375,9 +392,122 @@ fn put_lines(o: &mut Vec<f64>, v: &Vec<Line>) {
     }
 }
 
+/// The state of a curve made by one constructor call, as the shim puts it.
+fn put_curve(o: &mut Vec<f64>, c: &Curve) {
+    match c.kind() {
+        CurveKind::Line(l) => put_line(o, l),
+        CurveKind::Ellipse(e) => put_ellipse(o, e),
+        CurveKind::BSpline(b) => put_plain(o, b),
+        _ => {}
+    }
+}
+
+/// The curve of one constructor call (not a segment array).
+fn made_curve(k: &Kernel, i: &In) -> Result<solidcore::Result<Curve>, HarnessError> {
+    Ok(match i {
+        In::LineSegment { start, end } => {
+            api::create_line_segment(v3(start), v3(end)).map(Curve::from)
+        }
+        In::Line { start, direction } => {
+            api::create_line(v3(start), v3(direction)).map(Curve::from)
+        }
+        In::Circle { center, radius } => api::create_circle(v3(center), radius.0).map(Curve::from),
+        In::AnalyticCircle { center, radius } => {
+            api::create_analytic_circle(k, v3(center), radius.0).map(Curve::from)
+        }
+        In::Ellipse {
+            origin,
+            radius1,
+            radius2,
+        } => api::create_ellipse(k, v3(origin), radius1.0, radius2.0).map(Curve::from),
+        In::Arc {
+            center,
+            radius,
+            start_deg,
+            end_deg,
+        } => api::create_arc(v3(center), radius.0, start_deg.0, end_deg.0).map(Curve::from),
+        In::Helix {
+            origin,
+            height,
+            radius_start,
+            radius_end,
+            num_turns,
+            right_handed,
+            tolerance,
+        } => api::create_helix(&api::HelixParams {
+            origin: v3(origin),
+            height: height.0,
+            radius_start: radius_start.0,
+            radius_end: radius_end.0,
+            num_turns: num_turns.0,
+            right_handed: *right_handed,
+            tolerance: tolerance.0,
+        })
+        .map(Curve::from),
+        In::Curve { points } => {
+            let pts: Vec<Vec3> = points.iter().map(v3).collect();
+            api::create_curve(&pts).map(Curve::from)
+        }
+        In::Canonical {
+            points,
+            knots,
+            mults,
+            weights,
+            degree,
+            form,
+        } => {
+            let pts: Vec<Vec3> = points.iter().map(v3).collect();
+            let kn = fs(knots);
+            let w = weights.as_deref().map(fs);
+            let form = form_of(*form).ok_or_else(|| HarnessError::new("bad form"))?;
+            api::create_canonical_curve(&api::CanonicalCurveParams {
+                points: &pts,
+                knots: &kn,
+                knot_multiplicities: mults,
+                weights: w.as_deref(),
+                degree: *degree,
+                form,
+            })
+            .map(Curve::from)
+        }
+        In::Rectangle { .. } | In::Polygon { .. } | In::RemoveKnots { .. } => {
+            return Err(HarnessError::new(
+                "knot removal of a segment array or a removal",
+            ))
+        }
+    })
+}
+
+/// `SmApiRemoveCurveKnots` on the curve of `i`: creation status, then on success the
+/// removal's status and the curve.
+fn rust_remove_knots(k: &Kernel, i: &In) -> Result<Output, HarnessError> {
+    let mut curve = match made_curve(k, i)? {
+        Ok(c) => c,
+        Err(e) => {
+            if let Some(d) = Output::unported(&e) {
+                return Ok(d);
+            }
+            return Ok(Output::new().values("rec", vec![status(&e)]));
+        }
+    };
+    let removed = match api::remove_curve_knots(k, &mut curve) {
+        Ok(()) => 0.0,
+        Err(e) => {
+            if let Some(d) = Output::unported(&e) {
+                return Ok(d);
+            }
+            status(&e)
+        }
+    };
+    let mut o = vec![0.0, removed];
+    put_curve(&mut o, &curve);
+    Ok(Output::new().values("rec", o))
+}
+
 fn rust(i: &In) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     Ok(match i {
+        In::RemoveKnots { curve } => return rust_remove_knots(&k, curve),
         In::LineSegment { start, end } => {
             rec(api::create_line_segment(v3(start), v3(end)), put_line)
         }
@@ -648,6 +778,141 @@ fn gen_case(rng: &mut Rng) -> In {
     }
 }
 
+/// The homogeneous control points `pw` (`x w, y w, z w, w`) of degree `p` with knot
+/// vector `knots`, and the knots, after inserting the knot `u` once (Boehm); `None`
+/// for a knot outside the clamped range.
+fn insert_knot(
+    pw: &[[f64; 4]],
+    knots: &[f64],
+    p: usize,
+    u: f64,
+) -> Option<(Vec<[f64; 4]>, Vec<f64>)> {
+    // span k: knots[k] <= u < knots[k + 1]
+    let k = knots
+        .iter()
+        .rposition(|&t| t <= u)?
+        .min(knots.len().checked_sub(p + 2)?);
+    let mut q = Vec::with_capacity(pw.len() + 1);
+    for i in 0..=pw.len() {
+        let point = if i + p <= k {
+            *pw.get(i)?
+        } else if i > k {
+            *pw.get(i - 1)?
+        } else {
+            let (ki, kip) = (*knots.get(i)?, *knots.get(i + p)?);
+            let a = (u - ki) / (kip - ki);
+            let (lo, hi) = (pw.get(i.checked_sub(1)?)?, pw.get(i)?);
+            [
+                (1.0 - a) * lo[0] + a * hi[0],
+                (1.0 - a) * lo[1] + a * hi[1],
+                (1.0 - a) * lo[2] + a * hi[2],
+                (1.0 - a) * lo[3] + a * hi[3],
+            ]
+        };
+        q.push(point);
+    }
+    let mut kn = knots.to_vec();
+    kn.insert(k + 1, u);
+    Some((q, kn))
+}
+
+/// A B-spline whose interior knots were inserted into a Bezier curve, so that they are
+/// removable; one control point is then moved by about the removal tolerance or more.
+fn gen_removable(rng: &mut Rng) -> In {
+    let p = 1 + rng.below(4) as usize;
+    let scale = *rng.choose(&[1.0e-4, 1.0, 1.0, 1.0, 1.0e4]).unwrap_or(&1.0);
+    let collinear = rng.chance(0.2);
+    let dir = rng.point3(-1.0, 1.0);
+    let rational = rng.chance(0.3);
+    let mut pw: Vec<[f64; 4]> = (0..=p)
+        .map(|i| {
+            let x = if collinear {
+                let t = i as f64 / p as f64;
+                [dir[0] * t, dir[1] * t, dir[2] * t]
+            } else {
+                rng.point3(-1.0, 1.0)
+            };
+            let w = if rational { rng.uniform(0.5, 2.0) } else { 1.0 };
+            [x[0] * scale * w, x[1] * scale * w, x[2] * scale * w, w]
+        })
+        .collect();
+    let mut knots: Vec<f64> = std::iter::repeat_n(0.0, p + 1)
+        .chain(std::iter::repeat_n(1.0, p + 1))
+        .collect();
+    for _ in 0..=rng.below(5) {
+        // a new knot, or (sometimes) one more copy of an earlier one
+        let interior: Vec<f64> = knots
+            .iter()
+            .copied()
+            .filter(|&t| t > 0.0 && t < 1.0)
+            .collect();
+        let u = match rng.choose(&interior) {
+            Some(&t) if rng.chance(0.3) => t,
+            _ => rng.uniform(0.05, 0.95),
+        };
+        if knots.iter().filter(|&&t| t == u).count() >= p {
+            continue;
+        }
+        if let Some((q, kn)) = insert_knot(&pw, &knots, p, u) {
+            (pw, knots) = (q, kn);
+        }
+    }
+    // move one interior control point by a multiple of the scale
+    let eps = *rng
+        .choose(&[0.0, 0.0, 1.0e-9, 1.0e-7, 2.5e-7, 1.0e-6, 1.0e-5, 1.0e-3])
+        .unwrap_or(&0.0);
+    if pw.len() > 2 && eps > 0.0 {
+        let i = 1 + rng.below(pw.len() as u64 - 2) as usize;
+        let c = rng.below(3) as usize;
+        if let Some(q) = pw.get_mut(i) {
+            let w = q[3];
+            if let Some(x) = q.get_mut(c) {
+                *x += eps * scale.max(1.0) * w;
+            }
+        }
+    }
+    let mut uniq: Vec<f64> = Vec::new();
+    let mut mults: Vec<usize> = Vec::new();
+    for &t in &knots {
+        if uniq.last() == Some(&t) {
+            if let Some(m) = mults.last_mut() {
+                *m += 1;
+            }
+        } else {
+            uniq.push(t);
+            mults.push(1);
+        }
+    }
+    In::Canonical {
+        points: pw
+            .iter()
+            .map(|q| p3([q[0] / q[3], q[1] / q[3], q[2] / q[3]]))
+            .collect(),
+        knots: uniq.into_iter().map(F).collect(),
+        mults,
+        weights: rational.then(|| pw.iter().map(|q| F(q[3])).collect()),
+        degree: p,
+        form: 6,
+    }
+}
+
+/// One generated `remove_knots` case.
+fn gen_remove_knots(rng: &mut Rng) -> In {
+    let curve = if rng.chance(0.6) {
+        gen_removable(rng)
+    } else {
+        loop {
+            let c = gen_case(rng);
+            if !matches!(c, In::Rectangle { .. } | In::Polygon { .. }) {
+                break c;
+            }
+        }
+    };
+    In::RemoveKnots {
+        curve: Box::new(curve),
+    }
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "primitive.api_curves"
@@ -662,7 +927,21 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        let unit = "primitive.api_curves/remove_knots";
+        for i in 0..REMOVE_KNOTS_GENERATED {
+            let seed = CaseContext::seed_for(unit, i);
+            let mut rng = Rng::new(seed);
+            let inputs = serde_json::to_value(gen_remove_knots(&mut rng))
+                .map_err(|e| HarnessError::new(e.to_string()))?;
+            cases.push(Case {
+                unit: self.id().to_string(),
+                name: format!("remove_knots{i:04}"),
+                source: crate::case::CaseSource::Generated { seed },
+                inputs,
+            });
+        }
+        Ok(cases)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

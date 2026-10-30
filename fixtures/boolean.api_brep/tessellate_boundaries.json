@@ -1,0 +1,278 @@
+{
+ "cases": [
+  {
+   "name": "box",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "angle_tol_deg": 5.0
+   },
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1328"
+  },
+  {
+   "name": "box_first_curve_dropped",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "angle_tol_deg": 5.0,
+    "drop_curves": [
+     0
+    ]
+   },
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1328"
+  },
+  {
+   "name": "box_every_curve_dropped",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "angle_tol_deg": 5.0,
+    "drop_curves": [
+     0,
+     1,
+     2,
+     3,
+     4,
+     5,
+     6,
+     7,
+     8,
+     9,
+     10,
+     11
+    ]
+   },
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1328"
+  },
+  {
+   "name": "box_zero_tolerance",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "angle_tol_deg": 0.0
+   },
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1328"
+  },
+  {
+   "name": "box_negative_tolerance",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "angle_tol_deg": -1.0
+   }
+  },
+  {
+   "name": "sphere",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "sphere",
+     "center": [
+      1,
+      2,
+      3
+     ],
+     "radius": 4
+    },
+    "angle_tol_deg": 5.0
+   }
+  },
+  {
+   "name": "sphere_coarse",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 1
+    },
+    "angle_tol_deg": 90.0
+   }
+  },
+  {
+   "name": "sphere_fine",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 100
+    },
+    "angle_tol_deg": 0.5
+   }
+  },
+  {
+   "name": "torus",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "torus",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "major": 5,
+     "minor": 1
+    },
+    "angle_tol_deg": 10.0
+   }
+  },
+  {
+   "name": "plane",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "plane",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      3,
+      2
+     ]
+    },
+    "angle_tol_deg": 5.0
+   }
+  },
+  {
+   "name": "box_union_sphere",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "boolean",
+     "operation": 1,
+     "a": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     "b": {
+      "kind": "sphere",
+      "center": [
+       10,
+       10,
+       10
+      ],
+      "radius": 4
+     }
+    },
+    "angle_tol_deg": 5.0
+   }
+  },
+  {
+   "name": "tiny_sphere",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "sphere",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 0.001
+    },
+    "angle_tol_deg": 5.0
+   }
+  },
+  {
+   "name": "huge_box",
+   "inputs": {
+    "api": "tessellate_boundaries",
+    "brep": {
+     "kind": "box",
+     "origin": [
+      10000.0,
+      10000.0,
+      10000.0
+     ],
+     "size": [
+      10000.0,
+      20000.0,
+      30000.0
+     ]
+    },
+    "angle_tol_deg": 5.0
+   }
+  }
+ ]
+}

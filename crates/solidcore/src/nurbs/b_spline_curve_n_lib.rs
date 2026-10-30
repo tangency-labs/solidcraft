@@ -28,6 +28,7 @@
 //! | [`BSplineCurve::interpolate_points`]                   | `SmBSplineCurve::InterpolatePoints`            |
 //! | [`BSplineCurve::make_curves_compatible`]               | `SmBSplineCurve::MakeCurvesCompatible`         |
 //! | [`BSplineCurve::deform_to_end_point_targets`], [`InValueType`] | `SmBSplineCurve::DeformToEndPointTargets`, `SmInValueType` |
+//! | [`BSplineCurve::remove_knots`]                         | `SmBSplineCurve::RemoveKnots`                  |
 //! | [`BSplineCurve::reparametrize_with_arc_length`]        | `SmBSplineCurve::ReparametrizeWithArcLength`   |
 //! | [`BSplineCurve::scale`]                                | `SmBSplineCurve::Scale(double)`                |
 //! | [`BSplineCurve::scale_knot_vector`]                    | `SmBSplineCurve::ScaleKnotVector`              |
@@ -119,7 +120,7 @@ use crate::math::{min2, EFF_ZERO};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::crv_adv::p1::{Continuity, CurveEnd, BARE_FLAG_REASON};
-use crate::nurbs::crv_adv::p2::UnboundedEval;
+use crate::nurbs::crv_adv::p2::{ConstrainedEnds, UnboundedEval};
 use crate::nurbs::crv_approx::{
     approx_circ_arc_with_crv_data, approx_nurbs_with_non_rat_crv, calc_num_cpts_to_approx_arc,
     CircArcData,
@@ -165,6 +166,7 @@ const OP_INS: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::insert_knots";
 const OP_INTERP: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::interpolate_points";
 const OP_COMPAT: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::make_curves_compatible";
 const OP_DEFORM: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::deform_to_end_point_targets";
+const OP_REMOVE_KNOTS: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::remove_knots";
 const OP_REPARAM: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::reparametrize_with_arc_length";
 const OP_SCALE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::scale";
 const OP_SCALE_KNOTS: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::scale_knot_vector";
@@ -981,6 +983,33 @@ impl BSplineCurve {
                 None => return Err(SolidError::sm_err(OP_DEG_RED)),
             }
         };
+        self.swap_in_nurb(&cur_new);
+        Ok(())
+    }
+
+    /// Removes every knot whose removal keeps the curve within `tol` of the current
+    /// one, keeping the 1st to `highest_deriv_constraint`-th derivatives at both ends
+    /// when `constrain_end_deriv` (`RemoveKnots`, `N_CrvRemoveKnotsDerivConstraints`;
+    /// upstream's defaults are `false` and `0`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB or when the removal fails.
+    pub fn remove_knots(
+        &mut self,
+        tol: f64,
+        constrain_end_deriv: bool,
+        highest_deriv_constraint: usize,
+    ) -> Result<()> {
+        let (constraints, der) = if constrain_end_deriv {
+            (ConstrainedEnds::Both, highest_deriv_constraint)
+        } else {
+            (ConstrainedEnds::None, 0)
+        };
+        let cur_p = nurb_of(self, OP_REMOVE_KNOTS)?;
+        let cur_new = cur_p
+            .remove_knots_deriv_constraints(tol, constraints, der)
+            .map_err(SolidError::nl_ser(OP_REMOVE_KNOTS))?;
         self.swap_in_nurb(&cur_new);
         Ok(())
     }
