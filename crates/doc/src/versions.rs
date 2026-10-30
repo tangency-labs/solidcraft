@@ -957,7 +957,7 @@ mod tests {
 
     fn design() -> Document {
         let mut doc = Document::new("Robot");
-        doc.links.insert(1, DesignLink { path: "motor.solidcraft".into(), feature: 4, version: None });
+        doc.links.insert(1, DesignLink { path: "motor.solidcraft".into(), feature: 4, version: None, ..Default::default() });
         doc
     }
 
