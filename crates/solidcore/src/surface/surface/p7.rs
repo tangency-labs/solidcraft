@@ -3064,6 +3064,90 @@ mod tests {
     }
 
     #[test]
+    fn flat_corner_points_preserve_each_mask_bit() {
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let mut k = Kernel::default();
+        k.fixes.flat_corners_test_bits = true;
+        // Only the lower/lower corner has nonzero parallel tangents. Reverse
+        // either control-net direction to exercise each of the four bits.
+        for reverse_u in [false, true] {
+            for reverse_v in [false, true] {
+                let mut net = vec![
+                    vec![
+                        CPoint::new(0.0, 0.0, 0.0, NOW),
+                        CPoint::new(1.0, 0.0, 0.0, NOW),
+                    ],
+                    vec![
+                        CPoint::new(2.0, 0.0, 0.0, NOW),
+                        CPoint::new(1.0, 1.0, 0.0, NOW),
+                    ],
+                ];
+                if reverse_u {
+                    net.reverse();
+                }
+                if reverse_v {
+                    for row in &mut net {
+                        row.reverse();
+                    }
+                }
+                let knots = [0.0, 0.0, 1.0, 1.0];
+                let s = Surface::from(
+                    BSplineSurface::from_data(1, 1, 1, 1, 3, 3, &net, &knots, &knots).unwrap(),
+                );
+                let index = usize::from(reverse_u) * 2 + usize::from(reverse_v);
+                let flags = 1 << index;
+                assert_eq!(s.flat_corners(&k, 1e-8, false).unwrap().flags, flags);
+                let result = s.flat_corners(&k, 1e-8, true).unwrap();
+                assert_eq!(result.flags, flags);
+                for (i, point) in result.points.unwrap().iter().enumerate() {
+                    assert_eq!(*point, if i == index { Vec3::ZERO } else { Vec3::UNDEF });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn flat_corner_points_preserve_multiple_bits_and_regular_corners() {
+        use crate::nurbs::math::{CPoint, NOW};
+        let mut k = Kernel::default();
+        k.fixes.flat_corners_test_bits = true;
+        let net = vec![
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(2.0, 0.0, 0.0, NOW),
+            ],
+            vec![
+                CPoint::new(1.0, 0.0, 0.0, NOW),
+                CPoint::new(3.0, 0.0, 0.0, NOW),
+            ],
+        ];
+        let knots = [0.0, 0.0, 1.0, 1.0];
+        let s = Surface::from(
+            BSplineSurface::from_data(1, 1, 1, 1, 3, 3, &net, &knots, &knots).unwrap(),
+        );
+        assert_eq!(s.flat_corners(&k, 1e-8, false).unwrap().flags, 15);
+        let result = s.flat_corners(&k, 1e-8, true).unwrap();
+        assert_eq!(result.flags, 15);
+        assert_eq!(
+            result.points.unwrap(),
+            [
+                Vec3::ZERO,
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(3.0, 0.0, 0.0)
+            ]
+        );
+        assert_eq!(
+            plane().flat_corners(&k, 1e-8, true).unwrap(),
+            FlatCorners {
+                flags: 0,
+                points: Some([Vec3::UNDEF; 4])
+            }
+        );
+    }
+
+    #[test]
     fn plane_normal_is_axis() {
         let k = &Kernel::default();
         let s = plane();
