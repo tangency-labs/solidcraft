@@ -128,7 +128,11 @@ diagnostics, whether it was skipped, its fingerprint) and the state after it
 (bodies, solved sketches, construction geometry, sheet metal bodies, threads and
 the blend records later features read), and the body check mode it was evaluated
 under (`each_step`, `each_feature` or `off`): a design opened under another mode is
-evaluated again. States share what they share: a body that
+evaluated again. A body made by constant-radius rounds is recorded with the edges they
+rounded and their radii, and the body they were made on (stored like any other body,
+once, though no state holds it): a later round at a corner where those rounds meet
+blends them again with it, in a design opened from the file as in one evaluated anew
+(a thinned cache keeps those bodies with the bodies made from them). States share what they share: a body that
 later features pass through unchanged, its face names and a solved sketch are each
 recorded once. Face names are kept as worked out (saving works out any not asked
 for yet), so a body taken from the file is named exactly as when it was saved.
@@ -149,7 +153,7 @@ SHA-256 of their encoding), and a placed copy of a repeated part (an instance fr
 a STEP assembly) records the part and its matrix, so it shows that part's display
 again instead of being meshed on its own.
 
-`cache/model.json` records `solidcraft-model-cache/6`, the producer revision
+`cache/model.json` records `solidcraft-model-cache/7`, the producer revision
 `solidcraft-truck-adapter/4`, the application version, the build (source commit,
 CPU architecture and OS), the SHA-256 of the exact `document.json` (whose blob
 references pin every STEP, mesh and image payload) and of `cache/bodies.bin`, the

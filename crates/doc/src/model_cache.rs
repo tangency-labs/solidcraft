@@ -112,6 +112,11 @@ struct Writer {
     sheet_index: HashMap<String, usize>,
     states: Vec<Json>,
     state_index: HashMap<usize, usize>,
+    /// Each kernel body's place in `bodies`, by its record.
+    body_index: HashMap<usize, usize>,
+    /// The rounds that made bodies (`Body::rounds`): the body, the body they were made on (both
+    /// places in `bodies`), and the edges they rounded there with their radii.
+    rounds: Vec<Json>,
 }
 
 impl Writer {
@@ -155,11 +160,39 @@ impl Writer {
             let faces: Vec<Json> = look.faces.iter().map(|(name, (color, opacity))| json!([name, color, opacity])).collect();
             r["imported"] = json!({"color": look.color, "opacity": look.opacity, "faces": faces});
         }
-        r["body"] = json!(self.bodies.len());
-        self.bodies.push(b.body.clone());
+        r["body"] = json!(self.body(&b.body));
         self.model_bodies.push(r);
         self.model_body_index.insert(key, self.model_bodies.len() - 1);
         Some(self.model_bodies.len() - 1)
+    }
+
+    /// The place of a model body's kernel body: its own (a placed copy shares its record with
+    /// the part's other copies, but not its display), with the bodies the rounds that made it
+    /// were made on, each written once though no state holds it: a later round at a corner where
+    /// they meet blends them again, in a model opened from the file as in one evaluated anew.
+    fn body(&mut self, body: &Body) -> usize {
+        let key = |b: &Body| std::ptr::from_ref(b.record()).addr();
+        self.bodies.push(body.clone());
+        let first = self.bodies.len() - 1;
+        self.body_index.entry(key(body)).or_insert(first);
+        let (mut at, mut of) = (body.clone(), first);
+        // Down the rounds, until a body made on one already written.
+        while let Some((before, edges)) = at.rounds().map(|(b, e)| (b.clone(), e.to_vec())) {
+            let (i, new) = match self.body_index.get(&key(&before)) {
+                Some(i) => (*i, false),
+                None => {
+                    self.bodies.push(before.clone());
+                    self.body_index.insert(key(&before), self.bodies.len() - 1);
+                    (self.bodies.len() - 1, true)
+                }
+            };
+            self.rounds.push(json!({"body": of, "before": i, "edges": edges}));
+            if !new {
+                break;
+            }
+            (at, of) = (before, i);
+        }
+        first
     }
 
     fn sketch(&mut self, s: &Arc<SolvedSketch>) -> Option<usize> {
@@ -235,7 +268,7 @@ impl Model {
             // The check mode the results were evaluated under: they are another mode's results.
             let records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
-                "sheets": w.sheets, "validation": self.validation().id(),
+                "sheets": w.sheets, "validation": self.validation().id(), "rounds": w.rounds,
             });
             Ok(SavedModel { records, bodies: w.bodies })
         })
@@ -246,7 +279,8 @@ impl Model {
 impl SavedModel {
     /// The states the records hold, every record checked.
     fn states(&self) -> Result<Vec<Arc<ModelState>>> {
-        let (records, bodies) = (&self.records, &self.bodies);
+        let bodies = &self.bodies_with_rounds()?;
+        let records = &self.records;
         let list = |key: &str| records.get(key).and_then(Json::as_array).filter(|l| l.len() <= MAX_ITEMS).ok_or_else(|| bad("saved model: list"));
         let index = |v: Option<&Json>, len: usize| {
             v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < len).ok_or_else(|| bad("saved model: index"))
@@ -378,6 +412,55 @@ impl SavedModel {
         Ok(states)
     }
 
+    /// The kernel bodies with the rounds that made them ([`kernel::Body::rounds`]) as the records
+    /// list them, each body's before it is taken as another's body before its rounds.
+    fn bodies_with_rounds(&self) -> Result<Vec<Body>> {
+        let refused = || bad("saved model: rounds");
+        let list = self.records.get("rounds").and_then(Json::as_array).filter(|l| l.len() <= self.bodies.len()).ok_or_else(refused)?;
+        let place = |v: Option<&Json>| v.and_then(Json::as_u64).and_then(|i| usize::try_from(i).ok()).filter(|i| *i < self.bodies.len());
+        // Per body, the body its rounds were made on and their edges.
+        let mut made: Vec<Option<(usize, Vec<(usize, f64)>)>> = vec![None; self.bodies.len()];
+        for r in list {
+            let (body, before) = (place(r.get("body")).ok_or_else(refused)?, place(r.get("before")).ok_or_else(refused)?);
+            let edges: Vec<(usize, f64)> = serde_json::from_value(r.get("edges").cloned().ok_or_else(refused)?).map_err(|_| refused())?;
+            match made.get_mut(body) {
+                Some(slot @ None) => *slot = Some((before, edges)),
+                _ => return Err(refused()),
+            }
+        }
+        // Each body after the one its rounds were made on, down each chain once (a cycle is refused).
+        let mut bodies = self.bodies.clone();
+        let (mut done, mut on_chain) = (vec![false; bodies.len()], vec![false; bodies.len()]);
+        for start in 0..bodies.len() {
+            let mut chain = Vec::new();
+            let mut at = start;
+            while let Some(seen @ false) = done.get_mut(at) {
+                *seen = true;
+                chain.push(at);
+                if let Some(on) = on_chain.get_mut(at) {
+                    *on = true;
+                }
+                match made.get(at).and_then(Option::as_ref) {
+                    Some((before, _)) => at = *before,
+                    None => break,
+                }
+                if on_chain.get(at).copied().unwrap_or(false) {
+                    return Err(refused());
+                }
+            }
+            for &k in chain.iter().rev() {
+                if let Some(on) = on_chain.get_mut(k) {
+                    *on = false;
+                }
+                let Some(Some((before, edges))) = made.get(k) else { continue };
+                let before = bodies.get(*before).cloned().ok_or_else(refused)?;
+                let body = bodies.get(k).cloned().ok_or_else(refused)?;
+                *bodies.get_mut(k).ok_or_else(refused)? = body.with_rounds_of(&before, edges.clone())?;
+            }
+        }
+        Ok(bodies)
+    }
+
     /// The model's final state (what a picture of it shows), without checking that it is a
     /// document's evaluation.
     pub fn final_state(&self) -> Result<Arc<ModelState>> {
@@ -423,6 +506,20 @@ impl SavedModel {
         let state_sketches = states.iter().map(|s| held(s, "sketches", sketches.len())).collect::<Option<Vec<_>>>()?;
         let body_of = model_bodies.iter().map(|r| at(r.get("body"), self.bodies.len())).collect::<Option<Vec<_>>>()?;
         let names_of = model_bodies.iter().map(|r| at(r.get("names"), names.len())).collect::<Option<Vec<_>>>()?;
+        // The body each body's rounds were made on: kept with it, though no kept state holds it.
+        let rounds = list("rounds")?;
+        let mut before_of = HashMap::new();
+        for r in rounds {
+            before_of.insert(at(r.get("body"), self.bodies.len())?, at(r.get("before"), self.bodies.len())?);
+        }
+        // A kernel body and the bodies down its rounds (a cycle, refused on reading, ends it).
+        let with_before = |k: usize| -> Vec<usize> {
+            let mut out = vec![k];
+            while let Some(b) = out.last().and_then(|k| before_of.get(k)).filter(|b| !out.contains(b)) {
+                out.push(*b);
+            }
+            out
+        };
         // What each record takes in the file.
         let bytes = |list: &[Json]| list.iter().map(|r| serde_json::to_vec(r).map_or(usize::MAX, |b| b.len().saturating_add(1))).collect::<Vec<_>>();
         let (state_bytes, body_bytes) = (bytes(states.as_slice()), bytes(model_bodies.as_slice()));
@@ -459,9 +556,11 @@ impl SavedModel {
                     if names_used.get(n) == Some(&false) && new_names.insert(n) {
                         records = records.saturating_add(*name_bytes.get(n)?);
                     }
-                    for &(piece, bytes) in pieces.get(*body_of.get(m)?)? {
-                        if !stored.contains(&piece) {
-                            adds.insert(piece, bytes);
+                    for k in with_before(*body_of.get(m)?) {
+                        for &(piece, bytes) in pieces.get(k)? {
+                            if !stored.contains(&piece) {
+                                adds.insert(piece, bytes);
+                            }
                         }
                     }
                 }
@@ -491,7 +590,9 @@ impl SavedModel {
         // What the states kept refer to, numbered again in the order it had.
         let mut kernel_used = vec![false; self.bodies.len()];
         for m in (0..model_bodies.len()).filter(|m| kept_bodies.get(*m) == Some(&true)) {
-            *kernel_used.get_mut(*body_of.get(m)?)? = true;
+            for k in with_before(*body_of.get(m)?) {
+                *kernel_used.get_mut(k)? = true;
+            }
         }
         let renumber = |used: &[bool]| -> Vec<Option<usize>> {
             let mut next = 0;
@@ -538,9 +639,19 @@ impl SavedModel {
             };
             out_features.push(f);
         }
+        let mut out_rounds = Vec::new();
+        for r in rounds {
+            let Some(body) = new(&new_kernel, at(r.get("body"), self.bodies.len())?) else { continue };
+            let before = new(&new_kernel, at(r.get("before"), self.bodies.len())?)?;
+            let mut r = r.clone();
+            let o = r.as_object_mut()?;
+            o.insert("body".into(), json!(body));
+            o.insert("before".into(), json!(before));
+            out_rounds.push(r);
+        }
         let mut records = json!({
             "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
-            "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets,
+            "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets, "rounds": out_rounds,
         });
         // The check mode the results were evaluated under, as the model records it (a model
         // that records none stays without one: adopting it is refused either way).
