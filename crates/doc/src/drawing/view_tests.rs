@@ -10,6 +10,7 @@ use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
 use crate::drawing::{Excluded, Sheet, Source};
+use crate::drawing_view::OccurrencePaths;
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 
@@ -119,6 +120,127 @@ fn a_views_projected_views_are_found_down_its_chains() {
     assert_eq!(d.with_projected(&set(&[top, left])), set(&[top, left]));
     assert_eq!(d.with_projected(&set(&[])), set(&[]));
     assert_eq!(d.with_projected(&set(&[99])), set(&[99]));
+}
+
+/// What a view shows saves in its settings, follows down its chain until a view sets its own, and
+/// reads back as the same bytes; a view that sets neither saves neither.
+#[test]
+fn what_a_view_shows_follows_its_parent_and_saves_as_it_is() {
+    let (mut d, _, [front, right, top]) = three();
+    let paths = |ids: &[&[u64]]| -> OccurrencePaths { ids.iter().map(|path| path.to_vec()).collect() };
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap();
+    let none = resolved(&d, top);
+    assert_eq!((none.occurrences.value, none.occurrences.set_by, none.hide.value, none.hide.set_by), (None, SetBy::Default, None, SetBy::Default));
+    view_mut(&mut d, front).settings.occurrences = Some(paths(&[&[7], &[]]));
+    view_mut(&mut d, front).settings.hide = Some(paths(&[&[7, 8]]));
+    d.validate().unwrap();
+    let followed = resolved(&d, top);
+    assert_eq!((followed.occurrences.value, followed.occurrences.set_by), (Some(paths(&[&[7], &[]])), SetBy::Parent(front)));
+    assert_eq!((followed.hide.value, followed.hide.set_by), (Some(paths(&[&[7, 8]])), SetBy::Parent(front)));
+    // An empty list is a setting of its own: hiding nothing, whatever the parent hides.
+    view_mut(&mut d, right).settings.hide = Some(paths(&[]));
+    let own = resolved(&d, top);
+    assert_eq!((own.hide.value, own.hide.set_by), (Some(paths(&[])), SetBy::Parent(right)));
+    assert_eq!(own.occurrences.set_by, SetBy::Parent(front), "each setting on its own");
+    let v = file(&d);
+    let listed = v["views"].as_array().unwrap();
+    let saved = |id: u64| listed.iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    assert_eq!(saved(front)["settings"], json!({"scale": "1:2", "occurrences": [[7], []], "hide": [[7, 8]]}));
+    assert_eq!(saved(right)["settings"], json!({"visual_style": "visible_hidden", "hide": []}));
+    assert_eq!(saved(top).get("settings"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// The choice's limits are kept on reading, at each side of each limit. A path no occurrence makes
+/// reads: the record doesn't check it against the design.
+#[test]
+fn what_a_view_shows_keeps_its_limits_on_reading() {
+    let (d, _, _) = three();
+    let at = d.views.iter().position(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+    let with = |key: &str, paths: Value| {
+        refused(&d, |v| {
+            v["views"][at]["settings"][key] = paths;
+        })
+    };
+    let lists = |paths: usize, ids: usize| json!(vec![vec![1u64; ids]; paths]);
+    // One id past the cap: 64 paths of 64, then one of 1.
+    let one_past = json!([vec![vec![1u64; 64]; 64], vec![vec![1u64]]].concat());
+    let cases = [
+        ("occurrences", json!([[999_999]]), "read"),
+        ("occurrences", json!([[]]), "read"),
+        ("occurrences", json!([]), "read"),
+        ("hide", json!([]), "read"),
+        ("hide", lists(1000, 1), "read"),
+        ("hide", lists(1001, 1), "at most 1000 occurrence paths"),
+        ("occurrences", lists(1000, 1), "read"),
+        ("occurrences", lists(1001, 0), "at most 1000 occurrence paths"),
+        ("hide", lists(64, 64), "read"),
+        ("hide", lists(65, 64), "4096 ids in all"),
+        ("hide", one_past, "4096 ids in all"),
+        ("occurrences", lists(1, 64), "read"),
+        ("occurrences", lists(1, 65), "1..64 ids"),
+        ("hide", lists(1, 65), "1..64 ids"),
+        ("hide", json!([[]]), "hide []"),
+        ("hide", json!([[1], []]), "hide []"),
+        ("hide", json!(null), "read"),
+        ("hide", json!([[-1]]), "invalid value"),
+        ("occurrences", json!([[1.5]]), "invalid"),
+        ("occurrences", json!(["a"]), "invalid"),
+        ("occurrences", json!(7), "invalid"),
+    ];
+    for (key, paths, says) in cases {
+        let e = with(key, paths.clone());
+        assert!(e.contains(says), "{key} {}: {e}", paths.to_string().chars().take(60).collect::<String>());
+    }
+    // The ids of both lists count together.
+    let both = refused(&d, |v| {
+        v["views"][at]["settings"]["occurrences"] = lists(40, 64);
+        v["views"][at]["settings"]["hide"] = lists(25, 64);
+    });
+    assert!(both.contains("4096 ids in all"), "{both}");
+}
+
+/// Seeded changes to a view's saved choice: each reads or is refused, never panics, and what reads
+/// saves as the same bytes and resolves.
+#[test]
+fn seeded_changes_to_what_a_view_shows_read_or_are_refused() {
+    let (d, _, ids_of) = three();
+    let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
+    let id = |seed: u64, salt: u64| -> Value {
+        [json!(1), json!(0), json!(u64::MAX), json!(-1), json!(1.5), json!("1"), json!(null), json!([1]), json!(f64::MAX)]
+            [pick(seed, salt, 9) as usize]
+            .clone()
+    };
+    let path = |seed: u64, salt: u64| -> Value {
+        match pick(seed, salt, 6) {
+            0 => json!([]),
+            1 => json!(vec![1u64; 64]),
+            2 => json!(vec![1u64; 65]),
+            3 => id(seed, salt + 1),
+            _ => json!((0..pick(seed, salt + 2, 4)).map(|i| id(seed, salt + 3 + i)).collect::<Vec<_>>()),
+        }
+    };
+    for seed in 1..=500u64 {
+        let list = |salt: u64| -> Value {
+            match pick(seed, salt, 5) {
+                0 => json!(null),
+                1 => json!({"occurrences": []}),
+                _ => json!((0..pick(seed, salt + 1, 4)).map(|i| path(seed, salt + 10 + i * 10)).collect::<Vec<_>>()),
+            }
+        };
+        let at = pick(seed, 1, 3) as usize;
+        let mut v = file(&d);
+        v["views"][at]["settings"]["occurrences"] = list(100);
+        v["views"][at]["settings"]["hide"] = list(200);
+        let Ok(read) = Drawing::from_json(&v.to_string()) else { continue };
+        let again = read.to_json().unwrap();
+        assert_eq!(Drawing::from_json(&again).unwrap().to_json().unwrap(), again, "seed {seed}");
+        for view in ids_of {
+            read.resolve_view(view).unwrap();
+        }
+    }
 }
 
 /// A drawing lists its views by id, whatever order they were added in: the same views added the

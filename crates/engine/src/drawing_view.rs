@@ -2,11 +2,12 @@
 //! and where a saved view sits on its sheet (#4816). The snapshot command and saved views use it;
 //! their pictures (W17b) will too.
 //!
-//! A view shows every body the design places, where its occurrences place it ([`shown`]). The
-//! browser's eye counts for nothing: hiding a part in the model never changes a drawing. A body
-//! placed through a reference occurrence is a reference part: it doesn't set the view's extents
-//! when model parts are there too ([`measure`]).
+//! A view shows the bodies the design places, where its occurrences place it ([`shown`]), less what
+//! it chooses to leave out ([`ShownSet::of_view`]). The browser's eye counts for nothing: hiding a
+//! part in the model never changes a drawing. A body placed through a reference occurrence is a
+//! reference part: it doesn't set the view's extents when model parts are there too ([`measure`]).
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -51,7 +52,12 @@ pub enum Unmeasured {
     NoBodies,
     /// The bodies of the assembly can't be placed.
     NotPlaced,
+    /// The view's `source` and `hide` leave nothing, as when the occurrences it drew were deleted.
+    NothingChosen,
 }
+
+/// Why a choice of occurrences that draws nothing is refused.
+pub const NOTHING_CHOSEN: &str = "the source and hide leave no bodies to draw";
 
 impl Unmeasured {
     /// Its name in replies.
@@ -60,6 +66,7 @@ impl Unmeasured {
             Unmeasured::PastWalkLimit => "past_walk_limit",
             Unmeasured::NoBodies => "no_bodies",
             Unmeasured::NotPlaced => "not_placed",
+            Unmeasured::NothingChosen => "nothing_chosen",
         }
     }
 }
@@ -73,6 +80,7 @@ impl fmt::Display for Unmeasured {
             ),
             Unmeasured::NoBodies => f.write_str("the view's source has no bodies"),
             Unmeasured::NotPlaced => f.write_str("the assembly's bodies can't be placed"),
+            Unmeasured::NothingChosen => write!(f, "{NOTHING_CHOSEN}: the occurrences it chose may have been deleted"),
         }
     }
 }
@@ -113,17 +121,12 @@ impl Styles {
 }
 
 /// What a view shows, worked out once per request: the world state and each body it shows, in the
-/// world state's order. The extents and the lines read it; choosing occurrences and hiding parts
-/// (V4) will filter it.
+/// world state's order. The extents and the lines read it.
+#[derive(Clone)]
 pub struct ShownSet {
     pub state: Arc<ModelState>,
     pub bodies: Vec<Shown>,
 }
-
-/// Occurrence paths a view's `source` or `hide` may hold, each.
-pub const MAX_PATHS: usize = 1_000;
-/// Ids a view's `source` and `hide` may hold in all.
-pub const MAX_PATH_IDS: usize = 4_096;
 
 impl ShownSet {
     /// The shown body in place.
@@ -138,6 +141,13 @@ impl ShownSet {
         let hide: HashSet<&[u64]> = hide.iter().map(Vec::as_slice).collect();
         self.bodies.retain(|b| chosen(&b.path, source.as_ref(), &hide));
         self
+    }
+
+    /// What saved view `view` shows of the set: [`ShownSet::keep`] by what it resolves to, which a
+    /// view that chooses nothing skips. Paths no occurrence makes any more match no body.
+    pub fn of_view(&self, view: &ResolvedView) -> Cow<'_, ShownSet> {
+        let (source, hide) = (view.occurrences.value.as_deref(), view.hide.value.as_deref().unwrap_or_default());
+        if source.is_none() && hide.is_empty() { Cow::Borrowed(self) } else { Cow::Owned(self.clone().keep(source, hide)) }
     }
 }
 
@@ -193,6 +203,20 @@ pub fn not_drawable(display: VisualStyle, reference: VisualStyle) -> Option<&'st
     (lined(display) || lined(reference)).then_some("not supported yet: shaded views with lines need the view's exact lines (W06)")
 }
 
+/// What saved view `view` shows of `shown`, with its extents on its plane, or why there's nothing to
+/// measure: the one rule its boundary, its fitted scale and its lines are worked out by.
+pub fn measured<'a>(
+    shown: &'a std::result::Result<ShownSet, Unmeasured>,
+    view: &ResolvedView,
+) -> std::result::Result<(Cow<'a, ShownSet>, Extents), Unmeasured> {
+    let set = shown.as_ref().map_err(|why| *why)?.of_view(view);
+    if set.bodies.is_empty() {
+        return Err(Unmeasured::NothingChosen);
+    }
+    let extents = measure(&set, &view.basis)?;
+    Ok((set, extents))
+}
+
 /// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure:
 /// of its model parts when it has any, as a reference part only shows around them, else of its
 /// reference parts.
@@ -232,15 +256,16 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
     ViewFrame::new(basis, scale, model.center(), centre).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the design's extents
-/// on its plane (a view's source is the design the drawing is in), grown by [`shows`], at its
-/// scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
+/// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the extents of what it
+/// shows on its plane ([`measured`]; a view's source is the design the drawing is in), grown by
+/// [`shows`], at its scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
 /// measure, a placeholder [`PLACEHOLDER_MM`] each way round its centre. It reads the model as it
 /// is evaluated: no model is evaluated.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
-    let measured = shown(s).and_then(|set| measure(&set, &view.basis).map(|e| (e, shows(&set, &view.basis, &e, view.reference_shown_percent))));
+    let shown = shown(s);
+    let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
     placed(&view, measured, centre, cmd)
 }
 

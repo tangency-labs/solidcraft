@@ -8,6 +8,7 @@ use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::NoPictures;
 
 use super::*;
+use crate::drawing_scene::tests::two_cubes;
 use crate::schema::tests::conforms;
 
 const EPS: f64 = 1e-9;
@@ -104,17 +105,6 @@ fn nest(s: &mut Session, level: u64) {
     // From JSON, so a field another change adds to occurrences takes its default here.
     let occurrence = json!({"id": 5000 + level, "component": component, "parent": parent, "name": name});
     doc.occurrences.push(serde_json::from_value(occurrence).unwrap());
-}
-
-/// Part `Part` with a 10 mm cube `Cube` from the origin, placed twice: the second copy 30 mm along
-/// X. The session and the two occurrences.
-fn two_cubes() -> (Session, [u64; 2]) {
-    let mut s = Session::default();
-    let created = run(&mut s, "component.create", json!({"name": "Part"}));
-    let first = created["occurrence"].as_u64().unwrap();
-    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
-    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [30, 0, 0]}))["occurrence"].as_u64().unwrap();
-    (s, [first, second])
 }
 
 fn edit_refused(s: &mut Session, view: u64, set: Value) -> String {
@@ -357,6 +347,7 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
         reference_style: Some(VisualStyle::Visible),
         reference_hides_model: Some(false),
         tangent_edges: Some(Default::default()),
+        ..ViewOverrides::default()
     };
     assert_eq!(made.settings, own);
     let of_top = copy(&mut s, top);
@@ -1858,6 +1849,218 @@ fn a_view_with_nothing_to_measure_gets_a_placeholder() {
     run(&mut sketch_only, "sketch.finish", json!({}));
     let (mut sketch_only, [front, ..]) = three_views_of(sketch_only);
     assert_box(&placeholder(&mut sketch_only, front, "no_bodies"), [140.0, 140.0], [160.0, 160.0]);
+}
+
+/// The two copies of [`two_cubes`] in a drawing: a base view at 1:1 centred at (150, 150), and the
+/// session, its sheet, the view and the two occurrences.
+fn two_cubes_drawn() -> (Session, u64, [u64; 2]) {
+    let (mut s, copies) = two_cubes();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [150, 150]}));
+    (s, view, copies)
+}
+
+/// How wide view `id` is on its sheet, in paper millimetres.
+fn width(s: &mut Session, id: u64) -> f64 {
+    boundary(&inspect_view(s, id)).0.x
+}
+
+/// `source` and `hide` on a saved view: both copies are 40 mm across, one is 10 mm, and its
+/// boundary stays centred on its place. Inspect says where each comes from, null follows again, and
+/// an edit is one undo step that undoes.
+#[test]
+fn a_saved_views_source_and_hide_choose_what_it_measures() {
+    let (mut s, view, [_, second]) = two_cubes_drawn();
+    assert!((width(&mut s, view) - 40.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["occurrences"], json!({"value": null, "from": "default", "set": null}), "{inspected}");
+    assert_eq!(inspected["settings"]["hide"], json!({"value": null, "from": "default", "set": null}), "{inspected}");
+
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, view, json!({"hide": [[second]]}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["hide"]), steps + 1));
+    assert!((width(&mut s, view) - 10.0).abs() < 1e-6);
+    assert_box(&inspect_view(&mut s, view), [145.0, 145.0], [155.0, 155.0]);
+    let inspected = inspect_view(&mut s, view);
+    assert_eq!(inspected["settings"]["hide"], json!({"value": [[second]], "from": "this", "set": [[second]]}), "{inspected}");
+
+    let reply = edit_view(&mut s, view, json!({"hide": null, "source": {"occurrences": [[second]]}}));
+    assert_eq!(reply["changed"], json!(["source", "hide"]));
+    assert!((width(&mut s, view) - 10.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"source": null}));
+    assert!((width(&mut s, view) - 40.0).abs() < 1e-6, "null follows the default again");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, view) - 10.0).abs() < 1e-6);
+    assert_eq!(saved(&s, view).settings.occurrences.as_deref(), Some(&[vec![second]][..]));
+}
+
+/// A new base view takes its scale from what it shows: with the second copy hidden it fits one
+/// 10 mm cube, so it comes out larger than the view of both.
+#[test]
+fn a_base_views_fitted_scale_is_of_what_it_shows() {
+    let (mut s, _, [_, second]) = two_cubes_drawn();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (both, _) = create(&mut s, BASE, json!({"sheet": sheet}));
+    let (one, id) = create(&mut s, BASE, json!({"sheet": sheet, "hide": [[second]]}));
+    assert!(one["scale"]["factor"].as_f64().unwrap() > both["scale"]["factor"].as_f64().unwrap(), "{one} {both}");
+    assert_eq!(one["scale"]["fitted"], json!(true));
+    assert_eq!(saved(&s, id).settings.hide.as_deref(), Some(&[vec![second]][..]));
+}
+
+/// A projected view follows what its parent shows, naming it, and is among the followers of the
+/// edit that changes it; then it sets its own, and the parent's next change leaves it alone.
+#[test]
+fn a_projected_view_follows_what_its_parent_shows_until_it_sets_its_own() {
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [150, 250]}}));
+    let reply = edit_view(&mut s, view, json!({"hide": [[second]]}));
+    assert_eq!(reply["followers"], json!([ids::encode(side)]), "{reply}");
+    assert!((width(&mut s, side) - 10.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, side);
+    assert_eq!(
+        inspected["settings"]["hide"],
+        json!({"value": [[second]], "from": "parent", "parent": ids::encode(view), "set": null}),
+        "{inspected}"
+    );
+
+    edit_view(&mut s, side, json!({"hide": []}));
+    assert!((width(&mut s, side) - 40.0).abs() < 1e-6, "an empty list hides nothing, whatever the parent hides");
+    let reply = edit_view(&mut s, view, json!({"hide": [[first]]}));
+    assert_eq!(reply["followers"], json!([]), "{reply}");
+    assert!((width(&mut s, side) - 40.0).abs() < 1e-6);
+    // A display link is its own switch: `linked` doesn't touch what a view shows.
+    edit_view(&mut s, side, json!({"linked": true}));
+    assert!((width(&mut s, side) - 40.0).abs() < 1e-6);
+}
+
+/// A view copied alone follows nothing, so it keeps what it showed: its parent's choice becomes its
+/// own, and the parent's next change leaves it alone. A view copied with its parent still follows.
+#[test]
+fn a_copied_view_keeps_what_it_shows() {
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    let (_, side) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above"}));
+    edit_view(&mut s, view, json!({"hide": [[second]]}));
+    let alone = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(side), "sheet": "Sheet 1", "position_mm": [300, 250]})))[0];
+    assert!(matches!(saved(&s, alone).kind, ViewKind::Base { .. }));
+    assert_eq!(saved(&s, alone).settings.hide.as_deref(), Some(&[vec![second]][..]));
+    assert!((width(&mut s, alone) - 10.0).abs() < 1e-6);
+    let together = listed(&to_sheet(&mut s, COPY, json!({"view": ids::encode(view), "sheet": "Sheet 1", "with_linked": true})));
+    let [copy, its_side] = together[..] else { panic!("{together:?}") };
+    edit_view(&mut s, view, json!({"hide": [[first]]}));
+    assert_eq!(saved(&s, alone).settings.hide.as_deref(), Some(&[vec![second]][..]), "the copy follows nothing");
+    let inspected = inspect_view(&mut s, its_side);
+    assert_eq!(inspected["settings"]["hide"]["parent"], json!(ids::encode(copy)), "{inspected}");
+}
+
+/// Deleting an occurrence never refuses the drawing. A `hide` path to it goes quiet, a `source` path
+/// to it with another left draws the other, and one with none left is a placeholder that says why;
+/// undoing the delete brings the lines back. The file still reads with the paths in it.
+#[test]
+fn a_deleted_occurrence_leaves_the_views_that_named_it() {
+    let (mut s, hides, [first, second]) = two_cubes_drawn();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    edit_view(&mut s, hides, json!({"hide": [[second]]}));
+    let (_, on_both) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "source": {"occurrences": [[first], [second]]}}));
+    let (_, on_second) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "source": {"occurrences": [[second]]}}));
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut s, hides) - 10.0).abs() < 1e-6);
+    assert!((width(&mut s, on_both) - 10.0).abs() < 1e-6);
+    let gone = inspect_view(&mut s, on_second);
+    assert_eq!((gone["extents"]["status"].as_str(), gone["extents"]["provenance"].as_str()), (Some("placeholder"), Some("nothing_chosen")), "{gone}");
+    assert_eq!(gone["settings"]["occurrences"]["value"], json!([[second]]), "the path stays, for an undo: {gone}");
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut s, on_second) - 10.0).abs() < 1e-6);
+}
+
+/// Making or editing a view refuses what the snapshot refuses, with its reason, and leaves the
+/// drawing and the undo steps as they were: a path no occurrence makes, too many paths or ids, `[]`
+/// in `hide`, and a choice that leaves nothing. `[]` in `source` with only placed bodies is that.
+#[test]
+fn hostile_source_and_hide_on_a_saved_view_are_refused() {
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let many: Vec<Vec<u64>> = vec![vec![first]; 1001];
+    let deep: Vec<Vec<u64>> = vec![vec![first; 64]; 65];
+    let cases = [
+        (json!({"source": {"occurrences": [[999]]}}), "source.occurrences path"),
+        (json!({"hide": [[999]]}), "hide path"),
+        (json!({"hide": [[first, first]]}), "repeats an id"),
+        (json!({"source": {"occurrences": [vec![first; 65]]}}), "1..64 ids"),
+        (json!({"hide": many}), "at most 1000 occurrence paths"),
+        (json!({"source": {"occurrences": deep}}), "4096 ids in all"),
+        (json!({"hide": [[]]}), "hide [] would leave out"),
+        (json!({"hide": [[first], [second]]}), NOTHING_CHOSEN),
+        (json!({"source": {"occurrences": []}}), NOTHING_CHOSEN),
+        (json!({"source": {"occurrences": [[]]}}), NOTHING_CHOSEN),
+        (json!({"source": {"occurrences": [[first]]}, "hide": [[first]]}), NOTHING_CHOSEN),
+        (json!({"hide": [[-1]]}), "hide"),
+        (json!({"source": {}}), "occurrences"),
+    ];
+    for (set, says) in cases {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, view, set.clone());
+        assert!(e.contains(says), "edit {}: {e}", set.to_string().chars().take(60).collect::<String>());
+        assert!(Arc::ptr_eq(&record, s.drawing("test").unwrap()) && s.undo.len() == steps, "edit");
+        let mut p = set.clone();
+        p["sheet"] = json!(sheet);
+        let e = create_refused(&mut s, BASE, p);
+        assert!(e.contains(says), "base {}: {e}", set.to_string().chars().take(60).collect::<String>());
+    }
+}
+
+/// With nothing to measure anyway, a choice isn't what leaves it empty: the view is made and gets
+/// its placeholder for the design's reason.
+#[test]
+fn a_choice_on_a_design_with_no_bodies_gets_the_designs_placeholder() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "source": {"occurrences": [[]]}}));
+    assert_eq!(inspect_view(&mut s, view)["extents"]["provenance"], json!("no_bodies"));
+}
+
+/// Seeded choices on a view, edited one after another: each edit is refused exactly when the rule
+/// worked out the long way leaves nothing; otherwise the view is as wide as the copies left.
+#[test]
+fn seeded_choices_on_a_saved_view_agree_with_the_rule() {
+    let pick = |seed: u64, salt: u64, n: u64| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) % n;
+    let (mut s, view, [first, second]) = two_cubes_drawn();
+    for seed in 1..=120u64 {
+        let source: Option<Vec<Vec<u64>>> =
+            [None, Some(vec![vec![first]]), Some(vec![vec![second]]), Some(vec![vec![first], vec![second]]), Some(vec![vec![]])]
+                [pick(seed, 1, 5) as usize]
+                .clone();
+        let hide: Vec<Vec<u64>> = [vec![], vec![vec![first]], vec![vec![second]]][pick(seed, 2, 3) as usize].clone();
+        let shown = |copy: u64| source.as_ref().is_none_or(|paths| paths.contains(&vec![copy])) && !hide.contains(&vec![copy]);
+        let set = json!({"source": source.as_ref().map(|paths| json!({"occurrences": paths})), "hide": hide});
+        let want = match (shown(first), shown(second)) {
+            (true, true) => Some(40.0),
+            (false, false) => None,
+            _ => Some(10.0),
+        };
+        match want {
+            Some(want) => {
+                edit_view(&mut s, view, set);
+                let got = width(&mut s, view);
+                assert!((got - want).abs() < 1e-6, "seed {seed}: {got}");
+                let d = s.drawing("test").unwrap();
+                assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d, "seed {seed}");
+            }
+            None => assert!(edit_refused(&mut s, view, set).contains(NOTHING_CHOSEN), "seed {seed}"),
+        }
+    }
 }
 
 /// What a reply lists as outside its sheet's drawing space, and those views' ids.

@@ -2,6 +2,8 @@
 //! `drawing.view.snapshot` takes them whole; a saved view (W12) keeps the same fields, each one
 //! optional so that a projected view can follow its parent.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Deserializer, Serialize};
 use solidcore_record::Plane;
 use solidcraft_geom::drawing_view::{Invalid, NamedView, Scale, basis_looking};
@@ -9,6 +11,10 @@ use solidcraft_render::VisualStyle;
 
 /// The most of its reference parts a view shows, as a percent.
 pub const MAX_REFERENCE_SHOWN_PERCENT: f64 = 100.0;
+
+/// Occurrence paths from the design's root, each the subtree it places. Shared, so resolving a view
+/// on every redraw copies none of them.
+pub type OccurrencePaths = Arc<[Vec<u64>]>;
 
 /// Which way a view looks: by name, or along any direction with an up.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -94,7 +100,7 @@ pub struct ViewSettings {
 
 /// The settings a saved view sets itself, each on its own: one left out follows the view's parent,
 /// then [`ViewSettings`]'s default ([`crate::drawing::Drawing::resolve_view`]). None is written.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ViewOverrides {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,12 +113,19 @@ pub struct ViewOverrides {
     pub reference_hides_model: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tangent_edges: Option<TangentEdges>,
+    /// The subtrees it draws, with `[]` for the design's own bodies: every body the design places
+    /// when no view of its chain sets them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurrences: Option<OccurrencePaths>,
+    /// The subtrees it leaves out: none when no view of its chain sets them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide: Option<OccurrencePaths>,
 }
 
 impl ViewOverrides {
     /// Sets nothing: every setting follows.
     pub fn is_empty(&self) -> bool {
-        *self == ViewOverrides::default()
+        self == &ViewOverrides::default()
     }
 }
 

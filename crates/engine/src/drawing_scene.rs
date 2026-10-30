@@ -209,9 +209,10 @@ struct DrawnDimension {
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
 fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
-    let measured = shown.as_ref().map_err(|why| *why).and_then(|set| {
-        let extents = crate::drawing_view::measure(set, &view.basis)?;
-        Ok((set, extents, crate::drawing_view::shows(set, &view.basis, &extents, view.reference_shown_percent)))
+    // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
+    let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
+        let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
+        (set, extents, around)
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
@@ -220,7 +221,6 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     if let Some(why) = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value) {
         return none(Status::Failed(why.into()));
     }
-    // Every body the design places, until saved views have `source` and `hide` (V4) to keep a part.
     // Its reference parts draw too, around what the extents measure.
     let (set, extents, around) = match measured {
         Ok(measured) => measured,
@@ -237,14 +237,14 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
         Err(e) => return none(Status::Failed(reason(e))),
     };
     let lines = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string())).and_then(|rect| {
-        let mut lines = crate::drawing_view::lines(s, set, &frame, &request, CMD)?;
+        let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, CMD)?;
         styles.leave_shaded_to_pictures(&mut lines);
         Ok((lines, rect))
     });
     match lines {
         Ok((lines, rect)) => {
             let mut group = paper_group(&lines, id);
-            group.items.splice(0..0, picture_items(id, &view_parts(set, styles), rect));
+            group.items.splice(0..0, picture_items(id, &view_parts(&set, styles), rect));
             if group.records() > MAX_RECORDS {
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
             }
@@ -671,8 +671,8 @@ pub fn step(s: &mut Session) -> bool {
     let Ok(state) = s.world_state() else { return false };
     let units = s.doc.drawing_units(&d).to_string();
     let waiting: Vec<(u64, ResolvedView)> =
-        on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, *view)).collect();
-    let Some(&(id, view)) = waiting.first() else { return step_dimensions(s, &d, &on, &state, units) };
+        on.iter().filter(|(id, view, _)| !s.drawing_scenes.fresh(*id, &state, view)).map(|(id, view, _)| (*id, view.clone())).collect();
+    let Some((id, view)) = waiting.first().cloned() else { return step_dimensions(s, &d, &on, &state, units) };
     let shown = match s.drawing_scenes.shown.take() {
         Some((was, shown)) if Arc::ptr_eq(&was, &state) => shown,
         _ => crate::drawing_view::shown(s),
