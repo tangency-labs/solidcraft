@@ -1,0 +1,17 @@
+{
+  "en": {
+    "cmd.inspect_analysis": "View Analysis"
+  },
+  "ar": {
+    "cmd.inspect_analysis": "تحليل العرض"
+  },
+  "he": {
+    "cmd.inspect_analysis": "ניתוח תצוגה"
+  },
+  "ja": {
+    "cmd.inspect_analysis": "表示解析"
+  },
+  "zh": {
+    "cmd.inspect_analysis": "视图分析"
+  }
+}

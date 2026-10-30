@@ -208,6 +208,23 @@ fn help_x(report: Rect) -> f32 {
     report.left() - 18.0
 }
 
+/// The command whose tool or dialog is open right now, shown pressed in the toolbar.
+fn running_command(app: &SolveApp) -> Option<String> {
+    match (&app.tool, &app.dialog) {
+        (Some(tool), _) => Some(tool.cmd.to_string()),
+        // Create Sketch never lands in last_command (it is not repeatable).
+        (None, Some(d)) if matches!(d.kind, crate::dialogs::Kind::Sketch) => Some("sketch.create".to_string()),
+        (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
+        _ => None,
+    }
+}
+
+/// Whether the toolbar shows command `id` pressed: its tool or dialog is open, or it turned on
+/// the view analysis on now (one at a time, `Session::active_analysis`), its tool running or not.
+pub(crate) fn shows_pressed(app: &SolveApp, id: &str) -> bool {
+    running_command(app).as_deref() == Some(id) || app.session.active_analysis() == Some(id)
+}
+
 /// The Report a bug button: labelled when the layout asks for it and there is room for its text
 /// (`label_width`, measured in the current language), otherwise just the icon. An icon-only
 /// layout gives it a square the size of Settings and Help.
@@ -1245,14 +1262,6 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         ribbon_tabs(app, ui, Rect::from_min_max(pos2(ribbon_left, r.top()), pos2(r.right(), r.top() + TAB_ROW_HEIGHT)));
         // Panels.
         let tab = app.ui.tab.clone();
-        // The command whose tool or dialog is open right now, shown pressed in the toolbar.
-        let running: Option<String> = match (&app.tool, &app.dialog) {
-            (Some(tool), _) => Some(tool.cmd.to_string()),
-            // Create Sketch never lands in last_command (it is not repeatable).
-            (None, Some(d)) if matches!(d.kind, crate::dialogs::Kind::Sketch) => Some("sketch.create".to_string()),
-            (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
-            _ => None,
-        };
         let mut px = ribbon_left;
         let top = r.top() + TAB_ROW_HEIGHT;
         let mut drop: Option<(&'static str, &'static str, Option<&'static str>)> = None;
@@ -1432,7 +1441,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
-                if !finish && (resp.is_pointer_button_down_on() || running.as_deref() == Some(selected.id) || family_open) {
+                if !finish && (resp.is_pointer_button_down_on() || shows_pressed(app, selected.id) || family_open) {
                     painter.rect(whole, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
                 } else if resp.hovered() && info.enabled {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
@@ -1499,7 +1508,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     );
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
-                    let active = running.as_deref() == Some(c.id);
+                    let active = shows_pressed(app, c.id);
                     let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                     painter.rect(
                         cell,

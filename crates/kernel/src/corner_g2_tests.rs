@@ -112,21 +112,152 @@ fn set_back_8_the_g2_corner_lies_between_the_hull_and_the_prisms() {
     assert!(clear <= CURVATURE_SHARE / 5.0, "{clear}");
 }
 
+/// How far past the box (60, 40, 20) face `face` of `rec` reaches within its trim: the highest
+/// `max(x - 60, y - 40, z - 20)` on it, bracketed `(lo, hi)` from its exact surface alone, with no
+/// mesh. The surface (a polynomial B-spline) is cut into its Bézier patches and those split in
+/// four (de Casteljau, exact up to rounding) while they can still hold a higher point: a patch
+/// lies in the hull of its control points, so its controls' highest value bounds it from above
+/// (`hi`), and its corners are points of the surface (`lo`, where inside the trim). A patch
+/// clear of the trim (the face's pcurves, sampled densely in its (u, v)) is dropped; one whose
+/// hull cannot beat `lo` by 1e-12 is done; one split 18 times counts its hull in `hi`. Returns
+/// the bracket and the (u, v) where `lo` is reached.
+fn past_the_box(rec: &b::Brep, face: usize) -> (f64, f64, [f64; 2]) {
+    use solidcraft_geom::bspline::{HPoint, segment};
+    let f = &rec.faces[face];
+    let (b::Surface::Spline { u_knots, v_knots, points }, None) = (&f.surface, &f.nurbs) else {
+        panic!("face {face} is no polynomial B-spline: {:?}", std::mem::discriminant(&f.surface));
+    };
+    let excess = |p: Vec3| (p.x - 60.0).max(p.y - 40.0).max(p.z - 20.0);
+    // The trim: every loop's pcurves as one polygon set, inside by the even-odd rule.
+    let mut rings: Vec<Vec<[f64; 2]>> = Vec::new();
+    for l in &f.loops {
+        let b::Loop::Edges { edges } = l else { continue };
+        let mut ring = Vec::new();
+        for oe in edges {
+            let [t0, t1] = oe.pcurve.interval().unwrap();
+            let mut seg: Vec<[f64; 2]> = (0..=400).map(|k| oe.pcurve.eval(t0 + (t1 - t0) * f64::from(k) / 400.0).unwrap()).collect();
+            if !oe.forward {
+                seg.reverse();
+            }
+            ring.extend(seg);
+        }
+        rings.push(ring);
+    }
+    let inside = |w: [f64; 2]| {
+        let mut odd = false;
+        for r in &rings {
+            for k in 0..r.len() {
+                let (p, q) = (r[k], r[(k + 1) % r.len()]);
+                if (p[1] > w[1]) != (q[1] > w[1]) && w[0] < p[0] + (w[1] - p[1]) * (q[0] - p[0]) / (q[1] - p[1]) {
+                    odd = !odd;
+                }
+            }
+        }
+        odd
+    };
+    let touches = |u: [f64; 2], v: [f64; 2]| {
+        rings.iter().flatten().any(|w| (u[0]..=u[1]).contains(&w[0]) && (v[0]..=v[1]).contains(&w[1]))
+            || [[u[0], v[0]], [u[1], v[0]], [u[0], v[1]], [u[1], v[1]]].into_iter().any(inside)
+    };
+    // The Bézier patches: each knot span in u, then in v (control point [i][j], i along u).
+    let (nu, nv) = (points.len(), points[0].len());
+    let (p, q) = (u_knots.len() - nu - 1, v_knots.len() - nv - 1);
+    let spans = |k: &[f64], n: usize, d: usize| {
+        let mut x: Vec<f64> = k[d..=n].to_vec();
+        x.dedup();
+        x.windows(2).map(|w| [w[0], w[1]]).collect::<Vec<_>>()
+    };
+    type Patch = (Vec<Vec<Vec3>>, [f64; 2], [f64; 2], u32);
+    let mut todo: Vec<Patch> = Vec::new();
+    for su in spans(u_knots, nu, p) {
+        // Each v column cut to the u span: (p + 1) x nv.
+        let cols: Vec<Vec<HPoint>> = (0..nv)
+            .map(|j| {
+                let c: Vec<HPoint> = (0..nu).map(|i| HPoint::weighted(Vec3::from(points[i][j]), 1.0)).collect();
+                segment(p, u_knots, &c, su[0], su[1]).unwrap().1
+            })
+            .collect();
+        for sv in spans(v_knots, nv, q) {
+            let net: Vec<Vec<Vec3>> = (0..=p)
+                .map(|i| {
+                    segment(q, v_knots, &cols.iter().map(|c| c[i]).collect::<Vec<_>>(), sv[0], sv[1]).unwrap().1.iter().map(|h| h.xyz()).collect()
+                })
+                .collect();
+            todo.push((net, su, sv, 0));
+        }
+    }
+    let half = |c: &[Vec3]| {
+        let (mut l, mut r, mut pts) = (Vec::new(), Vec::new(), c.to_vec());
+        while let (Some(&a), Some(&z)) = (pts.first(), pts.last()) {
+            l.push(a);
+            r.push(z);
+            pts = pts.windows(2).map(|w| w[0].lerp(w[1], 0.5)).collect();
+        }
+        r.reverse();
+        (l, r)
+    };
+    let (mut lo, mut hi, mut at) = (f64::NEG_INFINITY, f64::NEG_INFINITY, [f64::NAN; 2]);
+    while let Some((net, u, v, depth)) = todo.pop() {
+        if !touches(u, v) {
+            continue;
+        }
+        for (i, j, uv) in [(0, 0, [u[0], v[0]]), (p, 0, [u[1], v[0]]), (0, q, [u[0], v[1]]), (p, q, [u[1], v[1]])] {
+            let e = excess(net[i][j]);
+            if e > lo && inside(uv) {
+                (lo, at) = (e, uv);
+            }
+        }
+        let hull = net.iter().flatten().map(|c| excess(*c)).fold(f64::NEG_INFINITY, f64::max);
+        if hull <= lo + 1e-12 {
+            continue;
+        }
+        if depth == 18 {
+            hi = hi.max(hull);
+            continue;
+        }
+        // Split in u (each column of the net is a v row: split the rows across i), then in v.
+        let (mut a, mut z) = (vec![Vec::new(); p + 1], vec![Vec::new(); p + 1]);
+        for j in 0..=q {
+            let (l, r) = half(&net.iter().map(|row| row[j]).collect::<Vec<_>>());
+            for i in 0..=p {
+                a[i].push(l[i]);
+                z[i].push(r[i]);
+            }
+        }
+        let (um, vm) = (0.5 * (u[0] + u[1]), 0.5 * (v[0] + v[1]));
+        for (n, uu) in [(a, [u[0], um]), (z, [um, u[1]])] {
+            let (l, r): (Vec<_>, Vec<_>) = n.iter().map(|row| half(row)).unzip();
+            todo.push((l, uu, [v[0], vm], depth + 1));
+            todo.push((r, uu, [vm, v[1]], depth + 1));
+        }
+    }
+    (lo, hi.max(lo), at)
+}
+
 /// Long setbacks, where SMLib's own patch bulges past the faces (beyond about 2 r, by 0.25 at
 /// 3 r): the G2 patch is fitted to the faces' own planes along their curves and stays inside the
-/// box but by under a thousandth (where it passes from a round's curvature to a plane's), G2
-/// clear of the hole's corners.
+/// box, G2 clear of the hole's corners. The body is convex (a box with its edges and corner
+/// rounded), and a convex face lies on the inner side of every tangent plane: the patch meets
+/// each of the box's planes tangentially along its seam there, so it reaches past none of them,
+/// up to rounding (1e-9 mm, the patch's seams lie on the planes to 1e-13). Measured on the
+/// patch's exact surface within its trim ([`past_the_box`]), not on a mesh of it.
 #[test]
 fn a_long_setback_keeps_the_g2_patch_inside_the_box() {
     let (body, edges) = box_corner();
+    let mut wrong = Vec::new();
     for s in [11.0, 12.0, 13.0, 14.0, 15.0] {
         let g2 = fillet_g2_corners(&body, &edges, 5.0, &[(Vec3::new(60.0, 40.0, 20.0), s)]).unwrap();
-        let m = g2.mesh(&MeshTolerance::chord(1e-3)).unwrap();
-        let over = m.positions.iter().map(|p| (p.x - 60.0).max(p.y - 40.0).max(p.z - 20.0)).fold(f64::NEG_INFINITY, f64::max);
+        let rec = brep_record(&g2).unwrap();
+        let patch: Vec<usize> = (0..rec.faces.len()).filter(|f| matches!(rec.faces[*f].surface, b::Surface::Spline { .. })).collect();
+        assert_eq!(patch.len(), 1, "{s}: one patch");
+        let (lo, hi, at) = past_the_box(&rec, patch[0]);
         let (_, clear, _) = corner_seams(&g2, 0.15);
-        eprintln!("set back {s}: past the box by {over:.2e}, curvature jump clear of the corners {clear:.3e}");
-        assert!(over < 1e-3 && clear <= CURVATURE_SHARE / 5.0, "{s}: {over} {clear}");
+        eprintln!("set back {s}: past the box by {lo:.4e} at (u, v) {at:?} (at most {hi:.4e}), curvature jump clear of the corners {clear:.3e}");
+        if !(hi <= 1e-9 && clear <= CURVATURE_SHARE / 5.0) {
+            wrong.push(format!("set back {s}: past the box by {lo:.4e}..{hi:.4e} at (u, v) {at:?}, curvature jump {clear:.3e}"));
+        }
     }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// Every edge of a box rounded: eight corners, each set back and filled, one closed solid.

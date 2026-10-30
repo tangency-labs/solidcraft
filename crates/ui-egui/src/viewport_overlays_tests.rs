@@ -623,7 +623,7 @@ fn comb_options_draw_the_combs_shown_again() {
     assert!(crate::scenario::rect_of("comb_options").is_some(), "the options card is drawn");
     assert_eq!((comb_options().length, comb_options().teeth), (1.0, 40));
     h.step(&json!({"click": {"world": [10, 0, 20]}})).unwrap();
-    let combs = shown_combs();
+    let combs = shown_combs(&h.app);
     assert_eq!(combs.len(), 1, "{:?}", h.app.status);
     assert_eq!(combs[0].len(), 40);
     let tooth = |c: &[[solidcraft_engine::geom::Vec3; 2]]| c[0][0].dist(c[0][1]);
@@ -635,7 +635,7 @@ fn comb_options_draw_the_combs_shown_again() {
     h.step(&json!({"drag": [[track.center().x, track.center().y], [track.right() + 40.0, track.center().y]]})).unwrap();
     h.frame();
     assert_eq!(comb_options().length, 8.0);
-    let combs = shown_combs();
+    let combs = shown_combs(&h.app);
     assert_eq!(combs.len(), 1, "the card's drag picked nothing");
     assert!((tooth(&combs[0]) - 8.0 * auto).abs() < 1e-9 * auto, "{} vs 8 × {auto}", tooth(&combs[0]));
     // Teeth to its left end: 4.
@@ -643,10 +643,89 @@ fn comb_options_draw_the_combs_shown_again() {
     h.step(&json!({"drag": [[track.center().x, track.center().y], [track.left() - 40.0, track.center().y]]})).unwrap();
     h.frame();
     assert_eq!(comb_options().teeth, 4);
-    let combs = shown_combs();
+    let combs = shown_combs(&h.app);
     assert_eq!((combs.len(), combs[0].len()), (1, 4));
     // The tool ends: the combs and the card go.
     h.step(&json!({"key": "Escape"})).unwrap();
     h.frames(2);
-    assert!(shown_combs().is_empty() && crate::scenario::rect_of("comb_options").is_none());
+    assert!(shown_combs(&h.app).is_empty() && crate::scenario::rect_of("comb_options").is_none());
+    assert!(!crate::toolbar::shows_pressed(&h.app, "inspect.curvature_comb"), "Esc turned the analysis off");
+}
+
+/// Every comb shown shares one scale: the tool combs each new pick together with those already
+/// shown, so tooth lengths compare across curves. An R5 edge's teeth are twice an R10 edge's,
+/// after either pick and after the options change.
+#[test]
+fn combs_shown_together_share_one_scale() {
+    use crate::sketch_tools::{CombOptions, set_comb_options, shown_combs};
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 20})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [30, 0, 0], "radius": 10, "height": 20})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.curvature_comb"})).unwrap();
+    h.frame();
+    h.step(&json!({"click": {"world": [0, 5, 20]}})).unwrap();
+    h.step(&json!({"click": {"world": [30, 10, 20]}})).unwrap();
+    let ratio = |h: &Harness| {
+        let combs = shown_combs(&h.app);
+        assert_eq!(combs.len(), 2, "{:?}", h.app.status);
+        let tooth = |c: &[[solidcraft_engine::geom::Vec3; 2]]| c[0][0].dist(c[0][1]);
+        tooth(&combs[0]) / tooth(&combs[1])
+    };
+    assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
+    set_comb_options(&mut h.app, CombOptions { length: 3.0, teeth: 12 });
+    assert!((ratio(&h) - 2.0).abs() < 1e-9, "{}", ratio(&h));
+    assert_eq!(shown_combs(&h.app)[1].len(), 12);
+}
+
+/// The view analysis buttons are one toggle group, reflecting the session's one analysis on:
+/// Curvature Comb on shows it pressed (through another dialog too); its button again turns it off
+/// and clears the combs; Zebra on turns the comb off, and Zebra again leaves none on.
+#[test]
+fn view_analysis_buttons_are_one_toggle_group() {
+    use crate::sketch_tools::shown_combs;
+    use crate::toolbar::shows_pressed;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    h.settle();
+    let (comb, zebra) = ("inspect.curvature_comb", "inspect.zebra");
+    let active = |h: &mut Harness| h.app.run("inspect.analysis", json!({})).unwrap()["active"].clone();
+    // Comb on, then off with its button again.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra));
+    assert_eq!(active(&mut h), json!(comb));
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    assert_eq!(shown_combs(&h.app).len(), 1, "{:?}", h.app.status);
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shown_combs(&h.app).is_empty() && h.app.tool.is_none() && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
+    // Comb on again; it stays on, pressed, while another dialog is open.
+    h.step(&json!({"start": comb})).unwrap();
+    h.step(&json!({"click": {"world": [0, 10, 20]}})).unwrap();
+    h.step(&json!({"start": "solid.fillet"})).unwrap();
+    h.frame();
+    assert!(h.app.dialog.is_some() && h.app.tool.is_none());
+    assert!(shows_pressed(&h.app, comb) && shown_combs(&h.app).len() == 1);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frame();
+    // Zebra on: the comb goes off and its combs go.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert!(shown_combs(&h.app).is_empty());
+    assert_eq!(active(&mut h), json!(zebra));
+    // Comb on: Zebra goes off.
+    h.step(&json!({"start": comb})).unwrap();
+    h.frame();
+    assert!(shows_pressed(&h.app, comb) && !shows_pressed(&h.app, zebra) && h.app.session.analysis.is_none());
+    // Zebra on, then off: none is on.
+    h.step(&json!({"start": zebra})).unwrap();
+    h.step(&json!({"start": zebra})).unwrap();
+    h.frame();
+    assert!(!shows_pressed(&h.app, zebra) && !shows_pressed(&h.app, comb));
+    assert_eq!(active(&mut h), json!(null));
 }
