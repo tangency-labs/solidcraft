@@ -58,10 +58,12 @@ use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 
 pub mod balloon;
+pub mod by_id;
 pub mod dimension;
 pub mod view;
 
 use balloon::Balloon;
+use by_id::ById;
 use dimension::Dimension;
 use view::View;
 
@@ -119,9 +121,8 @@ pub struct Drawing {
     /// By id ([`Drawing::add_dimensions`]), each behind its own `Arc`, as the views are.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dimensions: Vec<Arc<Dimension>>,
-    /// By id ([`Drawing::add_balloons`]), as the dimensions are.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub balloons: Vec<Arc<Balloon>>,
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub balloons: ById<Balloon>,
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
@@ -251,7 +252,7 @@ impl Drawing {
             sheets: vec![Arc::new(first)],
             views: Vec::new(),
             dimensions: Vec::new(),
-            balloons: Vec::new(),
+            balloons: ById::default(),
             revisions: Arc::default(),
         };
         drawing.validate()?;
@@ -275,10 +276,10 @@ impl Drawing {
         DRAWING.check_numbers(&v, "properties")?;
         DRAWING.upgrade(&mut v, version, applied.as_deref())?;
         let mut d: Drawing = serde_json::from_value(v).map_err(damaged)?;
-        let (views, dimensions, balloons) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions), std::mem::take(&mut d.balloons));
+        let (views, dimensions) = (std::mem::take(&mut d.views), std::mem::take(&mut d.dimensions));
         d.add_views(views);
         d.add_dimensions(dimensions);
-        d.add_balloons(balloons);
+        d.balloons.put_in_order();
         d.validate().map_err(damaged)?;
         Ok(Drawing { format: DRAWING.format_string(DRAWING.current()), format_pending: DRAWING.pending_names(), ..d })
     }
