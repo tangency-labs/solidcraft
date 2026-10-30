@@ -1,5 +1,6 @@
 //! Document RGB and optional separate opacity editing. Interface paint uses tokens; gradients are colour data.
 use super::{layout::label, metrics::dimension};
+use crate::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
 use crate::ui_kit::{Container, Surface};
 use crate::{i18n, scenario, theme::Tokens};
 use egui::{Color32, Response, Sense, Ui, ecolor::HsvaGamma, pos2, vec2};
@@ -288,7 +289,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         }
     });
     // A colour joins the recent list once an edit is finished: a drag or a held step button is
-    // released, a typed value is entered. Every picker shares the list (`share_recent_colors`).
+    // released, a typed value is entered. Every picker shares the list (`crate::recent_colors`).
     // While the popover stays open, fine-tuning replaces the colour it added rather than filling
     // the list with each step; a colour taken from the list starts a new entry.
     let session_id = id.with("recent_session");
@@ -472,17 +473,6 @@ fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
     steps
 }
 
-/// How many colours the recent list keeps.
-pub(crate) const MAX_RECENT_COLORS: usize = 12;
-
-/// The colours picked last, newest first, shared by every colour picker of the window.
-#[derive(Clone, Default)]
-struct RecentColors {
-    colors: Vec<[u8; 3]>,
-    /// Picked since the app last took the list for its preferences.
-    changed: bool,
-}
-
 /// One popover's part in the recent list while it stays open (drawn on consecutive passes).
 #[derive(Clone, Copy, Default)]
 struct RecentSession {
@@ -492,47 +482,6 @@ struct RecentSession {
     pending: bool,
     /// The colour this opening added, replaced by the next finished edit.
     entry: Option<[u8; 3]>,
-}
-
-fn recent_id() -> egui::Id {
-    egui::Id::new("color_recent_colors")
-}
-
-/// The recently picked colours, newest first.
-fn recent_colors(ctx: &egui::Context) -> Vec<[u8; 3]> {
-    ctx.data(|d| d.get_temp::<RecentColors>(recent_id())).map(|r| r.colors).unwrap_or_default()
-}
-
-/// Put a finished pick at the front of the recent list (once, capped).
-/// `replacing` is the colour this popover added earlier while it stayed open: it goes if it is
-/// still the newest entry.
-fn remember_color(ctx: &egui::Context, rgb: [u8; 3], replacing: Option<[u8; 3]>) {
-    ctx.data_mut(|d| {
-        let recent = d.get_temp_mut_or_default::<RecentColors>(recent_id());
-        if replacing.is_some() && recent.colors.first().copied() == replacing {
-            recent.colors.remove(0);
-        }
-        recent.colors.retain(|c| *c != rgb);
-        recent.colors.insert(0, rgb);
-        recent.colors.truncate(MAX_RECENT_COLORS);
-        recent.changed = true;
-    });
-}
-
-/// Keep the saved list and the pickers' list the same; the app calls this every frame. Picks made
-/// since the last call are written to `saved`; otherwise `saved` (loaded, reset) is what the
-/// pickers show.
-pub fn share_recent_colors(ctx: &egui::Context, saved: &mut Vec<[u8; 3]>) {
-    saved.truncate(MAX_RECENT_COLORS);
-    ctx.data_mut(|d| {
-        let recent = d.get_temp_mut_or_default::<RecentColors>(recent_id());
-        if recent.changed {
-            saved.clone_from(&recent.colors);
-            recent.changed = false;
-        } else if recent.colors != *saved {
-            recent.colors.clone_from(saved);
-        }
-    });
 }
 
 /// The recent colours as a row of samples (empty slots outlined); returns the one clicked.

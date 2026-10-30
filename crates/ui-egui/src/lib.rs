@@ -211,6 +211,7 @@ mod print_face_ui;
 pub(crate) mod quick_measure;
 #[cfg(test)]
 mod quick_measure_tests;
+pub(crate) mod recent_colors;
 pub mod recovery_ui;
 pub mod ref_images;
 mod render_ui;
@@ -1080,7 +1081,7 @@ impl SolveApp {
         self.ui.recent_colors = v
             .get("recent_colors")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(ui_kit::MAX_RECENT_COLORS).collect())
+            .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
     }
 
@@ -2642,7 +2643,7 @@ impl SolveApp {
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
-        ui_kit::share_recent_colors(ui.ctx(), &mut self.ui.recent_colors);
+        recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
         let t0 = now_ms();
         // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
         // faces are read on a thread; the fonts are installed again once they are there.
