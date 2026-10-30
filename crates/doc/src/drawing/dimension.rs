@@ -610,13 +610,22 @@ impl<'a> Picker<'a> {
                 vec![(b, *index)]
             }
             EdgePick::Point(p) => {
-                let mut on = Vec::new();
+                // A point on a curve lies off its chords by up to what the body was meshed to, so
+                // that is looked for only when no edge passes through the point itself.
+                let (mut on, mut curved) = (Vec::new(), Vec::new());
                 for i in 0..self.state.bodies.len() {
+                    let meshed_to = self.state.bodies.get(i).map_or(0.0, |b| b.display_tol());
                     let Some(lines) = self.placed(i) else { continue };
-                    let near = |line: &Vec<Vec3>| line.windows(2).any(|w| matches!(w, [a, b] if p.dist_to_segment(*a, *b) <= point_tolerance(*p)));
-                    on.extend(lines.iter().enumerate().filter(|(_, line)| near(line)).map(|(e, _)| (i, e)));
+                    for (e, line) in lines.iter().enumerate() {
+                        let off = line.windows(2).fold(f64::INFINITY, |off, w| if let [a, b] = w { off.min(p.dist_to_segment(*a, *b)) } else { off });
+                        if off <= point_tolerance(*p) {
+                            on.push((i, e));
+                        } else if off <= meshed_to {
+                            curved.push((i, e));
+                        }
+                    }
                 }
-                on
+                if on.is_empty() { curved } else { on }
             }
         };
         match on.as_slice() {

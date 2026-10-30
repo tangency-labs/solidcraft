@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde_json::json;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
@@ -201,6 +203,35 @@ fn a_radial_dimension_reads_a_hole_and_an_edit_makes_it_a_diameter() {
         assert!(e.contains("a radial dimension has only `diameter`"), "{p}: {e}");
     }
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// A point on a curved edge names it wherever it falls between the edge's chords, a little way off it
+/// names nothing, and a point on a straight edge is that edge however near a curved one is.
+#[test]
+fn a_point_on_a_curved_edge_finds_it_between_its_chords() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[80, 20, 30]], "radius": 5, "body": "Box"}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let rim = |radius: f64, degrees: f64| {
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        json!([40.0 + radius * cos, 0.0, 15.0 + radius * sin])
+    };
+    // The hole's rim is two half circles, and each point names one of them. Whole steps never land on
+    // where they meet, which names both and is refused.
+    let mut named = BTreeSet::new();
+    for step in 0..55 {
+        let at = add(&mut s, view, json!({"radial": {"edge": rim(6.0, 3.3 + 6.5 * f64::from(step))}}));
+        reads(&at, 12.0, "Ø12.00");
+        named.insert(at["record"]["kind"]["radial"]["edge"]["name"].as_str().unwrap().to_string());
+    }
+    assert_eq!(named.len(), 2, "{named:?}");
+    assert!(refused(&mut s, json!({"view": ids::encode(view), "kind": {"radial": {"edge": rim(7.0, 20.0)}}})).contains("no edge"));
+    let (sin, cos) = 45f64.to_radians().sin_cos();
+    reads(&add(&mut s, view, json!({"radial": {"edge": [75.0 + 5.0 * cos, 0.0, 25.0 + 5.0 * sin]}})), 5.0, "R5.00");
+    reads(&add(&mut s, view, json!({"length": {"edge": [74.99, 0, 30]}})), 75.0, "75.00");
 }
 
 /// A dimension whose edge is filleted away has no value, and gives the one it last read this
