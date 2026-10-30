@@ -18,9 +18,9 @@
 //! faces of B-spline surfaces or real `SmPlane`s): the C++ side builds a real `SmBrep`
 //! and preserves exactly exported analytic surfaces. Other surfaces and edge curves
 //! get the plain B-spline copies the Rust import rebuilds. The Rust side reads an `.smb`
-//! file itself (`crate::own_builder::read_with`: the Rust reader, renumbered into the
-//! shim's walk order; no C++ export reaches the Rust side) and imports the graph that
-//! unit's shim exports for the other sources. Loop,
+//! file itself (`crate::own_builder::read_with`: the Rust reader) and builds a wire, face
+//! or network the way the shim's `build` does (`crate::own_builder::build_as`), each
+//! renumbered into the shim's walk order: no C++ export reaches the Rust side. Loop,
 //! face and edge use selectors are taken modulo their counts. The mutating ops compare
 //! every edge use's UV trim curve afterwards.
 //!
@@ -2154,14 +2154,24 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
             run_rust_brep(&mut k, &mut b, &op)
         }
         Some(brep) => {
-            let ex = export_of(brep)?;
-            let Some(c) = fixture::counts(&ex) else {
-                return Ok(Output::new().values("out", ex.to_vec()));
+            // a wire, face or network: built by the Rust kernel as the shim's `build`
+            // builds it (`validate_only` and `init_gaps` off) and renumbered into the
+            // shim's walk order (no C++ export reaches the Rust side)
+            use crate::own_builder::{build_as, build_status, counts, Built, Conventions};
+            let conv = &Conventions::EDGEUSE_GRAPH;
+            let built = build_as(&mut k, brep, false, false, conv)?
+                .ok_or_else(|| harness("own builder: a non-file source was not built"))?;
+            let mut b = match built {
+                Built::Brep(b) => *b,
+                Built::Failed(e) => {
+                    return Ok(Output::unported(&e).unwrap_or_else(|| {
+                        Output::new().values("out", vec![-1.0, build_status(&e)])
+                    }))
+                }
             };
-            let Some(op) = resolve_op(i, c) else {
+            let Some(op) = resolve_op(i, counts(&b)) else {
                 return Ok(Output::err("no_entity_of_that_kind"));
             };
-            let (mut b, _) = shared::import(&ex)?;
             run_rust_brep(&mut k, &mut b, &op)
         }
         None => run_rust_geom(&mut k, i),
