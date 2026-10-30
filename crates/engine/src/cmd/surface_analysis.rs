@@ -546,7 +546,7 @@ mod tests {
             assert!(!s.section.is_empty());
             assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
             assert!(!s.is_dirty());
-            assert_eq!(s.undo.len(), undo);
+            assert_eq!(s.undo.len(), undo + 1, "the section's step alone");
         }
     }
 
@@ -595,7 +595,7 @@ mod tests {
                 assert_eq!(status(&mut s)[0].id, if latest_continuity { StatusId::Continuity } else { StatusId::SurfaceAnalysis });
                 assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
                 assert!(!s.is_dirty());
-                assert_eq!(s.undo.len(), undo);
+                assert_eq!(s.undo.len(), undo + 1, "the section's step alone");
                 assert!(!s.scratch().single_surface_analysis());
                 s.execute("file.new", &json!({})).unwrap();
                 assert!(!s.single_surface_analysis(), "new/open retain SDK session configuration");
