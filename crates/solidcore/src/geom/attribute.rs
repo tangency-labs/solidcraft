@@ -53,6 +53,8 @@
 //! | [`AttributeStore::clear_attributes`]              | `SmAObject::ClearAttributes` (co-ported)         |
 //! | [`AttributeStore::attributes`]                    | `SmAObject::GetAttributes` (co-ported)           |
 //! | [`AttributeStore::find_attribute`]                | `SmAObject::FindAttribute` (co-ported)           |
+//! | [`AttributeHandlers`], [`AttributeValue::Application`], [`Attribute::application`] | an application's `SmAttribute` subclass and its `MakeCopy` / `Split` / `Merge` / `Coincident` / `Copy` / `Edit` / `Destruction` overrides |
+//! | [`Placement`], [`AttributeView`]                  | (not upstream) what an application handler does to the store, and the store it reads |
 //!
 //! Deviations:
 //! - **Ownership.** Upstream attributes are heap objects linked to `SmAObject`s by
@@ -94,10 +96,18 @@
 //!   For safety, ASCII counts must fit the remaining input and indices grow only
 //!   after successful extraction; truncated or malformed index lists are rejected
 //!   with [`SolidError::InvalidInput`] instead of leaving invented zero entries.
+//! - **Application attribute classes.** Upstream's virtual handlers mutate the
+//!   attributed objects directly. An [`AttributeHandlers`] implementation instead
+//!   reads an [`AttributeView`] and returns [`Placement`]s that the store applies in
+//!   the order returned ([`Placement::Propagate`] is the base-class body, evaluated
+//!   when applied). Its `IsPropagatedThroughBooleans` is the base's `FALSE`, its
+//!   `PropagateRegionsThroughBooleans` the base `SmAttribute::Merge`, its type the
+//!   base `SmAttribute_TYPE`, and it has no persistence getters.
 //! - `Mark` (`m_lMark`), `Dump`, `AssertValid`, `GetMemoryUsed` and the persistence
 //!   getters (`GetNumLongElements`, ...) belong to other units or are unused; the
 //!   attribute's data is exposed through [`Attribute::value`].
 
+use core::any::Any;
 use std::collections::BTreeMap;
 
 use crate::error::{Result, SolidError};
@@ -553,6 +563,290 @@ pub enum AttributeValue {
     QuadricVertex(crate::query::brep::QuadricVertexData),
     /// `SmQuadricEdgeAttr` (unit `query.brep`, [`crate::query::brep`]).
     QuadricEdge(crate::query::brep::QuadricEdgeData),
+    /// An application-defined class (an application's `SmAttribute` subclass): its
+    /// data and its overrides of the propagation handlers ([`AttributeHandlers`]).
+    Application(ApplicationValue),
+}
+
+/// The overridable handlers of an application-defined attribute class (upstream: an
+/// application's `SmAttribute` subclass overriding `MakeCopy`, `Split`, `Merge`,
+/// `Coincident`, `Copy`, `Edit` and `Destruction`). Every method defaults to SMLib's
+/// base-class behaviour, so a type that overrides nothing propagates exactly like a
+/// data-less attribute.
+///
+/// The propagation handlers do not mutate the store: each gets a read-only
+/// [`AttributeView`] of the store and of the attribute being notified, and returns
+/// the [`Placement`]s the store then applies in the order returned. The dispatch
+/// pattern is SMLib's `SmAObject::Notify` ([`crate::geom::a_object::notify`]): one
+/// `split` per attribute of the split object, one `merge` per attribute id over both
+/// sources (an attribute of the second source whose id the first source also carries
+/// is not called), and so on.
+///
+/// Implementors derive `Clone`, `PartialEq` and `Debug`; [`AttributeHandlersBase`] is
+/// then implemented for them.
+pub trait AttributeHandlers: AttributeHandlersBase {
+    /// `MakeCopy`: the data of a copy of this attribute (the copy keeps the
+    /// attribute's id and behaviour and has no users). Default: a clone.
+    fn make_copy(&self) -> Box<dyn AttributeHandlers> {
+        self.clone_box()
+    }
+
+    /// `Split(pSplitObject, pChild1, pChild2)`. Default: [`Placement::Propagate`] to
+    /// each child other than the split object.
+    ///
+    /// # Errors
+    /// The application's own failures.
+    fn split(
+        &self,
+        view: &AttributeView<'_>,
+        split_object: ObjectKey,
+        child1: ObjectKey,
+        child2: ObjectKey,
+    ) -> Result<Vec<Placement>> {
+        let _ = view;
+        let mut out = Vec::new();
+        if child1 != split_object {
+            out.push(Placement::Propagate { on: child1 });
+        }
+        if child2 != split_object {
+            out.push(Placement::Propagate { on: child2 });
+        }
+        Ok(out)
+    }
+
+    /// `Merge(pOrigObject1, pOrigObject2, pMergedResult)`. Default:
+    /// [`Placement::Propagate`] to the merged object.
+    ///
+    /// # Errors
+    /// The application's own failures.
+    fn merge(
+        &self,
+        view: &AttributeView<'_>,
+        orig1: ObjectKey,
+        orig2: ObjectKey,
+        merged: ObjectKey,
+    ) -> Result<Vec<Placement>> {
+        let _ = (view, orig1, orig2);
+        Ok(vec![Placement::Propagate { on: merged }])
+    }
+
+    /// `Coincident(pFromObj, pToObj, ...)`. Default: [`Placement::Propagate`] to `to`.
+    ///
+    /// # Errors
+    /// The application's own failures.
+    fn coincident(
+        &self,
+        view: &AttributeView<'_>,
+        from: ObjectKey,
+        to: ObjectKey,
+    ) -> Result<Vec<Placement>> {
+        let _ = (view, from);
+        Ok(vec![Placement::Propagate { on: to }])
+    }
+
+    /// `Copy(pFromObj, pToObj)`. Default: [`Placement::Propagate`] to `to`.
+    ///
+    /// # Errors
+    /// The application's own failures.
+    fn copy(
+        &self,
+        view: &AttributeView<'_>,
+        from: ObjectKey,
+        to: ObjectKey,
+    ) -> Result<Vec<Placement>> {
+        let _ = (view, from);
+        Ok(vec![Placement::Propagate { on: to }])
+    }
+
+    /// `Edit(pEditedObject)`. Default: nothing.
+    ///
+    /// # Errors
+    /// The application's own failures.
+    fn edit(&self, view: &AttributeView<'_>, edited: ObjectKey) -> Result<Vec<Placement>> {
+        let _ = (view, edited);
+        Ok(Vec::new())
+    }
+
+    /// `Destruction(pToBeDeleted)`. Default: nothing.
+    ///
+    /// # Errors
+    /// The application's own failures.
+    fn destruction(&self, view: &AttributeView<'_>, deleted: ObjectKey) -> Result<Vec<Placement>> {
+        let _ = (view, deleted);
+        Ok(Vec::new())
+    }
+}
+
+/// The object-safe clone, comparison and downcast plumbing of [`AttributeHandlers`],
+/// implemented for every `Clone + PartialEq` handler type.
+pub trait AttributeHandlersBase: Any + core::fmt::Debug + Send + Sync {
+    /// A boxed clone (`Clone` of [`ApplicationValue`]).
+    fn clone_box(&self) -> Box<dyn AttributeHandlers>;
+    /// `self` as [`Any`], for downcasting to the concrete type.
+    fn as_any(&self) -> &dyn Any;
+    /// Whether `other` is of the same concrete type and equal to `self`.
+    fn eq_dyn(&self, other: &dyn AttributeHandlers) -> bool;
+}
+
+impl<T: AttributeHandlers + Clone + PartialEq> AttributeHandlersBase for T {
+    fn clone_box(&self) -> Box<dyn AttributeHandlers> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn eq_dyn(&self, other: &dyn AttributeHandlers) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<T>()
+            .is_some_and(|o| o == self)
+    }
+}
+
+/// The data and handlers of an application-defined attribute
+/// ([`AttributeValue::Application`]). `Clone` goes through
+/// [`AttributeHandlersBase::clone_box`] and `PartialEq` through
+/// [`AttributeHandlersBase::eq_dyn`].
+#[derive(Debug)]
+pub struct ApplicationValue(pub Box<dyn AttributeHandlers>);
+
+impl ApplicationValue {
+    /// Boxes an application handler.
+    #[must_use]
+    pub fn new(handlers: impl AttributeHandlers) -> Self {
+        Self(Box::new(handlers))
+    }
+
+    /// The handlers.
+    #[must_use]
+    pub fn handlers(&self) -> &dyn AttributeHandlers {
+        self.0.as_ref()
+    }
+
+    /// The concrete application type, if it is a `T`.
+    #[must_use]
+    pub fn downcast_ref<T: AttributeHandlers>(&self) -> Option<&T> {
+        self.0.as_any().downcast_ref::<T>()
+    }
+}
+
+impl Clone for ApplicationValue {
+    fn clone(&self) -> Self {
+        Self(self.0.clone_box())
+    }
+}
+
+impl PartialEq for ApplicationValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq_dyn(other.0.as_ref())
+    }
+}
+
+/// What an application handler asks the store to do, applied in the order returned.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Placement {
+    /// SMLib's default body of `Split`, `Copy`, `Merge` and `Coincident` for the
+    /// notified attribute and object `on`: unless `on` already has an attribute of
+    /// its id, a copy (`MakeCopy`, copy behaviours) or the attribute itself
+    /// (reference behaviours) is added to `on`; temporary attributes are not placed.
+    /// Evaluated when applied, so earlier placements are seen.
+    Propagate {
+        /// The target object.
+        on: ObjectKey,
+    },
+    /// Inserts a new attribute and adds it to `on` (`new ...; pObj->AddAttribute`).
+    Add {
+        /// The target object.
+        on: ObjectKey,
+        /// The new attribute (its users are ignored).
+        attribute: Attribute,
+    },
+    /// Adds an existing attribute to `on` (`pObj->AddAttribute(pAttr)`), as a
+    /// reference.
+    Reference {
+        /// The target object.
+        on: ObjectKey,
+        /// The attribute.
+        handle: AttributeHandle,
+    },
+    /// Replaces an existing attribute's data (its id, behaviour and users are kept).
+    Edit {
+        /// The attribute.
+        handle: AttributeHandle,
+        /// Its new data.
+        value: AttributeValue,
+    },
+    /// Removes the attribute from `on`'s list (`pObj->RemoveAttribute(pAttr)`): a
+    /// dependent attribute is deleted with its last user.
+    Remove {
+        /// The object.
+        on: ObjectKey,
+        /// The attribute.
+        handle: AttributeHandle,
+    },
+}
+
+/// The read-only view an application handler gets: the store (every object's
+/// attributes) and the attribute being notified.
+#[derive(Debug, Clone, Copy)]
+pub struct AttributeView<'a> {
+    store: &'a AttributeStore,
+    handle: AttributeHandle,
+    attribute: &'a Attribute,
+}
+
+impl<'a> AttributeView<'a> {
+    /// The whole store, read-only.
+    #[must_use]
+    pub const fn store(&self) -> &'a AttributeStore {
+        self.store
+    }
+
+    /// The handle of the attribute being notified (`this`).
+    #[must_use]
+    pub const fn handle(&self) -> AttributeHandle {
+        self.handle
+    }
+
+    /// The attribute being notified (`this`).
+    #[must_use]
+    pub const fn attribute(&self) -> &'a Attribute {
+        self.attribute
+    }
+
+    /// `pObj->GetAttributes()`: the object's attributes, in list order.
+    #[must_use]
+    pub fn attributes(&self, obj: ObjectKey) -> Vec<(AttributeHandle, &'a Attribute)> {
+        self.store
+            .attributes(obj)
+            .into_iter()
+            .filter_map(|h| self.store.get(h).map(|a| (h, a)))
+            .collect()
+    }
+
+    /// `pObj->FindAttribute(lAttributeID)`.
+    #[must_use]
+    pub fn find_attribute(
+        &self,
+        obj: ObjectKey,
+        attribute_id: u64,
+    ) -> Option<(AttributeHandle, &'a Attribute)> {
+        let h = self.store.find_attribute(obj, attribute_id)?;
+        self.store.get(h).map(|a| (h, a))
+    }
+}
+
+/// Which application handler to run.
+#[derive(Debug, Clone, Copy)]
+enum AppHandler {
+    Split(ObjectKey, ObjectKey, ObjectKey),
+    Merge(ObjectKey, ObjectKey, ObjectKey),
+    Coincident(ObjectKey, ObjectKey),
+    Copy(ObjectKey, ObjectKey),
+    Edit(ObjectKey),
+    Destruction(ObjectKey),
 }
 
 /// An attribute: an id naming its purpose, a [`Behavior`], the list of objects
@@ -689,7 +983,37 @@ impl Attribute {
                 self.behavior,
                 AttributeValue::QuadricEdge(d.make_copy()),
             ),
+            AttributeValue::Application(v) => Self::with_value(
+                id,
+                self.behavior,
+                AttributeValue::Application(ApplicationValue(v.0.make_copy())),
+            ),
             other => Self::with_value(id, self.behavior, other.clone()),
+        }
+    }
+
+    /// An application-defined attribute (`new (crContext) MyAttribute(...)`): its
+    /// propagation runs `handlers`' overrides ([`AttributeHandlers`]).
+    #[must_use]
+    pub fn application(
+        attribute_id: u64,
+        behavior: Behavior,
+        handlers: impl AttributeHandlers,
+    ) -> Self {
+        Self::with_value(
+            attribute_id,
+            behavior,
+            AttributeValue::Application(ApplicationValue::new(handlers)),
+        )
+    }
+
+    /// The application data as a `T`, if this is an application attribute of that
+    /// type.
+    #[must_use]
+    pub fn application_value<T: AttributeHandlers>(&self) -> Option<&T> {
+        match &self.value {
+            AttributeValue::Application(v) => v.downcast_ref::<T>(),
+            _ => None,
         }
     }
 
@@ -733,7 +1057,8 @@ impl Attribute {
             | AttributeValue::PolyEdgeToVertexUse { .. }
             | AttributeValue::DecimateVertex(_)
             | AttributeValue::QuadricVertex(_)
-            | AttributeValue::QuadricEdge(_) => type_code::ATTRIBUTE,
+            | AttributeValue::QuadricEdge(_)
+            | AttributeValue::Application(_) => type_code::ATTRIBUTE,
             AttributeValue::Generic { .. } => type_code::GENERIC,
             AttributeValue::Long(_) => type_code::LONG,
             AttributeValue::Pointer(_) | AttributeValue::MergeRegion(_) => type_code::POINTER,
@@ -752,7 +1077,8 @@ impl Attribute {
             | AttributeValue::PolyEdgeToVertexUse { .. }
             | AttributeValue::DecimateVertex(_)
             | AttributeValue::QuadricVertex(_)
-            | AttributeValue::QuadricEdge(_) => "SmAttribute_TYPE",
+            | AttributeValue::QuadricEdge(_)
+            | AttributeValue::Application(_) => "SmAttribute_TYPE",
             AttributeValue::Generic { .. } => "SmGenericAttribute_TYPE",
             AttributeValue::Long(_) => "SmLongAttribute_TYPE",
             AttributeValue::Pointer(_) | AttributeValue::MergeRegion(_) => {
@@ -776,7 +1102,8 @@ impl Attribute {
             | AttributeValue::PolyEdgeToVertexUse { .. }
             | AttributeValue::DecimateVertex(_)
             | AttributeValue::QuadricVertex(_)
-            | AttributeValue::QuadricEdge(_) => &[],
+            | AttributeValue::QuadricEdge(_)
+            | AttributeValue::Application(_) => &[],
             AttributeValue::Generic { .. } => &[type_code::GENERIC],
             AttributeValue::Long(_) => &[type_code::LONG],
             AttributeValue::Pointer(_) => &[type_code::POINTER],
@@ -1205,6 +1532,9 @@ impl AttributeStore {
         child2: ObjectKey,
     ) -> Result<()> {
         const OP: &str = "geom::attribute::AttributeStore::split";
+        if self.run_application(h, AppHandler::Split(split_object, child1, child2), OP)? {
+            return Ok(());
+        }
         if child1 != split_object {
             self.propagate_to(h, child1, OP)?;
         }
@@ -1216,8 +1546,12 @@ impl AttributeStore {
 
     /// `Copy(pFromObj, pToObj)`: `to` gets a copy of (or a reference to) this
     /// attribute unless it already has one of its id (`from` is not used).
-    pub fn copy(&mut self, h: AttributeHandle, _from: ObjectKey, to: ObjectKey) -> Result<()> {
-        self.propagate_to(h, to, "geom::attribute::AttributeStore::copy")
+    pub fn copy(&mut self, h: AttributeHandle, from: ObjectKey, to: ObjectKey) -> Result<()> {
+        const OP: &str = "geom::attribute::AttributeStore::copy";
+        if self.run_application(h, AppHandler::Copy(from, to), OP)? {
+            return Ok(());
+        }
+        self.propagate_to(h, to, OP)
     }
 
     /// `Merge(pOrigObject1, pOrigObject2, pMergedResult)` (virtual): the merge-region
@@ -1264,31 +1598,95 @@ impl AttributeStore {
         if matches!(self.attr(h, OP)?.value, AttributeValue::MergeRegion(_)) {
             return self.merge_region_merge(h, orig1, orig2, merged, regions);
         }
+        if self.run_application(h, AppHandler::Merge(orig1, orig2, merged), OP)? {
+            return Ok(());
+        }
         self.propagate_to(h, merged, OP)
     }
 
     /// `Coincident(pFromObj, pToObj, pFromBrep, pToBrep)`: `to` gets a copy of (or
     /// a reference to) this attribute unless it has one of its id (the B-reps are
     /// not used and dropped from the signature).
-    pub fn coincident(
+    pub fn coincident(&mut self, h: AttributeHandle, from: ObjectKey, to: ObjectKey) -> Result<()> {
+        const OP: &str = "geom::attribute::AttributeStore::coincident";
+        if self.run_application(h, AppHandler::Coincident(from, to), OP)? {
+            return Ok(());
+        }
+        self.propagate_to(h, to, OP)
+    }
+
+    /// `Edit(pEditedObject)`: the default handler does nothing (an application
+    /// attribute runs [`AttributeHandlers::edit`]).
+    pub fn edit(&mut self, h: AttributeHandle, edited: ObjectKey) -> Result<()> {
+        const OP: &str = "geom::attribute::AttributeStore::edit";
+        self.run_application(h, AppHandler::Edit(edited), OP)
+            .map(|_| ())
+    }
+
+    /// `Destruction(pToBeDeleted)`: the default handler does nothing (an application
+    /// attribute runs [`AttributeHandlers::destruction`]).
+    pub fn destruction(&mut self, h: AttributeHandle, deleted: ObjectKey) -> Result<()> {
+        const OP: &str = "geom::attribute::AttributeStore::destruction";
+        self.run_application(h, AppHandler::Destruction(deleted), OP)
+            .map(|_| ())
+    }
+
+    /// The virtual dispatch of an application attribute's handler: runs it with a
+    /// read-only view and applies the placements it returns, in order. Returns
+    /// whether `h` is an application attribute (`false`: the caller runs the base
+    /// handler; nothing was done).
+    fn run_application(
         &mut self,
         h: AttributeHandle,
-        _from: ObjectKey,
-        to: ObjectKey,
+        handler: AppHandler,
+        op: &'static str,
+    ) -> Result<bool> {
+        let attribute = self.attr(h, op)?;
+        let AttributeValue::Application(app) = &attribute.value else {
+            return Ok(false);
+        };
+        let view = AttributeView {
+            store: self,
+            handle: h,
+            attribute,
+        };
+        let handlers = app.handlers();
+        let placements = match handler {
+            AppHandler::Split(s, c1, c2) => handlers.split(&view, s, c1, c2)?,
+            AppHandler::Merge(o1, o2, m) => handlers.merge(&view, o1, o2, m)?,
+            AppHandler::Coincident(from, to) => handlers.coincident(&view, from, to)?,
+            AppHandler::Copy(from, to) => handlers.copy(&view, from, to)?,
+            AppHandler::Edit(edited) => handlers.edit(&view, edited)?,
+            AppHandler::Destruction(deleted) => handlers.destruction(&view, deleted)?,
+        };
+        self.apply_placements(h, placements, op)?;
+        Ok(true)
+    }
+
+    /// Applies an application handler's placements for attribute `h`, in order.
+    fn apply_placements(
+        &mut self,
+        h: AttributeHandle,
+        placements: Vec<Placement>,
+        op: &'static str,
     ) -> Result<()> {
-        self.propagate_to(h, to, "geom::attribute::AttributeStore::coincident")
-    }
-
-    /// `Edit(pEditedObject)`: the default handler does nothing.
-    pub fn edit(&mut self, h: AttributeHandle, _edited: ObjectKey) -> Result<()> {
-        self.attr(h, "geom::attribute::AttributeStore::edit")
-            .map(|_| ())
-    }
-
-    /// `Destruction(pToBeDeleted)`: the default handler does nothing.
-    pub fn destruction(&mut self, h: AttributeHandle, _deleted: ObjectKey) -> Result<()> {
-        self.attr(h, "geom::attribute::AttributeStore::destruction")
-            .map(|_| ())
+        for placement in placements {
+            match placement {
+                Placement::Propagate { on } => self.propagate_to(h, on, op)?,
+                Placement::Add { on, mut attribute } => {
+                    attribute.users.clear();
+                    let new = self.insert(attribute)?;
+                    self.add_attribute(on, new)?;
+                }
+                Placement::Reference { on, handle } => self.add_attribute(on, handle)?,
+                Placement::Edit { handle, value } => self.attr_mut(handle, op)?.value = value,
+                Placement::Remove { on, handle } => {
+                    self.attr(handle, op)?;
+                    self.remove_attribute(on, handle, false)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// `PropagateRegionsThroughBooleans(pOrigObject1, pOrigObject2, pMergedResult)`

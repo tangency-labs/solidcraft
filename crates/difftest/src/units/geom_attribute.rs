@@ -403,7 +403,8 @@ fn kind(a: &Attribute) -> i64 {
         | AttributeValue::PolyEdgeToVertexUse { .. }
         | AttributeValue::DecimateVertex(_)
         | AttributeValue::QuadricVertex(_)
-        | AttributeValue::QuadricEdge(_) => KIND_PLAIN,
+        | AttributeValue::QuadricEdge(_)
+        | AttributeValue::Application(_) => KIND_PLAIN,
         AttributeValue::Generic { .. } => KIND_GENERIC,
         AttributeValue::Long(_) => KIND_LONG,
         AttributeValue::Pointer(_) => KIND_POINTER,
@@ -941,7 +942,8 @@ impl RustRun {
                 | AttributeValue::PolyEdgeToVertexUse { .. }
                 | AttributeValue::DecimateVertex(_)
                 | AttributeValue::QuadricVertex(_)
-                | AttributeValue::QuadricEdge(_) => {}
+                | AttributeValue::QuadricEdge(_)
+                | AttributeValue::Application(_) => {}
                 AttributeValue::Generic {
                     longs,
                     doubles,
