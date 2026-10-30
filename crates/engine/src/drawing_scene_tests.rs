@@ -428,6 +428,7 @@ fn seeded_edits_and_steps_always_end_at_the_built_scene() {
         let at_once = built(&s, sheet);
         assert_eq!(bytes(&end.scene), bytes(&at_once.scene), "seed {seed}");
         assert_eq!(&*end.objects, at_once.objects.as_slice(), "seed {seed}");
+        assert_eq!(run(&mut s, "drawing.status", json!({}))["waiting"], json!(0), "seed {seed}");
     }
 }
 
@@ -646,4 +647,185 @@ fn the_providers_objects_follow_its_views() {
         "the view lined up with it goes along"
     );
     assert_eq!(&*moved.objects, built(&s, sheet).objects.as_slice());
+}
+
+/// `drawing.status`, matching its schema, and each view's status word by id.
+fn status_of(s: &mut Session) -> (Value, BTreeMap<u64, String>) {
+    let reply = run(s, "drawing.status", json!({}));
+    let schema = output_schema_for::<crate::schema::drawing_scene::DrawingStatusResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let words = reply["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| (ids::decode(v["view"].as_str().unwrap()).unwrap(), v["status"].as_str().unwrap().to_string()));
+    let words = words.collect();
+    (reply, words)
+}
+
+/// Every word of `words` is `word`.
+fn all_are(words: &BTreeMap<u64, String>, word: &str) -> bool {
+    !words.is_empty() && words.values().all(|w| w == word)
+}
+
+/// A view never drawn is out of date; `step` draws it and it is current. A model edit marks every
+/// view; a move marks none, and neither does its undo; a change of a setting marks the view and
+/// those following it. Reading draws nothing and changes nothing.
+#[test]
+fn status_says_which_views_are_out_of_date() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "out_of_date"), "{reply}");
+    assert_eq!(reply["waiting"], json!(2), "{reply}");
+    extract(&mut s, sheet).unwrap();
+    step(&mut s);
+    // A step draws the lowest id first, and the seeded ids needn't put the front view there.
+    let (first, second) = if front < top { (front, top) } else { (top, front) };
+    let (reply, words) = status_of(&mut s);
+    assert_eq!((words[&first].as_str(), words[&second].as_str()), ("current", "out_of_date"), "{reply}");
+    assert_eq!(reply["waiting"], json!(1), "{reply}");
+    settled(&mut s, sheet);
+    let (doc, projections) = (s.doc.clone(), s.drawing_scenes.projections);
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current"), "{reply}");
+    assert_eq!(reply["waiting"], json!(0), "{reply}");
+    assert!(Arc::ptr_eq(&doc, &s.doc) && s.drawing_scenes.projections == projections, "reading draws nothing");
+
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"place": {"at": [160.0, 150.0]}}}));
+    assert!(all_are(&status_of(&mut s).1, "current"), "a move marks none");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(all_are(&status_of(&mut s).1, "current"), "nor its undo");
+
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"tangent_edges": "show"}}));
+    let words = status_of(&mut s).1;
+    assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "out_of_date"));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:5"}}));
+    assert!(all_are(&status_of(&mut s).1, "out_of_date"), "the view following it too");
+    settled(&mut s, sheet);
+
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!(all_are(&status_of(&mut s).1, "out_of_date"), "a model edit marks every view");
+}
+
+/// A failed or placeholder view always says why, and a view on another sheet is out of date until
+/// its own sheet is drawn, with that sheet's id.
+#[test]
+fn status_says_why_a_view_has_no_lines() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded"}}));
+    settled(&mut s, sheet);
+    let (reply, words) = status_of(&mut s);
+    assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "failed"), "{reply}");
+    let failed = reply["views"].as_array().unwrap().iter().find(|v| v["status"] == "failed").unwrap();
+    assert!(failed["reason"].as_str().unwrap().contains("drawing renderer"), "{reply}");
+    assert_eq!(failed["sheet"], json!(ids::encode(sheet)), "{reply}");
+
+    run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": null}}));
+    run(&mut s, "drawing.view.move_to_sheet", json!({"view": ids::encode(top), "sheet": "Other", "break_alignment": true}));
+    settled(&mut s, sheet);
+    let (reply, words) = status_of(&mut s);
+    assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "out_of_date"), "{reply}");
+    let other = s.drawing("test").unwrap().sheets.iter().find(|x| x.id != sheet).unwrap().id;
+    let moved = reply["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(top))).unwrap();
+    assert_eq!(moved["sheet"], json!(ids::encode(other)), "{reply}");
+
+    for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
+        nest(&mut s, level);
+    }
+    settled(&mut s, sheet);
+    let reply = status_of(&mut s).0;
+    let held = reply["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(ids::encode(front))).unwrap();
+    assert_eq!(held["status"], json!("placeholder"), "{reply}");
+    assert!(!held["reason"].as_str().unwrap().is_empty(), "{reply}");
+}
+
+/// A view that drew but didn't fit its sheet's scene is failed, as that scene left it, until it is
+/// drawn again: a scene older than the last drawing is not trusted.
+#[test]
+fn status_takes_what_the_last_scene_left_out_until_a_view_draws_again() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    settled(&mut s, sheet);
+    let fitted = overfill(&mut s, top);
+    extract(&mut s, sheet).unwrap();
+    let (reply, words) = status_of(&mut s);
+    assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "failed"), "{reply}");
+    let failed = reply["views"].as_array().unwrap().iter().find(|v| v["status"] == "failed").unwrap();
+    assert!(failed["reason"].as_str().unwrap().contains("put it on another sheet"), "{reply}");
+
+    // Drawn again since that scene, and it fits: its own drawing says where it stands.
+    let cache = &mut s.drawing_scenes;
+    cache.serial += 1;
+    let entry = cache.views.get_mut(&top).unwrap();
+    entry.drawn = fitted;
+    entry.serial = cache.serial;
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current"), "{reply}");
+}
+
+/// A scene counts only for its own sheet as that sheet is now: a view moved off the sheet whose
+/// scene left it out, and a view left there when another goes, each read their own drawing again.
+#[test]
+fn status_takes_a_scene_only_for_its_sheet_as_it_is() {
+    let failed_on_its_sheet = |s: &mut Session, top: u64| {
+        let (reply, words) = status_of(s);
+        assert_eq!(words[&top], "failed", "{reply}");
+    };
+    let (mut s, sheet, [_, top]) = front_and_top();
+    settled(&mut s, sheet);
+    overfill(&mut s, top);
+    extract(&mut s, sheet).unwrap();
+    failed_on_its_sheet(&mut s, top);
+    run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));
+    run(&mut s, "drawing.view.move_to_sheet", json!({"view": ids::encode(top), "sheet": "Other", "break_alignment": true}));
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current"), "moved, it no longer has the old sheet's advice: {reply}");
+
+    let (mut s, sheet, [front, top]) = front_and_top();
+    settled(&mut s, sheet);
+    overfill(&mut s, top);
+    extract(&mut s, sheet).unwrap();
+    failed_on_its_sheet(&mut s, top);
+    run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));
+    run(&mut s, "drawing.view.move_to_sheet", json!({"view": ids::encode(front), "sheet": "Other", "break_alignment": true}));
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current"), "its sheet changed since that scene: {reply}");
+}
+
+/// Gives `view` a drawing of lines past a paper scene's records on their own (drawn, but no sheet
+/// holds them), as if just drawn; returns the drawing it had.
+fn overfill(s: &mut Session, view: u64) -> Drawn {
+    let cache = &mut s.drawing_scenes;
+    cache.serial += 1;
+    let serial = cache.serial;
+    let entry = cache.views.get_mut(&view).unwrap();
+    let path = (0..MAX_RECORDS).map(|i| Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new((i + 1) as f64 * 1e-3, 0.0) }).collect();
+    let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5 }];
+    let group = Group { object: view, kind: ObjectKind::View, items };
+    entry.serial = serial;
+    std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None })
+}
+
+/// Each dimension's word is the one inspect uses: read, then lost when its body goes, with why. A
+/// parameter status takes nothing, and needs a drawing open.
+#[test]
+fn status_says_where_each_dimension_stands() {
+    let (mut s, _, [front, _]) = front_and_top();
+    let added = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}}));
+    let reply = status_of(&mut s).0;
+    assert_eq!(reply["dimensions"], json!([{"dimension": added["record"]["id"], "status": "ok"}]), "{reply}");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    assert!(s.execute("drawing.status", &json!({})).is_err(), "no drawing open");
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.delete", json!({"feature": block.to_string()}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let reply = status_of(&mut s).0;
+    let lost = &reply["dimensions"][0];
+    assert_eq!(lost["status"], json!("lost"), "{reply}");
+    assert!(!lost["why"].as_str().unwrap().is_empty(), "{reply}");
+    assert!(s.execute("drawing.status", &json!({"sheet": "x"})).is_err());
 }
