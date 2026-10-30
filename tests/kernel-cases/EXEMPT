@@ -44,6 +44,7 @@ diagnostics.crash_reports         crash reports
 diagnostics.crash_reports.clear   crash reports
 diagnostics.crash_test            crash reports
 diagnostics.profile               timing: where a command's time goes
+diagnostics.validation            a setting: when the body check runs
 doc.open                          opening and recovering documents
 doc.recover                       opening and recovering documents
 doc.recovery_discard              opening and recovering documents

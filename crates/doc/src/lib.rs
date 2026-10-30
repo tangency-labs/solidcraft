@@ -103,6 +103,41 @@ pub enum DocError {
     Sketch(#[from] solidcraft_sketch::SketchError),
     #[error(transparent)]
     Kernel(#[from] solidcraft_kernel::KernelError),
+    /// A stored reference (a face or edge name, a piece of a split face) no longer finds exactly
+    /// what it named: the feature using it fails, and the user picks it again. `feature` is
+    /// empty until the evaluation of the feature fills it in ([`DocError::in_feature`]).
+    #[error("{}", reselect_message(feature, reference))]
+    Reselect { feature: String, reference: String },
+}
+
+impl DocError {
+    /// A feature's `reference` that no longer finds what it named ([`DocError::Reselect`]), for
+    /// the feature being evaluated.
+    pub fn reselect(reference: impl Into<String>) -> Self {
+        DocError::Reselect { feature: String::new(), reference: reference.into() }
+    }
+
+    /// This error, raised while feature `feature` was evaluated: a [`DocError::Reselect`] names it.
+    pub fn in_feature(self, feature: &str) -> Self {
+        match self {
+            DocError::Reselect { feature: f, reference } if f.is_empty() => DocError::Reselect { feature: feature.into(), reference },
+            other => other,
+        }
+    }
+}
+
+/// What a feature that lost a reference says ([`DocError::Reselect`]).
+fn reselect_message(feature: &str, reference: &str) -> String {
+    let feature = if feature.is_empty() { "this feature" } else { feature };
+    format!("{feature}: the reference `{reference}` no longer exists as it was picked; reselect it")
+}
+
+/// The feature and the reference of a [`DocError::Reselect`] message, read back from its text
+/// (a feature's error is kept as text): `None` for any other message.
+pub fn reselect_parts(text: &str) -> Option<(&str, &str)> {
+    let (feature, rest) = text.split_once(": the reference `")?;
+    let reference = rest.strip_suffix("` no longer exists as it was picked; reselect it")?;
+    Some((feature, reference))
 }
 
 pub type Result<T> = std::result::Result<T, DocError>;

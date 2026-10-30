@@ -1,0 +1,23 @@
+{
+  "ar": {
+    "diagnostic.reselect_reference": "{feature}: المرجع `{reference}` لم يعد موجودًا كما اختير؛ أعد اختياره"
+  },
+  "de": {
+    "diagnostic.reselect_reference": "{feature}: Die Referenz `{reference}` existiert nicht mehr so, wie sie ausgewählt wurde; wählen Sie sie erneut aus"
+  },
+  "en": {
+    "diagnostic.reselect_reference": "{feature}: the reference `{reference}` no longer exists as it was picked; reselect it"
+  },
+  "he": {
+    "diagnostic.reselect_reference": "{feature}: ההפניה `{reference}` כבר אינה קיימת כפי שנבחרה; יש לבחור אותה מחדש"
+  },
+  "ja": {
+    "diagnostic.reselect_reference": "{feature}: 参照 `{reference}` は選択したときのままでは存在しません。選択し直してください"
+  },
+  "ko": {
+    "diagnostic.reselect_reference": "{feature}: 참조 `{reference}`이(가) 선택했을 때의 모습으로 더 이상 존재하지 않습니다. 다시 선택하세요"
+  },
+  "zh": {
+    "diagnostic.reselect_reference": "{feature}：引用 `{reference}` 已不再是选择时的样子；请重新选择"
+  }
+}

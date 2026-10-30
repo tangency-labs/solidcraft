@@ -2063,7 +2063,7 @@ impl Model {
                 }
                 Ok(None) => f,
                 Err(e) => {
-                    frame_error = Some(e.to_string());
+                    frame_error = Some(e.in_feature(&f.name).to_string());
                     f
                 }
             };
@@ -2074,7 +2074,7 @@ impl Model {
                 None => kernel::guard(&f.name, || {
                     let (r, deferred) =
                         kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
-                    r.map_err(|e| kernel::KernelError::Failed(e.to_string()))?;
+                    r.map_err(|e| kernel::KernelError::Failed(e.in_feature(&f.name).to_string()))?;
                     // The checks the feature's steps left to its end: the bodies it keeps.
                     if deferred { check_kept(&state, &next) } else { Ok(()) }
                 }),
@@ -7476,11 +7476,19 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 /// The names of the faces a feature's face points lie on (empty where none), found in
 /// [`face_point_state`]. A To / From point is named after the nearest face over every body, the
 /// one `object_height` resolves it to, not the first body with a face within tolerance: a part
-/// resting a hair from the picked face would otherwise take its name.
+/// resting a hair from the picked face would otherwise take its name. Another feature's point is
+/// named on the bodies of the feature's own component first: each component's bodies lie in its
+/// own coordinates there, where a part inserted twice has a face at the same point in each.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
     if !matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }) {
-        return Ok(crate::naming::face_names_at(st, &pts));
+        let own = ModelState { bodies: st.bodies.iter().filter(|b| doc.model_body_component(b) == comp).cloned().collect(), ..ModelState::default() };
+        let names = crate::naming::face_names_at(&own, &pts);
+        return Ok(names
+            .into_iter()
+            .zip(&pts)
+            .map(|(name, p)| if name.is_empty() { crate::naming::face_names_at(st, std::slice::from_ref(p)).pop().unwrap_or_default() } else { name })
+            .collect());
     }
     let fst = face_point_state(doc, st, kind, comp)?;
     let normal = match kind {
