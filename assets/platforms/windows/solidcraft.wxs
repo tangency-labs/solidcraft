@@ -7,7 +7,7 @@
       -d BinDir=... -d IconPath=... -o out.msi
 
   Per-machine install with a setup wizard: Welcome, install folder (Program Files\SolidCraft by
-  default, remembered for upgrades), Ready, progress, and a Finish page with a ticked "Launch
+  default; an update keeps the installed folder and skips this page), Ready, progress, and a Finish page with a ticked "Launch
   SolidCraft" box. Installs a Start Menu shortcut, solidcraft-cli (and adds its folder to the system PATH), the licence files (including
   THIRD-PARTY-LICENSES.txt), makes SolidCraft the owner of `.sc` (and of the older `.solidcraft` and pre-rename `.solvecraft`), and offers it under
   "Open with" for STEP, IGES, 3MF and STL. `msiexec /qn` installs silently.
@@ -26,9 +26,20 @@
       Compressed="yes"
       Language="1033">
     <SummaryInformation Description="SolidCraft parametric 3D CAD" Manufacturer="SolidCraft contributors" />
-    <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other. -->
-    <MajorUpgrade AllowSameVersionUpgrades="yes"
+    <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other.
+         The new version is installed first and the old one removed afterwards
+         (afterInstallExecute), so solidcraft.exe and the Start menu shortcut stay at their path
+         through an update: removing them first made Windows drop a Start menu or taskbar pin on
+         every update (#9366). This relies on the component rules: a component keeps its GUID and
+         its files keep their names and folder; a file that moves or is renamed gets a new
+         component. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallExecute"
         DowngradeErrorMessage="A newer version of SolidCraft is already installed." />
+    <!-- With the old files still in place during the install, the default rules ("o": replace
+         only an older file version) would keep the old solidcraft.exe of a pre-release or nightly
+         of the same X.Y.Z, whose file version is the same. "a" replaces every file; all of them
+         are SolidCraft's own. -->
+    <Property Id="REINSTALLMODE" Value="amus" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <!-- Advertised shortcuts to an .exe need an .exe icon identifier (ICE50). -->
@@ -60,6 +71,10 @@
     <UI>
       <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" Condition="NOT Installed" />
       <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" />
+      <!-- An update keeps the folder of the installed version: the components keep their GUIDs
+           (see MajorUpgrade), so they must not move to another folder. -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="3" Condition="NOT Installed AND WIX_UPGRADE_DETECTED" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3" Condition="NOT Installed AND WIX_UPGRADE_DETECTED" />
       <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchSolidcraft"
           Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
     </UI>

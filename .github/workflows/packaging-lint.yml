@@ -55,6 +55,9 @@ jobs:
       - name: XML, desktop entry, AppStream, Flatpak manifest
         run: |
           xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml*
+          # An MSI update installs before it removes the old version, so Start menu pins survive (#9366).
+          grep -q 'Schedule="afterInstallExecute"' assets/platforms/windows/solidcraft.wxs
+          grep -q 'Id="REINSTALLMODE" Value="amus"' assets/platforms/windows/solidcraft.wxs
           desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.desktop
           # The window's X11 class is its app id; the old ids stay only as the rename shims.
           grep -qx 'StartupWMClass=io.tangencylabs.solidcraft' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
