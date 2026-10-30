@@ -1,0 +1,32 @@
+{
+  "en": {
+    "Couple motion links": "Couple motion links",
+    "Export URDF": "Export URDF",
+    "Export URDF…": "Export URDF…",
+    "Mesh file prefix": "Mesh file prefix",
+    "Joint effort": "Joint effort",
+    "Joint velocity": "Joint velocity",
+    "urdf.fallback_help": "Effort and velocity apply to joints with no saved dynamics. Leave empty for 1000 and 10.",
+    "urdf.positive_number": "enter a number above 0"
+  },
+  "ar": {
+    "Couple motion links": "ربط وصلات الحركة",
+    "Export URDF": "تصدير URDF",
+    "Export URDF…": "تصدير URDF…",
+    "Mesh file prefix": "بادئة ملف الشبكة",
+    "Joint effort": "قوة المفصل",
+    "Joint velocity": "سرعة المفصل",
+    "urdf.fallback_help": "تنطبق القوة والسرعة على المفاصل التي لا تحتوي على ديناميكيات محفوظة. اتركها فارغة لاستخدام 1000 و10.",
+    "urdf.positive_number": "أدخل رقمًا أكبر من 0"
+  },
+  "he": {
+    "Couple motion links": "צימוד קישורי תנועה",
+    "Export URDF": "ייצוא URDF",
+    "Export URDF…": "ייצוא URDF…",
+    "Mesh file prefix": "קידומת קובץ רשת",
+    "Joint effort": "כוח מפרק",
+    "Joint velocity": "מהירות מפרק",
+    "urdf.fallback_help": "כוח ומהירות חלים על מפרקים ללא דינמיקה שמורה. השאירו ריק עבור 1000 ו-10.",
+    "urdf.positive_number": "הזינו מספר גדול מ-0"
+  }
+}
