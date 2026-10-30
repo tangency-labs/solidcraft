@@ -19,3 +19,21 @@ unit = "topology.brep_local_operation"
 check = "ratchet"
 case = "nurb_fillet_face5_same"
 reason = "ND-493 C++ clock-seeded rand() (srand(time(NULL)) in GetPointsInFace via IsInnerShell in the merge stitch): intermittent on main CI at c47d6d3b5 and 7ca6ce7a9; Rust deterministic; parked"
+
+[[waiver]]
+unit = "boolean.api_brep"
+check = "ratchet"
+case = "rotational_sweep_whole_box"
+reason = "ND-491 C++ heap-order nondeterminism (whole-B-rep rotational sweep with stitching): SM_ERR or the Rust result depending on prior allocations; --heap-pads flags it unstable; parked with cpp_defect = ND-491 as the sweep.topology_sweep whole-B-rep cases are (precedent: the nm_box_linear_z_stitch waiver above)"
+
+[[waiver]]
+unit = "boolean.api_brep"
+check = "ratchet"
+case = "rotational_sweep_region_null_whole"
+reason = "ND-491 C++ heap-order nondeterminism (whole-B-rep rotational sweep with stitching): SM_ERR or the Rust result depending on prior allocations; --heap-pads flags it unstable; parked with cpp_defect = ND-491 as the sweep.topology_sweep whole-B-rep cases are (precedent: the nm_box_linear_z_stitch waiver above)"
+
+[[waiver]]
+unit = "boolean.api_brep"
+check = "ratchet"
+case = "rotational_sweep_region_swept_whole"
+reason = "ND-491 C++ heap-order nondeterminism (whole-B-rep rotational sweep with stitching): SM_ERR or the Rust result depending on prior allocations; --heap-pads flags it unstable; parked with cpp_defect = ND-491 as the sweep.topology_sweep whole-B-rep cases are (precedent: the nm_box_linear_z_stitch waiver above)"

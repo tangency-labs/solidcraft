@@ -1,0 +1,25 @@
+# Whole-B-rep SmApiNonManifoldRotationalSweep with stitching (no selection, so
+# SmTopologySweep::DoSweep's whole-B-rep branch): the C++ result follows the heap layout
+# (pointer-hash silhouette order, ND-491). The C++ returns SM_ERR or succeeds depending on
+# the allocations made before the call; when it succeeds it matches the Rust result
+# (plan/upstream-issues/ND-491--addendum-2026-10-30-boolean-api-brep-rotational-sweeps.md).
+[[mismatch]]
+unit = "boolean.api_brep"
+case = "rotational_sweep_whole_box"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): SM_ERR in some runs, success equal to the Rust result in others; --heap-pads flags it unstable (in-process)"
+
+[[mismatch]]
+unit = "boolean.api_brep"
+case = "rotational_sweep_region_null_whole"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): SM_ERR in some runs, success equal to the Rust result in others; --heap-pads flags it unstable (in-process)"
+
+[[mismatch]]
+unit = "boolean.api_brep"
+case = "rotational_sweep_region_swept_whole"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): SM_ERR in some runs, success equal to the Rust result in others; --heap-pads flags it unstable (in-process)"
