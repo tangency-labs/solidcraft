@@ -1229,11 +1229,16 @@ impl Dialog {
             }
         }
         Self::take_component_bodies(app, &mut d);
-        // A primitive goes where a face or vertex is picked, standing on a planar face.
-        if let Kind::Primitive { at, .. } = &mut d.kind {
+        // A primitive goes where a face or vertex is picked, standing on a planar face. The Box,
+        // Sphere and Torus also go to a sketch point (#9403).
+        if let Kind::Primitive { cmd, at, .. } = &mut d.kind {
+            let sketch_points = !crate::primitive_placement::inputs(cmd).is_empty();
             *at = s.selection.iter().find_map(|sel| match sel {
                 Sel::Face { body, index, point } => Some((*point, planar_face(s, body, *index).map(|(_, n)| n))),
                 Sel::Vertex { point, .. } => Some((*point, None)),
+                Sel::ExternalSketchPoint { .. } | Sel::SketchPoint { .. } if sketch_points => {
+                    crate::primitive_placement::world_point(s, sel).map(|p| (p, None))
+                }
                 _ => None,
             });
         }
@@ -2851,6 +2856,12 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         Sel::SketchMidpoint { id } => crate::i18n::format("dialog.selection_midpoint", &[("id", id)]),
         Sel::ExternalSketchCurve { sketch, id } => {
             crate::i18n::format("dialog.selection_external_curve", &[("sketch", &sketch_name(*sketch)), ("id", id)])
+        }
+        // Another sketch's point (a Sphere's centre, #9403), named as Select Other names it.
+        Sel::ExternalSketchPoint { sketch, id } => {
+            let state = crate::open_meshing::session_world(s);
+            let point = state.sketch(*sketch).map_or_else(|| id.clone(), |ss| crate::select_other::point_label(&ss.sketch, id));
+            crate::i18n::format("dialog.selection_external_point", &[("point", &point), ("sketch", &sketch_name(*sketch))])
         }
         Sel::SketchConstraint { id } => crate::i18n::format("dialog.selection_constraint", &[("id", id)]),
         Sel::Profile { sketch, index } => {
