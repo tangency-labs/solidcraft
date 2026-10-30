@@ -33,6 +33,7 @@ way, the error names the files already written and the one that failed.
 | `mesh_prefix` | none | Put before each mesh file name. Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
 | `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
+| `collision` | mesh | What a body left on `auto` becomes: `mesh` or `convex_hull`. See [Collision shapes](#collision-shapes). |
 | `mimic` | true | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. |
 
 URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
@@ -136,8 +137,27 @@ parent at their current pose, with a warning when the copied part has a joint. (
 the copies move together, which a URDF could only express with `<mimic>`.) The export stops copying past
 64 levels or 100 000 placements, with a warning.
 
+## Collision shapes
+
+`body.collision {body | component, shape}` saves what a body looks like to a simulator, or use
+**Collision Shape** in its menu:
+
+| Shape | Written as |
+|---|---|
+| `auto` | What the `collision` parameter says (the default) |
+| `mesh` | The body's full mesh. A component whose bodies are all this shares its visual STL |
+| `convex_hull` | One closed STL per body. Split a part into bodies to get one hull per body |
+| `box` | A `<box>` along the body's principal axes |
+| `cylinder` | A `<cylinder>` along whichever principal axis gives the least volume |
+| `sphere` | A `<sphere>` around the body |
+| `none` | No `<collision>`: a screw, a cosmetic part |
+
+The `collision` parameter of `file.export` is `mesh` (the default) or `convex_hull`, and applies to bodies
+left on `auto`. An open surface collides only with a shape that gives it a volume. It still adds no
+mass. A flat body has no convex hull, so it gets no collision, with a warning.
+
 ## Not covered
 
-- Simplified collision shapes: the collision mesh is the visual mesh.
+- Automatic convex decomposition of a concave part.
 - SDF and MJCF export, and URDF import.
 - Joint motion inside the copies of a component placed several times.

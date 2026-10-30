@@ -333,6 +333,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
                     "mimic": {"type": "boolean", "description": "urdf: write <mimic> for motion links (default true)"},
+                    "collision": {"type": "string", "enum": ["mesh", "convex_hull"], "description": "urdf: what a body with no collision shape of its own becomes (default mesh)"},
                 }),
                 &["path"],
             ),
@@ -969,7 +970,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
             p["expression"] = parameter_value(a)?;
             exec(b, "parameters.change", p)
         }
-        "export" => exec(b, "file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic"])),
+        "export" => exec(b, "file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic", "collision"])),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
             None => exec(b, "diagnostics.crash_reports", pick(a, &["limit"])),
@@ -1181,7 +1182,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         }
         "undo" => mapped("edit.undo", json!({})),
         "redo" => mapped("edit.redo", json!({})),
-        "export" => mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic"])),
+        "export" => mapped("file.export", pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic", "collision"])),
         "save" => mapped("file.save", pick(a, &["path", "format"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names"])),
         "new_design" => mapped("file.new", pick(a, &["name"])),

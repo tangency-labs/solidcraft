@@ -18,6 +18,7 @@ ROOT = HERE.parent.parent
 TOLERANCE = 1e-6
 SIM_SECONDS = 2.0
 SIM_STEP = 1 / 2000
+DROP_TOLERANCE = 1e-3
 
 
 class Skip(Exception):
@@ -143,6 +144,8 @@ def pybullet(urdf, expected):
         notes.append(pendulum_note(samples, want))
     if "free_slide" in expected:
         notes.append(slide_note(urdf, expected["free_slide"], bullet_slide))
+    if "drops" in expected:
+        notes.append(drop_note(urdf, expected["drops"]))
     return ", ".join(notes)
 
 
@@ -172,6 +175,30 @@ def slide_note(urdf, want, simulate):
     if abs(distance - want["distance"]) > want["tolerance"] * want["distance"]:
         raise AssertionError(f"slid {distance:.5f} m, expected {want['distance']:.5f} m")
     return f"slid {distance:.5f} m (expected {want['distance']:.5f})"
+
+
+def drop_note(urdf, drops):
+    """Drop a 5 mm ball on each shape: it rests at the worked-out height, or falls through."""
+    pb, client, _, _ = bullet_world(urdf, (0, 0, -9.81))
+    try:
+        ball = pb.createCollisionShape(pb.GEOM_SPHERE, radius=0.005, physicsClientId=client)
+        bodies = []
+        for drop in drops:
+            start = [drop["xy"][0], drop["xy"][1], 0.03]
+            bodies.append(pb.createMultiBody(0.01, ball, basePosition=start, physicsClientId=client))
+        for _ in range(int(SIM_SECONDS / SIM_STEP)):
+            pb.stepSimulation(physicsClientId=client)
+        for drop, body in zip(drops, bodies):
+            z = pb.getBasePositionAndOrientation(body, physicsClientId=client)[0][2]
+            want = drop["rest_z"]
+            if want is None:
+                if z > 0:
+                    raise AssertionError(f"{drop['shape']}: the ball stopped at {z:.4f} m, expected it to fall through")
+            elif abs(z - want) > DROP_TOLERANCE:
+                raise AssertionError(f"{drop['shape']}: the ball rests at {z:.4f} m, expected {want:.4f} m")
+    finally:
+        pb.disconnect(client)
+    return f"{len(drops)} drops"
 
 
 def bullet_slide(urdf, joint_name, gravity, seconds):

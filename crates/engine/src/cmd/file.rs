@@ -2380,6 +2380,11 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
         effort: positive("effort")?,
         velocity: positive("velocity")?,
         mimic: bool_(p, "mimic").unwrap_or(true),
+        collision: match str_(p, "collision") {
+            None | Some("mesh") => solidcraft_io::urdf::CollisionDefault::Mesh,
+            Some("convex_hull") => solidcraft_io::urdf::CollisionDefault::ConvexHull,
+            Some(_) => return Err(bad(cmd, "`collision` must be mesh or convex_hull")),
+        },
     };
     let file = std::path::Path::new(path);
     let stem = file.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
