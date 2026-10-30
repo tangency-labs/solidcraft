@@ -1,0 +1,6 @@
+{
+  "en": { "cmd.inspect_section_curves": "Section Curves" },
+  "cs": { "cmd.inspect_section_curves": "Křivky řezu" },
+  "ja": { "cmd.inspect_section_curves": "断面曲線" },
+  "zh": { "cmd.inspect_section_curves": "截面曲线" }
+}
