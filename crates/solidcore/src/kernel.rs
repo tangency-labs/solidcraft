@@ -239,6 +239,8 @@ pub struct UpstreamFixes {
     pub fillet_nx1_end_rib_global_merge: bool,
     /// `sm_FixUVTrimCurves` moves only the end control points of the two UV trims meeting at a corner onto the vertex's UV point, without dropping the vertex onto them, trimming there and stretching them back over the edge interval (WR-255, #959/#570; the fork's tangency-labs/smlib@5af7070).
     pub uv_trim_corner_end_points_only: bool,
+    /// `SmEdgeuse::CreateUVTrimCurve` takes a drop that came back in pieces as the longest run of pieces that meet end to end (the same edge parameter and `(u, v)`), joined exactly on the edge parameters it was dropped from, where upstream reparameterizes a piece covering 90% of the edge onto the whole edge interval, which runs the trim at the wrong pace (up to 5 mm off its edge) (WR-543, #1383; the fork's tangency-labs/smlib@e36feb1).
+    pub uv_trim_joins_drop_pieces: bool,
     /// `BSplineCurve::trim` removes short end spans only for model-space curves
     /// (dimension 3), preserving exact UV trims in surface parameter units
     /// (WR-441, #1114). Off by default for pinned SMLib compatibility.
