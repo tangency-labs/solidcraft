@@ -1,6 +1,6 @@
 //! Simple shapes around a mesh's points, for collision: a convex hull and fitted primitives.
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 
 use crate::inertia::principal;
 use crate::{Mesh, Vec3};
@@ -66,7 +66,8 @@ pub fn convex_hull(points: &[Vec3]) -> Option<Mesh> {
             dist(**x).total_cmp(&dist(**y))
         })?;
         let apex = at(top)?;
-        let mut edges: HashSet<(usize, usize)> = HashSet::new();
+        // Ordered, so the same points always give the same faces and the same file.
+        let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut orphans = Vec::new();
         for slot in &mut faces {
             if slot.as_ref().is_some_and(|f| f.distance(points, apex) > eps) {
