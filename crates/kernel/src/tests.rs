@@ -373,17 +373,43 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     assert_eq!(fillet_max_each(&post, &mids, 3.5).unwrap().map(|x| x.0), Some(vec![3.0; 4]));
 }
 
-/// A corner's rounds with a radius per edge, one wider than its faces, are refused as too large,
-/// so a fit can reduce them. (The same corner at one radius as wide as the faces, and its fit,
-/// are the rig's fillets/477-fillet-cube-corner-rounds-as-wide-as-faces-* cases; no command
-/// takes a radius per edge.)
+/// R21 on an edge of a 20 mm cube overflows on its tangent sides, which a round may, taking all
+/// of both faces beside the edge: its circle about (y, z) = (21, 21) meets them only at 21, past
+/// the cube. What is left is the square [0, 20]² inside that circle, with u = 21 − y,
+/// ∫₁^√440 (√(441 − u²) − 1) du, along 20: 6107.529370.
+fn round_wider_than_its_faces() -> f64 {
+    let f = |u: f64| 0.5 * (u * (441.0 - u * u).sqrt() + 441.0 * (u / 21.0).asin());
+    let w = 440f64.sqrt();
+    20.0 * (f(w) - f(1.0) - (w - 1.0))
+}
+
 #[test]
-fn corner_rounds_larger_than_their_faces_are_too_large() {
+fn a_round_wider_than_its_faces_overflows_onto_its_tangent_sides() {
+    let want = round_wider_than_its_faces();
+    assert!((want - 6107.529370).abs() < 1e-6, "{want}");
+    let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
+    let out = fillet(&b, &[Vec3::new(10.0, 0.0, 0.0)], 21.0).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
+    assert!(rel(measure(&out).unwrap().volume, want) < 1e-9, "{} vs {want}", measure(&out).unwrap().volume);
+}
+
+/// A corner's rounds with a radius per edge, one wider than its faces: R21 with R5 on the other
+/// two edges at the corner. The R21 takes both faces beside its edge, and with them the R5
+/// edges, which lie on them: the body is R21's alone
+/// ([`a_round_wider_than_its_faces_overflows_onto_its_tangent_sides`]). (The same corner at one
+/// radius as wide as the faces, and its fit, are the rig's
+/// fillets/477-fillet-cube-corner-rounds-as-wide-as-faces-* cases; no command takes a radius per
+/// edge.)
+#[test]
+#[ignore = "fails until SMLib blends the corner whole: status 1001, fillet error 4 (edge type 14), Unable to Trim Rail Curve"]
+fn a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges() {
     let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
     let corner = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];
     let sel: Vec<(Vec3, f64)> = corner.iter().copied().zip([21.0, 5.0, 5.0]).collect();
-    let e = crate::blend_corner::fillet_radii(&b, &sel).unwrap_err();
-    assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
+    let out = crate::blend_corner::fillet_radii(&b, &sel).unwrap();
+    assert!(out.validity().is_empty(), "{:?}", out.validity());
+    let want = round_wider_than_its_faces();
+    assert!(rel(measure(&out).unwrap().volume, want) < 1e-9, "{} vs {want}", measure(&out).unwrap().volume);
 }
 
 #[test]

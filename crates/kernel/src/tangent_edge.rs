@@ -265,12 +265,15 @@ fn bernstein_roots(c: &[f64], lo: f64, hi: f64, depth: u32, work: &mut usize, ou
     bernstein_roots(&r, mid, hi, depth - 1, work, out);
 }
 
-/// Whether edge `e`'s two uses' faces meet with outward normals within `max_angle` (radians) of
-/// each other all along it, `sign(f)` turning face `f`'s natural normal outward. An edge with
-/// other than two uses has no such pair: false. See the module documentation.
-pub(crate) fn tangent_all_along(rec: &Brep, sign: impl Fn(usize) -> Option<f64>, e: usize, max_angle: f64) -> Result<bool> {
+/// Calls `visit` with the outward unit normals of edge `e`'s two uses' faces at one point of the
+/// edge after another, `sign(f)` turning face `f`'s natural normal outward: on each piece of the
+/// edge where both normals are polynomials, at the `D + 1` Chebyshev points the module
+/// documentation describes, skipping a point where either is undefined (a pole). `visit` returns
+/// whether to go on. `Ok(None)` for an edge with other than two uses; else whether some point had
+/// both normals.
+fn normal_pairs(rec: &Brep, sign: impl Fn(usize) -> Option<f64>, e: usize, mut visit: impl FnMut(Vec3, Vec3) -> bool) -> Result<Option<bool>> {
     let edge = rec.edges.get(e).ok_or_else(|| failed(format!("edge {e}")))?;
-    let [ua, ub] = edge.uses.as_slice() else { return Ok(false) };
+    let [ua, ub] = edge.uses.as_slice() else { return Ok(None) };
     let use_of = |u: &solidcraft_geom::brep::EdgeUseRef| -> Result<Use<'_>> {
         let face = rec.faces.get(u.face as usize).ok_or_else(|| failed(format!("face {}", u.face)))?;
         let oriented = match face.loops.get(u.r#loop as usize) {
@@ -297,7 +300,6 @@ pub(crate) fn tangent_all_along(rec: &Brep, sign: impl Fn(usize) -> Option<f64>,
     if breaks.len().saturating_mul(nodes) > MAX_POINTS {
         return Err(failed(format!("deciding tangency along edge {e}: {} pieces of degree {degree}", breaks.len())));
     }
-    let cos = max_angle.cos();
     let mut defined = false;
     for w in breaks.windows(2) {
         let &[t0, t1] = w else { continue };
@@ -308,17 +310,47 @@ pub(crate) fn tangent_all_along(rec: &Brep, sign: impl Fn(usize) -> Option<f64>,
         for j in 0..nodes {
             let t = m + h * ((2 * j + 1) as f64 * std::f64::consts::PI / (2 * nodes) as f64).cos();
             if let (Some(na), Some(nb)) = (a.normal(t)?, b.normal(t)?) {
-                if !(na.dot(nb) >= cos) {
-                    return Ok(false);
-                }
                 defined = true;
+                if !visit(na, nb) {
+                    return Ok(Some(true));
+                }
             }
         }
     }
+    Ok(Some(defined))
+}
+
+/// Whether edge `e`'s two uses' faces meet with outward normals within `max_angle` (radians) of
+/// each other all along it, `sign(f)` turning face `f`'s natural normal outward. An edge with
+/// other than two uses has no such pair: false. See the module documentation.
+pub(crate) fn tangent_all_along(rec: &Brep, sign: impl Fn(usize) -> Option<f64>, e: usize, max_angle: f64) -> Result<bool> {
+    let cos = max_angle.cos();
+    let mut tangent = true;
+    let Some(defined) = normal_pairs(rec, sign, e, |na, nb| {
+        tangent = na.dot(nb) >= cos;
+        tangent
+    })?
+    else {
+        return Ok(false);
+    };
     if !defined {
         return Err(failed(format!("edge {e}: its faces' normals are undefined all along it")));
     }
-    Ok(true)
+    Ok(tangent)
+}
+
+/// The least angle (radians, 0 to π) between the outward normals of edge `e`'s two uses' faces
+/// at the points [`normal_pairs`] visits: the edge's least angle where it is the same all along
+/// the edge (two planes, a plane and a cylinder along a generator), at most a little above it
+/// elsewhere. `None` for an edge with other than two uses, or whose normals are undefined
+/// everywhere.
+pub(crate) fn least_angle_along(rec: &Brep, sign: impl Fn(usize) -> Option<f64>, e: usize) -> Result<Option<f64>> {
+    let mut least = f64::INFINITY;
+    let defined = normal_pairs(rec, sign, e, |na, nb| {
+        least = least.min(na.cross(nb).len().atan2(na.dot(nb)));
+        true
+    })?;
+    Ok(defined.filter(|d| *d).map(|_| least))
 }
 
 #[cfg(test)]

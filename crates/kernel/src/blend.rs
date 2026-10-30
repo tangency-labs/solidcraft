@@ -684,9 +684,11 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     Ok(out)
 }
 
-/// Edges meeting at an angle below this continue one another; faces meeting at an angle below
-/// it meet tangentially.
-const TANGENT_DEGREES: f64 = 0.5;
+/// Edges meeting at an angle (radians) below this continue one another; faces meeting at an
+/// angle below it meet tangentially, a smooth edge with nothing to round. One value for smooth
+/// everywhere: the shaded view's ([`crate::smooth_edges::ANGLE`], half a degree), so an edge
+/// the view draws can be rounded and one it hides is smooth.
+const TANGENT: f64 = crate::smooth_edges::ANGLE;
 
 /// The point halfway along edge `e`.
 fn edge_middle(rec: &Faces, e: usize) -> Option<Vec3> {
@@ -699,7 +701,7 @@ fn normal_reach(rec: &Faces) -> f64 {
     rec.rec.tolerance.max(1e-7) * 10.0
 }
 
-/// Whether edge `e`'s two uses meet tangentially (within [`TANGENT_DEGREES`]) all along it: a
+/// Whether edge `e`'s two uses meet tangentially (within [`TANGENT`]) all along it: a
 /// smooth edge, with no corner to blend (a seam a face meets itself across is one). An edge
 /// whose faces are tangent at one end only (a round running into a wall it is tangent to where
 /// the wall meets its face) is a crease everywhere else, which is not smooth; nor is a cusp, its
@@ -707,7 +709,7 @@ fn normal_reach(rec: &Faces) -> f64 {
 /// edge. Decided exactly from the faces' surfaces and the uses' pcurves
 /// ([`crate::tangent_edge`]).
 fn smooth_join(rec: &Faces, e: usize) -> Result<bool> {
-    crate::tangent_edge::tangent_all_along(&rec.rec, |f| rec.side(f), e, TANGENT_DEGREES.to_radians())
+    crate::tangent_edge::tangent_all_along(&rec.rec, |f| rec.side(f), e, TANGENT)
 }
 
 /// `seeds` (edges in the record's order, each once), then every other edge that continues one
@@ -735,7 +737,7 @@ fn chain_of(rec: &Faces, seeds: &[usize], hidden: &[bool]) -> Result<Vec<usize>>
         }
         if a == v { rec.tangent(e, false) } else { rec.tangent(e, true).map(|t| t * -1.0) }
     };
-    let cos = TANGENT_DEGREES.to_radians().cos();
+    let cos = TANGENT.cos();
     let accept = normal_reach(rec);
     // Whether edge `e` is convex at its end `v` (its faces meet at less than 180° inside the
     // body): the direction into its second face, square to it, points against its first face's
@@ -796,6 +798,33 @@ pub(crate) fn unfinished_chain(body: &Body, picks: &[Vec3], edges: &[usize], hid
         }
     }
     Ok(chain_of(&rec, &seeds, hidden)?.get(seeds.len()).and_then(|&next| edge_middle(&rec, next)))
+}
+
+/// Before rounding exactly `edges` (the record's edges `picks` took, in order), edge i at radius
+/// `radii[i]`: refuses a round too small to change the part. Across a crease whose faces' normals
+/// turn by δ, a round of radius r lies r·(sec(δ/2) − 1) (≈ r·δ²/8) inside the sharp edge at its
+/// middle, the farthest it moves the part; below the edge's tolerance the round is the edge
+/// itself to the model's accuracy (SMLib refuses to build it). δ is the least turn along the edge
+/// ([`crate::tangent_edge::least_angle_along`]); the message names the smallest radius that
+/// rounds it, tolerance / (sec(δ/2) − 1), rounded up to the micrometre.
+pub(crate) fn rounds_too_small(body: &Body, picks: &[Vec3], edges: &[usize], radii: &[f64]) -> Result<()> {
+    let rec = Faces::of(body)?;
+    for (i, (&e, &r)) in edges.iter().zip(radii).enumerate() {
+        let Some(edge) = rec.rec.edges.get(e) else { continue };
+        let tolerance = edge.tolerance.max(rec.rec.tolerance);
+        let Some(turn) = crate::tangent_edge::least_angle_along(&rec.rec, |f| rec.side(f), e)? else { continue };
+        let reach = 1.0 / (0.5 * turn).cos() - 1.0;
+        if !(turn > TANGENT && reach.is_finite() && reach > 0.0) || r * reach >= tolerance {
+            continue;
+        }
+        let at = picks.get(i).map(|p| format!("({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)).unwrap_or_default();
+        let smallest = (tolerance / reach * 1e3).ceil() / 1e3;
+        return Err(KernelError::Invalid(format!(
+            "a round of radius {r} mm on the edge at {at} is too small: its faces turn only {:.2}° across the edge, so the round stays within the model's tolerance ({tolerance} mm) of it and changes nothing; the smallest radius that rounds this edge is {smallest:.3} mm",
+            turn.to_degrees()
+        )));
+    }
+    Ok(())
 }
 
 /// A blend's failure where a picked edge continues tangentially into `next`, an edge left out
@@ -1213,6 +1242,66 @@ mod tests {
             let actual = crate::measure(&body).unwrap().volume - crate::measure(&rounded).unwrap().volume;
             assert!((actual - removed).abs() < 1e-3 * removed, "{actual} vs {removed}");
             assert!(rounded.validity().is_empty());
+        }
+    }
+
+    /// A block 40 wide and 20 deep (z 0…20) whose top rises from y = 20 at its sides to a
+    /// crease along z at x = 20, each half sloping `slope` degrees, so the faces turn by twice
+    /// that across the crease; and a point on the crease.
+    fn roof(slope: f64) -> (Body, Vec3) {
+        let h = 20.0 * slope.to_radians().tan();
+        let outline = [Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 20.0), Vec2::new(20.0, 20.0 + h), Vec2::new(0.0, 20.0)];
+        let region = Region2 { outer: Loop2::polygon(&outline), holes: vec![] };
+        let body = crate::build::extrude(&Plane::XY, &[region], 0.0, 20.0).unwrap().remove(0);
+        (body, Vec3::new(20.0, 20.0 + h, 10.0))
+    }
+
+    /// A round lies r·(sec(δ/2) − 1) inside the crease it replaces (δ the faces' turn): below the
+    /// edge's tolerance it changes nothing and is refused as too small, naming the smallest
+    /// radius that rounds. The block's edges are held to 2e-5 mm (SMLib's intersection tolerance
+    /// for a part this size, twice its zone tolerance of 1e-5). At 1° an R0.4 round would lie
+    /// 0.4 · (sec 0.5° − 1) = 0.015 µm in, under it: the smallest is 2e-5 / (sec 0.5° − 1) =
+    /// 0.52523 mm, named rounded up. At 3° the R2 round is 0.685 µm in and builds: one face more,
+    /// the top that much lower, removing 20 · r²(tan(δ/2) − δ/2) = 4.786e-4 mm³.
+    #[test]
+    fn a_round_too_small_to_change_the_part_is_refused_naming_the_smallest_that_rounds() {
+        let (gentle, crease) = roof(0.5);
+        let rec = Faces::of(&gentle).unwrap().rec;
+        assert!(rec.tolerance == 2e-5 && rec.edges.iter().all(|e| e.tolerance == 2e-5), "{}", rec.tolerance);
+        let turn = 1f64.to_radians();
+        let smallest = 2e-5 / (1.0 / (0.5 * turn).cos() - 1.0);
+        assert!((smallest - 0.52523).abs() < 1e-5, "{smallest}");
+        let e = fillet(&gentle, &[crease], 0.4).unwrap_err().to_string();
+        assert!(
+            e.contains("is too small") && e.contains("turn only 1.00°") && e.contains("the smallest radius that rounds this edge is 0.526 mm"),
+            "{e}"
+        );
+
+        let (steeper, crease) = roof(1.5);
+        let (r, turn) = (2.0, 3f64.to_radians());
+        let rounded = fillet(&steeper, &[crease], r).unwrap();
+        assert!(rounded.validity().is_empty(), "{:?}", rounded.validity());
+        assert_eq!(rounded.face_count(), steeper.face_count() + 1);
+        let (before, after) = (crate::measure(&steeper).unwrap(), crate::measure(&rounded).unwrap());
+        let sag = r * (1.0 / (0.5 * turn).cos() - 1.0);
+        assert!(((before.bbox.max.y - after.bbox.max.y) - sag).abs() < 1e-9, "{} vs {sag}", before.bbox.max.y - after.bbox.max.y);
+        let removed = 20.0 * r * r * ((0.5 * turn).tan() - 0.5 * turn);
+        assert!(((before.volume - after.volume) - removed).abs() < 1e-6, "{} vs {removed}", before.volume - after.volume);
+    }
+
+    /// At 1° the crease rounds from 0.526 mm: R2 lies 0.076 µm in and R20 0.76 µm, and each
+    /// builds, removing 20 · r²(tan(δ/2) − δ/2).
+    #[test]
+    #[ignore = "fails until SMLib rounds creases from 0.5° (SmEdge::GetBlendEdgeuse calls an edge within 2° of tangent smooth: SM_ERR_INVALID_INPUT)"]
+    fn a_one_degree_crease_rounds_from_the_smallest_radius_named() {
+        let (gentle, crease) = roof(0.5);
+        let turn = 1f64.to_radians();
+        for r in [2.0, 20.0] {
+            let rounded = fillet(&gentle, &[crease], r).unwrap();
+            assert!(rounded.validity().is_empty(), "r={r}: {:?}", rounded.validity());
+            let removed = 20.0 * r * r * ((0.5 * turn).tan() - 0.5 * turn);
+            let (before, after) = (crate::measure(&gentle).unwrap().volume, crate::measure(&rounded).unwrap().volume);
+            assert!(((before - after) - removed).abs() < 1e-6, "r={r}: {} vs {removed}", before - after);
         }
     }
 

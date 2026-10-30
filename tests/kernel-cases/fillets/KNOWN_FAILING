@@ -28,11 +28,11 @@
 5835-chamfer-sloped-basin-1-mm-rim-2-two-edges SMLib status 1001: SmFilletNx2Corner, CalcFilletIntSideFace cannot intersect a chamfer with the side face at the rim's corner, where the front chamfer past the rim should build cut by the front face
 5835-chamfer-sloped-basin-4-mm-rim-2-2-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corner
 5835-chamfer-sloped-basin-4-mm-rim-2-4-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corners
-851-chamfer-knife-edge-tip-0-5 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
-851-chamfer-knife-edge-tip-2 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
-851-chamfer-knife-edge-tip-2-box-less-cylinder SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
-851-chamfer-knife-edge-tip-2-sketched SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
-851-chamfer-knife-edge-tip-5 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
+851-chamfer-knife-edge-tip-0-5 SMLib SM_ERR_INVALID_INPUT: smlib_chamfer takes the ball radius d·√((1−c)/(1+c)), c the faces' binormals' dot (capi chamfer_radius), which is 0 at a cusp, where they agree; the case wants the ball of radius d
+851-chamfer-knife-edge-tip-2 SMLib SM_ERR_INVALID_INPUT: smlib_chamfer takes the ball radius d·√((1−c)/(1+c)), c the faces' binormals' dot (capi chamfer_radius), which is 0 at a cusp, where they agree; the case wants the ball of radius d
+851-chamfer-knife-edge-tip-2-box-less-cylinder SMLib SM_ERR_INVALID_INPUT: smlib_chamfer takes the ball radius d·√((1−c)/(1+c)), c the faces' binormals' dot (capi chamfer_radius), which is 0 at a cusp, where they agree; the case wants the ball of radius d
+851-chamfer-knife-edge-tip-2-sketched SMLib SM_ERR_INVALID_INPUT: smlib_chamfer takes the ball radius d·√((1−c)/(1+c)), c the faces' binormals' dot (capi chamfer_radius), which is 0 at a cusp, where they agree; the case wants the ball of radius d
+851-chamfer-knife-edge-tip-5 SMLib SM_ERR_INVALID_INPUT: smlib_chamfer takes the ball radius d·√((1−c)/(1+c)), c the faces' binormals' dot (capi chamfer_radius), which is 0 at a cusp, where they agree; the case wants the ball of radius d
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 926-chamfer-top-edge-ending-on-boss-wall-above-it not supported yet: the chamfer is refused as larger than its faces where it ends on the boss's wall
