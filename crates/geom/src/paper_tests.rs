@@ -417,7 +417,7 @@ fn text_on_the_grid_is_its_placed_outlines() {
 
 /// Slivers are measured in the grid's own steps: a 5 mm piece goes straight on to the next on a
 /// 1 mm grid, and stays on the nanometre grid. An arc's quarters keep its radius and turn, in
-/// steps; a width under half a step is one step. A curve the walk can't take yet is refused.
+/// steps; a width under half a step is one step. An ellipse comes as counted cubics.
 #[test]
 fn slivers_and_radii_are_in_the_grids_own_steps() {
     let millimetre = Grid::new(1.0).unwrap();
@@ -430,7 +430,11 @@ fn slivers_and_radii_are_in_the_grids_own_steps() {
     let coarse = walk(&three, millimetre);
     let to = |x: i64| Piece::Line { to: GridPoint { x, y: 0 } };
     assert_eq!(path(&coarse).1.pieces, [to(100), to(200)]);
-    assert_eq!(coarse.report, GridReport { widths_snapped: 1, pieces_merged: 1, dashes_snapped: 0 }, "0.35 mm is under half a 1 mm step");
+    assert_eq!(
+        coarse.report,
+        GridReport { widths_snapped: 1, pieces_merged: 1, dashes_snapped: 0, curve_cubics: 0 },
+        "0.35 mm is under half a 1 mm step"
+    );
     assert_eq!(path(&coarse).0, 1);
     // The boundary both ways: 10 steps along x merge, 11 don't; a (6, 8) step merges, (7, 8) doesn't.
     for (dx, dy, merged) in [(10.0, 0.0, 1), (11.0, 0.0, 0), (6.0, 8.0, 1), (7.0, 8.0, 0)] {
@@ -447,9 +451,23 @@ fn slivers_and_radii_are_in_the_grids_own_steps() {
         path(&walk(&half, millimetre)).1,
         GridPath { start: GridPoint { x: 50, y: 60 }, pieces: vec![arc(60, 50), arc(50, 40)], closed: false }
     );
-    let ellipse = open(vec![Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w: 0.5 }]);
-    let refused = ellipse.prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap_err();
-    assert!(refused.0.contains("not supported yet"), "{refused}");
+    // An ellipse comes as cubics, counted, ending where it ends.
+    let arch = Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w: 0.5 };
+    let ellipse = open(vec![arch]);
+    let on = walk(&ellipse, Grid::NANOMETRE);
+    let walked = path(&on).1;
+    assert!(on.report.curve_cubics > 1 && walked.pieces.len() == on.report.curve_cubics, "{:?}", on.report);
+    assert!(walked.pieces.iter().all(|piece| matches!(piece, Piece::Cubic { .. })));
+    assert_eq!(walked.pieces.last().map(Piece::to), Some(GridPoint { x: 20_000_000, y: 0 }));
+    // And within the curves' error of it: the cubics, flattened to a tenth of the error, are that
+    // close to the ellipse (a fine polyline of it), give or take the flattening.
+    let error = grid::CURVE_ERROR_MM;
+    let truth: Vec<Vec2> = (0..=20_000).map(|i| arch.point_at(f64::from(i) / 20_000.0)).collect();
+    let to_line = |q: Vec2, a: Vec2, b: Vec2| q.dist(a + (b - a) * ((q - a).dot(b - a) / (b - a).dot(b - a)).clamp(0.0, 1.0));
+    for q in flatten(&walked, error * 0.1 * 1e6).unwrap() {
+        let off = truth.windows(2).map(|ab| to_line(q * 1e-6, ab[0], ab[1])).fold(f64::INFINITY, f64::min);
+        assert!(off <= error * 1.2, "{off} mm from the ellipse");
+    }
 }
 
 fn picture(x0: f64, y0: f64, x1: f64, y1: f64, opacity: f64) -> Item {
