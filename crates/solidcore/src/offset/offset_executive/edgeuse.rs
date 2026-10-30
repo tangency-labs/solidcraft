@@ -47,7 +47,7 @@ use crate::topology::face::{p1 as face1, p2 as face2};
 use crate::topology::proto_topology::ProtoGeometry;
 use crate::topology::{vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
-use super::p1::OffsetExecutive;
+use super::p1::{OffsetExecutive, OffsetOperation};
 
 const OP: &str = "offset::offset_executive::edgeuse";
 
@@ -1180,6 +1180,10 @@ impl CreatorExecutive<Handle> for Executive<'_> {
             .iter()
             .map(|&f| Handle::topology(Arena::Original, EntityRef::Face(f)))
             .collect()
+    }
+
+    fn is_local_operation(&self) -> bool {
+        self.inner.operation() == OffsetOperation::LocalOperation
     }
 
     fn has_collapsed_faces(&self) -> bool {

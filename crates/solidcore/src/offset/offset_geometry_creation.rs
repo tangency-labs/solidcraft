@@ -73,6 +73,11 @@
 //!   [`SolidError::InvalidInput`] with [`UNDEFINED_UPSTREAM`] as operation, which tells
 //!   it apart from a callee's real `SM_ERR_INVALID_INPUT`; the statuses upstream
 //!   ignores are ignored whatever they are, except these and [`SolidError::Unported`].
+//! - **Opt-in (WR-530, #402).** With `Kernel::fixes.local_operation_refuses_loose_tangent_edges`,
+//!   in a local operation ([`OffsetExecutive::is_local_operation`]) `ExtendTrimEdges`
+//!   fails when the lifted edge drops onto the other extended surface farther than ten
+//!   times `max(edge tolerance, approximation tolerance)`, and `EdgeuseOffset` passes
+//!   that failure on (the fork's tangency-labs/smlib@23c5b0a).
 //! - **`ExtendTrimEdges`' empty seam drop.** When a candidate's `GlobalPointSolve`
 //!   (`SM_SR_SINGLE`, minimize) finds no solution, upstream reads `sSolutions2[0]`
 //!   anyway (cpp:1610): defined behaviour, the array's backing `sData2[0]` (a default
@@ -318,6 +323,11 @@ pub trait OffsetExecutive<O> {
     fn extend_convex_edges(&self) -> bool;
     /// `GetShellFaces`: the faces to shell rather than offset (empty without a list).
     fn shell_faces(&self) -> Vec<O>;
+    /// `GetOffsetOperation() == SM_OO_LOCAL_OPERATION`: whether the executive runs a
+    /// local operation (`SmBrep::LocalOperation`); `false` unless the adapter says so.
+    fn is_local_operation(&self) -> bool {
+        false
+    }
     /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
     /// thinner than the wall); `false` unless `Kernel::fixes.offset_collapsed_rounds_mated`.
     fn has_collapsed_faces(&self) -> bool {
@@ -3007,6 +3017,19 @@ impl OffsetGeometryCreation {
                 true,
                 None,
             )?;
+            // Opt-in (WR-530, #402; the fork's tangency-labs/smlib@23c5b0a): the edge is
+            // lifted onto one face's new surface and dropped onto the other's. Faces offset
+            // alike stay tangent, so the drop lands on the edge; when only one of them got a
+            // new surface (a local operation moving a face beside a blend, or one piece of a
+            // split face), the drop crosses the gap between them and the faces no longer
+            // meet there
+            if k.fixes.local_operation_refuses_loose_tangent_edges && executive.is_local_operation()
+            {
+                let meet_tol = 10.0 * smos_max(off_tol, self.this_approx_tol_3d());
+                if dropped.max_drop_to_surf > meet_tol {
+                    return Err(sm_err(OP_EXTEND));
+                }
+            }
             let uv_curves = dropped.uv_curves;
             let mut closest_idx = 0usize;
 
@@ -3574,7 +3597,7 @@ impl OffsetGeometryCreation {
 
             if tan_sec || lamina {
                 // Extend or Trim Lamina or Tangent Edges (a problem is only reported)
-                let _ = ignore_soft(self.extend_trim_edges(
+                let extended = self.extend_trim_edges(
                     k,
                     brep,
                     executive,
@@ -3583,7 +3606,16 @@ impl OffsetGeometryCreation {
                     offset_edgeuse,
                     other_offset_edgeuse,
                     mark,
-                ))?;
+                );
+                // Opt-in (WR-530): a local operation has no later step that would close
+                // the gap: it fails
+                if k.fixes.local_operation_refuses_loose_tangent_edges
+                    && executive.is_local_operation()
+                {
+                    extended?;
+                } else {
+                    let _ = ignore_soft(extended)?;
+                }
                 return Ok(out);
             }
 
