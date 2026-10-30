@@ -62,6 +62,11 @@ set. In a chain, each step uses the values of the joint value it follows.
 - **Mass and inertia** come from each body's mesh and material density: the mass in kg, the
   centre of mass and the inertia tensor about it in the link frame, in kg m². Bodies of the
   same link combine with the parallel-axis theorem.
+- **Mass override:** `component.physical_override {component, mass?, com?, inertia?}` replaces the
+  values of a component's own bodies, for a bought motor modelled as a solid block. With only `mass`,
+  the centre of mass stays and the inertia is scaled. Nested components are links of their own and keep
+  theirs. The root design can't take one: move those bodies into a component. Properties and the bill
+  of materials keep showing the mass worked out from the bodies.
 - **Open surfaces** are drawn but add no mass or collision, with a warning naming them.
 - **A link with no mass** (only surfaces, no bodies, or a chain's in-between link) gets a token
   mass of 1e-6 kg and inertia of 1e-12 kg m², because Gazebo drops massless links and breaks

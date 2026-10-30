@@ -1,0 +1,11 @@
+{
+  "en": {
+    "cmd.component_physical_override": "Mass Override"
+  },
+  "ar": {
+    "cmd.component_physical_override": "تجاوز الكتلة"
+  },
+  "he": {
+    "cmd.component_physical_override": "עקיפת מסה"
+  }
+}
