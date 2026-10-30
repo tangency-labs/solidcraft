@@ -3,8 +3,9 @@
 // ComputePointValues, ClassifyBoundaryStartPointIntersection, FlushCurve, DoBoundaryPlaneTest
 // and ComputeLawPointValues, and the file function sm_IsPointUnique
 // (source/SMLib/src/SmSurfaceIntersector.cpp), run on a real SmSurfaceIntersector over
-// SmPlane / SmBSplineSurface / SmCurveBoundedSurface objects (a derived class only exposes the
-// protected state).
+// SmPlane / SmBSplineSurface / SmCurveBoundedSurface objects and real SmCylinder / SmCone /
+// SmSphere / SmTorus objects (built as the ssi_corpus shim builds them; a derived class only
+// exposes the protected state).
 //
 // One entry point, sc_intersect_surface_intersector_p2_run(in, n_in, out, cap, out_len). `in` is
 // a program (layout in crates/solidcore-ffi/src/units/intersect_surface_intersector_p2.rs);
@@ -13,11 +14,14 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
 #include <SmCurve.h>
+#include <SmCone.h>
 #include <SmCurveBoundedSurface.h>
+#include <SmCylinder.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmExtent3d.h>
@@ -26,11 +30,13 @@
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
 #include <SmPlane.h>
+#include <SmSphere.h>
 #include <SmSurface.h>
 #include <SmSurfaceCache.h>
 #include <SmSurfaceIntersector.h>
 #include <SmTArray.h>
 #include <SmTList.h>
+#include <SmTorus.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
 #include <nurbs.h>
@@ -122,10 +128,72 @@ double flg(SmBoolean b)
     return b ? 1.0 : 0.0;
 }
 
-// `0 o x y scale dom` (SmPlane) or `1 p q nu nv net(x y z w) u v` (SmBSplineSurface).
+// The ssi_corpus shim's unit_cross: the unit vector along a x b.
+SmVector3d unit_cross(const SmVector3d& a, const SmVector3d& b)
+{
+    SmVector3d c(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+    double l = std::sqrt(c.x * c.x + c.y * c.y + c.z * c.z);
+    return SmVector3d(c.x / l, c.y / l, c.z / l);
+}
+
+// An analytic surface (kinds 4..7), built as the ssi_corpus shim's build_surface (angles in
+// degrees):
+//   4 cylinder origin[3] x[3] y[3] radius angle0 angle1 height0 height1
+//   5 cone     apex[3] x[3] y[3] half_angle_deg height0 height1 (SmCone::CreateCanonical)
+//   6 sphere   center[3] x[3] y[3] radius lon0 lon1 lat0 lat1
+//   7 torus    center[3] x[3] y[3] R r major0 major1 minor0 minor1
+// then GetNaturalUVDomain(), which makes its NURB in place (as that runner does before its
+// intersection, and the Rust side's make_nurb).
+SmSurface* read_analytic_surface(Rd& rd, const SmContext& ctx, int64_t kind)
+{
+    SmVector3d c = rd.vec();
+    SmVector3d x = rd.vec();
+    SmVector3d y = rd.vec();
+    SmSurface* srf = NULL;
+    if (kind == 4)
+    {
+        double radius = rd.num(), a0 = rd.num(), a1 = rd.num(), h0 = rd.num(), h1 = rd.num();
+        SmVector3d z = unit_cross(x, y);
+        SmPoint3d o = c + z * h0;
+        srf = new (ctx) SmCylinder(o, x, y, radius, a0, a1, h1 - h0, FALSE, FALSE, FALSE, &ctx);
+    }
+    else if (kind == 5)
+    {
+        double half = rd.num(), h0 = rd.num(), h1 = rd.num();
+        SmVector3d z = unit_cross(x, y);
+        double t = std::tan(half * M_PI / 180.0);
+        SmPoint3d o = c + z * h0;
+        SmAxis2Placement pl(o, x, y);
+        SmCone* cone = NULL;
+        if (SmCone::CreateCanonical(ctx, pl, h0 * t, h1 * t, h1 - h0, cone) != SM_SUCCESS || cone == NULL)
+            throw Bad();
+        srf = cone;
+    }
+    else if (kind == 6)
+    {
+        double radius = rd.num(), lon0 = rd.num(), lon1 = rd.num(), lat0 = rd.num(), lat1 = rd.num();
+        SmExtent2d anal(lon0, lat0, lon1, lat1);
+        srf = new (ctx) SmSphere(c, x, y, anal, radius, FALSE, FALSE, NULL, &ctx);
+    }
+    else
+    {
+        double R = rd.num(), r = rd.num(), ma0 = rd.num(), ma1 = rd.num(), mi0 = rd.num(), mi1 = rd.num();
+        SmExtent2d anal(ma0, mi0, ma1, mi1);
+        srf = new (ctx) SmTorus(c, x, y, anal, R, r, FALSE, FALSE, NULL, &ctx);
+    }
+    (void)srf->GetNaturalUVDomain();
+    return srf;
+}
+
+// `0 o x y scale dom` (SmPlane), `1 p q nu nv net(x y z w) u v` (SmBSplineSurface) or an
+// analytic surface (`4`..`7`, read_analytic_surface).
 SmSurface* read_basic_surface(Rd& rd, const SmContext& ctx)
 {
-    int64_t kind = rd.idx(0, 1);
+    int64_t kind = rd.idx(0, 7);
+    if (kind == 2 || kind == 3)
+        throw Bad();
+    if (kind >= 4)
+        return read_analytic_surface(rd, ctx, kind);
     if (kind == 0)
     {
         SmPoint3d o = rd.vec();
@@ -165,13 +233,16 @@ SmSurface* read_basic_surface(Rd& rd, const SmContext& ctx)
     return new (ctx) SmBSplineSurface(sur, FALSE, &ctx);
 }
 
-// A basic surface (`0 ..` / `1 ..`) or `3 basic`: an SmCurveBoundedSurface (implicit outer, no
-// boundary curves) over it, which owns (deletes) its basis. (`2` marks B = A.)
+// A basic surface (`0 ..` / `1 ..` / `4..7 ..`) or `3 basic`: an SmCurveBoundedSurface
+// (implicit outer, no boundary curves) over a plane or B-spline basis, which owns (deletes) it.
+// (`2` marks B = A.)
 SmSurface* read_surface(Rd& rd, const SmContext& ctx)
 {
     if (rd.at < rd.n && rd.in[rd.at] == 3.0)
     {
         rd.at++;
+        if (rd.at < rd.n && rd.in[rd.at] >= 4.0)
+            throw Bad();
         SmSurface* basis = read_basic_surface(rd, ctx);
         SmTArray<SmCurve*> c3d(ctx), cuv(ctx);
         return new (ctx) SmCurveBoundedSurface(*basis, &c3d, &cuv, TRUE);
@@ -314,6 +385,9 @@ void put_curves(std::vector<double>& o, const SmTArray<SmCurve*>& a, ULONG from)
 struct Prog
 {
     const SmContext& ctx;
+    // every domain (the intersector's and each DoBoundaryPlaneTest's) is the surface's
+    // GetNaturalUVDomain()
+    bool natural;
     std::vector<SmTsectPnt*> pts;
     std::vector<SmCurve*> curves;
     ~Prog()
@@ -521,6 +595,11 @@ void run_op(int32_t op, Rd& rd, Prog& pr, Peek& si, Outs& outs, std::vector<doub
         SmPoint3d bmax = rd.vec();
         SmExtent2d d1 = rd.dom4();
         SmExtent2d d2 = rd.dom4();
+        if (pr.natural)
+        {
+            d1 = si.GetSurface(0)->GetNaturalUVDomain();
+            d2 = si.GetSurface(1)->GetNaturalUVDomain();
+        }
         SmExtent3d box(bmin.x, bmin.y, bmin.z, bmax.x, bmax.y, bmax.z);
         SmPatchBoundaryBoundingPlanes bp1(si.GetSurface(0), d1);
         SmPatchBoundaryBoundingPlanes bp2(si.GetSurface(1), d2);
@@ -578,7 +657,8 @@ void run_op(int32_t op, Rd& rd, Prog& pr, Peek& si, Outs& outs, std::vector<doub
 }
 } // namespace
 
-// Program: `surfA surfB` (surfB `2` = the same object as A), `dom1[4] dom2[4] fillet`,
+// Program: `surfA surfB` (surfB `2` = the same object as A), `natural dom1[4] dom2[4] fillet`
+// (`natural` 1: every domain is the surface's GetNaturalUVDomain(), the given ones ignored),
 // `ncurves curves`, `npoints points`, `nops ops`. Output: per op `op status [values]`, then the
 // final state.
 SC_EXPORT int32_t sc_intersect_surface_intersector_p2_run(const double* in, int64_t n_in, double* out,
@@ -603,10 +683,16 @@ SC_EXPORT int32_t sc_intersect_surface_intersector_p2_run(const double* in, int6
         }
         else
             b = read_surface(rd, ctx);
+        bool natural = rd.flag();
         SmExtent2d d1 = rd.dom4();
         SmExtent2d d2 = rd.dom4();
+        if (natural)
+        {
+            d1 = a->GetNaturalUVDomain();
+            d2 = b->GetNaturalUVDomain();
+        }
         bool fillet = rd.flag();
-        Prog pr{ctx, {}, {}};
+        Prog pr{ctx, natural, {}, {}};
         int64_t nc = rd.idx(0, 8);
         for (int64_t i = 0; i < nc; i++)
             pr.curves.push_back(read_curve(rd, ctx));

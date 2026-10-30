@@ -4,7 +4,16 @@
 //!
 //! C++: `solidcore_ffi::units::intersect_surface_intersector_p2` (a real
 //! `SmSurfaceIntersector` on `SmPlane` / `SmBSplineSurface` / `SmCurveBoundedSurface`
-//! objects). Rust: `solidcore::intersect::surface_intersector::p2`.
+//! objects, and on the analytic `SmCylinder` / `SmCone` / `SmSphere` / `SmTorus` of the
+//! `analytic_bpt.json` fixtures, built as `--ssi-corpus` builds them: the Rust side with
+//! [`crate::ssi::kernel::rust_surface`]). Rust: `solidcore::intersect::surface_intersector::p2`.
+//!
+//! The analytic fixtures run `DoBoundaryPlaneTest` over the surfaces' natural domains
+//! (`natural`: each side asks its own surfaces for `GetNaturalUVDomain()`): the
+//! `SM_CAST_PTR(SmBSplineSurface)` there accepts every analytic kind, so their bounding
+//! planes (`SmSurfaceCache::ComputeBoundingPlanes`, unit `surface.surface_cache_p1`) and
+//! the plane tests run, where the B-spline / plane fixtures never reach a derived kind.
+//! Each such C++ case runs in a fresh process.
 //!
 //! A case is two surfaces (B may be A itself), their domains, the fillet flag, some
 //! curves, a point arena and a program of operations; both sides produce the record
@@ -50,6 +59,8 @@ use solidcore::surface::surface_cache::PatchBoundaryBoundingPlanes;
 use solidcore::SolidError;
 use solidcore_ffi::units::intersect_surface_intersector_p2::{self as ffi};
 
+use crate::ssi::case::SurfaceSpec;
+
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
@@ -88,6 +99,42 @@ enum SurfaceIn {
     /// B-spline basis.
     CurveBounded {
         basis: Box<SurfaceIn>,
+    },
+    /// `SmCylinder` (the `--ssi-corpus` construction; angles in degrees).
+    Cylinder {
+        origin: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+        radius: f64,
+        angle: [f64; 2],
+        height: [f64; 2],
+    },
+    /// `SmCone::CreateCanonical` of the apex-based cone.
+    Cone {
+        apex: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+        half_angle_deg: f64,
+        height: [f64; 2],
+    },
+    /// `SmSphere`.
+    Sphere {
+        center: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+        radius: f64,
+        lon: [f64; 2],
+        lat: [f64; 2],
+    },
+    /// `SmTorus`.
+    Torus {
+        center: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+        major_radius: f64,
+        minor_radius: f64,
+        major: [f64; 2],
+        minor: [f64; 2],
     },
 }
 
@@ -169,6 +216,9 @@ struct Inputs {
     a: SurfaceIn,
     /// `None`: B is A itself.
     b: Option<SurfaceIn>,
+    /// Every domain is the surface's natural UV domain (analytic A and B only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    natural: bool,
     dom1: [f64; 4],
     dom2: [f64; 4],
     fillet: bool,
@@ -177,6 +227,7 @@ struct Inputs {
     points: Vec<Vec<f64>>,
     ops: Vec<OpIn>,
 }
+
 
 fn weight(w: Option<f64>) -> f64 {
     w.unwrap_or(NOW)
@@ -216,7 +267,136 @@ fn ffi_surface(s: &SurfaceIn) -> ffi::SurfaceIn {
         SurfaceIn::CurveBounded { basis } => {
             ffi::SurfaceIn::CurveBounded(Box::new(ffi_surface(basis)))
         }
+        SurfaceIn::Cylinder {
+            origin,
+            x,
+            y,
+            radius,
+            angle,
+            height,
+        } => ffi::SurfaceIn::Analytic(ffi::Analytic::Cylinder {
+            origin: *origin,
+            x: *x,
+            y: *y,
+            radius: *radius,
+            angle: *angle,
+            height: *height,
+        }),
+        SurfaceIn::Cone {
+            apex,
+            x,
+            y,
+            half_angle_deg,
+            height,
+        } => ffi::SurfaceIn::Analytic(ffi::Analytic::Cone {
+            apex: *apex,
+            x: *x,
+            y: *y,
+            half_angle_deg: *half_angle_deg,
+            height: *height,
+        }),
+        SurfaceIn::Sphere {
+            center,
+            x,
+            y,
+            radius,
+            lon,
+            lat,
+        } => ffi::SurfaceIn::Analytic(ffi::Analytic::Sphere {
+            center: *center,
+            x: *x,
+            y: *y,
+            radius: *radius,
+            lon: *lon,
+            lat: *lat,
+        }),
+        SurfaceIn::Torus {
+            center,
+            x,
+            y,
+            major_radius,
+            minor_radius,
+            major,
+            minor,
+        } => ffi::SurfaceIn::Analytic(ffi::Analytic::Torus {
+            center: *center,
+            x: *x,
+            y: *y,
+            major_radius: *major_radius,
+            minor_radius: *minor_radius,
+            major: *major,
+            minor: *minor,
+        }),
     }
+}
+
+/// The `--ssi-corpus` description of an analytic surface (`None` for the other kinds).
+fn ssi_spec(s: &SurfaceIn) -> Option<SurfaceSpec> {
+    Some(match s {
+        SurfaceIn::Cylinder {
+            origin,
+            x,
+            y,
+            radius,
+            angle,
+            height,
+        } => SurfaceSpec::Cylinder {
+            origin: *origin,
+            xaxis: *x,
+            yaxis: *y,
+            radius: *radius,
+            angle: *angle,
+            height: *height,
+        },
+        SurfaceIn::Cone {
+            apex,
+            x,
+            y,
+            half_angle_deg,
+            height,
+        } => SurfaceSpec::Cone {
+            apex: *apex,
+            xaxis: *x,
+            yaxis: *y,
+            half_angle_deg: *half_angle_deg,
+            height: *height,
+        },
+        SurfaceIn::Sphere {
+            center,
+            x,
+            y,
+            radius,
+            lon,
+            lat,
+        } => SurfaceSpec::Sphere {
+            center: *center,
+            xaxis: *x,
+            yaxis: *y,
+            radius: *radius,
+            lon: *lon,
+            lat: *lat,
+        },
+        SurfaceIn::Torus {
+            center,
+            x,
+            y,
+            major_radius,
+            minor_radius,
+            major,
+            minor,
+        } => SurfaceSpec::Torus {
+            center: *center,
+            xaxis: *x,
+            yaxis: *y,
+            major_radius: *major_radius,
+            minor_radius: *minor_radius,
+            major: *major,
+            minor: *minor,
+        },
+        SurfaceIn::Plane { .. } | SurfaceIn::BSpline { .. } | SurfaceIn::CurveBounded { .. } => {
+            return None
+        }
+    })
 }
 
 fn ffi_curve(c: &CurveIn) -> ffi::CurveIn {
@@ -292,6 +472,7 @@ fn ffi_program(i: &Inputs) -> ffi::Program {
     ffi::Program {
         a: ffi_surface(&i.a),
         b: i.b.as_ref().map(ffi_surface),
+        natural: i.natural,
         dom1: i.dom1,
         dom2: i.dom2,
         fillet: i.fillet,
@@ -371,7 +552,16 @@ fn ext(d: [f64; 4]) -> Extent2d {
     Extent2d::from_bounds(d[0], d[1], d[2], d[3])
 }
 
-fn rust_surface(s: &SurfaceIn) -> Result<Surface, Fail> {
+fn rust_surface(k: &Kernel, s: &SurfaceIn) -> Result<Surface, Fail> {
+    if let Some(spec) = ssi_spec(s) {
+        // the `--ssi-corpus` construction, its NURB made as the shim's
+        // `GetNaturalUVDomain()` makes it
+        return match crate::ssi::kernel::rust_surface(k, &spec) {
+            Ok(Ok(srf)) => Ok(srf),
+            Ok(Err(d)) => Err(Fail::Deferred(Box::new(Output::deferred(d.unit, d.symbol)))),
+            Err(e) => Err(Fail::Harness(harness(format!("analytic surface: {e}")))),
+        };
+    }
     match s {
         SurfaceIn::Plane {
             o,
@@ -403,11 +593,16 @@ fn rust_surface(s: &SurfaceIn) -> Result<Surface, Fail> {
             Ok(Surface::from(BSplineSurface::from_nurb(sur, false)))
         }
         SurfaceIn::CurveBounded { basis } => Ok(Surface::from(CurveBoundedSurface::new(
-            rust_surface(basis)?,
+            rust_surface(k, basis)?,
             Vec::new(),
             Vec::new(),
             true,
         ).map_err(|e| HarnessError::new(e.to_string()))?)),
+        // built above
+        SurfaceIn::Cylinder { .. }
+        | SurfaceIn::Cone { .. }
+        | SurfaceIn::Sphere { .. }
+        | SurfaceIn::Torus { .. } => Err(Fail::Harness(harness("analytic surface"))),
     }
 }
 
@@ -602,6 +797,7 @@ fn run_op(
     curves: &[Curve],
     outs: &mut TsectCurves,
     op: &OpIn,
+    natural: Option<[Extent2d; 2]>,
     o: &mut Vec<f64>,
 ) -> Result<(), Fail> {
     match op {
@@ -669,8 +865,9 @@ fn run_op(
             dom1,
             dom2,
         } => {
-            let mut bp1 = PatchBoundaryBoundingPlanes::new(ext(*dom1));
-            let mut bp2 = PatchBoundaryBoundingPlanes::new(ext(*dom2));
+            let [d1, d2] = natural.unwrap_or([ext(*dom1), ext(*dom2)]);
+            let mut bp1 = PatchBoundaryBoundingPlanes::new(d1);
+            let mut bp2 = PatchBoundaryBoundingPlanes::new(d2);
             let bx = Extent3d::from_bounds(
                 bbox[0][0], bbox[0][1], bbox[0][2], bbox[1][0], bbox[1][1], bbox[1][2],
             );
@@ -741,19 +938,33 @@ fn op_code(op: &OpIn) -> f64 {
 
 fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let k = Kernel::default();
-    let a = rust_surface(&i.a)?;
+    let a = rust_surface(&k, &i.a)?;
     let b_srf = match &i.b {
-        Some(s) => Some(rust_surface(s)?),
+        Some(s) => Some(rust_surface(&k, s)?),
         None => None,
     };
     let b_ref = b_srf.as_ref().unwrap_or(&a);
+    // `GetNaturalUVDomain()` of each surface (the shim's `natural`)
+    let natural = if i.natural {
+        let dom = |s: &Surface| match s.natural_uv_domain_with_nurb(&k) {
+            Ok(d) => Ok(d),
+            Err(e) => Err(match Output::unported(&e) {
+                Some(d) => Fail::Deferred(Box::new(d)),
+                None => Fail::Harness(harness(format!("natural domain: {e}"))),
+            }),
+        };
+        Some([dom(&a)?, dom(b_ref)?])
+    } else {
+        None
+    };
+    let [dom1, dom2] = natural.unwrap_or([ext(i.dom1), ext(i.dom2)]);
     let curves = i
         .curves
         .iter()
         .map(rust_curve)
         .collect::<Result<Vec<_>, _>>()?;
     let mut o = Vec::new();
-    let mut si = match SurfaceIntersector::new(&k, &a, &ext(i.dom1), b_ref, &ext(i.dom2), i.fillet) {
+    let mut si = match SurfaceIntersector::new(&k, &a, &dom1, b_ref, &dom2, i.fillet) {
         Ok(si) => si,
         Err(e) => {
             if let Some(d) = Output::unported(&e) {
@@ -771,7 +982,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
     };
     for op in &i.ops {
         o.push(op_code(op));
-        run_op(&k, &mut si, &curves, &mut outs, op, &mut o)?;
+        run_op(&k, &mut si, &curves, &mut outs, op, natural, &mut o)?;
     }
     put_state(&mut o, &si);
     Ok(o)
@@ -1003,6 +1214,11 @@ fn natural(s: &SurfaceIn) -> [f64; 4] {
             v.last().copied().unwrap_or(1.0),
         ],
         SurfaceIn::CurveBounded { basis } => natural(basis),
+        // (the generator makes no analytic surface)
+        SurfaceIn::Cylinder { .. }
+        | SurfaceIn::Cone { .. }
+        | SurfaceIn::Sphere { .. }
+        | SurfaceIn::Torus { .. } => [0.0, 0.0, 1.0, 1.0],
     }
 }
 
@@ -1372,6 +1588,7 @@ fn gen_bpt_case(rng: &mut Rng) -> Inputs {
         dom1,
         dom2,
         fillet: false,
+        natural: false,
         curves: Vec::new(),
         points,
         ops,
@@ -1437,6 +1654,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
         dom1,
         dom2,
         fillet: rng.chance(0.1),
+        natural: false,
         curves,
         points,
         ops,

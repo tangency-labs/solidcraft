@@ -7,7 +7,9 @@
 //! `ComputeLawPointValues`, `sm_IsPointUnique`).
 //!
 //! [`run`] builds surfaces A and B (planes, B-splines or curve-bounded surfaces over
-//! either; B may be A itself), the intersector
+//! either, or the analytic `SmCylinder` / `SmCone` / `SmSphere` / `SmTorus` built as the
+//! `ssi_corpus` shim builds them, each with its `GetNaturalUVDomain()` called once; B may
+//! be A itself), the intersector
 //! `SmSurfaceIntersector(A, dom1, B, dom2, fillet)` (its context set as
 //! `DoIntersection` does), the program's curves and its points (a point arena; each op
 //! names points by index), then runs the [`Op`]s in order. The `FlushCurve` output
@@ -44,6 +46,11 @@
 //! non-finite UV value or both UV tangents zero (the gap walk may never leave the
 //! domains). `Flush` always runs: knots that decrease are rejected by
 //! `N_IgesValidate` inside `SmBSplineCurve::CreateCanonical` (an `SM_ERR` status).
+//!
+//! With [`Program::natural`] every domain (the intersector's and each `Bpt`'s) is the
+//! surface's `GetNaturalUVDomain()` instead of the given one; it requires analytic A and
+//! B. A program with an analytic surface runs in a fresh process
+//! ([`crate::isolate::fresh_process`]), so that a crash in the C++ fails only its case.
 
 use crate::validate::bad;
 use crate::{call_with_buffer, FfiError};
@@ -107,6 +114,189 @@ pub enum SurfaceIn {
     /// `SmCurveBoundedSurface(basis, {}, {}, TRUE)` over a plane or B-spline surface
     /// (implicit outer, no boundary curves).
     CurveBounded(Box<SurfaceIn>),
+    /// An analytic surface (the `ssi_corpus` shim's construction).
+    Analytic(Analytic),
+}
+
+/// An analytic surface, as the `ssi_corpus` shim builds it (angles in degrees).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Analytic {
+    /// `SmCylinder(origin + z h0, x, y, radius, angle0, angle1, h1 - h0, FALSE x3)`,
+    /// `z = unit(x × y)`.
+    Cylinder {
+        /// Origin of the axis.
+        origin: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Radius.
+        radius: f64,
+        /// Angles.
+        angle: [f64; 2],
+        /// Heights.
+        height: [f64; 2],
+    },
+    /// `SmCone::CreateCanonical(placement(apex + z h0, x, y), h0 t, h1 t, h1 - h0)`,
+    /// `t = tan(half_angle)`.
+    Cone {
+        /// Apex.
+        apex: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Half angle.
+        half_angle_deg: f64,
+        /// Heights from the apex.
+        height: [f64; 2],
+    },
+    /// `SmSphere(center, x, y, SmExtent2d(lon0, lat0, lon1, lat1), radius)`.
+    Sphere {
+        /// Centre.
+        center: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Radius.
+        radius: f64,
+        /// Longitudes.
+        lon: [f64; 2],
+        /// Latitudes.
+        lat: [f64; 2],
+    },
+    /// `SmTorus(center, x, y, SmExtent2d(major0, minor0, major1, minor1), R, r)`.
+    Torus {
+        /// Centre.
+        center: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Major radius.
+        major_radius: f64,
+        /// Minor radius.
+        minor_radius: f64,
+        /// Major angles.
+        major: [f64; 2],
+        /// Minor angles.
+        minor: [f64; 2],
+    },
+}
+
+/// Orthogonal, non-zero axes (the constructors build their frame from them).
+fn check_axes(x: &[f64; 3], y: &[f64; 3]) -> Result<(), FfiError> {
+    let d = x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let lx = x[0] * x[0] + x[1] * x[1] + x[2] * x[2];
+    let ly = y[0] * y[0] + y[1] * y[1] + y[2] * y[2];
+    if !(lx > 1e-12 && ly > 1e-12) || d.abs() > 1e-9 * (lx * ly).sqrt() {
+        return Err(bad("analytic axes zero or not orthogonal"));
+    }
+    Ok(())
+}
+
+/// An increasing angle interval at most a full turn within `[-360, 360]`.
+fn check_turn(a: &[f64; 2]) -> Result<(), FfiError> {
+    if !(a[0] < a[1] && a[1] - a[0] <= 360.0 && a[0] >= -360.0 && a[1] <= 360.0) {
+        return Err(bad("analytic angle interval"));
+    }
+    Ok(())
+}
+
+impl Analytic {
+    /// The shim's encoding (`4`..`7` and the values), after rejecting degenerate shapes.
+    fn encode(&self, e: &mut Enc) -> Result<(), FfiError> {
+        match self {
+            Analytic::Cylinder {
+                origin,
+                x,
+                y,
+                radius,
+                angle,
+                height,
+            } => {
+                check_axes(x, y)?;
+                check_turn(angle)?;
+                if !(*radius > 0.0 && height[0] < height[1]) {
+                    return Err(bad("cylinder radius or heights"));
+                }
+                e.int(4);
+                e.nums(origin)?;
+                e.nums(x)?;
+                e.nums(y)?;
+                e.num(*radius)?;
+                e.nums(angle)?;
+                e.nums(height)
+            }
+            Analytic::Cone {
+                apex,
+                x,
+                y,
+                half_angle_deg,
+                height,
+            } => {
+                check_axes(x, y)?;
+                let angle_ok = *half_angle_deg > 0.0 && *half_angle_deg < 90.0;
+                let heights_ok = height[0] > 0.0 && height[0] < height[1];
+                // (a NaN fails both comparisons, so it is refused)
+                if !angle_ok || !heights_ok {
+                    return Err(bad("cone half angle or heights"));
+                }
+                e.int(5);
+                e.nums(apex)?;
+                e.nums(x)?;
+                e.nums(y)?;
+                e.num(*half_angle_deg)?;
+                e.nums(height)
+            }
+            Analytic::Sphere {
+                center,
+                x,
+                y,
+                radius,
+                lon,
+                lat,
+            } => {
+                check_axes(x, y)?;
+                check_turn(lon)?;
+                if !(*radius > 0.0 && lat[0] < lat[1] && lat[0] >= -90.0 && lat[1] <= 90.0) {
+                    return Err(bad("sphere radius or latitudes"));
+                }
+                e.int(6);
+                e.nums(center)?;
+                e.nums(x)?;
+                e.nums(y)?;
+                e.num(*radius)?;
+                e.nums(lon)?;
+                e.nums(lat)
+            }
+            Analytic::Torus {
+                center,
+                x,
+                y,
+                major_radius,
+                minor_radius,
+                major,
+                minor,
+            } => {
+                check_axes(x, y)?;
+                check_turn(major)?;
+                check_turn(minor)?;
+                if !(*minor_radius > 0.0 && *major_radius > *minor_radius) {
+                    return Err(bad("torus radii"));
+                }
+                e.int(7);
+                e.nums(center)?;
+                e.nums(x)?;
+                e.nums(y)?;
+                e.num(*major_radius)?;
+                e.num(*minor_radius)?;
+                e.nums(major)?;
+                e.nums(minor)
+            }
+        }
+    }
 }
 
 /// A curve.
@@ -221,6 +411,8 @@ pub struct Program {
     pub a: SurfaceIn,
     /// Surface B, `None` for A itself.
     pub b: Option<SurfaceIn>,
+    /// Every domain is the surface's `GetNaturalUVDomain()` (analytic A and B only).
+    pub natural: bool,
     /// Domain of A.
     pub dom1: [f64; 4],
     /// Domain of B.
@@ -367,12 +559,15 @@ impl Enc {
                 self.nums(v)
             }
             SurfaceIn::CurveBounded(basis) => {
-                if matches!(**basis, SurfaceIn::CurveBounded(_)) {
-                    return Err(bad("nested curve-bounded surface"));
+                if matches!(**basis, SurfaceIn::CurveBounded(_) | SurfaceIn::Analytic(_)) {
+                    return Err(bad(
+                        "curve-bounded surface over a curve-bounded or analytic one",
+                    ));
                 }
                 self.int(3);
                 self.surface(basis)
             }
+            SurfaceIn::Analytic(a) => a.encode(self),
         }
     }
 
@@ -529,6 +724,10 @@ pub fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
         None => e.int(2),
         Some(b) => e.surface(b)?,
     }
+    if prog.natural && !has_analytic(prog, true) {
+        return Err(bad("natural domains need analytic surfaces"));
+    }
+    e.flag(prog.natural);
     e.nums(&prog.dom1)?;
     e.nums(&prog.dom2)?;
     e.flag(prog.fillet);
@@ -547,14 +746,32 @@ pub fn encode(prog: &Program) -> Result<Vec<f64>, FfiError> {
     Ok(e.v)
 }
 
+/// Whether A or B (`all`: A and B) is an analytic surface.
+fn has_analytic(prog: &Program, all: bool) -> bool {
+    let is = |s: &SurfaceIn| matches!(s, SurfaceIn::Analytic(_));
+    let b = prog.b.as_ref().is_none_or(is);
+    if all {
+        is(&prog.a) && b
+    } else {
+        is(&prog.a) || prog.b.as_ref().is_some_and(is)
+    }
+}
+
 /// Runs `prog` (see the module docs) and returns the record.
 ///
 /// # Errors
 ///
 /// [`FfiError::InvalidArgument`] for rejected inputs; [`FfiError::Status`] for a shim
-/// failure.
+/// failure (`SC_ERR_CHILD_CRASHED` when the C++ crashed in its fresh process).
 pub fn run(prog: &Program) -> Result<Vec<f64>, FfiError> {
     let input = encode(prog)?;
+    if has_analytic(prog, false) {
+        return crate::isolate::fresh_process(|| call(&input));
+    }
+    call(&input)
+}
+
+fn call(input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let n_in = i64::try_from(input.len()).map_err(|_| bad("program too long"))?;
     call_with_buffer(4096, |buf: &mut [f64], len| {
         // SAFETY: `input` is valid for `n_in` reads; `buf` for `buf.len()` writes; `len`
