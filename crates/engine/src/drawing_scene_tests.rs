@@ -559,14 +559,16 @@ fn a_sheets_objects_say_where_each_one_is() {
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "2:1"}}));
     let objects = built(&s, sheet).objects;
     let named: Vec<(u64, ObjectKind)> = objects.iter().map(|o| (o.object, o.kind)).collect();
-    assert_eq!(named, [(sheet, ObjectKind::DrawingBorder), (front, ObjectKind::View), (top, ObjectKind::View)]);
+    let by_id = [front.min(top), front.max(top)];
+    assert_eq!(named, [(sheet, ObjectKind::DrawingBorder), (by_id[0], ObjectKind::View), (by_id[1], ObjectKind::View)]);
     let border = objects[0];
     assert_eq!(border.boundary_mm, None);
     assert!(
         border.bounds_mm.min.x >= 0.0 && border.bounds_mm.min.y >= 0.0 && border.bounds_mm.max.x <= 420.0 && border.bounds_mm.max.y <= 297.0,
         "{border:?}"
     );
-    for (object, id, min, max) in [(objects[1], front, [50.0, 130.0], [250.0, 170.0]), (objects[2], top, [50.0, 170.0], [250.0, 270.0])] {
+    for (id, min, max) in [(front, [50.0, 130.0], [250.0, 170.0]), (top, [50.0, 170.0], [250.0, 270.0])] {
+        let object = objects[if id == by_id[0] { 1 } else { 2 }];
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
         assert!(near(&object.boundary_mm.unwrap(), min, max), "{object:?}");
         let inspected = run(&mut s, "drawing.view.inspect", json!({"view": ids::encode(id)}));
@@ -579,7 +581,7 @@ fn a_sheets_objects_say_where_each_one_is() {
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let schema = output_schema_for::<SheetSceneResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
-    assert_eq!((&reply["objects"][1]["object"], &reply["objects"][1]["kind"]), (&json!(ids::encode(front)), &json!("view")), "{reply}");
+    assert_eq!((&reply["objects"][1]["object"], &reply["objects"][1]["kind"]), (&json!(ids::encode(by_id[0])), &json!("view")), "{reply}");
     assert_eq!(reply["objects"][0].get("boundary_mm"), None, "{reply}");
     assert_eq!(reply["scene"].get("objects"), None, "{reply}");
 }

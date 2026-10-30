@@ -326,8 +326,12 @@ impl Drawing {
     /// What is on sheet `id`: its views and the dimensions and balloons in them. Each later kind of record on a
     /// sheet adds its own here, and goes with the sheet ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
-        let views: Vec<u64> = self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect();
         // The views are listed by id, so the sheet's are too.
+        self.with_contents(self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect())
+    }
+
+    /// `views`, listed by id, with the dimensions and balloons in them.
+    pub fn with_contents(&self, views: Vec<u64>) -> OnSheet {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
         OnSheet { views, dimensions, balloons }
@@ -339,10 +343,16 @@ impl Drawing {
     pub fn remove_sheet(&mut self, id: u64) -> OnSheet {
         let on = self.on_sheet(id);
         self.sheets.retain(|s| s.id != id);
-        self.views.retain(|v| v.sheet != id);
-        self.dimensions.retain(|d| on.dimensions.binary_search(&d.id).is_err());
-        self.balloons.retain(|b| on.balloons.binary_search(&b.id).is_err());
+        self.remove_objects(&on);
         on
+    }
+
+    /// Takes `objects` out, each list by id: the one rule a sheet's delete and a selection's delete
+    /// remove by. As in [`Drawing::remove_sheet`], what is left must still keep the record's rules.
+    pub fn remove_objects(&mut self, objects: &OnSheet) {
+        self.views.retain(|v| objects.views.binary_search(&v.id).is_err());
+        self.dimensions.retain(|d| objects.dimensions.binary_search(&d.id).is_err());
+        self.balloons.retain(|b| objects.balloons.binary_search(&b.id).is_err());
     }
 
     /// Every object's id, of every kind: what a new id must differ from. Each later kind adds its

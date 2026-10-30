@@ -14,6 +14,7 @@
 //! view lined up with its parent is on the parent's sheet; a view's place is on paper
 //! ([`is_paper_coordinate`]); at most [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -166,6 +167,25 @@ impl Drawing {
     /// View `id`, found by halves in the views' id order.
     pub fn view(&self, id: u64) -> Option<&View> {
         self.view_index(id).and_then(|i| self.views.get(i)).map(|v| &**v)
+    }
+
+    /// `views` and every view projected from them, directly or through others. A parent can sort
+    /// after its child, so each pass over the views finds at least one more level of a chain, which
+    /// is at most [`MAX_VIEW_DEPTH`] views.
+    pub fn with_projected(&self, views: &BTreeSet<u64>) -> BTreeSet<u64> {
+        let mut all = views.clone();
+        for _ in 0..MAX_VIEW_DEPTH {
+            let before = all.len();
+            for view in &self.views {
+                if matches!(view.kind, ViewKind::Projected { parent, .. } if all.contains(&parent)) {
+                    all.insert(view.id);
+                }
+            }
+            if all.len() == before {
+                break;
+            }
+        }
+        all
     }
 
     /// Where view `id` is in [`Drawing::views`].
