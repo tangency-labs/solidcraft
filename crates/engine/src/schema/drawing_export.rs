@@ -14,7 +14,7 @@ pub struct ExportParams {
     /// The sheet, by id or name.
     #[serde(deserialize_with = "sheet_ref")]
     pub sheet: String,
-    /// The file format (svg when not given). PNG and DXF are not supported yet.
+    /// The file format (svg when not given). DXF is not supported yet.
     #[serde(default)]
     pub format: ExportFormat,
     /// The file to write, ending in the format's extension (the reply holds the document when
@@ -22,6 +22,14 @@ pub struct ExportParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub path: Option<String>,
+    /// PNG only: its resolution in dots per inch, 25 to 2400 (the sheet's own when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub dpi: Option<f64>,
+    /// PNG only: how it stores its pixels (grey when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ExportColour")]
+    pub colour: Option<ExportColour>,
 }
 
 /// A sheet export's file format.
@@ -34,6 +42,43 @@ pub enum ExportFormat {
     Dxf,
 }
 
+impl ExportFormat {
+    /// The extension a file of this format ends in, which a path must have.
+    pub fn extension(self) -> &'static str {
+        match self {
+            ExportFormat::Svg => "svg",
+            ExportFormat::Png => "png",
+            ExportFormat::Dxf => "dxf",
+        }
+    }
+}
+
+/// How a sheet PNG stores its pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportColour {
+    /// 8-bit greyscale on white paper.
+    #[default]
+    Grey,
+    /// One bit a pixel, black or white, every line at least a pixel wide.
+    BlackWhite,
+    /// 24-bit colour on white paper.
+    Rgb,
+    /// 32-bit colour, the paper transparent.
+    Transparent,
+}
+
+impl From<ExportColour> for solidcraft_io::paper::PngColour {
+    fn from(colour: ExportColour) -> Self {
+        match colour {
+            ExportColour::Grey => Self::Grey,
+            ExportColour::BlackWhite => Self::BlackWhite,
+            ExportColour::Rgb => Self::Rgb,
+            ExportColour::Transparent => Self::Transparent,
+        }
+    }
+}
+
 /// What a writer did that the scene didn't say.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ExportReport {
@@ -41,6 +86,9 @@ pub struct ExportReport {
     pub widths_snapped: usize,
     /// Pieces too short for the nanometre grid, merged into the next.
     pub pieces_merged: usize,
+    /// A PNG's width and height in pixels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pixels: Option<[u32; 2]>,
 }
 
 /// What `drawing.export` returns.
@@ -53,9 +101,12 @@ pub struct ExportResult {
     /// The file written, when a path was given.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-    /// The SVG document, when no path was given.
+    /// The document when no path was given and it is text (SVG).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub svg: Option<String>,
+    pub text: Option<String>,
+    /// The document as base64 when no path was given and it is binary (PNG).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
     pub report: ExportReport,
     /// Each view on the sheet, in id order, as `drawing.scene` reports it.
     pub views: Vec<SheetSceneView>,

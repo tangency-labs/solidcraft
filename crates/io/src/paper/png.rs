@@ -18,10 +18,12 @@ use std::ops::RangeInclusive;
 use solidcraft_geom::paper::{self, Grid, GridItem, GridPath, GridReport, Prepared};
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
 
+use solidcraft_doc::drawing::{DEFAULT_DPI, MAX_DPI, MIN_DPI};
+
 use crate::{IoError, Result};
 
-/// The resolutions a sheet PNG may have, in dots per inch.
-pub const DPI: RangeInclusive<f64> = 25.0..=2400.0;
+/// The resolutions a sheet PNG may have, in dots per inch: a sheet's.
+pub const DPI: RangeInclusive<f64> = MIN_DPI..=MAX_DPI;
 /// The most points a sheet's lines may flatten to in all.
 pub const MAX_POINTS: usize = 1 << 24;
 /// The pixels drawn at a time, as RGBA bytes.
@@ -53,7 +55,7 @@ pub struct PngOptions {
 
 impl Default for PngOptions {
     fn default() -> Self {
-        PngOptions { dpi: 300.0, colour: PngColour::Grey }
+        PngOptions { dpi: DEFAULT_DPI, colour: PngColour::Grey }
     }
 }
 
