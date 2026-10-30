@@ -148,6 +148,7 @@ crate::dialog_descriptor::dialog_descriptors! {
         ; custom {
             /// Pick a plane or planar face; the sketch starts on it at once.
             Sketch,
+            PointTransfer(crate::dialogs_point_transfer::Transfer),
             Extrude {
                 distance: String,
                 direction: usize,
@@ -1056,7 +1057,8 @@ impl Dialog {
                     .or_else(|| crate::dialogs_part_size::start(app, id))
                     .or_else(|| crate::sketch_text::start(app, id))
                     .or_else(|| crate::sketch_text_move::start(app, id))
-                    .or_else(|| crate::sketch_modify_ui::start(app, id))?;
+                    .or_else(|| crate::sketch_modify_ui::start(app, id))
+                    .or_else(|| crate::dialogs_point_transfer::start(app, id))?;
                 Dialog::new(kind, inputs)
             }
         };
@@ -1071,8 +1073,24 @@ impl Dialog {
         // Pre-selection: what is selected now becomes the input (first input that takes it); a
         // face or edge stands for its body where bodies are wanted. (Edit Text's selection is the
         // text it edits, not its path.)
-        let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
+        let preselection: &[Sel] =
+            if matches!(d.kind, Kind::Text(_) | Kind::PointTransfer(crate::dialogs_point_transfer::Transfer { paste: true, .. })) {
+                &[]
+            } else {
+                &s.selection
+            };
         for sel in preselection {
+            // Anchored component placement keeps the exact occurrence rather than expanding
+            // it to its bodies (the normal solid-feature preselection below).
+            if matches!(d.kind, Kind::PointTransfer(_))
+                && let Sel::Occurrence { .. } = sel
+                && let Some(input) = d.inputs.first_mut().filter(|i| i.label == "Objects")
+            {
+                if !input.items.contains(sel) {
+                    input.items.push(sel.clone());
+                }
+                continue;
+            }
             // A sketch line drawn over a body edge is what a click there picks; a command that
             // takes edges and no sketch curves takes it as that edge (#8927).
             let as_edge = (!d.inputs.iter().any(|i| fits(i.accept, sel)) && d.inputs.iter().any(|i| i.accept & EDGES != 0))
@@ -1136,7 +1154,7 @@ impl Dialog {
                 _ => true,
             };
             let takes = |i: &SelInput| {
-                fits(i.accept, sel)
+                (fits(i.accept, sel) || (matches!(d.kind, Kind::PointTransfer(_)) && i.label == "Objects" && matches!(sel, Sel::Occurrence { .. })))
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
@@ -1259,6 +1277,7 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
+            Kind::PointTransfer(_) => return true,
             Kind::Frame(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
@@ -2264,6 +2283,13 @@ fn title(k: &Kind) -> &'static str {
         Kind::Text(_) => "EDIT TEXT",
         Kind::TextMove(_) => "MOVE/COPY TEXT",
         Kind::SketchModify(k) => k.title(),
+        Kind::PointTransfer(t) => {
+            if t.paste {
+                "Point to Point Paste"
+            } else {
+                "Point to Point Move/Copy"
+            }
+        }
         _ => k.simple_metadata().map_or("", |(_, title)| title),
     }
 }
@@ -2403,6 +2429,10 @@ fn align_object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
 /// face point, or sketch points).
 fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
     let session = &app.session;
+    if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })) {
+        crate::sketch_modify_ui::type_row(d, ui);
+        return;
+    }
     if matches!(d.kind, Kind::Mirror) {
         object_type_row(d, ui);
         return;
@@ -2560,7 +2590,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
             let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
             format!("({:.2}, {:.2}) mm", p.x, p.y)
         }
-        Sel::Vertex { body, .. } => format!("{body} · vertex"),
+        Sel::Vertex { body, point } => format!("{body} · ({:.2}, {:.2}, {:.2}) mm", point.x, point.y, point.z),
         _ => format!("{item:?}"),
     }
 }
@@ -4932,6 +4962,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::SketchModify(k) => return crate::sketch_modify_ui::commands(app, k, &d.inputs, &d.extra),
+        Kind::PointTransfer(t) => return crate::dialogs_point_transfer::commands(app, d, t),
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
         Kind::ViewDxf { .. } => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),

@@ -116,6 +116,7 @@ fn foreign_bodies(app: &SolveApp) -> bool {
 pub(crate) fn drop_stale(app: &mut SolveApp) {
     if app.own_clipboard_stamp != app.clipboard_stamp {
         app.session.clipboard.clear();
+        app.session.object_clipboard.clear();
         app.session.sketch_clipboard = None;
         app.copied_bodies.clear();
         app.copied_placements.clear();
@@ -238,6 +239,7 @@ fn clear_clipboard(app: &mut SolveApp) {
 /// features and sketch geometry are replaced by the commands that copy them), in this design and
 /// for the others: it is the last one.
 fn replace_clipboard(app: &mut SolveApp) {
+    app.session.object_clipboard.clear();
     app.clipboard_stamp += 1;
     app.own_clipboard_stamp = app.clipboard_stamp;
     app.foreign_copy = None;
@@ -309,6 +311,10 @@ pub fn copy(app: &mut SolveApp) -> bool {
         app.set_status(format!("Copied {} (Ctrl+V pastes an instance, Ctrl+Shift+V a new copy)", names.join(", ")), false);
         leave_text(app, format!("SolidCraft components: {}", names.join(", ")));
         app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, Vec::new(), placements.clone())));
+        app.session.object_clipboard = match placements.as_slice() {
+            [path] => vec![Sel::Occurrence { path: path.clone() }],
+            _ => Vec::new(),
+        };
         app.copied_placements = placements;
         return true;
     }
@@ -319,6 +325,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
         app.set_status(format!("Copied {}", bodies.join(", ")), false);
         leave_text(app, format!("SolidCraft bodies: {}", bodies.join(", ")));
         app.foreign_copy = Some(std::sync::Arc::new(solidcraft_engine::ForeignCopy::of(&app.session, bodies.clone(), Vec::new())));
+        app.session.object_clipboard = bodies.iter().map(|name| Sel::Body { name: name.clone() }).collect();
         app.copied_bodies = bodies;
         return true;
     }

@@ -111,7 +111,7 @@ pub enum Mod {
     /// `sketch.move`: how far the picked entities move along the sketch's own axes, how far they
     /// turn about the centre, and whether the originals stay behind. The command already
     /// carries the copy flag, so the Create Copy row needs no engine change.
-    Move { x: String, y: String, angle: String, copy: bool },
+    Move { x: String, y: String, angle: String, copy: bool, point_to_point: bool },
     /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the middle
     /// of their box. `x` and `y` move that middle, `factor` scales and `angle` turns about it.
     /// `frame` is the box (middle and size in the sketch, kept up to date from the picks by
@@ -147,7 +147,15 @@ pub enum Mod {
 
 impl Mod {
     pub fn previews(&self) -> bool {
-        matches!(self, Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. })
+        matches!(
+            self,
+            Self::Mirror
+                | Self::PatternRect { .. }
+                | Self::PatternCirc { .. }
+                | Self::Offset { .. }
+                | Self::Corner { .. }
+                | Self::Move { point_to_point: true, .. }
+        )
     }
 
     pub fn title(&self) -> &'static str {
@@ -170,6 +178,7 @@ impl Mod {
         match self {
             Mod::Scale { factor } => Some(("Factor", ValueKind::Unitless, factor)),
             Mod::Offset { distance, .. } => Some(("Distance", ValueKind::Length, distance)),
+            Mod::Move { point_to_point: true, .. } => None,
             Mod::Move { x, .. } => Some(("X Distance", ValueKind::Length, x)),
             // The handles in the viewport are its manipulator; the window has the numbers.
             Mod::Transform { .. } => None,
@@ -191,6 +200,11 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::Offset { .. } => vec![SelInput::new("Curves", CURVES, true)],
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Mirror line", AXES, false)],
+        Mod::Move { point_to_point: true, .. } => vec![
+            SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true),
+            SelInput::new("From", SKETCH_POINTS, false),
+            SelInput::new("To", SKETCH_POINTS, false),
+        ],
         Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)],
         Mod::Transform { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true)],
         // The direction is optional: `sketch.pattern.rectangular` documents sketch x as its
@@ -245,6 +259,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             y: crate::dialogs::length_default(&app.session, "0"),
             angle: "0 deg".into(),
             copy: false,
+            point_to_point: false,
         },
         "sketch.pattern.rectangular" => Mod::PatternRect {
             count: "3".into(),
@@ -443,9 +458,39 @@ pub fn double_click_entities(app: &mut SolveApp) -> bool {
     true
 }
 
-/// Place a circular pattern centre in empty sketch space without creating a document point.
+/// Switching move type retains the selected geometry and Create Copy choice.
+pub fn type_row(d: &mut Dialog, ui: &mut egui::Ui) {
+    let Kind::SketchModify(Mod::Move { point_to_point, .. }) = &d.kind else { return };
+    let old = usize::from(*point_to_point);
+    let mut mode = old;
+    crate::ui_kit::choice_row(ui, "Move Type", "sketch_move_type", &mut mode, &["Free Move", "Point to Point"]);
+    if mode != old {
+        set_point_to_point(d, mode == 1);
+    }
+}
+
+pub(crate) fn set_point_to_point(d: &mut Dialog, mode: bool) {
+    let Kind::SketchModify(k @ Mod::Move { .. }) = &mut d.kind else { return };
+    if let Mod::Move { point_to_point, .. } = k {
+        *point_to_point = mode;
+    }
+    let entities = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
+    d.inputs = inputs(k);
+    if let Some(input) = d.inputs.first_mut() {
+        input.items = entities;
+    }
+    d.active = if d.inputs.first().is_none_or(|input| input.items.is_empty()) { 0 } else { 1 };
+    d.error = None;
+}
+
+/// Pick a pattern centre or move anchor in empty sketch space without creating a point.
 pub fn pick_position(d: &mut Dialog, session: &solidcraft_engine::Session, point: Vec3) -> bool {
-    if !matches!(d.kind, Kind::SketchModify(Mod::PatternCirc { .. })) || d.active != 1 {
+    let position = match d.kind {
+        Kind::SketchModify(Mod::PatternCirc { .. }) => d.active == 1,
+        Kind::SketchModify(Mod::Move { point_to_point: true, .. }) => d.active == 1 || d.active == 2,
+        _ => false,
+    };
+    if !position {
         return false;
     }
     d.pick(session, Sel::Vertex { body: String::new(), point });
@@ -540,9 +585,11 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             });
         }
         Mod::Mirror => {}
-        Mod::Move { x, y, angle, copy } => {
-            enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
-            enter |= number(ui, "Angle", angle);
+        Mod::Move { x, y, angle, copy, point_to_point } => {
+            if !*point_to_point {
+                enter |= ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], Some(["X Distance", "Y Distance"]));
+                enter |= number(ui, "Angle", angle);
+            }
             ui_kit::options(ui, "move_options", &mut [("Create Copy", copy)]);
         }
         Mod::Transform { x, y, factor, angle, frame } => {
@@ -952,10 +999,18 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             // picked in one action): the command leaves the line in place and mirrors the rest.
             ("sketch.mirror", json!({"entities": entities, "line": line}))
         }
-        Mod::Move { x, y, angle, copy } => {
+        Mod::Move { x, y, angle, copy, point_to_point } => {
             let entities = entity_ids(&app.session, inputs, 0);
             if entities.is_empty() {
                 return Err("Select the sketch curves or points to move first".into());
+            }
+            if *point_to_point {
+                let from = crate::dialogs_point_transfer::anchor(app, inputs, 1)?;
+                let to = crate::dialogs_point_transfer::anchor(app, inputs, 2)?;
+                let state = app.session.world_state();
+                let plane = state.sketch(app.session.active_sketch.ok_or("Edit a sketch first")?).ok_or("Sketch no longer exists")?.plane;
+                let (from, to) = (plane.to_local(from), plane.to_local(to));
+                return Ok(vec![("sketch.move".into(), json!({"entities": entities, "from": [from.x,from.y], "to": [to.x,to.y], "copy": copy}))]);
             }
             let dx = value(app, x, ValueKind::Length, "X Distance")?;
             let dy = value(app, y, ValueKind::Length, "Y Distance")?;

@@ -759,6 +759,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
     let mut v = vec![
         act("ui.moveBodies", "Move/Copy", "move").key("M").with(json!({ "bodies": names })).on(!locked),
+        act("ui.pointMove", "Point to Point Move/Copy", "move").with(json!({"objects": items})).on(!locked),
         cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.material", "Physical Material", "material").with(json!({ "bodies": names })),
@@ -773,6 +774,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
+        cmd(app, "edit.paste.point_to_point", "Point to Point Paste"),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
         cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
         act("ui.rename", "Rename", "rename").with(json!({ "body": bodies.first() })).on(one),
@@ -811,6 +813,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
+        cmd(app, "edit.paste.point_to_point", "Point to Point Paste"),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
         act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
         Item::sep(),
@@ -923,6 +926,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             }
             "occurrence.copy" => item.params = Some(json!({"occurrence": placement.occurrence, "translate": [10,10,0]})),
             "ui.paste" | "ui.pasteNew" => item.params = Some(json!({"component": placement.component, "path": path})),
+            "ui.pointMove" => item.params = Some(json!({"objects":[{"type":"occurrence", "path":path}]})),
             "component.create" => item.params = Some(json!({"parent": placement.component, "parent_path": path})),
             "ui.rename" => item.label = "Rename Component".into(),
             "ui.appearance" => item.label = "Component Appearance".into(),
@@ -970,6 +974,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     // copied components as independent copies.
     let into = json!({ "component": id, "path": app.session.doc.first_path(id) });
     let pastes_here = crate::edit_clipboard::can_paste_into(app, id);
+    let point_objects = json!([{"type":"occurrence", "path":app.session.doc.first_path(id)}]);
     let mut v = Vec::new();
     if doc.parts.contains_key(&id) {
         v.push(cmd(app, "parts.resize", "Edit").with(json!({"component":id})));
@@ -978,6 +983,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
         v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
+        v.push(act("ui.pointMove", "Point to Point Move/Copy", "move").with(json!({"objects":point_objects})).on(!grounded));
         if doc.links.contains_key(&id) {
             v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
             v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
@@ -1042,6 +1048,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)));
     }
     v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").with(into.clone()).on(pastes_here));
+    v.push(cmd(app, "edit.paste.point_to_point", "Point to Point Paste"));
     v.push(
         act("ui.pasteNew", "Paste New", "paste")
             .key("Ctrl+Shift+V")
@@ -1156,6 +1163,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.dimension", "Sketch Dimension"));
         v.push(Item::sep());
         v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(app.session.sketch_clipboard.is_some()));
+        v.push(cmd(app, "edit.paste.point_to_point", "Point to Point Paste"));
         return v;
     }
     let ents: Vec<String> = curves.iter().chain(points.iter()).cloned().collect();
@@ -1221,6 +1229,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
     v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(app.session.sketch_clipboard.is_some()));
+    v.push(cmd(app, "edit.paste.point_to_point", "Point to Point Paste"));
     v.push(act("ui.delete", "Delete", "delete").key("Del"));
     v.push(cmd(app, "sketch.dimension", "Sketch Dimension").with(json!({ "entities": ents })).on(ents.len() <= 2));
     // One arc alone: Sketch Dimension gives its radius, this its length along the curve (#6039).
@@ -1378,6 +1387,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.extractComponent" => {
             if let Some(component) = id_of(&p, "component") {
                 crate::linked_source::extract(app, component);
+            }
+        }
+        "ui.pointMove" => {
+            if app.run("select.set", json!({"items": p.get("objects").cloned().unwrap_or_else(|| json!([]))})).is_ok() {
+                app.start("objects.move.point_to_point");
             }
         }
         "ui.copy" => drop(crate::edit_clipboard::copy(app)),

@@ -475,6 +475,8 @@ pub struct Session {
     contact_meshes: std::sync::Arc<std::sync::Mutex<cmd::motion::contact_sweep::ContactMeshes>>,
     /// Features copied with `timeline.copy` (pasted by `timeline.paste`).
     pub clipboard: Vec<solidcraft_doc::Feature>,
+    /// Bodies or an exact occurrence placement copied for point-to-point paste.
+    pub object_clipboard: Vec<Sel>,
     /// Sketch geometry copied with `sketch.copy` (pasted by `sketch.paste`).
     pub sketch_clipboard: Option<cmd::sketch_clipboard::SketchClip>,
     /// Resolved appearance copied by appearance.copy; transient, outside design/history.
@@ -671,6 +673,7 @@ impl Session {
             body_renames: Vec::new(),
             contact_meshes: Default::default(),
             clipboard: Vec::new(),
+            object_clipboard: Vec::new(),
             sketch_clipboard: None,
             appearance_clipboard: None,
             foreign_copy: None,
@@ -1533,6 +1536,7 @@ impl Session {
             body_renames: self.body_renames.clone(),
             contact_meshes: self.contact_meshes.clone(),
             clipboard: self.clipboard.clone(),
+            object_clipboard: self.object_clipboard.clone(),
             sketch_clipboard: self.sketch_clipboard.clone(),
             appearance_clipboard: self.appearance_clipboard.clone(),
             foreign_copy: self.foreign_copy.clone(),

@@ -79,6 +79,7 @@ mod kernel_heal_tests;
 mod parameter_sweep;
 mod parameters;
 mod plastic;
+mod point_transfer;
 mod print_face;
 mod render;
 mod render_ui;
@@ -329,6 +330,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());
+    v.extend(point_transfer::COMMANDS.iter());
     v.extend(sketch_clipboard::COMMANDS.iter());
     v.extend(script::COMMANDS.iter());
     v.extend(parameters::COMMANDS.iter());
