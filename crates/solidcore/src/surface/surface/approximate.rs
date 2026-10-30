@@ -36,7 +36,10 @@
 //! - **Patch index check.** When a starter surface's knots are not all of full
 //!   multiplicity, a patch's control points lie outside the net; upstream signals
 //!   `SM_ERR` but returns `SM_SUCCESS` without surface, as the port does (`Ok` with
-//!   `surface: None`).
+//!   `surface: None`). With `Kernel::fixes.approximate_surface_bezier_starter`
+//!   (WR-573, the fork's tangency-labs/smlib@eae96cb) the starter's inner knots are
+//!   raised to full multiplicity before each round of patches, and an overrun is
+//!   `SM_ERR`.
 //! - **Root surface.** `GetRootSurface` of an offset, curve bounded surface or surface
 //!   in a volume follows its base; the chain is walked in a loop bounded by
 //!   [`MAX_GEOMETRY_NESTING`] (`InvalidInput` beyond). The root of a plane, cone,
@@ -303,6 +306,31 @@ impl Surface {
 
             // Update pApproxSurf using cubic Bezier approximations to each patch.
 
+            // `Kernel::fixes.approximate_surface_bezier_starter` (WR-573): the patches
+            // below are the cubic Bezier pieces between knots, which needs every inner
+            // knot of full multiplicity (control points 3 apart per span). A starter
+            // copied from a root B-spline with simple inner knots is put in that form
+            // first, exactly, by knot insertion.
+            if k.fixes.approximate_surface_bezier_starter {
+                for (param, deg) in [(SurfParamType::U, u_deg), (SurfParamType::V, v_deg)] {
+                    let (knots, mult) = approx_surf.knots(param, None)?;
+                    more_knots.clear();
+                    for (knot, &m) in knots
+                        .iter()
+                        .zip(&mult)
+                        .take(knots.len().saturating_sub(1))
+                        .skip(1)
+                    {
+                        for _ in m..deg {
+                            more_knots.push(*knot);
+                        }
+                    }
+                    if !more_knots.is_empty() {
+                        approx_surf.insert_knots(param, &more_knots)?;
+                    }
+                }
+            }
+
             // get knots of the subdivided surface (statuses ignored: without NURB the
             // arrays keep their values)
             if let Some((knots, _mult)) = ignored(approx_surf.knots(SurfParamType::U, None))? {
@@ -332,6 +360,11 @@ impl Surface {
                     for iub in 0..=3 {
                         for ivb in 0..=3 {
                             if u_min + iub >= num_ctrl_u || v_min + ivb >= num_ctrl_v {
+                                // `Kernel::fixes.approximate_surface_bezier_starter`
+                                // (WR-573): an error, not success with no surface
+                                if k.fixes.approximate_surface_bezier_starter {
+                                    return Err(SolidError::sm_err(OP));
+                                }
                                 // SE(SM_ERR): some problem here with knots; upstream
                                 // returns SM_SUCCESS without surface
                                 return Ok(None);
@@ -849,6 +882,85 @@ mod tests {
         let p = s.evaluate_point(&k, uv).unwrap();
         let q = off.evaluate_point(&k, uv).unwrap();
         assert!(p.distance(q) <= 2.0 * tol, "{}", p.distance(q));
+    }
+
+    /// Issue #1501 (WR-573): the offset 0.5 of a sheet on a cubic wave of 6 control
+    /// points with simple inner knots (0 0 0 0 1/3 2/3 1 1 1 1), extruded 10 along y.
+    fn offset_wave() -> Surface {
+        let xz = [
+            (0.0, 0.0),
+            (2.0, 0.4),
+            (4.0, -0.4),
+            (6.0, 0.4),
+            (8.0, -0.4),
+            (10.0, 0.0),
+        ];
+        let pts: Vec<Point3> = xz
+            .iter()
+            .flat_map(|&(x, z)| [Point3::new(x, 0.0, z), Point3::new(x, 10.0, z)])
+            .collect();
+        let wave = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[4, 1, 1, 4],
+            v_multiplicities: &[2, 2],
+            u_knots: &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap();
+        let k = kernel();
+        Surface::from(OffsetSurface::new(&k, 0.5, Surface::from(wave), true, 0).unwrap())
+    }
+
+    #[test]
+    fn wr573_default_gives_success_without_surface() {
+        // upstream: the starter's simple knots run its patches past its control points
+        let k = kernel();
+        let r = offset_wave()
+            .approximate_surface(&k, 1e-3, 3, false)
+            .unwrap();
+        assert!(r.surface.is_none());
+    }
+
+    #[test]
+    fn wr573_bezier_starter_approximates_the_offset_wave() {
+        let mut k = kernel();
+        k.fixes.approximate_surface_bezier_starter = true;
+        let off = offset_wave();
+        let tol = 1e-3;
+        let r = off.approximate_surface(&k, tol, 3, false).unwrap();
+        // the flag's path ran: the starter's patches no longer overrun its control
+        // points, so a pass was sampled and a surface returned (without the flag
+        // there is no surface and no sample)
+        let s = r.surface.unwrap();
+        // Upstream accepts a pass when its last row (or column) of patches is within
+        // `tol`: `bFailed` starts over with every row (SmSurface.cpp, the `outer`
+        // loop), so a pass can succeed with an earlier row outside `tol`. Its
+        // achieved tolerance is the largest deviation over the whole pass, above `tol`
+        // here. Pinned (the kernel is deterministic): any change in the fit shows.
+        let want = 0.001_620_828_043_730_338_3;
+        assert!(
+            (r.achieved_tol - want).abs() <= 1e-12 * want,
+            "{}",
+            r.achieved_tol
+        );
+        // the surface is that pass's, its excess knots removed within `tol`
+        let dom = off.natural_uv_domain_with_nurb(&k).unwrap();
+        for (fu, fv) in [(0.1, 0.2), (0.5, 0.5), (0.83, 0.9)] {
+            let uv = dom.evaluate(fu, fv);
+            let p = s.evaluate_point(&k, uv).unwrap();
+            let q = off.evaluate_point(&k, uv).unwrap();
+            assert!(
+                p.distance(q) <= r.achieved_tol + tol,
+                "{fu} {fv}: {}",
+                p.distance(q)
+            );
+        }
     }
 
     #[test]

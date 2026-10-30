@@ -1,0 +1,15 @@
+#### WR-573. `SmSurface::ApproximateSurface` returns success with no surface for a starter with simple inner knots, so an offset B-spline sheet cannot be exported as B-splines (1.0.1)
+- **Severity:** Wrong result
+- **Area:** Surfaces
+- **Location:** `source/SMLib/src/SmSurface.cpp` at `3fd5b95`, `SmSurface::ApproximateSurface`: the per-patch loop's overrun branch (`if (lUMin+iub >= lNumCtrlU || lVMin+ivb >= lNumCtrlV) { SE(SM_ERR); return SM_SUCCESS; }`), and the starter copied from `GetRootSurface()` and used as it is.
+- **What happens:** the approximation fits one cubic Bezier patch between each pair of knots. That needs every inner knot of full multiplicity, so that each span's control points are 3 apart. A starter copied from a root B-spline with simple inner knots (the offset of a fitted bicubic patch) is used as it is, and its patches index past its control points. The branch that catches this signals `SM_ERR` but returns `SM_SUCCESS` with no surface, so the caller gets success and nothing.
+- **Trigger:**
+  - Input: a sheet on a cubic B-spline wave of 6 control points ((0, 0, 0), (2, 0, 0.4), (4, 0, -0.4), (6, 0, 0.4), (8, 0, -0.4), (10, 0, 0); knots 0 0 0 0 1/3 2/3 1 1 1 1), extruded 10 along y, offset by 0.5.
+  - Its face is on an `SmOffsetSurface` of that B-spline. `ApproximateSurface(1e-3, 3, FALSE)` of it returns `SM_SUCCESS` with no surface.
+  - Exporting the offset sheet with B-spline output (`SmBrepData`'s `bWriteAsBSplines` writer) then fails with 1001.
+- **How found:** tangency-labs/solidcore#1501 (SolidCraft's Offset Surface and Thicken of a filled cup's cover); fixed in the fork as tangency-labs/smlib@eae96cb.
+- **Confirmed:** yes, C++ (`surface.surface_approximate` `issue1501_offset_wave_simple_knots`): the pinned C++ returns `SM_SUCCESS` with no surface for the offset wave, and the Rust default matches it (as for the generated `offset_simple_knot_cubic`). Also the fork's C API test (`capi/tests/ops_kernel.cpp`, the cubic-wave sheet offset by 0.5 exports) fails before its fix, and `surface::surface::approximate::tests::wr573_default_gives_success_without_surface` holds the Rust default.
+- **Fix (opt-in, not the default):** `Kernel::fixes.approximate_surface_bezier_starter`.
+  - Before each round of patches, the approximation surface's inner knots are raised to full multiplicity (degree 3) in u and v by knot insertion, which is exact.
+  - A patch that still runs past the control points is `SM_ERR`.
+  - With it, the offset wave gets a surface (`wr573_bezier_starter_approximates_the_offset_wave`). Its achieved tolerance is 1.62e-3 at a requested 1e-3: as upstream, a pass is accepted when its last row of patches is within the tolerance, and the achieved tolerance is the pass's largest deviation.
