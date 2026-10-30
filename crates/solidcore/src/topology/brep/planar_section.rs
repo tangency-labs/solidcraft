@@ -278,7 +278,13 @@ pub struct PlanarSectionOptions {
     pub outputs: SectionOutputs,
     /// `bForceUVClassify`: give a section curve without UV curve one by dropping it on
     /// the surface (replacing the 3D curve by the drop's lift); only with
-    /// [`SectionOutputs::uv_curves`].
+    /// [`SectionOutputs::uv_curves`]. Defaults to `false`, as upstream's
+    /// `bForceUVClassify` does (`SmBrep.h:542-552`). Without it, UV section curves
+    /// requested for faces whose intersector makes no UV curve (planes, cylinders,
+    /// cones, spheres) are silently dropped by the trim step, matching upstream
+    /// (`SmBrep.cpp:5387`/`5480`, `SmFace.cpp:6990-7010`). Callers that need UV curves
+    /// should set it `true`; callers that do not should request no UV output, as
+    /// `SM_API`'s section function does.
     pub force_uv_classify: bool,
 }
 
@@ -301,6 +307,9 @@ pub struct PlanarSection {
 /// face or (on a planar face) with an embedded edge of the face are removed; with
 /// `force_uv_classify` and the UV output, a curve without UV curve gets one; the curves are
 /// then trimmed to the face (`CreateCurvesByTrimming`).
+///
+/// Note: without [`PlanarSectionOptions::force_uv_classify`], requested UV curves of
+/// analytic faces (plane, cylinder, cone, sphere) are dropped; see that field.
 ///
 /// Warning (upstream): if the plane crosses a surface seam you may get 2 sets of curves.
 ///
