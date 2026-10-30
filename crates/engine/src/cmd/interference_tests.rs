@@ -156,3 +156,20 @@ fn mesh_bodies_are_listed_as_unchecked_not_dropped() {
     assert_eq!(i["checked"], 1, "{i}");
     assert_eq!(i["unchecked"][0]["a"].as_str(), Some(meshes[0].as_str()), "{i}");
 }
+
+/// A case top whose outer top edge (a full circle) is filleted, with an open cavity cut from
+/// below: a board wholly in the cavity and a pad mostly below the case share no volume with it.
+/// The boolean once kept a retry that held the whole board when the meshes it checks with were
+/// fine enough to be skipped (see the kernel's `a_board_in_the_cavity_of_a_rounded_case_...`).
+#[test]
+fn a_filleted_circular_rim_does_not_swallow_bodies_in_its_cavity() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 50, "height": 14.3, "base": [0, 0, 1.5], "operation": "new", "body_name": "CaseTop"}));
+    run(&mut s, "solid.fillet", json!({"body": "CaseTop", "edges": [[25, 0, 15.8]], "radius": 1.5}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 43, "height": 11.7, "base": [0, 0, 1.5], "operation": "cut", "targets": ["CaseTop"]}));
+    run(&mut s, "solid.box", json!({"length": 25, "width": 30, "height": 1, "center": [0.5, 0, 7], "operation": "new", "body_name": "PCB"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 2.86, "base": [-10, 0, -0.86], "operation": "new", "body_name": "Pad"}));
+    let i = run(&mut s, "inspect.interference", json!({"bodies": ["CaseTop", "PCB", "Pad"]}));
+    assert_eq!(i["count"], 0, "{i}");
+    assert_eq!(i["unchecked"].as_array().map(Vec::len), Some(0), "{i}");
+}
