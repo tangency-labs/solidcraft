@@ -2,6 +2,17 @@
 (function () {
   "use strict";
 
+  // ---- times: the page is built with UTC times; show each in the viewer's locale and zone.
+  function localTime(t) {
+    return new Date(t * 1000).toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      timeZoneName: "short",
+    });
+  }
+  document.querySelectorAll("time[data-ts]").forEach(function (el) {
+    el.textContent = localTime(+el.getAttribute("data-ts"));
+  });
+
   // ---- sortable tables: <th data-sort="num|text">; a cell's data-v overrides its text.
   function cellValue(td, kind) {
     if (!td) return kind === "num" ? -Infinity : "";
@@ -98,7 +109,7 @@
     var tip = svg.parentNode.querySelector(".tip");
     function sx(t) { return L + (W - L - R) * (t - x0) / Math.max(1, x1 - x0); }
     function fmt(t) {
-      return new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC";
+      return localTime(t);
     }
     function move(ev) {
       var box = svg.getBoundingClientRect();

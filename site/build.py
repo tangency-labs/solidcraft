@@ -634,11 +634,19 @@ def chart_svg(points, cid="chart", title="Share of upstream lines ported over ti
             '<div class="tip" hidden></div></div>')
 
 
+def local_time(t):
+    """A <time> element for epoch `t`: UTC text as the no-script fallback, and the exact
+    instant in `datetime`/`data-ts` so app.js rewrites it in the viewer's own locale and zone."""
+    iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+    return (f'<time datetime="{iso}" data-ts="{int(t)}">'
+            f"{time.strftime('%Y-%m-%d %H:%M', time.gmtime(t))} UTC</time>")
+
+
 def chart_table(points):
     rows = []
     for t, s in points:
         tot = s["total_lines"] or 1
-        rows.append(f"<tr><td>{time.strftime('%Y-%m-%d %H:%M', time.gmtime(t))} UTC</td>"
+        rows.append(f"<tr><td>{local_time(t)}</td>"
                     f"<td class=num>{100 * s['green_lines'] / tot:.1f}%</td>"
                     f"<td class=num>{100 * s['done_lines'] / tot:.1f}%</td>"
                     f"<td class=num>{s['count']['green'] + s['count']['partial']} / {s['units']}</td></tr>")
@@ -670,7 +678,7 @@ def status_steps(hist, t0, t1):
         segs.append(f'<i class="st-{esc(st)}" style="width:{w:.2f}%" '
                     f'title="{esc(st)} from {time.strftime("%Y-%m-%d", time.gmtime(t))}"></i>')
     label = ", then ".join(f"{st} from {time.strftime('%Y-%m-%d', time.gmtime(t))}" for t, st, _ in runs)
-    items = "".join(f"<li><time>{time.strftime('%Y-%m-%d %H:%M', time.gmtime(t))} UTC</time> {badge(st)}"
+    items = "".join(f"<li>{local_time(t)} {badge(st)}"
                     f" <span class=muted>{fmt_int(n)} lines</span></li>" for t, st, n in runs)
     d0, d1 = (time.strftime("%b %d", time.gmtime(v)) for v in (t0, t1))
     return (f'<div class="steps" role="img" aria-label="Status history: {esc(label)}">{"".join(segs)}</div>'
