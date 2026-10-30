@@ -429,6 +429,8 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 local.interval2 = other.natural_interval();
                 local.curve_face2 = Some(face);
                 local.surface_curve2 = Some(uv_curves.get(i).ok_or(SolidError::sm_err(OP_CF))?);
+                // (the silhouette curve exists only for this solve)
+                local.temporary_curves = true;
                 local.solve_curve_curve(k, ts)?;
             }
             return Ok(());

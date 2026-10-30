@@ -390,6 +390,11 @@ pub struct LocalSolver<'a, O> {
     pub curve_face2: Option<O>,
     /// `m_pSurfaceCurve2` (`SmTLSCurveCurve`).
     pub surface_curve2: Option<&'a Curve>,
+    /// The curves are temporary (a face's silhouette curves, upstream's curve objects
+    /// made for this solve): their solves name no handle of their own, so their
+    /// solutions name the curves themselves, with their natural intervals, as
+    /// upstream's do (the face stands in only for the results).
+    pub(super) temporary_curves: bool,
 }
 
 /// `SmTopologySolver::GetBestAnswerSoFar` of the solver state `s`: the best answer
@@ -985,6 +990,7 @@ impl<'a, O> LocalSolver<'a, O> {
             curve_edge2: None,
             curve_face2: None,
             surface_curve2: None,
+            temporary_curves: false,
         }
     }
 
@@ -1811,6 +1817,9 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
         } else {
             (curve1, &self.interval, curve2, &self.interval2)
         };
+        // a temporary curve's solve names the curve objects (their natural intervals),
+        // not the face standing in for it (`temporary_curves`)
+        let temporary = self.temporary_curves;
         let solutions = if op == SolverOperation::Intersect {
             this.curve.global_curve_intersect(
                 ts.kernel,
@@ -1820,11 +1829,19 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 s.tolerance_3d,
                 &CurveIntersectOptions {
                     skip_global_coincidence_check: false,
-                    handles: [Some(this.handle), Some(other.handle)],
-                    analytic_handles: [
-                        objects.analytic_curve_handle(this.handle),
-                        objects.analytic_curve_handle(other.handle),
-                    ],
+                    handles: if temporary {
+                        [None, None]
+                    } else {
+                        [Some(this.handle), Some(other.handle)]
+                    },
+                    analytic_handles: if temporary {
+                        [None, None]
+                    } else {
+                        [
+                            objects.analytic_curve_handle(this.handle),
+                            objects.analytic_curve_handle(other.handle),
+                        ]
+                    },
                 },
             )?
         } else {
@@ -1834,6 +1851,7 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
                 this_interval,
                 other,
                 other_interval,
+                temporary,
                 &CurveSolveArgs {
                     operation: op,
                     tolerance_3d: s.tolerance_3d,
@@ -2116,6 +2134,7 @@ fn curve_global_curve_solve<O: SolutionObject>(
     this_interval: &Extent1d,
     other: CurveRef<'_, O>,
     other_interval: &Extent1d,
+    temporary: bool,
     args: &CurveSolveArgs<'_>,
 ) -> Result<SolutionArray<O>> {
     this.curve.global_curve_solve(
@@ -2128,7 +2147,11 @@ fn curve_global_curve_solve<O: SolutionObject>(
         &CurveSolveOptions {
             target_distance: args.best_answer,
             opt_vectors: args.opt_vectors,
-            handles: [Some(this.handle), Some(other.handle)],
+            handles: if temporary {
+                [None, None]
+            } else {
+                [Some(this.handle), Some(other.handle)]
+            },
         },
         args.requested,
     )

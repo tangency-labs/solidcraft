@@ -44,6 +44,7 @@ SC_EXPORT int32_t sc_intersect_topology_solver_p2_local(const double* input,
 }
 
 // Part-2 static entrypoints on real shell-vertex B-reps and empty shapes.
+#include "sc_analytic_surface.h"
 #include <SmBrep.h>
 #include <SmPlane.h>
 #include <SmShell.h>
@@ -57,14 +58,47 @@ SC_EXPORT int32_t sc_intersect_topology_solver_p2_local(const double* input,
 #include <nurbs.h>
 #include <vector>
 
-SC_EXPORT int32_t sc_intersect_topology_solver_p2_static(const double* in,
-    int64_t n_in, double* out, int64_t cap, int64_t* out_len)
+namespace
+{
+// The surface of face `which` (0 or 1) of the face entries: the default plane (z = 0 or 1,
+// domain (0,0,1,1)) when `srf` is NULL or its block is `0`, else the analytic surface of
+// its block (sc_analytic_surface.h) on its GetNaturalUVDomain(). `at` walks `srf`; NULL
+// for a malformed block.
+SmSurface* face_surface(const SmContext& context, int which, const double* srf, int64_t n_srf,
+                        int64_t& at, SmExtent2d& domain)
+{
+    domain = SmExtent2d(0, 0, 1, 1);
+    int64_t kind = 0;
+    if (srf != NULL)
+    {
+        if (at >= n_srf)
+            return NULL;
+        kind = (int64_t)srf[at++];
+    }
+    if (kind == 0)
+        return new (context) SmPlane(SmPoint3d(0.0, 0.0, (double)which), SmVector3d(1, 0, 0), SmVector3d(0, 1, 0),
+                                     SmVector2d(1, 1), SmExtent2d(0, 0, 1, 1), &context);
+    int64_t len = sc_analytic::length(kind);
+    if (len < 0 || at + len > n_srf)
+        return NULL;
+    SmSurface* s = sc_analytic::build(context, kind, srf + at);
+    at += len;
+    if (s != NULL)
+        domain = s->GetNaturalUVDomain();
+    return s;
+}
+
+int32_t run_static(const double* in, int64_t n_in, const double* srf, int64_t n_srf, double* out,
+                   int64_t cap, int64_t* out_len)
 {
     SC_TRY
     SmContext context;
     SmBrep first(SM_USE_DEFAULT, SM_USE_DEFAULT, &context);
     SmBrep second(SM_USE_DEFAULT, SM_USE_DEFAULT, &context);
     const int entry=(int)in[0], n1=(int)in[5], n2=(int)in[6];
+    // face surfaces are only built by the face entries
+    if (srf != NULL && entry < 5)
+        return SC_ERR_ARG;
     const SmSolverOperationType op=(SmSolverOperationType)(int)in[1];
     const SmSolutionRequestedType req=(SmSolutionRequestedType)(int)in[2];
     const double tol=in[3], best=in[4];
@@ -91,10 +125,14 @@ SC_EXPORT int32_t sc_intersect_topology_solver_p2_static(const double* in,
     const bool swap=in[n_in-2]!=0;
     const SmShape* limit=in[n_in-1]!=0?NULL:&shape;
     if(entry>=5) {
-        SmSurface* plane0=new(context) SmPlane(SmPoint3d(0,0,0),SmVector3d(1,0,0),SmVector3d(0,1,0),SmVector2d(1,1),SmExtent2d(0,0,1,1),&context);
-        SmSurface* plane1=new(context) SmPlane(SmPoint3d(0,0,1),SmVector3d(1,0,0),SmVector3d(0,1,0),SmVector2d(1,1),SmExtent2d(0,0,1,1),&context);
-        if(first.CreateFaceFromSurface(plane0,SmExtent2d(0,0,1,1),face0)!=SM_SUCCESS || !face0) {delete curve;return SC_ERR_ARG;}
-        if(second.CreateFaceFromSurface(plane1,SmExtent2d(0,0,1,1),face1)!=SM_SUCCESS || !face1) {delete curve;return SC_ERR_ARG;}
+        int64_t at=0;
+        SmExtent2d dom0, dom1;
+        SmSurface* plane0=face_surface(context,0,srf,n_srf,at,dom0);
+        if(!plane0) {delete curve;return SC_ERR_ARG;}
+        SmSurface* plane1=face_surface(context,1,srf,n_srf,at,dom1);
+        if(!plane1 || at!=n_srf) {delete plane0;delete plane1;delete curve;return SC_ERR_ARG;}
+        if(first.CreateFaceFromSurface(plane0,dom0,face0)!=SM_SUCCESS || !face0) {delete curve;return SC_ERR_ARG;}
+        if(second.CreateFaceFromSurface(plane1,dom1,face1)!=SM_SUCCESS || !face1) {delete curve;return SC_ERR_ARG;}
         if(entry==7) {
             SmEdge* edge=NULL;
             curve_consumed=true;
@@ -164,6 +202,23 @@ SC_EXPORT int32_t sc_intersect_topology_solver_p2_static(const double* in,
     if(!curve_consumed) delete curve;
     return sc_copy_out(values.data(),(int64_t)values.size(),out,cap,out_len);
     SC_CATCH
+}
+} // namespace
+
+SC_EXPORT int32_t sc_intersect_topology_solver_p2_static(const double* in,
+    int64_t n_in, double* out, int64_t cap, int64_t* out_len)
+{
+    return run_static(in, n_in, NULL, 0, out, cap, out_len);
+}
+
+// The face entries (5..8) with the faces' surfaces given by `srf`: per face `0` (the default
+// plane) or an analytic block of sc_analytic_surface.h.
+SC_EXPORT int32_t sc_intersect_topology_solver_p2_static_faces(const double* in,
+    int64_t n_in, const double* srf, int64_t n_srf, double* out, int64_t cap, int64_t* out_len)
+{
+    if (srf == NULL || n_srf < 2)
+        return SC_ERR_ARG;
+    return run_static(in, n_in, srf, n_srf, out, cap, out_len);
 }
 
 // Probe the actual selected operand's runtime class without performing the

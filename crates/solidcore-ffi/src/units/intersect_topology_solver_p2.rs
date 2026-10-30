@@ -16,6 +16,15 @@ mod sys {
             cap: i64,
             out_len: *mut i64,
         ) -> i32;
+        pub fn sc_intersect_topology_solver_p2_static_faces(
+            input: *const f64,
+            n_in: i64,
+            srf: *const f64,
+            n_srf: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
         pub fn sc_intersect_topology_solver_p2_local(
             input: *const f64,
             n_in: i64,
@@ -109,6 +118,208 @@ pub fn eval_local(input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// # Errors
 /// Malformed/nonfinite/unbounded input, or a reference construction failure.
 pub fn eval_static(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_static(input)?;
+    call_with_buffer(1024, |out, len| {
+        // SAFETY: the complete fixed header, bounded counts and finite payload are
+        // validated above; the reference copies only within the supplied capacity.
+        unsafe {
+            sys::sc_intersect_topology_solver_p2_static(
+                input.as_ptr(),
+                input.len() as i64,
+                out.as_mut_ptr(),
+                out.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
+}
+
+/// An analytic face surface of [`eval_static_faces`], built as the `ssi_corpus` shim
+/// builds it (`harness/cpp/shim/sc_analytic_surface.h`; angles in degrees).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FaceSurface {
+    /// The entry's default plane (`z = 0` for the first face, `z = 1` for the second,
+    /// domain `(0, 0, 1, 1)`).
+    Plane,
+    /// `SmCylinder(origin + z h0, x, y, radius, angle0, angle1, h1 - h0)`.
+    Cylinder {
+        /// Origin of the axis.
+        origin: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Radius.
+        radius: f64,
+        /// Angles.
+        angle: [f64; 2],
+        /// Heights.
+        height: [f64; 2],
+    },
+    /// `SmCone::CreateCanonical` of the apex-based cone `radius(h) = h tan(half_angle)`.
+    Cone {
+        /// Apex.
+        apex: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Half angle.
+        half_angle_deg: f64,
+        /// Heights from the apex.
+        height: [f64; 2],
+    },
+    /// `SmSphere(center, x, y, SmExtent2d(lon0, lat0, lon1, lat1), radius)`.
+    Sphere {
+        /// Centre.
+        center: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Radius.
+        radius: f64,
+        /// Longitudes.
+        lon: [f64; 2],
+        /// Latitudes.
+        lat: [f64; 2],
+    },
+    /// `SmTorus(center, x, y, SmExtent2d(major0, minor0, major1, minor1), R, r)`.
+    Torus {
+        /// Centre.
+        center: [f64; 3],
+        /// X axis.
+        x: [f64; 3],
+        /// Y axis.
+        y: [f64; 3],
+        /// Major radius.
+        major_radius: f64,
+        /// Minor radius.
+        minor_radius: f64,
+        /// Major angles.
+        major: [f64; 2],
+        /// Minor angles.
+        minor: [f64; 2],
+    },
+}
+
+impl FaceSurface {
+    /// The shim's block (`0`, or the kind `4..7` and its values), after rejecting
+    /// non-finite values and magnitudes above `1e9`: the checks of the `ssi_corpus`
+    /// FFI for the same constructors (finiteness only). A shape the constructors cannot
+    /// build (`SmCone::CreateCanonical` failing) is a shim argument error, and a C++
+    /// crash fails only its case (fresh process).
+    fn encode(&self, o: &mut Vec<f64>) -> Result<(), FfiError> {
+        let invalid = || FfiError::InvalidArgument("unsafe topology p2 face surface".into());
+        let start = o.len();
+        match self {
+            FaceSurface::Plane => {
+                o.push(0.0);
+            }
+            FaceSurface::Cylinder {
+                origin,
+                x,
+                y,
+                radius,
+                angle,
+                height,
+            } => {
+                o.push(4.0);
+                o.extend(origin.iter().chain(x).chain(y));
+                o.push(*radius);
+                o.extend(angle.iter().chain(height));
+            }
+            FaceSurface::Cone {
+                apex,
+                x,
+                y,
+                half_angle_deg,
+                height,
+            } => {
+                o.push(5.0);
+                o.extend(apex.iter().chain(x).chain(y));
+                o.push(*half_angle_deg);
+                o.extend(height);
+            }
+            FaceSurface::Sphere {
+                center,
+                x,
+                y,
+                radius,
+                lon,
+                lat,
+            } => {
+                o.push(6.0);
+                o.extend(center.iter().chain(x).chain(y));
+                o.push(*radius);
+                o.extend(lon.iter().chain(lat));
+            }
+            FaceSurface::Torus {
+                center,
+                x,
+                y,
+                major_radius,
+                minor_radius,
+                major,
+                minor,
+            } => {
+                o.push(7.0);
+                o.extend(center.iter().chain(x).chain(y));
+                o.extend([*major_radius, *minor_radius]);
+                o.extend(major.iter().chain(minor));
+            }
+        }
+        let finite = o
+            .get(start..)
+            .is_some_and(|v| v.iter().all(|x| x.is_finite() && x.abs() <= 1e9));
+        if finite {
+            Ok(())
+        } else {
+            Err(invalid())
+        }
+    }
+}
+
+/// [`eval_static`] for the face entries (5..8) with the two faces on `faces` instead
+/// of the default planes, each face on its surface's `GetNaturalUVDomain()` (the
+/// default plane on `(0, 0, 1, 1)`), run in a fresh process
+/// ([`crate::isolate::fresh_process`]) so that a crash in the C++ fails only its case.
+///
+/// # Errors
+/// As [`eval_static`]; an entry other than 5..8 or a face surface its checks reject.
+pub fn eval_static_faces(input: &[f64], faces: &[FaceSurface; 2]) -> Result<Vec<f64>, FfiError> {
+    validate_static(input)?;
+    if !input.first().is_some_and(|e| (5.0..=8.0).contains(e)) {
+        return Err(FfiError::InvalidArgument(
+            "topology p2 static faces: not a face entry".into(),
+        ));
+    }
+    let mut srf = Vec::new();
+    for f in faces {
+        f.encode(&mut srf)?;
+    }
+    crate::isolate::fresh_process(|| {
+        call_with_buffer(1024, |out, len| {
+            // SAFETY: the static record is validated above and the face blocks are
+            // complete, finite and bounded; the reference copies only within the
+            // supplied capacity.
+            unsafe {
+                sys::sc_intersect_topology_solver_p2_static_faces(
+                    input.as_ptr(),
+                    input.len() as i64,
+                    srf.as_ptr(),
+                    srf.len() as i64,
+                    out.as_mut_ptr(),
+                    out.len() as i64,
+                    &raw mut *len,
+                )
+            }
+        })
+    })
+}
+
+/// The checks of [`eval_static`].
+fn validate_static(input: &[f64]) -> Result<(), FfiError> {
     let invalid = || FfiError::InvalidArgument("unsafe topology p2 static fixture".into());
     let Some(&[entry, operation, request, tolerance, best, n1, n2, _, _, _]) = input.get(..10)
     else {
@@ -140,19 +351,7 @@ pub fn eval_static(input: &[f64]) -> Result<Vec<f64>, FfiError> {
     {
         return Err(invalid());
     }
-    call_with_buffer(1024, |out, len| {
-        // SAFETY: the complete fixed header, bounded counts and finite payload are
-        // validated above; the reference copies only within the supplied capacity.
-        unsafe {
-            sys::sc_intersect_topology_solver_p2_static(
-                input.as_ptr(),
-                input.len() as i64,
-                out.as_mut_ptr(),
-                out.len() as i64,
-                &raw mut *len,
-            )
-        }
-    })
+    Ok(())
 }
 
 /// Whether the native vertex selected as a curve by `EdgeVertex` is a curve.
