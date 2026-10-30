@@ -155,20 +155,26 @@ mod imp {
         segs.iter().map(|s| curve(plane, s)).collect()
     }
 
-    /// The kernel body of an SMLib result SMLib's own check finds valid.
-    fn body_of(brep: &Brep, what: &str) -> Result<Body> {
-        let check = brep.check(CheckLevel::All).map_err(|e| failed(what, e))?;
-        if !check.is_valid() {
-            return Err(failed(what, format!("SMLib's check refuses the result: {check}")));
+    /// The kernel body of an SMLib result SMLib's own check finds valid (checked here unless the
+    /// evaluation's validation mode leaves it to the feature's end, `crate::validation`).
+    fn body_of(brep: Brep, what: &str) -> Result<Body> {
+        use crate::validation::{Checked, Step};
+        let step = crate::validation::step();
+        if step == Step::Check {
+            let check = brep.check(CheckLevel::All).map_err(|e| failed(what, e))?;
+            if !check.is_valid() {
+                return Err(failed(what, format!("SMLib's check refuses the result: {check}")));
+            }
         }
-        crate::native::body_from_smlib(brep)
+        let body = crate::native::body_from_smlib(&brep)?;
+        Ok(if step == Step::Defer { body.left_unchecked(&format!("SMLib {what}"), Checked::AsIs, brep) } else { body })
     }
 
     /// The body (a solid or a sheet) a schema 4 record describes, taken by SMLib as a
     /// modeller's own record (no healing) and checked there.
     pub(crate) fn body_from_record(record: &solidcraft_geom::brep::Brep, what: &str) -> Result<Body> {
         let brep = Brep::from_record(record, true).map_err(|e| failed(what, e))?;
-        body_of(&brep, what)
+        body_of(brep, what)
     }
 
     /// The sketch segments `segs` on `plane` projected along `direction` onto the face of
@@ -236,7 +242,7 @@ mod imp {
     /// a sphere revolves.
     pub(crate) fn sphere(center: Vec3, radius: f64) -> Result<Body> {
         let brep = Brep::make_sphere(p(center), radius).map_err(|e| failed("sphere", e))?;
-        let body = body_of(&brep, "sphere")?;
+        let body = body_of(brep, "sphere")?;
         let faces = body.face_count();
         Ok(record::attach(body, &[], Some(vec![record::profile(&[0usize]); faces]), &[]))
     }
@@ -415,7 +421,7 @@ mod imp {
                 Brep::extrude(&curves(&knee, pieces)?, p(dir), distance - foot, lean, corner(d.corner), true).map_err(|e| failed("extrude", e))?;
             let brep = prism.boolean(&slope, solidcraft_smlib::BooleanOp::Union).map_err(|e| failed("extrude", e))?;
             let brep = brep.ok_or_else(|| failed("extrude", "nothing is left"))?;
-            let body = body_of(&brep, "extrude")?;
+            let body = body_of(brep, "extrude")?;
             // The caps and the foot's walls from the base; the sloping walls (and the foot's again)
             // from the edges at the knee, which both stand on.
             let low = roles(&body, &base, Some(&top), &edges, &[], false)?;
@@ -438,7 +444,7 @@ mod imp {
         let lean = draft.map_or(0.0, |d| -d.taper);
         let rule = draft.map_or(DraftCorner::default(), |d| corner(d.corner));
         let brep = Brep::extrude(&c, p(dir), distance, lean, rule, true).map_err(|e| failed("extrude", e))?;
-        let body = body_of(&brep, "extrude")?;
+        let body = body_of(brep, "extrude")?;
         // Half-way along a straight wall lies over its segment; a drafted one has moved.
         let inside = if draft.is_none() { seeds(&base, pieces, |q| q + dir * (distance * 0.5)) } else { Vec::new() };
         let roles = roles(&body, &base, Some(&top), &edges, &inside, false)?;
@@ -495,7 +501,7 @@ mod imp {
                 .map_err(|e| failed("extrude", e))?
                 .ok_or_else(|| KernelError::Invalid("the draft leaves nothing of the profile".into()))?;
         }
-        let body = body_of(&brep, "extrude")?;
+        let body = body_of(brep, "extrude")?;
         let base = plane.offset(from);
         let top = plane.offset(from + sign.signum() * distance);
         let low = roles(&body, &base, Some(&top), &seeds(&base, all, |q| q), &[], false)?;
@@ -574,7 +580,7 @@ mod imp {
         let turn = turn.min(std::f64::consts::TAU);
         let c = curves(plane, pieces)?;
         let brep = Brep::revolve(&c, p(origin), p(k), turn, true).map_err(|e| failed("revolve", e))?;
-        let body = body_of(&brep, "revolve")?;
+        let body = body_of(brep, "revolve")?;
         let size = body.size().max(1e-9);
         let off_axis = |q: Vec3| {
             let w = q - origin;
@@ -639,7 +645,7 @@ mod imp {
             return cornered(plane, pieces, path, &runs, translate);
         }
         let (brep, [_, middle, last]) = swept(plane, pieces, path, translate)?;
-        let body = body_of(&brep, "sweep")?;
+        let body = body_of(brep, "sweep")?;
         // The walls known by the profile carried half way (past the start's edges: a wall the
         // start touches by no edge, as round a closed path, and walls along later path segments).
         let inside = seeds(plane, pieces, |q| apply(&middle, q));
@@ -852,7 +858,7 @@ mod imp {
             }
         }
         let brep = body.ok_or_else(|| KernelError::Invalid("empty path".into()))?;
-        let body = body_of(&brep, "sweep")?;
+        let body = body_of(brep, "sweep")?;
         let roles = roles(&body, plane, (!closed).then_some(&pose), &seeds(plane, pieces, |q| q), &inside, false)?;
         with_history(body, &roles, pieces)
     }
@@ -1015,7 +1021,7 @@ mod imp {
             })
             .collect();
         let brep = Brep::sweep_stations(&c, &maps, if closed { Ends::Joined } else { Ends::Capped }).map_err(|e| failed("sweep", e))?;
-        let body = body_of(&brep, "sweep")?;
+        let body = body_of(brep, "sweep")?;
         let mid = st.get(st.len() / 2).copied().unwrap_or(*last);
         let inside = seeds(plane, &pieces, |q| mid.at + mid.apply(q - s0));
         let roles = if closed {
@@ -1227,7 +1233,7 @@ mod imp {
                 crate::sweep_path::closing_offset(plane, l, &[to_station(&IDENTITY), to_station(&at_start)])?;
             }
         }
-        let body = body_of(&brep, "sweep")?;
+        let body = body_of(brep, "sweep")?;
         let roles = if closed {
             roles(&body, &plane.offset(size * 10.0), None, &[], &inside, false)?
         } else {
@@ -1382,7 +1388,7 @@ mod imp {
     /// across them; `sections` and `first` as [`loft`] takes them name the faces.
     fn loft_through(sections: &[(Plane, Vec<Piece>)], first: usize, curves: &[Vec<Curve>], degree: u32) -> Result<Body> {
         let brep = Brep::loft(curves, degree, true).map_err(|e| failed("loft", e))?;
-        let body = body_of(&brep, "loft")?;
+        let body = body_of(brep, "loft")?;
         let (Some((start, lead)), Some(last)) = (sections.get(first), sections.get(if first == 0 { sections.len().saturating_sub(1) } else { 0 }))
         else {
             return Err(KernelError::Invalid("loft sections".into()));
@@ -1442,7 +1448,7 @@ mod imp {
     pub(crate) fn loft_to_point(plane: &Plane, pieces: &[Piece], apex: Vec3) -> Result<Body> {
         let c = curves(plane, pieces)?;
         let brep = Brep::loft_to_point(&c, p(apex)).map_err(|e| failed("loft to a point", e))?;
-        let body = body_of(&brep, "loft to a point")?;
+        let body = body_of(brep, "loft to a point")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
         with_history(body, &roles, pieces)
     }
@@ -1454,7 +1460,7 @@ mod imp {
         // Walls within a ten-thousandth of the pitch of the true screw surfaces.
         let tolerance = (pitch.abs() * 1e-4).clamp(1e-6, 1e-2);
         let brep = Brep::screw_sweep(&c, p(origin), p(axis), pitch, turns, tolerance).map_err(|e| failed("screw sweep", e))?;
-        let body = body_of(&brep, "screw sweep")?;
+        let body = body_of(brep, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)
     }
@@ -1474,7 +1480,7 @@ mod imp {
         let tolerance = (pitch.abs() * 1e-4).clamp(1e-6, 1e-2);
         let brep =
             Brep::screw_sweep_radial(&c, p(origin), p(axis), pitch, turns, law, tolerance).map_err(|e| failed("screw sweep with a radial law", e))?;
-        let body = body_of(&brep, "screw sweep")?;
+        let body = body_of(brep, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)
     }

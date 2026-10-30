@@ -55,6 +55,10 @@ pub struct Body {
     /// Meshes of this record kept for reuse, set by [`Body::keeping_meshes`]: a check that
     /// intersects one large body with many small ones meshes it at the same tolerance each time.
     pub(crate) meshes: Option<std::sync::Arc<MeshMemo>>,
+    /// The SMLib result this body was decoded from, when the step that made it left SMLib's
+    /// check to the end of its feature ([`crate::validation`]): checked there as the step's own
+    /// check would have, then let go. Answers only for this record.
+    pub(crate) unchecked: Option<std::sync::Arc<crate::validation::Unchecked>>,
 }
 
 /// The meshes made of one record (see [`Body::keeping_meshes`]), by tolerance and angle. They
@@ -473,7 +477,15 @@ impl Body {
             history: None,
             display_of: None,
             meshes: None,
+            unchecked: None,
         }
+    }
+
+    /// This body with `result`, the SMLib result of the step `what` it was decoded from, whose
+    /// check that step left to the end of its feature ([`crate::validation::check_kept`]).
+    pub(crate) fn left_unchecked(self, what: &str, how: crate::validation::Checked, result: solidcraft_smlib::Brep) -> Body {
+        let unchecked = crate::validation::Unchecked::new(&self.record, what, how, result);
+        Body { unchecked: Some(std::sync::Arc::new(unchecked)), ..self }
     }
 
     /// The body of a schema 4 record (a solid, or a surface body of open shells): checked for

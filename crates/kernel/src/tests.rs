@@ -1109,8 +1109,7 @@ fn sloped_basin(margin: f64) -> Body {
     let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
     let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
     let pocket =
-        loft(&[(Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))])
-            .unwrap();
+        loft(&[(Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)), (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0))]).unwrap();
     boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap()
 }
 

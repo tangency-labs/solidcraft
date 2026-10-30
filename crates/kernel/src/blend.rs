@@ -502,7 +502,9 @@ fn largest_that_fits(size: f64, blend: impl Fn(f64) -> Result<Body>) -> Result<O
             break;
         }
         let mid = lo + (hi - lo) / 2;
-        match blend(mid as f64 * q) {
+        // A candidate fits only as a body SMLib's check accepts: each is checked as it is built,
+        // whatever the evaluation's validation mode (`crate::validation`).
+        match crate::validation::validating(crate::Validation::EachStep, || blend(mid as f64 * q)).0 {
             Ok(b) => {
                 lo = mid;
                 best = Some(b);

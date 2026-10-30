@@ -1032,6 +1032,8 @@ pub struct Model {
     primed: Option<(u64, Arc<std::collections::HashMap<u64, FeatureResult>>)>,
     /// Shared with copies of this evaluator; states hold only a weak reference.
     frame_bodies: Arc<std::sync::Mutex<FrameBodies>>,
+    /// When SMLib's check runs on the features this model evaluates ([`Model::set_validation`]).
+    validation: kernel::Validation,
 }
 
 /// Parameters a feature uses directly (inputs, sketch dimensions and the expressions of a
@@ -1359,6 +1361,33 @@ fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
         }
     }
     h.finish()
+}
+
+/// What the validation mode adds to the context digest: nothing for checking every step (how
+/// every evaluation before the mode checked, so its results and saved caches stand), so a result
+/// is taken from the cache only under the mode it was evaluated in.
+fn validation_digest(validation: kernel::Validation) -> u64 {
+    match validation {
+        kernel::Validation::EachStep => 0,
+        v => {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            ("validation", v.id()).hash(&mut h);
+            h.finish()
+        }
+    }
+}
+
+/// SMLib's check of every body a feature made or changed (in `after`, not in `before`, the
+/// state it started from), once its steps left their checks to its end: the first that fails is
+/// the feature's error, naming the body.
+fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
+    for b in &after.bodies {
+        if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
+            continue;
+        }
+        kernel::check_kept(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
+    }
+    Ok(())
 }
 
 /// Whether `after`, a state feature `f` evaluated to from `before` in an earlier evaluation, is
@@ -1846,6 +1875,19 @@ impl Model {
         self.primed = None;
     }
 
+    /// When SMLib's check runs on the features this model evaluates.
+    pub fn validation(&self) -> kernel::Validation {
+        self.validation
+    }
+
+    /// Check the features evaluated from now on under `validation` ([`kernel::Validation`]):
+    /// after every sweep, boolean and blend, once on the bodies each feature keeps, or not at
+    /// all. The results already there stand until their features are evaluated again; the cache
+    /// keeps results apart by mode, so one evaluated under another mode is not taken up.
+    pub fn set_validation(&mut self, validation: kernel::Validation) {
+        self.validation = validation;
+    }
+
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
         let _span = solidcraft_profile::span("doc", "evaluate");
@@ -1862,7 +1904,8 @@ impl Model {
         let mut recomputed = 0;
         let mut restored = 0;
         let marker = doc.marker.unwrap_or(usize::MAX);
-        let ctx = context_digest(doc, &vals);
+        let validation = self.validation;
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
@@ -2029,8 +2072,11 @@ impl Model {
             let r = match frame_error.or(bad_param) {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
-                    eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair)
-                        .map_err(|e| kernel::KernelError::Failed(e.to_string()))
+                    let (r, deferred) =
+                        kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
+                    r.map_err(|e| kernel::KernelError::Failed(e.to_string()))?;
+                    // The checks the feature's steps left to its end: the bodies it keeps.
+                    if deferred { check_kept(&state, &next) } else { Ok(()) }
                 }),
             };
             if r.is_ok() {

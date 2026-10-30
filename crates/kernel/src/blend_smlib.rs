@@ -357,12 +357,20 @@ mod imp {
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
                 e => failed(what, "operation", e),
             })?;
-            let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
-            if !check.is_valid() {
-                let input_fails = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-                let step =
-                    if input_fails { "SMLib's check refuses the result (the input already fails it)" } else { "SMLib's check refuses the result" };
-                return Err(failed(what, step, check));
+            // Checked here unless the evaluation's validation mode leaves it to the feature's end
+            // (`crate::validation`).
+            let step = crate::validation::step();
+            if step == crate::validation::Step::Check {
+                let check = r.check(CheckLevel::All).map_err(|e| failed(what, "check", e))?;
+                if !check.is_valid() {
+                    let input_fails = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+                    let step = if input_fails {
+                        "SMLib's check refuses the result (the input already fails it)"
+                    } else {
+                        "SMLib's check refuses the result"
+                    };
+                    return Err(failed(what, step, check));
+                }
             }
             let (out, result_order) = body_from_smlib_ordered(&r)?;
             let history = match (order, &result_order) {
@@ -380,7 +388,13 @@ mod imp {
                 },
                 _ => None,
             };
-            Ok((out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body), extra, result_order))
+            let out = out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body);
+            let out = if step == crate::validation::Step::Defer {
+                out.left_unchecked(&format!("SMLib {what}"), crate::validation::Checked::AsIs, r)
+            } else {
+                out
+            };
+            Ok((out, extra, result_order))
         })
     }
 

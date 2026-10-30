@@ -13,6 +13,7 @@ mod smlib {
     use crate::history::History;
     use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
     use crate::ops::BoolOp;
+    use crate::validation::{Checked, Step};
     use crate::{KernelError, Result, record};
 
     fn failed(what: &str, e: impl std::fmt::Display) -> KernelError {
@@ -34,7 +35,7 @@ mod smlib {
             BoolOp::Intersect => BooleanOp::Intersect,
         };
         let Some(r) = ta.boolean(&tb, kind).map_err(|e| failed("operation", e))? else { return Ok(None) };
-        checked(&r, &[&sa, &sb])?;
+        let step = checked(&r, &[&sa, &sb])?;
         let (body, or) = body_from_smlib_ordered(&r)?;
         let history = match (oa, ob, or) {
             (Some(oa), Some(ob), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&[oa, ob], &or).map(Some).unwrap_or_else(|e| {
@@ -43,7 +44,7 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(Some(with_history(body, history, a, b)))
+        Ok(Some(left(with_history(body, history, a, b), step, r)))
     }
 
     /// The union of `bodies` in one SMLib call, each tagged as its own operand, checked once:
@@ -68,7 +69,7 @@ mod smlib {
         let refs: Vec<&solidcraft_smlib::Brep> = tagged.iter().collect();
         let r = solidcraft_smlib::Brep::union_all(&refs).map_err(|e| failed("operation", e))?;
         let operand_refs: Vec<&solidcraft_smlib::Brep> = operands.iter().collect();
-        checked(&r, &operand_refs)?;
+        let step = checked(&r, &operand_refs)?;
         let (body, or) = body_from_smlib_ordered(&r)?;
         let history = match (orders, or) {
             (Some(orders), Some(or)) => r.history().map_err(|e| failed("history", e))?.history(&orders, &or).map(Some).unwrap_or_else(|e| {
@@ -77,25 +78,30 @@ mod smlib {
             }),
             _ => None,
         };
-        Ok(body.with_checked_history(history, &record::counts(bodies)))
+        Ok(left(body.with_checked_history(history, &record::counts(bodies)), step, r))
     }
 
-    /// An error unless SMLib's check accepts `r`, the result of combining `operands`.
-    fn checked(r: &solidcraft_smlib::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<()> {
+    /// `body`, decoded from `r`, keeping `r` for the check at the end of its feature when the
+    /// step left it there.
+    fn left(body: Body, step: Step, r: solidcraft_smlib::Brep) -> Body {
+        if step == Step::Defer { body.left_unchecked("SMLib boolean", Checked::Combined, r) } else { body }
+    }
+
+    /// An error unless SMLib's check accepts `r`, the result of combining `operands` (checked
+    /// here unless the evaluation's validation mode leaves it to the feature's end,
+    /// `crate::validation`): what was done with the check.
+    fn checked(r: &solidcraft_smlib::Brep, operands: &[&solidcraft_smlib::Brep]) -> Result<Step> {
+        let step = crate::validation::step();
+        if step != Step::Check {
+            return Ok(step);
+        }
         // Solids touching each other along an edge or at a vertex come back as one non-manifold
         // body, which the export splits into separate solids: SMLib's check is of those, imported
         // as given (its check of the touching arrangement itself refuses the radial order of
         // faces round an edge they share).
-        let manifold = r.is_manifold_solid().map_err(|e| failed("check", e))?;
-        let check = if manifold {
-            r.check(CheckLevel::All).map_err(|e| failed("check", e))?
-        } else {
-            let record = r.to_native().map_err(|e| failed("export", e))?;
-            let split = solidcraft_smlib::Brep::from_record(&record, true).map_err(|e| failed("the separate solids", e))?;
-            split.check(CheckLevel::All).map_err(|e| failed("check", e))?
-        };
+        let check = crate::validation::check_result(r, Checked::Combined).map_err(|e| KernelError::Failed(format!("SMLib boolean: {e}")))?;
         if check.is_valid() {
-            return Ok(());
+            return Ok(step);
         }
         // Whether an operand failed it already says whose the fault is.
         let failing: Vec<String> = operands

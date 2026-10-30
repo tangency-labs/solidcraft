@@ -24,7 +24,7 @@ fn chamfer_error(s: &Session) -> Option<String> {
 /// then a 9 mm chamfer on the top edge over one side opening. The openings are 5 mm from the
 /// edge, so the chamfer runs over their rims: it is cut by them. Of its section, the triangle
 /// y + (20 − z) <= 9 (area 40.5, along 20: 810), the two openings crossing it hold 80 each
-/// (the rig's fillets/1080-chamfer-runs-into-openings-refused): 4000 − (810 − 160) = 3350.
+/// (the rig's fillets/1080-chamfer-runs-into-openings-cut-by-them): 4000 − (810 − 160) = 3350.
 #[test]
 fn chamfer_through_the_openings_is_cut_by_them() {
     let mut s = open_fixture();

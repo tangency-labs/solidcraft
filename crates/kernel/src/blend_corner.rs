@@ -328,10 +328,8 @@ mod tests {
         };
         // 1 + k t − d (1 − t/δ) = 0.
         let crossing = (d - 1.0) / (k + d / delta);
-        let removed: f64 = [(0.0, crossing), (crossing, delta)]
-            .iter()
-            .map(|&(a, b)| (b - a) / 6.0 * (area(a) + 4.0 * area(0.5 * (a + b)) + area(b)))
-            .sum();
+        let removed: f64 =
+            [(0.0, crossing), (crossing, delta)].iter().map(|&(a, b)| (b - a) / 6.0 * (area(a) + 4.0 * area(0.5 * (a + b)) + area(b))).sum();
         assert!((removed - 375.673069).abs() < 1e-6, "{removed}");
         let before = crate::measure(&basin).unwrap().volume;
         assert!((before - 140333.333333).abs() < 1e-5, "{before}");
