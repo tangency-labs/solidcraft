@@ -4,13 +4,13 @@
 //! As the `topology.edgeuse_p1` runner, the C++ side builds a real `SmBrep` per call
 //! (an upstream `.smb` file, a wire edge, a face, or the `prog_test` wire network). The
 //! Rust side builds every non-file source itself with the Rust kernel
-//! ([`crate::own_builder`], renumbered into the shim's traversal order); for an `.smb`
-//! file it imports the graph the shim exports in traversal order into a [`Brep`]
-//! (the shared import of `topology.edgeuse_p1`, plus this unit's extras: the infinite
-//! region, the editing flag, the size estimates and each vertex's vertex use list in
-//! its native order). Every op's C++ output after the build status is compared with the
-//! Rust side's as one float array (`out`): statuses (`0`, an `SmStatus` code, `-2`
-//! where upstream dereferences null), traversal indices, flags and values.
+//! ([`crate::own_builder`], renumbered into the shim's traversal order) and reads an
+//! `.smb` file with the Rust reader ([`crate::own_reader::brep_in_order`], renumbered
+//! the same way): the infinite region, the editing flag, the size estimates and each
+//! vertex's vertex use list are the Rust read's own, and no C++ export reaches the Rust
+//! side. Every op's C++ output after the build status is compared with the Rust side's
+//! as one float array (`out`): statuses (`0`, an `SmStatus` code, `-2` where upstream
+//! dereferences null), traversal indices, flags and values.
 //!
 //! Selectors are taken modulo the entity count (`-1` selecting null where allowed); an
 //! op needing an entity the B-rep lacks is rejected (nothing runs on either side).
@@ -771,18 +771,10 @@ fn build_failure(export: &[f64]) -> Output {
     ))
 }
 
-/// The Rust B-rep of an export with this unit's extras applied, and the geometry
-/// types of the import, with its cached gaps refilled on the finished B-rep
-/// ([`super::topology_vertexuse::refill_gaps`]).
-pub(crate) fn import(ex: &[f64], graph_at: usize) -> Result<(Brep, ImportTypes), HarnessError> {
-    let (mut b, types) = import_raw(ex, graph_at)?;
-    super::topology_vertexuse::refill_gaps(&mut b);
-    Ok((b, types))
-}
-
-/// [`import`] without refilling the cached gaps (they stay marked as set with
-/// `SM_UNDEF_DOUBLE` placeholder values), for the C++ side, which only resolves
-/// selectors on the import.
+/// The B-rep of an export with this unit's extras applied, and the geometry types of
+/// the import, its cached gaps not refilled (they stay marked as set with
+/// `SM_UNDEF_DOUBLE` placeholder values): for C++ sides that only resolve selectors on
+/// the import (the `heal.stitch_p1` / `heal.stitch_p2` runners).
 pub(crate) fn import_raw(ex: &[f64], graph_at: usize) -> Result<(Brep, ImportTypes), HarnessError> {
     let mut graph = vec![0.0];
     graph.extend_from_slice(ex.get(graph_at..).ok_or_else(|| harness("short export"))?);
@@ -2056,13 +2048,17 @@ fn run_rust_op(
                     return Err(harness("the second B-rep does not build").into());
                 }
                 None => {
-                    // an `.smb` file: imported from its own C++ export
-                    let block2 = brep_block_of(Some(other), false, false)?;
-                    let ex2 = ffi::eval(Op::Export, "", &block2)
-                        .map_err(|e| harness(format!("c++ export of the second B-rep: {e}")))?;
-                    let (_, graph_at2) = ffi::counts(&ex2)
-                        .ok_or_else(|| harness("the second B-rep does not build"))?;
-                    import(&ex2, graph_at2)?.0
+                    // an `.smb` file: read by the Rust reader
+                    let conv = &crate::own_builder::Conventions::EDGEUSE_GRAPH;
+                    match crate::own_reader::brep_in_order(k, other, false, false, conv)? {
+                        crate::own_builder::Built::Brep(b2) => *b2,
+                        crate::own_builder::Built::Failed(e) if e.is_unported() => {
+                            return Err(e.into());
+                        }
+                        crate::own_builder::Built::Failed(_) => {
+                            return Err(harness("the second B-rep does not build").into());
+                        }
+                    }
                 }
             };
             let id = |i: i64| (i >= 0).then(|| EdgeuseId::from_index(i as u32));
