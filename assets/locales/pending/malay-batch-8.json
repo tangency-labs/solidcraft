@@ -1,0 +1,33 @@
+{
+  "ms": {
+    "browser.calibrate_click_a": "Klik imej untuk Titik A, atau taip koordinatnya.",
+    "browser.calibrate_click_b": "Klik imej untuk Titik B, atau taip koordinatnya.",
+    "help.sketch.construction_line": "Cipta garis binaan tak terhingga melalui dua titik. Gunakannya untuk menyusun lakaran tanpa memisahkan profil.",
+    "help.sketch.construction_line.angle": "Cipta garis binaan tak terhingga pada sudut daripada paksi X lakaran. Pilih titik dan taip sudutnya, atau pilih arahnya.",
+    "help.sketch.construction_line.bisector": "Pilih dua garis lakaran lurus yang bersilang, kemudian pilih salah satu pembahagi dua sudut. Hasilnya mengikut garis sumbernya.",
+    "help.sketch.construction_line.horizontal": "Cipta garis binaan mendatar tak terhingga melalui satu titik. Kekangan mendatarnya kekal apabila disunting kemudian.",
+    "help.sketch.construction_line.parallel": "Pilih garis lakaran lurus, kemudian letakkan garis binaan tak terhingga yang selari. Klik kanan untuk memilih rujukan lain.",
+    "help.sketch.construction_line.perpendicular": "Pilih garis lakaran lurus, kemudian letakkan garis binaan tak terhingga yang serenjang. Klik kanan untuk memilih rujukan lain.",
+    "help.sketch.construction_line.tangent_at": "Cipta tangen pada satu titik pada bulatan atau lengkok bulat, atau pada titik hujung splin atau lengkung kon yang terbuka. Pilih lengkung itu, kemudian titik sentuhnya.",
+    "help.sketch.construction_line.tangent_external": "Pilih bulatan atau lengkok bulat, kemudian satu titik luar dan satu penyelesaian tangen. Pratonton hanya menunjukkan titik sentuh pada lengkok yang dilukis.",
+    "help.sketch.construction_line.tangent_two": "Pilih dua bulatan atau lengkok bulat, kemudian pilih tangen sepunya dalam pratonton. Titik sentuh mesti terletak pada lengkung yang dilukis.",
+    "help.sketch.construction_line.vertical": "Cipta garis binaan menegak tak terhingga melalui satu titik. Kekangan menegaknya kekal apabila disunting kemudian.",
+    "prefs.persistent_ribbon_pressed": "Serlahkan arahan reben yang aktif",
+    "prefs.persistent_ribbon_pressed_help": "Serlahkan arahan reben selagi kesannya dihidupkan. Matikan untuk mengekalkan rupa neutral dan bantuan arahan yang terdahulu.",
+    "prefs.sketch_construction_lines": "Alat garis binaan lanjutan",
+    "prefs.sketch_open_look_at": "Putar menghadap lakaran apabila dibuka",
+    "prefs.sketch_open_look_at_note": "Mati: mencipta atau menyunting lakaran membiarkan pandangan seperti sedia ada. Pandang Tepat menghadapkan pandangan ke lakaran apabila anda mahu.",
+    "recovery.discard_all": "Buang semua",
+    "recovery.discard_all_detail": "Tindakan ini tidak boleh dibuat asal.",
+    "recovery.discard_all_title": "Buang {count} simpanan automatik?",
+    "recovery.discard_all_title_one": "Buang 1 simpanan automatik?",
+    "ui.construction.angle_hint": "Garis binaan: klik satu titik, kemudian taip sudut atau pilih arah",
+    "ui.construction.bisector_hint": "Pembahagi dua sudut: pilih dua garis lurus yang bersilang, kemudian penyelesaian yang dikehendaki",
+    "ui.construction.common_hint": "Tangen sepunya: pilih dua bulatan/lengkok, kemudian penyelesaian yang dikehendaki",
+    "ui.construction.contact_hint": "Tangen: pilih bulatan/lengkok atau splin/lengkung kon terbuka, kemudian titik sentuh (lengkung bentuk bebas: titik hujung)",
+    "ui.construction.external_hint": "Tangen: pilih bulatan atau lengkok, satu titik luar, kemudian penyelesaian yang dikehendaki",
+    "ui.construction.free_hint": "Garis binaan: klik dua titik; klik kanan untuk mula semula",
+    "ui.construction.point_hint": "Garis binaan: klik titik yang akan dilalui",
+    "ui.construction.reference_hint": "Garis binaan: pilih garis lurus, kemudian satu titik; klik kanan untuk menukar rujukan"
+  }
+}
