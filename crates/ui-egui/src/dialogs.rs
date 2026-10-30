@@ -712,7 +712,7 @@ fn fits(a: Accept, s: &Sel) -> bool {
         // box selection and a pre-selection reach them the way a click already does.
         Sel::SketchPoint { .. } => a & (selection::POINTS | selection::SKETCH_POINTS) != 0,
         Sel::ExternalSketchPoint { .. } => a & selection::EXTERNAL_POINTS != 0,
-        Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
+        Sel::Drawing { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } | Sel::Occurrence { .. } => false,
     }
 }
 

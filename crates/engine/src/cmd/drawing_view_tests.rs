@@ -54,7 +54,7 @@ pub(crate) fn three_views() -> (Session, [u64; 3]) {
 }
 
 /// [`three_views`] of the design `s`.
-fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
+pub(crate) fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let mut id_source = solidcraft_doc::ids::IdSource::seeded(4816);

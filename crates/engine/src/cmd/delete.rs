@@ -138,6 +138,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             }
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
             Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its geometry".into()),
+            Sel::Drawing { .. } => skip("a drawing's objects are deleted with the drawing open".into()),
         }
     }
     features.dedup();
@@ -230,8 +231,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
+    use solidcraft_doc::ids;
 
-    use crate::Session;
+    use crate::{Sel, Session};
 
     fn run(s: &mut Session, id: &str, p: Value) -> Value {
         match s.execute(id, &p) {
@@ -397,6 +399,93 @@ mod tests {
         ] {
             assert!(s.execute("selection.delete", &p).is_err(), "{p}");
         }
+    }
+
+    /// A block of the design's own and a cube in a part, in a drawing: the block's front view at 1:2,
+    /// its right view lined up with it, and the right view's top view placed apart, with a dimension
+    /// on the block's top front edge and a balloon on the cube, both in the front view. The session,
+    /// the three views, the dimension, the balloon and the drawing.
+    fn sheet_objects() -> (Session, [u64; 3], u64, u64, u64) {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+        let made = run(&mut s, "component.create", json!({"name": "Part"}));
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [200, 0, 0], "operation": "new", "body_name": "Cube"}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let (mut s, views) = crate::cmd::drawing_view::tests::three_views_of(s);
+        let front = ids::encode(views[0]);
+        let id = |reply: Value| ids::decode(reply["record"]["id"].as_str().unwrap()).unwrap();
+        let dimension = id(run(&mut s, "drawing.dimension.add", json!({"view": front, "kind": {"length": {"edge": [50, 0, 20]}}})));
+        let balloon =
+            id(run(&mut s, "drawing.balloon.add", json!({"view": front, "edge": {"point": [205, 0, 0], "path": [occurrence]}, "at": [60, 40]})));
+        let drawing = s.open_drawing.unwrap();
+        (s, views, dimension, balloon, drawing)
+    }
+
+    fn item(drawing: u64, object: u64) -> Value {
+        json!({"type": "drawing", "drawing": ids::encode(drawing), "object": ids::encode(object)})
+    }
+
+    /// A view, a dimension and a balloon are selected by their ids, as a view's own id reads in every
+    /// reply, with no undo step and no change to the design or its export. Adding one keeps the rest.
+    #[test]
+    fn a_drawings_objects_are_selected_without_changing_anything() {
+        let (mut s, [front, right, _], dimension, balloon, drawing) = sheet_objects();
+        let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+        let svg = run(&mut s, "drawing.export", json!({"sheet": sheet}))["svg"].clone();
+        let (doc, steps) = (s.doc.clone(), s.undo.len());
+        let reply = run(&mut s, "select.set", json!({"items": [item(drawing, front), item(drawing, dimension), item(drawing, balloon)]}));
+        assert_eq!(reply["selected"], json!(3));
+        assert_eq!(s.selection[0], Sel::Drawing { drawing, object: front });
+        run(&mut s, "select.set", json!({"items": [item(drawing, right)], "add": true}));
+        assert_eq!(s.selection.len(), 4);
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.undo.len() == steps);
+        assert_eq!(run(&mut s, "drawing.export", json!({"sheet": sheet}))["svg"], svg);
+        run(&mut s, "select.clear", json!({}));
+        assert!(s.selection.is_empty());
+    }
+
+    /// What isn't a view, dimension or balloon of the drawing open is refused, and the selection stays
+    /// as it was: an unknown id, a sheet's, another drawing's, a malformed id, too many items, and
+    /// any of them with no drawing open.
+    #[test]
+    fn what_isnt_on_the_drawing_open_is_not_selected() {
+        let (mut s, [front, ..], _, _, drawing) = sheet_objects();
+        let sheet = s.drawing("test").unwrap().sheets[0].id;
+        run(&mut s, "select.set", json!({"items": [item(drawing, front)]}));
+        let other = run(&mut s, "drawing.create", json!({}))["drawing"].as_str().and_then(ids::decode);
+        run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+        run(&mut s, "select.set", json!({"items": [item(drawing, front)]}));
+        let refused = |s: &mut Session, items: Value| {
+            let before = s.selection.clone();
+            assert!(s.execute("select.set", &json!({"items": items})).is_err(), "{items}");
+            assert_eq!(s.selection, before, "{items}");
+        };
+        refused(&mut s, json!([item(drawing, 99)]));
+        refused(&mut s, json!([item(drawing, 0)]));
+        refused(&mut s, json!([item(drawing, sheet)]));
+        refused(&mut s, json!([item(99, front)]));
+        if let Some(other) = other {
+            refused(&mut s, json!([item(other, front)]));
+        }
+        refused(&mut s, json!([{"type": "drawing", "drawing": ids::encode(drawing), "object": front}]));
+        refused(&mut s, json!([{"type": "drawing", "drawing": ids::encode(drawing), "object": "x"}]));
+        refused(&mut s, json!([{"type": "drawing", "drawing": ids::encode(drawing)}]));
+        refused(&mut s, json!(vec![item(drawing, front); 10_001]));
+        run(&mut s, "drawing.close", json!({}));
+        refused(&mut s, json!([item(drawing, front)]));
+    }
+
+    /// A selected object that goes leaves the selection, whatever took it, and the rest stay: an undo
+    /// of the balloon, then closing the drawing takes the others.
+    #[test]
+    fn a_selected_object_that_goes_leaves_the_selection() {
+        let (mut s, [front, ..], dimension, balloon, drawing) = sheet_objects();
+        run(&mut s, "select.set", json!({"items": [item(drawing, front), item(drawing, dimension), item(drawing, balloon)]}));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.selection, [Sel::Drawing { drawing, object: front }, Sel::Drawing { drawing, object: dimension }]);
+        run(&mut s, "drawing.close", json!({}));
+        assert!(s.selection.is_empty());
     }
 
     fn joint_assembly() -> Session {

@@ -318,6 +318,11 @@ impl Drawing {
         }
     }
 
+    /// Whether `id` names an object a sheet shows: a view, a dimension or a balloon.
+    pub fn has_object(&self, id: u64) -> bool {
+        self.view(id).is_some() || self.dimension(id).is_some() || self.balloon(id).is_some()
+    }
+
     /// What is on sheet `id`: its views and the dimensions and balloons in them. Each later kind of record on a
     /// sheet adds its own here, and goes with the sheet ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {

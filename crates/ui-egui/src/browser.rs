@@ -719,7 +719,7 @@ impl Lit {
                 Sel::Plane { name } => Thing::Plane(name.clone()),
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
-                Sel::Occurrence { .. } => continue,
+                Sel::Occurrence { .. } | Sel::Drawing { .. } => continue,
             });
         }
         let hovered = match &app.viewport.hover {

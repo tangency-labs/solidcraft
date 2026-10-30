@@ -240,6 +240,7 @@ fn rank(s: &Sel, sketching: bool) -> (u8, u8) {
         Sel::Profile { .. } => 7,
         Sel::Plane { .. } => 8,
         Sel::Axis { .. } => 9,
+        Sel::Drawing { .. } => 10,
     };
     let own = matches!(s, Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchCurve { .. });
     (if sketching && !own { 1 } else { 0 }, kind)
@@ -331,6 +332,7 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::Face { body, index, .. } => format!("Face {} · {body}", index + 1),
         Sel::Body { name } => format!("Body · {name}"),
         Sel::Occurrence { path } => format!("Occurrence {path:?}"),
+        Sel::Drawing { object, .. } => format!("Drawing object {object}"),
         Sel::Feature { id } => app.session.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Profile { sketch, index } => format!("Profile {} · {}", index + 1, sketch_name(app, *sketch)),
         Sel::Plane { name } if matches!(name.as_str(), "XY" | "XZ" | "YZ") => format!("{} Plane", app.preferences.origin_plane_names.label(name)),
@@ -364,7 +366,7 @@ fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
         Sel::Edge { .. } => "fillet",
         Sel::Face { .. } | Sel::Feature { .. } => "presspull",
         Sel::Body { .. } => "body",
-        Sel::Occurrence { .. } => "component",
+        Sel::Occurrence { .. } | Sel::Drawing { .. } => "component",
         Sel::Profile { .. } => "sketch",
         Sel::Plane { .. } => "plane",
         Sel::Axis { .. } => "axis",
