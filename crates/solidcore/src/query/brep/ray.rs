@@ -190,15 +190,10 @@ fn face_surface_cache(
     let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, &cache_handle, &entity_of)?;
     let mut cache =
         get_surface_cache_with_face(k, &surface, Some(CacheObject::Surface(face)), &mut mapped)?;
-    // A Boolean operation can defer the factory's tree build until GetTree.
-    if get_tree
-        && (cache.base().tree().is_none()
-            || (!cache.base().have_t_surface_cache
-                && surface.face()?.is_some()
-                && cache.base().face_containment_done
-                    != crate::surface::surface_cache::p1::FaceContainment::UnderConstruction))
-    {
-        cache.build_tree_with_face(k, &mut mapped)?;
+    // A Boolean operation can defer the factory's tree build until GetTree. A plain
+    // SmSurfaceCache (the factory's fallback) runs its own GetTree: no face boundary.
+    if get_tree {
+        cache.get_tree_with_face(k, &mut mapped)?;
     }
     Ok(cache.into_base())
 }
