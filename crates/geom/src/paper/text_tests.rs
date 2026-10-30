@@ -88,6 +88,14 @@ fn a_run_and_its_font_pass_and_count_toward_the_records() {
     assert!(scene.prepare().unwrap().font(&run()).is_some_and(|f| f.id == [7; 32]));
 }
 
+/// A clip on another object leaves the text and its fonts: the scene it makes keeps them.
+#[test]
+fn a_clip_elsewhere_keeps_the_fonts() {
+    let mut scene = scene(vec![run()], vec![font()]);
+    scene.clips = vec![(u64::MAX, crate::paper::Clip::Circle { center: Vec2::ZERO, radius: 1.0 })];
+    assert!(scene.prepare().unwrap().font(&run()).is_some_and(|f| f.id == [7; 32]));
+}
+
 /// A scene without text writes no `fonts`, so every scene today keeps its bytes. A font's bytes are
 /// never written, so a scene read back is refused until they come from the font of its id. How a PDF
 /// may carry it is written by name.
