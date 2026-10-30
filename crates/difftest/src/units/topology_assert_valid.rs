@@ -138,6 +138,8 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     face_owner: &own_face_owner,
     edge_owner: &own_edge_owner,
     edgeuse_owner: &own_edgeuse_owner,
+    // the runner records `Notify` itself, after the build
+    naming: NamingScheme::Unknown,
 };
 fn block(src: &Src) -> Result<(String, Vec<f64>), HarnessError> {
     Ok(match src {

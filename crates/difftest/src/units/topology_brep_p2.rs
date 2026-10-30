@@ -966,6 +966,8 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     face_owner: &face_owner,
     edge_owner: &edge_owner,
     edgeuse_owner: &edgeuse_owner,
+    // the geometry is owned under this runner's own identities
+    naming: solidcore::topology::NamingScheme::Unknown,
 };
 
 /// The Rust B-rep of the case and its entity counts, or the build failure's output:

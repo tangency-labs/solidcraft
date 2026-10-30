@@ -54,7 +54,7 @@ use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::shell::{ShellMembers, ShellType};
 use solidcore::topology::{
     Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
-    LoopId, Loopuse, LoopuseId, LoopuseStart, NamingScheme, ObjectHandle, Region, RegionId, Shell,
+    LoopId, Loopuse, LoopuseId, LoopuseStart, ObjectHandle, Region, RegionId, Shell,
     ShellId, Vertex, VertexId, Vertexuse, VertexuseId, VertexuseOwner,
 };
 use solidcore::{EntityRef, SolidError};
@@ -1795,12 +1795,6 @@ fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Output, Fail> {
             fail,
         } => {
             let e = eid(*eu);
-            // the builders and the import name UV trim curve owners as Notify B-reps do
-            // (`own_builder::notify_edgeuse_owner`), so `SetUVTrimCurve` /
-            // `SetMemberUVTrimCurve` name the new owner the same way
-            if b.naming() == NamingScheme::Unknown {
-                b.set_naming(NamingScheme::Notify);
-            }
             let mate = match eu1::mate(b, e) {
                 Ok(m) => m,
                 Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {

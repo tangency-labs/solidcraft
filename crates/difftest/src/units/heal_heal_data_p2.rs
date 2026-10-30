@@ -1389,6 +1389,7 @@ const CONV: Conventions<'static> = Conventions {
     face_owner: &arena_face_owner,
     edge_owner: &arena_edge_owner,
     edgeuse_owner: &crate::own_builder::notify_edgeuse_owner,
+    naming: NamingScheme::Arena,
 };
 
 /// `new (ctx) SmBrep()`, then `SmPrimitiveCreation(brep->GetInfiniteRegion())

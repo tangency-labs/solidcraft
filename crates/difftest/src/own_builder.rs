@@ -37,8 +37,8 @@ use solidcore::topology::shell::ShellMembers;
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{
     Brep, Edge, EdgeId, Edgeuse, EdgeuseId, EdgeuseOwner, Face, FaceId, Faceuse, FaceuseId, Loop,
-    LoopEdge, LoopId, Loopuse, LoopuseId, LoopuseStart, Region, RegionId, Shell, ShellId, Vertex,
-    VertexId, Vertexuse, VertexuseId, VertexuseOwner,
+    LoopEdge, LoopId, Loopuse, LoopuseId, LoopuseStart, NamingScheme, Region, RegionId, Shell,
+    ShellId, Vertex, VertexId, Vertexuse, VertexuseId, VertexuseOwner,
 };
 use solidcore::{EntityRef, SolidError};
 
@@ -92,6 +92,14 @@ pub(crate) struct Conventions<'a> {
     pub(crate) edge_owner: &'a dyn Fn(EdgeId) -> (ObjectRef, ObjectRef),
     /// The owner identity of edge use `eu`'s UV trim curve (when it has an owner).
     pub(crate) edgeuse_owner: &'a dyn Fn(EdgeuseId) -> ObjectRef,
+    /// The naming the renumbered B-rep records ([`Brep::naming`]). The shim's B-rep
+    /// names its geometry by the owning topology objects themselves; the Rust analog is
+    /// [`NamingScheme::Arena`], and [`renumber_with`] records it
+    /// ([`Brep::use_arena_naming`]) when `face_owner` and `edge_owner` are the arena
+    /// identities (it refuses `Arena` with any other owners). A runner whose owners are
+    /// its own `key_of` identities (passed to the library through its environment)
+    /// keeps [`NamingScheme::Unknown`].
+    pub(crate) naming: NamingScheme,
 }
 
 fn arena_face_owner(f: FaceId) -> ObjectRef {
@@ -126,6 +134,7 @@ impl Conventions<'static> {
         face_owner: &arena_face_owner,
         edge_owner: &arena_edge_owner,
         edgeuse_owner: &notify_edgeuse_owner,
+        naming: NamingScheme::Arena,
     };
 
     /// `sc_topology_fixture.h` (`build`, then `walk` for the export of its
@@ -140,6 +149,7 @@ impl Conventions<'static> {
         face_owner: &fixture_face_owner,
         edge_owner: &fixture_edge_owner,
         edgeuse_owner: &fixture_edgeuse_owner,
+        naming: NamingScheme::Unknown,
     };
 }
 
@@ -1540,8 +1550,8 @@ fn renumber_walk(src: &Brep, g: &Walk, conv: &Conventions<'_>) -> Result<Brep, H
     b.set_validate_only(src.validate_only());
     b.set_tolerance(src.tolerance());
     b.set_key(src.key());
-    // geometry owners are relabelled under arena identities below, the naming the
-    // B-rep keeps by default (`NamingScheme::Unknown` falls back to it)
+    // geometry owners are relabelled under `conv`'s identities below, and the copy
+    // records `conv.naming` at the end (`record_naming`)
     b.set_editing_enabled(src.editing_enabled());
     let probe = Kernel::default();
     if src.this_model_size_estimate(&probe, false) != tol::USE_DEFAULT
@@ -1793,7 +1803,35 @@ fn renumber_walk(src: &Brep, g: &Walk, conv: &Conventions<'_>) -> Result<Brep, H
     for f in faces {
         b.sync_face_surface_tolerance(f).map_err(solid)?;
     }
+    record_naming(&mut b, conv)?;
     Ok(b)
+}
+
+/// Records `conv`'s naming on the renumbered `b` (see [`Conventions::naming`]).
+///
+/// # Errors
+///
+/// A harness error for [`NamingScheme::Arena`] under owners that are not the arena
+/// identities, or for a naming other than `Arena` / `Unknown` (a runner records those
+/// itself, after the build).
+fn record_naming(b: &mut Brep, conv: &Conventions<'_>) -> Result<(), HarnessError> {
+    match conv.naming {
+        NamingScheme::Unknown => Ok(()),
+        NamingScheme::Arena => {
+            let (f, e) = (FaceId::from_index(0), EdgeId::from_index(0));
+            if (conv.face_owner)(f) != arena_face_owner(f)
+                || (conv.edge_owner)(e).0 != arena_edge_owner(e).0
+            {
+                return Err(harness(
+                    "conventions: arena naming with non-arena geometry owners",
+                ));
+            }
+            b.use_arena_naming().map_err(solid)
+        }
+        other => Err(harness(format!(
+            "conventions: naming {other:?} is recorded by the runner"
+        ))),
+    }
 }
 
 /// The entity counts of a B-rep in the order of the shim's export header (regions,
@@ -1823,5 +1861,47 @@ pub(crate) fn build_status(e: &SolidError) -> f64 {
             f64::from(solidcore::error::SM_ERR_INVALID_INPUT)
         }
         _ => f64::from(solidcore::error::SM_ERR),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A B-rep renumbered under arena-owned conventions records `Arena` (as the
+    /// `.smb` reader's B-rep does before the renumbering), so library code that
+    /// names new geometry by the B-rep's scheme sees the owners it was given; the
+    /// `sc_topology_fixture.h` conventions, which own geometry under runner keys,
+    /// keep `Unknown`. Before this, every renumbered B-rep came back `Unknown`.
+    #[test]
+    fn renumber_records_the_conventions_naming() {
+        let src = BrepIn::Box {
+            origin: [0.0; 3],
+            size: [1.0, 2.0, 3.0],
+        };
+        let naming = |conv: &Conventions<'_>| {
+            let k = &mut Kernel::default();
+            match build_with(k, &src, false, false, conv).unwrap().unwrap() {
+                Built::Brep(b) => b.naming(),
+                Built::Failed(e) => panic!("box build failed: {e}"),
+            }
+        };
+        assert_eq!(naming(&Conventions::EDGEUSE_GRAPH), NamingScheme::Arena);
+        assert_eq!(
+            naming(&Conventions::TOPOLOGY_FIXTURE),
+            NamingScheme::Unknown
+        );
+    }
+
+    /// `Arena` naming over non-arena owners is refused instead of recorded.
+    #[test]
+    fn arena_naming_requires_arena_owners() {
+        let conv = Conventions {
+            naming: NamingScheme::Arena,
+            ..Conventions::TOPOLOGY_FIXTURE
+        };
+        let mut b = Brep::new();
+        assert!(record_naming(&mut b, &conv).is_err());
+        assert_eq!(b.naming(), NamingScheme::Unknown);
     }
 }

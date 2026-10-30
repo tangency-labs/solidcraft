@@ -1814,6 +1814,8 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     vertex_lists_last: true,
     face_owner: &face_owner,
     edge_owner: &edge_owner,
+    // the geometry is owned under this runner's own identities
+    naming: solidcore::topology::NamingScheme::Unknown,
     ..crate::own_builder::Conventions::EDGEUSE_GRAPH
 };
 
