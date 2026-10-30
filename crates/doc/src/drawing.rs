@@ -72,6 +72,7 @@ pub mod dimension;
 pub mod fields;
 pub mod image;
 pub mod note;
+pub mod sheet_set;
 pub mod table;
 pub mod template;
 pub mod view;
