@@ -20,9 +20,9 @@ const ICON: f32 = 20.0;
 /// [`READOUT`] below right). From the hot spot to the badge's bottom-left corner:
 const OFFSET: Vec2 = vec2(12.0, -8.0);
 /// Where the sketch tools' coordinate readout starts, down and right of the hot spot: right of
-/// the system arrow, which hangs about 12 points wide below it and would cover the first value
-/// (#9480).
-pub(crate) const READOUT: Vec2 = vec2(18.0, 10.0);
+/// the system arrow, which hangs below it about 12 points wide at the default size and about 18
+/// at the next larger one, and would cover the first value (#9480).
+pub(crate) const READOUT: Vec2 = vec2(26.0, 10.0);
 /// The gap to the hot spot when the badge flips to the left of the pointer.
 const FLIPPED_GAP: f32 = 6.0;
 
@@ -189,7 +189,8 @@ mod tests {
     }
 
     /// A line's coordinate readout starts right of the system arrow, which hangs below and
-    /// right of the hot spot about 12 points wide and 19 high, wherever the point snaps (#9480).
+    /// right of the hot spot about 12 × 19 points at the default size and 18 × 28 at the next
+    /// larger one, wherever the point snaps (#9480).
     #[test]
     fn the_coordinate_readout_starts_right_of_the_pointer_arrow() {
         let mut h = Harness::new();
@@ -203,7 +204,7 @@ mod tests {
             h.step(&json!({"move": [at.x, at.y]})).unwrap();
             h.frames(2);
             let readout = rect_of("viewport:readout").expect("the readout is drawn");
-            let arrow = Rect::from_min_size(at, vec2(13.0, 20.0));
+            let arrow = Rect::from_min_size(at, vec2(19.0, 29.0));
             assert!(!readout.intersects(arrow), "at {at:?}: the readout {readout:?} is under the arrow {arrow:?}");
             assert!(readout.top() > at.y, "at {at:?}: the readout {readout:?} is not below the hot spot");
         }
