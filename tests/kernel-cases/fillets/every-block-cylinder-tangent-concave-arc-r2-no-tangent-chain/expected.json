@@ -1,0 +1,13 @@
+{
+ "sources": [],
+ "what": "the concave half circle where a block as wide as the cylinder's diameter meets the cylinder's wall above its top, rounded r2 alone (Tangent chain off)",
+ "source": "analytic",
+ "method": "block 40x20x15 (x 0..40, y -10..10) joined to the cylinder R10 x 30 on the z axis: the block's sides y = +-10 run tangent into the cylinder wall at x = 0; V0 = 12000 + 3000 pi - 15 * 50 pi = 19068.5835. The arc (z = 15, rho = 10, x > 0) ends at (0, +-10, 15), where the block's top-side edges go on tangentially. Rounded r2 alone, the round adds the spandrel (rho in [10,12], z in [15,17]) over the block only, between its side planes |y| = 10: at radius rho it spans 2 asin(10/rho), running out to nothing at the ends. Added = int over the spandrel of 2 rho asin(10/rho) (Gauss-Legendre) = 23.3785. V = 19091.9620. Or a refusal saying the edge continues tangentially (as fillets/1207-fillet-bar-top-edge-after-boss-arc-round-no-tangent-chain).",
+ "body_count": 1,
+ "outcome": "solid_or_refused",
+ "refusal": "continues tangentially",
+ "volume_mm3": 19091.962003483477,
+ "continuity": {
+  "order": "g1"
+ }
+}
