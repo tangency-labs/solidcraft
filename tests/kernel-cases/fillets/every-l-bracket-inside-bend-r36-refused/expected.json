@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "an L-bracket's inside bend rounded r36, past both inside faces (35 long): refused, naming the largest radius that fits",
+ "source": "invariants",
+ "method": "a concave round adds material, and an r36 one would touch the inside faces 36 from the bend, past their 35: it would hang over the legs' ends. Owner rule: concave overflow stays refused, naming the largest that fits: 35 (every-l-bracket-inside-bend-r35-uses-both-faces), at the request's three significant digits (step 0.01).",
+ "outcome": "refused",
+ "refusal": "the largest radius that fits is 35 mm"
+}

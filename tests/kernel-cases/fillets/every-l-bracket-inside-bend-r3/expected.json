@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "the inside bend of an L-bracket rounded r3",
+ "source": "analytic",
+ "method": "L-bracket: the legs 40x20x5 (x 0..40, z 0..5) and 5x20x40 (x 0..5, z 0..40) joined, 20 deep in y: V0 = 4000 + 4000 - 500 = 7500, 8 faces. The concave edge (x = 5, z = 5) gains the spandrel (1-pi/4) 9 = 1.931417 along its 20: V = 7500 + 38.6283 = 7538.6283. Faces 9.",
+ "body_count": 1,
+ "volume_mm3": 7538.628330588459,
+ "faces": 9,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   40
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}
