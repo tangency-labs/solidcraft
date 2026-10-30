@@ -1,0 +1,33 @@
+{
+  "nb": {
+    "browser.calibrate_click_a": "Klikk på bildet for punkt A, eller skriv inn koordinatene.",
+    "browser.calibrate_click_b": "Klikk på bildet for punkt B, eller skriv inn koordinatene.",
+    "help.sketch.construction_line": "Opprett en uendelig hjelpelinje gjennom to punkter. Bruk den til å legge opp en skisse uten å dele opp profilene.",
+    "help.sketch.construction_line.angle": "Opprett en uendelig hjelpelinje i en vinkel fra skissens X-akse. Velg punktet og skriv inn vinkelen, eller velg retningen.",
+    "help.sketch.construction_line.bisector": "Velg to rette skisselinjer som krysser hverandre, og velg deretter en av vinkelhalveringslinjene. Resultatet følger kildelinjene sine.",
+    "help.sketch.construction_line.horizontal": "Opprett en uendelig vannrett hjelpelinje gjennom et punkt. Den vannrette bindingen følger med ved senere endringer.",
+    "help.sketch.construction_line.parallel": "Velg en rett skisselinje, og plasser deretter en parallell uendelig hjelpelinje. Høyreklikk for å velge en annen referanse.",
+    "help.sketch.construction_line.perpendicular": "Velg en rett skisselinje, og plasser deretter en vinkelrett uendelig hjelpelinje. Høyreklikk for å velge en annen referanse.",
+    "help.sketch.construction_line.tangent_at": "Opprett en tangent i et punkt på en sirkel eller sirkelbue, eller i endepunktet på en åpen spline eller kjeglesnittkurve. Velg kurven, og deretter berøringspunktet.",
+    "help.sketch.construction_line.tangent_external": "Velg en sirkel eller sirkelbue, deretter et eksternt punkt og en tangentløsning. Forhåndsvisningene viser bare berøringspunkter på den tegnede buen.",
+    "help.sketch.construction_line.tangent_two": "Velg to sirkler eller sirkelbuer, og velg deretter en felles tangent i forhåndsvisningen. Berøringspunktene må ligge på de tegnede kurvene.",
+    "help.sketch.construction_line.vertical": "Opprett en uendelig loddrett hjelpelinje gjennom et punkt. Den loddrette bindingen følger med ved senere endringer.",
+    "prefs.persistent_ribbon_pressed": "Fremhev aktive kommandoer på båndet",
+    "prefs.persistent_ribbon_pressed_help": "Fremhev kommandoer på båndet mens effektene deres er slått på. Slå av for å beholde det forrige nøytrale utseendet og den forrige kommandohjelpen.",
+    "prefs.sketch_construction_lines": "Utvidede hjelpelinjeverktøy",
+    "prefs.sketch_open_look_at": "Orienter mot skissen når den åpnes",
+    "prefs.sketch_open_look_at_note": "Av: å opprette eller redigere en skisse lar visningen stå som den er. Orienter mot vender visningen mot skissen når du vil.",
+    "recovery.discard_all": "Forkast alle",
+    "recovery.discard_all_detail": "Dette kan ikke angres.",
+    "recovery.discard_all_title": "Forkast {count} automatiske lagringer?",
+    "recovery.discard_all_title_one": "Forkast 1 automatisk lagring?",
+    "ui.construction.angle_hint": "Hjelpelinje: klikk på et punkt, og skriv deretter inn en vinkel eller velg en retning",
+    "ui.construction.bisector_hint": "Vinkelhalveringslinje: velg to rette linjer som krysser hverandre, og deretter ønsket løsning",
+    "ui.construction.common_hint": "Felles tangent: velg to sirkler/buer, og deretter ønsket løsning",
+    "ui.construction.contact_hint": "Tangent: velg en sirkel/bue eller åpen spline/kjeglesnittkurve, og deretter berøringspunktet (frie kurver: endepunkter)",
+    "ui.construction.external_hint": "Tangent: velg en sirkel eller bue, et eksternt punkt, og deretter ønsket løsning",
+    "ui.construction.free_hint": "Hjelpelinje: klikk på to punkter; høyreklikk for å starte på nytt",
+    "ui.construction.point_hint": "Hjelpelinje: klikk på punktet linjen skal gå gjennom",
+    "ui.construction.reference_hint": "Hjelpelinje: velg en rett linje, og deretter et punkt; høyreklikk for å bytte referanse"
+  }
+}
