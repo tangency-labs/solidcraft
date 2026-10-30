@@ -356,6 +356,11 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let check = setting::operations_panel(app, ui).on_hover_text(app.tr("prefs.operations_panel_note"));
                         crate::scenario::publish_target("prefs:operations_panel", check.rect);
                     });
+                    // The design waits for a file being opened or inserted, as before.
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::file_operations_wait(app, ui).on_hover_text(app.tr("prefs.file_operations_wait_note"));
+                        crate::scenario::publish_target("prefs:file_operations_wait", check.rect);
+                    });
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));
                     ui_kit::text(ui, app.tr("prefs.history_sketches_note"), ui_kit::Text::Hint("history_sketches"));
                     ui_kit::LayoutPreview {

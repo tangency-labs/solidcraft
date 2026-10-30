@@ -657,7 +657,7 @@ pub fn invalidate_scene(app: &mut SolveApp) {
 
 pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
     if render {
-        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load.busy() {
+        if app.session.active_sketch.is_some() || app.tool.is_some() || app.dialog.is_some() || app.file_load_holds() {
             return Err(crate::i18n::tr("render.error_finish_operation").into());
         }
         app.run("render.scene", json!({}))?;

@@ -310,6 +310,12 @@ drawing and answering while it runs:
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
   measure the real work.
 
+A file being opened or inserted (from the window or the control channel) holds the agent's
+design changes the same way until it is in, so an agent's `doc.open` and the edits after it go
+in that order. The person at the window can go on working meanwhile: the file is a row of the
+operations panel, and its result lands after their edits (`ui.prefs {"file_operations_wait":
+true}` brings back the card over the design that makes everything wait for the file).
+
 Timeouts and `control.pending` work as described above. A slow command is still answered when it
 is done, from a later frame. With the preference off, commands run on the window thread, and the
 window waits for each one.

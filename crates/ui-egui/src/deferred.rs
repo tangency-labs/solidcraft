@@ -224,7 +224,7 @@ impl SolveApp {
         }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(wait) = self.apply_off_thread
-            && !self.file_load.busy()
+            && !self.file_load_holds()
             && self.file_picker.is_none()
         {
             let ahead = self.session.ahead();
@@ -312,7 +312,7 @@ impl SolveApp {
     #[cfg(not(target_arch = "wasm32"))]
     fn begin_deferred(&self, id: &str, params: &Value, serial: u64) -> Start {
         let Some(wait) = self.apply_off_thread else { return Start::Now(None, None) };
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             return Start::Now(None, None);
         }
         let ahead = self.session.ahead();

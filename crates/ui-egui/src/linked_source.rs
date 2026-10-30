@@ -28,7 +28,7 @@ pub(crate) fn start_selected(app: &mut SolveApp) {
 }
 
 pub(crate) fn start(app: &mut SolveApp, component: u64) {
-    if app.file_picker_busy() || app.file_load.busy() {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     if !app.session.doc.links.contains_key(&component) {
@@ -63,7 +63,7 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
 
 /// Ask where the component's design goes, then move its history there and link it.
 pub(crate) fn extract(app: &mut SolveApp, component: u64) {
-    if app.file_picker_busy() || app.file_load.busy() {
+    if app.file_picker_busy() || app.file_load_holds() {
         return;
     }
     let Some(name) = app.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()) else { return };

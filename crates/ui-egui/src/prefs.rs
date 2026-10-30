@@ -1191,6 +1191,10 @@ preference_settings! {
     /// The operations under way, with their progress and Cancel, in a panel in the view's
     /// bottom-right corner. Off: a "Computing" notice and the agent's chip, as before.
     operations_panel: bool = true, PAGE_LAYOUT => check_id("prefs.operations_panel");
+    /// While a file opens, is inserted or its links are read again, the design waits for it
+    /// behind a card with the file's progress and Cancel, as it always did. Off (the default): the
+    /// operation is a row of the operations panel and the design stays usable meanwhile.
+    file_operations_wait: bool = false, PAGE_LAYOUT => check_id("prefs.file_operations_wait");
     /// Toolbar tabs hidden by the person. An empty list keeps every existing tab visible.
     hidden_toolbar_tabs: Vec<String> = Vec::new(), PAGE_LAYOUT;
     /// Show the ribbon's panel drop-downs as a grid of large icons, their names in the tooltips,
@@ -5694,6 +5698,7 @@ mod tests {
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("operations_panel", json!(false), PAGE_LAYOUT),
+            ("file_operations_wait", json!(true), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
             ("ribbon_menus_skip_pinned", json!(true), PAGE_LAYOUT),
             ("timeline_left", json!(true), PAGE_LAYOUT),

@@ -44,6 +44,9 @@ pub struct Row {
     pub steps: Option<(usize, usize)>,
     /// Waiting for the one before it.
     pub queued: bool,
+    /// Done, and waiting for the person to finish what they are doing (or for its design's tab)
+    /// before it lands.
+    pub waiting: bool,
     /// Asked to stop, and finishing its current step.
     pub cancelling: bool,
     /// Gone because it was cancelled (fading out).
@@ -76,7 +79,7 @@ enum Cancel {
 
 impl Row {
     fn new(key: String, label: String) -> Self {
-        Row { key, label, steps: None, queued: false, cancelling: false, cancelled: false, cancel: None, agent: false }
+        Row { key, label, steps: None, queued: false, waiting: false, cancelling: false, cancelled: false, cancel: None, agent: false }
     }
 
     /// Whether its X does anything.
@@ -100,6 +103,9 @@ impl Row {
         }
         if self.queued {
             return Some(crate::i18n::tr("operations.queued").to_string());
+        }
+        if self.waiting {
+            return Some(crate::i18n::tr("operations.waiting").to_string());
         }
         let (done, total) = self.steps.filter(|(_, total)| *total > 1)?;
         Some(format!("{} / {total}", (done + 1).min(total)))
@@ -138,7 +144,14 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         } else {
             Cancel::File
         };
-        rows.push(Row { steps: file.steps, queued: file.queued, cancelling: file.cancelled, cancel: Some(cancel), ..Row::new(key, label) });
+        rows.push(Row {
+            steps: file.steps,
+            queued: file.queued,
+            waiting: file.waiting,
+            cancelling: file.cancelled,
+            cancel: Some(cancel),
+            ..Row::new(key, label)
+        });
     }
     if let Some(job) = &app.applying {
         let command: Option<&str> = match app.dialog.as_ref().and_then(crate::dialogs::Dialog::command) {
@@ -300,7 +313,12 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: Rect) {
         return;
     }
     let now = crate::now_ms();
-    let rows = current(app);
+    let mut rows = current(app);
+    // A file the design waits for has its card, with its own Cancel (Wait for files to open).
+    if app.preferences.file_operations_wait {
+        rows.retain(|r| !r.key.starts_with("file:"));
+        app.operations.shown.retain(|s| !s.row.key.starts_with("file:"));
+    }
     app.operations.update(rows, now);
     if app.operations.is_empty() {
         return;
@@ -392,7 +410,7 @@ fn paint_row(ui: &egui::Ui, painter: &egui::Painter, t: &Tokens, row: &Row, alph
         }
         Some(_) => {}
         // Not told how far it is: a stripe going to and fro.
-        None if !row.queued && !row.cancelling && !row.cancelled => {
+        None if !row.queued && !row.waiting && !row.cancelling && !row.cancelled => {
             let phase = (ui.ctx().input(|i| i.time) * 0.8).fract() as f32;
             let w = bar.width() * 0.3;
             let left = bar.left() + (bar.width() - w) * (1.0 - (phase * 2.0 - 1.0).abs());

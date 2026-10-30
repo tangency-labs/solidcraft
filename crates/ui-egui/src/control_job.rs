@@ -289,7 +289,7 @@ impl Ahead {
     /// (not computed off the window thread, or nothing to compute).
     pub(crate) fn begin(app: &SolveApp, method: &str, request: &Value) -> Option<Ahead> {
         app.apply_off_thread?;
-        if !app.preferences.agent_off_thread || app.file_load.busy() || app.file_picker.is_some() {
+        if !app.preferences.agent_off_thread || app.file_load_holds() || app.file_picker.is_some() {
             return None;
         }
         let commands = ahead_commands(method, request);
@@ -390,7 +390,7 @@ impl SolveApp {
     /// Take a control request off the window thread when it computes long (see the module
     /// notes). Returns it when it should simply run here now.
     pub(crate) fn offload_control(&mut self, ctx: &egui::Context, req: ControlRequest) -> Option<ControlRequest> {
-        if self.apply_off_thread.is_none() || self.file_load.busy() || self.file_picker.is_some() {
+        if self.apply_off_thread.is_none() || self.file_load_holds() || self.file_picker.is_some() {
             return Some(req);
         }
         // Reading the design (a measure, an inspection that measures): on a copy, answered from
@@ -512,7 +512,7 @@ impl SolveApp {
         }
         let Some(job) = self.control_job.take() else { return };
         // A file opening meanwhile: the request waits for it as any design change does.
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             self.control_held.push_front(job.req);
             return;
         }

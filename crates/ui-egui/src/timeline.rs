@@ -573,7 +573,7 @@ fn playback_blocked(app: &SolveApp) -> bool {
         || app.session.active_sketch.is_some()
         || app.dialog.is_some()
         || app.tool.is_some()
-        || app.file_load.busy()
+        || app.file_load_holds()
         || app.file_picker.is_some()
         || app.saving.is_some()
         || app.applying.is_some()
