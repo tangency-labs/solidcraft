@@ -75,6 +75,7 @@ use crate::topology::proto_topology::p1::CopyBrepMap;
 
 #[cfg(test)]
 use crate::geom::attribute::ObjectKey;
+use crate::offset::offset_geometry_creation::make_edges_on_analytics_exact;
 use crate::sweep::topology_sweep::store::SweepIdentities;
 use crate::topology::edge::{NotificationStores, NotifyState};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2};
@@ -198,6 +199,26 @@ impl ShellOutcome {
     pub const fn input_ownership_transferred(&self) -> bool {
         self.retained_input.is_none()
     }
+}
+
+/// Opt-in (WR-545; the fork's tangency-labs/smlib@cd85d34): with
+/// `Kernel::fixes.shell_edges_on_analytics_exact`, the last step of `ShellBrep`,
+/// `SmOffsetGeometryCreation::MakeEdgesOnAnalyticsExact(crContext, rpShellBrep)`, on
+/// the shell's result under its notification identities. An error drops the shell.
+fn make_shell_edges_exact(
+    kernel: &mut Kernel,
+    shell: &mut Brep,
+    notifications: &mut OffsetNotifications<'_>,
+) -> Result<()> {
+    if !kernel.fixes.shell_edges_on_analytics_exact {
+        return Ok(());
+    }
+    let mut stores = NotificationStores {
+        records: &mut *notifications.records,
+        attributes: &mut *notifications.attributes,
+        key_of: notifications.result_key_of,
+    };
+    make_edges_on_analytics_exact(kernel, shell, &mut stores)
 }
 
 /// Static offset entry point, with a non-null original and an owned result.
@@ -344,17 +365,20 @@ impl OffsetExecutive {
                     // SER_DELETE: an error drops the shell
                     merge_sheet_side_walls(kernel, &mut shell, &sheet_faces, notifications)?;
                 }
+                make_shell_edges_exact(kernel, &mut shell, notifications)?;
                 return Ok(shell);
             }
 
-            shell_difference(
+            let mut shell = shell_difference(
                 kernel,
                 &mut input,
                 shell,
                 options.offset.distance,
                 tolerance,
                 notifications,
-            )
+            )?;
+            make_shell_edges_exact(kernel, &mut shell, notifications)?;
+            Ok(shell)
         })();
         ShellOutcome {
             result,

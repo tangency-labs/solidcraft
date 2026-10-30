@@ -31,6 +31,7 @@
 //! | `FaceOffsetBrep` (private)                                   | the face creator's topology/owned-geometry subset |
 //! | `create_analytic_extension` (private)                       | the SolidCraft fork's `sm_CreateAnalyticExtension` (tangency-labs/smlib@fddc366, @98ab1b0; opt-in) |
 //! | `exact_piece` (private)                                     | the fork's `sm_ExactPiece` (tangency-labs/smlib@fddc366; opt-in) |
+//! | [`make_edges_on_analytics_exact`]                          | the fork's `MakeEdgesOnAnalyticsExact` (tangency-labs/smlib@cd85d34; opt-in) |
 //!
 //! Deviations:
 //! - **Object handles.** Every `SmObject*` (topology, curves, surfaces) is a caller
@@ -122,13 +123,20 @@
 //!   upstream's. `exact_piece` counts the whole turns it moves a conic angle by and
 //!   returns [`SolidError::NotConverged`] past `MAX_EXACT_PIECE_TURNS` (65536), where
 //!   the fork's loop would not end for a non-finite or huge angle.
+//! - **Opt-in fork fix.** With `Kernel::fixes.shell_edges_on_analytics_exact` (WR-545),
+//!   the shell's result runs [`make_edges_on_analytics_exact`]. Upstream's
+//!   `CreateTrimmedNURBSCurve` gives `NULL` where the port returns an error; any error
+//!   but [`SolidError::Unported`] skips the edge as `NULL` does, as does a failing
+//!   `GlobalSurfaceIntersect`. `SmBrep::ReplaceCurve` is written out in place
+//!   (`brep_replace_curve`, private), with `SmEdge::ClearUVCaches`.
 //! - **Recursion.** None.
 
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::{Curve, CurveKind, ELLIPSE_TYPE, LINE_TYPE};
 use crate::curve::curve::p8::CurveIntersectOptions;
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::assert_array::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::MarkType;
 use crate::geom::extent1d::Extent1d;
@@ -136,8 +144,10 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::point_project_to_plane;
 use crate::geom::geom_utility::p2::{circle_plane_intersect, ContinuityType, CurveIntersection};
 use crate::geom::global_solver::{ObjectZoneTol, SolutionRequested, SolverOperation};
+use crate::geom::object::NotifyOperation;
 use crate::geom::solution_array::{SolutionArray, SolutionObject, SolutionType};
 use crate::geom::tol::{are_same, zone_tol_3d_of_curve};
+use crate::heal::gap::{EdgeEdgeGap, VertexEdgeGap};
 use crate::intersect::point_class::{ClassGeometry, ClassObject};
 use crate::kernel::Kernel;
 use crate::math::{
@@ -162,7 +172,13 @@ use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::Surface;
 use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::SurfaceCache;
+use crate::topology::brep::p1 as bp1;
+use crate::topology::brep::p2 as brep_p2;
+use crate::topology::edge::{self as topo_edge, NotificationStores, NotifyState, SetCurveOptions};
+use crate::topology::edgeuse::p1 as eu1;
+use crate::topology::face::p3::create_uv_trim_curves;
 use crate::topology::proto_topology::ProtoGeometry;
+use crate::topology::{Brep, EdgeId, FaceId};
 
 const OP_LOCAL: &str =
     "offset::offset_geometry_creation::LocalOperationGeometryCreation::faceuse_offset";
@@ -173,6 +189,7 @@ const OP_EXTEND: &str = "offset::offset_geometry_creation::extend_trim_edges";
 const OP_MATE: &str = "offset::offset_geometry_creation::mate_edges";
 const OP_EDGEUSE: &str = "offset::offset_geometry_creation::edgeuse_offset";
 const OP_EXACT_PIECE: &str = "offset::offset_geometry_creation::exact_piece";
+const OP_ANALYTICS_EXACT: &str = "offset::offset_geometry_creation::make_edges_on_analytics_exact";
 
 /// The most whole turns `exact_piece` moves a conic's angle by (a guard: the angles
 /// are within a few turns of each other).
@@ -1236,6 +1253,158 @@ fn exact_piece(k: &Kernel, marched: &Curve, exact: &[Curve], tol: f64) -> Result
         return Ok(Some(copy));
     }
     Ok(None)
+}
+
+/// The fork's `SmOffsetGeometryCreation::MakeEdgesOnAnalyticsExact`
+/// (tangency-labs/smlib@cd85d34, behind
+/// [`crate::kernel::UpstreamFixes::shell_edges_on_analytics_exact`]; WR-545): each edge
+/// of `b` whose curve is not analytic (an intersection marched and approximated)
+/// between two faces on analytic surfaces takes the exact line or conic the surfaces
+/// meet on through its ends and middle (`exact_piece`), running as the edge did,
+/// unless that curve fails its own validity check. The faces of the changed edges get
+/// their UV trim curves made again. Notifications go through `stores`.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the intersections; those of the evaluations, of the
+/// curve replacement and of `CreateUVTrimCurves`.
+pub fn make_edges_on_analytics_exact(
+    k: &mut Kernel,
+    b: &mut Brep,
+    stores: &mut NotificationStores<'_>,
+) -> Result<()> {
+    let tol = b.tolerance();
+    let ssi_tol = tol / 4.0;
+    let deg20_rad = 20.0 * PI / 180.0;
+    let use_surface_edges = [false, false];
+    let mut changed: Vec<FaceId> = Vec::new();
+    for e in bp1::edges(b, None)? {
+        let Some(curve) = topo_edge::curve(b, e)? else {
+            continue;
+        };
+        if curve.is_analytic() {
+            continue;
+        }
+        let faces = topo_edge::faces(b, e, None)?;
+        let &[f0, f1] = faces.as_slice() else {
+            continue;
+        };
+        if f0 == f1 {
+            continue;
+        }
+        let (Some(s1), Some(s2)) = (b.face(f0)?.surface.as_ref(), b.face(f1)?.surface.as_ref())
+        else {
+            continue;
+        };
+        if !s1.is_analytic()? || !s2.is_analytic()? {
+            continue;
+        }
+        // The surfaces' own intersection: none found (tangent surfaces) leaves the edge.
+        let exact = match s1.global_surface_intersect(
+            k,
+            &s1.natural_uv_domain_with_nurb(k)?,
+            s2,
+            &s2.natural_uv_domain_with_nurb(k)?,
+            use_surface_edges,
+            Some(ssi_tol),
+            Some(deg20_rad),
+        ) {
+            Ok(exact) => exact,
+            Err(err @ SolidError::Unported { .. }) => return Err(err),
+            Err(_) => continue,
+        };
+        let trimmed = match topo_edge::create_trimmed_nurbs_curve(k, b, e) {
+            Ok(Some(trimmed)) => trimmed,
+            Err(err @ SolidError::Unported { .. }) => return Err(err),
+            Ok(None) | Err(_) => continue,
+        };
+        let Some(mut piece) = exact_piece(k, &trimmed, &exact.curves_3d, tol)? else {
+            continue;
+        };
+        // The piece runs as the edge does (exact_piece may give it end to start).
+        let old = trimmed.evaluate(k, trimmed.natural_interval().evaluate(0.5), 1, true, true)?;
+        let new = piece.evaluate(k, piece.natural_interval().evaluate(0.5), 1, true, true)?;
+        let (Some(old_tangent), Some(new_tangent)) = (old.get(1), new.get(1)) else {
+            return Err(sm_err(OP_ANALYTICS_EXACT));
+        };
+        if old_tangent.dot(*new_tangent) < 0.0 {
+            let ivl = piece.natural_interval();
+            piece.reverse_parameterization(k, &ivl)?;
+        }
+        // A conic whose own parameters SMLib cannot hold consistently (its polar
+        // conversion off by more than its own zero, far from the origin) fails its
+        // validity check: the edge keeps its marched curve rather than take it.
+        // (AssertValid(NULL, SM_LEVEL_2, SM_NO_WALK) of the line or conic)
+        let valid = match piece.kind_mut() {
+            CurveKind::Line(l) => l.assert_valid(k, None, false, ObjectKey(0))?,
+            CurveKind::Ellipse(c) => c.assert_valid(k, None, false, ObjectKey(0), ObjectKey(0))?,
+            // (exact_piece gives only lines and conics)
+            _ => return Err(sm_err(OP_ANALYTICS_EXACT)),
+        };
+        if !valid {
+            continue;
+        }
+        brep_replace_curve(k, b, e, piece, stores)?;
+        for f in [f0, f1] {
+            if !changed.contains(&f) {
+                changed.push(f);
+            }
+        }
+    }
+    for f in changed {
+        create_uv_trim_curves(k, b, f, true, None)?;
+    }
+    Ok(())
+}
+
+/// `SmBrep::ReplaceCurve(pEdge, pNewCurve)`: the B-rep's pre-edit notification,
+/// `SmEdge::Replace3DCurve` (`SetCurve(curve, TRUE)`, the curve owned by the edge and
+/// the edge's interval the curve's natural interval) and `SmEdge::RemoveUVTrimCurves`
+/// (`ClearUVCaches`: the edge's pre-edit notification, every edge use's UV trim curve
+/// deleted and its gap to the next edge use reset, every vertex use's vertex/edge gap
+/// reset).
+fn brep_replace_curve(
+    k: &mut Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    mut curve: Curve,
+    stores: &mut NotificationStores<'_>,
+) -> Result<()> {
+    let interval = curve.natural_interval();
+    NotifyState::from_kernel_stores(stores).with_kernel_env(k, |_k, env| {
+        let this = Some(brep_p2::NotifyArg::Object(brep_p2::brep_ref(b)));
+        brep_p2::notify(b, env, None, NotifyOperation::PreEdit, [this, None, None])?;
+
+        // Replace3DCurve
+        let owner = (env.key_of)(EntityRef::Edge(e));
+        let _ = curve.set_owner(Some(owner), Some(brep_p2::brep_ref(b)));
+        let options = SetCurveOptions {
+            delete_old_curve: true,
+            ..SetCurveOptions::default()
+        };
+        let _ = topo_edge::set_curve(b, e, Some(curve), options, env, [None, None])?;
+        topo_edge::set_interval(b, e, &interval)?;
+
+        // RemoveUVTrimCurves (ClearUVCaches)
+        let edge_ref = (env.key_of)(EntityRef::Edge(e));
+        let brep_ref = brep_p2::brep_ref(b);
+        topo_edge::notify(
+            b,
+            e,
+            env,
+            NotifyOperation::PreEdit,
+            [Some(edge_ref), Some(brep_ref), None],
+        )?;
+        for eu in topo_edge::edgeuses(b, e, None, None)? {
+            let _ = eu1::set_uv_trim_curve(b, eu, eu1::UvTrimCurveArg::Null, 0.0, true, None)?;
+            b.edgeuse_mut(eu)?.edge_ccw_edge_gap = EdgeEdgeGap::new();
+        }
+        for vu in topo_edge::vertexuses(b, e, None)? {
+            let vu = vu.ok_or(dangling("edge use without vertex use"))?;
+            b.vertexuse_mut(vu)?.vertex_edge_gap = VertexEdgeGap::new();
+        }
+        Ok(())
+    })
 }
 
 /// `pSur->CreateOffsetSurface(ctx, signed_distance, approx_tol_3d, rNewSurface)`: the
