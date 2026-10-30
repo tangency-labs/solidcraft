@@ -15,7 +15,7 @@ use crate::window::Theme;
 
 use super::util;
 
-static WIN10_BUILD_VERSION: Lazy<Option<u32>> = Lazy::new(|| {
+pub(crate) static WIN10_BUILD_VERSION: Lazy<Option<u32>> = Lazy::new(|| {
     type RtlGetVersion = unsafe extern "system" fn(*mut OSVERSIONINFOW) -> NTSTATUS;
     let handle = get_function!("ntdll.dll", RtlGetVersion);
 
