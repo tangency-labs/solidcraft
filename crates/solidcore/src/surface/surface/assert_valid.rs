@@ -69,6 +69,9 @@
 //!   these tests; the port propagates their errors (as `validation.rs` does; except
 //!   the extrusion's `GlobalPropertyAnalysis`, see **Angles**), and a
 //!   failed `MakeNurb` is ignored, as upstream.
+//! - **Extrusion origin zero (WR-511, #1508).** Test 8 uses the pinned unscaled
+//!   `SM_EFF_ZERO` by default; `Kernel::fixes.extrusion_origin_scaled_zero` uses
+//!   `SM_EFF_ZERO * (1 + origin.max_dimension())` for that solve only.
 //! - **Unported overrides.** `SmCurveBoundedSurface`, `SmSrfInVolume` and
 //!   `SmOffsetSurface` have their own `AssertValid`, not ported here; they return
 //!   [`SolidError::Unported`]. `SmSTEPSurface` has none and
@@ -1684,12 +1687,18 @@ fn surf_of_extrusion_assert_valid(k: &Kernel, s: &Surface, r: &mut Reporter<'_>)
 
     // 4. check that m_vOrigin is a point on m_pGenCurve
     let gen_ivl = gen.natural_interval();
+    let origin = ext.origin();
+    let origin_tol = if k.fixes.extrusion_origin_scaled_zero {
+        EFF_ZERO * (1.0 + origin.max_dimension())
+    } else {
+        EFF_ZERO
+    };
     let solutions = gen.global_point_solve(
         k,
         &gen_ivl,
         SolverOperation::Intersect,
-        ext.origin(),
-        EFF_ZERO,
+        origin,
+        origin_tol,
         SolutionRequested::All,
         &GlobalPointSolveOptions::<OperandObject>::default(),
     )?;
