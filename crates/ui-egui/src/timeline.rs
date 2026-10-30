@@ -398,7 +398,7 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
     }
     let sentences = [
         ("import_report.not_imported", parts_of(IssueKind::NotImported)),
-        ("import_report.mesh", parts_of(IssueKind::ShownAsMesh)),
+        ("import_report.refused", parts_of(IssueKind::Refused)),
         ("import_report.surfaces", parts_of(IssueKind::ImportedAsSurfaces)),
         ("import_report.left_out", faces_of(IssueKind::FaceLeftOut)),
         ("import_report.open", parts_of(IssueKind::OpenBody)),
@@ -408,7 +408,7 @@ pub(crate) fn import_summary(report: &ImportReport) -> String {
         ("import_report.file", file),
     ];
     out.extend(sentences.iter().filter(|(_, n)| *n > 0).map(|(key, n)| counted(key, *n)));
-    let lost = [IssueKind::NotImported, IssueKind::ShownAsMesh, IssueKind::ImportedAsSurfaces, IssueKind::FaceLeftOut, IssueKind::OpenBody];
+    let lost = [IssueKind::NotImported, IssueKind::Refused, IssueKind::ImportedAsSurfaces, IssueKind::FaceLeftOut, IssueKind::OpenBody];
     if lost.iter().any(|k| parts.contains_key(k)) {
         out.push(crate::i18n::tr("import_report.hint").to_string());
     }
@@ -853,10 +853,10 @@ mod tests {
             solids: 40,
             issues: vec![
                 issue(
-                    IssueKind::ShownAsMesh,
+                    IssueKind::Refused,
                     Some(7),
                     0,
-                    "solid #7: shown as a mesh: pcurves failed on 1 of 122 faces; first: face #9: SMLib pcurves: an edge lies 13.73370504071075 mm off the face's surface",
+                    "solid #7: not imported: pcurves failed on 1 of 122 faces; first: face #9: SMLib pcurves: an edge lies 13.73370504071075 mm off the face's surface",
                 ),
                 issue(
                     IssueKind::FaceLeftOut,
@@ -876,7 +876,7 @@ mod tests {
         let summary = super::import_summary(&report);
         assert_eq!(
             summary,
-            "Imported 40 of 43 parts as solids. 1 part couldn't be imported. 1 part couldn't be made into a solid and is shown as a mesh. \
+            "Imported 40 of 43 parts as solids. 1 part couldn't be imported. 1 part couldn't be made into a solid and was not imported. \
              1 part couldn't be made into a solid and came in as surfaces. 3 faces couldn't be repaired and are missing. \
              Small flaws were repaired in 2 parts. There was 1 other problem with the file. \
              Exporting these parts again from the program that made them may fix this. Copy Warning Message has the details."

@@ -27,8 +27,7 @@ pub(super) struct Part {
     /// The file face of each kernel face.
     pub face_origin: Vec<u64>,
     /// No B-rep could be made of the whole solid, and this is why: the body is a surface body of
-    /// the faces that read ([`surface_part`]), or, where none could be made of them, a mesh of
-    /// them ([`mesh_part`]).
+    /// the faces that read ([`surface_part`]).
     pub refused: Option<String>,
 }
 
@@ -204,9 +203,9 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 ///    [`MAX_LEFT_OUT_ROUNDS`] reads). A face is only ever left out where a refusal names it.
 /// 2. Where a refusal names no face of the solid: the faces that read alone, stitched by SMLib
 ///    into one surface body (their edges sewn at ten times their tolerance).
-/// 3. Where SMLib cannot stitch them either: a mesh of them ([`mesh_part`]).
 ///
-/// With no face to import, the solid stays refused.
+/// Where SMLib cannot stitch them either, or there is no face to import, the solid stays refused
+/// with the reason it was: a B-rep SMLib refuses is never kept as a mesh of its faces.
 fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let _span = solidcraft_profile::span("import", "step.refused_surfaces");
     let trims = &solidcraft_smlib::pcurves::SmlibTrims;
@@ -256,13 +255,12 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
             Err(e) => notes.push(Note::LeftOut(format!("left out: {}", e.to_string().trim_start_matches("the operation failed: ")))),
         }
     }
-    match stitched_part(&pieces, faces.len(), &refused.msg) {
-        Ok(part) => Ok((part, notes)),
-        Err(e) => {
-            log::debug!(target: "step", "item #{item}: its faces not stitched ({e}); meshed instead");
-            mesh_part(&pieces, faces.len(), notes, refused)
-        }
-    }
+    // Where SMLib cannot stitch them either, the solid is refused with the reason it was.
+    let part = stitched_part(&pieces, faces.len(), &refused.msg).map_err(|e| {
+        log::debug!(target: "step", "item #{item}: its faces not stitched ({e})");
+        refused
+    })?;
+    Ok((part, notes))
 }
 
 /// The one-face surface bodies `pieces` (each with its file face) stitched by SMLib into one
@@ -288,37 +286,6 @@ fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> cr
         .ok_or_else(|| KernelError::Failed("a stitched face from no one face".into()))?;
     let closed = !body.is_surface();
     Ok(Part { body, closed, file_faces, face_origin, refused: Some(refused.to_string()) })
-}
-
-/// The one-face surface bodies `pieces` meshed by the planner, their triangles together a mesh
-/// body: no B-rep (modelling operations refuse it), for a solid whose faces SMLib could not
-/// stitch either. Faces that cannot be meshed are left out, each named in the notes; with no
-/// face to show, the solid stays refused.
-fn mesh_part(pieces: &[(u64, Body)], file_faces: usize, mut notes: Vec<Note>, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
-    let _span = solidcraft_profile::span("import", "step.refused_mesh");
-    // Every face at the display tolerance of the whole solid.
-    let bounds: solidcraft_geom::Aabb3 = pieces.iter().flat_map(|(_, b)| b.record().vertices.iter().map(|v| crate::body::v3(v.point))).collect();
-    let size = if bounds.is_empty() { 0.0 } else { bounds.diagonal() };
-    let tol = crate::MeshTolerance::display_of(if size.is_finite() { size } else { 0.0 });
-    let (mut positions, mut triangles) = (Vec::new(), Vec::new());
-    for (face, b) in pieces {
-        match b.mesh(&tol) {
-            Ok(m) if !m.triangles.is_empty() => {
-                let Ok(base) = u32::try_from(positions.len()) else { break };
-                positions.extend_from_slice(&m.positions);
-                triangles.extend(m.triangles.iter().map(|t| t.map(|i| i.saturating_add(base))));
-            }
-            Ok(_) => notes.push(Note::LeftOut(format!("left out: face #{face}: no triangles"))),
-            Err(e) => notes.push(Note::LeftOut(format!("left out: face #{face}: {}", e.to_string().trim_start_matches("the operation failed: ")))),
-        }
-    }
-    if triangles.is_empty() {
-        return Err(Failure { msg: format!("{} (no face could be shown as a mesh either)", refused.msg), ..refused });
-    }
-    let body = crate::meshbody::mesh_body(&positions, &triangles)
-        .map_err(|e| Failure { msg: format!("{} (its mesh: {e})", refused.msg), read: refused.read })?;
-    let closed = body.is_closed_mesh();
-    Ok((Part { body, closed, file_faces, face_origin: Vec::new(), refused: Some(refused.msg) }, notes))
 }
 
 /// Prepare `jobs`, the results in the jobs' order. Solids still to read and orient (the slow

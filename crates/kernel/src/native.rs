@@ -156,14 +156,71 @@ pub(crate) fn smlib_record_ordered(
 
 /// Where SMLib's faces and edges of `brep` (imported from `record`) are in the record's order:
 /// `None` where SMLib's export does not number them as the record does.
+///
+/// SMLib's export is in canonical order, and `order` says where SMLib's own face and edge `i`
+/// went in it. Where the canonical record numbers them as `record` does, `order` maps SMLib's
+/// to the record's. Otherwise SMLib may still keep the record's own order (an import lists
+/// SMLib's faces and edges in the record's order, and canonical order can list them otherwise,
+/// a tube's seam edges among them): the export put back in SMLib's order then numbers them as
+/// `record` does, and SMLib's face and edge `i` are the record's `i`.
 fn numbering(record: &solidcraft_geom::brep::Brep, brep: &solidcraft_smlib::Brep) -> Option<solidcraft_smlib::history::Order> {
     match brep.to_native_ordered() {
-        Ok((back, order)) => same_numbering(record, &back).then_some(order),
+        Ok((back, order)) => {
+            if same_numbering(record, &back) {
+                return Some(order);
+            }
+            let in_smlib_order = in_smlib_order(&back, &order)?;
+            same_numbering(record, &in_smlib_order).then(solidcraft_smlib::history::Order::default)
+        }
         Err(e) => {
             log::debug!(target: "smlib", "no order for an operand: {e}");
             None
         }
     }
+}
+
+/// The canonical record `back` with its faces and edges in SMLib's own order (`order`: where
+/// SMLib's face and edge `i` are in `back`), each loop naming its edges by SMLib's numbers.
+/// `None` where `order` is not a renumbering of `back`'s faces and edges (an edge split into
+/// pieces where solids touch along it is more than one record edge).
+fn in_smlib_order(back: &solidcraft_geom::brep::Brep, order: &solidcraft_smlib::history::Order) -> Option<solidcraft_geom::brep::Brep> {
+    use solidcraft_geom::brep::Loop;
+    let permutation = |to: &[usize], n: usize| -> Option<Vec<usize>> {
+        if to.is_empty() {
+            return Some((0..n).collect());
+        }
+        let mut from = vec![usize::MAX; n];
+        for (i, &k) in to.iter().enumerate() {
+            let slot = from.get_mut(k)?;
+            if *slot != usize::MAX {
+                return None;
+            }
+            *slot = i;
+        }
+        (to.len() == n).then_some(from)
+    };
+    if !order.pieces.is_empty() {
+        return None;
+    }
+    // `faces_from[k]`: SMLib's number of `back`'s face k; likewise for edges.
+    let faces_from = permutation(&order.faces, back.faces.len())?;
+    let edges_from = permutation(&order.edges, back.edges.len())?;
+    let mut out = back.clone();
+    for (k, face) in back.faces.iter().enumerate() {
+        let mut face = face.clone();
+        for l in &mut face.loops {
+            if let Loop::Edges { edges } = l {
+                for e in edges.iter_mut() {
+                    e.edge = u32::try_from(*edges_from.get(usize::try_from(e.edge).ok()?)?).ok()?;
+                }
+            }
+        }
+        *out.faces.get_mut(*faces_from.get(k)?)? = face;
+    }
+    for (k, edge) in back.edges.iter().enumerate() {
+        *out.edges.get_mut(*edges_from.get(k)?)? = edge.clone();
+    }
+    Some(out)
 }
 
 /// Whether two records of one body number its faces, edges and vertices alike: the same loops of

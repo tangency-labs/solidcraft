@@ -288,3 +288,27 @@ fn undoing_an_edit_after_opening_reuses_the_saved_results() {
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(format!("{}.bak", path.display()));
 }
+
+/// A saved model holds the results of the body check mode it was evaluated under: opened under
+/// the same mode it is taken as it is, under another the design is evaluated again.
+#[test]
+fn a_model_saved_under_another_check_mode_is_evaluated_again() {
+    let plate = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Sample Plate").unwrap();
+    let mut built = Session::default();
+    for c in (plate.script)()["commands"].as_array().unwrap() {
+        built.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    let path = temp("mode");
+    built.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
+    let same = open(&path);
+    assert_eq!(same.model.validation(), built.model.validation());
+    assert_eq!(same.model.recomputed, 0, "taken from the file");
+    let mut other = Session::default();
+    other.set_validation(solidcraft_engine::kernel::Validation::EachStep);
+    assert_ne!(other.validation(), built.model.validation());
+    other.execute("doc.open", &json!({"path": path.to_string_lossy()})).unwrap();
+    assert_eq!(other.validation(), solidcraft_engine::kernel::Validation::EachStep);
+    assert!(other.model.recomputed > 0, "evaluated again under its own mode");
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+}

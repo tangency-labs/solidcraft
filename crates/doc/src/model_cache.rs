@@ -232,9 +232,10 @@ impl Model {
                 }
                 features.push(f);
             }
+            // The check mode the results were evaluated under: they are another mode's results.
             let records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
-                "sheets": w.sheets,
+                "sheets": w.sheets, "validation": self.validation().id(),
             });
             Ok(SavedModel { records, bodies: w.bodies })
         })
@@ -537,10 +538,15 @@ impl SavedModel {
             };
             out_features.push(f);
         }
-        let records = json!({
+        let mut records = json!({
             "features": out_features, "states": out_states, "model_bodies": out_bodies, "names": kept_of(names.as_slice(), &names_used),
             "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets,
         });
+        // The check mode the results were evaluated under, as the model records it (a model
+        // that records none stays without one: adopting it is refused either way).
+        if let (Some(validation), Some(out)) = (self.records.get("validation"), records.as_object_mut()) {
+            out.insert("validation".into(), validation.clone());
+        }
         let kept: Vec<usize> = (0..self.bodies.len()).filter(|i| kernel_used.get(*i) == Some(&true)).collect();
         let bodies = kept.iter().filter_map(|i| self.bodies.get(*i).cloned()).collect();
         Some((SavedModel { records, bodies }, kept, used))
@@ -550,8 +556,9 @@ impl SavedModel {
 impl Model {
     /// The model a design file kept for `doc` ([`Model::saved`]), taken as `doc`'s evaluation:
     /// every feature's result as saved, nothing evaluated but the features whose state the file
-    /// did not keep ([`SavedModel::thinned`]). Refused (an error) unless every feature's
-    /// fingerprint is the one `doc` gives it now, and every record is well formed.
+    /// did not keep ([`SavedModel::thinned`]), under the check mode it was evaluated in
+    /// ([`Model::validation`]). Refused (an error) unless every feature's fingerprint is the one
+    /// `doc` gives it now, and every record is well formed.
     pub fn adopt(doc: &Document, saved: &SavedModel) -> Result<Model> {
         let mut states = saved.states()?;
         let frame_bodies = Arc::new(std::sync::Mutex::new(FrameBodies::default()));
@@ -565,13 +572,16 @@ impl Model {
         let text =
             |v: Option<&Json>| v.and_then(Json::as_str).filter(|s| s.len() <= 1 << 16).map(str::to_owned).ok_or_else(|| bad("saved model: text"));
         let features = records.get("features").and_then(Json::as_array).ok_or_else(|| bad("saved model: features"))?;
+        let validation =
+            records.get("validation").and_then(Json::as_str).and_then(kernel::Validation::parse).ok_or_else(|| bad("saved model: validation"))?;
         if features.len() != doc.features.len() {
             return Err(bad("saved model: features"));
         }
         let (vals, param_errors) = evaluation_values(doc);
         let step_digests = StepDigests::of(doc, &StepDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
-        let ctx = context_digest(doc, &vals);
+        // As `evaluate` digests the context under the mode, so the next evaluation reuses these.
+        let ctx = context_digest(doc, &vals) ^ validation_digest(validation);
         let mut before = Arc::new(ModelState::default());
         // Whether `before` is the state before the feature: one the file left out only stands in.
         let mut exact = true;
@@ -613,7 +623,7 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, step_digests, context: ctx, frame_bodies, ..Model::default() };
+        let mut model = Model { results, param_errors, step_digests, context: ctx, frame_bodies, validation, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         if unkept > 0 {
             // The features whose state the file did not keep, each evaluated again from the state

@@ -1087,7 +1087,10 @@ mod tests {
             .map(|(i, ms)| json!({"id": i + 1, "fingerprint": "0000000000000000", "ms": ms, "skipped": false, "state": i}))
             .collect();
         solidcraft_doc::SavedModel {
-            records: json!({"features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": []}),
+            records: json!({
+                "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
+                "sheets": [], "validation": "each_feature",
+            }),
             bodies,
         }
     }
@@ -1113,6 +1116,7 @@ mod tests {
         let (states, kept, all, within) = thinned(40);
         assert_eq!((states, kept.len(), within), (vec![true; 4], 40, true));
         assert_eq!(all.records, model.records);
+        assert_eq!(thinned(16).2.records["validation"], "each_feature", "the check mode it was evaluated under");
         // The final state and the slowest other (50 ms): the shared bodies count once, else
         // these two states would need 32 bodies' room.
         for bodies in [24, 31] {

@@ -57,7 +57,7 @@ pub struct ImportedBody {
     pub file_faces: usize,
     /// No B-rep could be made of the whole solid, and this is why (the import's warnings say so
     /// too, naming each face left out): `body` is an open surface body of the solid's exact faces
-    /// but those, or a mesh body of them where no surface body could be made of them.
+    /// but those.
     pub refused: Option<String>,
 }
 
@@ -99,10 +99,11 @@ pub struct StepImport {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IssueKind {
-    /// No body could be made of the part: it is not in the design.
+    /// The part could not be read from the file: it is not in the design.
     NotImported,
-    /// No solid could be made of the part: it is shown as a mesh of its faces.
-    ShownAsMesh,
+    /// The kernel refuses the part's B-rep, its faces' too: it is not in the design, and the
+    /// warning gives the kernel's reason.
+    Refused,
     /// No solid could be made of the part: it came in as surfaces of its faces.
     ImportedAsSurfaces,
     /// A face of the part could not be read or made, and is left out.
@@ -363,6 +364,12 @@ impl Reader {
             w.progress("converting", self.converted.min(self.solid_items), self.solid_items);
         }
         false
+    }
+
+    /// `item`'s part is not in the design: the kernel refuses its B-rep, for `why`.
+    fn refused(&mut self, item: u64, why: &str) {
+        let label = self.label(item);
+        self.note(IssueKind::Refused, Some(item), 0, format!("{label}: not imported: {why}"));
     }
 
     /// A warning about the file as a whole.
@@ -788,8 +795,7 @@ impl Reader {
             }
             if let Some(again) = self.unreadable.get(&item) {
                 if let Some(msg) = again.clone() {
-                    let label = self.label(item);
-                    self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
+                    self.refused(item, &msg);
                 }
                 continue;
             }
@@ -816,8 +822,7 @@ impl Reader {
                 None => {
                     if let Some(again) = self.unreadable.get(&item) {
                         if let Some(msg) = again.clone() {
-                            let label = self.label(item);
-                            self.warn(format!("{label}: not imported: {msg}"));
+                            self.refused(item, &msg);
                         }
                         continue;
                     }
@@ -840,9 +845,7 @@ impl Reader {
                     if let Some(failed) = read {
                         let label = self.label(item);
                         if let Some(why) = &part.refused {
-                            let kind = if part.body.is_mesh() { IssueKind::ShownAsMesh } else { IssueKind::ImportedAsSurfaces };
-                            let words = if part.body.is_mesh() { "shown as a mesh" } else { "imported as surfaces" };
-                            self.note(kind, Some(item), 0, format!("{label}: {words}: {why}"));
+                            self.note(IssueKind::ImportedAsSurfaces, Some(item), 0, format!("{label}: imported as surfaces: {why}"));
                         }
                         for f in &failed {
                             let (kind, faces, f) = match f {
@@ -924,8 +927,12 @@ impl Reader {
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {
-                    let label = self.label(item);
-                    self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
+                    if read {
+                        let label = self.label(item);
+                        self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
+                    } else {
+                        self.refused(item, &msg);
+                    }
                     // Later instances don't read the item again.
                     if !self.oriented.contains_key(&item) {
                         self.unreadable.insert(item, (!read).then_some(msg));

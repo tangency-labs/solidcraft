@@ -617,14 +617,13 @@ impl Session {
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
         let doc = Arc::new(doc);
+        // A model saved under another check mode holds that mode's results: evaluated again.
         let adopted = saved
             .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
-            .and_then(|saved| Model::adopt(&doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok());
+            .and_then(|saved| Model::adopt(&doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
+            .filter(|model| model.validation() == validation);
         let model = match adopted {
-            Some(mut model) => {
-                model.set_validation(validation);
-                model
-            }
+            Some(model) => model,
             None => {
                 let mut model = Model::new();
                 model.set_validation(validation);
