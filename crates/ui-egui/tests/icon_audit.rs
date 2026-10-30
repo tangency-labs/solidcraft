@@ -414,8 +414,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);
     }
     // The Section Analysis and a canvas have a menu only while they are there (#10745).
+    // Escape after each menu ends the section, so each menu gets one of its own.
     let plane = h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap()["section"]["id"].clone();
     menu(&mut h, json!({"type":"section","plane":plane}), "section", &mut requested);
+    h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
+    menu(&mut h, json!({"type":"analysis"}), "analysis", &mut requested);
     h.app.run("inspect.section", json!({"clear": true})).unwrap();
     let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
     png.extend(400u32.to_be_bytes());

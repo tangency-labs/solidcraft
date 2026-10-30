@@ -113,6 +113,8 @@ pub enum Target {
     Section {
         plane: u64,
     },
+    /// The browser's Analysis folder.
+    Analysis,
     /// A component's Bodies, Sketches or Construction folder, under the design (`scope` `c0`)
     /// or a placement (`o:<path>`).
     Folder {
@@ -423,6 +425,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
         Target::Section { plane } => crate::browser::section_items(app, *plane),
+        Target::Analysis => crate::browser::analysis_items(app),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
@@ -790,9 +793,6 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
         v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
         v.push(Item::sep());
-        if !app.session.section.is_empty() {
-            v.push(act("ui.unsection", "Remove Section", "section"));
-        }
         v.push(act("ui.origin", if app.origin_shown() { "Hide Origin" } else { "Show Origin" }, "origin"));
         return v;
     }
@@ -1712,6 +1712,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.origin" => app.set_origin_shown(!app.origin_shown()),
         "ui.clear" => drop(app.run("select.clear", json!({}))),
         "ui.unsection" => drop(app.run("inspect.section", json!({"clear": true}))),
+        "ui.analysisVisible" => crate::browser::set_analysis_shown(app, app.session.section_folder.is_some()),
         "ui.sectionView" => {
             if let Some(face) = p.get("face").and_then(|f| serde_json::from_value::<Sel>(f.clone()).ok()) {
                 section_view(app, face);
@@ -2383,8 +2384,9 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         }
         Target::Canvas { id } => doc.canvases.iter().any(|c| c.id == *id),
         Target::PointCloud { id } => doc.point_clouds.iter().any(|c| c.id == *id),
-        // Shown or hidden, the browser lists it.
+        // Shown or hidden, the browser lists it, in the Analysis folder while it has any plane.
         Target::Section { plane } => app.session.section.iter().chain(&app.session.section_hidden).any(|c| c.id == *plane),
+        Target::Analysis => !app.session.section.is_empty() || !app.session.section_hidden.is_empty(),
     };
     if found {
         return Ok(());
