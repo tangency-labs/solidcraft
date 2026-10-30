@@ -240,14 +240,21 @@ fn trusted(bytes: &[u8], binary: bool) -> bool {
     !binary && TRUSTED_FILES.contains(&bytes)
 }
 
-/// Runs `op` on `input` (see the module docs); `path` is the `.smb` file of a file
-/// B-rep block (ignored otherwise).
-///
-/// # Errors
-///
-/// [`FfiError::InvalidArgument`] for a malformed input or an index outside the B-rep;
-/// [`FfiError::Status`] for a shim failure.
-pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+/// What the checks of [`check_input`] leave to the caller.
+enum Checked<'a> {
+    /// The shim may run on the whole input.
+    Run,
+    /// A `Read` of bytes that are not exactly a shipped test file: the read runs in a
+    /// fresh child process.
+    Isolated,
+    /// A B-rep op: its B-rep `block` (validated by the export, or by [`validate`]), then
+    /// its `args`, checked by [`check_args`] against the B-rep's counts.
+    Brep { block: &'a [f64], args: &'a [f64] },
+}
+
+/// The checks of [`eval`] that need no B-rep: every op's whole input but a B-rep op's
+/// B-rep block and arguments.
+fn check_input(op: Op, input: &[f64]) -> Result<Checked<'_>, FfiError> {
     let mut rd = Reader::new(input);
     match op {
         Op::Read => {
@@ -276,7 +283,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
                 // MakeTopologyFromData uses a modified stream's indices unchecked (UB-164):
                 // its read runs in a fresh child process, which some such indices also
                 // keep looping: one that runs past READ_SECONDS is ended as crashed
-                return crate::isolate::fresh_process_within(READ_SECONDS, || raw(op, path, input));
+                return Ok(Checked::Isolated);
             }
         }
         Op::MakeFaceWithCurves => {
@@ -328,47 +335,101 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             rd.done()?;
         }
         Op::Glue | Op::Copy | Op::MergeSelf => {
-            // the topology.vertexuse wrapper validates the block itself and exports
             let (block, args) = split_block(op, input)?;
             if op == Op::MergeSelf {
                 merge_self_curves(input)?;
             }
+            return Ok(Checked::Brep { block, args });
+        }
+    }
+    Ok(Checked::Run)
+}
+
+/// A B-rep op's arguments `args`, checked against the B-rep's entity counts `c`
+/// ([`fixture::counts`] order); nothing may be left.
+fn check_args(op: Op, args: &[f64], c: &[usize; 10]) -> Result<(), FfiError> {
+    let [_, _, _, n_f, _, _, _, n_e, ..] = *c;
+    let mut ar = Reader::new(args);
+    match op {
+        Op::Glue => {
+            for _ in 0..2 {
+                if let Some(i) = ar.signed(MAX_INDEX << 20)? {
+                    if i >= n_e {
+                        return Err(bad("edge index out of range"));
+                    }
+                }
+            }
+            ar.orient()?;
+            ar.finite()?;
+            ar.flag()?;
+        }
+        Op::Copy => {
+            ar.index(1 << 20)?;
+            ar.flag()?;
+            if ar.index(MAX_COPIES)? == 0 {
+                return Err(bad("no copy"));
+            }
+        }
+        Op::MergeSelf => {
+            if ar.index(1 << 20)? >= n_f {
+                return Err(bad("face index out of range"));
+            }
+            ar.finite()?;
+            // (the curves: merge_self_curves)
+            ar.at = args.len();
+        }
+        Op::Read | Op::MakeFaceWithCurves | Op::MakeFace => {}
+    }
+    ar.done()
+}
+
+/// The checks [`eval`] makes before calling the shim, without running it or exporting
+/// the B-rep: `counts` ([`fixture::counts`] order) describe the B-rep the caller built
+/// from the same B-rep block (the export's counts in [`eval`]; the runner's Rust side
+/// passes its own B-rep's). The runner applies them to the Rust side, so an input the
+/// FFI refuses is a harness error on both sides and the Rust side never runs what the
+/// C++ side is refused: a `Copy` with `repeat` of `2^32` (nightly fuzz case `fuzz00208`)
+/// is refused here for the C++ (more than [`MAX_COPIES`]) while the runner's Rust side
+/// copied the faces `2^32` times and ran past the fuzz time limit.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed input or an index outside the B-rep,
+/// as [`eval`].
+pub fn validate(op: Op, path: &str, input: &[f64], counts: &[usize; 10]) -> Result<(), FfiError> {
+    match check_input(op, input)? {
+        Checked::Brep { block, args } => {
+            // the export's checks of the B-rep block (topology.vertexuse)
+            fixture::validate_block(path, block)?;
+            let mut rd = Reader::new(block);
+            rd.at = fixture::brep_block_at(block, path)?;
+            rd.done()?;
+            check_args(op, args, counts)
+        }
+        Checked::Run | Checked::Isolated => Ok(()),
+    }
+}
+
+/// Runs `op` on `input` (see the module docs); `path` is the `.smb` file of a file
+/// B-rep block (ignored otherwise).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for a malformed input or an index outside the B-rep;
+/// [`FfiError::Status`] for a shim failure.
+pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    match check_input(op, input)? {
+        Checked::Run => {}
+        Checked::Isolated => {
+            return crate::isolate::fresh_process_within(READ_SECONDS, || raw(op, path, input));
+        }
+        Checked::Brep { block, args } => {
+            // the topology.vertexuse wrapper validates the block itself and exports
             let export = fixture::eval(fixture::Op::Export, path, block)?;
             let Some(c) = fixture::counts(&export) else {
                 return Ok(export);
             };
-            let [_, _, _, n_f, _, _, _, n_e, ..] = c;
-            let mut ar = Reader::new(args);
-            match op {
-                Op::Glue => {
-                    for _ in 0..2 {
-                        if let Some(i) = ar.signed(MAX_INDEX << 20)? {
-                            if i >= n_e {
-                                return Err(bad("edge index out of range"));
-                            }
-                        }
-                    }
-                    ar.orient()?;
-                    ar.finite()?;
-                    ar.flag()?;
-                }
-                Op::Copy => {
-                    ar.index(1 << 20)?;
-                    ar.flag()?;
-                    if ar.index(MAX_COPIES)? == 0 {
-                        return Err(bad("no copy"));
-                    }
-                }
-                _ => {
-                    if ar.index(1 << 20)? >= n_f {
-                        return Err(bad("face index out of range"));
-                    }
-                    ar.finite()?;
-                    // (the curves: merge_self_curves)
-                    ar.at = args.len();
-                }
-            }
-            ar.done()?;
+            check_args(op, args, &c)?;
         }
     }
     raw(op, path, input)

@@ -1,0 +1,23 @@
+{
+ "unit": "topology.brep_p7",
+ "cases": [
+  {
+   "name": "fuzz00208_copy_repeat_2_32",
+   "origin": "nightly fuzz run 41040730716: topology.brep_p7/fuzz00208 (timeout: rust: no result after 20 s; base copy_plane_square.smb_1, mutations /merge = false, /merge = true, /repeat = 4294967296)",
+   "issue": "runner: the Rust side copied the faces 2^32 times where the FFI refuses more than MAX_COPIES (8) copies for the C++ side; fixed by applying the FFI's checks on the Rust side (topology_brep_p7::validate)",
+   "cpp": "harness: c++: invalid argument: bad index/count 4294967296",
+   "rust": "harness: invalid argument: bad index/count 4294967296",
+   "inputs": {
+    "brep": {
+     "file": "plane_square.smb",
+     "kind": "file",
+     "rebuild": false
+    },
+    "merge": true,
+    "n": 2,
+    "op": "copy",
+    "repeat": 4294967296
+   }
+  }
+ ]
+}
