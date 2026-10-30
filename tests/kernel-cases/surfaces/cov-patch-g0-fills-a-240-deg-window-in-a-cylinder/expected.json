@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#759"
+ ],
+ "what": "a window 240 deg round a cylinder's wall (r10 x 40, z 15..25), the faces the cut made taken off and the window patched g0 and stitched",
+ "source": "invariants",
+ "method": "the window (as the g1 case) filled G0: the fill meets the window's edges; its shape is the fill's own, so one closed valid solid is the right answer",
+ "body_count": 1
+}

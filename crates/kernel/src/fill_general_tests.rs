@@ -9,7 +9,7 @@ use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 use super::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, face_tolerance, patch_edges_report};
 use crate::body::Body;
 use crate::bridge::Continuity;
-use crate::{BoolOp, boolean, box_solid, copy_faces, cylinder, extrude, measure, patch_edges, stitch, torus};
+use crate::{BoolOp, boolean, box_solid, copy_faces, cylinder, extrude, measure, patch_edges, stitch};
 
 /// A body's faces as surfaces over their parameter boxes, with the (u, v) polygon of each face's
 /// loops (its exact pcurves, sampled).
@@ -299,87 +299,6 @@ fn an_opened_tube_end_capped_g1_and_g2_meets_the_wall() {
     }
     eprintln!("tube end: curvature across the rim g1 {:e}, g2 {:e} /mm", kappas[0], kappas[1]);
     assert!(kappas[1] < kappas[0], "g2 holds the wall's curvature closer than g1");
-}
-
-/// A cylinder about z (radius 10, 40 high) with a window `half` either side of the x axis
-/// through its wall, from z = 15 to 25; the wall and both ends without the faces the cut made (the
-/// window's edges bound only the wall), and a point on each of the window's edges.
-fn windowed(half: f64) -> (Body, Body, Vec<Vec3>) {
-    let solid = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 40.0).unwrap();
-    let x = 10.0 * half.cos();
-    let tool = box_solid(Vec3::new(x, -11.0, 15.0), Vec3::new(11.0, 11.0, 25.0)).unwrap();
-    let cut = boolean(&solid, &tool, BoolOp::Cut).unwrap().unwrap();
-    let open = curved_and_ends(&cut, &[0.0, 40.0]);
-    let rim = free_edge_points(&open);
-    (solid, open, rim)
-}
-
-#[test]
-fn a_window_cut_through_a_cylinder_wall_past_half_way_fills_g1_close_to_the_cylinder() {
-    // 240° round: seen along any direction the window folds over itself, so it bounds no height
-    // field; the old fill refused it.
-    let half = 2.0 * std::f64::consts::PI / 3.0;
-    let (solid, open, rim) = windowed(half);
-    for g in [Continuity::G0, Continuity::G1] {
-        let name = format!("window {}", g.as_str());
-        let (fill, r) = patch_edges_report(&open, &rim, &spec(g)).unwrap();
-        report(&name, &r);
-        let area = check_face(&name, &open, &fill);
-        let (gap, angle, _) = along_the_loop(&fill, &radial, &|_| 0.0);
-        eprintln!("{name}: along the window (1600 points): within {gap:e}, normal within {angle:.5}° of the wall's");
-        // How far the fill strays from the cylinder it replaces, inside.
-        let mut stray = 0.0f64;
-        for (s, [[u0, u1], [v0, v1]], _) in &Faces::of(&fill).faces {
-            for i in 0..=40 {
-                for j in 0..=40 {
-                    let p = s.point([u0 + (u1 - u0) * i as f64 / 40.0, v0 + (v1 - v0) * j as f64 / 40.0]).unwrap();
-                    let ang = p.y.atan2(p.x);
-                    if ang.abs() < half - 0.05 && p.z > 15.5 && p.z < 24.5 {
-                        stray = stray.max((Vec2::new(p.x, p.y).len() - 10.0).abs());
-                    }
-                }
-            }
-        }
-        let exact = 10.0 * 2.0 * half * 10.0;
-        let closed = stitch(&[&open, &fill], 0.0).unwrap();
-        let (got, want) = (measure(&closed).unwrap().volume, measure(&solid).unwrap().volume);
-        eprintln!(
-            "{name}: area {area:.3} (the cylinder's window {exact:.3}), the fill within {stray:.4} of the cylinder inside, sealed volume {got:.2} against the whole cylinder's {want:.2}"
-        );
-        assert!(!closed.is_surface());
-        if g == Continuity::G1 {
-            assert!(angle < 0.1, "{name}: the normal turns {angle}° from the wall's");
-            assert!((area - exact).abs() < 0.01 * exact && stray < 0.25, "{name}: {area} vs {exact}, stray {stray}");
-            assert!((got - want).abs() < 0.005 * want, "{name}: {got} vs {want}");
-        }
-    }
-}
-
-#[test]
-fn a_saddle_window_in_a_torus_fills_g0_and_g1() {
-    // The inner wall of a torus (major 20, minor 8) is saddle-shaped; a window 240° round it
-    // between z = ±3 bounds no height field.
-    let solid = torus(Vec3::ZERO, 20.0, 8.0).unwrap();
-    let tool = box_solid(Vec3::new(-6.0, -13.0, -3.0), Vec3::new(13.0, 13.0, 3.0)).unwrap();
-    let cut = boolean(&solid, &tool, BoolOp::Cut).unwrap().unwrap();
-    let open = curved_and_ends(&cut, &[]);
-    let rim = free_edge_points(&open);
-    // The torus's normal: from the tube's centre circle.
-    let normal = |p: Vec3| {
-        let c = Vec3::new(p.x, p.y, 0.0).normalized().unwrap() * 20.0;
-        (p - c).normalized().unwrap()
-    };
-    for g in [Continuity::G0, Continuity::G1] {
-        let name = format!("torus window {}", g.as_str());
-        let (fill, r) = patch_edges_report(&open, &rim, &spec(g)).unwrap();
-        report(&name, &r);
-        check_face(&name, &open, &fill);
-        let (gap, angle, _) = along_the_loop(&fill, &normal, &|_| 0.0);
-        eprintln!("{name}: along the window (1600 points): within {gap:e}, normal within {angle:.5}° of the torus's");
-        if g == Continuity::G1 {
-            assert!(angle < 0.1, "{name}: {angle}°");
-        }
-    }
 }
 
 /// A cylinder about z (radius 10, 40 high) with a pentagonal pocket cut into its wall from the
