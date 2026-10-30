@@ -11,6 +11,7 @@
 //! | Rust                                          | Upstream                                    |
 //! |-----------------------------------------------|---------------------------------------------|
 //! | [`calculate_tight_bounding_box`], [`calculate_tight_bounding_box_into`] | `SmFace::CalculateTightBoundingBox` |
+//! | `face_directed_max` (opt-in, WR-588), `cell_directed_max`, `cell_monotone` | `sm_FaceDirectedMax`, `sm_CellDirectedMax`, `sm_CellMonotone` (the fork tangency-labs/smlib@9d44c1b) |
 //! | [`face_classify_uv_line`]                     | `sm_FaceClassifyUVLine` (file static)       |
 //! | [`face_classify_uv_line_mut`]                 | `sm_FaceClassifyUVLine` (in place)          |
 //! | [`find_and_classify_loop_bisector`], [`LoopBisector`] | `sms_FindAndClassifyLoopBisector`   |
@@ -57,7 +58,12 @@
 //!   [`SolidError::Unported`], which propagates. A failed `GlobalPointSolve` gives no
 //!   solutions; a failed `EuclidianStepOff` leaves its start parameter, unclamped (its
 //!   outputs as upstream initialises them); a failed surface evaluation in the tight
-//!   box adds the partially evaluated point, as `SmSurfaceEval::Pos` returns it.
+//!   box adds the partially evaluated point, as `SmSurfaceEval::Pos` returns it. The
+//!   fork's `sm_CellDirectedMax` (WR-588) propagates the solve's and the classification's
+//!   errors where the tight box above ignores them; the port's search ignores them as the
+//!   tight box does, so the two differ only where those calls fail outright. A failed solve
+//!   in the trimmed-face search gives a cell with no solution, which counts with its loose
+//!   box, so the box only grows (safer than the fork's SER, which would fail the box).
 //! - **Same curve on two edges.** `SectorClassifyCurveOn` compares the curve pointers
 //!   of two different edges; an edge owns its curve in the port, so two edges never
 //!   share one (`bSingleCurveOnEdges` is always false), as in `query::edge`.
@@ -72,7 +78,10 @@
 //!   `ApproxDerivativeLengths` call is kept for its [`SolidError::Unported`]).
 //! - **Unported callees.** Only through callees (`SmEdgeuse::EvaluateBinormal` is wired
 //!   to `topology.edgeuse_p3`, whose own stubs propagate).
-//! - **Loops.** The step-off loops keep upstream's bounds (20 rounds in the sector
+//! - **Loops.** The trimmed-face search (WR-588, opt-in) takes its cells from an explicit
+//!   stack, not recursion, bounded at `FACE_EXTREME_MAX_DEPTH` (16 halvings) and
+//!   `FACE_EXTREME_MAX_CELLS` (4096 cells); a cell past either counts with its greatest value.
+//!   The step-off loops keep upstream's bounds (20 rounds in the sector
 //!   classification; its UV fallback doubles the step-off until it leaves the curve
 //!   interval, and stops after [`MAX_UV_STEP_OFF_ROUNDS`] rounds when the curve
 //!   derivative vanishes and the step-off never clamps). The bisector tries at most 6
@@ -340,7 +349,9 @@ pub(crate) fn surface_bounding_box(
 /// tight box of every face edge; unless the surface is planar (`SM_EFF_ZERO`) or its
 /// loose box over the face's UV domain already lies inside, grown by the surface points
 /// that maximise the signed distance along `±x`, `±y`, `±z` over the face's domain and
-/// classify on the face (not `SM_PC_UNKNOWN`).
+/// classify on the face (not `SM_PC_UNKNOWN`). With `Kernel::fixes.face_tight_box_searches_trim`
+/// (WR-588, #1799) those extremes are searched inside the trim (`face_directed_max`)
+/// instead of taken from the surface's global solve.
 ///
 /// # Errors
 ///
@@ -411,6 +422,77 @@ pub fn calculate_tight_bounding_box_into(
     let uv_domain = b.face(f)?.uv_domain;
     let srf_bbox = surface_bounding_box(k, b, f, surface, &uv_domain)?;
     if srf_bbox.is_contained_by(&face_bbox, 0.0) {
+        return Ok(());
+    }
+
+    // WR-588 (#1799; tangency-labs/smlib@9d44c1b), opt-in: the face's own extremes inside
+    // its trim (`sm_FaceDirectedMax`), not the surface's global ones alone. The starting
+    // values are the box of the vertices and edges, as the fork's.
+    if k.fixes.face_tight_box_searches_trim {
+        let (lo, hi) = (face_bbox.min(), face_bbox.max());
+        let x_max = face_directed_max(
+            k,
+            lb,
+            f,
+            surface,
+            &uv_domain,
+            face_zone_tol_3d,
+            Vec3::new(1.0, 0.0, 0.0),
+            hi.x,
+        )?;
+        let x_min = -face_directed_max(
+            k,
+            lb,
+            f,
+            surface,
+            &uv_domain,
+            face_zone_tol_3d,
+            Vec3::new(-1.0, 0.0, 0.0),
+            -lo.x,
+        )?;
+        let y_max = face_directed_max(
+            k,
+            lb,
+            f,
+            surface,
+            &uv_domain,
+            face_zone_tol_3d,
+            Vec3::new(0.0, 1.0, 0.0),
+            hi.y,
+        )?;
+        let y_min = -face_directed_max(
+            k,
+            lb,
+            f,
+            surface,
+            &uv_domain,
+            face_zone_tol_3d,
+            Vec3::new(0.0, -1.0, 0.0),
+            -lo.y,
+        )?;
+        let z_max = face_directed_max(
+            k,
+            lb,
+            f,
+            surface,
+            &uv_domain,
+            face_zone_tol_3d,
+            Vec3::new(0.0, 0.0, 1.0),
+            hi.z,
+        )?;
+        let z_min = -face_directed_max(
+            k,
+            lb,
+            f,
+            surface,
+            &uv_domain,
+            face_zone_tol_3d,
+            Vec3::new(0.0, 0.0, -1.0),
+            -lo.z,
+        )?;
+        face_bbox.add_point(Point3::new(x_min, y_min, z_min));
+        face_bbox.add_point(Point3::new(x_max, y_max, z_max));
+        *out = face_bbox;
         return Ok(());
     }
 
@@ -496,6 +578,335 @@ fn eval_pos(eval: &mut SurfaceEval<'_>) -> Result<Point3> {
             .copied()
             .unwrap_or(Vec3::UNDEF)),
     }
+}
+
+// ---- WR-588 (#1799): the trimmed face's own extremes (`sm_FaceDirectedMax`) -------------------
+
+/// The most cells [`face_directed_max`] divides a face's domain into
+/// (`sm_lFaceExtremeMaxCells`). A cell left undecided past it counts with its own greatest
+/// value, so the box is never smaller than the face.
+const FACE_EXTREME_MAX_CELLS: usize = 4096;
+
+/// How deep [`face_directed_max`] halves a cell (`sm_lFaceExtremeMaxDepth`), each way. A
+/// cell left undecided at this depth counts with its own greatest value.
+const FACE_EXTREME_MAX_DEPTH: u32 = 16;
+
+/// Whether `x` is above zero, false for NaN (the negation of `x > 0`, without the lint).
+fn is_positive(x: f64) -> bool {
+    x > 0.0
+}
+
+/// The greatest `S . dir` over `cell` of the face's surface, and whether a point taking
+/// it lies in the face (`sm_CellDirectedMax`).
+struct CellDirectedMax {
+    /// The greatest value (`-BIG_DOUBLE` without a solution).
+    top: f64,
+    /// Whether the point taking it is inside the face.
+    in_face: bool,
+    /// Whether the solver gave a solution.
+    found: bool,
+}
+
+/// `sm_CellDirectedMax`: `GlobalPointSolve(SM_SO_3D_SIGNED_DIRECTED_MAXIMIZE)` over `cell`
+/// (the solver's solutions within its tolerance of the greatest, each classified on the
+/// face). Status handling as the tight box above: a failed solve gives no solutions and a
+/// failed classification keeps the point as classified.
+fn cell_directed_max(
+    k: &Kernel,
+    lb: &mut LazyBrep<'_>,
+    f: FaceId,
+    surface: &Surface,
+    face_zone_tol_3d: f64,
+    cell: &Extent2d,
+    dir: Vec3,
+) -> Result<CellDirectedMax> {
+    let solutions = ignored(global_point_solve_starts(
+        k,
+        surface,
+        cell,
+        SolverOperation::Signed3dDirectedMaximize,
+        dir,
+        EFF_ZERO_SQRT,
+        SolutionRequested::All,
+    ))?
+    .unwrap_or_default();
+    let mut out = CellDirectedMax {
+        top: -crate::math::BIG_DOUBLE,
+        in_face: false,
+        found: !solutions.is_empty(),
+    };
+    let mut in_face_top = -crate::math::BIG_DOUBLE;
+    let mut pt_class = PointClassification::new(face_zone_tol_3d);
+    for sol in &solutions {
+        let uv = Point2::new(
+            sol.parameters.first().copied().unwrap_or(0.0),
+            sol.parameters.get(1).copied().unwrap_or(0.0),
+        );
+        let mut eval = SurfaceEval::with_uv(k, Some(surface), uv.x, uv.y);
+        let pos = eval_pos(&mut eval)?;
+        let value = pos.x * dir.x + pos.y * dir.y + pos.z * dir.z;
+        out.top = out.top.max(value);
+        ignored(point_classify(
+            k,
+            lb.get_mut(),
+            f,
+            uv,
+            &mut pt_class,
+            PointClassifyOptions {
+                src_zone_tol_3d: face_zone_tol_3d,
+                do_boundary_intersections: false,
+                use_uv_classification: true,
+                ..PointClassifyOptions::default()
+            },
+        ))?;
+        if pt_class.point_class() != PointClassType::Unknown {
+            in_face_top = in_face_top.max(value);
+        }
+    }
+    // Every solution takes the greatest value to the solver's tolerance.
+    out.in_face = out.found && in_face_top >= out.top - EFF_ZERO_SQRT;
+    if out.in_face {
+        out.top = out.top.max(in_face_top);
+    }
+    Ok(out)
+}
+
+/// `C(n, k)` as upstream's loop computes it (`k <= n`).
+fn binomial(n: usize, k: usize) -> f64 {
+    let mut c = 1.0;
+    for t in 1..=k {
+        c = c * (n - k + t) as f64 / t as f64;
+    }
+    c
+}
+
+/// The control net of a patch, as `sm_CellMonotone` reads it: `S . dir` of each control
+/// point and its weight (`i` along u, `j` along v, at `i * nv + j`).
+struct MonotoneNet<'a> {
+    nu: usize,
+    nv: usize,
+    points: &'a [Point3],
+    weights: &'a [f64],
+    rational: bool,
+    dir: Vec3,
+}
+
+impl MonotoneNet<'_> {
+    fn value(&self, i: usize, j: usize) -> Option<f64> {
+        self.points
+            .get(i * self.nv + j)
+            .map(|p| p.x * self.dir.x + p.y * self.dir.y + p.z * self.dir.z)
+    }
+
+    fn weight(&self, i: usize, j: usize) -> Option<f64> {
+        if self.rational {
+            self.weights.get(i * self.nv + j).copied()
+        } else {
+            Some(1.0)
+        }
+    }
+}
+
+/// Whether the control values of `net` rise (`sign` 1) or fall (`sign` -1) from each index
+/// along the patch to the next, at every index across it (`sm_CellMonotone`'s `rises`):
+/// along v when `along_v`, else along u. A rational net's coefficients are the Bezier of
+/// the sign of the isocurve's difference, computed exactly from `B_i B_k`. `None` when a
+/// control value is missing.
+fn rises(net: &MonotoneNet<'_>, along_v: bool, sign: f64) -> Option<bool> {
+    let (along, across) = if along_v {
+        (net.nv, net.nu)
+    } else {
+        (net.nu, net.nv)
+    };
+    // The control value and weight at (index across, index along).
+    let c = |a: usize, t: usize| {
+        if along_v {
+            net.value(a, t)
+        } else {
+            net.value(t, a)
+        }
+    };
+    let w = |a: usize, t: usize| {
+        if along_v {
+            net.weight(a, t)
+        } else {
+            net.weight(t, a)
+        }
+    };
+    for t in 0..along.saturating_sub(1) {
+        if !net.rational {
+            for a in 0..across {
+                let d = sign * (c(a, t + 1)? - c(a, t)?);
+                if !is_positive(d) {
+                    return Some(false);
+                }
+            }
+            continue;
+        }
+        let p = across.saturating_sub(1);
+        for m in 0..=2 * p {
+            let mut coefficient = 0.0;
+            for i in m.saturating_sub(p)..=m.min(p) {
+                let k = m - i;
+                coefficient += binomial(p, i)
+                    * binomial(p, k)
+                    * w(i, t + 1)?
+                    * w(k, t)?
+                    * (c(i, t + 1)? - c(k, t)?);
+            }
+            if !is_positive(sign * coefficient) {
+                return Some(false);
+            }
+        }
+    }
+    Some(true)
+}
+
+/// Whether `S . dir` is monotone along u, or along v, over all of `cell` of the surface's
+/// B-spline base, so that no point inside the cell is a local extreme of it
+/// (`sm_CellMonotone`), from the exact subpatch over the cell. The base is what
+/// `SmBSplineSurface` `IsKindOf` names: the B-spline itself, or the B-spline part of a plane,
+/// surface of revolution or extrusion, cone, sphere or torus (as [`surface_is_planar`]
+/// picks it). A polynomial patch: its control values rise row to row entry by entry, and
+/// a B-spline whose control values rise rises. A rational patch of one Bezier span (several
+/// spans are not decided here): the isocurve's control values rise, the sign of their
+/// differences being a Bezier in the other parameter. `false` when it cannot be told (a
+/// surface kind with no B-spline base, a subpatch short of the cell, a weight not positive).
+fn cell_monotone(k: &Kernel, surface: &Surface, cell: &Extent2d, dir: Vec3) -> Result<bool> {
+    let base = match surface.kind_with_nurb(k)? {
+        SurfaceKind::BSpline(bs) => bs,
+        SurfaceKind::Plane(p) => p.base(),
+        SurfaceKind::SurfOfRevolution(r) => r.base(),
+        SurfaceKind::SurfOfExtrusion(r) => r.base(),
+        SurfaceKind::Cone(c) => c.rev().base(),
+        SurfaceKind::Sphere(s) => s.base().base(),
+        SurfaceKind::Torus(s) => s.base().base(),
+        _ => return Ok(false),
+    };
+    // CopySubPatch snaps to knots: a patch short of the cell says nothing about the rest.
+    let Ok(patch) = base.copy_sub_patch(cell) else {
+        return Ok(false);
+    };
+    let patch_domain = patch.natural_uv_domain();
+    if patch_domain.min().x > cell.min().x
+        || patch_domain.min().y > cell.min().y
+        || patch_domain.max().x < cell.max().x
+        || patch_domain.max().y < cell.max().y
+    {
+        return Ok(false);
+    }
+    let Ok(control) = patch.control_point_net() else {
+        return Ok(false);
+    };
+    let (nu, nv) = (control.u_count, control.v_count);
+    if nu < 2 || nv < 2 || control.points.len() != nu * nv {
+        return Ok(false);
+    }
+    let mut rational = false;
+    if !control.weights.is_empty() {
+        if control.weights.len() != control.points.len() {
+            return Ok(false);
+        }
+        let Some(&w0) = control.weights.first() else {
+            return Ok(false);
+        };
+        for &w in &control.weights {
+            if w.is_nan() || w <= 0.0 {
+                return Ok(false);
+            }
+            rational = rational || w != w0;
+        }
+    }
+    if rational
+        && (nu != patch.degree(SurfParamType::U) + 1 || nv != patch.degree(SurfParamType::V) + 1)
+    {
+        return Ok(false);
+    }
+    let net = MonotoneNet {
+        nu,
+        nv,
+        points: &control.points,
+        weights: &control.weights,
+        rational,
+        dir,
+    };
+    Ok([(true, 1.0), (true, -1.0), (false, 1.0), (false, -1.0)]
+        .into_iter()
+        .any(|(along_v, sign)| rises(&net, along_v, sign).unwrap_or(false)))
+}
+
+/// The greatest `S . dir` over the trimmed region of the face's surface, raised to `best`,
+/// which comes in as the greatest over the face's vertices and edges (`sm_FaceDirectedMax`,
+/// WR-588). One solve over the whole domain gives the surface's greatest point there, which
+/// may lie outside the trim while the face's own greatest lies inside it, so the domain is
+/// divided into cells, each decided by:
+/// 1. its greatest value is no more than `best`: nothing in it is higher;
+/// 2. a point taking its greatest value lies in the face: that value is the face's there;
+/// 3. its least value exceeds `best`: the cell lies in one region above `best`, which no
+///    point of the face's boundary reaches, so the region is wholly outside the face (the
+///    point of 2 says outside);
+/// 4. `S . dir` is monotone over it ([`cell_monotone`]): the face's highest point in it is
+///    on the face's boundary or on the cell's own sides, which `best` and the neighbouring
+///    cells hold;
+///
+/// otherwise the cell is halved each way. A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past
+/// [`FACE_EXTREME_MAX_CELLS`] counts with its greatest value. The cells are an explicit
+/// stack (no recursion), taken last first, as the fork's.
+fn face_directed_max(
+    k: &Kernel,
+    lb: &mut LazyBrep<'_>,
+    f: FaceId,
+    surface: &Surface,
+    uv_domain: &Extent2d,
+    face_zone_tol_3d: f64,
+    dir: Vec3,
+    mut best: f64,
+) -> Result<f64> {
+    let mut cells: Vec<(Extent2d, u32)> = vec![(*uv_domain, 0)];
+    let mut divided = 0usize;
+    while let Some((cell, depth)) = cells.pop() {
+        let top = cell_directed_max(k, lb, f, surface, face_zone_tol_3d, &cell, dir)?;
+        if !top.found {
+            // No solution to decide by: the surface's loose box over the cell holds it.
+            let loose = surface_bounding_box(k, lb.get(), f, surface, &cell)?;
+            let (lo, hi) = (loose.min(), loose.max());
+            let loose_top = (lo.x * dir.x).max(hi.x * dir.x)
+                + (lo.y * dir.y).max(hi.y * dir.y)
+                + (lo.z * dir.z).max(hi.z * dir.z);
+            best = best.max(loose_top);
+            continue;
+        }
+        if top.top <= best + EFF_ZERO_SQRT {
+            continue;
+        }
+        if top.in_face {
+            best = top.top;
+            continue;
+        }
+        let least = cell_directed_max(k, lb, f, surface, face_zone_tol_3d, &cell, -dir)?;
+        if least.found && -least.top > best {
+            continue;
+        }
+        if cell_monotone(k, surface, &cell, dir)? {
+            continue;
+        }
+        let exhausted = depth >= FACE_EXTREME_MAX_DEPTH || {
+            divided += 1;
+            divided > FACE_EXTREME_MAX_CELLS
+        };
+        if exhausted {
+            best = top.top;
+            continue;
+        }
+        let mid = cell.mid();
+        let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
+        let child_depth = depth + 1;
+        cells.push((Extent2d::from_bounds(u0, v0, mid.x, mid.y), child_depth));
+        cells.push((Extent2d::from_bounds(mid.x, v0, u1, mid.y), child_depth));
+        cells.push((Extent2d::from_bounds(u0, mid.y, mid.x, v1), child_depth));
+        cells.push((Extent2d::from_bounds(mid.x, mid.y, u1, v1), child_depth));
+    }
+    Ok(best)
 }
 
 // ---- classification curves ----------------------------------------------------------------
@@ -2135,6 +2546,10 @@ mod tests {
     use super::*;
     use crate::curve::line::BoundedLineOptions;
     use crate::intersect::point_class::ClassObjectKind;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::math::{CPoint, NOW};
+    use crate::nurbs::srf_basic::Surface as NurbSurface;
+    use crate::primitive::api_trim_ops::trim_surface_with_3d_curves;
     use crate::surface::plane::Plane;
     use crate::topology::{
         Edge, Edgeuse, EdgeuseOwner, Face, Faceuse, FaceuseId, Loop, Loopuse, LoopuseId,
@@ -2240,6 +2655,190 @@ mod tests {
         let bx = calculate_tight_bounding_box(&k, &b, f).unwrap();
         assert_eq!(bx.min(), Point3::new(0.0, 0.0, 2.0));
         assert_eq!(bx.max(), Point3::new(1.0, 1.0, 2.0));
+    }
+
+    /// A bicubic height field over `[-20, 20]^2` (eight uniform spans each way, control
+    /// points at their Greville abscissae, so its parameters are `x` and `y`). Control
+    /// point `(5, 5)` has height 9, whose basis function is 2/3 at its middle; control
+    /// point `(0, 0)` has height `corner`, nonzero on `[-20, -15)` each way only.
+    fn crowned_height_field(corner: f64) -> Surface {
+        let n = 11;
+        // Unique knots -20, -15, ..., 20 with end multiplicity 4 (cubic).
+        let mut knots = vec![-20.0; 4];
+        knots.extend((1..8).map(|k| -20.0 + 5.0 * f64::from(k)));
+        knots.extend([20.0; 4]);
+        let greville: Vec<f64> = (0..n)
+            .map(|i| (knots[i + 1] + knots[i + 2] + knots[i + 3]) / 3.0)
+            .collect();
+        let net: Vec<Vec<CPoint>> = (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| {
+                        let z = match (i, j) {
+                            (5, 5) => 9.0,
+                            (0, 0) => corner,
+                            _ => 0.0,
+                        };
+                        CPoint::new(greville[i], greville[j], z, NOW)
+                    })
+                    .collect()
+            })
+            .collect();
+        let nurb = NurbSurface::new(net, 3, 3, knots.clone(), knots).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// The tight box of the crowned height field trimmed to the square `[-10, 10]^2` (its
+    /// loop is four lines on `z = 0`), with the fix `searches_trim` on or off.
+    fn crowned_trimmed_face_box(corner: f64, searches_trim: bool) -> Extent3d {
+        let mut k = Kernel::default();
+        k.fixes.face_tight_box_searches_trim = searches_trim;
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let corners = [(-10.0, -10.0), (10.0, -10.0), (10.0, 10.0), (-10.0, 10.0)];
+        let curves = (0..4)
+            .map(|i| {
+                let (x0, y0) = corners[i];
+                let (x1, y1) = corners[(i + 1) % 4];
+                Curve::from(
+                    Line::create_line_segment(
+                        3,
+                        Point3::new(x0, y0, 0.0),
+                        Point3::new(x1, y1, 0.0),
+                        Some(&interval),
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect();
+        let b = trim_surface_with_3d_curves(&mut k, crowned_height_field(corner), &[4], curves)
+            .unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 1);
+        calculate_tight_bounding_box(&k, &b, faces[0]).unwrap()
+    }
+
+    /// WR-588 (#1799): the trimmed face rises to 4 at its middle, where its surface's
+    /// global maximum (50 at the corner outside the trim) is not inside the face.
+    #[test]
+    fn tight_box_finds_a_trimmed_faces_peak_when_the_surface_peaks_outside() {
+        let bx = crowned_trimmed_face_box(50.0, true);
+        assert!((bx.max().z - 4.0).abs() <= 1e-9, "z max {}", bx.max().z);
+        assert!((bx.min().z - 0.0).abs() <= 1e-9, "z min {}", bx.min().z);
+        assert!((bx.min().x + 10.0).abs() <= 1e-9 && (bx.max().x - 10.0).abs() <= 1e-9);
+        assert!((bx.min().y + 10.0).abs() <= 1e-9 && (bx.max().y - 10.0).abs() <= 1e-9);
+    }
+
+    /// Upstream (fix off): the surface's global solve gives only the peak outside the
+    /// trim, so the box comes from the edges alone (z max 0).
+    #[test]
+    fn tight_box_of_a_trimmed_face_without_the_fix_is_upstreams() {
+        let bx = crowned_trimmed_face_box(50.0, false);
+        assert!((bx.max().z - 0.0).abs() <= 1e-9, "z max {}", bx.max().z);
+    }
+
+    /// A rational single-span patch (degree 2 in u, 1 in v) of the quarter cylinder of
+    /// radius 1 about the z axis (z = v): control points `(1, 0)`, `(mid_x, mid_y)`, `(0, 1)`
+    /// along u with weights `[1, sqrt(2)/2, 1]` (homogeneous `(w x, w y, w z, w)`).
+    fn quarter_cylinder_patch(mid_x: f64, mid_y: f64) -> Surface {
+        let w = [1.0, std::f64::consts::FRAC_1_SQRT_2, 1.0];
+        let xy = [(1.0, 0.0), (mid_x, mid_y), (0.0, 1.0)];
+        let net: Vec<Vec<CPoint>> = (0..3)
+            .map(|i| {
+                let (x, y) = xy[i];
+                [0.0, 1.0]
+                    .iter()
+                    .map(|&z| CPoint::new(x * w[i], y * w[i], z * w[i], w[i]))
+                    .collect()
+            })
+            .collect();
+        let u = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let v = vec![0.0, 0.0, 1.0, 1.0];
+        let nurb = NurbSurface::new(net, 2, 1, u, v).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// The cylinder's rational patch is monotone along its axis (`S . z = v` rises over
+    /// the whole cell), so [`cell_monotone`] settles a cell there.
+    #[test]
+    fn rational_cylinder_patch_is_monotone_along_its_axis() {
+        let k = Kernel::default();
+        let patch = quarter_cylinder_patch(1.0, 1.0);
+        let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert!(cell_monotone(&k, &patch, &cell, Vec3::new(0.0, 0.0, 1.0)).unwrap());
+    }
+
+    /// With the middle control point raised to `(2, 2)`, `S . x` rises then falls along u
+    /// (control values 1, 2, 0): no cell of it is settled by [`cell_monotone`].
+    #[test]
+    fn rational_patch_with_raised_middle_is_not_monotone_along_x() {
+        let k = Kernel::default();
+        let patch = quarter_cylinder_patch(2.0, 2.0);
+        let cell = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        assert!(!cell_monotone(&k, &patch, &cell, Vec3::new(1.0, 0.0, 0.0)).unwrap());
+    }
+
+    /// An analytic face (the quarter-cylinder side of a partial cylinder of radius 5 and
+    /// height 10, a cone-kind surface whose base is a B-spline) boxes at `[0,5] x [0,5] x
+    /// [0,10]` with the search on and off, both in the same time.
+    #[test]
+    fn tight_box_of_an_analytic_cylinder_face_is_the_same_with_the_search() {
+        for searches_trim in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.face_tight_box_searches_trim = searches_trim;
+            let brep = crate::primitive::api_primitives::create_partial_cylinder(
+                &mut k,
+                Point3::new(0.0, 0.0, 0.0),
+                5.0,
+                10.0,
+                0.0,
+                90.0,
+            )
+            .unwrap();
+            let faces = crate::topology::brep::p1::faces(&brep, None).unwrap();
+            let side = faces
+                .into_iter()
+                .find(|&f| {
+                    matches!(
+                        brep.face(f).unwrap().surface.as_ref().map(Surface::kind),
+                        Some(SurfaceKind::Cone(_))
+                    )
+                })
+                .unwrap();
+            // Its height is linear in v, so the whole face is monotone along z through the
+            // B-spline base of the cone-kind surface (rule 4 of the search).
+            let face = brep.face(side).unwrap();
+            let surface = face.surface.as_ref().unwrap();
+            assert!(cell_monotone(&k, surface, &face.uv_domain, Vec3::new(0.0, 0.0, 1.0)).unwrap());
+            let bx = calculate_tight_bounding_box(&k, &brep, side).unwrap();
+            let (lo, hi) = (bx.min(), bx.max());
+            for (got, want) in [
+                (lo.x, 0.0),
+                (lo.y, 0.0),
+                (lo.z, 0.0),
+                (hi.x, 5.0),
+                (hi.y, 5.0),
+                (hi.z, 10.0),
+            ] {
+                assert!(
+                    (got - want).abs() <= 1e-6,
+                    "fix {searches_trim}: {got} vs {want}"
+                );
+            }
+        }
+    }
+
+    /// The surface's global maximum lies inside the trim (no peak outside): both paths
+    /// give the face's extreme 4.
+    #[test]
+    fn tight_box_with_the_peak_inside_the_trim_agrees_with_upstream() {
+        for searches_trim in [false, true] {
+            let bx = crowned_trimmed_face_box(0.0, searches_trim);
+            assert!(
+                (bx.max().z - 4.0).abs() <= 1e-9,
+                "fix {searches_trim}: z max {}",
+                bx.max().z
+            );
+        }
     }
 
     #[test]
