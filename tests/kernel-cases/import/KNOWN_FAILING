@@ -2,3 +2,4 @@
 # rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: develop 5ada4fc8a with SMLib 90aabff (the run on 60b1c6a, aarch64 Linux).
+cov-step-horn-torus-quarter-round-trip SMLib revolve status 1001 on a profile touching its axis (the part is never built)
