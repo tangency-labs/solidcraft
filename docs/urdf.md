@@ -156,6 +156,14 @@ The `collision` parameter of `file.export` is `mesh` (the default) or `convex_hu
 left on `auto`. An open surface collides only with a shape that gives it a volume. It still adds no
 mass. A flat body has no convex hull, so it gets no collision, with a warning.
 
+## Warnings about implausible values
+
+The export still writes the file, and warns about:
+
+- an inertia that is not physically possible, usually from a mass override;
+- a moving part with no mass;
+- a collision mesh of more than 50 000 triangles.
+
 ## Not covered
 
 - Automatic convex decomposition of a concave part.
