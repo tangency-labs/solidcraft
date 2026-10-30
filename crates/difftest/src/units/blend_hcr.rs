@@ -43,8 +43,15 @@
 //! B-rep records that naming), so `SmBrep::GetSurfaces` (`IsPointVisible`) finds each face
 //! surface's owner, as upstream's copy constructor sets it.
 //!
-//! `ComputeSilhouettes` and `ComputeGlobalVisibility` are not run: their C++ path reaches
-//! UB-170 on open silhouette chains.
+//! `ComputeSilhouettes` (op `silhouettes`: the silhouette edges, sorted, each with its
+//! scene edge index or `-1` for a new edge, its interval and 5 points) and
+//! `ComputeGlobalVisibility` (op `global_visibility`: the visible and hidden pieces) run
+//! on the upstream solid bodies (`solid_bodies.json`), each C++ case in a fresh process.
+//! Their C++ path reaches UB-170 on open silhouette chains, so op `global_visibility`
+//! first runs `ComputeSilhouettes` on a copy of the HCR (the C++ side: a second `SmHCR`
+//! of the same B-rep) and outputs status `-2` when some scene edge's classification
+//! there has more silhouette vertices than edges in its box: the port's
+//! `IntersectCurveWithSilhouettes` reports that as `InvalidInput` ("UB-170").
 
 use super::topology_vertexuse::{gen_brep, path_of, push_curve, push_surface, sel, BrepIn, CrvIn};
 use crate::{own_reader, Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
@@ -85,6 +92,8 @@ enum OpIn {
     EdgeVisibility { edge: i64, vertex: i64, visible: bool, premark: bool },
     SilhouetteEdges,
     PointVisible { p: [f64; 3] },
+    GlobalVisibility,
+    Silhouettes,
 }
 
 /// A wire edge added to the B-rep (`CreateWireEdgeFromCurve`).
@@ -179,7 +188,14 @@ struct Resolved {
 }
 
 fn resolve(i: &Inputs, n_e: usize, n_v: usize) -> Option<Resolved> {
-    if n_e == 0 && !matches!(i.op, OpIn::Construct | OpIn::SilhouetteEdges | OpIn::PointVisible { .. }) {
+    if n_e == 0 && !matches!(
+            i.op,
+            OpIn::Construct
+                | OpIn::SilhouetteEdges
+                | OpIn::PointVisible { .. }
+                | OpIn::GlobalVisibility
+                | OpIn::Silhouettes
+        ) {
         return None;
     }
     let e = |s: i64| sel(s, n_e).max(0);
@@ -223,6 +239,8 @@ fn op_args(op: &OpIn) -> (u8, Vec<f64>) {
         }
         OpIn::SilhouetteEdges => (6, vec![]),
         OpIn::PointVisible { p } => (7, p.to_vec()),
+        OpIn::GlobalVisibility => (9, vec![]),
+        OpIn::Silhouettes => (10, vec![]),
     }
 }
 
@@ -360,6 +378,9 @@ fn validate_rust(op: u8, h: &Hcr, ops: &[f64]) -> Result<(), String> {
     let n_back = count(num()?)?;
     for _ in 0..n_back {
         index(num()?, n_e, false)?;
+    }
+    if op >= 9 && n_sil + n_back > 0 {
+        return Err(bad("seeds for a whole-scene op"));
     }
     match op {
         1 | 2 => {
@@ -536,7 +557,7 @@ impl UnitDiff for Runner {
         if let Err(m) = validate_rust(op, &h, &ops) {
             return Ok(Output::err(m));
         }
-        match run_rust(&k, h, &r) {
+        match run_rust(&mut k, h, &r) {
             Ok((status, record)) => Ok(output(status, record)),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| match e {
                 SolidError::InvalidInput {
@@ -624,7 +645,70 @@ fn put_piece(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
     }
 }
 
-fn run_rust(k: &Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>), SolidError> {
+/// The shim's `global_undefined`: after `ComputeSilhouettes` on a copy of `h`, some scene
+/// edge's classification (as `ComputeEdgeVisibility` makes it) reaches UB-170 in
+/// `IntersectCurveWithSilhouettes`.
+fn global_undefined(k: &mut Kernel, h: &Hcr) -> Result<bool, SolidError> {
+    let mut h2 = h.clone();
+    // its status is ignored, as `ComputeGlobalVisibility` does
+    if let Err(e) = h2.compute_silhouettes(k) {
+        if e.is_unported() {
+            return Err(e);
+        }
+    }
+    let scene = h2.scene_brep();
+    for e in solidcore::topology::brep::p1::edges(scene, None)? {
+        if edge::curve(scene, e)?.is_none() {
+            continue;
+        }
+        let ivl = edge::interval(scene, e)?;
+        let tol = edge::tolerance(scene, e)?;
+        let mut cc = new_curve_classification(k, HcrObject::Curve(e), ivl, tol);
+        match h2.intersect_curve_with_silhouettes(k, &mut cc) {
+            Err(SolidError::InvalidInput { reason, .. }) if reason.starts_with("UB-170") => {
+                return Ok(true)
+            }
+            Err(e) if e.is_unported() => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(false)
+}
+
+/// The shim's `put_silhouettes`: per silhouette edge its index in the scene as
+/// constructed (`-1` for an edge `ComputeSilhouettes` made), its interval and 5 points
+/// of its curve over that interval, sorted.
+fn put_silhouettes(k: &Kernel, o: &mut Vec<f64>, h: &Hcr, n_e: usize) -> Result<(), SolidError> {
+    let scene = h.scene_brep();
+    let mut recs: Vec<Vec<f64>> = Vec::new();
+    for e in h.silhouette_edges() {
+        let id = if (e.index() as usize) < n_e { f64::from(e.index()) } else { -1.0 };
+        let ivl = edge::interval(scene, e)?;
+        let mut r = vec![id, ivl.min(), ivl.max()];
+        let curve = edge::curve(scene, e)?;
+        for j in 0..5 {
+            let t = ivl.evaluate(f64::from(j) / 4.0);
+            match curve.map(|c| c.evaluate_point(k, t)) {
+                Some(Ok(p)) => r.extend([0.0, p.x, p.y, p.z]),
+                Some(Err(SolidError::Upstream { code, .. })) => {
+                    r.extend([f64::from(code), 0.0, 0.0, 0.0]);
+                }
+                Some(Err(_)) => r.extend([-1.0, 0.0, 0.0, 0.0]),
+                // `SM_ERR`
+                None => r.extend([1001.0, 0.0, 0.0, 0.0]),
+            }
+        }
+        recs.push(r);
+    }
+    recs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    o.push(recs.len() as f64);
+    for r in recs {
+        o.extend(r);
+    }
+    Ok(())
+}
+
+fn run_rust(k: &mut Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>), SolidError> {
     for &e in &r.sil {
         h.add_silhouette_edge(k, eid(e))?;
     }
@@ -693,6 +777,33 @@ fn run_rust(k: &Kernel, mut h: Hcr, r: &Resolved) -> Result<(f64, Vec<f64>), Sol
             rec.extend(edges.iter().map(|e| f64::from(e.index())));
         }
         OpIn::PointVisible { p } => rec.push(flag(h.is_point_visible(k, Vec3::new(p[0], p[1], p[2]))?)),
+        OpIn::GlobalVisibility => {
+            if global_undefined(k, &h)? {
+                return Ok((-2.0, Vec::new()));
+            }
+            match h.compute_global_visibility(k) {
+                Ok(()) => {}
+                Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
+                Err(e) => return Err(e),
+            }
+            rec.push(h.visible_curves().len() as f64);
+            for c in h.visible_curves() {
+                put_piece(k, &mut rec, c);
+            }
+            rec.push(h.invisible_curves().len() as f64);
+            for c in h.invisible_curves() {
+                put_piece(k, &mut rec, c);
+            }
+        }
+        OpIn::Silhouettes => {
+            let n_e = h.scene_brep().edges().len();
+            match h.compute_silhouettes(k) {
+                Ok(()) => {}
+                Err(SolidError::Upstream { code, .. }) => status = f64::from(code),
+                Err(e) => return Err(e),
+            }
+            put_silhouettes(k, &mut rec, &h, n_e)?;
+        }
     }
     Ok((status, rec))
 }

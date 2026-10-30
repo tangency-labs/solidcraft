@@ -20,7 +20,9 @@
 // scene_box its SmBrep::CalculateBoundingBox. Private members are read through
 // explicitly instantiated member pointers. Ops whose upstream path reads an
 // uninitialised or out-of-range value (UB-170: more silhouette vertices than edges in a
-// curve's box; an edge without curve) output status -2 instead of calling it.
+// curve's box; an edge without curve) output status -2 instead of calling it. For
+// ComputeGlobalVisibility (op 9) that check runs on a second SmHCR of the same B-rep
+// after its ComputeSilhouettes, over every scene edge with a curve.
 #include "sc_topology_fixture.h"
 #include <SmAxis2Placement.h>
 #include <SmCurveClass.h>
@@ -185,6 +187,59 @@ void put_pieces(std::vector<double>& o, SmHCR& h)
         put_piece(o, iv[i]);
 }
 
+// ComputeGlobalVisibility reaches UB-170: after the silhouettes of `h2` (a second SmHCR
+// of the same B-rep, as ComputeGlobalVisibility computes them first), some scene edge's
+// classification (the one ComputeEdgeVisibility makes, SmHCR.cpp:876-881) has more
+// silhouette vertices than edges in its box.
+bool global_undefined(SmHCR& h2)
+{
+    h2.ComputeSilhouettes(); // its status is ignored, as ComputeGlobalVisibility does
+    SmTArray<SmEdge*> edges;
+    h2.GetSceneBrep()->GetEdges(edges);
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+    {
+        SmEdge* e = edges[i];
+        if (e->GetCurve() == nullptr)
+            continue;
+        SmCurveInterval data[64];
+        SmCurveClassification cc(e->GetCurve(), e->GetInterval(), NULL, e->GetTolerance(), 64, data);
+        if (icws_undefined(h2, cc))
+            return true;
+    }
+    return false;
+}
+
+// The silhouette edges after ComputeSilhouettes: per edge its index in the construction
+// graph (-1 for a new edge), its interval and 5 points of its curve over that interval,
+// sorted (upstream iterates a pointer hash).
+void put_silhouettes(std::vector<double>& o, Graph& g, SmHCR& h)
+{
+    SmTArray<SmEdge*> edges;
+    SE(h.GetSilhouetteEdges(edges));
+    std::vector<std::vector<double>> recs;
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+    {
+        SmEdge* e = edges[i];
+        int64_t id = g.find(7, e);
+        std::vector<double> r{id < 0 ? -1.0 : (double)id};
+        SmExtent1d ivl = e->GetInterval();
+        r.push_back(ivl.GetMin());
+        r.push_back(ivl.GetMax());
+        for (int j = 0; j < 5; j++)
+        {
+            SmPoint3d p(0, 0, 0);
+            SmStatus s = e->GetCurve() ? e->GetCurve()->EvaluatePoint(ivl.Evaluate(j / 4.0), p) : SM_ERR;
+            r.push_back(st(s));
+            put_vec(r, p);
+        }
+        recs.push_back(r);
+    }
+    std::sort(recs.begin(), recs.end());
+    o.push_back((double)recs.size());
+    for (const auto& r : recs)
+        o.insert(o.end(), r.begin(), r.end());
+}
+
 void put_sorted(std::vector<double>& o, Graph& g, SmTArray<SmEdge*>& edges)
 {
     std::vector<int64_t> ids;
@@ -200,11 +255,11 @@ void put_sorted(std::vector<double>& o, Graph& g, SmTArray<SmEdge*>& edges)
 // op: 0 construction state, 1 IsSilhouetteEdge(e), 2 IsBackFacingEdge(e),
 // 3 IntersectCurveWithSilhouettes(e, fa, fb), 4 ComputeCurveVisibility(e, fa, fb, hints),
 // 5 ComputeEdgeVisibility(e, vertex, visible, premark), 6 GetSilhouetteEdges,
-// 7 IsPointVisible(P), 8 the scene only.
+// 7 IsPointVisible(P), 8 the scene only, 9 ComputeGlobalVisibility, 10 ComputeSilhouettes.
 SC_EXPORT int32_t sc_blend_hcr_eval(int32_t op, const char* path, const double* in, int64_t n_in,
                                     double* out, int64_t cap, int64_t* out_len)
 {
-    if (op < 0 || op > 8 || in == nullptr || n_in <= 0)
+    if (op < 0 || op > 10 || in == nullptr || n_in <= 0)
         return SC_ERR_ARG;
     SC_TRY
     const SmContext& ctx = the_context();
@@ -237,8 +292,12 @@ SC_EXPORT int32_t sc_blend_hcr_eval(int32_t op, const char* path, const double* 
     double ang_tol = rd.num();
     SmBoolean seams = rd.bflag();
     SmBoolean smooth = rd.bflag();
-    std::unique_ptr<SmHCR> ph(view_mode == 0 ? new SmHCR(ctx, built.brep, a, approx_tol, ang_tol, seams, smooth)
-                                             : new SmHCR(ctx, built.brep, placement, approx_tol, ang_tol, seams, smooth));
+    auto make_hcr = [&]() -> SmHCR*
+    {
+        return view_mode == 0 ? new SmHCR(ctx, built.brep, a, approx_tol, ang_tol, seams, smooth)
+                              : new SmHCR(ctx, built.brep, placement, approx_tol, ang_tol, seams, smooth);
+    };
+    std::unique_ptr<SmHCR> ph(make_hcr());
     SmHCR& h = *ph;
     SmBrep* scene = h.GetSceneBrep();
     Graph g;
@@ -361,6 +420,22 @@ SC_EXPORT int32_t sc_blend_hcr_eval(int32_t op, const char* path, const double* 
                 put_pieces(record, h);
             }
         }
+    }
+    else if (op == 9)
+    {
+        std::unique_ptr<SmHCR> h2(make_hcr());
+        if (global_undefined(*h2))
+            status = -2.0;
+        else
+        {
+            status = st(h.ComputeGlobalVisibility());
+            put_pieces(record, h);
+        }
+    }
+    else if (op == 10)
+    {
+        status = st(h.ComputeSilhouettes());
+        put_silhouettes(record, g, h);
     }
     else if (op == 6)
     {

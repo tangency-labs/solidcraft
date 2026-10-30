@@ -113,6 +113,7 @@ use crate::surface::surface::p1::get_surface_cache_with_face;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::face_context::MappedCacheFace;
+use crate::surface::surface_cache::p1::FaceContainment;
 use crate::surface::surface_cache::SurfaceCache;
 use crate::surface::volume::Volume;
 use crate::topology::{edge, edgeuse, vertex, vertexuse};
@@ -418,13 +419,18 @@ pub fn new_curve_classification(
     cc
 }
 
-/// `SM_CAST_PTR(SmBSplineSurface, pSurface)`: the surface as an `SmBSplineSurface`.
+/// `SM_CAST_PTR(SmBSplineSurface, pSurface)`: the surface as an `SmBSplineSurface`,
+/// for every class derived from it (plane, surface of revolution or extrusion, cone and
+/// cylinder, sphere, torus).
 fn b_spline_part(surface: &Surface) -> Option<&BSplineSurface> {
     match surface.kind() {
         SurfaceKind::BSpline(b) => Some(b),
         SurfaceKind::Plane(p) => Some(p.base()),
         SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
         SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
+        SurfaceKind::Cone(c) => Some(c.rev().base()),
+        SurfaceKind::Sphere(s) => Some(s.base().base()),
+        SurfaceKind::Torus(t) => Some(t.base().base()),
         _ => None,
     }
 }
@@ -589,6 +595,84 @@ fn face_surface_cache(
         }
     }
     Ok(Some(ListedCache::Fetched(cache.into_base())))
+}
+
+/// The handle a silhouette trace's surface cache names the scene's entities by (the
+/// [`entity_handles`] index); its solves keep no objects.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SilhouetteHandle(usize);
+
+impl SolutionObject for SilhouetteHandle {
+    fn kind(&self) -> ObjectKind {
+        ObjectKind::Surface
+    }
+}
+
+/// `smsurf_GetSurfaceCache` of `surface`, the surface of scene face `f` (an evaluation
+/// copy), built through that face with its tree (`GetTree`, through the face), for
+/// `CreateSilhouetteCurves`; `None` when the cache or its tree fails (upstream's call
+/// then fails, and `ComputeSilhouettes` ignores its status). The returned cache keeps
+/// its built tree for the trace's face-less `GetTree` calls (see the body).
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the cache build; those of the face lookups.
+fn silhouette_cache(
+    k: &Kernel,
+    scene: &mut Brep,
+    f: FaceId,
+    surface: &Surface,
+) -> Result<Option<SurfaceCache<SilhouetteHandle>>> {
+    let (to_handle, to_entity) = entity_handles(scene);
+    let handle_of = |e| {
+        to_handle
+            .get(&e)
+            .copied()
+            .map(SilhouetteHandle)
+            .ok_or(undefined("cache entity"))
+    };
+    let entity_of = |h: SilhouetteHandle| {
+        h.0.checked_sub(ENTITY_HANDLE_BASE)
+            .and_then(|i| to_entity.get(i))
+            .copied()
+            .ok_or(undefined("cache handle"))
+    };
+    let handle = handle_of(EntityRef::Face(f))?;
+    let mut mapped =
+        match MappedCacheFace::new(BrepCacheFace { b: scene, f }, &handle_of, &entity_of) {
+            Ok(mapped) => mapped,
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => return Ok(None),
+        };
+    let mut cache = match get_surface_cache_with_face(k, surface, Some(handle), &mut mapped) {
+        Ok(cache) => cache,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    match cache.get_tree_with_face(k, &mut mapped) {
+        Ok(_) => {}
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => return Ok(None),
+    }
+    let mut cache = cache.into_base();
+    // The trace's own `GetTree` calls (the tracer constructor's and
+    // `FindInteriorCurves`') have no face here. Upstream's `GetTree` rebuilds through
+    // the face while the trims are not in the tree (`m_bHaveTSurfaceCache` FALSE).
+    // With the tree built and the scene's editing enabled (as during
+    // `ComputeSilhouettes`), `SmTrimSrfCache::BuildTree` then only sets
+    // `m_bProcessBoundaryCurves = TRUE`, `m_bPointTestEnabled = FALSE` and
+    // `m_bHaveTSurfaceCache = FALSE`, and restores `m_bFaceContainmentDone`. The build
+    // above left those values; they are set again here, and the trace keeps them (its
+    // `DoTrace` sets the same two flags and restores them), so each rebuild it would make
+    // is that reset. The containment guard keeps the built tree instead of rebuilding; no
+    // trace path reads the guard (only `GetTree` and the trimmed point classifications,
+    // which the trace runs with point testing off). The cache is dropped after the trace.
+    if !cache.have_t_surface_cache {
+        cache.process_boundary_curves = true;
+        cache.point_test_enabled = false;
+        cache.face_containment_done = FaceContainment::UnderConstruction;
+    }
+    Ok(Some(cache))
 }
 
 /// The handles [`face_surface_cache`] addresses the scene's entities by, in the
@@ -1265,8 +1349,16 @@ impl Hcr {
             // pick tol to limit segment sizes in DoTrace
             let sil_tol = self.approx_tol_3d.min(self.ray_offset_tolerance / 100.0);
             let uv_domain = face.uv_domain;
-            let Some((curves, uv_curves)) = ignored(surface.create_silhouette_curves(
+            // CreateSilhouetteCurves' smsurf_GetSurfaceCache(this): the face-owned
+            // surface's trimmed cache, built through its scene face (a failed cache is a
+            // failed call, whose status is ignored)
+            let surface = surface.clone_for_evaluation()?;
+            let Some(mut cache) = silhouette_cache(k, &mut self.scene, f, &surface)? else {
+                continue;
+            };
+            let Some((curves, uv_curves)) = ignored(surface.create_silhouette_curves_with_cache(
                 k,
+                &mut cache,
                 &uv_domain,
                 self.view_vector,
                 false,
@@ -1559,8 +1651,10 @@ impl Hcr {
                             self.ray = Some(setup);
                             return Ok(false);
                         }
-                    } else if let Some(bss) = b_spline_part(surface) {
-                        let mut trimmed = bss.clone();
+                    } else if let Some(bss) = crate::topology::brep::p3::with_nurb(k, surface)? {
+                        // `new SmBSplineSurface(*pBSS)`: the copy constructor reads the
+                        // NURB through `GetOrCreateGwNurbPointer` (made first when missing)
+                        let mut trimmed = bss.into_owned();
                         let mut domain = domain;
                         let _ = ignored(trimmed.trim_with_domain(&mut domain))?;
                         if let Some(copy) = ignored(trimmed.copy_and_add_analytics(k))? {

@@ -16,7 +16,8 @@
 //!     start_hint end_hint` (the classified interval is the edge interval evaluated at
 //!     `0 <= fa, fb <= 1` in either order; any hint in the `int64_t` range);
 //!   - 5 `ComputeEdgeVisibility`: `edge vertex(-1 none) visible premark`;
-//!   - 7 `IsPointVisible`: `P[3]`.
+//!   - 7 `IsPointVisible`: `P[3]`;
+//!   - 9 `ComputeGlobalVisibility`, 10 `ComputeSilhouettes`: none, and no seeds.
 //!
 //! Op 8 constructs only; its output gives the scene that [`validate`] checks the seeds
 //! and op arguments against. Output: `status record_len record n_e curve_type[n_e]
@@ -26,6 +27,15 @@
 //! indices out of range, seeded silhouette edges without curve, non-finite numbers,
 //! values above [`MAX_SCENE_MAGNITUDE`] (the ray tracer's grid walk does not end), more
 //! than 64 seeds.
+//!
+//! Ops 9 and 10 run the whole silhouette and visibility computation on solid bodies,
+//! each in a fresh process ([`crate::isolate::fresh_process`]), so that a crash in the
+//! C++ fails only its own case. Op 9 outputs status `-2` when a scene edge, after the
+//! silhouettes of a second `SmHCR` of the same B-rep, reaches UB-170 (more silhouette
+//! vertices than edges in its curve's box). Op 10's record is the silhouette edges
+//! (`GetSilhouetteEdges` after `ComputeSilhouettes`), each as its construction-graph
+//! edge index (`-1` for a new edge), interval and 5 `status x y z` points of its curve,
+//! sorted.
 use super::topology_vertexuse::{self as fixture, Op};
 use crate::{call_with_buffer, FfiError};
 use std::ffi::CString;
@@ -170,7 +180,7 @@ fn validate_hcr(hcr: &[f64]) -> Result<(), FfiError> {
 /// Validates the seeds and arguments of op `op` (`ops`) against the scene of an op-8
 /// output (`scene`): what both sides check before running.
 pub fn validate(op: u8, scene: &[f64], ops: &[f64]) -> Result<(), FfiError> {
-    if op > 7 {
+    if op > 10 || op == 8 {
         return Err(bad("op"));
     }
     if op == 7 {
@@ -191,6 +201,9 @@ pub fn validate(op: u8, scene: &[f64], ops: &[f64]) -> Result<(), FfiError> {
     let n_back = rd.count(64.0)?;
     for _ in 0..n_back {
         rd.index(n_e, false)?;
+    }
+    if op >= 9 && n_sil + n_back > 0 {
+        return Err(bad("seeds for a whole-scene op"));
     }
     match op {
         1 | 2 => {
@@ -284,13 +297,16 @@ pub fn scene(path: &str, brep: &[f64], hcr: &[f64]) -> Result<Vec<f64>, FfiError
     call(8, path, &input)
 }
 
-/// Runs op `op` (0..=7) with the seeds and op arguments `ops`, after [`scene`] and
-/// [`validate`].
+/// Runs op `op` (0..=7, 9, 10) with the seeds and op arguments `ops`, after [`scene`]
+/// and [`validate`]; ops 9 and 10 in a fresh process.
 pub fn eval(op: u8, path: &str, brep: &[f64], hcr: &[f64], ops: &[f64]) -> Result<Vec<f64>, FfiError> {
     let s = scene(path, brep, hcr)?;
     validate(op, &s, ops)?;
     let mut input = brep.to_vec();
     input.extend_from_slice(hcr);
     input.extend_from_slice(ops);
+    if op >= 9 {
+        return crate::isolate::fresh_process(|| call(op, path, &input));
+    }
     call(op, path, &input)
 }
