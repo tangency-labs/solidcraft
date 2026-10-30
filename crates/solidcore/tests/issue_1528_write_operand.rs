@@ -24,6 +24,7 @@ use offset_fixture::{planar_faces_at, report, shell, volume};
 use solidcore::boolean::api_brep as boolean;
 use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
@@ -31,6 +32,7 @@ use solidcore::primitive::api_primitives as primitives;
 use solidcore::sweep::api_brep as sweeps;
 use solidcore::topology::api_files::{read_brep_from_file, write_brep_to_file};
 use solidcore::topology::brep::p10::TopologyEnv;
+use solidcore::topology::brep::p5::transform;
 use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
 use solidcore::topology::topology::NotifyRecords;
@@ -95,6 +97,43 @@ fn drilled(k: &mut Kernel) -> Brep {
 fn write_issue_1528_operand() {
     let mut k = Kernel::default();
     let b = drilled(&mut k);
+    write_and_shell(&mut k, &b, OUT, "1528");
+}
+
+/// The box-and-full-cylinder version of the plate (the plate as first rebuilt for WR-578):
+/// a 42.5 x 20 x 27.5 box joined with a full cylinder r 10 on the z axis through (0, 10),
+/// less the same blind hole, which turns onto +x by a placement instead of a rotation.
+const OUT_BOX_CYLINDER: &str =
+    "fixtures/offset.offset_executive_p2/data/issue1528_box_cylinder.smb";
+
+fn box_cylinder(k: &mut Kernel) -> Brep {
+    let slab = primitives::create_box(k, Point3::new(0.0, 0.0, 0.0), 42.5, 20.0, 27.5).unwrap();
+    let round = primitives::create_cylinder(k, Point3::new(0.0, 10.0, 0.0), 10.0, 27.5).unwrap();
+    let plate = boolean::boolean_union(k, slab, round).unwrap();
+    let mut hole = primitives::create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 5.0, 17.5).unwrap();
+    // local z (the axis) along +x from x = -10: x = (0, 1, 0), y = (0, 0, 1)
+    let placement = Axis2Placement::new(
+        Point3::new(-10.0, 12.5, 12.5),
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::new(0.0, 0.0, 1.0),
+    );
+    transform(k, &mut hole, &placement, None, false).unwrap();
+    let mut b = boolean::boolean_difference(k, plate, hole).unwrap();
+    b.refresh_cached_topology();
+    b
+}
+
+#[test]
+#[ignore = "generator: writes the #1528 box-and-cylinder fixture file"]
+fn write_issue_1528_box_cylinder_operand() {
+    let mut k = Kernel::default();
+    let b = box_cylinder(&mut k);
+    write_and_shell(&mut k, &b, OUT_BOX_CYLINDER, "1528 box-cylinder");
+}
+
+/// Writes `b` to `out` (repository-relative), reads it back as the runner does and prints
+/// the open face's index and the read-back shell's outcome.
+fn write_and_shell(k: &mut Kernel, b: &Brep, out: &str, label: &str) {
     let store = AttributeStore::new();
     let recs = NotifyRecords::new();
     let key_of = |e| named(e, 0);
@@ -106,9 +145,9 @@ fn write_issue_1528_operand() {
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
-    let bytes = write_brep_to_file(&k, Some(&b), &env, true).unwrap();
+    let bytes = write_brep_to_file(k, Some(b), &env, true).unwrap();
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let path = root.join(OUT);
+    let path = root.join(out);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, &bytes).unwrap();
 
@@ -124,24 +163,22 @@ fn write_issue_1528_operand() {
         records: &mut recs2,
         next_key: 1 << 50,
     };
-    let mut read =
-        read_brep_from_file(&mut k, Some(bytes.clone()), true, false, &mut tenv).unwrap();
+    let mut read = read_brep_from_file(k, Some(bytes.clone()), true, false, &mut tenv).unwrap();
     read.refresh_cached_topology();
-    let open = planar_faces_at(&k, &read, 0, 42.5);
+    let open = planar_faces_at(k, &read, 0, 42.5);
     assert_eq!(open.len(), 1, "the far end face");
     let index = read.face_list().iter().position(|&f| f == open[0]).unwrap();
     eprintln!(
-        "ISSUE 1528 wrote {} ({} bytes): faces {} edges {} volume {:?}; open face index {index}",
-        OUT,
+        "ISSUE {label} wrote {out} ({} bytes): faces {} edges {} volume {:?}; open face index {index}",
         bytes.len(),
         read.faces().len(),
         read.edges().len(),
-        volume(&k, &mut read)
+        volume(k, &mut read)
     );
-    let result = shell(&mut k, read, -2.0, &open);
+    let result = shell(k, read, -2.0, &open);
     report(
-        &k,
-        "1528 read-back shell 2 open at x 42.5",
+        k,
+        &format!("{label} read-back shell 2 open at x 42.5"),
         result,
         None,
         1e-6,
