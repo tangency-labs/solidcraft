@@ -33,6 +33,7 @@
 //! | 10   | `j do_point face old uv_ok` | `ClassifyFaceInterval`             |                          |
 //! | 11   | `self`                   | `TestForPartialCoincidentEdges`       | `gap has_curve [curve]`  |
 //! | 12   | `j todo`                 | `sm_SetDoFilletingGeometry(j, cc, todo)` |                       |
+//! | 13   | `j do_point face old uv_ok` | `ClassifyFaceInterval` on the real face |                    |
 //!
 //! Each op writes `op status outputs state`, the state of `cc[t]` being `size interval*size`,
 //! an interval `min max start mid end`, a point classification `class object face deviation t
@@ -44,7 +45,9 @@
 //! intervals, `NULL` curves that are dereferenced, non-B-spline edge curves that
 //! `TestForPartialCoincidentEdges` would copy) and topology work the bare stand-in topology
 //! cannot answer (face queries of `ClassifyFaceInterval`, connection tests across object kinds,
-//! the edge-curve replacement of `sm_SetDoFilletingGeometry`).
+//! the edge-curve replacement of `sm_SetDoFilletingGeometry`). Op 13 is op 10 that also runs
+//! the face queries when `face` is the one-face B-rep's face, the classification has a curve
+//! and the interval's vertex or edge ends are that B-rep's own entities.
 
 use super::intersect_curve_class_p1::{validate_objects, Reader};
 pub use super::intersect_curve_class_p4::topology_count;
@@ -73,8 +76,9 @@ pub mod op {
     pub const CLASSIFY_FACE: usize = 10;
     pub const PARTIAL: usize = 11;
     pub const FILLET: usize = 12;
+    pub const CLASSIFY_FACE_REAL: usize = 13;
     /// Largest op code.
-    pub const LAST: usize = 12;
+    pub const LAST: usize = 13;
 }
 
 mod sys {
@@ -159,7 +163,7 @@ pub fn validate(face: Option<&FaceSpec>, input: &[f64]) -> Result<(), FfiError> 
                 rd.flag()?;
                 rd.flag()?;
             }
-            op::CLASSIFY_FACE => {
+            op::CLASSIFY_FACE | op::CLASSIFY_FACE_REAL => {
                 rd.index(MAX_IVLS)?;
                 rd.flag()?;
                 rd.object(n_obj)?;

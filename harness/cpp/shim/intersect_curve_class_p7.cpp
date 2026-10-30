@@ -12,8 +12,9 @@
 // run-time checks below reject (SC_ERR_ARG) what is undefined upstream (indices outside the intervals,
 // NULL curves that are dereferenced, edge curves that are not B-splines where SM_CAST_PTR is
 // dereferenced) and the topology walks the bare stand-in topology cannot answer (face queries,
-// connection tests across kinds, the edge-curve replacement that deletes a pool curve). Objects live
-// for the whole process (never deleted: topology destructors notify owners).
+// connection tests across kinds, the edge-curve replacement that deletes a pool curve; op 13 runs the
+// face queries of ClassifyFaceInterval on the real face below). Objects live for the whole process
+// (never deleted: topology destructors notify owners).
 //
 // With has_face, the pool also holds a real one-face B-rep built with SmBrepConstructor
 // (sc_one_face_brep.h, as the intersect.curve_class_p4 shim): its face, loops, edges, vertices and
@@ -376,6 +377,7 @@ enum : int64_t
     OP_CLASSIFY_FACE = 10,
     OP_PARTIAL = 11,
     OP_FILLET = 12,
+    OP_CLASSIFY_FACE_REAL = 13,
 };
 
 const int64_t MAX_IVLS = 16;
@@ -450,6 +452,13 @@ bool read_cc(Rd& rd, const Pool& pool, SmCurveClassification& cc, SmCurveClassif
 bool is_ve(const SmPointClassification& pc)
 {
     return pc.GetPointClass() == SM_PC_VERTEX || pc.GetPointClass() == SM_PC_EDGE;
+}
+
+// A vertex or edge end whose object is an entity of the one-face B-rep (real topology the face
+// queries can walk), or an end of any other class.
+bool real_or_not_ve(const SmPointClassification& pc, const Pool& pool)
+{
+    return !is_ve(pc) || (pc.GetObject() != NULL && pool.is_real(pc.GetObject()));
 }
 
 // Whether a coincidence block of TestForPartialCoincidentEdges over these interiors could
@@ -791,6 +800,7 @@ int32_t run(Rd& rd, std::vector<double>& o)
             break;
         }
         case OP_CLASSIFY_FACE:
+        case OP_CLASSIFY_FACE_REAL:
         {
             int64_t j = rd.idx();
             bool do_point = rd.flag();
@@ -806,7 +816,11 @@ int32_t run(Rd& rd, std::vector<double>& o)
             SmPointClassificationType mc = ivl.m_vMid.GetPointClass();
             bool early = !(mc == SM_PC_UNKNOWN || (old != NULL && mc == SM_PC_FACE))
                          || (old != NULL && ivl.m_vMid.GetFaceObject() != NULL && old != ivl.m_vMid.GetFaceObject());
-            if (!early && (is_ve(ivl.m_vStart) || is_ve(ivl.m_vEnd) || do_point))
+            // (OP_CLASSIFY_FACE_REAL: the one-face B-rep's face, with that B-rep's own vertex / edge
+            // ends, has real loops to walk; the queries evaluate the classification's curve)
+            bool real = op == OP_CLASSIFY_FACE_REAL && pool.is_real(f) && cc.GetCurve() != NULL
+                        && real_or_not_ve(ivl.m_vStart, pool) && real_or_not_ve(ivl.m_vEnd, pool);
+            if (!early && !real && (is_ve(ivl.m_vStart) || is_ve(ivl.m_vEnd) || do_point))
                 return SC_ERR_ARG;
             o.push_back(st(cc.ClassifyFaceInterval((ULONG)j, do_point ? TRUE : FALSE, f, old, uv_ok ? TRUE : FALSE)));
             break;

@@ -32,6 +32,12 @@
 //! `ClassifyFaceInterval` (`topology.face_p4`, `query.face_p1`, `query.face_p2`), in-surface
 //! gaps (the surface point solve, `surface.surface_p4`) and the 2D pair tolerance on a surface
 //! (`surface.surface_p1`).
+//! Generated scripts with a real B-rep that has edges also yield `<name>_real_vertex`,
+//! `<name>_real_edge` and `<name>_real_point` twins ([`real_twin`], up to [`REAL_TWINS`]): one
+//! interval reclassified to start at the B-rep's own vertex or edge, or left unclassified with
+//! the point classification on, classified against the B-rep's face (op 13 in the shim, which
+//! runs `SmFace::FindVertexSector`, `SmFace::EdgeCurveOnClassify` and `SmFace::PointClassify`
+//! on its real loops).
 //! Generated scripts are filtered by the shim's run-time checks (scripts it rejects as
 //! undefined upstream, or as topology walks over the bare stand-ins, are dropped).
 
@@ -124,7 +130,17 @@ enum OpIn {
     CrossingFace { t: usize, face: Option<usize> },
     NearMisses { t: usize, b: bool },
     CoinMaybe { t: usize, j: usize, own: bool, report: bool },
-    ClassifyFace { t: usize, j: usize, do_point: bool, face: Option<usize>, old: Option<usize>, uv_ok: bool },
+    /// `real`: op 13, which lets the shim run the face queries on the real face.
+    ClassifyFace {
+        t: usize,
+        j: usize,
+        do_point: bool,
+        face: Option<usize>,
+        old: Option<usize>,
+        uv_ok: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        real: bool,
+    },
     Partial { t: usize, own: bool },
     Fillet { t: usize, j: usize, todo: u64 },
 }
@@ -142,7 +158,8 @@ impl OpIn {
             OpIn::CrossingFace { t, .. } => (op::CROSSING_FACE, t),
             OpIn::NearMisses { t, .. } => (op::NEAR_MISSES, t),
             OpIn::CoinMaybe { t, .. } => (op::COIN_MAYBE, t),
-            OpIn::ClassifyFace { t, .. } => (op::CLASSIFY_FACE, t),
+            OpIn::ClassifyFace { t, real: false, .. } => (op::CLASSIFY_FACE, t),
+            OpIn::ClassifyFace { t, real: true, .. } => (op::CLASSIFY_FACE_REAL, t),
             OpIn::Partial { t, .. } => (op::PARTIAL, t),
             OpIn::Fillet { t, .. } => (op::FILLET, t),
         }
@@ -767,6 +784,7 @@ fn gen_op(rng: &mut Rng, kinds: &[usize], n_obj: usize, ccs: &[CcIn; 2]) -> OpIn
             face: rng.choose(&faces).copied(),
             old: maybe_of(rng, &faces, 0.5),
             uv_ok: rng.chance(0.7),
+            real: false,
         },
         22..=23 => OpIn::Partial { t, own: rng.chance(0.4) },
         _ => OpIn::Fillet { t, j, todo: rng.below(8) },
@@ -862,9 +880,9 @@ fn edge_cases() -> Vec<(String, Value)> {
             OpIn::NearMisses { t: 0, b: false },
             OpIn::NearMisses { t: 1, b: true },
             OpIn::CoinMaybe { t: 0, j: 0, own: false, report: true },
-            OpIn::ClassifyFace { t: 0, j: 0, do_point: true, face: Some(3), old: None, uv_ok: true },
-            OpIn::ClassifyFace { t: 0, j: 2, do_point: false, face: Some(3), old: None, uv_ok: true },
-            OpIn::ClassifyFace { t: 0, j: 3, do_point: false, face: Some(3), old: Some(3), uv_ok: false },
+            OpIn::ClassifyFace { t: 0, j: 0, do_point: true, face: Some(3), old: None, uv_ok: true, real: false },
+            OpIn::ClassifyFace { t: 0, j: 2, do_point: false, face: Some(3), old: None, uv_ok: true, real: false },
+            OpIn::ClassifyFace { t: 0, j: 3, do_point: false, face: Some(3), old: Some(3), uv_ok: false, real: false },
             OpIn::Partial { t: 0, own: true },
             OpIn::Partial { t: 1, own: true },
             OpIn::Fillet { t: 0, j: 0, todo: 7 },
@@ -900,6 +918,75 @@ fn edge_cases() -> Vec<(String, Value)> {
     out
 }
 
+/// Real-face twins per run (in seed order, then variant order, up to this many).
+const REAL_TWINS: usize = 150;
+
+/// Which face query a [`real_twin`] reaches.
+#[derive(Debug, Clone, Copy)]
+enum RealVariant {
+    /// The interval starts at the B-rep's first vertex: `SmFace::FindVertexSector`.
+    Vertex,
+    /// The interval starts on the B-rep's first edge: `SmFace::EdgeCurveOnClassify`.
+    Edge,
+    /// Unclassified ends with the point classification on and a UV curve:
+    /// `SmFace::PointClassify`.
+    Point,
+}
+
+impl RealVariant {
+    const ALL: [RealVariant; 3] = [RealVariant::Vertex, RealVariant::Edge, RealVariant::Point];
+
+    fn suffix(self) -> &'static str {
+        match self {
+            RealVariant::Vertex => "real_vertex",
+            RealVariant::Edge => "real_edge",
+            RealVariant::Point => "real_point",
+        }
+    }
+}
+
+/// The real-face twin of a generated script with a real B-rep that has edges and vertices:
+/// its objects, face and classifications, with the first interval of the first
+/// classification that has a curve and an interval (and, for [`RealVariant::Point`], a UV
+/// curve) reclassified per `variant` with an unknown middle and end, and one op:
+/// `ClassifyFaceInterval` of that interval against the B-rep's face (op 13; the Rust side
+/// runs the same `classify_face_interval_mut` as op 10). `None` when the script has no such
+/// B-rep or interval, or the shim's checks reject the twin.
+fn real_twin(s: &Script, variant: RealVariant) -> Option<Script> {
+    let kinds = pool_kinds(&s.objects, s.face.as_ref());
+    let n_obj = s.objects.len();
+    let real = |k: usize| kinds.iter().enumerate().skip(n_obj).find(|&(_, &x)| x == k).map(|(i, _)| i);
+    let face = real(kind::FACE)?;
+    let edge = real(kind::EDGE)?;
+    let vertex = real(kind::VERTEX)?;
+    let point = matches!(variant, RealVariant::Point);
+    let t = s
+        .cc
+        .iter()
+        .position(|c| c.curve.is_some() && !c.ivls.is_empty() && (!point || c.uv1.is_some()))?;
+    let mut twin = s.clone();
+    let ivl = twin.cc.get_mut(t)?.ivls.first_mut()?;
+    let start = match variant {
+        RealVariant::Vertex => pc(104, Some(vertex), ivl.a, 0.0),
+        RealVariant::Edge => pc(103, Some(edge), ivl.a, 0.0),
+        RealVariant::Point => unknown(),
+    };
+    ivl.pcs = [start, unknown(), unknown()];
+    twin.ops = vec![OpIn::ClassifyFace {
+        t,
+        j: 0,
+        do_point: point,
+        face: Some(face),
+        old: None,
+        uv_ok: point,
+        real: true,
+    }];
+    if ffi::validate(ffi_face(&twin).as_ref(), &cpp_input(&twin)).is_err() || !shim_accepts(&twin) {
+        return None;
+    }
+    Some(twin)
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "intersect.curve_class_p7"
@@ -922,6 +1009,27 @@ impl UnitDiff for Runner {
             ..ctx.clone()
         };
         let mut cases = default_cases(self, &ctx)?;
+        let mut twins = Vec::new();
+        for c in cases.iter().filter(|c| matches!(c.source, CaseSource::Generated { .. })) {
+            let Ok(s) = serde_json::from_value::<Script>(c.inputs.clone()) else {
+                continue;
+            };
+            for variant in RealVariant::ALL {
+                if let Some(twin) = real_twin(&s, variant) {
+                    twins.push(Case {
+                        unit: self.id().into(),
+                        name: format!("{}_{}", c.name, variant.suffix()),
+                        source: CaseSource::Inline,
+                        inputs: json!(twin),
+                    });
+                }
+            }
+            if twins.len() >= REAL_TWINS {
+                break;
+            }
+        }
+        twins.truncate(REAL_TWINS);
+        cases.extend(twins);
         for (name, inputs) in edge_cases() {
             cases.push(Case {
                 unit: self.id().into(),
@@ -983,6 +1091,26 @@ mod tests {
         assert_eq!(&out[..3], &[2.0, 0.0, 2.0]);
         let out = rust_run(&script("collapse_snapped_interval_long")).ok().unwrap();
         assert_eq!(&out[..3], &[2.0, 1001.0, 3.0]);
+    }
+
+    /// Real-face twins of every variant exist and are comparable (not deferred).
+    #[test]
+    fn real_twins_are_comparable() {
+        for variant in RealVariant::ALL {
+            let mut twins = 0;
+            for i in 0..MIN_GENERATED {
+                let mut rng = Rng::new(CaseContext::seed_for("intersect.curve_class_p7", i));
+                let Some(v) = Runner.generate(&mut rng) else { continue };
+                let s: Script = serde_json::from_value(v).unwrap();
+                let Some(twin) = real_twin(&s, variant) else { continue };
+                twins += 1;
+                assert!(!matches!(rust_run(&twin), Err(Fail::Deferred(_))), "seed {i} {variant:?}: twin deferred");
+                if twins == 20 {
+                    break;
+                }
+            }
+            assert!(twins >= 20, "{variant:?}: {twins} twins");
+        }
     }
 
     #[test]
