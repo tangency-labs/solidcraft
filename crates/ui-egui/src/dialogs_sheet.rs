@@ -221,6 +221,40 @@ fn rule_list(app: &SolveApp) -> Vec<SheetRule> {
     design_rules(&app.session.doc)
 }
 
+/// Switching the unfold method (indices into `UNFOLD_METHODS`) keeps the rule's bends as they
+/// are: the newly shown value is the one the rule already gives, as the K-factor or as the 90°
+/// bend deduction or allowance. So picking Bend Deduction first shows what the K-factor gives a
+/// 90° bend, to check it against a chart. Left as typed when the rule doesn't work out.
+fn convert_unfold(doc: &solidcraft_engine::doc::Document, values: &mut [String], from: usize, to: usize) {
+    let Ok(rule) = manager_rule_values(doc, values, from) else { return };
+    let (key, text) = match UNFOLD_METHODS.get(to).copied() {
+        Some("deduction") => ("unfold_value", plain_length(doc, rule.deduction_90())),
+        Some("allowance") => ("unfold_value", plain_length(doc, rule.allowance_90())),
+        Some(_) => ("k_factor", plain_number(rule.k_factor)),
+        None => return,
+    };
+    if let Some(slot) = RULE_FIELDS.iter().position(|(k, _)| *k == key).and_then(|i| values.get_mut(i)) {
+        *slot = text;
+    }
+}
+
+/// A worked-out number for a field, to 10 decimal places without trailing zeros: far below what
+/// a part or a press brake chart can tell apart, and still readable.
+fn plain_number(value: f64) -> String {
+    let text = format!("{value:.10}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text == "-0" { "0".into() } else { text.into() }
+}
+
+/// A worked-out length (mm) for a field, in the design's unit, as [`plain_number`].
+fn plain_length(doc: &solidcraft_engine::doc::Document, mm: f64) -> String {
+    let full = crate::length_input::model(doc, mm);
+    match full.split_once(' ') {
+        Some((number, unit)) => number.parse::<f64>().map_or(full.clone(), |n| format!("{} {unit}", plain_number(n))),
+        None => full,
+    }
+}
+
 /// A row whose value is worked out, not typed: a disabled field, so it lines up and reads like
 /// the rows around it.
 fn read_only_row(ui: &mut egui::Ui, label: &str, text: &str) {
@@ -436,8 +470,6 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     *active = app.session.doc.sheet_rule(None).name == base.name || *pick >= rules.len();
                 },
                 fields: {
-                    // What the fields give, as OK would save them: the K-factor and its 90° bend.
-                    let unfolds = manager_rule_values(&app.session.doc, values, *method);
                     // What the 90° value implies, said below the rows when there is something to say.
                     let mut note = None;
                     for (i, (key, label)) in RULE_FIELDS.iter().enumerate() {
@@ -449,7 +481,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                                 choice_row(ui, "Corner Relief Shape", "sm_relief_shape", relief, &RELIEF_SHAPE_LABELS);
                             }
                             "k_factor" => {
+                                let was = *method;
                                 choice_row(ui, "sheet.unfold_method.label", "sm_unfold_method", method, &UNFOLD_METHOD_LABELS);
+                                if *method != was {
+                                    convert_unfold(&app.session.doc, values, was, *method);
+                                }
                                 if let Some(value_label) = UNFOLD_VALUE_LABELS.get(*method).copied().flatten() {
                                     // A 90° value: the K-factor it works out to is shown, not typed.
                                     let at = RULE_FIELDS.iter().position(|(k, _)| *k == "unfold_value");
@@ -457,6 +493,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                                         enter |= expr_row(ui, value_label, v);
                                     }
                                     let typed = at.and_then(|at| values.get(at)).is_some_and(|v| !v.trim().is_empty());
+                                    let unfolds = manager_rule_values(&app.session.doc, values, *method);
                                     let k = unfolds.as_ref().map_or_else(|_| "—".to_string(), |v| format!("{:.10}", v.k_factor));
                                     read_only_row(ui, label, &k);
                                     note = match &unfolds {
@@ -473,18 +510,6 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                         }
                         if let Some(v) = values.get_mut(i) {
                             enter |= expr_row(ui, label, v);
-                        }
-                        if *key == "k_factor" {
-                            // What the K-factor gives a 90° bend, to check it against a chart.
-                            let text = unfolds.as_ref().map_or_else(
-                                |_| "—".to_string(),
-                                |v| {
-                                    let allowance = crate::prefs::show_mm(app, v.allowance_90(), 1);
-                                    let deduction = crate::prefs::show_mm(app, v.deduction_90(), 1);
-                                    crate::i18n::format("sheet.unfold_method.at_90_values", &[("allowance", &allowance), ("deduction", &deduction)])
-                                },
-                            );
-                            read_only_row(ui, "sheet.unfold_method.at_90", &text);
                         }
                     }
                     choice_row(ui, "Angle Display", "sm_angle_display", angles, &ANGLE_DISPLAY_LABELS);

@@ -7,7 +7,6 @@ const SHEET_ROWS: &[&str] = &[
     "Thickness",
     "sheet.unfold_method.label",
     "K Factor",
-    "sheet.unfold_method.at_90",
     "Bend Radius",
     "Relief Width",
     "Relief Depth",
