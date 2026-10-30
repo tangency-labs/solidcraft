@@ -1037,7 +1037,23 @@ fn loop_orientation_3d(
             return Ok(OrientType::Unknown);
         }
         sampler.area += sampler.signed_area(&previous, &first);
-        if sampler.area.abs() > 8.0 * sampler.error + area_floor {
+        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-561, opt-in): the floor is
+        // relative to the loop's own bounding box (dimensionless too), so a small hole in
+        // a large face is oriented as a large one is; a box with no width or no height
+        // bounds no area.
+        let floor = if k.fixes.loop_orientation_floor_from_loop_box {
+            let box_u = sampler.bounds.x_length() / sampler.width;
+            let box_v = sampler.bounds.y_length() / sampler.height;
+            let bounds_area = box_u > EFF_ZERO && box_v > EFF_ZERO;
+            if !bounds_area {
+                angle /= 10.0;
+                continue;
+            }
+            area_floor * box_u * box_v
+        } else {
+            area_floor
+        };
+        if sampler.area.abs() > 8.0 * sampler.error + floor {
             return Ok(if sampler.area > 0.0 {
                 OrientType::Same
             } else {

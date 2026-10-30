@@ -99,6 +99,7 @@ use crate::nurbs::b_spline_curve::p2::{BoundingBoxRequest, ControlPointForm};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::geom::dist_cpt_cpt;
 use crate::nurbs::nurbs_crv::to_euclid;
+use crate::surface::surface::Surface;
 
 /// `SmLine_TYPE` (`CURV_BASE_TYPE + 10`).
 const LINE_TYPE: i64 = BSplineCurve::TYPE - 33 + 10;
@@ -295,6 +296,96 @@ pub(crate) struct DerivedOverrides<'a> {
     pub bounded: bool,
     /// `IsDegenerate(tol)` over the natural interval.
     pub is_degenerate: &'a dyn Fn(f64) -> Result<bool>,
+    /// Not upstream: the surface of the face whose UV trim this curve is
+    /// (`GetEdgeuse()->GetFace()->GetSurface()`), read only with
+    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560); `None` for any other curve.
+    pub trim_surface: Option<&'a Surface>,
+}
+
+/// The first fundamental form `[E, F, G]` of `surface` at `uv`, its derivatives taken
+/// on the given sides (the fork's `sm_FirstFundamentalForm`, as
+/// `topology::brep::validation::pointers` has it for WR-406); `None` where the surface
+/// cannot be evaluated.
+fn first_fundamental_form(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    u_from_left: bool,
+    v_from_left: bool,
+) -> Result<Option<[f64; 3]>> {
+    match surface.evaluate_1st_derivatives(k, uv, u_from_left, v_from_left) {
+        Ok((_, du, dv)) => Ok(Some([du.dot(du), du.dot(dv), dv.dot(dv)])),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Whether a first fundamental form is positive definite: no direction of zero length
+/// (not a singular point of its surface) (the fork's `sm_IsPositiveDefinite`).
+fn is_positive_definite(efg: [f64; 3]) -> bool {
+    efg[0] > 0.0 && efg[0] * efg[2] - efg[1] * efg[1] > 0.0
+}
+
+/// The map `(u, v) -> (a u + b v, c v)` that measures a UV trim's steps as lengths on
+/// its face's surface (the fork's `sm_TrimMetric`, WR-560): `[a, b, c]`, the Cholesky
+/// factor `L` of the surface's first fundamental form (`|L d|^2 = d.G.d`) at the
+/// trim's middle, or at the centre of the surface's natural domain where the middle is
+/// a singular point. `None` for a curve that is no UV trim of a face (`surface` `None`,
+/// a dimension other than 2), an unbounded one, or one whose surface has no metric at
+/// either point.
+fn trim_metric(
+    k: &Kernel,
+    trim: &BSplineCurve,
+    bounded: bool,
+    surface: Option<&Surface>,
+    domain: &Extent1d,
+) -> Result<Option<[f64; 3]>> {
+    let Some(surface) = surface.filter(|_| trim.dim == 2) else {
+        return Ok(None);
+    };
+    if !bounded {
+        return Ok(None);
+    }
+    let form_at = |uv: Point2| -> Result<Option<[f64; 3]>> {
+        Ok(first_fundamental_form(k, surface, uv, true, true)?
+            .filter(|efg| is_positive_definite(*efg)))
+    };
+    let mut form = match trim.evaluate_point(domain.evaluate(0.5)) {
+        Ok(mid) => form_at(Point2::new(mid.x, mid.y))?,
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => None,
+    };
+    if form.is_none() {
+        let centre = match surface.natural_uv_domain_with_nurb(k) {
+            Ok(d) => Some(d.evaluate(0.5, 0.5)),
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => None,
+        };
+        if let Some(centre) = centre {
+            form = form_at(centre)?;
+        }
+    }
+    let Some(efg) = form else {
+        return Ok(None);
+    };
+    let a = efg[0].sqrt();
+    let b = efg[1] / a;
+    let c = (efg[0] * efg[2] - efg[1] * efg[1]).sqrt() / a;
+    Ok(Some([a, b, c]))
+}
+
+/// A copy of `trim` with its control points mapped by [`trim_metric`]'s `l` (the
+/// fork's `sm_MappedTrim`): linear, so it maps homogeneous control points as it maps
+/// cartesian ones. `None` when the copy has no NURB.
+fn mapped_trim(trim: &BSplineCurve, l: [f64; 3]) -> Option<BSplineCurve> {
+    let mut copy = trim.clone();
+    let nurb = copy.nurb.as_mut()?;
+    for pw in nurb.cpts_mut() {
+        let (x, y) = (pw.x, pw.y);
+        pw.x = l[0] * x + l[1] * y;
+        pw.y = l[2] * y;
+    }
+    Some(copy)
 }
 
 /// `SmCurve::IsAnalytic` of a B-spline: the base `FALSE` (`SmBSplineCurve` does not
@@ -1069,6 +1160,40 @@ impl BSplineCurve {
                 analytic: curve_is_analytic(self),
                 bounded: curve_is_bounded(self),
                 is_degenerate: &is_degenerate,
+                trim_surface: None,
+            },
+        )
+    }
+
+    /// [`BSplineCurve::assert_valid`] of a UV trim on `trim_surface`, its face's
+    /// surface: with `Kernel::fixes.uv_trim_checks_on_surface` (WR-560) the radius of
+    /// curvature (13) and coincident control point (15) tests measure the trim on that
+    /// surface; otherwise the same as [`BSplineCurve::assert_valid`].
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineCurve::assert_valid`], and those of the surface's evaluations
+    /// ([`SolidError::Unported`] only; a failed evaluation leaves the trim unmapped).
+    pub fn assert_valid_on(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
+        let is_degenerate = |tol: f64| self.is_degenerate(k, tol, None);
+        self.assert_valid_with(
+            k,
+            list,
+            level_given,
+            key,
+            &DerivedOverrides {
+                degree: None,
+                analytic: curve_is_analytic(self),
+                bounded: curve_is_bounded(self),
+                is_degenerate: &is_degenerate,
+                trim_surface,
             },
         )
     }
@@ -1366,14 +1491,51 @@ impl BSplineCurve {
                 }
             }
 
+            // Not upstream (fork tangency-labs/smlib b4f8c57, WR-560, opt-in): a radius of
+            // curvature is a length, and a UV trim's lengths are those of its face's
+            // surface. The trim is tested mapped by the surface's first fundamental form
+            // at its middle, with the mapped trim's tolerance and solution spacing; a
+            // mapped trim that cannot be sized fails test 13 and is not analysed.
+            let mut mapped: Option<BSplineCurve> = None;
+            let (mut radius_sized, mut radius_tol, mut radius_sep) = (true, tol, min_sep);
+            if k.fixes.uv_trim_checks_on_surface {
+                if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
+                    mapped = mapped_trim(self, l);
+                    let mapped_box = match mapped.as_ref() {
+                        Some(m) => ignored(m.calculate_bounding_box(
+                            &domain,
+                            BoundingBoxRequest {
+                                normal: true,
+                                pseudo: false,
+                                polar: false,
+                            },
+                        ))?
+                        .and_then(|b| b.normal),
+                        None => None,
+                    };
+                    radius_sized = mapped_box.is_some();
+                    rtn &= bool_report(&mut list, key, 13, radius_sized)?;
+                    if let Some(mapped_box) = mapped_box {
+                        let mapped_size = mapped_box.size().length();
+                        radius_tol = (mapped_size / size_t) / 10000.0;
+                        radius_sep = mapped_size / max2(20., size_t);
+                    }
+                }
+            }
+            let copy_curve = mapped.as_ref().unwrap_or(self);
+
             // Another type of kink check: vanishing radius of curvature.
-            let solutions = global_property_analysis(
-                k,
-                self,
-                &domain,
-                CurveProperty::MinimizeRadiusOfCurvature,
-                min_sep,
-            )?;
+            let solutions = if radius_sized {
+                global_property_analysis(
+                    k,
+                    copy_curve,
+                    &domain,
+                    CurveProperty::MinimizeRadiusOfCurvature,
+                    radius_sep,
+                )?
+            } else {
+                Vec::new()
+            };
 
             // (upstream compares before setting the minimum radius, so the test never
             // fires; the opt-in `Kernel::fixes.bspline_check_min_radius` reads it first:
@@ -1382,7 +1544,7 @@ impl BSplineCurve {
             if k.fixes.bspline_check_min_radius {
                 min_radius = first_radius;
             }
-            if min_radius < tol {
+            if min_radius < radius_tol {
                 min_radius = first_radius;
                 let min_radius_param = match solutions.first() {
                     Some(s) => s.param(0)?,
@@ -1396,8 +1558,8 @@ impl BSplineCurve {
                     None
                 };
                 if let Some(t) = test {
-                    let ok = min_radius >= tol;
-                    report(&mut list, key, t, ok, tol, min_radius, |r| {
+                    let ok = min_radius >= radius_tol;
+                    report(&mut list, key, t, ok, radius_tol, min_radius, |r| {
                         r.set_owner_param(Point2::new(min_radius_param, 0.0));
                     })?;
                 }
@@ -1408,7 +1570,20 @@ impl BSplineCurve {
         /* 15 */
         // Are Curve Internal ControlPoints Coincident
         let pole_tol = ZONE_TOL_3D / 10.0;
-        let has_internal_pole = self.has_internal_pole(k, pole_tol)?;
+        // Not upstream (fork tangency-labs/smlib 54ca3e0, WR-560, opt-in): the tolerance is
+        // a length, and a UV trim's control points are measured as lengths on its face's
+        // surface, as the radius test above.
+        let mut pole_curve: Option<BSplineCurve> = None;
+        if k.fixes.uv_trim_checks_on_surface {
+            let interval = self.natural_interval();
+            if let Some(l) = trim_metric(k, self, ovr.bounded, ovr.trim_surface, &interval)? {
+                pole_curve = mapped_trim(self, l);
+            }
+        }
+        let has_internal_pole = pole_curve
+            .as_ref()
+            .unwrap_or(self)
+            .has_internal_pole(k, pole_tol)?;
         rtn &= report(
             &mut list,
             key,
@@ -1745,5 +1920,95 @@ mod tests {
         assert!(c
             .is_segment_line(&ivl, MAX_SEGMENT_SAMPLES + 1, 1e-6)
             .is_err());
+    }
+
+    /// The exact rational trim of a circle of radius `r` about `(cx, cy)` on a plane
+    /// spanning `sx` x `sy` over `[0,1]^2`, and that plane: in (u, v) an ellipse
+    /// `sy / sx` times as wide as it is long.
+    fn circle_trim_on_plane(
+        (cx, cy, r): (f64, f64, f64),
+        (sx, sy): (f64, f64),
+    ) -> (BSplineCurve, Surface) {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        let s = 2.0_f64.sqrt();
+        let control: Vec<Vec3> = (0..9_i32)
+            .map(|i| {
+                let t = f64::from(i) * PI / 4.0;
+                let scale = if i % 2 == 1 { s } else { 1.0 };
+                Vec3::new(
+                    (cx + scale * r * t.cos()) / sx,
+                    (cy + scale * r * t.sin()) / sy,
+                    0.0,
+                )
+            })
+            .collect();
+        let w = 0.5_f64.sqrt();
+        let trim = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 2, 2, 2, 3],
+            knots: &[0.0, 0.25, 0.5, 0.75, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, w, 1.0, w, 1.0, w, 1.0, w, 1.0]),
+            trim: None,
+        })
+        .unwrap();
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(sx, 0.0, 0.0),
+                Vec3::new(0.0, sy, 0.0),
+                Vec3::new(sx, sy, 0.0),
+            )
+            .unwrap(),
+        );
+        (trim, plane)
+    }
+
+    /// The failed test indices of `trim`'s `AssertValid` on `surface`.
+    fn failed_tests(k: &Kernel, trim: &BSplineCurve, surface: Option<&Surface>) -> Vec<u64> {
+        let mut list = AssertArray::new();
+        trim.assert_valid_on(k, Some(&mut list), true, ObjectKey(5), surface)
+            .unwrap();
+        (0..list.len())
+            .filter_map(|i| list.get(i).map(|r| r.test_index))
+            .collect()
+    }
+
+    /// WR-560 (fork tangency-labs/smlib b4f8c57, #891 item 2): the exact trim of a r 1
+    /// circle on a plane spanning 600 x 3 is an ellipse 200 times as long as it is wide
+    /// in (u, v), of radius 8.3e-6 at its ends against a tolerance of about 6.7e-5; on
+    /// the plane it is the circle of radius 1. Test 13 needs `bspline_check_min_radius`
+    /// to fire at all (WR-382).
+    #[test]
+    fn issue_891_uv_trim_radius_is_measured_on_its_surface() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_check_min_radius = true;
+        let (trim, plane) = circle_trim_on_plane((300.0, 1.5, 1.0), (600.0, 3.0));
+        let idx = failed_tests(&k, &trim, Some(&plane));
+        assert!(idx.contains(&13), "{idx:?}");
+        k.fixes.uv_trim_checks_on_surface = true;
+        let idx = failed_tests(&k, &trim, Some(&plane));
+        assert!(!idx.contains(&13), "{idx:?}");
+        // a curve that is no face's trim is tested as it is
+        let idx = failed_tests(&k, &trim, None);
+        assert!(idx.contains(&13), "{idx:?}");
+    }
+
+    /// WR-560 (fork tangency-labs/smlib 54ca3e0, #1524): the trim of a r 0.003 hole on a
+    /// plane spanning 4500 x 4500 has control points 6.7e-7 apart in (u, v), under the
+    /// pole tolerance `SM_ZONE_TOL_3D / 10`; on the plane they are 0.003 apart.
+    #[test]
+    fn issue_1524_uv_trim_control_points_are_measured_on_its_surface() {
+        let mut k = Kernel::default();
+        let (trim, plane) = circle_trim_on_plane((2250.0, 2250.0, 0.003), (4500.0, 4500.0));
+        let idx = failed_tests(&k, &trim, Some(&plane));
+        assert!(idx.contains(&15), "{idx:?}");
+        k.fixes.uv_trim_checks_on_surface = true;
+        let idx = failed_tests(&k, &trim, Some(&plane));
+        assert!(!idx.contains(&15), "{idx:?}");
     }
 }

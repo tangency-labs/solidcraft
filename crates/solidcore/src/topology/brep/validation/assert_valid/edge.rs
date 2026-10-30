@@ -33,6 +33,7 @@ use crate::math::{rad_to_deg, Point3, EFF_ZERO, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::p3::DerivedOverrides;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{
@@ -41,7 +42,8 @@ use crate::topology::{
 
 /// `m_pCurve->AssertValid(pAList, eTestLevel, SM_NO_WALK)` dispatched on the curve's
 /// class: the curve object reports as `key`, an ellipse's polar converter as
-/// `polar_key`.
+/// `polar_key`. `trim_surface` is the face's surface of a UV trim (WR-560, read by the
+/// `SmBSplineCurve` checks with `Kernel::fixes.uv_trim_checks_on_surface`).
 pub(super) fn curve(
     k: &Kernel,
     c: &mut Curve,
@@ -49,14 +51,15 @@ pub(super) fn curve(
     level: u8,
     key: ObjectKey,
     polar_key: ObjectKey,
+    trim_surface: Option<&Surface>,
 ) -> Result<bool> {
     let given = level == super::LEVEL_GIVEN;
     let owner = c.owner();
     let mut list = list;
     match c.kind_mut() {
-        CurveKind::BSpline(x) => x.assert_valid(k, list, given, key),
-        CurveKind::Line(x) => x.assert_valid(k, list, given, key),
-        CurveKind::Ellipse(x) => x.assert_valid(k, list, given, key, polar_key),
+        CurveKind::BSpline(x) => x.assert_valid_on(k, list, given, key, trim_surface),
+        CurveKind::Line(x) => x.assert_valid_on(k, list, given, key, trim_surface),
+        CurveKind::Ellipse(x) => x.assert_valid_on(k, list, given, key, polar_key, trim_surface),
         CurveKind::Parabola(x) => {
             // SmBSplineCurve::AssertValid builds a missing NURB (virtual MakeNurb,
             // status ignored) after the SmCurve base check, which does not read it
@@ -77,6 +80,7 @@ pub(super) fn curve(
                     analytic,
                     bounded,
                     is_degenerate: &is_degenerate,
+                    trim_surface,
                 },
             )
         }
@@ -98,6 +102,7 @@ pub(super) fn curve(
                     analytic,
                     bounded,
                     is_degenerate: &is_degenerate,
+                    trim_surface,
                 },
             )
         }
@@ -136,6 +141,7 @@ fn edge_curve_check(k: &Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Res
         level,
         geometry_key(20001, e.index()),
         geometry_key(20004, e.index()),
+        None,
     )
 }
 
@@ -708,6 +714,21 @@ pub(super) fn edgeuse(
     // when Edgeuse has a UVTrimCurve - Check that it's valid
     if has_trim {
         let level = cx.rep.level;
+        // not upstream (WR-560, opt-in): the trim is measured on its face's surface
+        // (`GetEdgeuse()->GetFace()->GetSurface()`)
+        let trim_surface = if k.fixes.uv_trim_checks_on_surface {
+            match eu1::face(b, eu)? {
+                Some(f) => b
+                    .face(f)?
+                    .surface
+                    .as_ref()
+                    .map(Surface::clone_for_evaluation)
+                    .transpose()?,
+                None => None,
+            }
+        } else {
+            None
+        };
         let list = cx.rep.array.as_deref_mut();
         if let Some(c) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
             rtn &= curve(
@@ -717,6 +738,7 @@ pub(super) fn edgeuse(
                 level,
                 geometry_key(20003, eu.index()),
                 geometry_key(20005, eu.index()),
+                trim_surface.as_ref(),
             )?;
         }
     }

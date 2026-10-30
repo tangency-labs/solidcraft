@@ -140,6 +140,7 @@ use crate::nurbs::b_spline_curve_n_lib::{InValueType, TrimMode};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::math::NOW;
 use crate::nurbs::nurbs_crv::allocate_nurb_curve;
+use crate::surface::surface::Surface;
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
 const OP_SEGMENT: &str = "curve::line::Line::create_line_segment";
@@ -2020,6 +2021,25 @@ impl Line {
         level_given: bool,
         key: ObjectKey,
     ) -> Result<bool> {
+        self.assert_valid_on(k, list, level_given, key, None)
+    }
+
+    /// [`Line::assert_valid`] of a UV trim on `trim_surface`, its face's surface: the
+    /// `SmBSplineCurve` checks measure the trim on it with
+    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560, see
+    /// [`BSplineCurve::assert_valid_on`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Line::assert_valid`].
+    pub fn assert_valid_on(
+        &mut self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
         let mut list = list;
         let mut rtn = true;
 
@@ -2042,6 +2062,7 @@ impl Line {
                     analytic: this.is_analytic(),
                     bounded: this.is_bounded(),
                     is_degenerate: &is_degenerate,
+                    trim_surface,
                 },
             )?;
         }

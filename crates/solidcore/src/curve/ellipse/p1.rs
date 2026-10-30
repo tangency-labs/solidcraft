@@ -129,6 +129,7 @@ use crate::nurbs::crv_basic::ConicType;
 use crate::nurbs::crv_common::{elliptical_arc_tol, EllipseArc};
 use crate::nurbs::index::at;
 use crate::nurbs::nurbs_crv::to_euclid;
+use crate::surface::surface::Surface;
 use crate::topology::database_io::{
     fixed16, DatabaseReader, DatabaseWriter, FileType, InputStream,
 };
@@ -1210,9 +1211,29 @@ impl Ellipse {
         key: ObjectKey,
         polar_key: ObjectKey,
     ) -> Result<bool> {
+        self.assert_valid_on(k, list, level_given, key, polar_key, None)
+    }
+
+    /// [`Ellipse::assert_valid`] of a UV trim on `trim_surface`, its face's surface:
+    /// the `SmBSplineCurve` checks measure the trim on it with
+    /// `Kernel::fixes.uv_trim_checks_on_surface` (WR-560, see
+    /// [`BSplineCurve::assert_valid_on`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Ellipse::assert_valid`].
+    pub fn assert_valid_on(
+        &mut self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        polar_key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
         let mut list = list;
         if !self.circle {
-            return self.ellipse_assert_valid(k, list, level_given, key, polar_key);
+            return self.ellipse_assert_valid(k, list, level_given, key, polar_key, trim_surface);
         }
 
         // init return value
@@ -1222,7 +1243,14 @@ impl Ellipse {
         rtn &= if level_given {
             true
         } else {
-            self.ellipse_assert_valid(k, list.as_deref_mut(), level_given, key, polar_key)?
+            self.ellipse_assert_valid(
+                k,
+                list.as_deref_mut(),
+                level_given,
+                key,
+                polar_key,
+                trim_surface,
+            )?
         };
 
         // Check that analytic ellipse is a circle
@@ -1247,6 +1275,7 @@ impl Ellipse {
         level_given: bool,
         key: ObjectKey,
         polar_key: ObjectKey,
+        trim_surface: Option<&Surface>,
     ) -> Result<bool> {
         let mut list = list;
 
@@ -1271,6 +1300,7 @@ impl Ellipse {
                     analytic: true,
                     bounded: true,
                     is_degenerate: &is_degenerate,
+                    trim_surface,
                 },
             )?;
         }
