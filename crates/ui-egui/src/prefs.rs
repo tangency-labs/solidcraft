@@ -1147,11 +1147,11 @@ preference_settings! {
     /// On, two or more joints show as one button with their count in the History, and a click
     /// shows each one (#8884). Off, the default, shows each joint as the History always has.
     history_group_joints: bool = false, PAGE_INTERFACE => check_id("prefs.history_group_joints");
-    /// The History bar folds long runs of one component's features into chips and starts feature
-    /// folders folded, and a STEP insert that brings more than one item goes into a `Group #N`
-    /// folder (#8885). Off shows each feature, starts folders open and makes no folder, as
-    /// before.
-    history_bar_groups: bool = true, PAGE_INTERFACE => check_id("prefs.history_bar_groups");
+    /// On, the History bar folds long runs of one component's features into chips and starts
+    /// feature folders folded, and a STEP insert that brings more than one item goes into a
+    /// `Group #N` folder (#8885). Off, the default, shows each feature, starts folders open and
+    /// makes no folder, as the bar always has.
+    history_bar_groups: bool = false, PAGE_INTERFACE => check_id("prefs.history_bar_groups");
     /// The vertical history (left, or under the browser) starts with the active component's Bodies
     /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
     timeline_origin_bodies: bool = false, PAGE_INTERFACE;
@@ -5484,7 +5484,7 @@ mod tests {
             ("history_sketches", json!("under_feature"), PAGE_INTERFACE),
             ("history_play_button", json!(false), PAGE_INTERFACE),
             ("history_group_joints", json!(true), PAGE_INTERFACE),
-            ("history_bar_groups", json!(false), PAGE_INTERFACE),
+            ("history_bar_groups", json!(true), PAGE_INTERFACE),
             ("browser_float", json!(true), PAGE_INTERFACE),
             ("browser_collapsed", json!(true), PAGE_INTERFACE),
             ("browser_show", json!("hover"), PAGE_INTERFACE),
