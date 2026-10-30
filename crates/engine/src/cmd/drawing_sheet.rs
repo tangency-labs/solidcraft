@@ -2,8 +2,8 @@
 //! the drawing (none when nothing changes). A sheet is named by its id or, when only one has it,
 //! its name.
 //!
-//! A new sheet takes the paper, border and resolution of the sheet it follows, so a drawing's
-//! sheets match unless told otherwise. Changing a sheet's paper regrows its border and zones,
+//! A new sheet takes the paper, border, title block and resolution of the sheet it follows, so a
+//! drawing's sheets match unless told otherwise. Changing a sheet's paper regrows its border and zones,
 //! which nothing on it is saved against, and moves nothing (S5): the answer lists the sheet's views
 //! whose boundary the new paper leaves outside its drawing space. A sheet with anything on it is
 //! deleted only with what is on it, when asked, in the same undo step.
@@ -15,6 +15,7 @@ use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, Excluded, OnSheet, Sheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_sheet::{Orientation, SheetSize};
+use solidcraft_geom::title_block::TitleBlock;
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_};
@@ -37,7 +38,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "after?: a sheet (id or name; default the last); name?; size?: {standard: a3} or {custom: {sides_mm: [w, h]}}; \
-             orientation?: landscape|portrait; dpi?: 25..2400 (each defaulting to the sheet it follows); documents?: {source: id, \
+             orientation?: landscape|portrait; title_block?: a definition or null; dpi?: 25..2400 (each defaulting to the sheet it              follows); documents?: {source: id, \
              component: id (0 the design)}; excluded?: {count?, print?} (none unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
@@ -48,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SET)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name; name?, size?, orientation?, dpi?; documents?: {source: id, component: id (0 the design)} or null; \
+            "sheet: id or name; name?, size?, orientation?, title_block?: a definition or null, dpi?; documents?: {source: id, component: id (0 the design)} or null; \
              excluded?: {count?, print?} → the drawing's sheets, and after a change of paper `outside`: the sheet's views whose \
              boundary leaves its drawing space (none is moved). One undo step, none when nothing changes.",
         ),
@@ -121,6 +122,14 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
     if let Some(orientation) = p.get("orientation") {
         sheet.sheet.orientation =
             serde_json::from_value::<Orientation>(orientation.clone()).map_err(|_| bad(cmd, "`orientation` is landscape or portrait"))?;
+    }
+    match p.get("title_block") {
+        None => {}
+        Some(Value::Null) => sheet.title_block = None,
+        Some(block) => {
+            let block = serde_json::from_value::<TitleBlock>(block.clone()).map_err(|e| bad(cmd, format!("`title_block`: {e}")))?;
+            sheet.title_block = Some(block);
+        }
     }
     if p.get("dpi").is_some() {
         sheet.dpi = num(p, "dpi").ok_or_else(|| bad(cmd, "`dpi` must be a number"))?;

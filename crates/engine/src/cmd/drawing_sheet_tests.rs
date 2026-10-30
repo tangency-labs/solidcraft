@@ -212,3 +212,49 @@ fn a_sheet_with_views_on_it_goes_only_with_them() {
     // An empty sheet goes without being asked twice.
     run(&mut s, "drawing.sheet.delete", json!({"sheet": second}));
 }
+
+/// A 180 x 54 mm block of two cells, as a command takes it: the title, and the projection symbol.
+fn block() -> Value {
+    json!({
+        "size_mm": [180.0, 54.0], "outline_line_mm": 0.7, "cell_line_mm": 0.35,
+        "cells": [
+            {"name": "title", "rect_mm": [-180.0, 0.0, -30.0, 54.0], "label": {"text": "Title", "cap_mm": 2.5},
+             "kind": {"text": {"content": [{"field": {"source": "component", "key": "name"}}], "cap_mm": 5.0}}},
+            {"name": "projection", "rect_mm": [-30.0, 0.0, 0.0, 54.0], "label": {"text": "Projection", "cap_mm": 2.5}, "kind": "projection_symbol"},
+        ],
+    })
+}
+
+/// A sheet's title block by command: given, listed by `drawing.inspect`, taken by a new sheet from
+/// the one it follows, and taken away with `null`. A block or a paper the sheet can't hold is
+/// refused, with the drawing unchanged and no undo step.
+#[test]
+fn a_sheets_title_block_by_command() {
+    let mut s = drawing_session();
+    let steps = s.undo.len();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": block()}));
+    let given: TitleBlock = serde_json::from_value(block()).unwrap();
+    assert_eq!(sheets(&s)[0].title_block.as_ref(), Some(&given));
+    let inspected = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!(inspected["sheets"][0]["title_block"], serde_json::to_value(&given).unwrap());
+    run(&mut s, "drawing.sheet.add", json!({}));
+    assert_eq!(sheets(&s)[1].title_block.as_ref(), Some(&given), "a new sheet takes it");
+    assert_eq!(s.undo.len(), steps + 2);
+    // A5 portrait's drawing border is 128 mm wide; the block is 180.
+    let unchanged = |s: &mut Session, p: Value, why: &str| {
+        let (before, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let refusal = refused(s, "drawing.sheet.set", p);
+        assert!(refusal.contains(why), "{refusal}");
+        assert_eq!((s.drawing("test").unwrap(), s.undo.len()), (&before, steps));
+    };
+    let fits = "a title block fits inside the drawing border";
+    unchanged(&mut s, json!({"sheet": "Sheet 1", "size": {"standard": "a5"}, "orientation": "portrait"}), fits);
+    let mut wide = block();
+    wide["size_mm"] = json!([400.5, 54.0]);
+    unchanged(&mut s, json!({"sheet": "Sheet 1", "title_block": wide}), fits);
+    let mut unknown = block();
+    unknown["colour"] = json!("red");
+    unchanged(&mut s, json!({"sheet": "Sheet 1", "title_block": unknown}), "unknown field `colour`");
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 2", "title_block": null}));
+    assert_eq!((sheets(&s)[0].title_block.is_some(), sheets(&s)[1].title_block.is_some()), (true, false));
+}

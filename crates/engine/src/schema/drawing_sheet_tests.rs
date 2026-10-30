@@ -6,7 +6,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    let settings = ["documents", "dpi", "excluded", "name", "orientation", "size"];
+    let settings = ["documents", "dpi", "excluded", "name", "orientation", "size", "title_block"];
     let with = |key: &'static str| -> Vec<&'static str> {
         let mut keys: Vec<&str> = settings.iter().copied().chain([key]).collect();
         keys.sort_unstable();
@@ -33,6 +33,8 @@ fn strict_keeps_todays_errors() {
         ("drawing.sheet.set", json!({"sheet": "Sheet 1", "excluded": {"count": "yes"}})),
         ("drawing.sheet.set", json!({"sheet": "Sheet 1", "excluded": {"cuont": true}})),
         ("drawing.sheet.set", json!({"sheet": "Sheet 1", "excluded": []})),
+        ("drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": 5})),
+        ("drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block": {"size_mm": [180, 54], "colour": "red"}})),
         ("drawing.sheet.reorder", json!({"sheets": "all"})),
         ("drawing.sheet.reorder", json!({"sheets": [5]})),
         ("drawing.sheet.delete", json!({"sheet": null})),
