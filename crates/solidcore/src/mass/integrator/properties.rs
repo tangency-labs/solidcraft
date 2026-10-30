@@ -24,6 +24,8 @@
 //! With `UpstreamFixes::brep_area_between_solid_and_void` (WR-535) a volume-separating
 //! faceuse adds its volume only where it bounds a non void region and its area only
 //! where the area behaviour selects it (tangency-labs/smlib@d2d9586).
+//! With `UpstreamFixes::precise_properties_trim_base_v` (WR-563, #1556) the iso-u
+//! integrals start at the trims' lowest v, not at the face UV domain's.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
@@ -238,6 +240,34 @@ pub fn face_properties(
         flags,
     )
 }
+/// The lowest v of the union of the trims' bounding boxes (as
+/// `CalculateUVDomainFromUVTrimCurves` builds the trim domain), no lower than the face's
+/// UV domain; the domain's lowest v without trims.
+fn trims_base_v(k: &Kernel, trims: &[Curve], domain: &Extent2d) -> Result<f64> {
+    use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
+    let req = BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let mut base = BIG_DOUBLE;
+    for trim in trims {
+        let bbox = trim
+            .calculate_bounding_box(k, &trim.natural_interval(), req, true)?
+            .normal
+            .ok_or_else(|| SolidError::sm_err(OP))?;
+        let v = bbox.min().y;
+        if v < base {
+            base = v;
+        }
+    }
+    let min_v = domain.min().y;
+    Ok(if trims.is_empty() || base < min_v {
+        min_v
+    } else {
+        base
+    })
+}
 fn valid_flags(flags: u64) -> Result<()> {
     if flags == 0 || flags & !PPF_ALL != 0 {
         Err(SolidError::invalid_input(OP, "invalid property mask"))
@@ -275,6 +305,16 @@ pub fn boundary_properties(
         -1.0
     } else {
         1.0
+    };
+    // The base of every iso-u integral: upstream's `GetUVDomain().GetMin().y`. Any base
+    // gives the same loop integral (a different base adds a function of u alone, whose
+    // integral round a closed loop is zero), but one far below the trims makes each
+    // integral long and the area a small difference of large terms. With
+    // `fixes.precise_properties_trim_base_v` (WR-563, #1556) it is the trims' lowest v.
+    let base_v = if k.fixes.precise_properties_trim_base_v {
+        trims_base_v(k, trims, domain)?
+    } else {
+        domain.min().y
     };
     let mut result = PreciseProperties::default();
     for trim in trims {
@@ -326,7 +366,7 @@ pub fn boundary_properties(
             kernel: k,
             surface,
             uv_curve: trim,
-            min_v: domain.min().y,
+            min_v: base_v,
             iso_curve_accuracy: accuracy / 10.0,
             y_scale: &scale,
             origin,
