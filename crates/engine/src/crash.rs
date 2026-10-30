@@ -40,6 +40,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::Document;
 
 use crate::Session;
+use crate::io::civil;
 
 /// Reports kept (the oldest, and recovered kernel panics, go first).
 pub const MAX_REPORTS: usize = 20;
@@ -146,21 +147,6 @@ fn now() -> u64 {
 
 fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-}
-
-/// `secs` since 1970 as (year, month, day, hour, minute, second) in UTC.
-fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
-    let days = i64::try_from(secs / 86_400).unwrap_or(0);
-    let rem = secs % 86_400;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 /// `2026-10-12T14:03:22Z`.

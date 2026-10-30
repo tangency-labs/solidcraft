@@ -3071,6 +3071,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-writer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e456864a7a304047bff84977dc6fb162bd956475d40ba50b2dcecaada7f753"
+dependencies = [
+ "bitflags 2.13.2",
+ "itoa",
+ "memchr",
+ "ryu",
+]
+
+[[package]]
 name = "peniko"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3750,6 +3762,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4287,8 +4305,11 @@ dependencies = [
  "cadmpeg-registry",
  "chardetng",
  "encoding_rs",
+ "flate2",
  "gltf",
  "log",
+ "pdf-writer",
+ "png",
  "quick-xml",
  "rustix 1.1.5",
  "serde",
@@ -4298,6 +4319,7 @@ dependencies = [
  "solidcraft-geom",
  "solidcraft-kernel",
  "thiserror 2.0.21",
+ "tiny-skia",
  "zip 9.0.4",
 ]
 

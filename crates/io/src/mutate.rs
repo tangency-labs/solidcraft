@@ -551,28 +551,67 @@ outer
         survives("design JSON with drawings", &mutations(&json, true, 0xd4c), MAX_DRAWINGS, |b| crate::read_design(b).ok().map(|d| d.drawings.len()));
     }
 
+    /// An A3 paper scene's JSON for the writers' mutation tests: a closed border, a dashed arc, and
+    /// a fill with a hole.
+    fn paper_scene_json() -> Vec<u8> {
+        use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
+        use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+        let p = Vec2::new;
+        let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+        let dashes = Dashes { lengths_mm: vec![4.2, 1.05, 0.5, 1.05], phase_mm: 0.5 };
+        let items = vec![
+            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7, pattern: None },
+            Item::Stroke {
+                path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }],
+                closed: false,
+                width_mm: 0.35,
+                pattern: Some(dashes),
+            },
+            Item::Fill { region: Region2 { outer: border, holes: vec![Loop2::circle(p(100.0, 100.0), 20.0)] } },
+        ];
+        let scene = Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }] };
+        serde_json::to_vec(&scene).unwrap()
+    }
+
     /// A paper scene's JSON, mutated, read, prepared and written as SVG: an error or a document,
     /// never a panic.
     #[test]
     fn paper_scenes_survive_mutation_into_svg() {
-        use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
-        use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
-        let p = Vec2::new;
-        let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
-        let items = vec![
-            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7 },
-            Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
-            Item::Fill { region: Region2 { outer: border, holes: vec![] } },
-        ];
-        let scene = Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }] };
-        let json = serde_json::to_vec(&scene).unwrap();
+        let json = paper_scene_json();
         let write = |b: &[u8]| -> Option<usize> {
-            let scene: Scene = serde_json::from_slice(b).ok()?;
-            let prepared = scene.prepare().ok()?;
-            crate::paper::paper_svg(&prepared).ok().map(|(bytes, _)| bytes.len())
+            let scene: solidcraft_geom::paper::Scene = serde_json::from_slice(b).ok()?;
+            crate::paper::paper_svg(&scene.prepare().ok()?).ok().map(|(bytes, _)| bytes.len())
         };
         assert!(write(&json).is_some());
         survives("paper scene to SVG", &mutations(&json, true, 0x5a3), usize::MAX, write);
+    }
+
+    /// The same scene written as a 25 dpi sheet PNG: an error or an image, never a panic.
+    #[test]
+    fn paper_scenes_survive_mutation_into_png() {
+        let json = paper_scene_json();
+        let options = crate::paper::PngOptions { dpi: 25.0, colour: crate::paper::PngColour::Grey };
+        let write = |b: &[u8]| -> Option<usize> {
+            let scene: solidcraft_geom::paper::Scene = serde_json::from_slice(b).ok()?;
+            let mut out = Vec::new();
+            crate::paper::paper_png(&scene.prepare().ok()?, options, &mut out).ok().map(|_| out.len())
+        };
+        assert!(write(&json).is_some());
+        survives("paper scene to PNG", &mutations(&json, true, 0x5a4), usize::MAX, write);
+    }
+
+    /// The same scene written as a PDF with a title and a date: an error or a document, never a
+    /// panic.
+    #[test]
+    fn paper_scenes_survive_mutation_into_pdf() {
+        let json = paper_scene_json();
+        let options = crate::paper::PdfOptions { layers: true, title: Some("Sheet 1".into()), output_time: Some(1_761_436_800) };
+        let write = |b: &[u8]| -> Option<usize> {
+            let scene: solidcraft_geom::paper::Scene = serde_json::from_slice(b).ok()?;
+            crate::paper::paper_pdf(&scene.prepare().ok()?, &options).ok().map(|(bytes, _)| bytes.len())
+        };
+        assert!(write(&json).is_some());
+        survives("paper scene to PDF", &mutations(&json, true, 0x5a5), usize::MAX, write);
     }
 
     /// Standard base64 (RFC 4648) of `bytes`, for a data URI.

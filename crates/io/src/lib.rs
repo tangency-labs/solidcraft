@@ -651,6 +651,22 @@ pub fn read_stl(bytes: &[u8]) -> Result<Vec<[[f32; 3]; 3]>> {
 /// Most triangles we read from one STL file.
 pub const MAX_STL_TRIANGLES: usize = 20_000_000;
 
+/// `secs` since 1970 as (year, month, day, hour, minute, second) in UTC: crash reports' stamps and
+/// sheet PDFs' dates.
+pub fn civil(secs: u64) -> (i64, i64, i64, u64, u64, u64) {
+    let days = i64::try_from(secs / 86_400).unwrap_or(0);
+    let rem = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + i64::from(m <= 2), m, d, rem / 3600, rem % 3600 / 60, rem % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
