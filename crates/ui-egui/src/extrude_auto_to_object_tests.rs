@@ -81,7 +81,9 @@ fn face_off_the_profile_plane_turns_the_extent_to_that_face() {
     assert!(params.get("to").is_some());
     let reach = solidcraft_engine::extrude_reach(&h.app.session, params).unwrap();
     assert!((reach - 20.0).abs() < 1e-9, "{reach}");
-    // OK builds the extrude up to the face.
+    // OK builds the extrude up to the face, once the check has made it a New Body (which hides
+    // the Targets row, moving OK).
+    h.settle();
     h.step(&json!({"widget": "OK"})).unwrap();
     h.frames(4);
     let state = h.app.session.world_state();
