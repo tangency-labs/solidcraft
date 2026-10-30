@@ -160,10 +160,6 @@ pub struct TreeState {
     history_plane: Option<String>,
     /// What the Section Analysis dialog's OK made, per plane of the section, for Edit to start from.
     pub section_dialog: Vec<crate::dialogs::SectionDraft>,
-    /// The Analysis folder hidden with its own eye, and the section planes it hid then: each
-    /// plane's eye keeps its own state meanwhile, and a plane shows only while both are shown.
-    pub analysis_hidden: bool,
-    pub folder_hid: Vec<u64>,
     /// What waits for the Capture Position question: a command id, or [`SAVE`].
     pub capture_prompt: Option<String>,
     /// The design, undo depth and visibility when the button last went down: a drag over the eyes
@@ -2006,15 +2002,10 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
     let mut planes: Vec<(u64, bool)> =
         app.session.section.iter().map(|c| (c.id, true)).chain(app.session.section_hidden.iter().map(|c| (c.id, false))).collect();
     planes.sort_unstable();
-    // A plane on show (made, shown, or brought back by Undo) shows the folder.
-    if planes.is_empty() || !app.session.section.is_empty() {
-        app.tree.analysis_hidden = false;
-        app.tree.folder_hid.clear();
-    }
     if planes.is_empty() {
         return;
     }
-    let folder_shown = !app.tree.analysis_hidden;
+    let folder_shown = app.session.section_folder.is_none();
     let key = "analysis";
     let open = is_open(app, key, true);
     let r = draw_row(
@@ -2056,41 +2047,31 @@ pub fn section_row_label(id: u64) -> String {
     format!("Section {id}")
 }
 
-/// Whether a section plane's own eye is open: it cuts, or the hidden Analysis folder hid it.
+/// Whether a section plane's own eye is open: it cuts, or it comes back with the hidden Analysis
+/// folder.
 fn section_plane_shown(app: &SolveApp, id: u64, cutting: bool) -> bool {
-    cutting || (app.tree.analysis_hidden && app.tree.folder_hid.contains(&id))
+    cutting || app.session.section_folder.as_ref().is_some_and(|back| back.contains(&id))
 }
 
-/// Show or hide one section plane (its eye): while the Analysis folder is hidden, only its own
-/// eye changes, and it shows with the folder.
+/// Show or hide one section plane (its eye); while the Analysis folder is hidden, whether it
+/// comes back with it.
 pub fn set_section_shown(app: &mut SolveApp, id: u64, shown: bool) {
-    if app.tree.analysis_hidden {
-        app.tree.folder_hid.retain(|x| *x != id);
-        if shown && app.session.section_hidden.iter().any(|c| c.id == id) {
-            app.tree.folder_hid.push(id);
-        }
-        return;
-    }
     drop(app.run("inspect.section", if shown { json!({ "show": id }) } else { json!({ "hide": id }) }));
 }
 
-/// Hide the Analysis folder (the planes on show, in one step) or show it again (the planes it
-/// hid that are still hidden).
+/// Hide the Analysis folder (the planes on show) or show it again (the planes it hid).
 pub fn set_analysis_shown(app: &mut SolveApp, shown: bool) {
-    if shown {
-        let back: Vec<u64> = app.tree.folder_hid.iter().copied().filter(|id| app.session.section_hidden.iter().any(|c| c.id == *id)).collect();
-        if !back.is_empty() {
-            drop(app.run("inspect.section", json!({ "show": back })));
-        }
-        app.tree.analysis_hidden = false;
-        app.tree.folder_hid.clear();
-    } else {
-        let on: Vec<u64> = app.session.section.iter().map(|c| c.id).collect();
-        if on.is_empty() || app.run("inspect.section", json!({ "hide": on })).is_ok() {
-            app.tree.analysis_hidden = true;
-            app.tree.folder_hid = on;
-        }
-    }
+    drop(app.run("inspect.section", json!({ "folder": shown })));
+}
+
+/// The Analysis folder's menu: its eye, and turning the whole section off, hidden planes too.
+pub fn analysis_items(app: &SolveApp) -> Vec<Item> {
+    let any = !app.session.section.is_empty() || !app.session.section_hidden.is_empty();
+    vec![
+        Item::action("ui.analysisVisible", "Show/Hide", "eye").on_if(any),
+        Item::sep(),
+        Item::action("ui.unsection", "Turn Off Section View", "section").on_if(any),
+    ]
 }
 
 /// The menu of a section plane's row.

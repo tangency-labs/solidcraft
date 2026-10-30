@@ -297,6 +297,7 @@ pub struct SectionState {
     pub planes: Vec<SectionPlane>,
     pub hidden: Vec<SectionPlane>,
     pub hatch: bool,
+    pub folder: Option<Vec<u64>>,
 }
 
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
@@ -547,6 +548,9 @@ pub struct Session {
     /// The section's planes hidden with their eye: kept, cutting nothing (`inspect.section`'s
     /// `hide` and `show`).
     pub section_hidden: Vec<SectionPlane>,
+    /// The Analysis folder hidden with its eye (`inspect.section`'s `folder: false`): the hidden
+    /// planes that come back when it is shown (none: the folder is shown).
+    pub section_folder: Option<Vec<u64>>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
     pub section_hatch: bool,
     /// Component identification colours are enabled when present; view state only.
@@ -659,11 +663,16 @@ impl SectionPlane {
 impl Session {
     /// The Section Analysis as an undo step keeps it.
     pub fn section_state(&self) -> SectionState {
-        SectionState { planes: self.section.clone(), hidden: self.section_hidden.clone(), hatch: self.section_hatch }
+        SectionState {
+            planes: self.section.clone(),
+            hidden: self.section_hidden.clone(),
+            hatch: self.section_hatch,
+            folder: self.section_folder.clone(),
+        }
     }
 
-    pub(crate) fn set_section_state(&mut self, state: SectionState) {
-        (self.section, self.section_hidden, self.section_hatch) = (state.planes, state.hidden, state.hatch);
+    pub fn set_section_state(&mut self, state: SectionState) {
+        (self.section, self.section_hidden, self.section_hatch, self.section_folder) = (state.planes, state.hidden, state.hatch, state.folder);
         self.revision += 1;
     }
 }
@@ -791,6 +800,7 @@ impl Session {
             foreign_copy: None,
             section: Vec::new(),
             section_hidden: Vec::new(),
+            section_folder: None,
             section_hatch: true,
             colored_components: None,
             analysis: None,
@@ -1811,6 +1821,7 @@ impl Session {
             foreign_copy: self.foreign_copy.clone(),
             section: Vec::new(),
             section_hidden: Vec::new(),
+            section_folder: None,
             section_hatch: true,
             colored_components: None,
             analysis: None,

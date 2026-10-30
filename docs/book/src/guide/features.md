@@ -227,7 +227,8 @@ from the side it cuts away (upright on a wall, along X on a floor).
 
 Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds the plane to it,
 `replace` moves one plane by its id, `remove` takes a plane out by its id, `hide` and `show` take
-plane ids, and `clear: true` removes them all. `offset` moves the cut against the plane's normal,
+plane ids, `folder: false` and `folder: true` hide and show the Analysis folder, and `clear: true`
+removes them all. `offset` moves the cut against the plane's normal,
 so a positive offset cuts more away; `at` is a world coordinate on a named plane's axis.
 
 ## Comparing two bodies

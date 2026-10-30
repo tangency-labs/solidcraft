@@ -34,6 +34,8 @@ pub struct SectionParams {
     pub hide: Option<PlaneIds>,
     /// Show hidden planes (by id) again.
     pub show: Option<PlaneIds>,
+    /// The Analysis folder's eye: false hides the planes on show until true brings them back.
+    pub folder: Option<bool>,
 }
 /// One plane's id or a list of them.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -58,6 +60,8 @@ pub struct SectionResult {
     pub section: Option<Section>,
     /// Every plane of the section, by id.
     pub planes: Vec<SectionPlaneState>,
+    /// While the Analysis folder is hidden: the ids that come back with it.
+    pub folder: Option<Vec<u64>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }

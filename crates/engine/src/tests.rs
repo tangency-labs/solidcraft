@@ -1809,6 +1809,9 @@ fn section_changes_undo_and_redo() {
         json!({"plane": "YZ", "at": 25, "flip": true, "replace": 2}),
         json!({"hide": 1}),
         json!({"show": [1]}),
+        json!({"folder": false}),
+        json!({"hide": 2}),
+        json!({"folder": true}),
         json!({"plane": "XZ", "offset": -15, "hatch": false, "replace": 1}),
         json!({"remove": 2}),
         json!({"plane": "XY", "add": true}),
@@ -1958,6 +1961,45 @@ fn section_planes_hide_and_show() {
     run(&mut s, "inspect.section", json!({"hide": 1}));
     run(&mut s, "inspect.section", json!({"clear": true}));
     assert!(s.section.is_empty() && s.section_hidden.is_empty());
+}
+
+/// The Analysis folder's eye: hiding it hides the planes on show and remembers them; a plane's
+/// own eye meanwhile changes only whether it comes back; showing it, or a plane added or moved,
+/// brings them back.
+#[test]
+fn section_folder_hides_and_shows_its_planes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let ids = |v: &[SectionPlane]| v.iter().map(|c| c.id).collect::<Vec<_>>();
+    for p in [json!({"plane": "XZ", "at": 15}), json!({"plane": "YZ", "at": 20, "add": true}), json!({"plane": "XY", "at": 5, "add": true})] {
+        run(&mut s, "inspect.section", p);
+    }
+    run(&mut s, "inspect.section", json!({"hide": 3}));
+    let r = run(&mut s, "inspect.section", json!({"folder": false}));
+    assert_eq!((ids(&s.section), s.section_folder.clone()), (vec![], Some(vec![1, 2])));
+    assert_eq!(r["folder"], json!([1, 2]));
+    run(&mut s, "inspect.section", json!({"hide": 1}));
+    run(&mut s, "inspect.section", json!({"show": 3}));
+    assert_eq!((ids(&s.section), s.section_folder.clone()), (vec![], Some(vec![2, 3])), "only what comes back changes");
+    run(&mut s, "inspect.section", json!({"folder": true}));
+    assert_eq!((ids(&s.section), ids(&s.section_hidden), s.section_folder.clone()), (vec![2, 3], vec![1], None));
+    // A plane added while the folder is hidden shows it, with the planes it hid.
+    run(&mut s, "inspect.section", json!({"folder": false}));
+    run(&mut s, "inspect.section", json!({"plane": "XY", "at": 2, "add": true}));
+    assert_eq!((ids(&s.section), ids(&s.section_hidden), s.section_folder.clone()), (vec![2, 3, 4], vec![1], None));
+    // Undo and redo bring the folder back as it was.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!((ids(&s.section), s.section_folder.clone()), (vec![], Some(vec![2, 3])));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.section_folder, None);
+    // Removing a plane it hid, or the last plane, forgets it.
+    run(&mut s, "inspect.section", json!({"folder": false}));
+    run(&mut s, "inspect.section", json!({"remove": 2}));
+    assert_eq!(s.section_folder, Some(vec![3, 4]));
+    run(&mut s, "inspect.section", json!({"clear": true}));
+    assert_eq!(s.section_folder, None);
+    assert!(s.execute("inspect.section", &json!({"folder": false, "hide": 1})).is_err());
+    assert!(s.execute("inspect.section", &json!({"folder": "no"})).is_err());
 }
 
 /// Hostile `inspect.section` parameters are refused and leave the section as it was.

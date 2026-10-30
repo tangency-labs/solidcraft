@@ -25,38 +25,95 @@ pub static COMMANDS: &[CommandSpec] =
          lies on the positive side of every plane, so two square planes cut a quarter away; at most 6 planes, hidden ones included); \
          replace?: a plane's id (move that plane to `plane`, keeping its id and the others; a hidden one is shown); or remove: a plane's id \
          (take that plane out; the last turns the section off); or hide / show: a plane's id or [ids] (a hidden plane stays in the \
-         section and cuts nothing until shown); or clear: true (all planes). Each change is one undo step; the design is untouched. \
+         section and cuts nothing until shown); or folder: false (hide the Analysis folder: the planes on show stop cutting and \
+         come back with folder: true; while it is hidden, hide and show change only which planes come back, and a plane added or \
+         moved shows it again, with them); or clear: true (all planes). Each change is one undo step; the design is untouched. \
          Returns section: the plane made {id, origin, normal, hatch, and for a named plane axis and at} \
-         (null when the section is off, or for remove, hide and show), and planes: [{id, origin, normal, hidden}], every plane of the section by id",
+         (null when the section is off, or for remove, hide, show and folder), planes: [{id, origin, normal, hidden}], every plane \
+         of the section by id, and folder: null, or while the folder is hidden the ids that come back with it",
     )];
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
+    let before: Vec<u64> = s.section.iter().map(|c| c.id).collect();
+    let made = change(s, p)?;
+    // A plane on show shows the folder again, with the planes it hid.
+    if !s.section.is_empty()
+        && let Some(back) = s.section_folder.take()
+    {
+        set_shown(s, &back, true);
+    }
+    if let Some(back) = s.section_folder.as_mut() {
+        back.retain(|id| s.section_hidden.iter().any(|c| c.id == *id));
+        if s.section_hidden.is_empty() {
+            s.section_folder = None;
+        }
+    }
+    s.status_slot(crate::status_items::StatusId::Section, !s.section.is_empty());
+    // A plane made or brought on show makes the section the newest effect.
+    if !made.is_null() || s.section.iter().any(|c| !before.contains(&c.id)) {
+        s.status_activated(crate::status_items::StatusId::Section);
+    }
+    Ok(reply(s, made))
+}
+
+/// Move the planes `ids` names between those on show and the hidden ones.
+fn set_shown(s: &mut Session, ids: &[u64], shown: bool) {
+    let (from, to) = if shown { (&mut s.section_hidden, &mut s.section) } else { (&mut s.section, &mut s.section_hidden) };
+    to.extend(from.iter().filter(|c| ids.contains(&c.id)).copied());
+    from.retain(|c| !ids.contains(&c.id));
+    to.sort_by_key(|c| c.id);
+}
+
+/// The change `p` asks for; the plane made, or null.
+fn change(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.section";
     if bool_(p, "clear").unwrap_or(false) {
         s.section.clear();
         s.section_hidden.clear();
-        s.status_slot(crate::status_items::StatusId::Section, false);
         s.revision += 1;
-        return Ok(reply(s, Value::Null));
+        return Ok(Value::Null);
     }
     let given = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
     let add = match p.get("add") {
         None | Some(Value::Null) => false,
         Some(v) => v.as_bool().ok_or_else(|| bad(cmd, "`add` must be true or false"))?,
     };
+    if given("folder") {
+        if ["plane", "replace", "remove", "hide", "show"].iter().any(|k| given(k)) || add {
+            return Err(bad(cmd, "`folder` is given alone, without `plane`, `add`, `replace`, `remove`, `hide` or `show`"));
+        }
+        let shown = bool_(p, "folder").ok_or_else(|| bad(cmd, "`folder` must be true or false"))?;
+        match (shown, s.section_folder.take()) {
+            (true, Some(back)) => set_shown(s, &back, true),
+            (false, None) => {
+                let on: Vec<u64> = s.section.iter().map(|c| c.id).collect();
+                set_shown(s, &on, false);
+                s.section_folder = Some(on);
+            }
+            (_, back) => s.section_folder = back,
+        }
+        s.revision += 1;
+        return Ok(Value::Null);
+    }
     if given("hide") || given("show") {
         if (given("hide") && given("show")) || ["plane", "replace", "remove"].iter().any(|k| given(k)) || add {
             return Err(bad(cmd, "`hide` and `show` take plane ids alone: give one of them without `plane`, `add`, `replace` or `remove`"));
         }
         let (key, hide) = if given("hide") { ("hide", true) } else { ("show", false) };
         let ids = plane_ids(s, p.get(key), key, cmd)?;
-        let (from, to) = if hide { (&mut s.section, &mut s.section_hidden) } else { (&mut s.section_hidden, &mut s.section) };
-        to.extend(from.iter().filter(|c| ids.contains(&c.id)).copied());
-        from.retain(|c| !ids.contains(&c.id));
-        to.sort_by_key(|c| c.id);
-        s.status_slot(crate::status_items::StatusId::Section, !s.section.is_empty());
+        // While the folder is hidden, a plane's eye changes only whether it comes back with it.
+        if let Some(back) = s.section_folder.as_mut() {
+            back.retain(|id| !ids.contains(id));
+            if !hide {
+                back.extend(&ids);
+                back.sort_unstable();
+                back.dedup();
+            }
+        } else {
+            set_shown(s, &ids, !hide);
+        }
         s.revision += 1;
-        return Ok(reply(s, Value::Null));
+        return Ok(Value::Null);
     }
     let id_of = |key: &str| -> Result<Option<u64>> {
         match p.get(key).filter(|v| !v.is_null()) {
@@ -84,9 +141,8 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         }
         s.section.retain(|c| c.id != id);
         s.section_hidden.retain(|c| c.id != id);
-        s.status_slot(crate::status_items::StatusId::Section, !s.section.is_empty());
         s.revision += 1;
-        return Ok(reply(s, Value::Null));
+        return Ok(Value::Null);
     }
     let (origin, normal, axis) = plane(s, p, cmd)?;
     let length = |key: &str| -> Result<Option<f64>> {
@@ -147,15 +203,13 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         1
     };
     s.section_hatch = hatch;
-    s.status_slot(crate::status_items::StatusId::Section, true);
-    s.status_activated(crate::status_items::StatusId::Section);
     s.revision += 1;
     let mut made = json!({"id": id, "origin": origin, "normal": normal, "hatch": hatch});
     if let Some(i) = axis {
         made["axis"] = json!(["X", "Y", "Z"].get(i).copied().unwrap_or("?"));
         made["at"] = json!(axis_component(origin, i));
     }
-    Ok(reply(s, made))
+    Ok(made)
 }
 
 /// The ids `hide` or `show` names: one id or a list, each one of the section's planes.
@@ -178,7 +232,7 @@ fn reply(s: &Session, made: Value) -> Value {
     all.sort_by_key(|(c, _)| c.id);
     let planes: Vec<Value> = all.iter().map(|(c, hidden)| json!({"id": c.id, "origin": c.origin, "normal": c.normal, "hidden": hidden})).collect();
     let made = if s.section.is_empty() && s.section_hidden.is_empty() { Value::Null } else { made };
-    json!({"section": made, "planes": planes})
+    json!({"section": made, "planes": planes, "folder": s.section_folder})
 }
 
 /// The `plane` parameter: a point on it, its unit normal and, for a named plane, the world axis

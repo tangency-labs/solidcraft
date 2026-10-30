@@ -1623,7 +1623,6 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         // Removing a section's last plane turns it off.
         "ui.sectionViewOff" | "ui.removeSectionPlane" => {
             if let Some(id) = p.get("plane").and_then(Value::as_u64) {
-                app.tree.folder_hid.retain(|x| *x != id);
                 drop(app.run("inspect.section", json!({ "remove": id })));
             }
         }

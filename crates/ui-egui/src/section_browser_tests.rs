@@ -58,19 +58,62 @@ fn the_eye_hides_and_shows_the_section_and_delete_removes_it() {
     // The folder's eye is its own: hiding it hides the plane without changing the plane's eye,
     // and hiding the plane meanwhile keeps it hidden when the folder shows again.
     click(&mut h, "eye:Analysis");
-    assert!(h.app.session.section.is_empty() && h.app.tree.analysis_hidden);
+    assert!(h.app.session.section.is_empty() && h.app.session.section_folder.is_some());
     menu(&mut h, 1, "Show/Hide");
     assert!(h.app.session.section.is_empty(), "the menu hides the plane itself");
-    assert!(h.app.tree.analysis_hidden, "the plane's eye doesn't change the folder's");
+    assert!(h.app.session.section_folder.is_some(), "the plane's eye doesn't change the folder's");
     click(&mut h, "eye:Analysis");
     assert!(h.app.session.section.is_empty(), "the plane was hidden on its own meanwhile");
-    assert!(!h.app.tree.analysis_hidden);
+    assert!(!h.app.session.section_folder.is_some());
     menu(&mut h, 1, "Show/Hide");
     assert!(!h.app.session.section.is_empty(), "Show/Hide in the menu brings it back");
 
     menu(&mut h, 1, "Delete");
     assert!(h.app.session.section.is_empty() && h.app.session.section_hidden.is_empty());
     assert!(crate::scenario::handle_at("row:Section 1").is_none(), "a deleted section leaves the browser");
+}
+
+fn ids(planes: &[solidcraft_engine::SectionPlane]) -> Vec<u64> {
+    planes.iter().map(|c| c.id).collect()
+}
+
+/// The Analysis folder's eye belongs to its design: a section in another tab leaves it alone,
+/// and coming back the folder's eye still brings its planes back.
+#[test]
+fn the_folder_eye_stays_with_its_design() {
+    let mut h = box_in_view();
+    corner(&mut h);
+    click(&mut h, "eye:Analysis");
+    assert_eq!(h.app.session.section_folder, Some(vec![1, 2]));
+    crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.run("inspect.section", json!({"plane": "XY", "at": 5})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.session.section_folder, None);
+    crate::documents::switch(&mut h.app, 0);
+    h.frames(3);
+    assert_eq!((ids(&h.app.session.section), h.app.session.section_folder.clone()), (vec![], Some(vec![1, 2])));
+    click(&mut h, "eye:Analysis");
+    assert_eq!(ids(&h.app.session.section), [1, 2]);
+}
+
+/// A plane added while the Analysis folder is hidden shows the folder again, and the planes it
+/// hid come back with it.
+#[test]
+fn a_plane_added_while_the_folder_is_hidden_brings_its_planes_back() {
+    let mut h = box_in_view();
+    corner(&mut h);
+    click(&mut h, "eye:Analysis");
+    assert!(h.app.session.section.is_empty());
+    menu_at(&mut h, [20.0, 15.0, 20.0]);
+    pick(&mut h, "Section View");
+    ok(&mut h);
+    assert_eq!((ids(&h.app.session.section), h.app.session.section_folder.clone()), (vec![1, 2, 3], None));
+    assert!(
+        context_menu::items(&h.app, &Target::Section { plane: 1 })
+            .iter()
+            .any(|i| i.label == "Show/Hide" && i.params.as_ref().is_some_and(|p| p["visible"] == false))
+    );
 }
 
 #[test]
