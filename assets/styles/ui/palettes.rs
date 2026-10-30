@@ -230,6 +230,8 @@ impl Tokens {
             bend_up: Color32::from_rgb(30, 140, 50),
             bend_down: Color32::from_rgb(200, 90, 20),
             interference: Color32::from_rgb(235, 45, 40),
+            comb_envelope: Color32::from_rgb(130, 40, 175),
+            comb_teeth: Color32::from_rgb(215, 105, 0),
             continuity: [
                 Color32::from_rgb(0, 158, 115),
                 Color32::from_rgb(0, 114, 178),
@@ -365,6 +367,8 @@ impl Tokens {
         t.box_crossing = Color32::from_rgb(80, 200, 120);
         t.bend_up = Color32::from_rgb(110, 200, 120);
         t.bend_down = Color32::from_rgb(240, 150, 80);
+        t.comb_envelope = Color32::from_rgb(195, 130, 255);
+        t.comb_teeth = Color32::from_rgb(255, 160, 60);
         t.form_ink = t.text;
         t.form_dim = Color32::from_rgb(180, 187, 200);
         t.form_primary = t.accent;
