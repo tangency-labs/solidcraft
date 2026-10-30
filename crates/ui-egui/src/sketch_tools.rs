@@ -77,8 +77,11 @@ thread_local! {
     /// The inference the cursor snapped to last (label, sketch point), for the hint.
     static SNAP: RefCell<Option<(&'static str, Vec2)>> = const { RefCell::new(None) };
     static PREV: Cell<Option<Vec2>> = const { Cell::new(None) };
-    /// Curvature comb teeth (foot, tip) shown while the comb tool is active.
-    static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
+    /// The curvature combs shown while the comb tool is active: each pick (the command's
+    /// parameters for the curve or edge clicked) and its combs' teeth (foot, tip).
+    static COMBS: RefCell<Vec<(Value, Vec<Vec<[Vec3; 2]>>)>> = const { RefCell::new(Vec::new()) };
+    /// The comb tool's options: comb length (a multiplier on the automatic length) and teeth.
+    static COMB_OPTIONS: Cell<CombOptions> = const { Cell::new(CombOptions::DEFAULT) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
@@ -364,6 +367,117 @@ fn v3(v: &Value) -> Option<Vec3> {
     Some(Vec3::new(v.get(0)?.as_f64()?, v.get(1)?.as_f64()?, v.get(2)?.as_f64()?))
 }
 
+/// The Curvature Comb tool's options: how long the teeth are, as a multiple of the automatic
+/// length (`inspect.curvature_comb`'s `length`), and how many each comb has (`density`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CombOptions {
+    pub length: f64,
+    pub teeth: usize,
+}
+
+impl CombOptions {
+    const DEFAULT: CombOptions = CombOptions { length: 1.0, teeth: 40 };
+    const LENGTH: std::ops::RangeInclusive<f64> = 0.25..=8.0;
+    const TEETH: std::ops::RangeInclusive<usize> = 4..=200;
+}
+
+/// The comb tool's options now.
+pub(crate) fn comb_options() -> CombOptions {
+    COMB_OPTIONS.with(Cell::get)
+}
+
+/// The combs shown, each as its teeth (foot, tip).
+#[cfg(test)]
+pub(crate) fn shown_combs() -> Vec<Vec<[Vec3; 2]>> {
+    COMBS.with(|c| c.borrow().iter().flat_map(|(_, combs)| combs.clone()).collect())
+}
+
+/// Run the comb command for `pick` with the tool's options: its combs' teeth (foot, tip), or
+/// nothing when it fails (the status line says why).
+fn comb_teeth(app: &mut SolveApp, pick: &Value) -> Option<Vec<Vec<[Vec3; 2]>>> {
+    let options = comb_options();
+    let mut params = pick.clone();
+    params["density"] = json!(options.teeth);
+    params["length"] = json!(options.length);
+    let v = app.run("inspect.curvature_comb", params).ok()?;
+    Some(
+        v["combs"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|comb| comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect())
+            .collect(),
+    )
+}
+
+/// Show the comb of `pick` (the comb command's parameters for a curve or an edge) beside those
+/// already shown.
+fn add_comb(app: &mut SolveApp, pick: Value) {
+    if let Some(teeth) = comb_teeth(app, &pick) {
+        COMBS.with(|c| c.borrow_mut().push((pick, teeth)));
+    }
+}
+
+/// Change the comb tool's options and run the comb again on every curve already shown.
+pub(crate) fn set_comb_options(app: &mut SolveApp, options: CombOptions) {
+    let options = CombOptions {
+        length: options.length.clamp(*CombOptions::LENGTH.start(), *CombOptions::LENGTH.end()),
+        teeth: options.teeth.clamp(*CombOptions::TEETH.start(), *CombOptions::TEETH.end()),
+    };
+    if COMB_OPTIONS.with(|o| o.replace(options)) == options {
+        return;
+    }
+    let picks: Vec<Value> = COMBS.with(|c| c.borrow().iter().map(|(pick, _)| pick.clone()).collect());
+    let shown: Vec<(Value, Vec<Vec<[Vec3; 2]>>)> = picks.into_iter().filter_map(|pick| comb_teeth(app, &pick).map(|teeth| (pick, teeth))).collect();
+    COMBS.with(|c| *c.borrow_mut() = shown);
+}
+
+/// The comb tool's options at the top left of the free viewport while it runs (the analysis and
+/// continuity legends keep the lower left): Comb length and Teeth. Changing either draws the
+/// combs shown again.
+fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
+    if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
+        return;
+    }
+    let tk = crate::theme::Tokens::get();
+    let available = crate::shell::workspace_content(app, crate::shell::content_rect(app, proj.rect));
+    let width = tk.form_card_width.min(available.width() - 2.0 * tk.space_16).max(0.0);
+    let mut options = comb_options();
+    let (length_tip, teeth_tip) = (app.tr("ui.comb_length_tip").to_string(), app.tr("ui.comb_teeth_tip").to_string());
+    let shown = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Canvas)
+        .area(egui::Id::new("sc_comb_options"))
+        .fixed_pos(available.left_top() + egui::vec2(tk.space_16, tk.space_16))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            crate::ui_kit::Container::popup_frame(ui.style()).fill(tk.dialog_body).inner_margin(tk.space_8).show(ui, |ui| {
+                crate::ui_kit::scope(ui, |ui| {
+                    ui.set_width(width);
+                    let length = crate::ui_kit::row(ui, "ui.comb_length", |ui| {
+                        let format = |v: f64| format!("{v:.2}\u{d7}");
+                        crate::ui_kit::slider(
+                            ui,
+                            &mut options.length,
+                            CombOptions::LENGTH,
+                            crate::ui_kit::Slider { step: Some(0.25), format, ..Default::default() },
+                        )
+                    });
+                    length.on_hover_text(&length_tip);
+                    let teeth = crate::ui_kit::row(ui, "ui.comb_teeth", |ui| {
+                        crate::ui_kit::slider(
+                            ui,
+                            &mut options.teeth,
+                            CombOptions::TEETH,
+                            crate::ui_kit::Slider { integer: true, format: |v| format!("{v:.0}"), ..Default::default() },
+                        )
+                    });
+                    teeth.on_hover_text(&teeth_tip);
+                });
+            });
+        });
+    crate::scenario::publish_rect("comb_options", shown.response.rect);
+    set_comb_options(app, options);
+}
+
 /// Curvature combs: teeth and the envelope through their tips.
 fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.tool.as_ref().map(|t| t.cmd) != Some("inspect.curvature_comb") {
@@ -372,7 +486,7 @@ fn combs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     }
     let tk = crate::theme::Tokens::get();
     COMBS.with(|c| {
-        for comb in c.borrow().iter() {
+        for comb in c.borrow().iter().flat_map(|(_, combs)| combs) {
             let mut tips: Vec<Pos2> = Vec::new();
             for [a, b] in comb {
                 let (Some(p), Some(q)) = (proj.to_screen(*a), proj.to_screen(*b)) else { continue };
@@ -837,14 +951,8 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 Hit::Edge { mid, .. } => Some(json!({"edges": [[mid.x, mid.y, mid.z]]})),
                 _ => None,
             });
-            if let Some(p) = params
-                && let Ok(v) = app.run(cmd, p)
-            {
-                for comb in v["combs"].as_array().into_iter().flatten() {
-                    let teeth: Vec<[Vec3; 2]> =
-                        comb["teeth"].as_array().into_iter().flatten().filter_map(|t| Some([v3(t.get(0)?)?, v3(t.get(1)?)?])).collect();
-                    COMBS.with(|c| c.borrow_mut().push(teeth));
-                }
+            if let Some(p) = params {
+                add_comb(app, p);
             }
         }
         Mode::ModelRef if cmd == "inspect.isocurve" => {
@@ -1528,6 +1636,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     glyphs(app, painter, proj, ui.input(|i| i.pointer.hover_pos()).filter(|_| ui.rect_contains_pointer(proj.rect)));
     snap_hint(app, painter, proj);
     combs(app, painter, proj);
+    comb_options_card(app, ui.ctx(), proj);
     if DEFERRED.with(|d| d.replace(false)) {
         analysis(app, "inspect.center_of_mass", json!({}));
     }

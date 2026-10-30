@@ -954,6 +954,55 @@ fn analytic_partials_are_the_derivatives_of_the_order_below() {
     }
 }
 
+/// A curve's curvature vector, exactly, on every kind of record: a circle's is 1/R towards its
+/// centre (as a conic and as SMLib's rational quadratic B-spline of it); an ellipse's at its
+/// vertices is a/b² and b/a²; a line is straight; and the circle where a plane z = 3 cuts a
+/// sphere of radius 5 about the origin, traced from a rough leader, has radius 4.
+#[test]
+fn curve_jets_are_exact_on_every_record() {
+    use crate::Vec3;
+    let near = |a: Vec3, b: Vec3| a.dist(b) <= 1e-9 * (1.0 + b.len());
+    let jet = |c: &Curve, t: f64| eval::CurveEval::new(c).unwrap().jet(t).unwrap();
+    let flat = Frame { origin: [1., 2., 3.], x_axis: [0.6, 0.8, 0.], y_axis: [-0.8, 0.6, 0.] };
+    let o = Vec3::new(1., 2., 3.);
+    for t in [0.0, 0.7, 2.5, 5.9] {
+        let j = jet(&Curve::Circle { frame: flat.clone(), radius: 4. }, t);
+        assert!(near(j.curvature, (o - j.point) * (1.0 / 16.0)), "{j:?}");
+        assert!(j.tangent.dot(j.curvature).abs() < 1e-12);
+    }
+    // A quarter circle of radius 2 as a rational quadratic.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let quarter =
+        Curve::RationalSpline { knots: vec![0., 0., 0., 1., 1., 1.], homogeneous: vec![[2., 0., 0., 1.], [2. * w, 2. * w, 0., w], [0., 2., 0., 1.]] };
+    for t in [0.0, 0.3, 0.5, 1.0] {
+        let j = jet(&quarter, t);
+        assert!(near(j.curvature, j.point * -0.25), "{t}: {j:?}");
+    }
+    let (a, b) = (10.0, 4.0);
+    let ellipse = Curve::Ellipse { frame: flat.clone(), radii: [a, b] };
+    assert!((jet(&ellipse, 0.0).curvature.len() - a / (b * b)).abs() < 1e-12);
+    assert!((jet(&ellipse, FRAC_PI_2).curvature.len() - b / (a * a)).abs() < 1e-12);
+    assert_eq!(jet(&Curve::Line { start: [0.; 3], end: [1., 2., 3.] }, 0.4).curvature, Vec3::ZERO);
+    // The plane z = 3 and a sphere of radius 5: a circle of radius 4 about (0, 0, 3).
+    let z = Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
+    let leader = Curve::Polyline { points: (0..=12).map(|k| (k as f64 * TAU / 12.0).sin_cos()).map(|(s, c)| [4.1 * c, 4.1 * s, 3.2]).collect() };
+    let cut = Curve::SurfaceIntersection {
+        surfaces: [
+            Box::new(Surface::Plane { origin: [0., 0., 3.], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }),
+            Box::new(Surface::Sphere { frame: z, radius: 5. }),
+        ],
+        leader: Box::new(leader),
+        tolerance: 1e-6,
+    };
+    for t in [0.0, 1.5, 4.25, 11.0] {
+        let j = jet(&cut, t);
+        let centre = Vec3::new(0., 0., 3.);
+        assert!((j.point.dist(centre) - 4.0).abs() < 1e-9 && (j.point.z - 3.0).abs() < 1e-12, "{j:?}");
+        assert!(near(j.curvature, (centre - j.point) * (1.0 / 16.0)), "{t}: {j:?}");
+        assert!(j.tangent.dot(j.point - centre).abs() < 1e-9);
+    }
+}
+
 #[test]
 fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_face() {
     // A torus face round 280° of its tube: on the quarter grid it needs all four quarters, a form

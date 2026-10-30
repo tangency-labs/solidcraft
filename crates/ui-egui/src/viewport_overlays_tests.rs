@@ -607,3 +607,46 @@ fn frame_rate_readout_stays_beside_a_right_pane() {
         in_corner(&h);
     }
 }
+
+/// The Curvature Comb tool's options card (Comb length, Teeth) shows while the tool runs, and
+/// moving either slider draws the combs already shown again: their teeth as long as the length
+/// says (a multiple of the automatic length), as many as Teeth says. Using the card picks nothing.
+#[test]
+fn comb_options_draw_the_combs_shown_again() {
+    use crate::sketch_tools::{comb_options, shown_combs};
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "inspect.curvature_comb"})).unwrap();
+    h.frame();
+    assert!(crate::scenario::rect_of("comb_options").is_some(), "the options card is drawn");
+    assert_eq!((comb_options().length, comb_options().teeth), (1.0, 40));
+    h.step(&json!({"click": {"world": [10, 0, 20]}})).unwrap();
+    let combs = shown_combs();
+    assert_eq!(combs.len(), 1, "{:?}", h.app.status);
+    assert_eq!(combs[0].len(), 40);
+    let tooth = |c: &[[solidcraft_engine::geom::Vec3; 2]]| c[0][0].dist(c[0][1]);
+    let auto = tooth(&combs[0]);
+    assert!(auto > 0.0);
+    let slider = |name: &str| crate::scenario::rect_of(&format!("dialog:slider_track:{name}")).unwrap_or_else(|| panic!("no slider {name}"));
+    // Comb length to its right end: 8 × the automatic length.
+    let track = slider("ui.comb_length");
+    h.step(&json!({"drag": [[track.center().x, track.center().y], [track.right() + 40.0, track.center().y]]})).unwrap();
+    h.frame();
+    assert_eq!(comb_options().length, 8.0);
+    let combs = shown_combs();
+    assert_eq!(combs.len(), 1, "the card's drag picked nothing");
+    assert!((tooth(&combs[0]) - 8.0 * auto).abs() < 1e-9 * auto, "{} vs 8 × {auto}", tooth(&combs[0]));
+    // Teeth to its left end: 4.
+    let track = slider("ui.comb_teeth");
+    h.step(&json!({"drag": [[track.center().x, track.center().y], [track.left() - 40.0, track.center().y]]})).unwrap();
+    h.frame();
+    assert_eq!(comb_options().teeth, 4);
+    let combs = shown_combs();
+    assert_eq!((combs.len(), combs[0].len()), (1, 4));
+    // The tool ends: the combs and the card go.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(shown_combs().is_empty() && crate::scenario::rect_of("comb_options").is_none());
+}
