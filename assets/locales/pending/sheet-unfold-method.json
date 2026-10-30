@@ -3,8 +3,6 @@
     "sheet.unfold_method.above_1": "A K-factor above 1 usually means the chart was measured at a larger bend radius than this rule's.",
     "sheet.unfold_method.allowance": "Bend Allowance",
     "sheet.unfold_method.allowance_90": "Bend Allowance (90°)",
-    "sheet.unfold_method.at_90": "At 90°",
-    "sheet.unfold_method.at_90_values": "BA {allowance} · BD {deduction}",
     "sheet.unfold_method.deduction": "Bend Deduction",
     "sheet.unfold_method.deduction_90": "Bend Deduction (90°)",
     "sheet.unfold_method.label": "Unfold Method"
@@ -13,8 +11,6 @@
     "sheet.unfold_method.above_1": "معامل K الأكبر من 1 يعني عادةً أن الجدول قيس بنصف قطر ثني أكبر من نصف قطر هذه القاعدة.",
     "sheet.unfold_method.allowance": "سماح الثني",
     "sheet.unfold_method.allowance_90": "سماح الثني (90°)",
-    "sheet.unfold_method.at_90": "عند 90°",
-    "sheet.unfold_method.at_90_values": "السماح {allowance} · الخصم {deduction}",
     "sheet.unfold_method.deduction": "خصم الثني",
     "sheet.unfold_method.deduction_90": "خصم الثني (90°)",
     "sheet.unfold_method.label": "طريقة الفرد"
@@ -23,8 +19,6 @@
     "sheet.unfold_method.above_1": "Ein K-Faktor über 1 bedeutet meist, dass die Tabelle mit einem größeren Biegeradius als dem dieser Regel gemessen wurde.",
     "sheet.unfold_method.allowance": "Biegezugabe",
     "sheet.unfold_method.allowance_90": "Biegezugabe (90°)",
-    "sheet.unfold_method.at_90": "Bei 90°",
-    "sheet.unfold_method.at_90_values": "Zugabe {allowance} · Abzug {deduction}",
     "sheet.unfold_method.deduction": "Biegeabzug",
     "sheet.unfold_method.deduction_90": "Biegeabzug (90°)",
     "sheet.unfold_method.label": "Abwicklungsmethode"
@@ -33,8 +27,6 @@
     "sheet.unfold_method.above_1": "מקדם K גדול מ-1 פירושו בדרך כלל שהטבלה נמדדה ברדיוס כיפוף גדול מזה של הכלל הזה.",
     "sheet.unfold_method.allowance": "תוספת כיפוף",
     "sheet.unfold_method.allowance_90": "תוספת כיפוף (90°)",
-    "sheet.unfold_method.at_90": "ב-90°",
-    "sheet.unfold_method.at_90_values": "תוספת {allowance} · ניכוי {deduction}",
     "sheet.unfold_method.deduction": "ניכוי כיפוף",
     "sheet.unfold_method.deduction_90": "ניכוי כיפוף (90°)",
     "sheet.unfold_method.label": "שיטת פריסה"
@@ -43,8 +35,6 @@
     "sheet.unfold_method.above_1": "K係数が1を超える場合、通常は表がこのルールより大きい曲げ半径で測定されたことを意味します。",
     "sheet.unfold_method.allowance": "曲げ許容値",
     "sheet.unfold_method.allowance_90": "曲げ許容値 (90°)",
-    "sheet.unfold_method.at_90": "90°の場合",
-    "sheet.unfold_method.at_90_values": "許容値 {allowance} · 控除 {deduction}",
     "sheet.unfold_method.deduction": "曲げ控除",
     "sheet.unfold_method.deduction_90": "曲げ控除 (90°)",
     "sheet.unfold_method.label": "展開方法"
@@ -53,8 +43,6 @@
     "sheet.unfold_method.above_1": "K 계수가 1보다 크면 보통 표가 이 규칙보다 큰 벤딩 반지름에서 측정되었다는 뜻입니다.",
     "sheet.unfold_method.allowance": "벤딩 허용치",
     "sheet.unfold_method.allowance_90": "벤딩 허용치 (90°)",
-    "sheet.unfold_method.at_90": "90°에서",
-    "sheet.unfold_method.at_90_values": "허용치 {allowance} · 차감 {deduction}",
     "sheet.unfold_method.deduction": "벤딩 차감",
     "sheet.unfold_method.deduction_90": "벤딩 차감 (90°)",
     "sheet.unfold_method.label": "전개 방법"
@@ -63,8 +51,6 @@
     "sheet.unfold_method.above_1": "Hệ số K lớn hơn 1 thường có nghĩa là bảng được đo ở bán kính chấn uốn lớn hơn của quy tắc này.",
     "sheet.unfold_method.allowance": "Lượng bù chấn uốn",
     "sheet.unfold_method.allowance_90": "Lượng bù chấn uốn (90°)",
-    "sheet.unfold_method.at_90": "Tại 90°",
-    "sheet.unfold_method.at_90_values": "Bù {allowance} · Khấu trừ {deduction}",
     "sheet.unfold_method.deduction": "Lượng khấu trừ chấn uốn",
     "sheet.unfold_method.deduction_90": "Lượng khấu trừ chấn uốn (90°)",
     "sheet.unfold_method.label": "Phương pháp trải phẳng"
@@ -73,8 +59,6 @@
     "sheet.unfold_method.above_1": "K 因子大于 1 通常表示该表是在比此规则更大的折弯半径下测得的。",
     "sheet.unfold_method.allowance": "折弯余量",
     "sheet.unfold_method.allowance_90": "折弯余量 (90°)",
-    "sheet.unfold_method.at_90": "90° 时",
-    "sheet.unfold_method.at_90_values": "余量 {allowance} · 扣除 {deduction}",
     "sheet.unfold_method.deduction": "折弯扣除",
     "sheet.unfold_method.deduction_90": "折弯扣除 (90°)",
     "sheet.unfold_method.label": "展开方法"
