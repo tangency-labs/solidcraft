@@ -186,6 +186,11 @@ pub struct Cluster {
     pub text: Range<u32>,
 }
 
+/// The font of `id` in a table in order of id.
+pub(super) fn font_in<'a>(fonts: &'a [Font], id: &[u8; 32]) -> Option<&'a Font> {
+    fonts.binary_search_by_key(id, |f| f.id).ok().and_then(|at| fonts.get(at))
+}
+
 /// A scene's text against the module's rules, `fonts`' records counted into `budget` first. Each font
 /// is checked before the runs that read it, so a font's fault is named as the font's.
 pub(super) fn check<'a>(fonts: &[Font], runs: impl Iterator<Item = &'a TextRun>, budget: &mut Budget) -> Result<()> {
@@ -214,8 +219,15 @@ impl Font {
     /// The records the font counts toward the scene's: itself, and each glyph with its loops and
     /// their pieces. Saturates rather than overflows.
     fn records(&self) -> usize {
+        self.records_beyond(None)
+    }
+
+    /// The records the font adds to a table holding `have` of it: itself, when the table has none
+    /// of it, and each glyph `have` doesn't hold.
+    fn records_beyond(&self, have: Option<&Font>) -> usize {
         let glyph = |g: &FontGlyph| g.outline.iter().fold(1usize, |n, l| n.saturating_add(1).saturating_add(l.segs.len()));
-        self.glyphs.values().fold(1usize, |n, g| n.saturating_add(glyph(g)))
+        let new = self.glyphs.iter().filter(|(id, _)| have.is_none_or(|font| !font.glyphs.contains_key(id)));
+        new.fold(usize::from(have.is_none()), |n, (_, g)| n.saturating_add(glyph(g)))
     }
 
     fn check(&self) -> Result<()> {
@@ -243,6 +255,11 @@ impl Font {
 }
 
 impl TextRun {
+    /// How far along its baseline its glyphs reach from its start, in millimetres.
+    pub fn reach(&self) -> f64 {
+        self.glyphs.iter().map(|g| g.x + g.advance).fold(0.0, f64::max)
+    }
+
     /// The records the run counts toward the scene's, beside its item: its glyphs and clusters.
     pub(super) fn records(&self) -> usize {
         self.glyphs.len().saturating_add(self.clusters.len())
@@ -302,6 +319,11 @@ impl TextRun {
 }
 
 impl Scene {
+    /// The records `more`, each font once, would add to the scene's font table.
+    pub fn font_records_beyond(&self, more: &[Font]) -> usize {
+        more.iter().fold(0usize, |n, font| n.saturating_add(font.records_beyond(font_in(&self.fonts, &font.id))))
+    }
+
     /// Adds `more` to the scene's font table, kept in order of id: a font already there adds its
     /// glyphs to that font's, so groups laid out apart share one table.
     pub fn add_fonts(&mut self, more: impl IntoIterator<Item = Font>) {
