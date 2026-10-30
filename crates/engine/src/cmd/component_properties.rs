@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
-use solidcraft_doc::{Document, Mat, PhysicalOverride};
+use solidcraft_doc::{CollisionShape, Document, Mat, PhysicalOverride};
 use solidcraft_geom::Aabb3;
 use solidcraft_geom::inertia::{self, Tensor3};
 
@@ -201,6 +201,41 @@ fn measure_placed(body: &solidcraft_doc::ModelBody, transform: Mat) -> Result<Pl
         edges: m.merged.edges,
         vertices: m.merged.vertices,
     })
+}
+
+pub(super) const BODY_COLLISION_CONTRACT: crate::schema::TypedContract<crate::schema::component::BodyCollisionParams> =
+    crate::schema::TypedContract::new();
+
+/// Set what a body, or every body of a component, looks like to a simulator.
+pub(super) fn body_collision(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "body.collision";
+    let text = crate::params::str_(p, "shape").ok_or_else(|| bad(cmd, "give `shape`"))?;
+    let shape = CollisionShape::parse(text).ok_or_else(|| bad(cmd, "`shape` must be auto, mesh, convex_hull, box, cylinder, sphere or none"))?;
+    let state = s.model.state();
+    let bodies: Vec<String> = match (crate::params::str_(p, "body"), p.get("component").filter(|v| !v.is_null())) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `body` or `component`, not both")),
+        (None, None) => return Err(bad(cmd, "give `body` or `component`")),
+        (Some(name), None) => {
+            if !state.bodies.iter().any(|b| b.name == name) {
+                return Err(bad(cmd, format!("no body `{name}`")));
+            }
+            vec![name.to_string()]
+        }
+        (None, Some(_)) => {
+            let id = super::component(s, p, "component", cmd)?;
+            state.bodies.iter().filter(|b| s.doc.model_body_component(b) == id).map(|b| b.name.clone()).collect()
+        }
+    };
+    let text = text.to_string();
+    let doc = s.doc_mut();
+    for b in &bodies {
+        if shape == CollisionShape::Auto {
+            doc.collision_shapes.remove(b);
+        } else {
+            doc.collision_shapes.insert(b.clone(), shape);
+        }
+    }
+    Ok(json!({"bodies": bodies, "shape": text}))
 }
 
 pub(super) const PHYSICAL_OVERRIDE_CONTRACT: crate::schema::TypedContract<crate::schema::component::PhysicalOverrideParams> =
