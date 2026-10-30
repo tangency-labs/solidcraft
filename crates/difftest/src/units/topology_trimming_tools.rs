@@ -2146,11 +2146,6 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
             let Some(op) = resolve_op(i, counts(&b)) else {
                 return Ok(Output::err("no_entity_of_that_kind"));
             };
-            // the renumbered B-rep records no naming scheme, under which `SetUVTrimCurve`
-            // leaves a new UV trim curve without owner; upstream always owns it by its
-            // holder (`pUVTrimCurve->SetOwner(eu)`), so name the op's new curves by arena
-            // identity
-            b.set_naming(solidcore::topology::NamingScheme::Arena);
             run_rust_brep(&mut k, &mut b, &op)
         }
         Some(brep) => {
