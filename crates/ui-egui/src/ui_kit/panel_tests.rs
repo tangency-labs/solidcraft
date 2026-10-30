@@ -1281,3 +1281,200 @@ fn a_left_panel_in_an_inside_out_view_keeps_an_anchor() {
     let anchor = panel.bounded_anchor(&ctx);
     assert!(anchor.x.is_finite() && anchor.y.is_finite(), "{anchor:?}");
 }
+
+#[test]
+fn dialog_tab_window_wraps_in_both_directions_and_excludes_background_fields() {
+    let ctx = crate::fonts::test_context();
+    let mut outside = "background".to_string();
+    let mut first = "4 mm".to_string();
+    let mut second = "20 mm".to_string();
+    let mut disabled = "99 mm".to_string();
+    let mut draw = |ui: &mut Ui| {
+        crate::dialog_focus::prepare_active(ui.ctx());
+        cell_editor(ui, egui::Id::new("background_field"), &mut outside, "", false);
+        Window::new(egui::Id::new("focus_window"), "", "Test dialog").show(ui.ctx(), true, |ui| {
+            expr_row(ui, "First", &mut first);
+            expr_row(ui, "Second", &mut second);
+            ui.add_enabled_ui(false, |ui| {
+                expr_row(ui, "Disabled", &mut disabled);
+            });
+        });
+    };
+    for _ in 0..3 {
+        frame(&ctx, vec![], &mut draw);
+    }
+    let at = scenario::handle_at("dialog:First").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    let first_id = ctx.memory(|m| m.focused()).unwrap();
+    let layer = ctx.read_response(first_id).unwrap().layer_id;
+    for backwards in [false, true] {
+        let mut visited = Vec::new();
+        for _ in 0..24 {
+            let events = key(egui::Key::Tab)
+                .into_iter()
+                .map(|event| match event {
+                    egui::Event::Key { key, physical_key, pressed, repeat, .. } => egui::Event::Key {
+                        key,
+                        physical_key,
+                        pressed,
+                        repeat,
+                        modifiers: if backwards { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE },
+                    },
+                    event => event,
+                })
+                .collect();
+            frame(&ctx, events, &mut draw);
+            for _ in 0..3 {
+                frame(&ctx, vec![], &mut draw);
+            }
+            let focused = ctx.memory(|m| m.focused()).unwrap();
+            let response = ctx.read_response(focused).unwrap();
+            assert_eq!(response.layer_id, layer, "Tab must stay inside the dialog");
+            assert!(response.enabled(), "disabled controls must be skipped");
+            assert!(response.rect.is_positive(), "focus must reach a visible control");
+            if !visited.contains(&focused) {
+                visited.push(focused);
+            }
+        }
+        assert!(visited.contains(&first_id), "the loop must return to the first field");
+        assert_eq!(visited.len(), 5, "only two fields, two footer actions and Close belong in the loop");
+    }
+}
+
+#[test]
+fn dialog_tab_dropdown_wraps_then_returns_to_its_parent_dialog() {
+    let ctx = crate::fonts::test_context();
+    let mut value = "4 mm".to_string();
+    let mut selected = 0;
+    let mut draw = |ui: &mut Ui| {
+        crate::dialog_focus::prepare_active(ui.ctx());
+        Window::new(egui::Id::new("popup_focus_window"), "", "Test dialog").show(ui.ctx(), true, |ui| {
+            expr_row(ui, "Value", &mut value);
+            row(ui, "Mode", |ui| {
+                dropdown(ui, "mode", &mut selected, &["First", "Second", "Third"]);
+            });
+        });
+    };
+    for _ in 0..3 {
+        frame(&ctx, vec![], &mut draw);
+    }
+    let at = scenario::handle_at("dialog:Value").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    let parent_layer = ctx.read_response(ctx.memory(|m| m.focused()).unwrap()).unwrap().layer_id;
+    let at = scenario::handle_at("dialog:Mode").unwrap();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    assert!(egui::Popup::is_any_open(&ctx));
+    for backwards in [false, true] {
+        for _ in 0..12 {
+            let events = key(egui::Key::Tab)
+                .into_iter()
+                .map(|event| match event {
+                    egui::Event::Key { key, physical_key, pressed, repeat, .. } => egui::Event::Key {
+                        key,
+                        physical_key,
+                        pressed,
+                        repeat,
+                        modifiers: if backwards { egui::Modifiers::SHIFT } else { egui::Modifiers::NONE },
+                    },
+                    event => event,
+                })
+                .collect();
+            frame(&ctx, events, &mut draw);
+            for _ in 0..3 {
+                frame(&ctx, vec![], &mut draw);
+            }
+            let focused = ctx.memory(|m| m.focused()).unwrap();
+            let response = ctx.read_response(focused).unwrap();
+            assert_eq!(response.layer_id.order, egui::Order::Foreground);
+            assert!(response.rect.is_positive());
+        }
+    }
+    frame(&ctx, key(egui::Key::Escape), &mut draw);
+    for _ in 0..3 {
+        frame(&ctx, vec![], &mut draw);
+    }
+    assert!(!egui::Popup::is_any_open(&ctx));
+    frame(&ctx, key(egui::Key::Tab), &mut draw);
+    for _ in 0..3 {
+        frame(&ctx, vec![], &mut draw);
+    }
+    let focused = ctx.memory(|m| m.focused()).unwrap();
+    assert_eq!(ctx.read_response(focused).unwrap().layer_id, parent_layer);
+}
+
+#[test]
+fn dialog_tab_dropdown_arrows_change_the_focused_choice() {
+    let ctx = crate::fonts::test_context();
+    let selected = std::cell::Cell::new(0);
+    let dropdown_id = std::cell::Cell::new(None);
+    let mut draw = |ui: &mut Ui| {
+        crate::dialog_focus::prepare_active(ui.ctx());
+        Window::new(egui::Id::new("arrow_window"), "", "Test").show(ui.ctx(), true, |ui| {
+            row(ui, "Mode", |ui| {
+                let mut value = selected.get();
+                dropdown_id.set(Some(dropdown(ui, "mode", &mut value, &["First", "Second", "Third"]).id));
+                selected.set(value);
+            });
+        });
+    };
+    for _ in 0..3 {
+        frame(&ctx, vec![], &mut draw);
+    }
+    ctx.memory_mut(|m| m.request_focus(dropdown_id.get().unwrap()));
+    frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+    assert_eq!(selected.get(), 1, "Down must change the focused dropdown choice");
+    assert_eq!(ctx.memory(|m| m.focused()), dropdown_id.get(), "arrows must keep focus on the dropdown");
+    frame(&ctx, key(egui::Key::ArrowUp), &mut draw);
+    assert_eq!(selected.get(), 0, "Up must change the focused dropdown choice");
+    frame(&ctx, key(egui::Key::ArrowUp), &mut draw);
+    assert_eq!(selected.get(), 0, "Up at the first choice must stay in bounds");
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    for _ in 0..3 {
+        frame(&ctx, vec![], &mut draw);
+    }
+    assert!(egui::Popup::is_any_open(&ctx));
+    frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+    frame(&ctx, key(egui::Key::ArrowDown), &mut draw);
+    frame(&ctx, key(egui::Key::Enter), &mut draw);
+    assert_eq!(selected.get(), 1, "open dropdown options must support arrows and Enter");
+}
+
+#[test]
+fn dialog_tab_dropdown_and_actions_paint_a_focus_outline() {
+    fn outlined(shape: &egui::Shape, rect: egui::Rect, color: egui::Color32) -> bool {
+        match shape {
+            egui::Shape::Rect(s) => s.rect == rect && s.stroke.color == color && s.stroke.width > 0.0,
+            egui::Shape::Vec(shapes) => shapes.iter().any(|s| outlined(s, rect, color)),
+            _ => false,
+        }
+    }
+    let ctx = crate::fonts::test_context();
+    let ids = std::cell::Cell::new([egui::Id::NULL; 4]);
+    let mut draw = |ui: &mut Ui| {
+        scope(ui, |ui| {
+            crate::dialog_focus::scope(ui, egui::Id::new("outline"), |ui| {
+                let mut selected = 0;
+                let choice = dropdown(ui, "mode", &mut selected, &["First", "Second"]);
+                let normal = button(ui, "Button", Button::Normal);
+                let primary = button(ui, "Primary", Button::Primary);
+                let text = text_button(ui, "Text action", true);
+                ids.set([choice.id, normal.id, primary.id, text.id]);
+            })
+        });
+    };
+    for _ in 0..3 {
+        crate::test_support::frame(&ctx, egui::RawInput::default(), &mut draw);
+    }
+    for id in ids.get() {
+        ctx.memory_mut(|m| m.request_focus(id));
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), &mut draw);
+        let rect = ctx.read_response(id).unwrap().rect.expand(Tokens::get().space_2);
+        assert!(
+            output.shapes.iter().any(|s| outlined(&s.shape, rect, crate::theme::TabAccent::current(&ctx).color)),
+            "focused control must have an accent outline: {id:?}"
+        );
+    }
+}

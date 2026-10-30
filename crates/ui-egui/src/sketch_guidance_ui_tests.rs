@@ -405,8 +405,6 @@ fn tracking_does_not_leak_outside_the_viewport_or_into_another_sketch() {
     assert!(h.app.viewport.tracking.guide.is_none());
 }
 
-}
-
 #[test]
 fn dialog_tab_mirror_advances_from_canvas_and_reverses_without_changing_picks() {
     let mut h = fixture();

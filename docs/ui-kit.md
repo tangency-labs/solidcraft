@@ -227,7 +227,9 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | status: `status_header`, `StatusHeader` | Supplied icon/name/status and constraint meter | `font_label`, `text/dim`, `accent`, sketch/header tokens |
 | `progress` | Clamped determinate progress | `space_3/6`, `dialog_rule`, `accent` |
 
-Pattern/Mirror use the `*_with_sense` variants to include selection fields in Tab order and keep auxiliary clear/remove actions pointer-only. Default controls keep their existing focus behavior, visuals, and accessibility labels.
+Feature and manager dialogs and shared windows keep Tab/Shift+Tab within their controls, wrapping in egui's native order. Tab from a floating canvas value enters the active dialog. A dialog's dropdown temporarily owns a nested focus loop; expression completion gets first chance to consume its keys. Focused controls, including dropdowns and buttons, show a shared accent outline. Up/Down steps through a focused closed dropdown's choices; open menus retain native arrow/Enter navigation. Pointer-only title dragging does not add a Tab stop.
+
+Selection fields use `selection_field_with_sense` to join the dialog's Tab order. Pattern/Mirror use the auxiliary `*_with_sense` variants to keep clear/remove actions pointer-only. Section headings and quantity arrows stay out of Tab order; numerical editors select the number without its unit on keyboard focus.
 
 History contents are selected from measured panel width. A 56 pt thin strip shows icons
 and four vertical transport controls: beginning, back, forward and end. The minimum named
@@ -426,6 +428,7 @@ Configuration drafts publish `config:new:name`; existing `config:cell:ROW:COLUMN
 activation, rule and preview handles remain. The header plus retains
 `dialog:menu:Add Column`, including the existing menu nesting. The old separate
 Add forms and column-removal band have been removed.
+
 
 Crash Reports uses `report_list` (bordered bounded scroll), `report_header` (kind,
 count pill and mono UTC time), `path_chip` (clipped mono path and adjacent action),
@@ -649,6 +652,7 @@ stable identity, enabled state and exact caller-owned geometry. Recovery actions
 use this component rather than custom button painters. The recovery well renders
 the existing restore artwork through its construction accent ramp.
 
+
 ### Theme corner radii
 
 Theme files may override `radius_sm`, `radius_md`, `radius_lg`, `radius_xl`,
@@ -796,7 +800,6 @@ shared token paint and hit targets. All are exercised in the kit gallery.
 | method_section | Compact, initially collapsed editor section with a method tag; unsupported contents remain inspectable and disabled, with a translated reason visible even when collapsed. Uses editor_section typography and spacing. |
 | vector3_field | Three bounded number fields divide the row's control column evenly, retaining the shared parser, focus and bevels. Used for RGB absorption and world-space origin/repeat vectors. |
 | sphere_preview_with_source | Sample card with an interactive source tag, retaining the sphere, name, usage badge and trailing action. Appearance uses the tag to inspect its inheritance chain. |
-
 
 The compact `settings_choice_row` variant reuses the shared settings radio-card painter
 for preset lists: 40 pt rows, right-aligned summaries and the active workspace accent.

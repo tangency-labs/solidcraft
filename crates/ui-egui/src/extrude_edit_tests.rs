@@ -573,3 +573,42 @@ fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibilit
     assert!(!h.app.body_visible("Source"));
     assert_eq!(h.app.session.visibility, visibility);
 }
+
+#[test]
+fn dialog_tab_extrude_enters_from_canvas_distance_and_never_leaves_the_dialog() {
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    let canvas = egui::Id::new("sc_canvas_value");
+    assert!(h.ctx.read_response(canvas).is_some(), "the floating distance editor is drawn");
+    h.ctx.memory_mut(|m| m.request_focus(canvas));
+    h.frames(2);
+    h.step(&json!({"key":"Tab"})).unwrap();
+    let focused = h.ctx.memory(|m| m.focused()).unwrap();
+    let response = h.ctx.read_response(focused).unwrap();
+    let layer = response.layer_id;
+    assert_ne!(layer, h.ctx.read_response(canvas).unwrap().layer_id);
+    assert!(h.app.viewport.dialog_rect.unwrap().contains(response.rect.center()));
+    for backwards in [false, true] {
+        let mut previous = h.ctx.memory(|m| m.focused()).unwrap();
+        let mut wrapped = false;
+        for _ in 0..40 {
+            let from = crate::scenario::handle_at(if backwards { "dialog:close" } else { "dialog:cancel" }).unwrap();
+            let wraps = h.ctx.read_response(previous).unwrap().rect.contains(from);
+            h.step(&json!({"key":"Tab", "shift":backwards})).unwrap();
+            let focused = h.ctx.memory(|m| m.focused()).unwrap();
+            let response = h.ctx.read_response(focused).unwrap();
+            assert_ne!(focused, previous, "each Tab must advance to a different control: {:?}", response.rect);
+            assert_ne!(Some(response.rect), crate::scenario::rect_of("dialog:header"), "the pointer-only drag header must not be a Tab stop");
+            if wraps {
+                let to = crate::scenario::handle_at(if backwards { "dialog:cancel" } else { "dialog:close" }).unwrap();
+                assert!(response.rect.contains(to), "the last action and first control must wrap in one Tab");
+                wrapped = true;
+            }
+            previous = focused;
+            assert_eq!(response.layer_id, layer, "Extrude's Tab order must be confined to its dialog");
+            assert!(response.rect.is_positive());
+        }
+        assert!(wrapped, "both traversal directions must exercise the wrap");
+    }
+}

@@ -200,51 +200,50 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
-    let response = combo
-        .show_ui(ui, |ui| {
-            let search = ui.add(
-                text_input(egui::TextEdit::singleline(filter))
-                    .id_salt(format!("{id}_search"))
-                    .hint_text(crate::i18n::tr_label("Search"))
-                    .desired_width(f32::INFINITY),
-            );
-            // Preferences types into its own search only while no field has the keyboard.
-            if search.has_focus() {
-                crate::prefs_search::note_key_sink(ui.ctx());
+    let draw_menu = |ui: &mut Ui| {
+        let search = ui.add(
+            text_input(egui::TextEdit::singleline(filter))
+                .id_salt(format!("{id}_search"))
+                .hint_text(crate::i18n::tr_label("Search"))
+                .desired_width(f32::INFINITY),
+        );
+        // Preferences types into its own search only while no field has the keyboard.
+        if search.has_focus() {
+            crate::prefs_search::note_key_sink(ui.ctx());
+        }
+        scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
+        if let Some(custom) = custom {
+            let response = ui.selectable_label(false, custom);
+            scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
+            if response.clicked() {
+                chosen = Some(filter.trim().to_owned());
+                ui.close();
             }
-            scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
-            if let Some(custom) = custom {
-                let response = ui.selectable_label(false, custom);
-                scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-                if response.clicked() {
-                    chosen = Some(filter.trim().to_owned());
-                    ui.close();
+            return;
+        }
+        let query = filter.to_lowercase();
+        egui::ScrollArea::vertical()
+            .id_salt(format!("{id}_list"))
+            .max_height(Tokens::get().space_24 * 10.0)
+            .min_scrolled_height(Tokens::get().space_24 * 10.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
+                    let response = ui.selectable_label(current == option.label, option.label);
+                    if let Some(handle) = option.handle {
+                        scenario::publish_handle(handle, response.rect.center());
+                    }
+                    if response.clicked() {
+                        chosen = Some(option.value.to_owned());
+                        ui.close();
+                    }
                 }
-                return;
-            }
-            let query = filter.to_lowercase();
-            egui::ScrollArea::vertical()
-                .id_salt(format!("{id}_list"))
-                .max_height(Tokens::get().space_24 * 10.0)
-                .min_scrolled_height(Tokens::get().space_24 * 10.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                        let response = ui.selectable_label(current == option.label, option.label);
-                        if let Some(handle) = option.handle {
-                            scenario::publish_handle(handle, response.rect.center());
-                        }
-                        if response.clicked() {
-                            chosen = Some(option.value.to_owned());
-                            ui.close();
-                        }
-                    }
-                    if let Some(pending) = pending {
-                        ui.label(pending);
-                    }
-                });
-        })
-        .response;
+                if let Some(pending) = pending {
+                    ui.label(pending);
+                }
+            });
+    };
+    let response = combo.show_ui(ui, |ui| crate::dialog_focus::popup(ui, draw_menu)).response;
     publish(ui, &response, egui::WidgetType::ComboBox);
     chosen
 }
@@ -308,12 +307,14 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
     let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
+    let mut response = dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
             scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
         }
-    })
+    });
+    step_dropdown(ui, &mut response, selected, options.len());
+    response
 }
 
 /// [`dropdown`] whose options each show a picture beside them while hovered, painted by `preview`
@@ -340,14 +341,46 @@ pub(crate) fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, optio
     let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
     let mut picked = false;
-    dropdown_menu(ui, id, text, |ui| {
+    let mut response = dropdown_menu(ui, id, text, |ui| {
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
             picked |= response.clicked();
             scenario::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
         }
     });
-    picked
+    let stepped = step_dropdown(ui, &mut response, selected, options.len());
+    picked || stepped
+}
+
+/// A closed, focused choice owns Up/Down; open menus retain native option navigation.
+fn step_dropdown(ui: &Ui, response: &mut Response, selected: &mut usize, count: usize) -> bool {
+    if !response.has_focus() || count == 0 {
+        return false;
+    }
+    let open = egui::Popup::is_any_open(ui.ctx());
+    ui.memory_mut(|m| m.set_focus_lock_filter(response.id, egui::EventFilter { vertical_arrows: !open, ..Default::default() }));
+    if open {
+        return false;
+    }
+    let step = ui.input_mut(|i| {
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            Some(1)
+        } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            Some(-1)
+        } else {
+            None
+        }
+    });
+    let Some(step) = step else { return false };
+    ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+    let next = selected.saturating_add_signed(step).min(count.saturating_sub(1));
+    let changed = next != *selected;
+    if changed {
+        *selected = next;
+        response.mark_changed();
+        ui.ctx().request_repaint();
+    }
+    changed
 }
 
 /// Dropdown with caller-supplied kit choices/actions, including disabled entries and stable
@@ -401,7 +434,7 @@ fn dropdown_menu_width(
         .selected_text(current)
         .icon(dropdown_arrow)
         .close_behavior(close_behavior)
-        .show_ui(ui, add)
+        .show_ui(ui, |ui| crate::dialog_focus::popup(ui, add))
         .response;
     publish(ui, &response, egui::WidgetType::ComboBox);
     response
@@ -1185,7 +1218,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     scenario::publish_rect("dialog:menu:Library", button);
     let popup = Container::new(ui.ctx(), Surface::Popup).menu(&library);
     let open = popup.is_open();
-    popup.show(|ui| super::scope(ui, menu));
+    popup.show(|ui| crate::dialog_focus::popup(ui, |ui| super::scope(ui, menu)));
     if open {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     }

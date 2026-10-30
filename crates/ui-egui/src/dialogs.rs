@@ -2698,9 +2698,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
-                let sense = if tab_order { egui::Sense::click() } else { egui::Sense::CLICK };
+                let sense = egui::Sense::click();
                 let chip = crate::ui_kit::selection_field_with_sense(ui, prompt, crate::ui_kit::Selection { active, filled }, sense);
-                if tab_order && d.tab_through.selection(i, &chip) {
+                if d.tab_through.selection(i, &chip) {
                     activate = Some(i);
                 }
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
@@ -2730,9 +2730,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
-                if chip.on_hover_text(tooltip).clicked() && !tab_order {
-                    activate = Some(i);
-                }
+                chip.on_hover_text(tooltip);
                 if !inp.items.is_empty() || stored_reference.is_some() {
                     let rect = egui::Rect::from_center_size(
                         egui::pos2(chip_rect.right() - t.space_24 / 2.0, chip_rect.center().y),
@@ -3274,7 +3272,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let reset_scroll = d.reset_scroll;
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
-    let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
@@ -3295,7 +3292,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         cancel = closed || action == crate::ui_kit::Action::Cancel;
         app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     } else {
-        let response = window.open(&mut keep).show(ctx, |ui| {
+        let draw_dialog = |ui: &mut egui::Ui| {
             let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
@@ -3359,7 +3356,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::ui_kit::Action::None => {}
                 }
             }
-        });
+        };
+        let response = panel.show(ctx, Some(&mut keep), draw_dialog);
         app.viewport.dialog_rect = response.map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
