@@ -574,6 +574,22 @@ impl Body {
         self
     }
 
+    /// This body with the lines `inputs`' faces were split along on purpose added to its own:
+    /// an operation combining bodies keeps their authored splits (each line once), as it keeps
+    /// their regularization protection.
+    pub(crate) fn inherit_split_lines(self, inputs: &[&Body]) -> Self {
+        let mut lines: Vec<Vec<Vec3>> = self.split_keep().to_vec();
+        for line in inputs.iter().flat_map(|input| input.split_keep()) {
+            if !lines.contains(line) {
+                lines.push(line.clone());
+            }
+        }
+        if lines.len() == self.split_keep().len() {
+            return self;
+        }
+        self.with_split_lines(Some(std::sync::Arc::new(lines)))
+    }
+
     /// Exact history of the operation that made this body, relative to that operation's
     /// operands (see [`crate::history`]); `None` when the operation does not report one.
     pub fn history(&self) -> Option<&crate::history::History> {
