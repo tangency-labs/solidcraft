@@ -13,7 +13,7 @@
 
 use serde_json::{Map, Value, json};
 use solidcraft_doc::BomType;
-use solidcraft_doc::bom::{self, Bom, Group, MAX_ITEM, Mass, Numbering, Order, Quantity, Request, Row, Tree, Uncounted, View};
+use solidcraft_doc::bom::{self, Bom, Group, ItemNumbers, MAX_ITEM, Mass, Numbering, Order, Quantity, Request, Row, Tree, Uncounted, View};
 use solidcraft_doc::metadata::{BOM_KEYS, BOM_QUANTITY, BOM_TYPE, MATERIAL, MAX_KEYS, Owner, PART_ONLY, VIRTUAL, check_text, key_list};
 
 use super::CommandSpec;
@@ -475,16 +475,34 @@ fn item_number(p: &Value, k: &str, default: Option<u32>, cmd: &str) -> Result<Op
 
 /// The view numbered as `how` says, its numbers saved (only a real change touches the design), and
 /// the view as `assembly.bom` gives it.
+fn save_numbers(s: &mut Session, numbers: ItemNumbers) {
+    let saved = &mut s.doc_mut().assembly.item_numbers;
+    match saved.iter_mut().find(|n| n.source == numbers.source && n.view == numbers.view) {
+        Some(old) => *old = numbers,
+        None => saved.push(numbers),
+    }
+}
+
+/// Saves the numbers a view shows, if it hasn't any saved: what placing it on a sheet does, so what
+/// is printed doesn't move. Its rows' positions are the numbers an unnumbered view shows.
+pub(super) fn keep_shown_numbers(s: &mut Session, request: &Request) -> solidcraft_doc::Result<()> {
+    if s.doc.assembly.item_numbers.iter().any(|n| n.source == request.source && n.view == request.view) {
+        return Ok(());
+    }
+    let state = s.model.state();
+    let how = Numbering::Renumber { start: 1, step: 1, order: Order::List };
+    if let Some(numbers) = bom::number(&mut Tree::new(&s.doc, &state), request, how)? {
+        save_numbers(s, numbers);
+    }
+    Ok(())
+}
+
 fn renumbered(s: &mut Session, p: &Value, how: Numbering, cmd: &str) -> Result<(Value, Bom)> {
     let request = Request { mass: false, ..request(s, p, cmd)? };
     let state = s.model.state();
     let numbers = bom::number(&mut Tree::new(&s.doc, &state), &request, how).map_err(|e| bad(cmd, e.to_string()))?;
     if let Some(numbers) = numbers {
-        let saved = &mut s.doc_mut().assembly.item_numbers;
-        match saved.iter_mut().find(|n| n.source == numbers.source && n.view == numbers.view) {
-            Some(old) => *old = numbers,
-            None => saved.push(numbers),
-        }
+        save_numbers(s, numbers);
     }
     let list = bom::list(&mut Tree::new(&s.doc, &state), &request).map_err(|e| bad(cmd, e.to_string()))?;
     let reply = json!({"component": request.source, "levels": request.view.as_str(), "numbered": list.numbered,

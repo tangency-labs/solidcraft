@@ -108,6 +108,7 @@ fn listed(on: &OnSheet) -> String {
         kind("balloon", &on.balloons),
         kind("image", &on.images),
         kind("revision tag", &on.tags),
+        kind("table", &on.tables),
     ]
     .into_iter()
     .flatten()

@@ -31,6 +31,30 @@ impl JsonSchema for RowIdParam {
     }
 }
 
+/// A revision tag, by its id as `drawing.inspect` lists it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TagIdParam(pub u64);
+
+impl<'de> Deserialize<'de> for TagIdParam {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => {
+                solidcraft_doc::ids::decode(&s).map(TagIdParam).ok_or_else(|| serde::de::Error::custom("must be a revision tag's id"))
+            }
+            _ => Err(serde::de::Error::custom("must be a revision tag's id")),
+        }
+    }
+}
+
+impl JsonSchema for TagIdParam {
+    fn schema_name() -> Cow<'static, str> {
+        "RevisionTagId".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A revision tag's id: 13 characters of lowercase Crockford base32.", "type": "string", "pattern": "^[0-9a-hjkmnp-tv-z]{13}$"})
+    }
+}
+
 /// A row's texts as typed, and whether the table hides it: each left out stays as it is.
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -157,7 +181,7 @@ fn tag_sheet<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct TagEditParams {
-    pub tag: RowIdParam,
+    pub tag: TagIdParam,
     pub set: TagSet,
 }
 
@@ -166,7 +190,7 @@ pub struct TagEditParams {
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct TagDeleteParams {
-    pub tag: RowIdParam,
+    pub tag: TagIdParam,
 }
 
 /// One revision tag.
