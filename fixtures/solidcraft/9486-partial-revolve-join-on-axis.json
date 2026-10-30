@@ -1,0 +1,146 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/9486",
+ "pr": "https://github.com/tangency-labs/solidcore/pull/1831",
+ "test": "none: the issue is open and has no fixing PR (SolidCraft's kernel work is paused, #3992), so `pr` points at the PR that adds this fixture, as the loader requires a /pull/ URL; the issue reproduces it (a Revolve, Operation = Join) and its triage comment; the numbers here are analytic",
+ "summary": "Revolve (Join) of a triangle that has an edge on the axis, turned through part of a turn, onto a body it touches fails on SolidCraft's kernel with 'boolean Union: the operation failed: no result' (reproduced on 0.27.0 with a 3 mm tile, a vertical axis, a 40 mm x 9 mm triangle revolved 90, 100 or 120 degrees, also when the triangle overlaps the tile by 1 mm). As a new body the same revolve is a clean cone sector. Three variants join fine there: the full 360 degree turn, a revolved rectangle that does not touch the axis, and the triangle moved 2 mm off the axis. Geometry here: a 100 x 100 x 3 mm tile (a box, in place of the hexagon of the triage) with its top face in z = 0, the axis is z through the tile's middle, and the triangle (r, z) = (0, 0), (40, 0), (0, 9) is turned 120 degrees about it, so the fan is a sector of a cone of radius 40 and height 9 (volume 1/3 * pi * 40^2 * 9 * 120/360 = 1600 pi mm^3) standing on the tile's top face. The overlap case moves the base down 1 mm into the tile: the triangle (0, -1), (40, -1), (0, 9). The tolerance is 0.01 mm^3, as in the other boolean cases. The profile plane is zx, so a profile point is (u, v) = (z, r).",
+ "cases": [
+  {
+   "name": "join_fan_on_tile",
+   "note": "#9486: the join as the issue made it: a 120 degree fan of a cone (triangle (0,0),(40,0),(0,9) about z) united with the tile whose top face carries its base. The fan's edge on the axis lies in the tile's top face and ends on the tile's middle.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "tile",
+     "origin": [
+      -50,
+      -50,
+      -3
+     ],
+     "size": [
+      100,
+      100,
+      3
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "fan",
+     "plane": "zx",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      0,
+      0,
+      1
+     ],
+     "angle_deg": 120.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         0
+        ],
+        [
+         0,
+         40
+        ],
+        [
+         9,
+         0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "tile",
+     "b": "fan"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 35026.548245744,
+     "tol": 0.01,
+     "formula": "V = 100*100*3 + 1/3 * pi * 40^2 * 9 * (120/360) = 30000 + 1600 pi"
+    }
+   }
+  },
+  {
+   "name": "join_fan_sunk_into_tile",
+   "note": "#9486: the same fan with its base 1 mm below the tile's top face (triangle (0,-1),(40,-1),(0,9)), so it overlaps the tile; the issue's triage failed this one as well.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "tile",
+     "origin": [
+      -50,
+      -50,
+      -3
+     ],
+     "size": [
+      100,
+      100,
+      3
+     ]
+    },
+    {
+     "op": "revolve",
+     "id": "fan",
+     "plane": "zx",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      0,
+      0,
+      1
+     ],
+     "angle_deg": 120.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -1,
+         0
+        ],
+        [
+         -1,
+         40
+        ],
+        [
+         9,
+         0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "tile",
+     "b": "fan"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 34071.504079052,
+     "tol": 0.01,
+     "formula": "the part of the fan below z = 0 lies inside the tile, so V = 100*100*3 + the fan above z = 0; the hypotenuse from (40, -1) to (0, 9) crosses z = 0 at r = 36, so that part is the sector of a cone of radius 36 and height 9: V = 30000 + 1/3 * pi * 36^2 * 9 * (120/360) = 30000 + 1296 pi"
+    }
+   }
+  }
+ ]
+}
