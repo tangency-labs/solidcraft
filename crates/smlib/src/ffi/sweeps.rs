@@ -16,7 +16,7 @@ use super::{ERR_ARG, RawBrep, new_brep};
 pub const CURVE_LINE: i64 = 1;
 pub const CURVE_ARC: i64 = 2;
 pub const CURVE_NURBS: i64 = 3;
-pub const CURVE_MAX_CURVES: usize = 4096;
+pub const CURVE_MAX_CURVES: usize = 16_384;
 pub const CURVE_MAX_DEGREE: usize = 25;
 pub const CURVE_MAX_POINTS: usize = 100_000;
 
