@@ -80,7 +80,9 @@ from a sketch: draw it or insert the vendor's DXF.
 separate body per end, named after the member (`Post End Cap`). Pick the end faces in the view:
 each must be a flat end of a frame member, square to its line.
 
-- The plate follows the profile's outer outline, set in from its edge by the **Inset**: a length,
+- On a closed section (a square or rectangular tube, a pipe, a bar) the plate follows the
+  profile's outer outline. On an open section (an angle, a channel, a beam) it is the rectangle
+  round the profile, so the whole end is closed. Either is set in from its edge by the **Inset**: a length,
   or a **Ratio of thickness** (default 0.5, so a 6 mm cap sits 3 mm in from the edge). A rounded
   corner keeps its rounding less the inset; a corner rounded less than the inset becomes sharp.
 - **Thickness** is the plate's thickness. **Outward** puts it past the end, so the frame gets
@@ -92,11 +94,9 @@ each must be a flat end of a frame member, square to its line.
 - Caps follow the member: change its profile, its line or the frame sketch and they move and
   resize with it. Renaming the member keeps them. A cap whose member or face is gone reports an
   error instead of picking another end.
-- Caps follow any outline of lines and arcs: bars and tubes, and the L of an angle, the C of a
-  channel and the I of a beam, flanges, web and all. The plate keeps the profile's shape: a root
-  rounding where the web meets a flange grows by the inset, and the chamfer cuts only outside
-  corners, leaving the roots as they are. An inset of half a wall or more (an angle's leg, a
-  beam's web) leaves no plate and is refused, as is a chamfer longer than its edges allow.
+- Caps follow any outline of lines and arcs. The rectangle on an open section is chamfered at
+  its four corners. An inset that leaves no plate is refused, as is a chamfer longer than its
+  edges allow.
 
 ```json
 {"command": "frame.end_cap", "params": {"faces": [{"face": [18.5, 0, 300], "body": "Post", "index": 7}], "thickness": 6}}

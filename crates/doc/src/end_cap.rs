@@ -436,7 +436,7 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         }
         let plane = Plane::new(section.origin + along * (face.origin - section.origin).dot(along), section.x, section.y)
             .ok_or_else(|| invalid("the end face's plane is degenerate"))?;
-        let outline = chamfered(&inset(&region.outer, d)?, c)?;
+        let outline = chamfered(&inset(&cap_outline(&region.outer), d)?, c)?;
         let cap_region = Region2 { outer: outline, holes: Vec::new() };
         // Along the plane's normal: the member lies behind an end facing that way.
         let s = facing.signum();
@@ -476,6 +476,19 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         st.bodies.push(ModelBody::traced_new(name, crate::lineage::numbered_tool(body), f.id));
     }
     Ok(())
+}
+
+/// The outline an end cap is cut from: a closed section's own outline (a tube, a pipe, a bar),
+/// or, for an open section that turns inward somewhere (an angle, a channel, a beam), the
+/// rectangle round it, so the plate closes the whole end.
+pub(crate) fn cap_outline(outer: &Loop2) -> Loop2 {
+    let ring = outer.polyline(1e-3);
+    let convex = ring.corners().all(|(p, c, n)| (*c - *p).cross(*n - *c) >= -1e-9);
+    if convex {
+        return outer.clone();
+    }
+    let bb = ring.bounds();
+    Loop2::polygon(&[bb.min, Vec2::new(bb.max.x, bb.min.y), bb.max, Vec2::new(bb.min.x, bb.max.y)])
 }
 
 fn one(mut bodies: Vec<solidcraft_kernel::Body>) -> Result<solidcraft_kernel::Body> {

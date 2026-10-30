@@ -457,3 +457,22 @@ fn end_cap_outlines_inset_and_chamfer_exactly() {
         let _ = inset(&tube.outer, d).and_then(|l| chamfered(&l, d));
     }
 }
+
+#[test]
+fn end_caps_close_open_sections_with_the_rectangle_round_them() {
+    use crate::end_cap::cap_outline;
+    // Closed sections keep their own outline: the rounded tube, the round tube.
+    let tube = Profile::RectTube { width: 40.0, height: 30.0, wall: 3.0, outer_radius: Some(6.0) }.region().unwrap();
+    close(cap_outline(&tube.outer).signed_area(), tube.outer.signed_area(), "rect tube");
+    let round = Profile::RoundTube { diameter: 40.0, wall: 3.0 }.region().unwrap();
+    close(cap_outline(&round.outer).signed_area(), round.outer.signed_area(), "round tube");
+    // Open sections (an L, a C, an I) get the rectangle round them.
+    let open = [
+        (Profile::Angle { width: 40.0, height: 30.0, thickness: 4.0, root_radius: Some(3.0), toe_radius: Some(1.0) }, 40.0 * 30.0),
+        (Profile::Channel { height: 100.0, width: 50.0, web: 6.0, flange: 8.0, root_radius: Some(5.0), toe_radius: Some(2.0) }, 100.0 * 50.0),
+        (Profile::IBeam { height: 100.0, width: 50.0, web: 4.5, flange: 7.0, root_radius: Some(4.5) }, 100.0 * 50.0),
+    ];
+    for (p, area) in open {
+        close(cap_outline(&p.region().unwrap().outer).signed_area(), area, "open section");
+    }
+}

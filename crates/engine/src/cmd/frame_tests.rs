@@ -718,21 +718,25 @@ fn end_cap_on_a_rounded_tube_keeps_the_rounding_less_the_inset() {
 }
 
 #[test]
-fn an_end_cap_on_an_i_beam_follows_its_flanges_web_and_roots() {
-    // 100 x 50, web 4.5, flanges 7, roots of radius 4.5 (the web). In by 1: flanges 48 x 5 and
-    // a web 2.5 x 88, with four roots grown to radius 5.5.
+fn an_end_cap_on_an_i_beam_closes_its_whole_end_square() {
+    // An I-beam is open, so its cap is the 50 x 100 rectangle round it, in by 1: 48 x 98.
     let mut s = capped_post(json!({"kind": "i_beam", "height": 100, "width": 50, "web": 4.5, "flange": 7}));
     let post = measured(&mut s, "Post");
     let mid = [(post.2[0] + post.3[0]) / 2.0, (post.2[1] + post.3[1]) / 2.0, 300.0];
     let top = face_pick(&s, "Post", mid, [0.0, 0.0, 1.0]);
     run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6, "offset": 1}));
     let cap = measured(&mut s, "Post End Cap");
-    let area = 2.0 * 48.0 * 5.0 + 2.5 * 88.0 + 4.0 * 5.5 * 5.5 * (1.0 - PI / 4.0);
-    assert!(rel(cap.1, area * 6.0) < MEASURED, "{cap:?}");
-    // More than half the web leaves no plate, and nothing changes.
-    let before = s.doc.to_json();
+    assert!(rel(cap.1, 48.0 * 98.0 * 6.0) < 1e-9, "{cap:?}");
+    // A 2 mm chamfer cuts the rectangle's four corners.
+    run(&mut s, "edit.undo", json!({}));
     let top = face_pick(&s, "Post", mid, [0.0, 0.0, 1.0]);
-    let e = s.execute("frame.end_cap", &json!({"faces": [top], "thickness": 6, "offset": 2.5})).unwrap_err().to_string();
+    run(&mut s, "frame.end_cap", json!({"faces": [top.clone()], "thickness": 6, "offset": 1, "chamfer": 2}));
+    let v = measured(&mut s, "Post End Cap").1;
+    assert!(rel(v, (48.0 * 98.0 - 4.0 * 2.0) * 6.0) < 1e-9, "{v}");
+    // An inset of half the beam's width leaves no plate, and nothing changes.
+    run(&mut s, "edit.undo", json!({}));
+    let before = s.doc.to_json();
+    let e = s.execute("frame.end_cap", &json!({"faces": [top], "thickness": 6, "offset": 25})).unwrap_err().to_string();
     assert!(e.contains("leaves no plate"), "{e}");
     assert_eq!(s.doc.to_json(), before);
 }
@@ -811,13 +815,10 @@ fn end_caps_refuse_bad_picks_and_values_atomically() {
         assert!(e.contains(why), "{p}: {e}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
-    // An angle 4 thick (roots of 4, toes of 2): an inset of 3 is more than half a leg; 1 leaves
-    // an L 38 long and 2 thick with its root grown to 5 and its toes shrunk to 1.
+    // An angle is open too: its cap is the 40 x 40 square round it, in by 1 (half of 2).
     let mut s = capped_post(json!({"kind": "angle", "width": 40, "height": 40, "thickness": 4}));
     let end = face_pick(&s, "Post", [-18.0, -19.0, 300.0], [0.0, 0.0, 1.0]);
-    let e = s.execute("frame.end_cap", &json!({"faces": [end.clone()], "thickness": 6})).unwrap_err().to_string();
-    assert!(e.contains("leaves no plate"), "{e}");
     run(&mut s, "frame.end_cap", json!({"faces": [end], "thickness": 2}));
     let v = measured(&mut s, "Post End Cap").1;
-    assert!(rel(v, (148.0 + 23.0 * (1.0 - PI / 4.0)) * 2.0) < MEASURED, "{v}");
+    assert!(rel(v, 38.0 * 38.0 * 2.0) < 1e-9, "{v}");
 }
