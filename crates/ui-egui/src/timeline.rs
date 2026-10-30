@@ -2523,6 +2523,7 @@ mod tests {
         use crate::scenario::{handle_at, handles};
         let corpus = |name: &str| format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"));
         let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
         let one = h.app.run("file.insert_step", json!({"path": corpus("cylinder")})).unwrap();
         let two = h.app.run("file.insert_step", json!({"path": corpus("cylinder_twice")})).unwrap();
         h.app.run("component.activate", json!({"component": "root"})).unwrap();

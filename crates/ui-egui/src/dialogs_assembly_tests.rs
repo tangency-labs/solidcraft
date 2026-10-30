@@ -1108,11 +1108,13 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.5 in"));
 }
 
-/// An imported assembly makes a joint per placed part: from the second joint, the timeline shows
-/// them as one grouped button with their count, and clicking it shows (and hides) each one.
+/// An imported assembly makes a joint per placed part: with "Group joints in the History" on, from
+/// the second joint the timeline shows them as one grouped button with their count, and clicking
+/// it shows (and hides) each one.
 #[test]
 fn many_joints_start_grouped_in_the_timeline() {
     let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
     for (name, x) in [("A", 0), ("B", 30)] {
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
         h.app.run("component.create", json!({ "name": name })).unwrap();
@@ -1141,8 +1143,9 @@ fn many_joints_start_grouped_in_the_timeline() {
     assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking it again groups them");
 }
 
-/// With "Group joints in the History" off, the History shows each joint as it did before: no
-/// grouped button, a tile for every joint, and the left History's JOINTS header without a count.
+/// With "Group joints in the History" off, as it is by default, the History shows each joint as it
+/// always has: no grouped button, a tile for every joint, and the left History's JOINTS header
+/// without a count. Turned on, the joints group; turned off again, they show one by one.
 #[test]
 fn joints_show_one_by_one_when_their_grouping_is_off() {
     let mut h = crate::scenario::Harness::new();
@@ -1157,9 +1160,7 @@ fn joints_show_one_by_one_when_their_grouping_is_off() {
         h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": name})).unwrap();
     }
     h.frames(2);
-    assert!(crate::scenario::handle_at("timeline:joints").is_some(), "two joints start grouped by default");
-    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": false}))["ok"], true);
-    h.frames(2);
+    assert!(!h.app.preferences.history_group_joints, "grouping is off by default");
     assert!(joints_open(&h.app, 2, JointRun::Loose), "each joint shows");
     assert!(crate::scenario::handle_at("timeline:joints").is_none(), "no grouped button");
     for name in ["Held", "Held again"] {
@@ -1167,8 +1168,14 @@ fn joints_show_one_by_one_when_their_grouping_is_off() {
     }
     assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
     h.frames(2);
-    assert!(!joints_open(&h.app, 2, JointRun::Loose), "turned back on, they group again");
+    assert!(!joints_open(&h.app, 2, JointRun::Loose), "turned on, the two joints group");
+    assert!(crate::scenario::handle_at("timeline:joints").is_some(), "the grouped button appears");
     assert!(crate::scenario::handle_at("timeline-joint:Held").is_none());
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": false}))["ok"], true);
+    h.frames(2);
+    assert!(joints_open(&h.app, 2, JointRun::Loose), "turned off again, each joint shows");
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "and the grouped button goes");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_some());
 }
 
 /// The grouped joints' arrow has a well of its own at the button's end: it lights up only under
@@ -1176,6 +1183,7 @@ fn joints_show_one_by_one_when_their_grouping_is_off() {
 #[test]
 fn the_grouped_joints_arrow_lights_up_under_the_pointer() {
     let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
     for (name, x) in [("A", 0), ("B", 30)] {
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
         h.app.run("component.create", json!({ "name": name })).unwrap();
