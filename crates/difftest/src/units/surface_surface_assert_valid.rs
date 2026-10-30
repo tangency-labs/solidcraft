@@ -57,6 +57,22 @@ pub const MIN_GENERATED: usize = 1500;
 /// Generated extrusion cases per run (`extNNNN`, their own seed stream).
 pub const EXTRUSION_CASES: usize = 400;
 
+/// Generated cases per run that reach the inputs the `gen` stream's guards once
+/// refused (`ovfNNNN`, their own seed stream, so every `gen` case keeps its inputs):
+/// B-splines with interior knots above the degree (B-spline test 1, iso curves
+/// extracted there are all zero) and spheres whose V interval runs past a pole
+/// (sphere tests 4 and 5).
+pub const OVERFULL_CASES: usize = 300;
+
+/// What a generated case may draw beyond the `gen` stream's inputs.
+#[derive(Clone, Copy, Default)]
+struct Extra {
+    /// Interior knots repeated above the degree.
+    overfull: bool,
+    /// Sphere V intervals past a pole.
+    past_pole: bool,
+}
+
 /// `surface.surface_assert_valid` runner.
 pub struct Runner;
 
@@ -343,18 +359,21 @@ fn flag(rng: &mut Rng, p: f64) -> f64 {
 
 /// A clamped knot vector for `n` control points of degree `p` with interior knots in
 /// `(0, 1)`, sometimes repeated.
-fn clamped(rng: &mut Rng, n: usize, p: usize) -> Vec<f64> {
+fn clamped(rng: &mut Rng, n: usize, p: usize, extra: Extra) -> Vec<f64> {
     let interior = n - p - 1;
     let mut mid: Vec<f64> = (0..interior)
         .map(|i| (i + 1) as f64 / (interior + 1) as f64)
         .collect();
     if interior >= 2 && rng.chance(0.3) {
-        // repeated interior knots (possibly above the degree)
+        // repeated interior knots (above the degree only with `extra.overfull`)
         let at = rng.below(interior as u64 - 1) as usize;
         let v = mid[at];
-        // (at most the degree: above it the C++ evaluates a calloc'd iso curve, see
-        // the FFI's `iso_extraction`)
-        let reps = 1 + rng.below((interior - at).min(p) as u64) as usize;
+        let room = if extra.overfull {
+            interior - at
+        } else {
+            (interior - at).min(p)
+        };
+        let reps = 1 + rng.below(room as u64) as usize;
         for m in mid.iter_mut().skip(at).take(reps) {
             *m = v;
         }
@@ -366,12 +385,21 @@ fn clamped(rng: &mut Rng, n: usize, p: usize) -> Vec<f64> {
 }
 
 #[allow(clippy::too_many_lines)]
-fn gen_bspline(rng: &mut Rng, b: &mut Vec<f64>) {
+fn gen_bspline(rng: &mut Rng, b: &mut Vec<f64>, extra: Extra) {
     let p = 1 + rng.below(3) as usize;
     let q = 1 + rng.below(3) as usize;
     let mut nu = p + 1 + rng.below(4) as usize;
     let mut nv = q + 1 + rng.below(4) as usize;
-    let mode = rng.below(14);
+    let mode = if extra.overfull {
+        // half the overfull cases take the p + 1 crease below
+        if rng.chance(0.5) {
+            1
+        } else {
+            rng.below(14)
+        }
+    } else {
+        rng.below(14)
+    };
     if mode == 1 {
         // a repeated interior knot needs room
         nu = nu.max(2 * p + 2);
@@ -382,12 +410,13 @@ fn gen_bspline(rng: &mut Rng, b: &mut Vec<f64>) {
     }
     let rational = rng.chance(0.25);
     let s = scale(rng);
-    let mut ku = clamped(rng, nu, p);
-    let mut kv = clamped(rng, nv, q);
+    let mut ku = clamped(rng, nu, p, extra);
+    let mut kv = clamped(rng, nv, q, extra);
     if mode == 1 {
-        // an interior knot repeated p times (a C0 crease; above the degree the case is
-        // rejected), sometimes p + 1 times
-        let reps = if rng.chance(0.2) { p + 1 } else { p };
+        // an interior knot repeated p times (a C0 crease), sometimes p + 1 times (above
+        // the degree: B-spline test 1, and iso curves extracted there are all zero)
+        let over = if extra.overfull { 0.5 } else { 0.2 };
+        let reps = if rng.chance(over) { p + 1 } else { p };
         for kk in ku.iter_mut().skip(p + 1).take(reps) {
             *kk = 0.5;
         }
@@ -524,7 +553,7 @@ fn angles(rng: &mut Rng) -> (f64, f64) {
 fn extrusion_generator(rng: &mut Rng, shape: u64, s: f64) -> (usize, Vec<[f64; 4]>, Vec<f64>) {
     let p = if shape == 0 { 1 + rng.below(2) as usize } else { 2 + rng.below(2) as usize };
     let n = p + 1 + rng.below(3) as usize;
-    let knots = clamped(rng, n, p);
+    let knots = clamped(rng, n, p, Extra::default());
     let rational = shape != 0 && rng.chance(0.2);
     let pts = (0..n)
         .map(|i| {
@@ -610,12 +639,40 @@ fn gen_extrusion_case(rng: &mut Rng) -> Inputs {
 }
 
 fn gen_case(rng: &mut Rng) -> Inputs {
-    let kind = rng.below(7) as usize;
+    gen_case_with(rng, Extra::default())
+}
+
+/// An `ovf` case: a B-spline that may repeat knots above the degree, or a sphere whose
+/// V interval may run past a pole.
+fn gen_overfull_case(rng: &mut Rng) -> Inputs {
+    let extra = if rng.chance(0.5) {
+        Extra {
+            overfull: true,
+            past_pole: false,
+        }
+    } else {
+        Extra {
+            overfull: false,
+            past_pole: true,
+        }
+    };
+    gen_case_with(rng, extra)
+}
+
+fn gen_case_with(rng: &mut Rng, extra: Extra) -> Inputs {
+    let drawn = rng.below(7) as usize;
+    let kind = if extra.overfull {
+        0
+    } else if extra.past_pole {
+        4
+    } else {
+        drawn
+    };
     let mut b = vec![kind as f64, level(rng)];
     b.push(if kind == 0 { 0.0 } else { flag(rng, 0.5) });
     let s = scale(rng);
     if kind == 0 {
-        gen_bspline(rng, &mut b);
+        gen_bspline(rng, &mut b, extra);
         return Inputs { block: b };
     }
     frame(rng, &mut b, s);
@@ -656,8 +713,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         }
         4 => {
             let (a0, a1) = angles(rng);
-            let (v0, v1) = match rng.below(4) {
+            let (v0, v1) = match rng.below(if extra.past_pole { 6 } else { 4 }) {
                 0 => (-90.0, 90.0),
+                // past a pole (sphere test 4 or 5; `ovf` cases only)
+                4 => (rng.uniform(-150.0, -91.0), rng.uniform(-80.0, 80.0)),
+                5 => (rng.uniform(-80.0, 80.0), rng.uniform(91.0, 150.0)),
                 1 => (-90.0, rng.uniform(-80.0, 89.0)),
                 2 => (rng.uniform(-89.0, 80.0), 90.0),
                 _ => {
@@ -684,7 +744,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
             let (a0, a1) = angles(rng);
             let p = 1 + rng.below(3) as usize;
             let n = p + 1 + rng.below(3) as usize;
-            let knots = clamped(rng, n, p);
+            let knots = clamped(rng, n, p, extra);
             let (t0, t1) = match rng.below(5) {
                 0 => (0.2, 0.8), // mismatched generator domain
                 _ => (0.0, 1.0),
@@ -734,6 +794,18 @@ impl UnitDiff for Runner {
             serde_json::to_value(gen_extrusion_case(rng)).ok()
         }) {
             c.name = c.name.replacen("gen", "ext", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        // overfull knots and past-pole spheres: their own seed stream too; `ovfNNNN`
+        let ovf = CaseContext {
+            seeds: ctx.seeds.max(OVERFULL_CASES),
+            ..ctx.clone()
+        };
+        for mut c in ovf.generated_cases("surface.surface_assert_valid:overfull", |rng| {
+            serde_json::to_value(gen_overfull_case(rng)).ok()
+        }) {
+            c.name = c.name.replacen("gen", "ovf", 1);
             c.unit = self.id().to_string();
             v.push(c);
         }

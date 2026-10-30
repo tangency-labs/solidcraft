@@ -904,6 +904,11 @@ pub fn decompose_to_bez(sur: &Surface) -> Result<Vec<Vec<Surface>>> {
         .collect()
 }
 
+/// The [`SolidError::InvalidInput`] reason of [`extract_iso_crv`] for a knot of
+/// multiplicity above the degree at `t` (upstream's bare `error = NL_YES`, which
+/// leaves the caller's curve untouched).
+pub const ISO_MULT_ABOVE_DEGREE: &str = "knot multiplicity above the degree";
+
 /// Extracts the iso-curve of `sur` at the parameter `t` (`N_SrfExtractIsoCrv`):
 /// [`Direction::U`] gives the u-curve at `v = t`, [`Direction::V`] the v-curve at
 /// `u = t`. Parameters outside the domain extrapolate the end spans.
@@ -976,7 +981,7 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
 
     let bad_mult = SolidError::InvalidInput {
         operation: OP,
-        reason: "knot multiplicity above the degree",
+        reason: ISO_MULT_ABOVE_DEGREE,
     };
 
     // Extract the u-curve.

@@ -98,11 +98,12 @@ use crate::nurbs::b_spline_curve::{
 };
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::crv_basic::Curve as NlCurve;
 use crate::nurbs::geom::Rectangle;
-use crate::nurbs::math::{NOW, NOZ};
+use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::nurbs::nurbs_srf::{is_nsrf_degenerate, split_srf};
 use crate::nurbs::srf_basic::Direction;
-use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch};
+use crate::nurbs::srf_tool::p1::{extract_iso_crv, extract_patch, ISO_MULT_ABOVE_DEGREE};
 use crate::surface::plane::Plane;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
@@ -430,11 +431,14 @@ impl BSplineSurface {
     /// constant u for [`SurfParamType::U`] (a curve in v), constant v otherwise. The
     /// parameter must lie in the (optional or natural) domain within
     /// `SM_EFF_ZERO_SQRT` and is clamped to it; with an optional domain the curve is
-    /// trimmed to it.
+    /// trimmed to it. At a knot of multiplicity above the degree the extraction fails
+    /// and, as upstream, the curve is the all-zero one (zero control points, weights
+    /// and knots) the curve allocation leaves.
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a parameter outside the domain or when the extraction fails;
+    /// `SM_ERR` for a parameter outside the domain or when the extraction fails
+    /// otherwise;
     /// `SM_ERR_NULL_POINTER` without NURB; [`SolidError::Unported`] from the UV iso
     /// line or the trim.
     pub fn create_iso_parametric_curve(
@@ -483,9 +487,26 @@ impl BSplineSurface {
             Direction::U
         };
 
-        // build the isoParameter gw_CURVE
-        let cur =
-            extract_iso_crv(surface, iso_parameter, dir).map_err(SolidError::nl_ser(OP_ISO))?;
+        // build the isoParameter gw_CURVE: a knot of multiplicity above the degree makes
+        // N_SrfExtractIsoCrv return NL_YES without writing; upstream only prints
+        // ERR_MSG and goes on with the curve sm_AllocateNurbCurve calloc'd (all control
+        // points, weights and knots zero)
+        let cur = match extract_iso_crv(surface, iso_parameter, dir) {
+            Ok(cur) => cur,
+            Err(SolidError::InvalidInput { reason, .. }) if reason == ISO_MULT_ABOVE_DEGREE => {
+                let (cpoint_highest, degree, knots_highest) = if surf_param == SurfParamType::U {
+                    (surface.m(), surface.q(), surface.s())
+                } else {
+                    (surface.n(), surface.p(), surface.r())
+                };
+                let mut pw = Vec::new();
+                pw.resize(cpoint_highest + 1, CPoint::ZERO);
+                let mut u = Vec::new();
+                u.resize(knots_highest + 1, 0.0);
+                NlCurve::new(pw, degree, u)?
+            }
+            Err(e) => return Err(SolidError::nl_ser(OP_ISO)(e)),
+        };
 
         // Use it as m_pNurb in a BSplineCurve object
         let mut new_iso_curve = BSplineCurve::from_nurb(cur, 3, false);
@@ -1650,7 +1671,6 @@ impl BSplineSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface;
 
     /// A rational quadratic arc from `p0` to `p2` with tangent corner `c` and corner
@@ -1737,6 +1757,43 @@ mod tests {
         ];
         let r = BSplineSurface::create_sphere_from_arcs(k, &arcs, 1e-6).unwrap();
         assert_eq!(r.ccw_arcs, vec![0, 1, 2]);
+    }
+
+    /// At an interior knot of multiplicity above the degree `N_SrfExtractIsoCrv`
+    /// fails and upstream returns the curve `sm_AllocateNurbCurve` calloc'd: every
+    /// control point, weight and knot zero, sized like the surface's direction.
+    #[test]
+    fn iso_curve_at_knot_above_degree_is_the_zero_curve() {
+        let net = (0..4)
+            .map(|i| {
+                (0..2)
+                    .map(|j| CPoint::new(f64::from(i), f64::from(j), 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let sur = Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .expect("surface");
+        let s = BSplineSurface::from_nurb(sur, false);
+        let k = Kernel::default();
+        let iso = s
+            .create_iso_parametric_curve(&k, SurfParamType::U, 0.5, IsoCurveOptions::default())
+            .expect("iso curve");
+        let cur = iso.curve.gw_nurb().expect("nurb");
+        assert_eq!((cur.n(), cur.degree(), cur.m()), (1, 1, 3));
+        assert!(cur.cpts().iter().all(|c| *c == CPoint::ZERO));
+        assert!(cur.knots().iter().all(|&u| u == 0.0));
+        // a regular u gives the real curve
+        let iso = s
+            .create_iso_parametric_curve(&k, SurfParamType::U, 0.25, IsoCurveOptions::default())
+            .expect("iso curve");
+        let cur = iso.curve.gw_nurb().expect("nurb");
+        assert!(cur.cpts().iter().all(|c| c.w == NOW));
     }
 
     /// Four great-circle arcs of radius 2 about the origin, closing a loop round +z (a corner

@@ -148,21 +148,6 @@ fn mults(k: &[f64]) -> Vec<i64> {
     m
 }
 
-/// An interior knot of multiplicity above the degree makes `N_SrfExtractIsoCrv` fail
-/// there; `SmBSplineSurface::CreateIsoParametricCurve` ignores that and returns the
-/// calloc'd, all-zero (zero-weight) curve, which `CalculateContinuities` (test 4) then
-/// evaluates. The port's `create_iso_parametric_curve` returns the error instead
-/// (`plan/findings/surface.surface_assert_valid--iso-curve-at-overfull-knot.md`), so
-/// such surfaces are not compared.
-fn iso_extraction(k: &[f64], degree: usize) -> Result<(), FfiError> {
-    let m = mults(k);
-    let interior = m.get(1..m.len().saturating_sub(1)).unwrap_or(&[]);
-    if interior.iter().any(|&x| x > degree as i64) {
-        return Err(bad("interior knot multiplicity above the degree"));
-    }
-    Ok(())
-}
-
 /// `SmBSplineSurface::HasInternalPole` indexes the control net from the knot
 /// multiplicities; interior knots of high multiplicity (or unclamped ends) send it
 /// outside the net (undefined behaviour). Rejects every block whose index arithmetic
@@ -225,8 +210,6 @@ fn check(block: &[f64]) -> Result<(), FfiError> {
         knots(&ku)?;
         knots(&kv)?;
         internal_pole_indices(&ku, &kv, p, q, nu, nv)?;
-        iso_extraction(&ku, p)?;
-        iso_extraction(&kv, q)?;
         points(&mut rd, nu * nv, rational)?;
     } else if kind == 7 {
         rd.vec()?;
@@ -289,7 +272,9 @@ fn check(block: &[f64]) -> Result<(), FfiError> {
                 let d = rd.dom()?;
                 let r = rd.num()?;
                 angular(d[0], d[2])?;
-                if d[1] >= d[3] || d[1] < -90.0 || d[3] > 90.0 || r <= 1e-6 {
+                // (a V interval past a pole is defined: sphere tests 4 and 5 report it)
+                angular(d[1], d[3])?;
+                if r <= 1e-6 {
                     return Err(bad("sphere domain or radius"));
                 }
                 rd.flag()?;
