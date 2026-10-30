@@ -1248,14 +1248,53 @@ impl SurfOfExtrusion {
     /// `SM_ERR` for an order above 5 (`MAXDER`); `SM_ERR_NULL_POINTER` without
     /// generator; those of the generator's evaluation.
     pub fn evaluate_step(&self, k: &Kernel, uv: Point2, hu: usize, hv: usize) -> Result<Vec<Vec3>> {
+        // (an order above the limit is refused before the array is read)
+        let n = if hu <= 5 && hv <= 5 {
+            (hu + 1) * (hv + 1)
+        } else {
+            0
+        };
+        let mut d = vec![Vec3::ZERO; n];
+        self.evaluate_step_into(k, uv, hu, hv, &mut d)?;
+        Ok(d)
+    }
+
+    /// [`Self::evaluate_step`] into the caller's array `d` (`(hu + 1) * (hv + 1)` entries):
+    /// the entries upstream does not write keep the caller's values, as upstream's
+    /// `aDerivatives` does (a fresh `SmVector3d` array holds `SM_UNDEF_DOUBLE`).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::evaluate_step`]; `InvalidInput` when `d` is too short.
+    pub(crate) fn evaluate_step_into(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        hu: usize,
+        hv: usize,
+        d: &mut [Vec3],
+    ) -> Result<()> {
         // check state:
         if hu > MAX_DERIV || hv > MAX_DERIV {
             return Err(SolidError::sm_err(OP_EVAL_STEP));
         }
 
-        // Set zero derivative values - anything with a partial V term
         let n = (hu + 1) * (hv + 1);
-        let mut d = vec![Vec3::ZERO; n];
+        let d = d
+            .get_mut(..n)
+            .ok_or_else(|| SolidError::invalid_input(OP_EVAL_STEP, "derivative array too short"))?;
+
+        // Set zero derivative values - anything with a partial V term (only those to
+        // be set: the rest of the caller's array is left untouched)
+        for i in 0..=hu {
+            for j in 0..=hv {
+                if j > 0 && i + j <= hu && i + j <= hv {
+                    if let Some(slot) = d.get_mut(i * (hv + 1) + j) {
+                        *slot = Vec3::ZERO;
+                    }
+                }
+            }
+        }
 
         // (per SMLib practice upstream clamps a copy of uv it never reads)
 
@@ -1286,7 +1325,7 @@ impl SurfOfExtrusion {
         for i in 1..=hu {
             set(i * (hv + 1), pv_at(i));
         }
-        Ok(d)
+        Ok(())
     }
 
     /// The point at the STEP parameters `uv` (`EvaluateSTEPPoint`): the generator's

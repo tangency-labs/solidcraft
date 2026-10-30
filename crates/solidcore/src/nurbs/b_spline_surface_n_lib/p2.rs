@@ -35,7 +35,9 @@
 //!   as upstream.
 //! - **`Evaluate`** returns the derivative matrix `D[i][j]` (`i <= u`, `j <= v`
 //!   derivatives) instead of writing the caller's array; entries upstream leaves
-//!   untouched (the lower half with `bOnlyUpperHalf`) are zero. Its flags are an
+//!   untouched (the lower half with `bOnlyUpperHalf`) are zero. The unwritten lower
+//!   half is 0 here and `SM_UNDEF` upstream (a fresh caller's `SmVector3d` array);
+//!   unreachable today (no caller reads it). Its flags are an
 //!   [`EvaluateFlags`] value; the internal `bDoZeroSampling` argument is private.
 //!   `SmSurfaceEval` retains the matrix written before a zero-tangent correction
 //!   failure, because upstream accessors ignore that failure and read the output.

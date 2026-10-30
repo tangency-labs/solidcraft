@@ -1512,6 +1512,124 @@ impl Surface {
         }
     }
 
+    /// [`Surface::evaluate`] into the caller's array `d` (flat, entry
+    /// `i * (highest_v_deriv + 1) + j` the derivative of order `i` in u and `j` in v):
+    /// the entries upstream's evaluation does not write keep the caller's values, as
+    /// upstream's `aDerivatives` does. A curve bounded surface passes the call to its
+    /// basis surface and a STEP surface to its base's `EvaluateSTEP`
+    /// ([`Surface::evaluate_step_into`]); the other kinds write every entry, except
+    /// the lower half when `flags.only_upper_half` is set.
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation; `InvalidInput` when `d` is too short, for a STEP
+    /// surface without base surface, or a chain deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
+    pub fn evaluate_into(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        flags: EvaluateFlags,
+        d: &mut [Vec3],
+    ) -> Result<()> {
+        self.evaluate_into_at(k, uv, highest_u_deriv, highest_v_deriv, flags, d, 0)
+    }
+
+    /// [`Surface::evaluate_step`] into the caller's array `d`, as
+    /// [`Surface::evaluate_into`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::evaluate_into`].
+    pub fn evaluate_step_into(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        highest_u_deriv: usize,
+        highest_v_deriv: usize,
+        flags: EvaluateFlags,
+        d: &mut [Vec3],
+    ) -> Result<()> {
+        self.evaluate_step_into_at(k, uv, highest_u_deriv, highest_v_deriv, flags, d, 0)
+    }
+
+    /// [`Surface::evaluate_into`] at chain depth `depth`.
+    fn evaluate_into_at(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        hu: usize,
+        hv: usize,
+        flags: EvaluateFlags,
+        d: &mut [Vec3],
+        depth: usize,
+    ) -> Result<()> {
+        const OP: &str = "surface::surface::p1::evaluate_into";
+        match self.kind() {
+            // pass the call along
+            SurfaceKind::CurveBounded(s) => {
+                s.basis()
+                    .evaluate_into_at(k, uv, hu, hv, flags, d, nesting_depth(depth, OP)?)
+            }
+            SurfaceKind::Step(s) => {
+                let base = s
+                    .surface()
+                    .ok_or_else(|| SolidError::invalid_input(OP, "STEP surface without base"))?;
+                base.evaluate_step_into_at(k, uv, hu, hv, flags, d, nesting_depth(depth, OP)?)
+            }
+            _ => {
+                let m = self.evaluate(k, uv, hu, hv, flags)?;
+                copy_written(&m, hu, hv, flags.only_upper_half, d, OP)
+            }
+        }
+    }
+
+    /// [`Surface::evaluate_step_into`] at chain depth `depth`.
+    fn evaluate_step_into_at(
+        &self,
+        k: &Kernel,
+        uv: Point2,
+        hu: usize,
+        hv: usize,
+        flags: EvaluateFlags,
+        d: &mut [Vec3],
+        depth: usize,
+    ) -> Result<()> {
+        const OP: &str = "surface::surface::p1::evaluate_step_into";
+        self.check_evaluation_copy_depth(0)?;
+        match self.kind_with_nurb(k)? {
+            SurfaceKind::CurveBounded(s) => {
+                s.basis()
+                    .evaluate_step_into_at(k, uv, hu, hv, flags, d, nesting_depth(depth, OP)?)
+            }
+            // the overrides (the side and half flags are not used)
+            SurfaceKind::Cone(s) => s.evaluate_step_into(uv, hu, hv, d),
+            SurfaceKind::Sphere(s) => s.evaluate_step_into(uv, hu, hv, d),
+            SurfaceKind::Torus(s) => s.evaluate_step_into(uv, hu, hv, d),
+            SurfaceKind::SurfOfRevolution(s) => s.evaluate_step_at_into(k, uv, hu, hv, d),
+            SurfaceKind::SurfOfExtrusion(s) => s.evaluate_step_into(k, uv, hu, hv, d),
+            // pass the call along (the base default, `Evaluate`)
+            SurfaceKind::BSpline(_)
+            | SurfaceKind::Plane(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::SrfInVolume(_) => self.evaluate_into_at(
+                k,
+                uv,
+                hu,
+                hv,
+                EvaluateFlags {
+                    non_zero_tangents: true,
+                    ..flags
+                },
+                d,
+                nesting_depth(depth, OP)?,
+            ),
+        }
+    }
+
     /// [`Surface::evaluate_step`] for a caller that ignores its status: the derivative
     /// array it leaves, `None` when it fails before writing it. A curve bounded surface
     /// passes the caller's array on to its basis surface; the `SmSurfOfRevolution`
@@ -1798,7 +1916,6 @@ impl Surface {
     ///
     /// Those of [`Surface::domain_with_continuity`] and of the context's cache
     /// preparation.
-    #[allow(clippy::too_many_arguments)]
     pub fn domain_with_continuity_with_context<O: Copy + PartialEq>(
         &self,
         k: &Kernel,
@@ -1811,7 +1928,6 @@ impl Surface {
         self.domain_with_continuity_in(k, min_continuity, uv, uv_vector, Some(context), handle)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn domain_with_continuity_in<O: Copy + PartialEq>(
         &self,
         k: &Kernel,
@@ -3941,7 +4057,6 @@ impl<'t, 's, O: SolutionObject> CsGlobalSolver<'t, 's, O> {
 impl<'t, 's, O: SolutionObject> LsiGlobalSolver<'t, 's, O> {
     /// The constructor (`SmLSIGlobalSolver`): one tree, two variables.
     #[must_use]
-    #[allow(clippy::too_many_arguments)] // upstream's constructor arguments
     pub fn new(
         k: &'s Kernel,
         surface_tree: &'t Tree<O>,
@@ -4311,6 +4426,36 @@ impl<'a> SssIntersectEnfo<'a> {
             srf_tangents: [[undef; 2]; 3],
         }
     }
+}
+
+/// Copies an evaluation matrix `m` into the flat caller array `d` (entry
+/// `i * (hv + 1) + j`): every entry, or only the upper half (`i + j <= hu`) when
+/// `only_upper_half` is set, leaving the others untouched.
+fn copy_written(
+    m: &[Vec<Vec3>],
+    hu: usize,
+    hv: usize,
+    only_upper_half: bool,
+    d: &mut [Vec3],
+    op: &'static str,
+) -> Result<()> {
+    for i in 0..=hu {
+        for j in 0..=hv {
+            if only_upper_half && i + j > hu {
+                continue;
+            }
+            let v = m
+                .get(i)
+                .and_then(|row| row.get(j))
+                .copied()
+                .ok_or_else(|| SolidError::invalid_input(op, "evaluation matrix too small"))?;
+            let slot = d
+                .get_mut(i * (hv + 1) + j)
+                .ok_or_else(|| SolidError::invalid_input(op, "derivative array too short"))?;
+            *slot = v;
+        }
+    }
+    Ok(())
 }
 
 /// The next depth of a curve bounded, STEP or volume chain walk, `InvalidInput` past

@@ -69,7 +69,9 @@
 //!   with more `u` than `v` derivatives; the port returns `InvalidInput` there, and
 //!   for derivative orders above `MAX_DERIVATIVE` (upstream writes into a caller-sized
 //!   array; the port allocates it, as `BSplineSurface::evaluate` bounds it).
-//!   Entries upstream leaves untouched are zero.
+//!   Entries upstream leaves untouched are zero: the unwritten lower half is 0 here and
+//!   `SM_UNDEF` upstream (a fresh caller's `SmVector3d` array); unreachable today (no
+//!   caller reads it).
 //! - **`Reparameterize`** computes a new origin only in debug code: the release
 //!   build keeps the old origin while changing the scales and the domain, so the
 //!   analytic plane moves unless the new domain starts where the old one did. The
