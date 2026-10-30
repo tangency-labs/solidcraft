@@ -888,9 +888,12 @@ fn build_scene(
             }
             sc.lines.push(SceneLine { points: e.clone(), color: p.edge, alpha: 1.0, width: 1.2, on_top: false });
         }
-        // The outline of the body where each section plane cuts what the section keeps.
+        // The outline of the body where each section plane cuts what the section keeps, and
+        // where two planes' cuts meet.
         for (i, c) in section.iter().enumerate() {
-            for (a, b) in section_segments(&mesh, c.origin, c.normal).into_iter().filter_map(|(a, b)| outline_part(a, b, &section, i)) {
+            let segments = section_segments(&mesh, c.origin, c.normal);
+            let creases = if section.len() > 1 { section_creases(&segments, &section, i, section_nudge(&mesh)) } else { Vec::new() };
+            for (a, b) in segments.into_iter().filter_map(|(a, b)| outline_part(a, b, &section, i)).chain(creases) {
                 sc.lines.push(SceneLine { points: vec![a, b], color: p.edge, alpha: 1.0, width: 1.6, on_top: false });
             }
         }
@@ -942,8 +945,95 @@ pub fn outline_part(a: Vec3, b: Vec3, planes: &[SectionPlane], own: usize) -> Op
     (lo < hi).then(|| (a + (b - a) * lo, a + (b - a) * hi))
 }
 
-/// How far [`section_segments`] nudges the cut to the kept side.
-fn section_nudge(m: &solidcraft_geom::Mesh) -> f64 {
+/// Where plane `own`'s cut face meets a later plane's inside the body: on the line the two
+/// planes cross on, where `segments` (plane `own`'s cut of a mesh, from [`section_segments`] or
+/// [`SectionIndex::segments`]) enclose material on both sides of the later plane (one that only
+/// touches the material cuts no face there) and every other plane keeps it. Nudged `eps` to the
+/// kept side of both, as the cut outline is ([`section_nudge`]).
+pub fn section_creases(segments: &[(Vec3, Vec3)], planes: &[SectionPlane], own: usize, eps: f64) -> Vec<(Vec3, Vec3)> {
+    let Some(c) = planes.get(own) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (j, d) in planes.iter().enumerate().skip(own + 1) {
+        let Some(dir) = c.normal.cross(d.normal).normalized() else { continue };
+        let k = c.normal.dot(d.normal);
+        let det = 1.0 - k * k;
+        if det < 1e-12 {
+            continue;
+        }
+        let (h1, h2) = (c.normal.dot(c.origin), d.normal.dot(d.origin));
+        let base = c.normal * ((h1 - h2 * k) / det) + d.normal * ((h2 - h1 * k) / det);
+        let through = |off: f64| material_along(segments, c.normal, d, off, base, dir);
+        for (mut lo, mut hi) in overlap(&through(2.0 * eps), &through(-2.0 * eps)) {
+            for (_, e) in planes.iter().enumerate().filter(|(i, _)| *i != own && *i != j) {
+                let (f, slope) = (e.normal.dot(base - e.origin), e.normal.dot(dir));
+                if slope.abs() < 1e-12 {
+                    if f > 0.0 {
+                        hi = lo;
+                    }
+                } else if slope > 0.0 {
+                    hi = hi.min(-f / slope);
+                } else {
+                    lo = lo.max(-f / slope);
+                }
+            }
+            if lo < hi {
+                let nudge = (c.normal + d.normal) * eps;
+                out.push((base + dir * lo - nudge, base + dir * hi - nudge));
+            }
+        }
+    }
+    out
+}
+
+/// The stretches `t` of the line `base + dir * t` (on plane `d` moved `off` along its normal)
+/// that the cut loops `segments` of the plane with `normal` enclose, in order.
+fn material_along(segments: &[(Vec3, Vec3)], normal: Vec3, d: &SectionPlane, off: f64, base: Vec3, dir: Vec3) -> Vec<(f64, f64)> {
+    // Where the loops cross the line: +1 going into the material.
+    let mut crossings: Vec<(f64, i32)> = segments
+        .iter()
+        .filter_map(|&(a, b)| {
+            let (da, db) = (d.normal.dot(a - d.origin) - off, d.normal.dot(b - d.origin) - off);
+            if (da < 0.0) == (db < 0.0) {
+                return None;
+            }
+            let at = a + (b - a) * (da / (da - db));
+            let into = (b - a).cross(normal).dot(dir) > 0.0;
+            Some((dir.dot(at - base), if into { 1 } else { -1 }))
+        })
+        .collect();
+    crossings.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (mut inside, mut start, mut out) = (0, 0.0, Vec::new());
+    for (t, step) in crossings {
+        let was = inside;
+        inside += step;
+        if was <= 0 && inside > 0 {
+            start = t;
+        } else if was > 0 && inside <= 0 {
+            out.push((start, t));
+        }
+    }
+    out
+}
+
+/// Where two lists of ordered, separate stretches overlap.
+fn overlap(a: &[(f64, f64)], b: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    let (mut i, mut j, mut out) = (0, 0, Vec::new());
+    while let (Some(&(a0, a1)), Some(&(b0, b1))) = (a.get(i), b.get(j)) {
+        let (lo, hi) = (a0.max(b0), a1.min(b1));
+        if lo < hi {
+            out.push((lo, hi));
+        }
+        if a1 < b1 {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    out
+}
+
+/// How far [`section_segments`] nudges the cut of `m` to the kept side.
+pub fn section_nudge(m: &solidcraft_geom::Mesh) -> f64 {
     1e-4 * (1.0 + m.bounds().diagonal())
 }
 
@@ -1010,6 +1100,11 @@ impl SectionIndex {
             }
         }
         index
+    }
+
+    /// How far its segments are nudged to the kept side ([`section_nudge`]).
+    pub fn nudge(&self) -> f64 {
+        self.eps
     }
 
     /// The normal this index was made for.

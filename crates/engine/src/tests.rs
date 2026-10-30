@@ -2072,6 +2072,44 @@ fn section_index_cuts_like_every_triangle() {
     }
 }
 
+/// Where two planes' cut faces meet inside the body, the picture draws the line between them,
+/// as wide as the cut outline: along the line the planes cross on, only through the material
+/// and where every other plane keeps it. A third plane shortens it and meets both cuts; planes
+/// crossing outside the body draw none.
+#[test]
+fn section_creases_are_drawn_where_two_cuts_meet() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true}));
+    // How much of the cut-width lines lies along `a`-`b`.
+    let along = |s: &Session, a: Vec3, b: Vec3| -> f64 {
+        let cam = view::home_camera(s);
+        let near = |p: Vec3| p.dist_to_segment(a, b) < 0.02;
+        let lines = view::scene_with_section(s, &cam, &s.section).lines;
+        let on: Vec<&[Vec3]> = lines.iter().filter(|l| l.width == 1.6 && l.points.iter().all(|p| near(*p))).map(|l| &l.points[..]).collect();
+        on.iter().flat_map(|p| p.windows(2)).map(|w| w[0].dist(w[1])).sum()
+    };
+    let v = |x: f64, y: f64, z: f64| Vec3::new(x, y, z);
+    assert!((along(&s, v(20.0, 15.0, 0.0), v(20.0, 15.0, 20.0)) - 20.0).abs() < 0.05, "the two cuts' shared edge");
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [0, 0, 14], "normal": [0, 0, 1]}, "add": true}));
+    for (a, b, length) in [
+        (v(20.0, 15.0, 0.0), v(20.0, 15.0, 20.0), 14.0),
+        (v(-5.0, 15.0, 14.0), v(25.0, 15.0, 14.0), 20.0),
+        (v(20.0, 10.0, 14.0), v(20.0, 35.0, 14.0), 15.0),
+    ] {
+        let drawn = along(&s, a, b);
+        assert!((drawn - length).abs() < 0.05, "{a:?} to {b:?}: {drawn} mm drawn, {length} mm wanted");
+    }
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [0, -5, 0], "normal": [0, -1, 0]}}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true}));
+    assert_eq!(along(&s, v(20.0, -5.0, -10.0), v(20.0, -5.0, 30.0)), 0.0, "no crease outside the body");
+    // Parallel planes have no line in common.
+    let parallel = [Vec3::X, -Vec3::X].map(|normal| SectionPlane { id: 1, origin: Vec3::new(20.0, 0.0, 0.0), normal });
+    let segments = view::section_segments(&s.model.state().bodies[0].mesh(), parallel[0].origin, parallel[0].normal);
+    assert!(view::section_creases(&segments, &parallel, 0, 1e-3).is_empty());
+}
+
 /// Press Pull: positive pulls a face out, negative pushes it in (a cut), edges get a fillet.
 #[test]
 fn press_pull() {

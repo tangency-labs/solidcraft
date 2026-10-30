@@ -1637,8 +1637,8 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
         ground_shadow(&mut sc, app, &st);
     }
-    // Section: the outline of each body where each plane cuts what the section hides, in the
-    // view's text colour (#4146).
+    // Section: the outline of each body where each plane cuts what the section keeps, and where
+    // two planes' cuts meet, in the view's text colour (#4146).
     let planes = section_planes(app);
     if !planes.is_empty() {
         let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
@@ -1660,10 +1660,10 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
                     Some((_, index)) => index,
                     None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh, n)),
                 };
-                for (a, c) in index.segments(&mesh, o) {
-                    if let Some((a, c)) = solidcraft_engine::view::outline_part(a, c, &planes, i) {
-                        sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
-                    }
+                let segments = index.segments(&mesh, o);
+                let creases = solidcraft_engine::view::section_creases(&segments, &planes, i, index.nudge());
+                for (a, c) in segments.into_iter().filter_map(|(a, c)| solidcraft_engine::view::outline_part(a, c, &planes, i)).chain(creases) {
+                    sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
                 }
                 made.insert(key, (mesh, index));
             }
@@ -7770,6 +7770,30 @@ mod tests {
         let (view, window) = (Tokens::light().text.gamma_multiply(0.9), Tokens::dark().text.gamma_multiply(0.9));
         assert!(colours.contains(&c4(view)), "the outlines in the view's text colour");
         assert!(!colours.contains(&c4(window)), "none in the window's");
+    }
+
+    /// Where two planes' cut faces meet inside the body, the viewport draws the line between
+    /// them with the cut outlines, so the kept corner reads as two faces, not one flat shape.
+    #[test]
+    fn a_section_draws_where_two_cuts_meet() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("inspect.section", json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}})).unwrap();
+        h.app.run("inspect.section", json!({"plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}, "add": true})).unwrap();
+        let scene = build_scene(&h.app);
+        let outline = c4(Tokens::view().text.gamma_multiply(0.9));
+        let f = |b: &[u8]| f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        let crease: f64 = scene
+            .lines
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .filter(|l| scene.palette.get(crate::gpu::PaletteIndex(u32::from_le_bytes([l[24], l[25], l[26], l[27]]))) == Some(outline))
+            .map(|l| [0, 12].map(|at| Vec3::new(f(&l[at..]), f(&l[at + 4..]), f(&l[at + 8..]))))
+            .filter(|[a, b]| [a, b].iter().all(|p| p.dist_to_segment(Vec3::new(20.0, 15.0, 0.0), Vec3::new(20.0, 15.0, 20.0)) < 0.02))
+            .map(|[a, b]| a.dist(b))
+            .sum();
+        assert!((crease - 20.0).abs() < 0.05, "{crease} mm of the cuts' shared edge drawn");
     }
 
     /// The view's picture is cut by the section the viewport shows: an open Section Analysis
