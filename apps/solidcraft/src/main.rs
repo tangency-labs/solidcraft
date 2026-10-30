@@ -38,6 +38,8 @@ mod nav_bridge;
 mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
+#[cfg(target_os = "macos")]
+mod space_mouse_macos;
 mod startup;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
@@ -91,8 +93,10 @@ struct App {
     come_forward: come_forward::ComeForward,
     /// The graphics device: lost, it can't draw again (`App::watch_device`, #4172).
     gpu: Option<LostWatch>,
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     space_mouse: space_mouse::SpaceMouse,
+    #[cfg(target_os = "macos")]
+    space_mouse: space_mouse_macos::SpaceMouse,
     #[cfg(target_os = "macos")]
     native_menu: Option<native_menu::NativeMenu>,
     /// A device's own app moving the view (Preferences › Navigation, off by default).
@@ -161,10 +165,12 @@ impl eframe::App for App {
         }
         self.solve.logic(ctx);
         self.dialog_folder.design(self.solve.session.path.as_deref());
-        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
         if !self.solve.file_picker_busy() {
             self.space_mouse.tick(&mut self.solve, ctx);
         }
+        #[cfg(target_os = "macos")]
+        self.space_mouse.tick(&mut self.solve, ctx);
         // Every frame, so switching the bridge off reaches the reader while a picker is open too.
         self.nav_bridge.tick(&mut self.solve, ctx);
         if self.solve.quit_requested {
@@ -193,6 +199,8 @@ impl eframe::App for App {
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, self.solve.prefs());
     }
     fn on_exit(&mut self) {
+        #[cfg(target_os = "macos")]
+        self.space_mouse.stop();
         // The agent chat's agent and everything it started end with the app.
         solidcraft_ui_egui::agent_chat::shutdown(&mut self.solve);
         // A save still being written ends before the app does.
@@ -1082,7 +1090,16 @@ fn main() -> eframe::Result {
             }
             let nav_bridge = nav_bridge::NavBridge::start(&cc.egui_ctx);
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
-            let space_mouse = space_mouse::SpaceMouse::start(&cc.egui_ctx, nav_bridge.claim());
+            let space_mouse = {
+                #[cfg(target_os = "macos")]
+                {
+                    space_mouse_macos::SpaceMouse::start(&cc.egui_ctx, nav_bridge.claim())
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    space_mouse::SpaceMouse::start(&cc.egui_ctx, nav_bridge.claim())
+                }
+            };
             #[cfg(target_os = "macos")]
             let native_menu = match native_menu::NativeMenu::new(&app, &cc.egui_ctx) {
                 Ok(menu) => Some(menu),

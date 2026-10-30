@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.3d_mouse_driver_settings": "Use 3Dconnexion Settings for navigation speed, axis directions, navigation mode and button assignments.",
+    "ui.3d_mouse_navlib": "Use 3Dconnexion Navigation Library",
+    "ui.3d_mouse_navlib_restart": "Restart SolidCraft after changing this setting. Turn it off to use the built-in driver-client/HID backend."
+  },
+  "de": {
+    "ui.3d_mouse_driver_settings": "Geschwindigkeit, Achsenrichtungen, Navigationsmodus und Tastenbelegung in den 3Dconnexion-Einstellungen ändern.",
+    "ui.3d_mouse_navlib": "3Dconnexion Navigation Library verwenden",
+    "ui.3d_mouse_navlib_restart": "SolidCraft nach einer Änderung neu starten. Ausschalten, um den integrierten Treiberclient/HID zu verwenden."
+  },
+  "ja": {
+    "ui.3d_mouse_driver_settings": "移動速度、軸の方向、ナビゲーションモード、ボタン割り当ては3Dconnexion設定で変更します。",
+    "ui.3d_mouse_navlib": "3Dconnexion Navigation Libraryを使用",
+    "ui.3d_mouse_navlib_restart": "変更後はSolidCraftを再起動してください。オフにすると内蔵のドライバークライアント/HIDを使用します。"
+  },
+  "zh": {
+    "ui.3d_mouse_driver_settings": "请在3Dconnexion设置中调整导航速度、轴方向、导航模式和按钮分配。",
+    "ui.3d_mouse_navlib": "使用3Dconnexion Navigation Library",
+    "ui.3d_mouse_navlib_restart": "更改此设置后请重启SolidCraft。关闭后使用内置驱动客户端/HID后端。"
+  },
+  "ko": {
+    "ui.3d_mouse_driver_settings": "탐색 속도, 축 방향, 탐색 모드와 버튼 할당은 3Dconnexion 설정에서 변경하세요.",
+    "ui.3d_mouse_navlib": "3Dconnexion Navigation Library 사용",
+    "ui.3d_mouse_navlib_restart": "설정 변경 후 SolidCraft를 다시 시작하세요. 끄면 내장 드라이버 클라이언트/HID를 사용합니다."
+  },
+  "ar": {
+    "ui.3d_mouse_driver_settings": "استخدم إعدادات 3Dconnexion لضبط سرعة التنقل واتجاهات المحاور ووضع التنقل وتعيينات الأزرار.",
+    "ui.3d_mouse_navlib": "استخدام مكتبة التنقل 3Dconnexion",
+    "ui.3d_mouse_navlib_restart": "أعد تشغيل SolidCraft بعد تغيير هذا الإعداد. أوقفه لاستخدام عميل برنامج التشغيل/HID المدمج."
+  },
+  "he": {
+    "ui.3d_mouse_driver_settings": "השתמשו בהגדרות 3Dconnexion עבור מהירות הניווט, כיווני הצירים, מצב הניווט והקצאת הכפתורים.",
+    "ui.3d_mouse_navlib": "שימוש בספריית הניווט של 3Dconnexion",
+    "ui.3d_mouse_navlib_restart": "יש להפעיל מחדש את SolidCraft לאחר שינוי ההגדרה. כיבוי משתמש בלקוח מנהל ההתקן/HID המובנה."
+  },
+  "vi": {
+    "ui.3d_mouse_driver_settings": "Dùng Cài đặt 3Dconnexion để điều chỉnh tốc độ điều hướng, hướng trục, chế độ và gán nút.",
+    "ui.3d_mouse_navlib": "Dùng thư viện điều hướng 3Dconnexion",
+    "ui.3d_mouse_navlib_restart": "Khởi động lại SolidCraft sau khi đổi cài đặt. Tắt để dùng trình khách trình điều khiển/HID tích hợp."
+  }
+}

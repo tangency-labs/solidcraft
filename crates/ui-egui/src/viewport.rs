@@ -181,6 +181,10 @@ pub struct ViewportState {
     /// The 3D mouse's motion this frame, for the page showing the camera to apply with what its
     /// camera may do (`navigation::device`).
     pub device_motion: Option<crate::space_mouse::DeviceMotion>,
+    /// A native navigation driver's complete camera, consumed by the active page.
+    pub device_camera: Option<Camera>,
+    /// The native driver owns the cap's speed, axes and button assignments.
+    pub space_mouse_driver_settings: bool,
     /// A device app's motion since the page last took it (`space_mouse::bridge_frame`), applied
     /// the same way.
     pub bridge_motion: Option<crate::space_mouse::BridgeMotion>,
