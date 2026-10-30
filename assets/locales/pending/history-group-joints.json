@@ -1,0 +1,34 @@
+{
+  "en": {
+    "prefs.history_group_joints": "Group joints in the History",
+    "prefs.history_group_joints_note": "Two or more joints show as one button with their count, and a click shows each one. Off shows each joint."
+  },
+  "ja": {
+    "prefs.history_group_joints": "履歴でジョイントをまとめる",
+    "prefs.history_group_joints_note": "2つ以上のジョイントを、数を添えた1つのボタンにまとめます。クリックすると各ジョイントを表示します。オフにすると各ジョイントを個別に表示します。"
+  },
+  "zh": {
+    "prefs.history_group_joints": "在历史中将关节分组",
+    "prefs.history_group_joints_note": "两个或更多关节显示为一个带数量的按钮，单击即可显示每个关节。关闭后逐个显示每个关节。"
+  },
+  "de": {
+    "prefs.history_group_joints": "Gelenke im Verlauf gruppieren",
+    "prefs.history_group_joints_note": "Zwei oder mehr Gelenke erscheinen als eine Schaltfläche mit ihrer Anzahl; ein Klick zeigt jedes einzeln. Aus zeigt jedes Gelenk einzeln."
+  },
+  "ko": {
+    "prefs.history_group_joints": "이력에서 조인트 묶기",
+    "prefs.history_group_joints_note": "조인트가 두 개 이상이면 개수가 표시된 버튼 하나로 묶고, 클릭하면 각 조인트를 표시합니다. 끄면 각 조인트를 하나씩 표시합니다."
+  },
+  "ar": {
+    "prefs.history_group_joints": "تجميع المفاصل في السجل",
+    "prefs.history_group_joints_note": "يظهر مفصلان أو أكثر كزر واحد مع عددها، والنقر عليه يُظهر كل مفصل. عند الإيقاف يظهر كل مفصل على حدة."
+  },
+  "he": {
+    "prefs.history_group_joints": "קיבוץ מפרקים בציר הזמן",
+    "prefs.history_group_joints_note": "שני מפרקים או יותר מוצגים ככפתור אחד עם מספרם, ולחיצה מציגה כל אחד מהם. כשהאפשרות כבויה, כל מפרק מוצג בנפרד."
+  },
+  "vi": {
+    "prefs.history_group_joints": "Nhóm các khớp nối trong Lịch sử",
+    "prefs.history_group_joints_note": "Từ hai khớp nối trở lên hiện thành một nút kèm số lượng, nhấp vào để hiện từng khớp nối. Khi tắt, mỗi khớp nối hiện riêng."
+  }
+}

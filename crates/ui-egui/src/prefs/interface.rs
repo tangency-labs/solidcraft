@@ -234,6 +234,11 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         let check = setting::history_play_button(app, ui).on_hover_text(app.tr("prefs.history_play_button_note"));
                         crate::scenario::publish_target("prefs:history_play_button", check.rect);
                     });
+                    // A design's joints as one button in the History, from the second joint (#8884).
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::history_group_joints(app, ui).on_hover_text(app.tr("prefs.history_group_joints_note"));
+                        crate::scenario::publish_target("prefs:history_group_joints", check.rect);
+                    });
                     ui_kit::row(ui, app.tr("prefs.browser"), |ui| {
                         ui.add_enabled_ui(app.ui.layout == crate::shell::LayoutMode::Floating, |ui| {
                             let mut selected = usize::from(app.preferences.browser_float);

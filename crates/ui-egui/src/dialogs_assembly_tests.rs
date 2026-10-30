@@ -1141,6 +1141,36 @@ fn many_joints_start_grouped_in_the_timeline() {
     assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking it again groups them");
 }
 
+/// With "Group joints in the History" off, the History shows each joint as it did before: no
+/// grouped button, a tile for every joint, and the left History's JOINTS header without a count.
+#[test]
+fn joints_show_one_by_one_when_their_grouping_is_off() {
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("A", 0), ("B", 30)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({ "name": name })).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
+    for name in ["Held", "Held again"] {
+        h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": name})).unwrap();
+    }
+    h.frames(2);
+    assert!(crate::scenario::handle_at("timeline:joints").is_some(), "two joints start grouped by default");
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": false}))["ok"], true);
+    h.frames(2);
+    assert!(joints_open(&h.app, 2, JointRun::Loose), "each joint shows");
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "no grouped button");
+    for name in ["Held", "Held again"] {
+        assert!(crate::scenario::handle_at(&format!("timeline-joint:{name}")).is_some(), "{name} has its own tile");
+    }
+    assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
+    h.frames(2);
+    assert!(!joints_open(&h.app, 2, JointRun::Loose), "turned back on, they group again");
+    assert!(crate::scenario::handle_at("timeline-joint:Held").is_none());
+}
+
 /// The grouped joints' arrow has a well of its own at the button's end: it lights up only under
 /// the pointer, and clicking it shows and hides the joints like the rest of the button.
 #[test]
