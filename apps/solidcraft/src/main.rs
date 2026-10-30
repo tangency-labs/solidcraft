@@ -38,6 +38,7 @@ mod nav_bridge;
 mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
+mod splash;
 mod startup;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
@@ -81,6 +82,8 @@ fn mark(step: &str) {
 
 struct App {
     solve: SolveApp,
+    /// Desktop startup splash screen shown before transitioning into the main window.
+    splash: Option<splash::Splash>,
     /// The settings folder whose start marker the first frame clears (`startup::started`).
     starting: Option<std::path::PathBuf>,
     /// Frames begun; the second one means the first was drawn (startup is over).
@@ -107,7 +110,7 @@ impl eframe::App for App {
             self.frames += 1;
             // Before the window is shown: its title bar must be within reach (window_fit.rs).
             #[cfg(target_os = "windows")]
-            if self.frames == 1 {
+            if self.frames == 1 && self.splash.is_none() {
                 fit_window_to_work_area(ctx, _frame);
             }
             mark(if self.frames == 1 { "first frame begins" } else { "second frame begins (first presented)" });
@@ -137,6 +140,12 @@ impl eframe::App for App {
             }
         }
         self.watch_device();
+        if let Some(splash) = &mut self.splash {
+            if splash.tick(ctx, self.solve.custom_titlebar) {
+                return;
+            }
+            self.splash = None;
+        }
         // The design on screen is the one whose commands a crash report replays.
         self.solve.session.crash_journal = solidcraft_engine::crash::enabled();
         // The OS closing the window (Alt+F4, Cmd+Q, the window manager): ask about unsaved
@@ -187,6 +196,10 @@ impl eframe::App for App {
         self.solve.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(splash) = &mut self.splash {
+            splash.ui(ui);
+            return;
+        }
         content_ui(&mut self.solve, ui);
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -738,24 +751,22 @@ const STENCIL_BITS: u8 = 8;
 const MSAA: u16 = 4;
 
 /// `custom_titlebar`: no OS decorations, the application bar is the title bar.
-fn app_viewport(custom_titlebar: bool) -> Result<egui::ViewportBuilder, eframe::Error> {
+fn app_viewport(custom_titlebar: bool, splash: bool) -> Result<egui::ViewportBuilder, eframe::Error> {
     // Let macOS use the bundle's layered icon; eframe's default bitmap would replace it.
     #[cfg(target_os = "macos")]
     let icon = egui::IconData::default();
     #[cfg(not(target_os = "macos"))]
     let icon =
         egui::IconData { rgba: app_icon::rgba(64).map_err(|e| eframe::Error::AppCreation(std::io::Error::other(e).into()))?, width: 64, height: 64 };
-    Ok(egui::ViewportBuilder::default()
+    let builder = egui::ViewportBuilder::default()
         .with_title("SolidCraft")
         .with_icon(icon)
-        .with_inner_size([1600.0, 1000.0])
-        .with_min_inner_size([960.0, 600.0])
         .with_drag_and_drop(true)
-        .with_decorations(!custom_titlebar)
         .with_fullsize_content_view(true)
         .with_titlebar_shown(false)
         .with_title_shown(false)
-        .with_app_id(APP_ID))
+        .with_app_id(APP_ID);
+    Ok(splash::configure_viewport(builder, custom_titlebar, splash))
 }
 
 /// The window's app id: it names the desktop entry, so it is the packages' reverse-DNS id.
@@ -899,10 +910,17 @@ fn main() -> eframe::Result {
         _ => eframe::wgpu::Backends::all(),
     };
     let custom_titlebar = CUSTOM_TITLEBAR && !startup::system_title_bar(cfg!(target_os = "windows"), started);
+    let prefs_keys = [solidcraft_ui_egui::prefs::STORAGE_KEY, solidcraft_ui_egui::prefs::LEGACY_STORAGE_KEY];
+    let show_splash = !safe_mode && control_port.is_none() && startup::show_splash(settings.as_deref(), &prefs_keys);
+    if show_splash && let Some(dir) = &settings {
+        startup::clear_saved_window(dir);
+    }
     eframe::egui_wgpu::set_startup_hook(startup_step);
     solidcraft_engine::crash::phase("window");
     let options = eframe::NativeOptions {
-        viewport: app_viewport(custom_titlebar)?,
+        viewport: app_viewport(custom_titlebar, show_splash)?,
+        window_builder: if show_splash { Some(Box::new(move |b| splash::configure_viewport(b, custom_titlebar, true))) } else { None },
+        centered: show_splash,
         // The window's pass (egui's) has no depth and one sample: the viewport draws its scene
         // offscreen with its own depth and MSAA, then blits it, so the UI pass pays for neither.
         depth_buffer: 0,
@@ -917,7 +935,7 @@ fn main() -> eframe::Result {
         } else {
             settings.as_ref().map(|d| d.join("app.ron"))
         },
-        persist_window: !safe_mode,
+        persist_window: !safe_mode && !show_splash,
         wgpu_options,
         ..Default::default()
     };
@@ -1121,8 +1139,10 @@ fn main() -> eframe::Result {
             }
             mark("app created");
             solidcraft_engine::crash::phase("first frame");
+            let splash = splash::Splash::new(show_splash && app.preferences.show_splash);
             Ok(Box::new(App {
                 solve: app,
+                splash,
                 starting,
                 frames: 0,
                 take_focus_unwanted: control_port.is_some(),
@@ -1354,19 +1374,23 @@ mod viewport_tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn macos_preserves_the_bundle_icon_instead_of_setting_a_runtime_bitmap() {
-        let viewport = super::app_viewport(super::CUSTOM_TITLEBAR).expect("viewport");
-        assert_eq!(viewport.icon.as_deref(), Some(&eframe::egui::IconData::default()));
-        assert_eq!(viewport.app_id.as_deref(), Some(super::APP_ID));
+        for splash in [false, true] {
+            let viewport = super::app_viewport(super::CUSTOM_TITLEBAR, splash).expect("viewport");
+            assert_eq!(viewport.icon.as_deref(), Some(&eframe::egui::IconData::default()));
+            assert_eq!(viewport.app_id.as_deref(), Some(super::APP_ID));
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn desktop_viewport_supplies_the_original_mark_to_the_window() {
-        let viewport = super::app_viewport(super::CUSTOM_TITLEBAR).expect("viewport");
-        let icon = viewport.icon.expect("running window must have an icon");
-        assert_eq!((icon.width, icon.height), (64, 64));
-        assert_eq!(icon.rgba, super::app_icon::rgba(64).expect("original mark"));
-        assert_eq!(viewport.app_id.as_deref(), Some(super::APP_ID));
+        for splash in [false, true] {
+            let viewport = super::app_viewport(super::CUSTOM_TITLEBAR, splash).expect("viewport");
+            let icon = viewport.icon.expect("running window must have an icon");
+            assert_eq!((icon.width, icon.height), (64, 64));
+            assert_eq!(icon.rgba, super::app_icon::rgba(64).expect("original mark"));
+            assert_eq!(viewport.app_id.as_deref(), Some(super::APP_ID));
+        }
     }
 
     #[test]

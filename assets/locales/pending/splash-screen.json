@@ -1,0 +1,42 @@
+{
+  "ar": {
+    "prefs.show_splash": "إظهار شاشة البداية عند تشغيل SolidCraft",
+    "prefs.splash": "شاشة البداية",
+    "splash.starting": "جارٍ بدء تشغيل SolidCraft…"
+  },
+  "de": {
+    "prefs.show_splash": "Startbildschirm beim Öffnen von SolidCraft anzeigen",
+    "prefs.splash": "Startbildschirm",
+    "splash.starting": "SolidCraft wird gestartet…"
+  },
+  "en": {
+    "prefs.show_splash": "Show splash screen when SolidCraft starts",
+    "prefs.splash": "Splash screen",
+    "splash.starting": "Starting SolidCraft…"
+  },
+  "he": {
+    "prefs.show_splash": "הצג מסך פתיחה בעת הפעלת SolidCraft",
+    "prefs.splash": "מסך פתיחה",
+    "splash.starting": "מפעיל את SolidCraft…"
+  },
+  "ja": {
+    "prefs.show_splash": "SolidCraft の起動時にスプラッシュ画面を表示する",
+    "prefs.splash": "スプラッシュ画面",
+    "splash.starting": "SolidCraft を起動しています…"
+  },
+  "ko": {
+    "prefs.show_splash": "SolidCraft 시작 시 스플래시 화면 표시",
+    "prefs.splash": "스플래시 화면",
+    "splash.starting": "SolidCraft 시작 중…"
+  },
+  "vi": {
+    "prefs.show_splash": "Hiển thị màn hình khởi động khi mở SolidCraft",
+    "prefs.splash": "Màn hình khởi động",
+    "splash.starting": "Đang khởi động SolidCraft…"
+  },
+  "zh": {
+    "prefs.show_splash": "启动 SolidCraft 时显示启动画面",
+    "prefs.splash": "启动画面",
+    "splash.starting": "正在启动 SolidCraft…"
+  }
+}

@@ -38,6 +38,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 &mut app.preferences.reopen_designs,
             );
         });
+        ui_kit::settings_block(ui, app.tr("prefs.splash"), labels, |ui| {
+            ui_kit::checkbox(ui, app.tr("prefs.show_splash"), &mut app.preferences.show_splash);
+        });
         ui_kit::settings_block(ui, app.tr_label("Crash reports"), labels, |ui| {
             ui.horizontal(|ui| {
                 let count = app.crashes.saved_count();

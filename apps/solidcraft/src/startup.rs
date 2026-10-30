@@ -74,6 +74,39 @@ fn app_ron_reads(text: &str, prefs_keys: &[&str]) -> bool {
     prefs_keys.iter().filter_map(|k| kv.get(*k)).all(|p| serde_json::from_str::<serde_json::Value>(p).is_ok_and(|v| v.is_object()))
 }
 
+/// Whether the saved preferences in `dir`'s `app.ron` ask for the startup splash screen (`true` by
+/// default when absent or unread). Read before the window opens so [`crate::app_viewport`] can size
+/// the initial viewport for the splash screen.
+pub fn show_splash(dir: Option<&Path>, prefs_keys: &[&str]) -> bool {
+    let Some(dir) = dir else { return true };
+    let Ok(text) = std::fs::read_to_string(dir.join("app.ron")) else { return true };
+    let Ok(kv) = ron::from_str::<std::collections::HashMap<String, String>>(&text) else { return true };
+    for key in prefs_keys {
+        let Some(raw) = kv.get(*key) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else { continue };
+        if let Some(show) =
+            v.get("preferences").and_then(|p| p.get("show_splash")).or_else(|| v.get("show_splash")).and_then(serde_json::Value::as_bool)
+        {
+            return show;
+        }
+    }
+    true
+}
+
+/// Remove eframe's saved `"window"` geometry from `app.ron` before launching with the splash
+/// screen so `eframe` does not overwrite the `560 × 280` splash viewport with the previous main
+/// window's size.
+pub fn clear_saved_window(dir: &Path) {
+    let path = dir.join("app.ron");
+    let Ok(text) = std::fs::read_to_string(&path) else { return };
+    let Ok(mut kv) = ron::from_str::<std::collections::HashMap<String, String>>(&text) else { return };
+    if kv.remove("window").is_some()
+        && let Ok(out) = ron::to_string(&kv)
+    {
+        let _ = std::fs::write(&path, out);
+    }
+}
+
 /// Check the settings files in `dir` before anything reads them: one that doesn't read is moved
 /// aside (the app then starts with defaults for it). Returns a line per file moved.
 pub fn check_settings(dir: &Path, prefs_keys: &[&str]) -> Vec<String> {
@@ -544,6 +577,19 @@ mod tests {
         // A damaged marker counts as none.
         std::fs::write(d.join(MARKER), "zz").unwrap();
         assert_eq!(begin(&d), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn show_splash_reads_from_app_ron_and_defaults_to_true() {
+        let keys = ["solidcraft.prefs", "solvecraft.prefs"];
+        let d = scratch("splash-pref");
+        assert!(show_splash(None, &keys));
+        assert!(show_splash(Some(&d), &keys));
+        std::fs::write(d.join("app.ron"), r#"{"solidcraft.prefs": "{\"preferences\":{\"show_splash\":false}}"}"#).unwrap();
+        assert!(!show_splash(Some(&d), &keys));
+        std::fs::write(d.join("app.ron"), r#"{"solidcraft.prefs": "{\"preferences\":{\"show_splash\":true}}"}"#).unwrap();
+        assert!(show_splash(Some(&d), &keys));
         let _ = std::fs::remove_dir_all(&d);
     }
 

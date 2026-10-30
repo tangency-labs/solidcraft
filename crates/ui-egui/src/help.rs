@@ -10,6 +10,19 @@ use crate::ui_kit::{Container, Surface};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COMMIT: &str = env!("SOLIDCRAFT_COMMIT");
 pub const BUILD_DATE: &str = env!("SOLIDCRAFT_BUILD_DATE");
+
+/// Decode a bounded PNG image into an [`egui::ColorImage`] (used by the desktop splash screen).
+pub fn decode_png(bytes: &[u8], max_width: u32, max_height: u32) -> Option<egui::ColorImage> {
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(max_width);
+    limits.max_image_height = Some(max_height);
+    limits.max_alloc = Some(u64::from(max_width) * u64::from(max_height) * 8);
+    reader.limits(limits);
+    let image = reader.decode().ok()?.to_rgba8();
+    let size = [image.width() as usize, image.height() as usize];
+    Some(egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw()))
+}
 /// The user and developer guide (docs/book, published by .github/workflows/pages.yml).
 pub const DOCS_URL: &str = "https://docs.solidcraft.io/";
 const ATTRIBUTION: &str = include_str!("../../../ATTRIBUTION.md");
