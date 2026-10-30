@@ -14,9 +14,9 @@
 //!   here removes or changes. Release, approval and frozen snapshots build on it later.
 //! - Row and tag ids come from the caller (the design's random ids), never from a counter here, so
 //!   two people adding rows to one drawing never take the same id. An id in use is refused.
-//! - A [`Tag`] (a triangle with the revision in it) is bound to a row by its id and shows its
-//!   revision, or its own text. Deleting a row reports the tags bound to it, which then show the
-//!   revision they had, marked lost.
+//! - A [`Tag`] (a triangle with the revision in it) sits on a sheet, is bound to a row by its id and
+//!   shows its revision, or its own text. Deleting a row reports the tags bound to it, which then
+//!   show the revision they had, marked lost.
 //!
 //! This is the drawing's revision only: the model's revision is its component's part property and
 //! the time of an export is the writer's, and neither is kept or stood in for here.
@@ -26,6 +26,7 @@ use std::collections::{BTreeSet, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::cell::{self, Content, HAlign, Part, Source, check_label, check_text};
+use crate::drawing_view::is_paper_coordinate;
 use crate::table::{self, Column, Heading, RowKind, Table};
 
 /// The most rows a record may have.
@@ -144,6 +145,11 @@ pub struct Tag {
     pub id: u64,
     #[serde(with = "crate::ids")]
     pub row: u64,
+    /// The sheet it sits on.
+    #[serde(with = "crate::ids")]
+    pub sheet: u64,
+    /// Its centre on the sheet, in millimetres from the sheet's lower-left corner.
+    pub at: [f64; 2],
     /// The length of the triangle's side.
     pub size_mm: f64,
     /// Shown in place of the row's revision: an override.
@@ -152,6 +158,19 @@ pub struct Tag {
     /// The revision it showed when its row was deleted.
     #[serde(default)]
     pub lost: Option<String>,
+}
+
+impl Tag {
+    /// A tag's own rules: where it sits, its size and its text.
+    fn check(&self) -> Result<()> {
+        require(self.sheet != 0, "a tag is on a sheet")?;
+        require(self.at.iter().all(|c| is_paper_coordinate(*c)), "a tag is on paper")?;
+        require(TAG_SIZES_MM.contains(&self.size_mm), "a tag's side is 1 to 50 mm")?;
+        if let Some(text) = &self.text {
+            check_label(text).map_err(cell_rule)?;
+        }
+        Ok(())
+    }
 }
 
 /// What a tag shows.
@@ -245,8 +264,8 @@ impl RevisionRecord {
         for tag in &self.tags {
             require(ids.insert(tag.id), "each row and tag has its own id")?;
             require(tag.lost.is_some() || self.rows.iter().any(|r| r.id == tag.row), "a tag is bound to a row")?;
-            require(TAG_SIZES_MM.contains(&tag.size_mm), "a tag's side is 1 to 50 mm")?;
-            for text in tag.text.iter().chain(&tag.lost) {
+            tag.check()?;
+            if let Some(text) = &tag.lost {
                 check_label(text).map_err(cell_rule)?;
             }
         }
@@ -335,13 +354,37 @@ impl RevisionRecord {
         Ok(())
     }
 
-    /// Adds tag `id` bound to a row, at the default size.
-    pub fn add_tag(&mut self, row: u64, id: u64) -> Result<()> {
+    /// Adds tag `id` bound to a row, on `sheet` at `at`, at the default size.
+    pub fn add_tag(&mut self, row: u64, id: u64, sheet: u64, at: [f64; 2]) -> Result<()> {
         require(self.tags.len() < MAX_ISSUED, "a record has at most 10,000 tags")?;
         require(self.rows.iter().any(|r| r.id == row), "no row has that id")?;
         require(!self.id_taken(id), "that id is taken")?;
-        self.tags.push(Tag { id, row, size_mm: DEFAULT_TAG_MM, text: None, lost: None });
+        let tag = Tag { id, row, sheet, at, size_mm: DEFAULT_TAG_MM, text: None, lost: None };
+        tag.check()?;
+        self.tags.push(tag);
         Ok(())
+    }
+
+    /// Changes tag `id` by `change`, which must leave it keeping a tag's rules.
+    pub fn edit_tag(&mut self, id: u64, change: impl FnOnce(&mut Tag)) -> Result<()> {
+        let tag = self.tags.iter_mut().find(|t| t.id == id).ok_or(Invalid("no tag has that id"))?;
+        let mut edited = tag.clone();
+        change(&mut edited);
+        edited.check()?;
+        *tag = edited;
+        Ok(())
+    }
+
+    /// Deletes tag `id`.
+    pub fn delete_tag(&mut self, id: u64) -> Result<()> {
+        let at = self.tags.iter().position(|t| t.id == id).ok_or(Invalid("no tag has that id"))?;
+        self.tags.remove(at);
+        Ok(())
+    }
+
+    /// Deletes the tags `ids` lists, by id: what deleting their sheet takes.
+    pub fn delete_tags(&mut self, ids: &[u64]) {
+        self.tags.retain(|t| !ids.contains(&t.id));
     }
 
     /// What a tag shows.

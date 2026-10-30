@@ -122,7 +122,8 @@ fn a_deleted_row_names_the_tags_it_leaves() {
     let row = add(&mut s, json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let tag = d.allocate_id(&mut s.ids).unwrap();
-    Arc::make_mut(&mut d.revisions).add_tag(ids::decode(&row).unwrap(), tag).unwrap();
+    let sheet = d.sheets[0].id;
+    Arc::make_mut(&mut d.revisions).add_tag(ids::decode(&row).unwrap(), tag, sheet, [10.0, 20.0]).unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     let deleted = run(&mut s, DELETE, json!({"row": row}));
     assert_eq!(deleted["tags_lost"], json!([ids::encode(tag)]));
@@ -286,4 +287,86 @@ fn a_drawing_numbers_its_revisions() {
     // No change makes no step.
     set(&mut s, json!({"start": 0})).unwrap();
     assert_eq!(s.undo.len(), steps);
+}
+
+/// A tag is added on a sheet, shows its row's revision or its own text, moves and is deleted, each
+/// one step. A deleted row leaves it showing what it had. Inspect lists it, it saves and reads back.
+#[test]
+fn a_revision_tag_sits_on_a_sheet_and_shows_its_row() {
+    let mut s = drawing_session();
+    let row = add(&mut s, json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let added = run(&mut s, TAG_ADD, json!({"row": row, "sheet": sheet, "at": [100.0, 50.0]}));
+    let tag = added["tag"].as_str().unwrap().to_string();
+    assert_eq!(
+        added["tags"],
+        json!([{"tag": tag, "row": row, "sheet": sheet, "at": [100.0, 50.0], "size_mm": 5.0, "shows": "1", "lost": false}]),
+        "{added}"
+    );
+    assert_eq!(listed(&mut s)["tags"][0]["tag"], json!(tag));
+
+    let edited = run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"at": [120.0, 60.0], "size_mm": 8.0, "text": "A"}}));
+    assert_eq!(
+        (&edited["tags"][0]["at"], &edited["tags"][0]["size_mm"], &edited["tags"][0]["shows"]),
+        (&json!([120.0, 60.0]), &json!(8.0), &json!("A")),
+        "{edited}"
+    );
+    let cleared = run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"text": null}}));
+    assert_eq!(cleared["tags"][0]["shows"], json!("1"), "{cleared}");
+    let steps = s.undo.len();
+    run(&mut s, TAG_EDIT, json!({"tag": tag, "set": {"text": null}}));
+    assert_eq!(s.undo.len(), steps, "nothing changed, no step");
+
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), *d);
+
+    let gone = run(&mut s, DELETE, json!({"row": row}));
+    assert_eq!((&gone["tags"][0]["shows"], &gone["tags"][0]["lost"]), (&json!("1"), &json!(true)), "{gone}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(listed(&mut s)["tags"][0]["lost"], json!(false), "undo binds it again");
+
+    let deleted = run(&mut s, TAG_DELETE, json!({"tag": tag}));
+    assert_eq!(deleted.get("tags"), None, "{deleted}");
+}
+
+/// A sheet's delete counts its tags as what is on it and takes them with `contents: delete`; a tag
+/// on another sheet stays. An unknown sheet, row or tag, and a place or size past the rules, are
+/// refused with nothing changed.
+#[test]
+fn a_sheets_delete_takes_its_tags_and_hostile_tags_are_refused() {
+    let mut s = drawing_session();
+    let row = add(&mut s, json!({}));
+    let first = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let second = s.execute("drawing.sheet.add", &json!({"name": "Other"})).unwrap()["sheet"].as_str().unwrap().to_string();
+    let on_first = run(&mut s, TAG_ADD, json!({"row": row, "sheet": first, "at": [10.0, 10.0]}))["tag"].clone();
+    let on_second = run(&mut s, TAG_ADD, json!({"row": row, "sheet": "Other", "at": [20.0, 20.0]}))["tag"].clone();
+    // An edit moves a tag to another sheet, by name or id.
+    let moved = run(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"sheet": "Other"}}));
+    assert_eq!(moved["tags"][0]["sheet"], json!(second), "{moved}");
+    run(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"sheet": first}}));
+
+    let held = s.execute("drawing.sheet.delete", &json!({"sheet": second})).unwrap_err().to_string();
+    assert!(held.contains("revision tag"), "{held}");
+    s.execute("drawing.sheet.delete", &json!({"sheet": second, "contents": "delete"})).unwrap();
+    let left = listed(&mut s);
+    assert_eq!(left["tags"].as_array().map(Vec::len), Some(1));
+    assert_eq!(left["tags"][0]["tag"], on_first);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(listed(&mut s)["tags"][1]["tag"], on_second, "undo brings it back");
+
+    for bad in [
+        json!({"row": "0000000000000", "sheet": first, "at": [0.0, 0.0]}),
+        json!({"row": row, "sheet": "no such", "at": [0.0, 0.0]}),
+        json!({"row": row, "sheet": first, "at": [1e300, 0.0]}),
+        json!({"row": row, "sheet": first, "at": [0.0, 0.0], "size_mm": 0.5}),
+        json!({"row": row, "sheet": first, "at": [0.0, 0.0], "size_mm": 51.0}),
+        json!({"row": row, "sheet": first, "at": [0.0, 0.0], "text": "x\ny"}),
+        json!({"row": row, "sheet": first}),
+    ] {
+        refused(&mut s, TAG_ADD, bad);
+    }
+    refused(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"sheet": "no such"}}));
+    refused(&mut s, TAG_EDIT, json!({"tag": on_first, "set": {"at": [1e300, 0.0]}}));
+    refused(&mut s, TAG_EDIT, json!({"tag": "0000000000000", "set": {"at": [0.0, 0.0]}}));
+    refused(&mut s, TAG_DELETE, json!({"tag": "0000000000000"}));
 }
