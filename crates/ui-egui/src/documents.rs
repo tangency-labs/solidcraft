@@ -317,6 +317,11 @@ impl Documents {
         self.slots.iter_mut().filter_map(Option::as_mut)
     }
 
+    /// The background slot (a tab not shown) holding the design with `uid`.
+    pub(crate) fn background_slot_mut(&mut self, uid: u64) -> Option<&mut DocSlot> {
+        self.slots.iter_mut().flatten().find(|slot| slot.session.uid == uid)
+    }
+
     /// The designs in the tabs not shown.
     pub(crate) fn background(&self) -> impl Iterator<Item = &Session> {
         self.slots.iter().filter_map(Option::as_ref).map(|slot| &slot.session)

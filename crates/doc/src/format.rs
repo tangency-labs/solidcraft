@@ -263,6 +263,7 @@ impl From<solidcraft_format::FormatError> for DocError {
     fn from(e: solidcraft_format::FormatError) -> Self {
         match e {
             solidcraft_format::FormatError::Invalid(why) => DocError::Invalid(why),
+            solidcraft_format::FormatError::Cancelled => DocError::Invalid("cancelled".into()),
         }
     }
 }

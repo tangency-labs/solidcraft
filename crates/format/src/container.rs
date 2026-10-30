@@ -37,6 +37,10 @@ pub struct Limits {
     pub level: fn(&str, usize) -> i64,
     /// Whether a container of this many bytes may be read, or why not.
     pub check_size: fn(u64) -> Result<(), String>,
+    /// Whether the work is cancelled (a save the person stopped): a long part is written a piece
+    /// at a time and stops before the next piece when this says so. `None`: it cannot be
+    /// cancelled here.
+    pub cancelled: Option<fn() -> bool>,
 }
 
 fn invalid(message: impl std::fmt::Display) -> FormatError {
@@ -93,7 +97,15 @@ impl Writer {
             .compression_level(compressed.then_some(level))
             .large_file(bytes.len() as u64 >= u64::from(u32::MAX));
         self.zip.start_file(name, options).map_err(invalid)?;
-        self.zip.write_all(bytes).map_err(invalid)
+        // A piece at a time: a long compression (a large mesh or model cache) stops on Cancel
+        // within a piece instead of after the whole part.
+        for piece in bytes.chunks(1 << 20) {
+            if self.limits.cancelled.is_some_and(|cancelled| cancelled()) {
+                return Err(FormatError::Cancelled);
+            }
+            self.zip.write_all(piece).map_err(invalid)?;
+        }
+        Ok(())
     }
 
     /// Would `entries` more optional parts of `extra` bytes, stored uncompressed, still keep the
