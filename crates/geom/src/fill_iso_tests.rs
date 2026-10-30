@@ -217,3 +217,65 @@ fn a_rational_patch_s_derivatives_are_its_differences() {
         assert!(exact.dist(differences) < 1e-5 * exact.len().max(1.0), "∂({du}, {dv}): {exact:?} vs {differences:?}");
     }
 }
+
+/// The four quarter arcs of the circle of radius `r` about z at height `z`, on their NURBS form.
+fn circle_quarters(z: f64, r: f64) -> Vec<IsoEdge> {
+    let f = frame(Vec3::Z * z, Vec3::X, Vec3::Y);
+    let q = std::f64::consts::FRAC_PI_2;
+    (0..4).map(|k| arc(f.clone(), r, [k as f64 * q, (k + 1) as f64 * q], false)).collect()
+}
+
+/// Neighbours given by a normal and a leave direction at each point of the loop.
+fn beside_by<'a>(
+    edges: &'a [IsoEdge],
+    frame_at: impl Fn(Vec3) -> (Vec3, Vec3) + 'a,
+) -> impl FnMut(usize, &[f64]) -> Result<Vec<Option<Across>>, String> + 'a {
+    move |k, ts| {
+        ts.iter()
+            .map(|t| {
+                let p = eval_edge_h(&edges[k], *t).map_err(|e| e.to_string())?.project().ok_or("a point at infinity")?;
+                let (normal, leave) = frame_at(p);
+                Ok(Some(Across { leave, normal, bend: None, jet: None }))
+            })
+            .collect()
+    }
+}
+
+/// Whether any patch of the fill folds (its normal reverses between neighbouring samples).
+fn any_fold(fill: &IsoFill) -> bool {
+    fill.patches.iter().any(|p| {
+        let s = SurfaceEval::new(&Surface::RationalSpline {
+            u_knots: p.surface.knots()[0].clone(),
+            v_knots: p.surface.knots()[1].clone(),
+            homogeneous: (0..p.surface.count()[0])
+                .map(|i| (0..p.surface.count()[1]).map(|j| p.surface.point(i, j)).map(|h| [h.x, h.y, h.z, h.w]).collect())
+                .collect(),
+        })
+        .unwrap();
+        let n = 48;
+        let normal = |i: usize, j: usize| {
+            let (_, su, sv) = s.derivs(i as f64 / n as f64, j as f64 / n as f64).unwrap();
+            su.cross(sv).normalized()
+        };
+        (0..=n).any(|i| {
+            (0..=n).any(|j| {
+                let Some(a) = normal(i, j) else { return false };
+                [(i + 1, j), (i, j + 1)].iter().any(|&(k, l)| k <= n && l <= n && normal(k, l).is_some_and(|b| a.dot(b) <= 0.0))
+            })
+        })
+    })
+}
+
+/// A tube's end: the circle in four quarter arcs, G1 to the tube's wall (its normal radial, the
+/// wall going on upwards). Every corner of the loop is a smooth vertex, where the cross derivative
+/// of one side is the next side's tangent, along the edge itself.
+#[test]
+fn a_tube_end_capped_g1_holds_the_wall_and_does_not_fold() {
+    let edges = circle_quarters(30.0, 10.0);
+    let radial = |p: Vec3| (Vec3::new(p.x, p.y, 0.0).normalized().unwrap(), Vec3::Z);
+    let s = IsoSpec { tol: 2e-5, ..spec() };
+    let fill = iso_fill(&edges, &mut beside_by(&edges, radial), &s).unwrap();
+    eprintln!("tube end g1: {} patches, {:?}", fill.patches.len(), fill.achieved);
+    assert!(fill.achieved.normal_excess <= s.angle_tol);
+    assert!(!any_fold(&fill), "the cap folds");
+}

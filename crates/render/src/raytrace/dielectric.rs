@@ -104,8 +104,13 @@ pub enum Certificate {
     ClosedBox(Bounds),
 }
 
-/// A strict geometric subset, never a trusted mesh.closed flag. Only twelve
-/// outward corner triangles, two complementary halves per box face, qualify.
+/// Most triangles a closed box's boundary may come in (its mesh is read in full, sorting its
+/// edges).
+pub const MAX_BOX_TRIANGLES: usize = 1 << 16;
+
+/// A strict geometric subset, never a trusted mesh.closed flag. A thin sheet is one or two
+/// coplanar triangles; a closed box is a mesh that is exactly the boundary of an axis-aligned
+/// box, in however many triangles ([`certify_box`]).
 pub fn certify(scene: &ProductScene, input: &DielectricOptions) -> Result<Certificate> {
     let body = scene.meshes.get(input.body_index).ok_or(TraceError::InvalidInput("dielectric body ordinal"))?;
     if body.name != input.body_name {
@@ -113,70 +118,105 @@ pub fn certify(scene: &ProductScene, input: &DielectricOptions) -> Result<Certif
     }
     let mesh = &body.mesh;
     let closed = matches!(input.boundary, crate::job::DielectricBoundary::ClosedBox);
-    if (!closed && !(1..=2).contains(&mesh.triangles.len())) || (closed && mesh.triangles.len() != 12) || mesh.positions.len() > 36 {
-        return Err(TraceError::InvalidInput("unsupported dielectric boundary tessellation"));
+    let unsupported = TraceError::InvalidInput("unsupported dielectric boundary tessellation");
+    if closed {
+        if !(12..=MAX_BOX_TRIANGLES).contains(&mesh.triangles.len()) {
+            return Err(unsupported);
+        }
+        return certify_box(mesh);
     }
-    let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
-    let mut hi = -lo;
-    let mut tris = [None; 12];
+    if !(1..=2).contains(&mesh.triangles.len()) || mesh.positions.len() > 36 {
+        return Err(unsupported);
+    }
+    let mut tris = [None; 2];
     for (slot, indices) in tris.iter_mut().zip(&mesh.triangles) {
-        let mut vertices = [Vec3::ZERO; 3];
-        for (v, index) in vertices.iter_mut().zip(indices) {
-            *v = *mesh.positions.get(*index as usize).ok_or(TraceError::InvalidInput("dielectric vertex index"))?;
-            lo = lo.min(*v);
-            hi = hi.max(*v);
-        }
-        let triangle = Triangle::new(vertices)?;
-        if triangle.geometric_normal().is_none() {
-            return Err(TraceError::InvalidInput("degenerate dielectric boundary"));
-        }
+        let triangle = triangle(mesh, indices)?;
         *slot = Some(triangle);
     }
-    if !closed {
-        let first = tris.first().copied().flatten().ok_or(TraceError::InvalidInput("empty thin sheet"))?;
-        let normal = first.geometric_normal().ok_or(TraceError::InvalidInput("thin sheet normal"))?;
-        let [anchor, _, _] = first.vertices();
-        for triangle in tris.into_iter().flatten() {
-            if triangle.geometric_normal() != Some(normal) || triangle.vertices().into_iter().any(|p| (p - anchor).dot(normal) != 0.0) {
-                return Err(TraceError::InvalidInput("thin sheet must be one planar consistently wound surface"));
+    let first = tris.first().copied().flatten().ok_or(TraceError::InvalidInput("empty thin sheet"))?;
+    let normal = first.geometric_normal().ok_or(TraceError::InvalidInput("thin sheet normal"))?;
+    let [anchor, _, _] = first.vertices();
+    for triangle in tris.into_iter().flatten() {
+        if triangle.geometric_normal() != Some(normal) || triangle.vertices().into_iter().any(|p| (p - anchor).dot(normal) != 0.0) {
+            return Err(TraceError::InvalidInput("thin sheet must be one planar consistently wound surface"));
+        }
+    }
+    if let Some(second) = tris.get(1).copied().flatten() {
+        let first = first.vertices();
+        let second = second.vertices();
+        let mut shared = [Vec3::ZERO; 2];
+        let mut shared_count = 0usize;
+        let mut other_first = None;
+        let mut other_second = None;
+        for p in first {
+            if second.contains(&p) {
+                *shared.get_mut(shared_count).ok_or(TraceError::InvalidInput("duplicate thin sheet triangle"))? = p;
+                shared_count += 1;
+            } else {
+                other_first = Some(p);
             }
         }
-        if let Some(second) = tris.get(1).copied().flatten() {
-            let first = first.vertices();
-            let second = second.vertices();
-            let mut shared = [Vec3::ZERO; 2];
-            let mut shared_count = 0usize;
-            let mut other_first = None;
-            let mut other_second = None;
-            for p in first {
-                if second.contains(&p) {
-                    *shared.get_mut(shared_count).ok_or(TraceError::InvalidInput("duplicate thin sheet triangle"))? = p;
-                    shared_count += 1;
-                } else {
-                    other_first = Some(p);
-                }
-            }
-            for p in second {
-                if !first.contains(&p) {
-                    other_second = Some(p);
-                }
-            }
-            let [a, b] = shared;
-            let c = other_first.ok_or(TraceError::InvalidInput("thin sheet shared edge"))?;
-            let d = other_second.ok_or(TraceError::InvalidInput("thin sheet shared edge"))?;
-            if shared_count != 2 || (b - a).cross(c - a).dot(normal) * (b - a).cross(d - a).dot(normal) >= 0.0 {
-                return Err(TraceError::InvalidInput("thin sheet triangles overlap or have no unique shared edge"));
+        for p in second {
+            if !first.contains(&p) {
+                other_second = Some(p);
             }
         }
-        return Ok(Certificate::ThinSheet);
+        let [a, b] = shared;
+        let c = other_first.ok_or(TraceError::InvalidInput("thin sheet shared edge"))?;
+        let d = other_second.ok_or(TraceError::InvalidInput("thin sheet shared edge"))?;
+        if shared_count != 2 || (b - a).cross(c - a).dot(normal) * (b - a).cross(d - a).dot(normal) >= 0.0 {
+            return Err(TraceError::InvalidInput("thin sheet triangles overlap or have no unique shared edge"));
+        }
+    }
+    Ok(Certificate::ThinSheet)
+}
+
+/// The mesh's triangle with these indices, refused where it is degenerate.
+fn triangle(mesh: &solidcraft_geom::Mesh, indices: &[u32; 3]) -> Result<Triangle> {
+    let mut vertices = [Vec3::ZERO; 3];
+    for (v, index) in vertices.iter_mut().zip(indices) {
+        *v = *mesh.positions.get(*index as usize).ok_or(TraceError::InvalidInput("dielectric vertex index"))?;
+    }
+    let triangle = Triangle::new(vertices)?;
+    if triangle.geometric_normal().is_none() {
+        return Err(TraceError::InvalidInput("degenerate dielectric boundary"));
+    }
+    Ok(triangle)
+}
+
+/// A closed box: `mesh` is exactly the boundary of the axis-aligned box its points span, each
+/// point of that boundary covered once, by exact tests on the mesh's coordinates:
+/// - every triangle lies in the plane of one of the box's faces (its three corners on it, its
+///   normal exactly that axis), facing out of the box;
+/// - the triangles make a closed, consistently oriented surface: each edge, between two points
+///   given by their exact coordinates, is run once each way.
+///
+/// Such a surface is a 2-cycle on the box's boundary, a sphere, so it covers every point of the
+/// boundary the same number of times k, with every triangle facing out (k ≥ 1), and its area is
+/// k times the boundary's. k is 1 when the triangles' area is under 1.5 times the boundary's.
+/// The count of triangles is no part of it: a face may come in any tiling.
+fn certify_box(mesh: &solidcraft_geom::Mesh) -> Result<Certificate> {
+    let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut hi = -lo;
+    let mut tris = Vec::new();
+    tris.try_reserve_exact(mesh.triangles.len()).map_err(|_| TraceError::AllocationFailed)?;
+    for indices in &mesh.triangles {
+        let triangle = triangle(mesh, indices)?;
+        for v in triangle.vertices() {
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+        tris.push(triangle);
     }
     if lo.x >= hi.x || lo.y >= hi.y || lo.z >= hi.z {
         return Err(TraceError::InvalidInput("closed box needs positive extents"));
     }
     let bounds = Bounds::new(lo, hi)?;
-    let mut masks = [[0u8; 2]; 6];
-    let mut counts = [0usize; 6];
-    for triangle in tris.into_iter().flatten() {
+    let mut edges: Vec<([u64; 3], [u64; 3])> = Vec::new();
+    edges.try_reserve_exact(tris.len() * 3).map_err(|_| TraceError::AllocationFailed)?;
+    let key = |p: Vec3| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()];
+    let mut area = 0.0;
+    for triangle in &tris {
         let vertices = triangle.vertices();
         let n = triangle.geometric_normal().ok_or(TraceError::InvalidInput("box normal"))?;
         let axis = if n.x.abs() == 1.0 {
@@ -190,41 +230,23 @@ pub fn certify(scene: &ProductScene, input: &DielectricOptions) -> Result<Certif
         };
         let positive = super::component(n, axis) > 0.0;
         let plane = super::component(if positive { hi } else { lo }, axis);
-        let face = axis * 2 + usize::from(positive);
-        let mut mask = 0u8;
-        for p in vertices {
-            if super::component(p, axis) != plane {
-                return Err(TraceError::InvalidInput("box winding or face plane"));
-            }
-            let mut corner = 0;
-            for (bit, a) in [(0, (axis + 1) % 3), (1, (axis + 2) % 3)] {
-                let value = super::component(p, a);
-                if value == super::component(hi, a) {
-                    corner |= 1 << bit;
-                } else if value != super::component(lo, a) {
-                    return Err(TraceError::InvalidInput("box vertex is not a corner"));
-                }
-            }
-            mask |= 1 << corner;
+        if vertices.iter().any(|p| super::component(*p, axis) != plane) {
+            return Err(TraceError::InvalidInput("box winding or face plane"));
         }
-        let count = counts.get_mut(face).ok_or(TraceError::Internal("box face count"))?;
-        let target = masks.get_mut(face).and_then(|pair| pair.get_mut(*count)).ok_or(TraceError::InvalidInput("too many box face triangles"))?;
-        *target = mask;
-        *count += 1;
+        let [a, b, c] = vertices;
+        area += (b - a).cross(c - a).len() * 0.5;
+        edges.extend([(key(a), key(b)), (key(b), key(c)), (key(c), key(a))]);
     }
-    for (count, [a, b]) in counts.into_iter().zip(masks) {
-        // Three distinct corners each; missing corners must be opposite. Thus
-        // both triangles share a diagonal and tile, rather than overlap.
-        let missing_a = (!a) & 15;
-        let missing_b = (!b) & 15;
-        if count != 2
-            || a.count_ones() != 3
-            || b.count_ones() != 3
-            || (a | b) != 15
-            || !matches!((missing_a, missing_b), (1, 8) | (8, 1) | (2, 4) | (4, 2))
-        {
-            return Err(TraceError::InvalidInput("incomplete or ambiguous closed box face"));
-        }
+    // Each edge run once each way: sorted, every directed edge is there once and so is its
+    // reverse.
+    edges.sort_unstable();
+    if edges.windows(2).any(|w| w[0] == w[1]) || edges.iter().any(|(a, b)| edges.binary_search(&(*b, *a)).is_err()) {
+        return Err(TraceError::InvalidInput("incomplete or ambiguous closed box face"));
+    }
+    let size = hi - lo;
+    let boundary = 2.0 * (size.x * size.y + size.y * size.z + size.z * size.x);
+    if !(area < 1.5 * boundary) {
+        return Err(TraceError::InvalidInput("closed box boundary covered more than once"));
     }
     Ok(Certificate::ClosedBox(bounds))
 }

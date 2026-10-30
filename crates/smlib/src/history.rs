@@ -178,10 +178,11 @@ impl Raw {
                 }
             };
             let origins = if e.origins.is_empty() {
-                // New: where its two faces meet, each side what that face came from.
+                // New: where its two faces meet, each side what that face came from. Between two
+                // pieces of one face (a split line) nothing met: it comes from nothing.
                 let side = |f: usize| faces.get(f).and_then(|p| Side::new(p.origins.iter().copied()));
                 match bounds.as_slice() {
-                    [a, b] => side(*a).zip(side(*b)).map(|(a, b)| EdgeOrigin::meet(a, b)).into_iter().collect(),
+                    [a, b] => side(*a).zip(side(*b)).filter(|(a, b)| a != b).map(|(a, b)| EdgeOrigin::meet(a, b)).into_iter().collect(),
                     _ => Vec::new(),
                 }
             } else {

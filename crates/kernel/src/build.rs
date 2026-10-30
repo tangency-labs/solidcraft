@@ -827,12 +827,23 @@ fn smlib_tapered(plane: &Plane, region: &Region2, from: f64, to: f64, foot: f64,
         return Err(KernelError::Invalid("a tapered extrusion needs a taper".into()));
     };
     let holes: Vec<NumberedLoop> = joined.holes.iter().map(|h| section(h, from, -taper)).collect::<Result<_>>()?;
+    // A loop's section `at` as it is there: a line the offset swallows is gone, its neighbours
+    // meeting where it was (its wall closes on the way; whether that wall is built is the
+    // draft's to say).
+    let shape = |l: &NumberedLoop, at: f64, taper: f64| -> Result<NumberedLoop> {
+        let ccw = l.oriented(false);
+        if at == 0.0 || taper == 0.0 {
+            return Ok(ccw);
+        }
+        let segs: Vec<Seg2> = offset_loop(&ccw.lp, at * taper.tan())?.into_iter().flatten().collect();
+        Ok(NumberedLoop { lp: Loop2 { segs }, from: ccw.from })
+    };
     // The sections where the walls are farthest moved, the two ends: each hole stays inside the
     // outer loop and clear of the other holes there (the walls are planes, cones and their like,
     // which move monotonically in between).
     for at in [from, to] {
-        let o = section(&joined.outer, at, taper)?;
-        let hs: Vec<NumberedLoop> = joined.holes.iter().map(|h| section(h, at, -taper)).collect::<Result<_>>()?;
+        let o = shape(&joined.outer, at, taper)?;
+        let hs: Vec<NumberedLoop> = joined.holes.iter().map(|h| shape(h, at, -taper)).collect::<Result<_>>()?;
         let pts = |l: &NumberedLoop| l.lp.segs.iter().flat_map(|s| s.polyline(1e-3)).collect::<Vec<Vec2>>();
         // Apart: no point of either inside the other.
         let apart = |a: &NumberedLoop, b: &NumberedLoop| !pts(a).iter().any(|p| b.lp.contains(*p)) && !pts(b).iter().any(|p| a.lp.contains(*p));

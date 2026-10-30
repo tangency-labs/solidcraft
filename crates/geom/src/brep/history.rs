@@ -119,7 +119,8 @@ pub enum EdgeOrigin {
 }
 
 /// A result edge: the result faces it separates and what it came from (empty when it is new
-/// and lies between faces new to the operation).
+/// and lies between faces new to the operation, or between two pieces of one face: a split
+/// line).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EdgeProv {
     pub faces: Vec<usize>,
