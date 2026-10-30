@@ -22,6 +22,9 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 chardetng = { workspace = true }
 encoding_rs = { workspace = true }
+# Sheet PNGs (src/paper/png.rs).
+png = { workspace = true }
+tiny-skia = { workspace = true }
 
 # A plain fsync where a network share refuses Apple's full flush (src/safe_write.rs); already in
 # the tree through tempfile.

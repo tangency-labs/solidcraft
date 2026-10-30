@@ -359,13 +359,13 @@ mod tests {
             .iter()
             .filter_map(|i| match i {
                 Item::Stroke { path, closed, width_mm } => Some((path.len(), *closed, *width_mm)),
-                Item::Fill { .. } => None,
+                Item::Fill { .. } | Item::Picture(_) => None,
             })
             .collect();
         assert_eq!(strokes, [(2, false, 0.5), (1, true, 0.5), (3, true, 0.5), (1, false, 0.5)]);
         let chord = group.items.last().and_then(|i| match i {
             Item::Stroke { path, .. } => path.first().copied(),
-            Item::Fill { .. } => None,
+            Item::Fill { .. } | Item::Picture(_) => None,
         });
         assert!(matches!(chord, Some(Seg2::Line { .. })), "{chord:?}");
         let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![group] };

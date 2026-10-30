@@ -4289,6 +4289,7 @@ dependencies = [
  "encoding_rs",
  "gltf",
  "log",
+ "png",
  "quick-xml",
  "rustix 1.1.5",
  "serde",
@@ -4298,6 +4299,7 @@ dependencies = [
  "solidcraft-geom",
  "solidcraft-kernel",
  "thiserror 2.0.21",
+ "tiny-skia",
  "zip 9.0.4",
 ]
 
