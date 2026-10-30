@@ -534,9 +534,9 @@ pub struct Session {
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
     /// The last value each drawing dimension read this session, by drawing and dimension: what a
-    /// dimension that can't be measured now last measured. Never saved, so a design's drawings
-    /// don't change with every model edit.
-    pub(crate) dimension_values: std::collections::BTreeMap<(u64, u64), f64>,
+    /// dimension that can't be measured now last measured. Only the file's copy of the document
+    /// keeps it ([`as_saved`]): a read is no change to undo or to ask about saving.
+    pub(crate) dimension_values: DimensionValues,
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
@@ -841,7 +841,8 @@ impl Session {
         Ok(())
     }
 
-    /// The design as its current file holds it, including visibility and relative link paths.
+    /// The design as its current file holds it: what is hidden, what its dimensions last read and
+    /// its links relative to that file.
     pub fn design(&self) -> std::borrow::Cow<'_, Document> {
         self.design_at(self.path.as_deref())
     }
@@ -2009,6 +2010,22 @@ mod world_placement_cache_tests;
 
 /// Per sketch feature: its parameter-driven dimensions' values (see [`own_values`]).
 pub(crate) type SketchValues = std::collections::BTreeMap<u64, std::collections::BTreeMap<String, f64>>;
+
+/// What each drawing dimension last read, by drawing and dimension.
+pub(crate) type DimensionValues = std::collections::BTreeMap<(u64, u64), f64>;
+
+/// A design as its file holds it: `doc` with what is hidden in it and what its dimensions last read.
+pub(crate) fn as_saved<'a>(doc: &'a Document, visibility: &Visibility, dimension_values: &DimensionValues) -> std::borrow::Cow<'a, Document> {
+    if visibility.is_empty() && dimension_values.is_empty() {
+        return std::borrow::Cow::Borrowed(doc);
+    }
+    let mut copy = doc.clone();
+    if !visibility.is_empty() {
+        copy.visibility = visibility.clone();
+    }
+    copy.keep_last_good(dimension_values);
+    std::borrow::Cow::Owned(copy)
+}
 
 /// The values of a sketch's driving dimensions that come from parameters: what a value edit
 /// changes in it (as opposed to geometry it projects or links from upstream).

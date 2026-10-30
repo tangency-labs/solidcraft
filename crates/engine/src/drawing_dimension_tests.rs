@@ -114,7 +114,16 @@ impl Fixture {
     fn add(&mut self, view: u64, kind: DimensionKind, override_text: Option<&str>) -> u64 {
         let id = self.d.allocate_id(&mut self.ids).unwrap();
         let override_text = override_text.map(str::to_string);
-        self.d.add_dimensions([Arc::new(Dimension { id, view, kind, offset_mm: 10.0, text: TextPlace::Centred, decimals: 2, override_text })]);
+        self.d.add_dimensions([Arc::new(Dimension {
+            id,
+            view,
+            kind,
+            offset_mm: 10.0,
+            text: TextPlace::Centred,
+            decimals: 2,
+            override_text,
+            last_good: None,
+        })]);
         self.d.validate().unwrap();
         id
     }

@@ -1,8 +1,9 @@
 //! A drawing's dimensions (W19b, #4896): each the distance or angle between named parts of its
 //! view's model, measured as the view shows it ([`solidcraft_geom::drawing_measure`]). A dimension
 //! saves what it measures by name, never a picked point, so when the model changes it follows the
-//! model or says what it lost: it never moves to other geometry. Nothing worked out is saved: its
-//! value, its status and its last good value come from the model each time.
+//! model or says what it lost: it never moves to other geometry. Its value and status come from
+//! the model each time. The one thing worked out that is saved is its last good value, what it last
+//! read, for when it can't be measured any more: nothing reads that as its value.
 //!
 //! - **Linear**: between two corners ([`ModelPoint`]), horizontal, vertical or aligned as the view
 //!   shows them, or along a direction on the view.
@@ -25,7 +26,8 @@
 //! along isn't zero, and is at most [`MAX_REAL`] each way, as every number a drawing saves (a whole
 //! number past it reads, then saves as one the file's check refuses); the offset and the text place
 //! are on paper ([`is_paper_coordinate`]); at most [`MAX_DECIMALS`] decimals; an override text of 1
-//! to [`MAX_TEXT_BYTES`] bytes; at most [`MAX_DIMENSIONS`] dimensions, listed by id.
+//! to [`MAX_TEXT_BYTES`] bytes; a last good value from 0 to [`MAX_REAL`]; at most [`MAX_DIMENSIONS`]
+//! dimensions, listed by id.
 //!
 //! [`Document::resolve_dimensions`] finds what a dimension measures again, strictly: an edge by
 //! its name, or the one edge between the faces it names, never the piece nearest an old pick; a
@@ -83,6 +85,9 @@ pub struct Dimension {
     /// Shown instead of the number, which is still worked out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_text: Option<String>,
+    /// What it last read (model millimetres, or radians for an angle), as of the last save.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_good: Option<f64>,
 }
 
 /// What a dimension measures.
@@ -152,6 +157,11 @@ fn is_false(v: &bool) -> bool {
     !*v
 }
 
+/// Whether a dimension's record may keep `value` as its last good one.
+fn is_last_good(value: f64) -> bool {
+    (0.0..=MAX_REAL).contains(&value)
+}
+
 impl Drawing {
     /// Adds `dimensions`, each where its id puts it, as [`Drawing::add_views`] adds views.
     pub fn add_dimensions(&mut self, dimensions: impl IntoIterator<Item = Arc<Dimension>>) {
@@ -205,6 +215,7 @@ impl Drawing {
         };
         require(is_paper_coordinate(d.offset_mm) && text, off_paper)?;
         require(d.decimals <= MAX_DECIMALS, || format!("it shows at most {MAX_DECIMALS} decimals"))?;
+        require(d.last_good.is_none_or(is_last_good), || format!("its last good value is from 0 to {MAX_REAL}"))?;
         match &d.override_text {
             Some(text) => require(!text.is_empty() && text.len() <= MAX_TEXT_BYTES, || {
                 format!("the text shown instead of its number is 1 to {MAX_TEXT_BYTES} bytes")
@@ -351,6 +362,23 @@ impl Document {
         };
         let (body, origin_feature, edges) = picker.names(body, &edges)?;
         Ok(ModelPoint { body, origin_feature, edges, path: path.to_vec() })
+    }
+
+    /// Keeps what each dimension last read, by drawing and dimension id, in its record, as a
+    /// design's file does. A dimension no longer there is passed over, and so is a value its record
+    /// would refuse (a model can read past what a drawing saves), so the file still opens. A drawing
+    /// with no new value stays shared.
+    pub fn keep_last_good(&mut self, values: &BTreeMap<(u64, u64), f64>) {
+        for drawing in &mut self.drawings {
+            let id = drawing.id;
+            for (&(_, dimension), &value) in values.range((id, 0)..=(id, u64::MAX)) {
+                let Some(at) = drawing.dimension_index(dimension) else { continue };
+                let new = is_last_good(value) && drawing.dimensions.get(at).is_some_and(|d| d.last_good != Some(value));
+                if new && let Some(record) = Arc::make_mut(drawing).dimensions.get_mut(at) {
+                    Arc::make_mut(record).last_good = Some(value);
+                }
+            }
+        }
     }
 
     /// The dimensions `wanted` of `drawing` (one of this design's drawings) as `model` (this

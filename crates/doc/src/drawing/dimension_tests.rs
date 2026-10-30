@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
@@ -52,7 +52,7 @@ fn measured() -> (Drawing, [u64; 3]) {
     let mut added = [0; 3];
     for ((kind, text), id) in kinds.into_iter().zip(texts).zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.add_dimensions([Arc::new(Dimension { id: *id, view, kind, offset_mm: -10.0, text, decimals: 2, override_text: None })]);
+        d.add_dimensions([Arc::new(Dimension { id: *id, view, kind, offset_mm: -10.0, text, decimals: 2, override_text: None, last_good: None })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -246,7 +246,16 @@ fn a_radial_dimension_saves_its_edge_and_whether_it_is_a_diameter() {
     let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
     let radial = |diameter| DimensionKind::Radial { edge: edge("F3:hole|F1:front"), diameter };
     let kind = radial(true);
-    d.add_dimensions([Arc::new(Dimension { id, view, kind, offset_mm: 5.0, text: TextPlace::Centred, decimals: 1, override_text: None })]);
+    d.add_dimensions([Arc::new(Dimension {
+        id,
+        view,
+        kind,
+        offset_mm: 5.0,
+        text: TextPlace::Centred,
+        decimals: 1,
+        override_text: None,
+        last_good: None,
+    })]);
     d.validate().unwrap();
     let radial_id = ids::encode(id);
     let mut v = file(&d);
@@ -270,4 +279,103 @@ fn a_direction_along_a_line_saves_as_its_coordinates() {
     assert_eq!(serde_json::to_value(along).unwrap(), json!({"along": [0.6, 0.8]}));
     assert_eq!(serde_json::from_value::<LinearDirection>(json!({"along": [0.6, 0.8]})).unwrap(), along);
     assert_eq!(serde_json::to_value(Reading::True).unwrap(), json!("true"));
+}
+
+/// A last good value saves only when there is one, reads back as saved, and an older drawing reads
+/// with none.
+#[test]
+fn a_last_good_value_saves_only_when_there_is_one() {
+    let (mut d, [linear, ..]) = measured();
+    let id = ids::encode(linear);
+    assert_eq!(dim(&mut file(&d), &id).get("last_good"), None, "none: not written");
+    let at = d.dimension_index(linear).unwrap();
+    Arc::make_mut(&mut d.dimensions[at]).last_good = Some(80.5);
+    let mut v = file(&d);
+    assert_eq!(dim(&mut v, &id)["last_good"], json!(80.5));
+    let read = Drawing::from_json(&v.to_string()).unwrap();
+    assert_eq!(read, d);
+    assert_eq!(read.to_json().unwrap(), d.to_json().unwrap(), "the same bytes again");
+    dim(&mut v, &id).as_object_mut().unwrap().remove("last_good");
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap().dimension(linear).unwrap().last_good, None);
+}
+
+/// A last good value is from 0 to the largest number a drawing saves; a file with any other is
+/// refused, and so is a record built with one that JSON can't hold.
+#[test]
+fn a_last_good_value_keeps_its_rule() {
+    let (d, [linear, ..]) = measured();
+    let id = ids::encode(linear);
+    let with = |value: Value| refused(&d, |v| dim(v, &id)["last_good"] = value);
+    for good in [json!(0.0), json!(-0.0), json!(5e-324), json!(80), json!(MAX_REAL)] {
+        assert_eq!(with(good.clone()), "read", "{good}");
+    }
+    for bad in [json!(-5e-324), json!(-1.0)] {
+        assert!(with(bad.clone()).contains("last good"), "{bad}: {}", with(bad.clone()));
+    }
+    // Past every drawing's largest number: the file's own check refuses it first.
+    let past = MAX_REAL * (1.0 + f64::EPSILON);
+    for bad in [json!(past), json!(f64::MAX), json!(-f64::MAX)] {
+        assert_ne!(with(bad.clone()), "read", "{bad}");
+    }
+    let mut direct = d.clone();
+    Arc::make_mut(&mut direct.dimensions[0]).last_good = Some(past);
+    assert!(direct.validate().is_err());
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut direct = d.clone();
+        Arc::make_mut(&mut direct.dimensions[0]).last_good = Some(bad);
+        assert!(direct.validate().is_err(), "{bad}");
+    }
+}
+
+/// What dimensions last read goes into their records by drawing and dimension, leaving out a
+/// dimension or a drawing no longer there and a value the record would refuse. A drawing with no
+/// new value stays shared with the document it was copied from, and that document keeps none.
+#[test]
+fn keep_last_good_keeps_only_what_a_record_may_save() {
+    let (first, [a, b, c]) = measured();
+    let second = Drawing { id: first.id + 1, ..first.clone() };
+    let (one, two) = (first.id, second.id);
+    let mut doc = Document::new("Box");
+    doc.drawings = vec![Arc::new(first), Arc::new(second)];
+    let before = doc.clone();
+    let values = BTreeMap::from([
+        ((one, a), 80.0),
+        ((one, b), MAX_REAL),
+        ((one, c), MAX_REAL * 2.0),
+        ((one, 1), 5.0),
+        ((one, u64::MAX), 5.0),
+        ((two + 1, a), 5.0),
+    ]);
+    doc.keep_last_good(&values);
+    let read = |doc: &Document, drawing: usize, id| doc.drawings[drawing].dimension(id).unwrap().last_good;
+    assert_eq!([read(&doc, 0, a), read(&doc, 0, b), read(&doc, 0, c)], [Some(80.0), Some(MAX_REAL), None]);
+    assert_eq!([read(&doc, 1, a), read(&doc, 1, b), read(&doc, 1, c)], [None; 3], "another drawing's dimensions, with the same ids");
+    assert!(Arc::ptr_eq(&doc.drawings[1], &before.drawings[1]), "no new value: still shared");
+    assert_eq!(read(&before, 0, a), None, "the document it was copied from keeps none");
+    doc.drawings.iter().for_each(|d| d.validate().unwrap());
+    let kept = doc.clone();
+    doc.keep_last_good(&values);
+    assert!(Arc::ptr_eq(&doc.drawings[0], &kept.drawings[0]), "the same values again: still shared");
+}
+
+/// Whatever a read hands over, at every boundary and over random bit patterns, the saved record is
+/// one a file can open: a design is never lost to its last good values.
+#[test]
+fn keep_last_good_never_writes_a_record_a_file_refuses() {
+    let (d, [linear, ..]) = measured();
+    let id = d.id;
+    let mut doc = Document::new("Box");
+    doc.drawings = vec![Arc::new(d)];
+    let tricky = [0.0, -0.0, 5e-324, MAX_REAL, MAX_REAL * (1.0 + f64::EPSILON), -1.0, 1e12, f64::MAX, f64::NAN, f64::INFINITY, f64::NEG_INFINITY];
+    let mut bits = 0x9E37_79B9_7F4A_7C15_u64;
+    let random = std::iter::repeat_with(|| {
+        bits = bits.wrapping_mul(0x5851_F42D_4C95_7F2D).wrapping_add(1);
+        f64::from_bits(bits)
+    });
+    for value in tricky.into_iter().chain(random.take(2000)) {
+        doc.keep_last_good(&BTreeMap::from([((id, linear), value)]));
+        let saved = doc.drawings[0].to_json().unwrap();
+        let read = Drawing::from_json(&saved).unwrap_or_else(|e| panic!("{value}: {e}"));
+        assert_eq!(read.dimension(linear).unwrap().last_good, doc.drawings[0].dimension(linear).unwrap().last_good, "{value}");
+    }
 }

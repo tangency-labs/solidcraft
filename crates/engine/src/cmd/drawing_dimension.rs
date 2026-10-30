@@ -74,8 +74,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DimensionResult>)
         .params(
             "dimension: its id → {dimension, view, record: as saved, status: ok, overridden, ambiguous, suppressed, lost or unmeasurable, \
-             why?, value? (model mm, or degrees for an angle), foreshortened?, text?, last_good? (the value it last read this session, \
-             when it has none now), exact, candidates?: [{edge: {body, index}} or {corner: [x, y, z]}]}. Read-only; no model is \
+             why?, value? (model mm, or degrees for an angle), foreshortened?, text?, last_good? (the value it last read, kept when \
+             the design is saved, when it has none now), exact, candidates?: [{edge: {body, index}} or {corner: [x, y, z]}]}. Read-only; no model is \
              evaluated.",
         ),
 ];
@@ -115,6 +115,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         text: request.text.unwrap_or(TextPlace::Centred),
         decimals: request.decimals.unwrap_or(DEFAULT_DECIMALS),
         override_text: request.override_text,
+        last_good: None,
     };
     // Read before it is added: a dimension its view can't measure would show nothing.
     let mut staged = Drawing::clone(&record);
@@ -229,7 +230,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Dimension `id` of the open drawing as the model has it now. A value read is kept as its last
-/// good one ([`Session::dimension_values`]).
+/// good one ([`Session::dimension_values`]); with none this session, the file's is its last good one.
 fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?.clone();
     let dimension = d.dimension(id).ok_or_else(|| bad(cmd, format!("the drawing has no dimension {}", ids::encode(id))))?;
@@ -240,7 +241,7 @@ fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
             s.dimension_values.insert((d.id, id), m.value);
             None
         }
-        None => s.dimension_values.get(&(d.id, id)).copied(),
+        None => s.dimension_values.get(&(d.id, id)).copied().or(dimension.last_good),
     };
     let (status, why, candidates) = status_words(r.status);
     let angle = matches!(dimension.kind, DimensionKind::Angle { .. });

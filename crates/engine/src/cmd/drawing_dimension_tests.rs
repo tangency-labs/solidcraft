@@ -218,7 +218,7 @@ fn a_dimension_that_cant_be_measured_gives_its_last_good_value() {
     let read = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
     assert!(read.get("value").is_none() && read["status"] != json!("ok"), "{read}");
     assert_eq!(read["last_good"], json!(80.0), "{read}");
-    // A session that never read it has none.
+    // A read isn't in the document: a session on it, with no file in between, has none.
     let mut fresh = Session::new((*s.doc).clone());
     run(&mut fresh, "drawing.open", json!({"drawing": ids::encode(drawing)}));
     assert!(run(&mut fresh, INSPECT, json!({"dimension": added["dimension"]})).get("last_good").is_none());
@@ -349,4 +349,163 @@ fn hostile_dimension_params_never_panic() {
         }
     }
     assert!(internal.is_empty(), "dimension commands panicked:\n{}", internal.join("\n"));
+}
+
+/// A box with an 80 mm dimension on its top front edge, read once, and the drawing closed: the
+/// session, the drawing's id and the dimension's.
+fn read_once() -> (Session, u64, u64) {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    let added = add(&mut s, view, json!({"length": {"edge": [40, 0, 30]}}));
+    run(&mut s, "drawing.close", json!({}));
+    (s, drawing, ids::decode(added["dimension"].as_str().unwrap()).unwrap())
+}
+
+/// Fillets away the edge the [`read_once`] dimension measures.
+fn lose_the_edge(s: &mut Session) {
+    run(s, "solid.fillet", json!({"body": "Box", "radius": 5, "edges": [[40, 0, 30]]}));
+}
+
+/// `s` saved to a file called `name` and opened from it in a new session, with `drawing` open.
+fn reopened(s: &mut Session, drawing: u64, name: &str) -> Session {
+    let dir = std::env::temp_dir().join(format!("solidcraft-last-good-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    run(s, "file.save_as", json!({"path": path}));
+    let mut fresh = Session::default();
+    run(&mut fresh, "doc.open", json!({"path": path}));
+    run(&mut fresh, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let _ = std::fs::remove_dir_all(&dir);
+    fresh
+}
+
+fn inspect_of(s: &mut Session, dimension: u64) -> Value {
+    run(s, INSPECT, json!({"dimension": ids::encode(dimension)}))
+}
+
+/// A lost dimension still says what it last read after the design is saved and opened again, in
+/// either form of the file. It stays lost, with no value and no text, and a read of it leaves
+/// nothing to save.
+#[test]
+fn a_lost_dimension_keeps_its_last_good_value_after_reopening() {
+    for name in [format!("part.{}", solidcraft_io::DESIGN_EXT), "part.json".to_string()] {
+        let (mut s, drawing, dimension) = read_once();
+        lose_the_edge(&mut s);
+        let mut opened = reopened(&mut s, drawing, &name);
+        let read = inspect_of(&mut opened, dimension);
+        assert_eq!(read["status"], json!("lost"), "{name}: {read}");
+        assert!(read.get("value").is_none() && read.get("text").is_none(), "{name}, never its value: {read}");
+        assert_eq!(read["last_good"], json!(80.0), "{name}: {read}");
+        assert!(!opened.is_dirty(), "{name}: a read leaves nothing to save");
+    }
+}
+
+/// A read changes nothing in the document: no undo step, nothing to save, the same document. Only
+/// the file's copy has the value, and a session that read nothing copies nothing.
+#[test]
+fn a_read_stays_out_of_the_document() {
+    let (mut s, drawing, dimension) = read_once();
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let path = std::env::temp_dir().join(format!("solidcraft-last-good-read-{}.json", std::process::id()));
+    run(&mut s, "file.save_as", json!({"path": path}));
+    let (doc, steps) = (s.doc.clone(), s.undo.len());
+    inspect_of(&mut s, dimension);
+    assert!(Arc::ptr_eq(&s.doc, &doc) && s.undo.len() == steps && !s.is_dirty());
+    assert_eq!(s.doc.drawing(drawing).unwrap().dimension(dimension).unwrap().last_good, None, "only in the file's copy");
+    assert_eq!(s.design().drawing(drawing).unwrap().dimension(dimension).unwrap().last_good, Some(80.0));
+    let opened = Session::new(solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap());
+    let _ = std::fs::remove_file(&path);
+    assert!(matches!(opened.design(), std::borrow::Cow::Borrowed(_)), "nothing read: nothing to copy");
+    assert_eq!(opened.doc.drawing(drawing).unwrap().dimension(dimension).unwrap().last_good, Some(80.0));
+    let bytes = solidcraft_io::write_design(&opened.design());
+    assert_eq!(solidcraft_io::write_design(&solidcraft_io::read_design(&bytes).unwrap()), bytes, "save, open, save: the same bytes");
+}
+
+/// A saved value is only ever what it last read: measured now, a dimension reads the model and has
+/// no last good value, whatever the file said. A newer read replaces the saved one, in the session
+/// and through the next save.
+#[test]
+fn a_saved_last_good_value_never_reads_as_the_value() {
+    let (mut s, drawing, dimension) = read_once();
+    s.dimension_values.insert((drawing, dimension), 55.5);
+    let mut opened = reopened(&mut s, drawing, "seeded.json");
+    let read = inspect_of(&mut opened, dimension);
+    reads(&read, 80.0, "80.00");
+    assert_eq!(read["record"]["last_good"], json!(55.5), "as saved");
+    assert!(read.get("last_good").is_none(), "measured now: {read}");
+    run(&mut opened, "drawing.close", json!({}));
+    lose_the_edge(&mut opened);
+    run(&mut opened, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    assert_eq!(inspect_of(&mut opened, dimension)["last_good"], json!(80.0), "this session's read comes first");
+    run(&mut opened, "drawing.close", json!({}));
+    let mut again = reopened(&mut opened, drawing, "again.json");
+    assert_eq!(inspect_of(&mut again, dimension)["last_good"], json!(80.0), "and replaces the saved one");
+}
+
+/// An angle saves its last good value in radians and gives it in degrees, as it gives its value.
+#[test]
+fn a_lost_angle_gives_its_saved_value_in_degrees() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    let added = add(&mut s, view, json!({"angle": {"a": [40, 0, 30], "b": [0, 0, 15]}}));
+    let dimension = ids::decode(added["dimension"].as_str().unwrap()).unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    lose_the_edge(&mut s);
+    let mut opened = reopened(&mut s, drawing, "angle.json");
+    let read = inspect_of(&mut opened, dimension);
+    assert_eq!(read["status"], json!("lost"), "{read}");
+    assert!((read["record"]["last_good"].as_f64().unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{read}");
+    assert!((read["last_good"].as_f64().unwrap() - 90.0).abs() < 1e-9, "{read}");
+}
+
+/// A model can read past the largest number a drawing saves: that value isn't saved, so the file
+/// still opens, and the dimension has none.
+#[test]
+fn a_value_past_what_a_drawing_saves_leaves_the_file_able_to_open() {
+    let (mut s, drawing, dimension) = read_once();
+    s.dimension_values.insert((drawing, dimension), 2e9);
+    let mut opened = reopened(&mut s, drawing, "huge.json");
+    assert!(inspect_of(&mut opened, dimension)["record"].get("last_good").is_none());
+}
+
+/// A background save runs on a scratch copy of the session, and an autosave on its own snapshot:
+/// both keep what the dimensions last read, so a recovered design has it too.
+#[test]
+fn background_saves_and_autosaves_keep_the_last_good_value() {
+    let (s, drawing, dimension) = read_once();
+    let last_good = |doc: &solidcraft_doc::Document| doc.drawing(drawing).unwrap().dimension(dimension).unwrap().last_good;
+    assert_eq!(last_good(&s.scratch().design()), Some(80.0));
+    let dir = std::env::temp_dir().join(format!("solidcraft-last-good-autosave-{}", std::process::id()));
+    let mut saver = crate::recovery::Autosaver::new(&dir, std::time::Duration::from_secs(3600)).unwrap();
+    assert!(saver.save(&s).unwrap());
+    drop(saver);
+    let found = crate::recovery::orphans(&dir);
+    let (doc, _) = crate::recovery::load(&dir, &found[0].id).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(last_good(&doc), Some(80.0));
+}
+
+/// What this session read goes with this design: opening another one starts with none, so it can't
+/// reach that design's file, even a copy with the same ids.
+#[test]
+fn opening_a_design_starts_with_no_last_good_values() {
+    let (mut s, _, _) = read_once();
+    let path = std::env::temp_dir().join(format!("solidcraft-last-good-open-{}.json", std::process::id()));
+    std::fs::write(&path, solidcraft_io::write_design(&s.doc)).unwrap();
+    run(&mut s, "doc.open", json!({"path": path}));
+    let _ = std::fs::remove_file(&path);
+    assert!(s.dimension_values.is_empty());
+}
+
+/// A view copied to a sheet brings its dimensions with what they saved: the same references, read
+/// on the same view direction.
+#[test]
+fn a_copied_dimension_keeps_its_saved_value() {
+    let (mut s, drawing, dimension) = read_once();
+    let mut opened = reopened(&mut s, drawing, "copy.json");
+    let view = opened.drawing("test").unwrap().dimension(dimension).unwrap().view;
+    run(&mut opened, "drawing.view.copy_to_sheet", json!({"view": ids::encode(view), "sheet": "Sheet 1", "position_mm": [100, 100]}));
+    let d = opened.drawing("test").unwrap();
+    let copy = d.dimensions.iter().find(|x| x.id != dimension).unwrap();
+    assert_eq!(copy.last_good, Some(80.0));
 }

@@ -220,6 +220,7 @@ struct Snapshot {
     id: String,
     doc: Arc<Document>,
     visibility: crate::Visibility,
+    dimension_values: crate::DimensionValues,
     path: Option<String>,
 }
 
@@ -227,13 +228,7 @@ impl Snapshot {
     /// Write the design and its entry (the slow part: serialising and compressing the design).
     fn write(&self) -> Result<()> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
-        let bytes = if self.visibility.is_empty() {
-            solidcraft_io::write_design_container(&self.doc)?
-        } else {
-            let mut doc = (*self.doc).clone();
-            doc.visibility = self.visibility.clone();
-            solidcraft_io::write_design_container(&doc)?
-        };
+        let bytes = solidcraft_io::write_design_container(&crate::as_saved(&self.doc, &self.visibility, &self.dimension_values))?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
@@ -297,7 +292,7 @@ impl Autosaver {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (tx, rx) = std::sync::mpsc::channel();
-            let (doc, visibility) = (snapshot.doc.clone(), snapshot.visibility.clone());
+            let (doc, visibility, dimension_values) = (snapshot.doc.clone(), snapshot.visibility.clone(), snapshot.dimension_values.clone());
             let started = std::thread::Builder::new().name("autosave".into()).spawn(move || {
                 let _ = tx.send(snapshot.write());
             });
@@ -308,7 +303,7 @@ impl Autosaver {
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, path: s.path.clone() };
+                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, dimension_values, path: s.path.clone() };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
                     Ok(true)
@@ -342,7 +337,14 @@ impl Autosaver {
         if self.last.as_ref().is_some_and(|(l, v)| (Arc::ptr_eq(l, &s.doc) || **l == *s.doc) && *v == s.visibility) {
             return None;
         }
-        Some(Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc: s.doc.clone(), visibility: s.visibility.clone(), path: s.path.clone() })
+        Some(Snapshot {
+            dir: self.dir.clone(),
+            id: self.id.clone(),
+            doc: s.doc.clone(),
+            visibility: s.visibility.clone(),
+            dimension_values: s.dimension_values.clone(),
+            path: s.path.clone(),
+        })
     }
 
     /// The running write's outcome, once it has one (`wait`: wait for it). True when no write

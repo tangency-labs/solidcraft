@@ -482,15 +482,12 @@ impl Session {
 
     /// Prepare only the file's copy with relative paths; saving never rewrites live history.
     pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
-        let mut design = std::borrow::Cow::Borrowed(&*self.doc);
+        let mut design = crate::as_saved(&self.doc, &self.visibility, &self.dimension_values);
         if let Some(path) = path {
             let links = super::design_link::rebased(&self.doc, self.path.as_deref(), path);
             if links != self.doc.links {
                 design.to_mut().links = links;
             }
-        }
-        if !self.visibility.is_empty() {
-            design.to_mut().visibility = self.visibility.clone();
         }
         design
     }
