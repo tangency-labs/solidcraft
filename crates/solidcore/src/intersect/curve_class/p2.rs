@@ -1302,6 +1302,7 @@ fn tail_apply<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
                 "SmBrep mutable owning context (sm_SetXSectCurveThroughPoint)",
             ));
         }
+        // a working copy, written back into the same curve object below
         src_curve = Some((h, classification.curve_geometry(&*geometry)?.clone()));
     }
     let mate_edge = match (edge, emate) {
@@ -1341,10 +1342,11 @@ fn tail_apply<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
         solution,
         out.sss_point,
     ))?;
-    // the classification curve is edited in place upstream
+    // the classification curve is edited in place upstream: the edit goes back into
+    // the same curve object, which keeps its owner (an edge's curve stays the edge's)
     if let Some((h, c)) = src_curve {
         if let Some(slot) = geometry.curve_mut(h) {
-            *slot = c;
+            slot.assign_edited(c);
         }
     }
     if let Some(r) = r {
@@ -2277,5 +2279,61 @@ mod tests {
         let r = refine_cci_to_surfaces(&c, &s, None, Point3::new(1.0, 2.0, 3.0), 6).unwrap();
         assert_eq!(r.recursion_count, 7);
         assert_eq!(r.sss_point.y, 2.0);
+    }
+
+    impl ClassGeometryMut<H> for G {
+        fn curve_mut(&mut self, o: H) -> Option<&mut Curve> {
+            self.0.get_mut(o.0)
+        }
+        fn topology_entity_mut(&mut self, _o: H) -> Option<(&mut Brep, EntityRef)> {
+            None
+        }
+    }
+
+    /// `sm_ApplyPointSolution` edits the classification curve object in place
+    /// (`sm_SetXSectCurveThroughPoint((SmCurve *)pSrcCurve3d, ..)`), so the curve keeps
+    /// its owner (an edge's curve stays the edge's) and its recorded edge tolerance.
+    /// The port edits a copy; writing the copy back with `*slot = copy` made the
+    /// stored curve another object without owner.
+    #[test]
+    fn apply_point_solution_keeps_the_class_curve_owner() {
+        use crate::geom::attribute::ObjectKey;
+        use crate::geom::object::ObjectRef;
+        use crate::surface::plane::Plane;
+        let k = Kernel::default();
+        let mut g = line();
+        let owner = ObjectRef {
+            type_code: crate::topology::edge::TYPE,
+            key: ObjectKey(7),
+        };
+        let _ = g.0[0].set_owner(Some(owner), None);
+        g.0[0].set_owner_zone_tol_3d(Some(1e-3));
+        let c = cc(&k, &[0.0, 1.0]);
+        let plane = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)));
+        let side = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)));
+        let uv = Point2::new(0.5, 0.0);
+        let mut sol = Solution::<H>::new();
+        sol.start.parameters[0] = 0.5;
+        sol.start.parameters[1] = 0.5;
+        let mut out = RefineCci {
+            sss_point_flag: false,
+            sss_point: Point3::new(0.5, 0.0, 0.0),
+            deviation: 0.0,
+            recursion_count: 0,
+        };
+        tail_apply(
+            &k,
+            &mut g,
+            &c,
+            true,
+            None,
+            None,
+            [(&plane, uv), (&side, uv), (&plane, uv), (&side, uv)],
+            &mut sol,
+            &mut out,
+        )
+        .unwrap();
+        assert_eq!(g.0[0].owner(), Some(owner));
+        assert_eq!(g.0[0].owner_zone_tol_3d(), Some(1e-3));
     }
 }

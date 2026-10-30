@@ -858,6 +858,16 @@ impl Curve {
         &self.kind
     }
 
+    /// Writes the geometry of `edited`, a working copy of this curve that was edited,
+    /// back into this curve object, as upstream's in-place edit of the object leaves
+    /// it: the owner and the notification identity stay this object's (a plain
+    /// `*self = edited` makes it another object, without owner when `edited` is a
+    /// clone). The memo is the one of the written geometry.
+    pub(crate) fn assign_edited(&mut self, edited: Self) {
+        self.kind = edited.kind;
+        self.memo = edited.memo;
+    }
+
     /// The concrete kind, mutable.
     pub fn kind_mut(&mut self) -> &mut CurveKind {
         // an edit makes another curve value: start an empty memo

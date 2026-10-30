@@ -1630,8 +1630,15 @@ impl FilletCorner {
 
         // join the 2 curves (JoinWith is virtual: SmLine and SmEllipse override it)
         join_with(&*env.k, &mut curve1, true, &mut curve2, false)?;
-        env.pseudo.brep_mut().edge_mut(fe_on_extended_edge)?.curve = Some(curve1.clone());
-        env.pseudo.brep_mut().edge_mut(fe_on_edge)?.curve = Some(curve2);
+        // upstream joins the edges' curve objects in place: the edits go back into the
+        // same objects, which keep their edge owners
+        for (e, edited) in [(fe_on_extended_edge, curve1.clone()), (fe_on_edge, curve2)] {
+            let slot = &mut env.pseudo.brep_mut().edge_mut(e)?.curve;
+            match slot {
+                Some(c) => c.assign_edited(edited),
+                None => *slot = Some(edited),
+            }
+        }
 
         // Combine two edges
         self.edges.remove(found_index);

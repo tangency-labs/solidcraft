@@ -846,7 +846,10 @@ enum Slot {
 
 /// The in-place edit of the mate edge use's UV trim curve object.
 fn store_mate_uv(pseudo: &mut FilletBrep, mate: EdgeuseId, curve: &BSplineCurve) -> Result<()> {
-    pseudo.brep_mut().edgeuse_mut(mate)?.uv_trim_curve = Some(Curve::from(curve.clone()));
+    store_in_place(
+        &mut pseudo.brep_mut().edgeuse_mut(mate)?.uv_trim_curve,
+        curve,
+    );
     Ok(())
 }
 
@@ -856,8 +859,18 @@ fn store_rail_curve(
     rail_edge: EdgeId,
     curve: &BSplineCurve,
 ) -> Result<()> {
-    pseudo.brep_mut().edge_mut(rail_edge)?.curve = Some(Curve::from(curve.clone()));
+    store_in_place(&mut pseudo.brep_mut().edge_mut(rail_edge)?.curve, curve);
     Ok(())
+}
+
+/// Writes `curve` into the curve object of `slot`, which keeps its owner as the
+/// upstream object edited in place does (a new `Curve` has none).
+fn store_in_place(slot: &mut Option<Curve>, curve: &BSplineCurve) {
+    let edited = Curve::from(curve.clone());
+    match slot {
+        Some(c) => c.assign_edited(edited),
+        None => *slot = Some(edited),
+    }
 }
 
 /// `pNewFS->SetFilletExecutive(m_pExecutive)` of a fillet corner's temporary solver:
