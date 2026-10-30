@@ -773,11 +773,49 @@ impl OffsetExecutive {
 
             // Not upstream (opt-in, fork tangency-labs/smlib 5d428ae and 7ff0a94): a local
             // operation closes the loop gaps its step walls leave at their ends, then splits
-            // the edges that run past a step wall's corner
+            // the edges that run past a step wall's corner (after WR-531's caps below, in the
+            // fork's order)
             let step_walls = kernel.fixes.local_operation_step_walls
                 && self.operation() == OffsetOperation::LocalOperation;
             if step_walls {
                 self.close_loop_gaps(kernel, notifications)?;
+            }
+
+            // Not upstream (WR-531), opt-in `Kernel::fixes.offset_point_vertex_caps` (the
+            // fork's tangency-labs/smlib@d5dadaa): a vertex where one face closes on itself to
+            // a point (a cone's apex, the tip of a drilled hole: the seam is its only edge) has
+            // no edges whose offsets could meet there, and its face's offset ends short of the
+            // point, on the circle the point's normals sweep out. The point's offset is the
+            // sphere about it through that circle, as the unextended offset builds it
+            // (BuildOffsetOfVertex: a strut vertex with one arc to blend), a face of its whole
+            // surface the merge joins to the offset face along the circle.
+            if kernel.fixes.offset_point_vertex_caps {
+                for vertex in bp1::vertices(original, None)? {
+                    if crate::topology::vertex::edges(original, vertex, None)?.len() != 1 {
+                        continue;
+                    }
+                    let cap = self.build_offset_of_vertex(kernel, original, Some(vertex))?;
+                    let Some(surface) = cap.surface else {
+                        continue;
+                    };
+                    let mut stores = NotificationStores {
+                        records: &mut *notifications.records,
+                        attributes: &mut *notifications.attributes,
+                        key_of: notifications.result_key_of,
+                    };
+                    let new_face = self.make_cap_face(
+                        kernel,
+                        surface,
+                        Vec::new(),
+                        Vec::new(),
+                        &[],
+                        &mut NotifyState::from_kernel_stores(&mut stores),
+                    )?;
+                    self.relate_vertex_face(vertex, new_face);
+                }
+            }
+
+            if step_walls {
                 self.split_edges_at_step_corners(kernel, notifications)?;
             }
 
