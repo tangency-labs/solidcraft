@@ -429,6 +429,13 @@ fn damaged_files_are_refused_and_never_patched() {
         zero(&mut in_memory);
         assert_eq!(in_memory.validate().unwrap_err().to_string(), "an object has the id 0, which is never one");
     }
+    // A revision tag on a sheet the drawing doesn't have.
+    let mut tagged = d.clone();
+    let record = std::sync::Arc::make_mut(&mut tagged.revisions);
+    record.add(None, 1 << 44).unwrap();
+    record.add_tag(1 << 44, (1 << 44) + 1, 1 << 43, [10.0, 10.0]).unwrap();
+    let why = tagged.validate().unwrap_err().to_string();
+    assert!(why.contains("a revision tag is on one of the drawing's sheets"), "{why}");
     // A reference to nothing, or to an object of another kind; a source a sheet documents removed.
     for missing in [ids::encode(99), assembly_id.clone()] {
         let expected = format!("damaged drawing: sheet {bolt_sheet_id}: it documents source {missing}, which the drawing doesn't have");

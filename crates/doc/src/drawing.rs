@@ -257,12 +257,14 @@ pub struct OnSheet {
     pub balloons: Vec<u64>,
     /// The images placed on it.
     pub images: Vec<u64>,
+    /// The revision tags on it.
+    pub tags: Vec<u64>,
 }
 
 impl OnSheet {
     /// Nothing is on the sheet.
     pub fn is_empty(&self) -> bool {
-        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty() && self.images.is_empty()
+        self.views.is_empty() && self.dimensions.is_empty() && self.balloons.is_empty() && self.images.is_empty() && self.tags.is_empty()
     }
 }
 
@@ -385,9 +387,10 @@ impl Drawing {
     /// Each later kind of record on a sheet adds its own here, and goes with the sheet
     /// ([`Drawing::remove_sheet`]).
     pub fn on_sheet(&self, id: u64) -> OnSheet {
-        // The views are listed by id, so the sheet's are too, and so are its images.
+        // The views are listed by id, so the sheet's are too, and so are its images and revision tags.
         let mut on = self.with_contents(self.views.iter().filter(|v| v.sheet == id).map(|v| v.id).collect());
         on.images = self.sheet_images.iter().filter(|i| i.sheet == id).map(|i| i.id).collect();
+        on.tags = self.revisions.tags().iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
         on
     }
 
@@ -396,7 +399,7 @@ impl Drawing {
     pub fn with_contents(&self, views: Vec<u64>) -> OnSheet {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
-        OnSheet { views, dimensions, balloons, images: Vec::new() }
+        OnSheet { views, dimensions, balloons, images: Vec::new(), tags: Vec::new() }
     }
 
     /// Takes sheet `id` out with everything on it ([`Drawing::on_sheet`]), and answers what that
@@ -418,6 +421,9 @@ impl Drawing {
         self.balloons.retain(|b| objects.balloons.binary_search(&b.id).is_err());
         self.sheet_images.retain(|i| objects.images.binary_search(&i.id).is_err());
         self.drop_unused_images();
+        if !objects.tags.is_empty() {
+            Arc::make_mut(&mut self.revisions).delete_tags(&objects.tags);
+        }
     }
 
     /// Every object's id, of every kind: what a new id must differ from. Each later kind adds its
@@ -460,6 +466,9 @@ impl Drawing {
         // One record for the whole drawing until sheets keep their own (#3874).
         require(!self.revisions.per_sheet, || "a drawing keeps one revision record for all its sheets".into())?;
         self.revisions.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
+        require(self.revisions.tags().iter().all(|t| self.sheets.iter().any(|s| s.id == t.sheet)), || {
+            "a revision tag is on one of the drawing's sheets".into()
+        })?;
         self.check_views()?;
         self.check_dimensions()?;
         self.check_balloons()?;
