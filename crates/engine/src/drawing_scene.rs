@@ -2,10 +2,10 @@
 //! scene ([`Scene`]), for the sheet page and every export, so the screen and the files draw the
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
 //! on the sheet by id, its visible lines as [`paper_group`] makes them, then its title block's lines
-//! ([`TitleBlockLayout::paper`]). Images placed on the sheet sit between the border and the views
-//! ([`groups`]), so a view's lines draw over a photo. Text, tables and hidden lines each join as one
-//! more kind of group. A shaded view's group holds its pictures under its lines; nothing here draws
-//! their pixels ([`crate::drawing_picture`]).
+//! and projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed
+//! on the sheet sit between the border and the views ([`groups`]), so a view's lines draw over a
+//! photo. Text, tables and hidden lines each join as one more kind of group. A shaded view's group
+//! holds its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
 //! then moved to its centre, so the same lines on the same centre are the same bytes however they
@@ -31,6 +31,7 @@ use solidcraft_doc::drawing::view::{ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, ModelState, ids};
+use solidcraft_geom::cell::Projection;
 use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
 use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
@@ -143,7 +144,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let (scene, views, objects) = assemble(record, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let (scene, views, objects) = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
     Ok(SheetScene { scene, views, objects })
 }
 
@@ -205,11 +206,12 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, then its title block. A view that would take the scene
-/// past a paper scene's limits is left out and says why, and the views after it are still drawn when
-/// they fit.
+/// lines, in id order) moved to its centre, then its title block, its symbol in `projection`. A view
+/// that would take the scene past a paper scene's limits is left out and says why, and the views
+/// after it are still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
+    projection: Projection,
     images: &[Group],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>)> {
@@ -219,7 +221,7 @@ fn assemble<D: Borrow<Drawn>>(
     // The block sits on the border. It's painted over the views, but counted with the border, so no
     // view takes its records.
     let block = match (&record.title_block, &layout) {
-        (Some(block), Some(layout)) => Some(block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id)),
+        (Some(block), Some(layout)) => Some(block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id, projection)),
         _ => None,
     };
     let mut objects = Vec::new();
@@ -363,11 +365,13 @@ struct Entry {
     serial: u64,
 }
 
-/// What a scene is assembled from: the sheet's record, the images on it, and each view on it with
-/// its entry's serial (0: not drawn yet) and its centre.
+/// What a scene is assembled from: the sheet's record, the drawing's projection (its title block's
+/// symbol), the images on the sheet, and each view on it with its entry's serial (0: not drawn yet)
+/// and its centre.
 #[derive(PartialEq)]
 struct Inputs {
     sheet: Sheet,
+    projection: Projection,
     images: Vec<Group>,
     views: Vec<(u64, u64, Vec2)>,
 }
@@ -393,7 +397,8 @@ impl Cache {
     fn inputs(&self, d: &Drawing, record: &Sheet, on: &[(u64, ResolvedView, Vec2)]) -> Inputs {
         let serial = |id: &u64| self.views.get(id).map_or(0, |e| e.serial);
         let images = crate::drawing_pictures::groups(d, record.id);
-        Inputs { sheet: record.clone(), images, views: on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect() }
+        let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
+        Inputs { sheet: record.clone(), projection: d.projection, images, views }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -467,7 +472,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             let kept: BTreeSet<u64> = d.views.iter().map(|v| v.id).collect();
             cache.views.retain(|id, _| kept.contains(id));
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let (scene, views, objects) = assemble(record, &inputs.images, drawn)?;
+            let (scene, views, objects) = assemble(record, d.projection, &inputs.images, drawn)?;
             (Arc::new(scene), views, objects.into(), GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };
