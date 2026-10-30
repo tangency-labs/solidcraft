@@ -4831,4 +4831,63 @@ mod attribute_seed_tests {
         assert_eq!(second.attribute_store(), &second_before);
         assert_eq!(target.entity_attributes(EntityRef::Face(face)).len(), 1);
     }
+
+    /// A hand-back that fails (the session store lists an attribute that was deleted,
+    /// so `body_attributes` errors) puts each body's store from before the session
+    /// back, rather than leaving the bodies with no attributes.
+    #[test]
+    fn failed_hand_back_restores_both_bodies_attributes() {
+        let mut k = Kernel::default();
+        let mut target = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
+        let face = crate::topology::brep::p1::faces(&target, None)
+            .unwrap()
+            .first()
+            .copied()
+            .unwrap();
+        target
+            .add_attribute(
+                EntityRef::Face(face),
+                Attribute::long(10_007, 7, Behavior::Copy),
+            )
+            .unwrap();
+        let mut second = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 1.0, 1.0, 1.0).unwrap();
+        let second_face = crate::topology::brep::p1::faces(&second, None)
+            .unwrap()
+            .first()
+            .copied()
+            .unwrap();
+        second
+            .add_attribute(
+                EntityRef::Face(second_face),
+                Attribute::long(10_008, 8, Behavior::Copy),
+            )
+            .unwrap();
+        let target_before = target.attribute_store().clone();
+        let second_before = second.attribute_store().clone();
+
+        {
+            let mut session =
+                FilletSession::with_second_base(&mut k, &mut target, Some(&mut second)).unwrap();
+            let store = &mut session.objects.attributes;
+            let planted = store
+                .insert(Attribute::long(10_009, 9, Behavior::Copy))
+                .unwrap();
+            // key 0 names no object (`loopuse::entity_of_notify_key`), so the hand-back
+            // clears its list; dropping its only user deletes the attribute but leaves
+            // the list naming it, and clearing that list then fails.
+            store.add_attribute(ObjectKey(0), planted).unwrap();
+            assert!(store.remove_user(planted, ObjectKey(0), false).unwrap());
+            assert!(
+                body_attributes(store, session.objects.target, session.objects.target_serial)
+                    .is_err()
+            );
+        }
+        assert_eq!(target.attribute_store(), &target_before);
+        assert_eq!(second.attribute_store(), &second_before);
+        assert_eq!(target.entity_attributes(EntityRef::Face(face)).len(), 1);
+        assert_eq!(
+            second.entity_attributes(EntityRef::Face(second_face)).len(),
+            1
+        );
+    }
 }
