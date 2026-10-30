@@ -48,6 +48,13 @@ impl<'a> Reader<'a> {
         self.bytes.get(mark..self.at).unwrap_or_default()
     }
 
+    /// The bytes not read yet; the reader is then at the end.
+    pub(crate) fn rest(&mut self) -> &'a [u8] {
+        let rest = self.bytes.get(self.at..).unwrap_or_default();
+        self.at = self.bytes.len();
+        rest
+    }
+
     pub(crate) fn take(&mut self, n: usize) -> Result<&'a [u8], WireError> {
         let end = self.at.checked_add(n).ok_or(WireError("truncated"))?;
         let head = self.bytes.get(self.at..end).ok_or(WireError("truncated"))?;

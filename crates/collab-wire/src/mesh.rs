@@ -15,17 +15,22 @@
 //! ```
 //!
 //! A shape keeps its faces in name order, so a face is found by its name and the shape's hash
-//! doesn't follow the B-rep's face numbering. A shape message, deflated, is one of:
+//! doesn't follow the B-rep's face numbering. A shape message is one of:
 //!
 //! ```text
 //! 0 (whole)    face count, then per face, in name order: 0 and the chunk, or 1 and the
-//!              32-byte hash of a chunk the receiver already holds
+//!              32-byte hash of a chunk the receiver holds or will pull
 //! 1 (delta)    the hash of a shape the receiver holds, the count and names of the faces it
 //!              loses (in name order), then the faces it gains or that changed, as above
 //! ```
 //!
 //! A delta costs nothing for a face that didn't change; a receiver without its base refuses it,
-//! and the sender sends the shape whole.
+//! and the sender sends the shape whole. A face can also travel alone, as the blob a receiver
+//! pulls by id ([`FaceChunk::to_blob`]): one too large to ride inline, or one held elsewhere.
+//!
+//! Every message (a shape message or a face blob) goes as its inflated length, a varint, then
+//! the deflate stream. The receiver knows what a message costs before inflating it
+//! ([`declared_size`]), and nothing inflates past what it declared.
 //!
 //! The encoder writes each face in one canonical form, so a face that comes out of the mesher
 //! the same on the grid gets the same bytes and hash however the mesh numbers or orders it:
@@ -37,6 +42,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use miniz_oxide::inflate::TINFLStatus;
 use sha2::{Digest, Sha256};
 use solidcraft_geom::{Mesh, Vec3};
 
@@ -50,10 +56,11 @@ pub type Hash = [u8; 32];
 /// coordinate comes back within half a micrometre. Plenty for a preview, and it is what makes
 /// the deltas small (plan, "Network weight").
 const GRID_PER_MM: f64 = 1000.0;
-/// The largest coordinate and placement entry, in millimetres: the bound `geom` keeps B-rep and
-/// section input to (`geom::brep`, `geom::section`), not `solidcraft_sketch::MAX_COORD` (1e9, a
-/// sketch's own). Its grid value fits in an `f64` exactly (under 2^53).
-const MAX_COORD_MM: f64 = 1e12;
+/// The largest coordinate and placement entry, in millimetres: a display bound, far below the
+/// B-rep's 1e12 (`geom::brep`). It is the GPU path's own (`gpu::path::scene`) and a sketch's
+/// (`solidcraft_sketch::MAX_COORD`), so what reaches the GPU from someone else stays where an
+/// f32 view holds it well. Its grid value fits in an `f64` exactly (under 2^53).
+const MAX_COORD_MM: f64 = 1e9;
 const MAX_GRID: u64 = (MAX_COORD_MM * GRID_PER_MM) as u64;
 /// Most faces, vertices and triangles in one shape (held chunks included): the caps the
 /// live-layer plan set, about 300 MB as a [`Mesh`] at most.
@@ -64,8 +71,10 @@ const MAX_TRIANGLES: usize = 8_000_000;
 /// selection carries the same names). A split face's name lists its neighbours, so names run to
 /// a few hundred bytes; a body with a longer one doesn't go.
 const MAX_NAME_BYTES: usize = 4 << 10;
-/// Most bytes a shape message inflates to, and most a shape may take sent whole: a
-/// decompression bomb stops here.
+/// Most bytes of face names in one shape: presence and the Browser keep every name of every body
+/// they hold. That is 1,024 names at the 4 KiB cap, or a scan named per triangle (10,000 faces).
+const MAX_SHAPE_NAME_BYTES: usize = 4 << 20;
+/// Most bytes a message may declare, and so inflate to, and most a shape may take sent whole.
 const MAX_DECODED_BYTES: usize = 64 << 20;
 
 /// Deflate level (miniz, 0 to 10). On the sensor enclosure, 9 is under 1% smaller than 6 at the
@@ -105,6 +114,24 @@ impl FaceChunk {
     /// The content hash: over the name and the quantised vertices, normals and triangles.
     pub fn hash(&self) -> &Hash {
         &self.hash
+    }
+
+    /// The face alone, as the blob a receiver pulls by id when a shape message names it by hash.
+    /// A blob longer than one frame goes as pieces: that is the blob layer's rule, for every blob.
+    pub fn to_blob(&self) -> Vec<u8> {
+        seal(&self.bytes)
+    }
+
+    /// Reads [`to_blob`](FaceChunk::to_blob)'s bytes, from anyone, with the checks of a face
+    /// inside a shape message.
+    pub fn from_blob(bytes: &[u8]) -> Result<FaceChunk, WireError> {
+        let raw = unseal(bytes)?;
+        let mut r = Reader::new(&raw);
+        let head = walk(&mut r, None)?;
+        require(r.left() == 0, "bytes after the face")?;
+        // The name is copied out, so the chunk can take `raw` without a second copy.
+        let name = head.name.to_owned();
+        Ok(FaceChunk::new(Head { name: &name, ..head }, raw))
     }
 }
 
@@ -146,6 +173,10 @@ impl Shape {
                 for (c, g) in tri.iter_mut().zip(mesh.triangles.get(t as usize).copied().unwrap_or_default()) {
                     *c = corner(mesh, g as usize, normals)?;
                 }
+                // Two corners on one grid point: no area at 1 µm and nothing to draw.
+                if tri[0].0 == tri[1].0 || tri[1].0 == tri[2].0 || tri[0].0 == tri[2].0 {
+                    continue;
+                }
                 let least = tri.iter().enumerate().min_by_key(|(_, c)| **c).map_or(0, |(k, _)| k);
                 tri.rotate_left(least);
                 tris.push(tri);
@@ -162,6 +193,7 @@ impl Shape {
         let vertices = faces.iter().map(|c| c.vertices).sum();
         let triangles = faces.iter().map(|c| c.triangles).sum();
         require(vertices <= MAX_VERTICES && triangles <= MAX_TRIANGLES, "too many vertices or triangles")?;
+        require(faces.iter().map(|c| c.name.len()).sum::<usize>() <= MAX_SHAPE_NAME_BYTES, "face names over 4 MiB in one shape")?;
         // Sent whole, it must inflate within the cap too, so whoever holds it can pass it on.
         require(whole_len(&faces) <= MAX_DECODED_BYTES, "the shape is over the size cap")?;
         let mut h = Sha256::new().chain_update(b"solidcraft-wire/shape\0");
@@ -187,12 +219,12 @@ impl Shape {
     }
 
     /// The bytes to send the whole shape: every face chunk, except those the sender `knows` the
-    /// receiver holds, which go as their hash. A chunk no longer than its hash always goes whole.
+    /// receiver holds, or will pull ([`FaceChunk::to_blob`]), which go as their hash. A chunk no longer than its hash always goes whole.
     pub fn encode(&self, knows: impl Fn(&Hash) -> bool) -> Vec<u8> {
         let mut raw = Vec::with_capacity(whole_len(&self.faces));
         raw.push(WHOLE);
         put_faces(&mut raw, self.faces.iter().map(|c| &**c), &knows);
-        miniz_oxide::deflate::compress_to_vec(&raw, DEFLATE_LEVEL)
+        seal(&raw)
     }
 
     /// The bytes to send a receiver that holds `base`: the names of the faces this shape lacks,
@@ -209,15 +241,14 @@ impl Shape {
             put_name(&mut raw, name);
         }
         put_faces(&mut raw, changed.into_iter(), &knows);
-        miniz_oxide::deflate::compress_to_vec(&raw, DEFLATE_LEVEL)
+        seal(&raw)
     }
 
     /// Reads [`encode`](Shape::encode)'s or [`encode_delta`](Shape::encode_delta)'s bytes, from
     /// anyone: `held` gives the shapes and chunks this side already has, by hash. What it hands
     /// back must carry the hash asked for, or the message is refused.
     pub fn decode(bytes: &[u8], held: &impl Held) -> Result<Shape, WireError> {
-        let raw = miniz_oxide::inflate::decompress_to_vec_with_limit(bytes, MAX_DECODED_BYTES)
-            .map_err(|_| WireError("not deflate, or inflates past the size cap"))?;
+        let raw = unseal(bytes)?;
         let mut r = Reader::new(&raw);
         let shape = match r.byte()? {
             WHOLE => Shape::new(read_faces(&mut r, held)?)?,
@@ -265,6 +296,38 @@ impl Shape {
         }
         Ok(mesh)
     }
+}
+
+/// A message as sent: its inflated length, then the deflate stream.
+fn seal(raw: &[u8]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(10 + raw.len() / 2);
+    put_varint(&mut b, raw.len() as u64);
+    b.extend(miniz_oxide::deflate::compress_to_vec(raw, DEFLATE_LEVEL));
+    b
+}
+
+/// Reads [`seal`]'s bytes. It inflates one byte past the declared size at most and refuses
+/// anything but exactly that size, so a decompression bomb stops at what it declared.
+fn unseal(bytes: &[u8]) -> Result<Vec<u8>, WireError> {
+    let mut r = Reader::new(bytes);
+    let n = declared(&mut r)?;
+    let raw = miniz_oxide::inflate::decompress_to_vec_with_limit(r.rest(), n + 1).map_err(|e| match e.status {
+        TINFLStatus::HasMoreOutput => WireError("inflates past its declared size"),
+        _ => WireError("not deflate"),
+    })?;
+    require(raw.len() <= n, "inflates past its declared size")?;
+    require(raw.len() == n, "inflates short of its declared size")?;
+    Ok(raw)
+}
+
+fn declared(r: &mut Reader) -> Result<usize, WireError> {
+    usize::try_from(r.varint()?).ok().filter(|&n| n <= MAX_DECODED_BYTES).ok_or(WireError("a declared size past the cap"))
+}
+
+/// What a shape message or a face blob inflates to, read from its first bytes without inflating
+/// (at most 64 MiB), so the receiver can count it against its budget first.
+pub fn declared_size(bytes: &[u8]) -> Result<usize, WireError> {
+    declared(&mut Reader::new(bytes))
 }
 
 /// What the receiving side already holds, by content hash: shapes (the bases of deltas) and face
@@ -373,7 +436,7 @@ fn corner(mesh: &Mesh, g: usize, normals: bool) -> Result<Corner, WireError> {
     let p = mesh.positions.get(g).ok_or(WireError("a triangle corner past the last vertex"))?;
     let mut q = [0i64; 3];
     for (q, x) in q.iter_mut().zip([p.x, p.y, p.z]) {
-        require(x.is_finite() && x.abs() <= MAX_COORD_MM, "a coordinate not finite or past 1e12 mm")?;
+        require(x.is_finite() && x.abs() <= MAX_COORD_MM, "a coordinate not finite or past 1e9 mm")?;
         *q = (x * GRID_PER_MM).round() as i64;
     }
     let n = if normals { oct(mesh.normals.get(g).copied().unwrap_or_default())? } else { [0; 2] };
@@ -448,7 +511,7 @@ fn walk<'a>(r: &mut Reader<'a>, mut sink: Option<Sink>) -> Result<Head<'a>, Wire
     let mut q = [0i64; 3];
     for _ in 0..vertices {
         for c in &mut q {
-            *c = c.checked_add(unzigzag(r.varint()?)).filter(|c| c.unsigned_abs() <= MAX_GRID).ok_or(WireError("a coordinate past 1e12 mm"))?;
+            *c = c.checked_add(unzigzag(r.varint()?)).filter(|c| c.unsigned_abs() <= MAX_GRID).ok_or(WireError("a coordinate past 1e9 mm"))?;
         }
         if let Some(s) = sink.as_mut() {
             let [x, y, z] = q.map(|c| c as f64 / GRID_PER_MM);
@@ -474,6 +537,7 @@ fn walk<'a>(r: &mut Reader<'a>, mut sink: Option<Sink>) -> Result<Head<'a>, Wire
             let i = u32::try_from(last).ok().filter(|&i| (i as usize) < vertices).ok_or(WireError("a triangle corner out of range"))?;
             *c = base.checked_add(i).ok_or(WireError("too many vertices"))?;
         }
+        require(t[0] != t[1] && t[1] != t[2] && t[0] != t[2], "a triangle with a repeated corner")?;
         if let Some(s) = sink.as_mut() {
             s.mesh.triangles.push(t);
             s.mesh.tri_face.push(s.face);
@@ -528,7 +592,7 @@ impl Body {
         let mut b = Vec::with_capacity(Body::BYTES);
         b.extend_from_slice(&self.shape);
         for &v in self.placement.as_flattened() {
-            require(v.is_finite() && v.abs() <= MAX_COORD_MM, "a placement not finite or past 1e12")?;
+            require(v.is_finite() && v.abs() <= MAX_COORD_MM, "a placement not finite or past 1e9")?;
             b.extend_from_slice(&v.to_le_bytes());
         }
         Ok(b)
@@ -542,7 +606,7 @@ impl Body {
         for v in placement.as_flattened_mut() {
             let b: [u8; 8] = r.take(8)?.try_into().map_err(|_| WireError("truncated"))?;
             *v = f64::from_le_bytes(b);
-            require(v.is_finite() && v.abs() <= MAX_COORD_MM, "a placement not finite or past 1e12")?;
+            require(v.is_finite() && v.abs() <= MAX_COORD_MM, "a placement not finite or past 1e9")?;
         }
         Ok(Body { shape, placement })
     }

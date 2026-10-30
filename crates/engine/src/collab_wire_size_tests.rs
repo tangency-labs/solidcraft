@@ -45,6 +45,13 @@ fn mesh(body: &ModelBody, quality: &str) -> Arc<Mesh> {
     if quality == "display" { body.plan_mesh_at(DisplayQuality::Normal).unwrap() } else { body.mesh() }
 }
 
+/// The triangles the wire keeps: those whose corners land on three different 1 µm grid points.
+/// A sliver narrower than that has nothing to draw, and the codec leaves it out.
+fn drawn(mesh: &Mesh) -> usize {
+    let grid = |i: u32| mesh.positions.get(i as usize).map(|p| [p.x, p.y, p.z].map(|x| (x * 1e3).round() as i64));
+    mesh.triangles.iter().filter(|[a, b, c]| grid(*a) != grid(*b) && grid(*b) != grid(*c) && grid(*a) != grid(*c)).count()
+}
+
 #[test]
 fn small_bodies_come_back_and_each_edit_goes_as_a_delta() {
     let designs: [&[(&str, Value)]; 2] = [
@@ -71,15 +78,16 @@ fn small_bodies_come_back_and_each_edit_goes_as_a_delta() {
                 let whole = sent.encode(|_| false);
                 let got = Shape::decode(&whole, &()).unwrap();
                 assert_eq!(got.hash(), sent.hash(), "{id} ({quality})");
-                assert_eq!(got.to_mesh().unwrap().triangles.len(), mesh.triangles.len(), "{id} ({quality}): triangles");
+                assert_eq!(got.to_mesh().unwrap().triangles.len(), drawn(&mesh), "{id} ({quality}): triangles");
                 let delta = before.get(k).map(|base| {
                     let delta = sent.encode_delta(&base.0, |_| false);
                     assert_eq!(Shape::decode(&delta, base).unwrap().hash(), sent.hash(), "{id} ({quality}): the delta");
                     delta.len()
                 });
                 println!(
-                    "{id} ({quality}): {} triangles, {} faces; {} B whole, {delta:?} B as a delta",
+                    "{id} ({quality}): {} triangles ({} slivers left out), {} faces; {} B whole, {delta:?} B as a delta",
                     mesh.triangles.len(),
+                    mesh.triangles.len() - drawn(&mesh),
                     sent.faces().len(),
                     whole.len()
                 );
@@ -110,7 +118,7 @@ fn collab_wire_sizes_of_the_sensor_enclosure() {
             let t = Instant::now();
             let got = Shape::decode(&bytes, &()).unwrap().to_mesh().unwrap();
             let decode = t.elapsed();
-            assert_eq!(got.triangles.len(), mesh.triangles.len());
+            assert_eq!(got.triangles.len(), drawn(&mesh));
             let bare = Mesh { normals: Vec::new(), ..(*mesh).clone() };
             let positions = shape(body, &bare).encode(|_| false).len();
             println!(

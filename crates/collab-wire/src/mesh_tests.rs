@@ -6,7 +6,7 @@ use solidcraft_geom::{Mesh, Vec3};
 use solidcraft_testkit::{mutations, survives};
 
 use super::{MAX_DECODED_BYTES, MAX_TRIANGLES, MAX_VERTICES};
-use crate::{FaceChunk, Hash, Held, Shape, WireError};
+use crate::{FaceChunk, Hash, Held, Shape, WireError, declared_size};
 
 /// A closed cylinder as a B-rep face tessellation gives it: the side, with smooth normals, and
 /// two flat caps, each face with vertices of its own.
@@ -160,9 +160,13 @@ fn a_mesh_without_face_ids_or_normals_is_one_face_without_normals() {
     assert!(empty.faces().is_empty() && empty.to_mesh().unwrap().positions.is_empty());
 }
 
-/// Inflates a shape message (raw deflate).
+/// Inflates a message: its declared length, then raw deflate.
 fn inflate(bytes: &[u8]) -> Vec<u8> {
-    miniz_oxide::inflate::decompress_to_vec(bytes).unwrap()
+    let mut r = crate::bytes::Reader::new(bytes);
+    let n = r.varint().unwrap() as usize;
+    let raw = miniz_oxide::inflate::decompress_to_vec(r.rest()).unwrap();
+    assert_eq!(raw.len(), n, "the declared size");
+    raw
 }
 
 fn sha256(parts: &[&[u8]]) -> Hash {
@@ -390,9 +394,17 @@ fn a_delta_names_only_the_faces_that_changed() {
     assert_eq!(receive(&delta), Err(WireError("a delta against a shape this side does not hold")));
 }
 
-/// Deflates a hand-made shape message.
+/// Deflates a hand-made message behind its true length.
 fn deflated(raw: &[u8]) -> Vec<u8> {
-    miniz_oxide::deflate::compress_to_vec(raw, 6)
+    declaring(raw.len(), raw)
+}
+
+/// Deflates a hand-made message behind the length `n`, true or not.
+fn declaring(n: usize, raw: &[u8]) -> Vec<u8> {
+    let mut b = Vec::new();
+    crate::bytes::put_varint(&mut b, n as u64);
+    b.extend(miniz_oxide::deflate::compress_to_vec(raw, 6));
+    b
 }
 
 /// A shape message of one inline face: `name`, then the rest of the chunk as given.
@@ -410,9 +422,9 @@ const GOOD: &[u8] = &[3, 1, 0, 2, 3, 0, 4, 0, 0, 0, 4, 0, 0, 2, 2];
 
 /// Faces that lie (name, the rest of the chunk), each with the reason it is refused for.
 fn face_lies() -> Vec<(Vec<u8>, Vec<u8>, &'static str)> {
-    // A coordinate one grid step past 1e12 mm (zig-zag 2e15 + 2).
+    // A coordinate one grid step past 1e9 mm (zig-zag 2e12 + 2).
     let mut far = vec![3, 1, 0];
-    crate::bytes::put_varint(&mut far, 2_000_000_000_000_002);
+    crate::bytes::put_varint(&mut far, 2_000_000_000_002);
     far.extend([3, 0, 4, 0, 0, 0, 4, 0, 0, 2, 2]);
     let f = || b"F".to_vec();
     vec![
@@ -422,7 +434,9 @@ fn face_lies() -> Vec<(Vec<u8>, Vec<u8>, &'static str)> {
         (f(), vec![3, 1, 0, 2, 3, 0, 4, 0, 0, 0, 4, 0, 0, 2, 4], "a triangle corner out of range"),
         (f(), vec![3, 1, 0, 2, 3, 0, 4, 0, 0, 0, 4, 0, 1, 2, 2], "a triangle corner out of range"),
         (f(), vec![0x83, 0, 1, 0, 2, 3, 0, 4, 0, 0, 0, 4, 0, 0, 2, 2], "varint not in its shortest form"),
-        (f(), far, "a coordinate past 1e12 mm"),
+        (f(), far, "a coordinate past 1e9 mm"),
+        // Corners 0, 0, 2: nothing to draw, and nothing an honest sender writes.
+        (f(), vec![3, 1, 0, 2, 3, 0, 4, 0, 0, 0, 4, 0, 0, 0, 4], "a triangle with a repeated corner"),
         (f(), vec![3, 1, 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f, 3, 0], "varint over 64 bits"),
         // Counts past the caps, and under them but more than the bytes left could hold. Nothing
         // is reserved for them.
@@ -440,8 +454,9 @@ fn each_lie_in_a_shape_message_is_refused() {
     for (name, rest, why) in face_lies() {
         refused(&one_face(&name, &rest), why);
     }
-    refused(b"", "not deflate, or inflates past the size cap");
-    refused(&[0xff; 64], "not deflate, or inflates past the size cap");
+    refused(b"", "truncated");
+    refused(&[0xff; 64], "varint over 64 bits");
+    refused(&[&[10][..], &[0xff; 64]].concat(), "not deflate");
     refused(&deflated(&[2, 0]), "a message form");
     refused(&deflated(&[&[0, 1, 0, 1, b'F'][..], GOOD, &[0]].concat()), "bytes after the last face");
     refused(&deflated(&[&[0, 2, 0, 1, b'F'][..], GOOD].concat()), "truncated");
@@ -455,12 +470,28 @@ fn each_lie_in_a_shape_message_is_refused() {
     // Two faces with one name, or out of name order: a shape keeps its faces by name.
     refused(&deflated(&[&[0, 2, 0, 1, b'F'][..], GOOD, &[0, 1, b'F'], GOOD].concat()), "faces out of name order, or a name twice");
     refused(&deflated(&[&[0, 2, 0, 1, b'G'][..], GOOD, &[0, 1, b'F'], GOOD].concat()), "faces out of name order, or a name twice");
-    // A decompression bomb: 65 MiB of zeros in about 64 KB.
-    let bomb = deflated(&vec![0; MAX_DECODED_BYTES + (1 << 20)]);
+    // A message is exactly as long as it says: one byte more or less is refused.
+    let good = [&[0, 1, 0, 1, b'F'][..], GOOD].concat();
+    assert!(receive(&deflated(&good)).is_ok());
+    refused(&declaring(good.len() - 1, &good), "inflates past its declared size");
+    refused(&declaring(good.len() + 1, &good), "inflates short of its declared size");
+    // A decompression bomb: 65 MiB of zeros in about 64 KB. Said truthfully, its size is past
+    // the cap and nothing is inflated; told as 20 bytes, inflating stops at the 21st.
+    let zeros = vec![0; MAX_DECODED_BYTES + (1 << 20)];
+    let bomb = deflated(&zeros);
     assert!(bomb.len() < 100_000);
+    assert_eq!(declared_size(&bomb), Err(WireError("a declared size past the cap")));
+    refused(&bomb, "a declared size past the cap");
+    let lying = declaring(20, &zeros);
     let t = std::time::Instant::now();
-    refused(&bomb, "not deflate, or inflates past the size cap");
+    refused(&lying, "inflates past its declared size");
     eprintln!("bomb: {} bytes refused in {:?}", bomb.len(), t.elapsed());
+    // Inflating stops at the declared size plus one byte, before what comes later is read: here
+    // 100 stored bytes, then a block of the reserved type, which only a decoder that read on
+    // would reach.
+    let stored = [&[20, 0, 100, 0, 0x9b, 0xff][..], &[0; 100], &[0x07]].concat();
+    refused(&stored, "inflates past its declared size");
+    refused(&[&[100][..], &stored[1..]].concat(), "not deflate");
 }
 
 #[test]
@@ -526,16 +557,15 @@ fn a_mesh_that_cannot_go_is_refused_before_anything_is_sent() {
     refused(&Mesh { tri_face: vec![0, 0], ..one() }, &["F"], "a face per triangle, or none");
     refused(&Mesh { tri_face: vec![u32::MAX], ..one() }, &["F"], "too many faces");
     refused(&Mesh { tri_face: vec![1], ..one() }, &["F", "F"], "two faces with one name");
-    for bad in [f64::NAN, f64::INFINITY, 1.000_001e12, -1.000_001e12] {
-        refused(&Mesh { positions: vec![Vec3::new(bad, 0.0, 0.0), Vec3::X, Vec3::Y], ..one() }, &["F"], "a coordinate not finite or past 1e12 mm");
+    for bad in [f64::NAN, f64::INFINITY, 1.000_001e9, -1.000_001e9] {
+        refused(&Mesh { positions: vec![Vec3::new(bad, 0.0, 0.0), Vec3::X, Vec3::Y], ..one() }, &["F"], "a coordinate not finite or past 1e9 mm");
     }
     // A name goes up to 4 KiB, the plan's cap for a name on the wire.
     let name = "x".repeat(4096);
     assert_eq!(receive(&send(&one(), &[&name])).unwrap().faces()[0].name(), name);
     refused(&one(), &[&"x".repeat(4097)], "a face name over 4 KiB");
-    // The bound itself goes, and comes back within half a micrometre plus the rounding of f64
-    // there (an ulp at 1e12 mm is 0.12 µm).
-    let edge = Mesh { positions: vec![Vec3::new(1e12, -1e12, 0.0), Vec3::new(-1e12, 1e12, 1e12), Vec3::Y], ..one() };
+    // The display bound itself goes, and comes back within half a micrometre.
+    let edge = Mesh { positions: vec![Vec3::new(1e9, -1e9, 0.0), Vec3::new(-1e9, 1e9, 1e9), Vec3::Y], ..one() };
     let got = receive(&send(&edge, &["F"])).unwrap().to_mesh().unwrap();
     for p in &edge.positions {
         assert!(got.positions.iter().any(|q| p.dist(*q) < 1e-9 * p.len().max(1.0)), "{p:?} didn't come back: {:?}", got.positions);
@@ -579,7 +609,7 @@ fn a_body_is_a_shape_hash_and_its_exact_placement() {
     assert_eq!(bytes.len(), crate::Body::BYTES);
     assert_eq!(crate::Body::from_bytes(&bytes), Ok(body), "bit for bit");
     assert!(crate::Body::from_bytes(&bytes[..127]).is_err() && crate::Body::from_bytes(&[bytes.as_slice(), &[0]].concat()).is_err());
-    for bad in [f64::NAN, f64::NEG_INFINITY, 2e12] {
+    for bad in [f64::NAN, f64::NEG_INFINITY, 1.000_001e9, 2e12] {
         let mut lie = body;
         lie.placement[3][0] = bad;
         assert!(lie.to_bytes().is_err());
@@ -588,4 +618,83 @@ fn a_body_is_a_shape_hash_and_its_exact_placement() {
         assert!(crate::Body::from_bytes(&b).is_err());
     }
     survives("body", &mutations(&bytes, false, 0xb0d1), 1, |b| crate::Body::from_bytes(b).ok().map(|_| 1));
+}
+
+#[test]
+fn a_triangle_with_no_area_on_the_grid_is_left_out() {
+    // The first two corners are 0.1 µm apart: one grid point.
+    let m = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::new(0.000_1, 0.0, 0.0), Vec3::X, Vec3::Y],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        ..Default::default()
+    };
+    let got = receive(&send(&m, &["F"])).unwrap().to_mesh().unwrap();
+    assert_eq!(got.triangles.len(), 1, "only the triangle with an area");
+    // All of a face's triangles collapsed: the face goes, empty.
+    let dot = Mesh { positions: vec![Vec3::ZERO; 3], triangles: vec![[0, 1, 2]], ..Default::default() };
+    let got = receive(&send(&dot, &["F"])).unwrap();
+    assert_eq!((got.faces().len(), got.to_mesh().unwrap().triangles.len()), (1, 0));
+}
+
+/// A whole shape message of `n` faces, each GOOD under a name `size` bytes long.
+fn named_faces(n: usize, size: usize) -> Vec<u8> {
+    let mut raw = vec![0];
+    crate::bytes::put_varint(&mut raw, n as u64);
+    for k in 0..n {
+        let name = format!("{k:05}{}", "x".repeat(size - 5));
+        raw.push(0);
+        crate::bytes::put_varint(&mut raw, name.len() as u64);
+        raw.extend(name.as_bytes());
+        raw.extend(GOOD);
+    }
+    deflated(&raw)
+}
+
+#[test]
+fn a_shape_holds_at_most_4_mib_of_face_names() {
+    // 1,024 names at the 4 KiB cap is exactly 4 MiB.
+    assert_eq!(receive(&named_faces(1024, 4096)).map(|s| s.faces().len()), Ok(1024));
+    assert_eq!(receive(&named_faces(1025, 4096)), Err(WireError("face names over 4 MiB in one shape")));
+    // The same when it is cut from a mesh: 1,025 one-triangle faces.
+    let mut m = Mesh::default();
+    for k in 0..1025u32 {
+        m.positions.extend([Vec3::new(f64::from(k), 0.0, 0.0), Vec3::new(f64::from(k), 1.0, 0.0), Vec3::new(f64::from(k), 0.0, 1.0)]);
+        m.triangles.push([3 * k, 3 * k + 1, 3 * k + 2]);
+        m.tri_face.push(k);
+    }
+    let names: Vec<String> = (0..1025).map(|k| format!("{k:05}{}", "x".repeat(4091))).collect();
+    assert_eq!(Shape::from_mesh(&m, &names), Err(WireError("face names over 4 MiB in one shape")));
+    assert!(Shape::from_mesh(&m, &names.iter().map(|n| &n[..64]).collect::<Vec<_>>()).is_ok());
+}
+
+#[test]
+fn a_face_travels_alone_as_a_blob() {
+    let shape = Shape::from_mesh(&sample(), &NAMES).unwrap();
+    for c in shape.faces() {
+        let blob = c.to_blob();
+        assert_eq!(declared_size(&blob), Ok(c.bytes.len()));
+        assert_eq!(FaceChunk::from_blob(&blob).as_ref(), Ok(&**c), "{}: the same chunk and hash", c.name());
+    }
+    // A face too large for one frame (a scan: one face, 20,000 triangles) still goes as one
+    // blob; the blob layer cuts it into pieces.
+    let mut scan = cylinder(50.0, 80.0, 5000, Vec3::ZERO);
+    scan.tri_face.clear();
+    let scan = Shape::from_mesh(&scan, &["Scan:face:0"]).unwrap();
+    let blob = scan.faces()[0].to_blob();
+    assert!(blob.len() > 64 << 10, "{} bytes", blob.len());
+    assert_eq!(FaceChunk::from_blob(&blob).map(|c| c.triangles), Ok(20_000));
+    // Each lie is refused alone as inside a shape message, and so is anything after the face.
+    for (name, rest, why) in face_lies() {
+        let raw = [&[name.len() as u8][..], &name, &rest].concat();
+        assert_eq!(FaceChunk::from_blob(&deflated(&raw)), Err(WireError(why)), "{why}");
+    }
+    let good = [&[1, b'F'][..], GOOD].concat();
+    assert!(FaceChunk::from_blob(&deflated(&good)).is_ok());
+    assert_eq!(FaceChunk::from_blob(&deflated(&[&good[..], &[0]].concat())), Err(WireError("bytes after the face")));
+    assert_eq!(FaceChunk::from_blob(&declaring(good.len() + 1, &good)), Err(WireError("inflates short of its declared size")));
+    let blob = shape.faces()[1].to_blob();
+    let read = |b: &[u8]| FaceChunk::from_blob(b).ok().map(|c| c.triangles);
+    survives("face blob (deflated)", &mutations(&blob, false, 0xb10b), MAX_TRIANGLES, read);
+    let inside: Vec<Vec<u8>> = mutations(&inflate(&blob), false, 0xb10c).iter().map(|b| deflated(b)).collect();
+    survives("face blob (inside the deflate)", &inside, MAX_TRIANGLES, read);
 }
