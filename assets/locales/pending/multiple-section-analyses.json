@@ -5,6 +5,8 @@
     "cmd.inspect_section_list": "List Section Analyses",
     "cmd.inspect_section_rename": "Rename Section Analysis",
     "cmd.inspect_section_visibility": "Show/Hide Section Analysis",
+    "prefs.section_replaces_cut": "Section Analysis replaces the cut",
+    "prefs.section_replaces_cut_help": "Running Section Analysis again changes the section shown instead of adding one, and Remove Section deletes it instead of hiding it. Sections already in a design are kept either way.",
     "section.default_name": "Section {n}",
     "section.not_found": "This section does not cut: {why}"
   },
@@ -14,6 +16,8 @@
     "cmd.inspect_section_list": "Querschnittsanalysen auflisten",
     "cmd.inspect_section_rename": "Querschnittsanalyse umbenennen",
     "cmd.inspect_section_visibility": "Querschnittsanalyse ein-/ausblenden",
+    "prefs.section_replaces_cut": "Querschnittsanalyse ersetzt den Schnitt",
+    "prefs.section_replaces_cut_help": "Ein erneuter Aufruf der Querschnittsanalyse ändert den angezeigten Schnitt, statt einen weiteren hinzuzufügen, und „Schnitt entfernen“ löscht ihn, statt ihn auszublenden. Schnitte, die ein Design bereits enthält, bleiben in jedem Fall erhalten.",
     "section.default_name": "Schnitt {n}",
     "section.not_found": "Dieser Schnitt ist nicht wirksam: {why}"
   },
@@ -23,6 +27,8 @@
     "cmd.inspect_section_list": "断面解析の一覧",
     "cmd.inspect_section_rename": "断面解析の名前を変更",
     "cmd.inspect_section_visibility": "断面解析の表示/非表示",
+    "prefs.section_replaces_cut": "断面解析で断面を置き換える",
+    "prefs.section_replaces_cut_help": "断面解析をもう一度実行すると、断面を追加する代わりに表示中の断面を変更し、「セクションを解除」は断面を非表示にする代わりに削除します。デザインにすでにある断面はどちらの場合も保持されます。",
     "section.default_name": "断面 {n}",
     "section.not_found": "この断面は無効です: {why}"
   },
@@ -32,6 +38,8 @@
     "cmd.inspect_section_list": "列出截面分析",
     "cmd.inspect_section_rename": "重命名截面分析",
     "cmd.inspect_section_visibility": "显示/隐藏截面分析",
+    "prefs.section_replaces_cut": "截面分析替换剖切",
+    "prefs.section_replaces_cut_help": "再次运行截面分析时会更改当前显示的剖切，而不是添加新剖切；“移除剖面”会删除它，而不是隐藏它。设计中已有的剖切在两种情况下都会保留。",
     "section.default_name": "截面 {n}",
     "section.not_found": "此截面无效：{why}"
   },
@@ -41,6 +49,8 @@
     "cmd.inspect_section_list": "단면 분석 목록",
     "cmd.inspect_section_rename": "단면 분석 이름 바꾸기",
     "cmd.inspect_section_visibility": "단면 분석 표시/숨기기",
+    "prefs.section_replaces_cut": "단면 분석이 단면을 바꿈",
+    "prefs.section_replaces_cut_help": "단면 분석을 다시 실행하면 단면을 추가하는 대신 표시된 단면을 바꾸고, 단면 제거는 단면을 숨기는 대신 삭제합니다. 디자인에 이미 있는 단면은 어느 쪽이든 유지됩니다.",
     "section.default_name": "단면 {n}",
     "section.not_found": "이 단면은 적용되지 않습니다: {why}"
   },
@@ -50,6 +60,8 @@
     "cmd.inspect_section_list": "قائمة تحليلات المقطع",
     "cmd.inspect_section_rename": "إعادة تسمية تحليل المقطع",
     "cmd.inspect_section_visibility": "إظهار/إخفاء تحليل المقطع",
+    "prefs.section_replaces_cut": "تحليل المقطع يستبدل القطع",
+    "prefs.section_replaces_cut_help": "تشغيل تحليل المقطع مرة أخرى يغيّر المقطع المعروض بدلًا من إضافة مقطع جديد، و«إزالة المقطع» تحذفه بدلًا من إخفائه. تبقى المقاطع الموجودة في التصميم في الحالتين.",
     "section.default_name": "مقطع {n}",
     "section.not_found": "هذا المقطع لا يقطع: {why}"
   },
@@ -59,6 +71,8 @@
     "cmd.inspect_section_list": "רשימת ניתוחי חתך",
     "cmd.inspect_section_rename": "שינוי שם ניתוח חתך",
     "cmd.inspect_section_visibility": "הצגה/הסתרה של ניתוח חתך",
+    "prefs.section_replaces_cut": "ניתוח חתך מחליף את החתך",
+    "prefs.section_replaces_cut_help": "הפעלה חוזרת של ניתוח חתך משנה את החתך המוצג במקום להוסיף חתך, ו„הסרת מקטע“ מוחקת אותו במקום להסתיר אותו. חתכים שכבר נמצאים בתכנון נשמרים בכל מקרה.",
     "section.default_name": "חתך {n}",
     "section.not_found": "חתך זה אינו חותך: {why}"
   },
@@ -68,6 +82,8 @@
     "cmd.inspect_section_list": "Danh sách phân tích mặt cắt",
     "cmd.inspect_section_rename": "Đổi tên phân tích mặt cắt",
     "cmd.inspect_section_visibility": "Hiện/Ẩn phân tích mặt cắt",
+    "prefs.section_replaces_cut": "Phân tích mặt cắt thay thế mặt cắt",
+    "prefs.section_replaces_cut_help": "Chạy lại Phân tích mặt cắt sẽ thay đổi mặt cắt đang hiện thay vì thêm một mặt cắt mới, và Xóa mặt cắt sẽ xóa nó thay vì ẩn nó. Các mặt cắt đã có trong thiết kế vẫn được giữ trong cả hai trường hợp.",
     "section.default_name": "Mặt cắt {n}",
     "section.not_found": "Mặt cắt này không có tác dụng: {why}"
   }

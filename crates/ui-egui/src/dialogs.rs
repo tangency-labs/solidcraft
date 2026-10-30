@@ -4109,6 +4109,11 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     Ok(())
 }
 
+/// A new Section Analysis's name: `Section N` in the user's language, for the first free `N`.
+fn new_section_name(s: &Session) -> String {
+    solidcraft_engine::cmd::section::free_name(&s.doc, |n| crate::i18n::format("section.default_name", &[("n", &n.to_string())]))
+}
+
 /// The Section Analysis a Section Analysis dialog edits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SectionEdit {
@@ -4866,11 +4871,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             match edit {
                 Some(e) => ("inspect.section.edit", json!({"section": e.id, "plane": plane, "offset": offset, "flip": flip, "hatch": hatch})),
-                None => {
-                    let name =
-                        solidcraft_engine::cmd::section::free_name(&s.doc, |n| crate::i18n::format("section.default_name", &[("n", &n.to_string())]));
-                    ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch, "name": name}))
+                // The "replaces the cut" preference: the section shown takes the new plane and
+                // keeps its name, one cut at a time as before several were kept (#3977).
+                None if app.preferences.section_replaces_cut => {
+                    let all = &s.doc.section_analyses;
+                    let mut p = json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch, "replace": true});
+                    if all.shown.and_then(|id| all.get(id)).is_none() {
+                        p["name"] = json!(new_section_name(s));
+                    }
+                    ("inspect.section", p)
                 }
+                None => ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch, "name": new_section_name(s)})),
             }
         }
         Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),

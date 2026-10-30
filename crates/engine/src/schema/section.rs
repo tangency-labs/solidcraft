@@ -7,7 +7,8 @@ use serde_json::Value;
 use super::types::{IdOrName, LengthExpr};
 
 /// Make a new Section Analysis and show it (the one shown before is hidden, and kept), or with
-/// `clear` hide the one shown.
+/// `clear` hide the one shown. With `replace`, the section shown is changed in place instead
+/// (none shown: a new one is made), and `clear` deletes it.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SectionParams {
@@ -36,6 +37,11 @@ pub struct SectionParams {
     /// Hide the section shown now (it stays in the design) instead of making one.
     #[serde(default)]
     pub clear: Option<bool>,
+    /// One cut at a time, as before several sections (#3977): the section shown takes the new
+    /// plane (keeping its name unless `name` is given) and `clear` deletes it. The app passes it
+    /// when the "Section Analysis replaces the cut" preference is on. Default: false.
+    #[serde(default)]
+    pub replace: Option<bool>,
 }
 
 /// Change a Section Analysis and show it. Keys left out keep their values.

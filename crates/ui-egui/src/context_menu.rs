@@ -1565,8 +1565,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.tangentChain" => tangent_chain(app),
         "ui.origin" => app.set_origin_shown(!app.origin_shown()),
         "ui.clear" => drop(app.run("select.clear", json!({}))),
-        // Hides the section shown; it stays in the Analysis folder.
-        "ui.unsection" => drop(app.run("inspect.section", json!({"clear": true}))),
+        // Hides the section shown; it stays in the Analysis folder. With the "replaces the cut"
+        // preference it is deleted instead, as the one cut was before several were kept (#3977).
+        "ui.unsection" => drop(app.run("inspect.section", json!({"clear": true, "replace": app.preferences.section_replaces_cut}))),
         "ui.editSection" => {
             if let Some(id) = id_of(&p, "section") {
                 crate::dialogs::edit_section(app, id);

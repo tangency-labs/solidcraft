@@ -31,6 +31,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::scenario::publish_handle("prefs:auto_operation", auto.rect.center());
         ui_kit::text(ui, app.tr("prefs.auto_operation_note"), ui_kit::Text::Hint("auto_operation"));
     });
+    ui_kit::settings_section(ui, "section_analysis", app.tr("ui.section_analysis"), |ui| {
+        let section = setting::section_replaces_cut(app, ui).on_hover_text(app.tr("prefs.section_replaces_cut_help"));
+        crate::scenario::publish_target("prefs:section_replaces_cut", section.rect);
+    });
     ui_kit::settings_section(ui, "placement", app.tr("prefs.placement"), |ui| {
         setting::placement_handles(app, ui);
     });

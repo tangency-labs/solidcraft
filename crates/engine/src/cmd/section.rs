@@ -40,6 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
          flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true); name?; or clear: true (hide the section shown). \
          Makes a new section and shows it (the one shown before is hidden and kept); a cut on a construction plane or face follows it. \
+         replace?: bool (default false): change the section shown in place instead (none shown: make one), and with clear delete it; \
          Returns the cut's origin and normal, and for a named plane its axis and at",
         ),
     CommandSpec::new("inspect.section.edit", "Edit Section Analysis", crate::checked!("inspect.section.edit", edit))
@@ -391,9 +392,15 @@ fn checked_cut(s: &Session, sec: &SectionAnalysis, cmd: &str) -> Result<()> {
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.section";
+    // One cut at a time, as before a design kept several (#3977): the app asks for it when the
+    // user's preference says so. It only steers this run; the design keeps what it has.
+    let replace = bool_(p, "replace").unwrap_or(false);
+    let shown = s.doc.section_analyses.shown.filter(|id| s.doc.section_analyses.get(*id).is_some());
     if bool_(p, "clear").unwrap_or(false) {
-        if s.doc.section_analyses.shown.is_some() {
-            change(s, |all| all.shown = None);
+        match shown {
+            Some(id) if replace => drop(discard(s, id)),
+            Some(_) => change(s, |all| all.shown = None),
+            None => {}
         }
         sync(s);
         return Ok(json!({"section": null}));
@@ -401,19 +408,25 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let plane = plane_of(s, p.get("plane").unwrap_or(&Value::Null), cmd)?;
     let offset = offset_of(s, p, &plane, cmd)?.unwrap_or_default();
     let all = &s.doc.section_analyses;
-    if all.items.len() >= MAX_SECTIONS {
+    let replaced = shown.filter(|_| replace).and_then(|id| all.get(id));
+    if replaced.is_none() && all.items.len() >= MAX_SECTIONS {
         return Err(bad(cmd, "too many section analyses"));
     }
-    let name = match str_(p, "name") {
-        Some(n) => check_name(all, n, None, cmd)?,
-        None => all.free_name(english_name),
+    let own = replaced.map(|x| x.id);
+    let name = match (str_(p, "name"), replaced) {
+        (Some(n), _) => check_name(all, n, own, cmd)?,
+        (None, Some(x)) => x.name.clone(),
+        (None, None) => all.free_name(english_name),
     };
-    let id = all.next_id();
+    let id = own.unwrap_or_else(|| all.next_id());
     let flip = bool_(p, "flip").unwrap_or(false);
     let sec = SectionAnalysis { id, name, plane, offset, flip, hatch: bool_(p, "hatch").unwrap_or(true) };
     checked_cut(s, &sec, cmd)?;
     change(s, |all| {
-        all.items.push(sec);
+        match all.get_mut(id) {
+            Some(x) => *x = sec,
+            None => all.items.push(sec),
+        }
         all.shown = Some(id);
         all.folder_hidden = false;
     });
@@ -511,8 +524,15 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.section.delete";
     let id = find(s, p, cmd)?;
-    let i = s.doc.section_analyses.items.iter().position(|x| x.id == id).ok_or_else(|| bad(cmd, "no such section analysis"))?;
-    let gone = change(s, |all| {
+    let gone = discard(s, id).ok_or_else(|| bad(cmd, "no such section analysis"))?;
+    sync(s);
+    serde_json::to_value(SectionDeleteResult { deleted: gone.name, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// Take section `id` out of the design; `None` when there is no such section.
+fn discard(s: &mut Session, id: u64) -> Option<SectionAnalysis> {
+    let i = s.doc.section_analyses.items.iter().position(|x| x.id == id)?;
+    Some(change(s, |all| {
         let gone = all.items.remove(i);
         if all.shown == Some(id) {
             all.shown = None;
@@ -522,9 +542,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             *all = SectionAnalyses::default();
         }
         gone
-    });
-    sync(s);
-    serde_json::to_value(SectionDeleteResult { deleted: gone.name, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    }))
 }
 
 fn list(s: &mut Session, _p: &Value) -> Result<Value> {

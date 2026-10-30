@@ -1295,6 +1295,10 @@ preference_settings! {
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
+    /// Section Analysis keeps one cut, as before a design kept several (#3977): running it again
+    /// changes the section shown, and Remove Section deletes it. Off: each run adds a section and
+    /// Remove Section hides it. It steers only what the command does; designs keep their sections.
+    section_replaces_cut: bool = false, PAGE_TOOLS => check_id("prefs.section_replaces_cut");
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before).
     extrude_auto_to_object: bool = false, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
@@ -5711,6 +5715,7 @@ mod tests {
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
+            ("section_replaces_cut", json!(true), PAGE_TOOLS),
             ("extrude_auto_to_object", json!(true), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
             ("extrude_view_return", json!(true), PAGE_TOOLS),

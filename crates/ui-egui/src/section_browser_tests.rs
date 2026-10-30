@@ -327,3 +327,47 @@ fn section_ribbon_toggle_and_setting_edit_have_separate_intent_and_compatibility
     assert!(h.app.dialog.is_some());
     assert_eq!(h.app.session.section, cut);
 }
+
+/// The "Section Analysis replaces the cut" preference (#3977): off (the default), OK in the
+/// toolbar's dialog adds a section and Remove Section hides it; on, OK changes the section shown
+/// and Remove Section deletes it, as the one cut was before. It changes no section a design has.
+#[test]
+fn the_replace_preference_steers_the_toolbar_and_remove_section() {
+    let mut h = harness();
+    assert!(!h.app.preferences.section_replaces_cut, "adding is the default");
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let names = |h: &Harness| h.app.session.doc.section_analyses.items.iter().map(|x| x.name.clone()).collect::<Vec<_>>();
+    let remove = |h: &mut Harness| {
+        let items = context_menu::items(&h.app, &Target::Viewport);
+        let item = items.iter().find(|i| i.label == "Remove Section").unwrap_or_else(|| panic!("no Remove Section in {items:?}")).clone();
+        context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
+        h.frames(3);
+    };
+    start_on_xy(&mut h, "4 mm");
+    ok(&mut h);
+    start_on_xy(&mut h, "6 mm");
+    ok(&mut h);
+    assert_eq!(names(&h), ["Section 1", "Section 2"], "each OK adds a section");
+    remove(&mut h);
+    assert!(h.app.session.section.is_none());
+    assert_eq!(names(&h), ["Section 1", "Section 2"], "Remove Section hides, the section stays");
+
+    crate::prefs::control(&mut h.app, &json!({"section_replaces_cut": true})).unwrap();
+    assert!(h.app.preferences.section_replaces_cut);
+    assert_eq!(names(&h), ["Section 1", "Section 2"], "turning it on changes no section");
+    let first = h.app.session.doc.section_analyses.items[0].id;
+    click(&mut h, "eye:Section 1");
+    start_on_xy(&mut h, "9 mm");
+    ok(&mut h);
+    assert_eq!(names(&h), ["Section 1", "Section 2"], "OK replaces the cut shown");
+    assert_eq!(shown(&h), Some(first));
+    assert!((h.app.session.section.expect("a cut").0.z - 9.0).abs() < 1e-9);
+    remove(&mut h);
+    assert!(h.app.session.section.is_none());
+    assert_eq!(names(&h), ["Section 2"], "Remove Section deletes the section shown");
+    // None shown: OK makes one, named as a new section is.
+    start_on_xy(&mut h, "3 mm");
+    ok(&mut h);
+    assert_eq!(names(&h), ["Section 2", "Section 3"]);
+    assert!((h.app.session.section.expect("a cut").0.z - 3.0).abs() < 1e-9);
+}

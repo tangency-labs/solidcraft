@@ -73,6 +73,7 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
     assert_eq!(params["flip"], !current_flip);
     h.app.run("inspect.section", params).unwrap();
     assert!((h.app.session.section.unwrap().1 - flipped.1).len() < 1e-9);
+    assert_eq!(h.app.session.doc.section_analyses.items.len(), 1, "the card changes the section shown, it never adds one (#3977)");
 }
 
 #[test]
