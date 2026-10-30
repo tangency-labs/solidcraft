@@ -1,6 +1,6 @@
 # UI localization
 
-SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, French, Galician, Hebrew, Croatian, Italian,
+SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Finnish, French, Galician, Hebrew, Croatian, Italian,
 Japanese, Korean, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
@@ -45,7 +45,7 @@ that looks untranslated. Two guards catch that in the build:
 - `every_complete_catalog_carries_every_english_message` — adding a key to `en.json`
   without giving it to a complete catalog fails the tests. English is the source catalog,
   Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian and Serbian carry
-  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
+  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
   Turkish are partial — their gaps fall back to English and are reported by `cargo xtask i18n` without
   failing the build. A new label needs en, ar, he, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
   follow later.
@@ -93,6 +93,8 @@ Croatian; the Browser panel is Stablo modela, so it is never confused with a web
 traka. In Serbian, brand and file names, acronyms, units, key names and placeholders stay in Latin
 script inside the Cyrillic text. Command IDs, shortcuts, file formats, units and user-provided names
 are not translated.
+
+The Finnish catalog (`fi`, shown as Suomi) uses Luonnos (Sketch), Kappale (Body), Piirre (timeline Feature), Rajoite (Constraint), Mitta (Dimension), Pyöristys (Fillet), Viiste (Chamfer), Pursotus (Extrude) and Pyöräytys (Revolve); a design is a malli and an AI model a tekoälymalli. Draft is Päästö, Flat Pattern is Levityskuva, Hem is Huulos, and Counterbore/Countersink are Upotus/Kartioupotus. Camera and view angles are Nyökkäys (pitch), Kääntö (yaw) and Kallistus (roll); a saved render shot is a Kuvakulma. Finnish puts a space before % (50 %). Command IDs, shortcuts, file formats, units and user-provided names stay unchanged.
 
 The Norwegian Bokmål catalog (`nb`, shown as Norsk bokmål) uses Skisse (Sketch),
 Kropp (Body), Funksjon (timeline Feature), Binding (Constraint), Avrunding (Fillet)

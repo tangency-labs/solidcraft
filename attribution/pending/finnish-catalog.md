@@ -1,0 +1,1 @@
+| assets/locales/fi.json | SolidCraft contributors | Original Finnish translation of SolidCraft's English catalog, AI-assisted (Claude Code) clean-room from the English and not yet reviewed line by line by a native speaker; no commercial CAD text used | MIT OR Apache-2.0 |

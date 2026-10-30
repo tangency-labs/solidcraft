@@ -64,6 +64,7 @@ static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
 static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
 static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
+static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
 static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
@@ -99,6 +100,7 @@ pub const LOCALES: &[&Catalog] = &[
     &GERMAN,
     &ENGLISH_UK,
     &SPANISH,
+    &FINNISH,
     &FRENCH,
     &GALICIAN,
     &HEBREW,
@@ -1152,6 +1154,18 @@ mod tests {
         assert_eq!(gl.format("dialog.selected_count", &[("count", "2")]), "↖ 2 seleccionados");
         assert_eq!(gl.label("Fillet"), "Arredondamento");
         assert_eq!(gl.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    #[test]
+    fn finnish_catalog_is_registered_and_translates_keys() {
+        let fi = Locale::for_language("fi");
+        assert_eq!(fi.name(), "Suomi");
+        assert!(is_supported("fi"));
+        assert_eq!(fi.text("ui.preferences"), "Asetukset");
+        assert_eq!(fi.format("document.save_changes", &[("name", "My {design}")]), "Tallennetaanko muutokset tiedostoon My {design}?");
+        assert_eq!(fi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 valittu");
+        assert_eq!(fi.label("Fillet"), "Pyöristys");
+        assert_eq!(fi.label("NonExistentKey"), "NonExistentKey");
     }
 
     #[test]
