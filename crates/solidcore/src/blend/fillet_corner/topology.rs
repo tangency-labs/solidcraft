@@ -261,6 +261,30 @@ fn check_tangential_edgeuse_at_vertex(
     })())
 }
 
+/// With `Kernel::fixes.fillet_nx1_tangent_side_edge_same_convexity` (WR-600, the fork's
+/// tangency-labs/smlib@7992ec7): a side edge of an Nx1 corner whose faces meet
+/// tangentially at `vertex` (a bar's flat side running onto the cylinder its round end
+/// lies on) has no convexity, so it is never of the opposite one: its entry of `same`
+/// (`same_convexity_edges` of each side) becomes `true`. Without the fix `same` is
+/// returned as it is.
+fn tangent_sides_same_convexity(
+    k: &Kernel,
+    target: &mut Brep,
+    sides: [EdgeuseId; 2],
+    vertex: VertexId,
+    tan_tol_deg: f64,
+    mut same: [bool; 2],
+) -> Result<[bool; 2]> {
+    if k.fixes.fillet_nx1_tangent_side_edge_same_convexity {
+        for (side, same) in sides.into_iter().zip(same.iter_mut()) {
+            if check_tangential_edgeuse_at_vertex(k, target, side, vertex, tan_tol_deg)? {
+                *same = true;
+            }
+        }
+    }
+    Ok(same)
+}
+
 /// `same_convexity_edges_round_vertex` (the fork's tangency-labs/smlib@d5ebcb3): whether
 /// `edge2`, anywhere round the vertex, has the convexity of `first`'s edge.
 fn same_convexity_edges_round_vertex(
@@ -378,7 +402,16 @@ impl FilletCorner {
             same_convexity_edges(k, target, filleted, side0, vertex)?,
             same_convexity_edges(k, target, filleted, side1, vertex)?,
         ];
-        let mut same = same;
+        // A side edge whose faces meet tangentially at the vertex is of the filleted
+        // edge's convexity with WR-600's fix (tangency-labs/smlib@7992ec7).
+        let mut same = tangent_sides_same_convexity(
+            k,
+            target,
+            sides,
+            vertex,
+            crate::math::rad_to_deg(self.tangency_tol_radians),
+            same,
+        )?;
         // A side edge whose faces meet tangentially at the vertex (a flat top running
         // smoothly onto a round) is no edge of the corner: the corner's side edge is
         // the one reached past it round the vertex (tangency-labs/smlib@d5ebcb3, WR-457).
@@ -1156,6 +1189,73 @@ impl FilletCorner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WR-600's peg: a bar x 0..20 of stadium section R 5, 10 high (a box and the end
+    /// cylinder at x = 0), joined to a cylinder of the bar's radius about x = 20 and
+    /// 20 high that is its other round end. At (20, -5, 10) the concave arc where the
+    /// top meets the cylinder ends between the bar's top side edge (convex) and the
+    /// vertical line where its side runs tangent into the cylinder.
+    fn wr_600_sides(fix: bool) -> [bool; 2] {
+        use crate::boolean::api_brep::boolean_union;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::topology::{edge as edge_q, vertexuse};
+        let mut k = Kernel::default();
+        k.fixes.fillet_nx1_tangent_side_edge_same_convexity = fix;
+        let block = create_box(&mut k, Point3::new(0.0, -5.0, 0.0), 20.0, 10.0, 10.0).unwrap();
+        let end0 = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 5.0, 10.0).unwrap();
+        let post = create_cylinder(&mut k, Point3::new(20.0, 0.0, 0.0), 5.0, 20.0).unwrap();
+        let bar = boolean_union(&mut k, block, end0).unwrap();
+        let mut b = boolean_union(&mut k, bar, post).unwrap();
+        let at = Point3::new(20.0, -5.0, 10.0);
+        let vertex = crate::topology::brep::p1::vertices(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&v| b.vertex(v).unwrap().point.distance(at) < 1e-9)
+            .unwrap();
+        let ends = |b: &Brep, e: EdgeId| {
+            let (s, t) = edge_q::start_end_vertices(b, e).unwrap();
+            (
+                b.vertex(s.unwrap()).unwrap().point,
+                b.vertex(t.unwrap()).unwrap().point,
+            )
+        };
+        let edges = crate::query::api_queries::get_edges(&b).unwrap();
+        let find = |b: &Brep, pred: &dyn Fn(Point3, Point3) -> bool| {
+            let e = edges
+                .iter()
+                .copied()
+                .find(|&e| {
+                    let (s, t) = ends(b, e);
+                    pred(s, t)
+                })
+                .unwrap();
+            edge_q::edgeuses(b, e, None, None)
+                .unwrap()
+                .into_iter()
+                .find(|&eu| {
+                    let vu = eu1::vertexuse(b, eu).unwrap().unwrap();
+                    vertexuse::vertex(b, vu).unwrap() == Some(vertex)
+                })
+                .unwrap()
+        };
+        let tangent = find(&b, &|s, t| {
+            s.x == 20.0 && t.x == 20.0 && s.y == -5.0 && t.y == -5.0 && s.z != t.z
+        });
+        let top = find(&b, &|s, t| {
+            s.z == 10.0 && t.z == 10.0 && s.y == -5.0 && t.y == -5.0 && s.x != t.x
+        });
+        tangent_sides_same_convexity(&k, &mut b, [tangent, top], vertex, 0.1, [false, false])
+            .unwrap()
+    }
+
+    #[test]
+    fn wr_600_tangent_side_edge_is_of_the_filleted_convexity() {
+        // by default the sides' convexities are kept as `same_convexity_edges` read them
+        assert_eq!(wr_600_sides(false), [false, false]);
+        // with the fix the tangent side edge is never of the opposite convexity; the
+        // top's convex side edge keeps its reading
+        assert_eq!(wr_600_sides(true), [true, false]);
+    }
 
     fn run(kind: FilletCornerKind, all: usize) -> Result<()> {
         let k = Kernel::default();
