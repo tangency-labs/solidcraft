@@ -1844,7 +1844,9 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
     // bottom edge (2 mm, R 1, K 0.5: setback 3 inside, half of it in the middle; BA π, panel
     // 37). With the bend inside or in the middle the base is cut back through the two lower
     // arcs: the DXF's outline was about 150 LINEs then, every arc as chords a quarter
-    // millimetre long, where the bend outside gives 8 LINEs and 4 ARCs.
+    // millimetre long, where the bend outside gives 6 LINEs and 4 ARCs: each of the flange's
+    // sides is one line through its bend and its panel (their union has no vertex where the
+    // two sides meet in line).
     let h = 8.0 * (1.0 - 0.5f64.sqrt());
     // ∫ √(64 − z²): the area under an arc of radius 8, from its centre's height on.
     let under = |z: f64| z / 2.0 * (64.0 - z * z).sqrt() + 32.0 * (z / 8.0).asin();
@@ -1869,8 +1871,9 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
         let lines = shapes.iter().filter(|g| matches!(g, solidcraft_io::Geom2::Line(..))).count();
         let radii: Vec<f64> =
             shapes.iter().filter_map(|g| if let solidcraft_io::Geom2::Arc { c, a, .. } = g { Some(c.dist(*a)) } else { None }).collect();
-        // Eight lines of outline and the bend's centre line; the four corners.
-        assert_eq!((lines, radii.len(), shapes.len()), (9, 4, 13), "{position}");
+        // Six lines of outline (the plate's top, left and right; the flange's two sides and its
+        // end) and the bend's centre line; the four corners.
+        assert_eq!((lines, radii.len(), shapes.len()), (7, 4, 11), "{position}");
         assert!(radii.iter().all(|r| (r - 8.0).abs() < 1e-9), "{position}: {radii:?}");
         // The plate less what lies below the bend line, ∫ 184 + 2·√(64 − (8 − y)²) from 0 to the
         // setback, and the flange along the trimmed edge, which runs from arc to arc.
@@ -3152,7 +3155,13 @@ fn hole_beside_two_adjacent_edge_flanges_cuts_and_bends_stay_guarded() {
     let mut s = Session::default();
     build(&mut s);
     let before = volume(&mut s);
-    assert!((before - 14057.2).abs() < 0.1, "{before}");
+    // Folded, the sheet (2.5 mm, R 2.5, K 0.44) holds its flat area times the thickness, less
+    // each bend's flat strip (its length times the allowance (R + K·t)·π/2) and plus its sector
+    // (R + t/2)·π/2: t·A + t²·(½ − K)·(π/2)·L for the bends' length L.
+    let flat_area: f64 = s.model.state().sheets[0].flat_regions().unwrap().iter().map(|r| r.area()).sum();
+    let bends: f64 = flat(&mut s)["bends"].as_array().unwrap().iter().map(|b| b["length"].as_f64().unwrap()).sum();
+    let want = 2.5 * flat_area + 2.5 * 2.5 * (0.5 - 0.44) * FRAC_PI_2 * bends;
+    assert!(rel(before, want) < 1e-9, "{before} vs {want}");
     if let Err(e) = hole(&mut s, "Hole", [25.0, 20.0]) {
         panic!("hole beside two flanges: {e}");
     }
