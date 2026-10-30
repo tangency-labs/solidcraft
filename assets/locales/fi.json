@@ -3664,7 +3664,7 @@
   "ui.3d_mouse_reading": "Lukema",
   "ui.3d_mouse_reset_axes": "Nollaa akselimääritys",
   "ui.3d_mouse_reset_view": "Nollaa näkymä",
-  "ui.3d_mouse_restore": "Palauta oletukset",
+  "ui.3d_mouse_restore": "Palauta 3D-hiiren oletukset",
   "ui.3d_mouse_restore_ask": "Palautetaanko 3D-hiiren asetukset oletuksiin? Kalibrointi ja painikemääritykset säilyvät.",
   "ui.3d_mouse_section": "3D-hiiri",
   "ui.3d_mouse_show_in_view": "Näytä 3D-hiiri 3D-näkymässä",
