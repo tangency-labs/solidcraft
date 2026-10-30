@@ -8,8 +8,9 @@
 //! [`default_block`] is the built-in definition. [`TitleBlock::validate`] checks a definition on
 //! its own, as when one is read, and
 //! [`TitleBlock::layout`] places it on one sheet by the cell text rule: each cell's rectangle, where
-//! its label goes and the box its value goes in, and [`TitleBlockLayout::paper`] draws its lines.
-//! Values are set in their boxes once the paper scene has text.
+//! its label goes and the box its value goes in, and [`TitleBlockLayout::paper`] draws its lines and
+//! the projection symbol ([`projection_symbol`]) in the drawing's projection. Text values are set in
+//! their boxes once the paper scene has text.
 //!
 //! The outline is drawn `outline_line_mm` wide and the lines between cells `cell_line_mm`, each
 //! centred on its edge. The block's right and bottom edges lie on the drawing border, whose line is
@@ -19,7 +20,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::cell::{self, Content, Fit, Format, HAlign, Part, Source, is_snake_case};
+use crate::cell::{self, Content, Fit, Format, HAlign, Part, Projection, Source, is_snake_case};
 use crate::drawing_sheet::SheetLayout;
 use crate::paper::{Group, Item, MAX_LINE_MM, ObjectKind};
 use crate::{Aabb2, Loop2, Seg2, Vec2};
@@ -28,6 +29,10 @@ use crate::{Aabb2, Loop2, Seg2, Vec2};
 pub const MAX_CELLS: usize = 64;
 const MIN_BLOCK_SIDE_MM: f64 = 1.0;
 const MAX_BLOCK_SIDE_MM: f64 = 1000.0;
+
+/// The projection symbol's sizes (ISO 5456-2, table A.1): `h`, the diameter of the cone's smaller
+/// end, which is also the height of the capital letters it goes with.
+pub const SYMBOL_SIZES_MM: [f64; 6] = [3.5, 5.0, 7.0, 10.0, 14.0, 20.0];
 
 /// A title block's definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -103,6 +108,9 @@ pub struct CellLayout {
     /// Where the label's baseline starts, when the cell has one.
     pub label_at: Option<Vec2>,
     pub value_box: Aabb2,
+    /// The projection symbol's size `h`, when the cell holds it: the largest of [`SYMBOL_SIZES_MM`]
+    /// whose symbol fits the value box, lines and all.
+    pub symbol_mm: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -131,6 +139,32 @@ impl Cell {
     fn value_box(&self, inside: Aabb2) -> Aabb2 {
         cell::value_box(inside, self.label.as_ref().map(|label| label.cap_mm))
     }
+}
+
+/// The largest of [`SYMBOL_SIZES_MM`] whose symbol fits `room`: `4.3 h` by `2 h` on its lines'
+/// centres, so `4.4 h` by `2.1 h` with its `h / 10` lines.
+fn symbol_size(room: Vec2) -> Option<f64> {
+    SYMBOL_SIZES_MM.into_iter().rev().find(|h| 4.4 * h <= room.x && 2.1 * h <= room.y)
+}
+
+/// The projection symbol in `projection`, `h` across the cone's smaller end and centred on `centre`
+/// (ISO 5456-2, figures A.1 and A.2): a truncated cone `2 h` long, from its `h` end on the left to its
+/// `2 h` end, and the cone seen end on, circles `2 h` and `h` across, `3 h / 10` from it: on the right
+/// in first angle, on the left in third. Its lines are `h / 10` wide. The centrelines, which the
+/// standard lets go, are left out.
+pub fn projection_symbol(projection: Projection, h: f64, centre: Vec2) -> [Item; 3] {
+    let gap = 0.3 * h;
+    let left = centre.x - (4.0 * h + gap) / 2.0;
+    let (cone_at, circles_at) = match projection {
+        Projection::First => (left, left + 3.0 * h + gap),
+        Projection::Third => (left + 2.0 * h + gap, left + h),
+    };
+    let y = centre.y;
+    let cone = [(cone_at, y - h / 2.0), (cone_at + 2.0 * h, y - h), (cone_at + 2.0 * h, y + h), (cone_at, y + h / 2.0)];
+    let cone = Loop2::polygon(&cone.map(|(x, y)| Vec2::new(x, y)));
+    let circles = Vec2::new(circles_at, y);
+    let stroke = |path: Loop2| Item::Stroke { path: path.segs, closed: true, width_mm: h / 10.0 };
+    [stroke(cone), stroke(Loop2::circle(circles, h)), stroke(Loop2::circle(circles, h / 2.0))]
 }
 
 /// The built-in block, 180 x 54 mm: the twelve cells of the layout approved on #3875, each under a
@@ -179,7 +213,8 @@ impl TitleBlock {
 
     /// Each cell with the block's lower-right corner at `corner`, inside its lines and inside
     /// `clear` too when given (the drawing border's line's inner edge), checked by the cell text
-    /// rule: room for a value below its label, and for one line of a text value.
+    /// rule: room for a value below its label, for one line of a text value, and for the smallest
+    /// projection symbol.
     fn place_cells(&self, corner: Vec2, clear: Option<Aabb2>) -> Result<Vec<CellLayout>> {
         let place = |cell: &Cell| {
             let rect = cell.rect(corner);
@@ -188,12 +223,20 @@ impl TitleBlock {
             let value_box = cell.value_box(inside);
             let room = value_box.size();
             require(room.x > 0.0 && room.y > 0.0, "a cell has room for its value below its label")?;
-            if let CellKind::Text(text) = &cell.kind {
-                let one_line = cell::place_lines(value_box, 1, text.cap_mm, text.cap_mm, text.align, false);
-                require(matches!(one_line, Ok((_, None))), "a value's cap height is above 0 and one line of it fits its value box")?;
-            }
+            let symbol_mm = match &cell.kind {
+                CellKind::Text(text) => {
+                    let one_line = cell::place_lines(value_box, 1, text.cap_mm, text.cap_mm, text.align, false);
+                    require(matches!(one_line, Ok((_, None))), "a value's cap height is above 0 and one line of it fits its value box")?;
+                    None
+                }
+                CellKind::ProjectionSymbol => {
+                    let size = symbol_size(room);
+                    require(size.is_some(), "a projection symbol's cell has room for its smallest size, 15.4 x 7.35 mm")?;
+                    size
+                }
+            };
             let label_at = cell.label.as_ref().map(|label| cell::label_at(inside, label.cap_mm));
-            Ok(CellLayout { rect, label_at, value_box })
+            Ok(CellLayout { rect, label_at, value_box, symbol_mm })
         };
         self.cells.iter().map(place).collect()
     }
@@ -253,12 +296,13 @@ impl TitleBlock {
 }
 
 impl TitleBlockLayout {
-    /// The block's lines as one paper group of `object` (its sheet): the outline as a closed stroke
+    /// The block as one paper group of `object` (its sheet): the outline as a closed stroke
     /// `outline_line_mm` wide, then every cell edge inside it `cell_line_mm` wide, across from the top
-    /// down and then up and down from the left. Each is drawn once, centred on its edge: neighbours'
-    /// shared edges, and edges that meet end to end along one line, are one stroke. The cells' text
-    /// isn't here yet.
-    pub fn paper(&self, object: u64) -> Group {
+    /// down and then up and down from the left, then the projection symbol in `projection` centred
+    /// in each cell that holds it. Each line is drawn once, centred on its edge: neighbours' shared
+    /// edges, and edges that meet end to end along one line, are one stroke. The cells' text isn't
+    /// here yet.
+    pub fn paper(&self, object: u64, projection: Projection) -> Group {
         let Aabb2 { min, max } = self.outline;
         let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
         let mut items = vec![Item::Stroke { path: Loop2::polygon(&corners).segs, closed: true, width_mm: self.outline_line_mm }];
@@ -273,6 +317,11 @@ impl TitleBlockLayout {
         let line = |a, b| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm: self.cell_line_mm };
         items.extend(joined(&across).into_iter().map(|(y, x0, x1)| line(Vec2::new(x0, y), Vec2::new(x1, y))));
         items.extend(joined(&down).into_iter().map(|(x, y0, y1)| line(Vec2::new(x, y0), Vec2::new(x, y1))));
+        for cell in &self.cells {
+            if let Some(h) = cell.symbol_mm {
+                items.extend(projection_symbol(projection, h, cell.value_box.center()));
+            }
+        }
         Group { object, kind: ObjectKind::TitleBlock, items }
     }
 }

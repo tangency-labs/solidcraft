@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
+use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::ObjectKind;
 
@@ -195,7 +196,7 @@ fn a_sheets_title_block_is_drawn_after_its_views() {
     assert_eq!(scene.groups.iter().map(|g| (g.object, g.kind)).collect::<Vec<_>>(), expected);
     let d = s.drawing("test").unwrap();
     let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
-    let drawn = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap().paper(sheet);
+    let drawn = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap().paper(sheet, Projection::Third);
     assert_eq!(serde_json::to_string(scene.groups.last().unwrap()).unwrap(), serde_json::to_string(&drawn).unwrap());
     let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
     let schema = output_schema_for::<SheetSceneResult>();
@@ -207,6 +208,31 @@ fn a_sheets_title_block_is_drawn_after_its_views() {
     let after = extract(&mut s, sheet).unwrap();
     assert!(after.generation > before.generation && after.scene.groups.iter().all(|g| g.kind != ObjectKind::TitleBlock));
     assert_eq!((after.stale.len(), s.drawing_scenes.projections), (0, projections));
+}
+
+/// The title block's symbol follows the drawing's projection: the first scene after a change of
+/// projection already has the block drawn in it, while the projected view still waits to be drawn
+/// again, and once it is, the scene is the one built at once.
+#[test]
+fn the_title_blocks_symbol_follows_the_drawings_projection() {
+    let (mut s, sheet, _) = front_and_top();
+    let block = solidcraft_geom::title_block::default_block();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": serde_json::to_value(&block).unwrap()}));
+    let block_of = |s: &Session, projection: Projection| {
+        let d = s.drawing("test").unwrap();
+        let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
+        let border = record.border.as_ref().unwrap().layout(&record.sheet).unwrap();
+        serde_json::to_string(&record.title_block.as_ref().unwrap().layout(&border).unwrap().paper(sheet, projection)).unwrap()
+    };
+    let third = settled(&mut s, sheet);
+    assert_eq!(serde_json::to_string(third.scene.groups.last().unwrap()).unwrap(), block_of(&s, Projection::Third));
+    run(&mut s, "drawing.set", json!({"projection": "first"}));
+    let at_once = extract(&mut s, sheet).unwrap();
+    assert!(at_once.generation > third.generation && !at_once.stale.is_empty());
+    assert_eq!(serde_json::to_string(at_once.scene.groups.last().unwrap()).unwrap(), block_of(&s, Projection::First));
+    let first = settled(&mut s, sheet);
+    assert_ne!(block_of(&s, Projection::First), block_of(&s, Projection::Third));
+    assert_eq!(bytes(&first.scene), bytes(&built(&s, sheet).scene));
 }
 
 /// A sheet with no views is its border alone.
@@ -392,13 +418,13 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
-        let (empty, _) = assemble(&record, std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
+        let (empty, _) = assemble(&record, Projection::Third, std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         let left = MAX_RECORDS - empty.groups.iter().map(Group::records).sum::<usize>();
         // The first leaves 20 records; the second needs 32; the third takes the last 20.
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
-        let (scene, states) = assemble(&record, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
+        let (scene, states) = assemble(&record, Projection::Third, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>();
