@@ -20,6 +20,10 @@
 //! `do_fillet` ends with the closed-manifold check of the generic
 //! `FilletExecutive::do_fillet` (not upstream, WR-212, tangency-labs/solidcore#422);
 //! the public wrappers that drive it put the caller's body back on that refusal.
+//! After the in-place merge (also on error) the geometry bound to the target's
+//! edges, edge uses and faces under the session's kernel identities is rebound to the
+//! target's naming, as the piecewise merge does (owners are pointers upstream;
+//! tangency-labs/solidcore#423).
 //! No public API entry point reaches `DoPiecewiseMerge` or a live-session
 //! `IntersectInsertRelate` (global merge): `SetFilletParameters` resets both flags;
 //! [`FilletSession::set_do_piecewise_merge`] selects the piecewise merge after it.
@@ -562,6 +566,25 @@ impl FilletSession<'_> {
             // DoPiecewiseMerge deletes m_pFilletBrep inside its mark scope
             return self.do_piecewise_merge(k);
         }
+        let result = self.merge_fillet_in_place(k);
+        // (not upstream: owners are pointers there) the insertion names the geometry
+        // it binds to the target's edges and faces by the session's kernel identity
+        // of the entity; rebind it to the same entity's identity in the target's
+        // naming, as the piecewise merge does, so the curve owner test of
+        // `SmEdge::ValidateGeometry` (`SmBrep` test #61) finds its edge
+        // (tangency-labs/solidcore#423). Also after an error.
+        let naming = self.objects.target.naming();
+        let serial = self.objects.target_serial;
+        let session_owner = |e| p3::topology_ref(serial, e);
+        let restored =
+            super::piecewise::normalize_session_owners(self.objects.target, session_owner, |e| {
+                super::piecewise::naming_owner(naming, e).unwrap_or_else(|| session_owner(e))
+            });
+        result.and(restored)
+    }
+
+    /// The in-place (non-piecewise) body of [`Self::merge_fillet`].
+    fn merge_fillet_in_place(&mut self, k: &mut Kernel) -> Result<()> {
         // SetFilletBrepEdgeMap, then the geometry and corner insertion.
         self.insert_fillet_intersection_topology(k)?;
         // Upstream cbi_MAP_TOPO_EDGES=0: do not collect mapped intersections.
