@@ -5,7 +5,9 @@
     "Automatic": "Automatic",
     "Convex hull": "Convex hull",
     "Full mesh": "Full mesh",
-    "No collision": "No collision"
+    "No collision": "No collision",
+    "Collision": "Collision",
+    "Convex hull collision": "Convex hull collision"
   },
   "ar": {
     "cmd.body_collision": "شكل التصادم",
@@ -13,7 +15,9 @@
     "Automatic": "تلقائي",
     "Convex hull": "غلاف محدب",
     "Full mesh": "شبكة كاملة",
-    "No collision": "بدون تصادم"
+    "No collision": "بدون تصادم",
+    "Collision": "التصادم",
+    "Convex hull collision": "تصادم بالغلاف المحدب"
   },
   "he": {
     "cmd.body_collision": "צורת התנגשות",
@@ -21,6 +25,8 @@
     "Automatic": "אוטומטי",
     "Convex hull": "מעטפת קמורה",
     "Full mesh": "רשת מלאה",
-    "No collision": "ללא התנגשות"
+    "No collision": "ללא התנגשות",
+    "Collision": "התנגשות",
+    "Convex hull collision": "התנגשות במעטפת קמורה"
   }
 }
