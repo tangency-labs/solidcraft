@@ -956,6 +956,20 @@ fn finish_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
 // ---------------------------------------------------------------------------------------------
 // Drawing
 
+/// The id a drawing command gives its geometry, checked against the names that geometry
+/// will carry: a curve's id goes into the name of the faces the curve makes
+/// (`F2:side:<id>`), and a name reads some characters as its own. An id holding one of
+/// them would split every name it lands in, so it is refused here (#5858).
+fn named_id(cmd: &str, id: Option<&str>) -> Result<Option<String>> {
+    match id {
+        Some(i) if !solidcraft_doc::persistent_name::text_fits_name(i) => {
+            Err(bad(cmd, format!("the id `{i}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#` or `]`")))
+        }
+        Some(i) => Ok(Some(i.to_string())),
+        None => Ok(None),
+    }
+}
+
 fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.line";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
@@ -966,6 +980,9 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     let closed = bool_(p, "closed").unwrap_or(false);
     let infer = bool_(p, "infer").unwrap_or(false);
     let ids = string_list(cmd, p, "ids")?;
+    for id in &ids {
+        named_id(cmd, Some(id))?;
+    }
     let ((curves, cons), info) = draw(s, p, cmd, |sk, doc| {
         let args: Vec<PArg> = list.iter().map(|v| parg(sk, doc, v, cmd)).collect::<Result<_>>()?;
         let n = args.len();
@@ -1308,7 +1325,7 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.center";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
     let r = radius_arg(p, cmd)?;
-    let id = str_(p, "id").map(str::to_string);
+    let id = named_id(cmd, str_(p, "id"))?;
     let (out, info) = draw(s, p, cmd, |sk, doc| {
         let c = req_parg(sk, doc, p, "center", cmd)?;
         // The origin is the sketch's frame, not a hold on the geometry: a circle centred there
@@ -1375,7 +1392,7 @@ fn circle_three(s: &mut Session, p: &Value) -> Result<Value> {
 fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.three_point";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
-    let id = str_(p, "id").map(str::to_string);
+    let id = named_id(cmd, str_(p, "id"))?;
     let (out, info) = draw(s, p, cmd, |sk, doc| {
         let (a, b) = (req_parg(sk, doc, p, "start", cmd)?, req_parg(sk, doc, p, "end", cmd)?);
         let t = req_parg(sk, doc, p, "through", cmd)?;
@@ -1402,7 +1419,7 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
 fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.center_point";
     let p = &super::sketch_project::snap_points(s, p, cmd)?;
-    let id = str_(p, "id").map(str::to_string);
+    let id = named_id(cmd, str_(p, "id"))?;
     let sweep = num(p, "sweep");
     let (out, info) = draw(s, p, cmd, |sk, doc| {
         let c = req_parg(sk, doc, p, "center", cmd)?;
@@ -1597,7 +1614,7 @@ fn slot_overall(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.point";
-    let id = str_(p, "id").map(str::to_string);
+    let id = named_id(cmd, str_(p, "id"))?;
     // A point snapped while drawing (`"mid:<line>"`, `"on:<curve>:x,y"`, a model vertex or edge):
     // the snap makes it, held by its constraint, as it does for a line's end. Taken as bare
     // coordinates it was free to move off the midpoint it was put on (#4691).
