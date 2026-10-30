@@ -1284,6 +1284,8 @@ preference_settings! {
     /// Snap a drawing point to where the two most recent centre or midpoint guides cross.
     /// Off: the guides stay visual and the cursor does not move (#8694).
     sketch_recent_snap: bool = false, PAGE_SKETCH;
+    /// Opt into cursor alignment along either remembered centre or midpoint guide.
+    sketch_reference_snap: bool = false, PAGE_SKETCH;
     /// Drawing lines a point up with the sketch's points on both axes at once, keeping the
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
@@ -4983,6 +4985,7 @@ mod tests {
             ("sketch_tracking_guides", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
+            ("sketch_reference_snap", json!(true), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
         ];

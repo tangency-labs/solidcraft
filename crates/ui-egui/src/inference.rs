@@ -314,6 +314,28 @@ impl Tracking {
         best.map(|(_, at)| at)
     }
 
+    /// Nearest horizontal/vertical projection onto either remembered reference guide.
+    /// Reuses the visual guide tolerance and state; no extra reference history is stored.
+    pub(crate) fn alignment(&self, sk: &Sketch, plane: &solidcraft_engine::geom::Plane, proj: &Proj, cursor: egui::Pos2) -> Option<Vec2> {
+        let (ray, direction) = proj.ray(cursor);
+        let at = plane.to_local(plane.intersect_ray(ray, direction)?);
+        if !at.x.is_finite() || !at.y.is_finite() {
+            return None;
+        }
+        let to = |p: Vec2| proj.to_screen(plane.to_world(p));
+        let mut best: Option<(f32, Vec2)> = None;
+        for id in self.anchor.iter().chain(self.previous.iter()) {
+            let Some(anchor) = Self::point_of(sk, id) else { continue };
+            let Some((_, end)) = Self::axis_guide(anchor, at, cursor, &to) else { continue };
+            let Some(screen) = to(end) else { continue };
+            let distance = cursor.distance(screen);
+            if best.is_none_or(|(d, _)| distance < d) {
+                best = Some((distance, end));
+            }
+        }
+        best.map(|(_, at)| at)
+    }
+
     fn axis_guide(anchor: Vec2, at: Vec2, cursor: egui::Pos2, to: &impl Fn(Vec2) -> Option<egui::Pos2>) -> Option<(Vec2, Vec2)> {
         let origin = to(anchor)?;
         let mut distance = 6.0;

@@ -1,0 +1,30 @@
+{
+  "ar": {
+    "prefs.sketch_reference_snap": "الالتقاط إلى خطوط الإرشاد المرجعية المحفوظة",
+    "prefs.sketch_reference_snap_note": "أثناء الرسم، حاذِ المؤشر أفقياً أو عمودياً مع منتصف حافة أو مركز دائرة محفوظ. عند التعطيل يبقى خط الإرشاد المفرد مرئياً فقط."
+  },
+  "de": {
+    "prefs.sketch_reference_snap": "An gespeicherten Bezugshilfslinien fangen",
+    "prefs.sketch_reference_snap_note": "Richtet den Zeiger beim Zeichnen waagerecht oder senkrecht an einer gespeicherten Kantenmitte oder einem Kreismittelpunkt aus. Aus: Eine einzelne Hilfslinie bleibt nur sichtbar."
+  },
+  "en": {
+    "prefs.sketch_reference_snap": "Snap to remembered reference guides",
+    "prefs.sketch_reference_snap_note": "While drawing, align the cursor horizontally or vertically to a remembered edge midpoint or circle center. Off: a single guide stays visual."
+  },
+  "he": {
+    "prefs.sketch_reference_snap": "הצמדה לקווי עזר שמורים",
+    "prefs.sketch_reference_snap_note": "בזמן השרטוט, יישור הסמן אופקית או אנכית לאמצע קצה או למרכז מעגל שנשמר. כשהאפשרות כבויה, קו עזר יחיד הוא חזותי בלבד."
+  },
+  "ja": {
+    "prefs.sketch_reference_snap": "記憶した参照ガイドにスナップ",
+    "prefs.sketch_reference_snap_note": "作図中、記憶したエッジの中点または円の中心に対してカーソルを水平または垂直に合わせます。オフの場合、単独のガイドは表示のみです。"
+  },
+  "vi": {
+    "prefs.sketch_reference_snap": "Bắt vào đường dẫn tham chiếu đã nhớ",
+    "prefs.sketch_reference_snap_note": "Khi vẽ, căn con trỏ theo phương ngang hoặc dọc với trung điểm cạnh hoặc tâm đường tròn đã nhớ. Khi tắt, một đường dẫn chỉ có tác dụng hiển thị."
+  },
+  "zh": {
+    "prefs.sketch_reference_snap": "捕捉到记忆的参考辅助线",
+    "prefs.sketch_reference_snap_note": "绘制时，将光标与记忆的边中点或圆心水平或垂直对齐。关闭时，单条辅助线仅用于显示。"
+  }
+}

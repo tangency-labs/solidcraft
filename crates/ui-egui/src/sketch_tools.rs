@@ -623,6 +623,16 @@ pub fn refine_snap(
             lined.extend(plumb);
         }
     }
+    // Geometry and tool inferences keep priority. A remembered single guide is otherwise
+    // an optional free-coordinate snap, sharing the upstream tracking state and dashed guide.
+    if !mid_only
+        && app.preferences.sketch_tracking_guides
+        && app.preferences.sketch_reference_snap
+        && best.is_none()
+        && let Some(at) = app.viewport.tracking.alignment(sk, plane, proj, a)
+    {
+        best = Some((at.dist(lp), "+", at));
+    }
     SNAP.with(|s| *s.borrow_mut() = best.map(|(_, l, p)| (l, p)));
     LINED.with(|l| *l.borrow_mut() = best.filter(|_| !lined.is_empty()).map(|(_, _, at)| (at, lined)));
     // A midpoint snap is a point argument the commands understand ("mid:<line>").

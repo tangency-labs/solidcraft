@@ -9,6 +9,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             .on_hover_text(app.tr("prefs.sketch_tracking_guides_note"));
         ui_kit::checkbox(ui, app.tr("prefs.sketch_recent_snap"), &mut app.preferences.sketch_recent_snap)
             .on_hover_text(app.tr("prefs.sketch_recent_snap_note"));
+        ui_kit::checkbox(ui, app.tr("prefs.sketch_reference_snap"), &mut app.preferences.sketch_reference_snap)
+            .on_hover_text(app.tr("prefs.sketch_reference_snap_note"));
         ui_kit::checkbox(ui, app.tr("prefs.sketch_align_points"), &mut app.preferences.sketch_align_points)
             .on_hover_text(app.tr("prefs.sketch_align_points_note"));
         let mut auto = app.session.auto_project;

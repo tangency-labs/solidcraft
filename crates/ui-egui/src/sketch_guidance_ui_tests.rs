@@ -513,3 +513,37 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         "the line stays horizontal"
     );
 }
+
+#[test]
+fn a_single_remembered_guide_can_align_a_circle_outside_the_original_edge() {
+    use solidcraft_engine::geom::Vec2;
+    let mut h = tracking_fixture();
+    h.app.run("sketch.options", json!({"snap":false})).unwrap();
+    h.app.start("sketch.circle.center");
+    step(&mut h, json!({"move":{"sketch":[0,20]}}));
+    let near = json!({"sketch":[45,20.3]});
+    step(&mut h, json!({"move":{"sketch":[45,20.3]}}));
+    let [x, y] = h.at(&near).unwrap();
+    let pos = egui::pos2(x as f32, y as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let point = |h: &Harness| crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
+    assert!((point(&h).0.y - 20.0).abs() > 0.2, "single-guide snapping stays off by default");
+    h.call("ui.prefs", json!({"sketch_reference_snap":true}));
+    let (at, arg) = point(&h);
+    assert!(arg.is_none(), "alignment places a free coordinate, not a curve constraint");
+    assert!((at.y - 20.0).abs() < 1e-6 && (at.x - 45.0).abs() < 0.02, "{at:?}");
+    // The older reference is still useful after hovering a circle centre.
+    step(&mut h, json!({"move":{"sketch":[-10,3]}}));
+    step(&mut h, json!({"move":{"sketch":[45,20.3]}}));
+    assert!((point(&h).0.y - 20.0).abs() < 1e-6);
+    h.call("ui.prefs", json!({"sketch_reference_snap":false}));
+    assert!((point(&h).0.y - 20.0).abs() > 0.2, "the preference restores visual-only guides");
+    h.call("ui.prefs", json!({"sketch_reference_snap":true,"sketch_tracking_guides":false}));
+    assert!((point(&h).0.y - 20.0).abs() > 0.2, "hidden guides never snap");
+    h.call("ui.prefs", json!({"sketch_tracking_guides":true}));
+    step(&mut h, json!({"move":{"sketch":[0,20]}}));
+    step(&mut h, json!({"move":{"sketch":[45,20.3]}}));
+    step(&mut h, json!({"click":{"sketch":[45,20.3]}}));
+    let placed = h.app.tool.as_ref().unwrap().pts[0].0;
+    assert!(placed.dist(Vec2::new(at.x, 20.0)) < 1e-6, "the circle centre uses the aligned coordinate: {placed:?}");
+}
