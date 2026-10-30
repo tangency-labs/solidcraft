@@ -178,6 +178,34 @@ fn surface(o: &mut Vec<f64>, s: &Surface) {
     }
 }
 
+/// Appends the encoding of one curve (the `curve` layout above).
+pub fn encode_curve(o: &mut Vec<f64>, c: &Curve) {
+    curve(o, c);
+}
+
+/// Appends the encoding of one surface (the `surface` layout above).
+pub fn encode_surface(o: &mut Vec<f64>, s: &Surface) {
+    surface(o, s);
+}
+
+/// Reads one curve at `*pos`, validated as [`decode`] validates it, and advances
+/// `*pos` past it.
+pub fn decode_curve(data: &[f64], pos: &mut usize) -> Result<Curve, String> {
+    let mut r = Rd { d: data, i: *pos };
+    let c = r.curve()?;
+    *pos = r.i;
+    Ok(c)
+}
+
+/// Reads one surface at `*pos`, validated as [`decode`] validates it, and advances
+/// `*pos` past it.
+pub fn decode_surface(data: &[f64], pos: &mut usize) -> Result<Surface, String> {
+    let mut r = Rd { d: data, i: *pos };
+    let s = r.surface()?;
+    *pos = r.i;
+    Ok(s)
+}
+
 /// Encodes a body (see the module docs for the layout).
 pub fn encode(body: &Body) -> Vec<f64> {
     let mut o = vec![

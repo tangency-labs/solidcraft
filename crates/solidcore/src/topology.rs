@@ -43,6 +43,7 @@ pub mod api_files;
 pub mod api_projection;
 pub mod brep;
 pub mod brep_cache;
+pub mod brep_constructor;
 pub mod brep_data;
 pub mod brep_data_write;
 pub mod database_io;

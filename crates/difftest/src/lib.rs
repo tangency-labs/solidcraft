@@ -11,6 +11,7 @@
 pub mod baseline;
 pub mod case;
 pub mod compare;
+pub mod constructor;
 pub mod export_memo;
 pub mod fixtures;
 pub mod fuzz;
