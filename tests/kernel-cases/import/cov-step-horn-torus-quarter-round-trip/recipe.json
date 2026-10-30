@@ -1,0 +1,56 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "name": "Tube"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     5,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Tube",
+    "axis": "Z",
+    "angle": "90 deg",
+    "body_name": "Horn"
+   }
+  },
+  {
+   "command": "file.export",
+   "params": {
+    "path": "$OUT/kernel-case-horn-torus.step",
+    "format": "step",
+    "bodies": [
+     "Horn"
+    ]
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_step",
+   "params": {
+    "path": "$OUT/kernel-case-horn-torus.step"
+   }
+  }
+ ]
+}

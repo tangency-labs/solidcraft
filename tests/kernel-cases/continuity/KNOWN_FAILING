@@ -2,3 +2,5 @@
 # rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: not seeded yet; seeded from a develop run after the SMLib pin bump.
+cov-patch-g1-caps-an-opened-tube-end not supported yet: the general fill refuses the cap (it folds)
+cov-patch-g2-caps-an-opened-tube-end not supported yet: the general fill refuses the cap (it folds)

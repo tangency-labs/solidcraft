@@ -1127,7 +1127,8 @@ fn surface_of_revolution_sense_follows_iso() {
 
 /// A tube revolved about a line it touches (a horn torus, as a tight sweep makes) is written as
 /// one rational B-spline face whose loop passes the pole twice, with no zero-length edge there:
-/// no TOROIDAL_SURFACE (it would be degenerate) and no surface of revolution.
+/// no TOROIDAL_SURFACE (it would be degenerate) and no surface of revolution. (Its volume, built
+/// and read back, is the rig's import/cov-step-horn-torus-quarter-round-trip.)
 #[test]
 fn horn_torus_written_as_one_spline_face() {
     let prof = Region2 { outer: Loop2::circle(Vec2::new(5.0, 0.0), 5.0), holes: vec![] };
@@ -1135,9 +1136,6 @@ fn horn_torus_written_as_one_spline_face() {
     let text = step_export(&[&b], "t").unwrap();
     assert!(!text.contains("TOROIDAL_SURFACE") && !text.contains("SURFACE_OF_REVOLUTION"));
     assert_eq!(text.matches("ADVANCED_FACE(").count(), 3, "{text}");
-    let imp = round_trip(&b);
-    let v = std::f64::consts::PI * 25.0 * std::f64::consts::TAU * 5.0 / 4.0;
-    assert!(rel(measure(&imp.bodies[0].body).unwrap().volume, v) < 1e-3);
 }
 
 /// How a torus-capped cylinder ([`torus_capped_cylinder`]) ends.

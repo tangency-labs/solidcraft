@@ -1,0 +1,50 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 30,
+    "body_name": "Tube"
+   }
+  },
+  {
+   "command": "face.delete",
+   "params": {
+    "body": "Tube",
+    "faces": [
+     [
+      0,
+      0,
+      30
+     ]
+    ],
+    "heal": false
+   }
+  },
+  {
+   "command": "surface.patch",
+   "params": {
+    "body": "Tube",
+    "edges": [
+     [
+      10,
+      0,
+      30
+     ]
+    ],
+    "continuity": "g1",
+    "body_name": "Cap"
+   }
+  },
+  {
+   "command": "surface.stitch",
+   "params": {
+    "bodies": [
+     "Tube",
+     "Cap"
+    ]
+   }
+  }
+ ]
+}

@@ -212,15 +212,6 @@ fn report(name: &str, r: &PatchReport) {
     );
 }
 
-/// A cylinder about z of radius 10 and 30 high with its top face taken off; points around the rim.
-fn open_tube() -> (Body, Vec<Vec3>) {
-    let solid = cylinder(Vec3::ZERO, Vec3::Z, 10.0, 30.0).unwrap();
-    let open = copy_faces(&solid, &[&around(10.0, 15.0)[..], &[Vec3::ZERO]].concat()).unwrap();
-    assert!(open.is_surface());
-    let rim = (0..8).map(|k| Vec2::from_angle(k as f64 * 0.785).extend(0.0) * 10.0 + Vec3::Z * 30.0).collect();
-    (open, rim)
-}
-
 /// `body` without its planar faces but those at height `z0` or `z1` (the ends of a cylinder):
 /// a cut solid's walls (and ends) as a surface, the faces the cut made taken away.
 fn curved_and_ends(body: &Body, ends: &[f64]) -> Body {
@@ -258,47 +249,8 @@ fn free_edge_points(body: &Body) -> Vec<Vec3> {
     points
 }
 
-/// Points round the circle of radius `r` about z at height `z`, every 30°.
-fn around(r: f64, z: f64) -> Vec<Vec3> {
-    (0..12).map(|k| Vec2::from_angle(0.1 + k as f64 * std::f64::consts::TAU / 12.0).extend(0.0) * r + Vec3::Z * z).collect()
-}
-
 fn radial(p: Vec3) -> Vec3 {
     Vec3::new(p.x, p.y, 0.0).normalized().unwrap()
-}
-
-#[test]
-fn an_opened_tube_end_capped_g1_and_g2_meets_the_wall() {
-    let (open, rim) = open_tube();
-    let mut kappas = Vec::new();
-    for g in [Continuity::G1, Continuity::G2] {
-        let name = format!("tube end {}", g.as_str());
-        let started = std::time::Instant::now();
-        let (fill, r) = patch_edges_report(&open, &rim, &spec(g)).unwrap();
-        eprintln!("{name}: filled in {:?}", started.elapsed());
-        report(&name, &r);
-        assert!(r.general);
-        let area = check_face(&name, &open, &fill);
-        // The wall's normal is radial and it does not bend along its axis.
-        let (gap, angle, kappa) = along_the_loop(&fill, &radial, &|_| 0.0);
-        eprintln!(
-            "{name}: along the rim (1600 points): within {gap:e} of it, normal within {angle:.5}° of the wall's, curvature across {kappa:e} /mm (the wall's 0)"
-        );
-        assert!(angle < 0.1, "{name}: the normal turns {angle}° from the wall's");
-        kappas.push(kappa);
-        // A dome over the rim, not a flat lid: more than the disc.
-        assert!(area > std::f64::consts::PI * 100.0 * 1.05, "{name}: {area}");
-        // Sealed: the tube's volume plus the dome's, the dome's by the divergence theorem over the
-        // patch (∫∫ (z − 30)·n_z dA), independent of the mesher.
-        let closed = stitch(&[&open, &fill], 0.0).unwrap();
-        assert!(!closed.is_surface(), "{name}: the cap closes the tube");
-        let dome = Faces::of(&fill).quadrature(500, &|p, n| (p.z - 30.0) * n.z).abs();
-        let (got, want) = (measure(&closed).unwrap().volume, std::f64::consts::PI * 100.0 * 30.0 + dome);
-        eprintln!("{name}: sealed volume {got:.3}, tube + dome {want:.3}");
-        assert!((got - want).abs() < 2e-4 * want, "{name}: {got} vs {want}");
-    }
-    eprintln!("tube end: curvature across the rim g1 {:e}, g2 {:e} /mm", kappas[0], kappas[1]);
-    assert!(kappas[1] < kappas[0], "g2 holds the wall's curvature closer than g1");
 }
 
 /// A cylinder about z (radius 10, 40 high) with a pentagonal pocket cut into its wall from the

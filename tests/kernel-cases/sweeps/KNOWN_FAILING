@@ -2,3 +2,4 @@
 # rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: not seeded yet; seeded from a develop run after the SMLib pin bump.
+cov-revolve-circle-touching-its-axis-a-quarter-turn SMLib revolve status 1001 on a profile touching its axis
