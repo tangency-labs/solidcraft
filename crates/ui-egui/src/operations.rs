@@ -6,7 +6,7 @@
 //!
 //! The rows are read each frame from the work itself (the file being opened and the ones queued
 //! behind it, a feature dialog's OK computing, the history's commands and a delete's check
-//! computing off the window thread, an agent's command, a save, the bodies of an opened design
+//! computing off the window thread, an agent's command, a save being written, the bodies of an opened design
 //! being meshed), so nothing has to be registered or forgotten. Work reports its progress, and
 //! learns it was cancelled, through [`solidcraft_engine::doc::progress::Progress`]: the timeline's
 //! evaluation reports each feature it reaches, and long work inside one reports its steps through
@@ -44,6 +44,8 @@ pub struct Row {
     pub label: String,
     /// Steps done of how many, when the work counts them.
     pub steps: Option<(usize, usize)>,
+    /// The steps are bytes (a file read or written): the bar says how far in per cent.
+    pub percent: bool,
     /// Waiting for the one before it.
     pub queued: bool,
     /// Done, and waiting for the person to finish what they are doing (or for its design's tab)
@@ -53,7 +55,7 @@ pub struct Row {
     pub cancelling: bool,
     /// How it ended, once it is gone (fading out); `None` while it runs, or when it didn't say.
     pub ended: Option<Outcome>,
-    /// How to cancel it; `None`: it can't be (a save being written).
+    /// How to cancel it; `None`: it can't be (an opened design's bodies being meshed).
     cancel: Option<Cancel>,
     /// An agent's command: drawn in the agent cursor's colour.
     agent: bool,
@@ -77,11 +79,13 @@ enum Cancel {
     FeatureEdit,
     /// An agent's command.
     Agent,
+    /// A save being written: it stops unless the file is already being replaced.
+    Save,
 }
 
 impl Row {
     fn new(key: String, label: String) -> Self {
-        Row { key, label, steps: None, queued: false, waiting: false, cancelling: false, ended: None, cancel: None, agent: false }
+        Row { key, label, steps: None, percent: false, queued: false, waiting: false, cancelling: false, ended: None, cancel: None, agent: false }
     }
 
     /// Whether its X does anything.
@@ -112,6 +116,9 @@ impl Row {
             return Some(crate::i18n::tr("operations.waiting").to_string());
         }
         let (done, total) = self.steps.filter(|(_, total)| *total > 1)?;
+        if self.percent {
+            return Some(format!("{}%", (done.min(total) as f64 * 100.0 / total as f64).floor()));
+        }
         Some(format!("{} / {total}", (done + 1).min(total)))
     }
 }
@@ -135,7 +142,14 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     }
     if let Some(saving) = &app.saving {
         let command = saving.command();
-        rows.push(Row::new(format!("save:{command}"), command_name(command)));
+        let (steps, percent) = work_steps(&saving.progress).map_or((None, false), |(steps, percent)| (Some(steps), percent));
+        rows.push(Row {
+            steps,
+            percent,
+            cancelling: saving.progress.is_cancelled(),
+            cancel: Some(Cancel::Save),
+            ..Row::new(format!("save:{command}"), command_name(command))
+        });
     }
     // A file being opened, inserted or exported, and those waiting behind it.
     let mut queued = 0;
@@ -150,6 +164,7 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         };
         rows.push(Row {
             steps: file.steps,
+            percent: file.percent,
             queued: file.queued,
             waiting: file.waiting,
             cancelling: file.cancelled,
@@ -198,6 +213,16 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     rows
 }
 
+/// Long work's steps (a file read or written), and whether they are bytes ([`Row::percent`]).
+fn work_steps(progress: &solidcraft_engine::doc::progress::Progress) -> Option<((usize, usize), bool)> {
+    progress.work().map(|(stage, done, total)| ((done, total), bytes_stage(stage)))
+}
+
+/// Stages of long work whose steps are bytes.
+pub(crate) fn bytes_stage(stage: &str) -> bool {
+    matches!(stage, "reading" | "writing")
+}
+
 /// How far a watched evaluation is: the long work inside one feature while there is some, else
 /// the features evaluated of the timeline's.
 fn evaluation_steps(progress: &solidcraft_engine::doc::progress::Progress) -> Option<(usize, usize)> {
@@ -241,6 +266,13 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
             }
         }
         Cancel::Agent => app.stop_agent_command(),
+        // It says itself how it ended: a save already replacing the file goes through.
+        Cancel::Save => {
+            if let Some(saving) = &app.saving {
+                saving.progress.cancel();
+            }
+            return Ok(());
+        }
     }
     record(&mut app.operations, &row.key, row.label.clone(), Outcome::Cancelled);
     app.set_status(crate::i18n::format("operations.cancelled", &[("name", &row.label)]), false);
@@ -541,6 +573,7 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
                 "key": r.key,
                 "label": r.label,
                 "steps": r.steps.map(|(done, total)| json!({"done": done, "total": total})),
+                "percent": r.percent,
                 "queued": r.queued,
                 "cancelling": r.cancelling,
                 "cancellable": r.cancellable(),

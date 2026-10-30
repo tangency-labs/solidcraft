@@ -12,6 +12,9 @@ use crate::SolveApp;
 pub struct Saving {
     command: &'static str,
     done: std::sync::mpsc::Receiver<(Session, Result<Value, String>)>,
+    /// How far the file is written, and its Cancel: until the file is replaced, a cancelled save
+    /// leaves the file and its backup as they were, and the design unsaved.
+    pub(crate) progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
 }
 
 impl Saving {
@@ -38,12 +41,14 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         copy.path.clone_from(&app.session.path);
         let (tx, rx) = std::sync::mpsc::channel();
         let given = params.clone();
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        let watching = progress.clone();
         let job = std::thread::Builder::new().name("save".into()).spawn(move || {
-            let r = copy.execute(command, &given).map_err(|e| e.to_string());
+            let r = solidcraft_engine::doc::progress::watch(watching, || copy.execute(command, &given)).map_err(|e| e.to_string());
             let _ = tx.send((copy, r));
         });
         if job.is_ok() {
-            app.saving = Some(Saving { command, done: rx });
+            app.saving = Some(Saving { command, done: rx, progress });
             return true;
         }
         // No thread to write on: save here, as before.
@@ -73,12 +78,20 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         Some((_, Err(e))) => Err(e),
         None => Err(format!("{command}: the save stopped")),
     };
+    let cancelled = r.as_ref().is_err_and(|e| e.contains("save cancelled"));
     let outcome = match &r {
         Ok(_) => crate::operations::Outcome::Done,
+        Err(_) if cancelled => crate::operations::Outcome::Cancelled,
         Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(command, e)),
     };
     crate::operations::ended(app, &format!("save:{command}"), outcome);
-    app.finish_command(command, &r);
+    if cancelled {
+        // Not an error: the file is as it was, and the design still has its changes to save.
+        let name = crate::i18n::tr_label(crate::command_label(command)).to_string();
+        app.set_status(crate::i18n::format("operations.cancelled", &[("name", &name)]), false);
+    } else {
+        app.finish_command(command, &r);
+    }
     crate::documents::saved_for_close(app);
 }
 
@@ -101,7 +114,7 @@ mod tests {
         let document = h.app.session.doc.clone();
         let history = h.app.session.undo.len();
         let (_save_finish, save_done) = std::sync::mpsc::channel();
-        h.app.saving = Some(super::Saving { command: "file.save", done: save_done });
+        h.app.saving = Some(super::Saving { command: "file.save", done: save_done, progress: Default::default() });
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
         assert!(crate::dialogs::begin_applying(&h.app, &dialog).is_none());
         assert!(crate::dialogs::run_dialog(&mut h.app, &dialog).unwrap_err().contains("file operation"));
@@ -139,7 +152,7 @@ mod tests {
         let mut copy = h.app.session.scratch();
         copy.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
         let (finish, done) = std::sync::mpsc::channel();
-        h.app.saving = Some(super::Saving { command: "file.save_as", done });
+        h.app.saving = Some(super::Saving { command: "file.save_as", done, progress: Default::default() });
         let (tx, rx) = std::sync::mpsc::channel();
         h.app.control_rx = Some(rx);
         let (req, reply) = crate::control::ControlRequest::new("engine.script", json!([{"command": "solid.sphere", "params": {"diameter": 4}}]));
@@ -167,7 +180,7 @@ mod tests {
         let mut copy = h.app.session.scratch();
         copy.execute("file.save_as", &json!({"path": path.to_string_lossy()})).unwrap();
         let (finish, done) = std::sync::mpsc::channel();
-        h.app.saving = Some(super::Saving { command: "file.save_as", done });
+        h.app.saving = Some(super::Saving { command: "file.save_as", done, progress: Default::default() });
         // A change that reaches the session past the window's guards.
         h.app.session.execute("solid.sphere", &json!({"diameter": 4})).unwrap();
         finish.send((copy, Ok(json!({})))).unwrap();
@@ -200,5 +213,47 @@ mod tests {
         super::start(&mut h.app, "file.save_as", json!({"path": bad.to_string_lossy()}));
         super::tick(&mut h.app, true);
         assert!(h.app.session.is_dirty() && h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    }
+
+    /// A save can be cancelled until its file is replaced: a cancelled save writes nothing, and
+    /// the design keeps its changes to save. From the operations panel (here `ui.operations`) its
+    /// row's X stops it, and it ends cancelled, not as an error.
+    #[test]
+    fn a_save_cancelled_before_its_file_is_replaced_writes_nothing() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let path = h.dir.join("Cancelled.solidcraft");
+        // The engine: a watched save asked to stop writes nothing.
+        let stop = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        stop.cancel();
+        let r = solidcraft_engine::doc::progress::watch(stop, || h.app.session.execute("file.save_as", &json!({"path": path.to_string_lossy()})));
+        assert!(r.is_err_and(|e| e.to_string().ends_with("save cancelled")));
+        assert!(!path.exists() && h.app.session.is_dirty() && h.app.session.path.is_none());
+        // The window: a save under way is a row with a working X.
+        let (finish, done) = std::sync::mpsc::channel();
+        let progress = std::sync::Arc::new(solidcraft_engine::doc::progress::Progress::default());
+        h.app.saving = Some(super::Saving { command: "file.save_as", done, progress: progress.clone() });
+        let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(listed["operations"][0]["key"], "save:file.save_as", "{listed}");
+        assert_eq!(listed["operations"][0]["cancellable"], true, "{listed}");
+        crate::operations::control(&mut h.app, &json!({"cancel": "save:file.save_as"})).unwrap();
+        assert!(progress.is_cancelled(), "the worker is asked to stop");
+        let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(listed["operations"][0]["cancelling"], true, "{listed}");
+        h.frame();
+        let shown = |h: &crate::scenario::Harness| {
+            h.app.operations.rows(crate::now_ms()).find(|(r, _)| r.key == "save:file.save_as").and_then(|(r, _)| r.status())
+        };
+        assert_eq!(shown(&h), Some(crate::i18n::tr("operations.cancelling").to_string()), "drawn while it stops");
+        // The worker stops before replacing the file: cancelled, not an error, still unsaved.
+        finish.send((h.app.session.scratch(), Err(format!("{}: save cancelled", path.display())))).unwrap();
+        super::tick(&mut h.app, false);
+        assert!(h.app.saving.is_none() && h.app.session.is_dirty() && !path.exists());
+        assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| !error), "{:?}", h.app.status);
+        let listed = crate::operations::control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(listed["finished"][0]["outcome"], "cancelled", "{listed}");
+        // Its row fades out saying it was cancelled, not still cancelling.
+        h.frame();
+        assert_eq!(shown(&h), Some(crate::i18n::tr("operations.stopped").to_string()));
     }
 }
