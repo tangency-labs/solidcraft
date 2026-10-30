@@ -54,7 +54,7 @@ fn tapped_thread_depth_keeps_reference_edge_placement_after_reopen() {
     };
     assert_eq!(references.len(), 2);
     assert_eq!(thread_depth.as_ref().unwrap().to_string(), "3");
-    assert!(!reopened.model.state().bodies[0].body.contains(Vec3::new(10.0, 12.0, 10.0)));
+    assert_eq!(reopened.model.state().bodies[0].body.classify_point(Vec3::new(10.0, 12.0, 10.0)).unwrap(), solidcraft_kernel::PointClass::Outside);
 }
 
 #[test]
@@ -610,8 +610,11 @@ fn a_mid_face_pick_between_two_free_ends_needs_from() {
     let body = &st.body("Part").unwrap().body;
     let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.9 * a.cos(), 4.9 * a.sin(), z));
     let rings = |z0: f64, z1: f64| (0..=40).map(move |i| z0 + (z1 - z0) * i as f64 / 40.0).flat_map(ring);
-    assert!(rings(0.5, 14.0).all(|q| body.contains(q)), "the bottom half is cut");
-    assert!(rings(16.0, 29.5).filter(|q| !body.contains(*q)).count() > 100, "the top half is not threaded");
+    assert!(rings(0.5, 14.0).all(|q| body.classify_point(q).unwrap() == solidcraft_kernel::PointClass::Inside), "the bottom half is cut");
+    assert!(
+        rings(16.0, 29.5).filter(|q| body.classify_point(*q).unwrap() == solidcraft_kernel::PointClass::Outside).count() > 100,
+        "the top half is not threaded"
+    );
 }
 
 /// Up to a plane, or to a point's place along the axis, from the end given.
@@ -741,7 +744,8 @@ fn a_left_handed_thread_turns_the_other_way() {
                 let a0 = *i as f64 * 10f64.to_radians();
                 let z0 = 4.5;
                 let probe = |a: f64| Vec3::new(r * (a0 + a).cos(), r * (a0 + a).sin(), z0 + sign * p * a / std::f64::consts::TAU);
-                !body.contains(probe(0.0)) && (1..12).all(|k| !body.contains(probe(k as f64 * 0.5)))
+                body.classify_point(probe(0.0)).unwrap() == solidcraft_kernel::PointClass::Outside
+                    && (1..12).all(|k| body.classify_point(probe(k as f64 * 0.5)).unwrap() == solidcraft_kernel::PointClass::Outside)
             })
             .count()
     };

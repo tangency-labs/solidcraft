@@ -35,12 +35,17 @@ fn reselect(s: &Session, name: &str) -> Option<String> {
 
 /// Whether any body holds `p`.
 fn solid_at(s: &Session, p: [f64; 3]) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(Vec3::new(p[0], p[1], p[2])))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// Which body holds `p`.
 fn body_at(s: &Session, p: [f64; 3]) -> Option<String> {
-    s.model.state().bodies.iter().find(|b| b.body.contains(Vec3::new(p[0], p[1], p[2]))).map(|b| b.name.clone())
+    s.model
+        .state()
+        .bodies
+        .iter()
+        .find(|b| b.body.classify_point(Vec3::new(p[0], p[1], p[2])).unwrap() == solidcraft_kernel::PointClass::Inside)
+        .map(|b| b.name.clone())
 }
 
 fn names(s: &Session, body: &str) -> Vec<(String, bool)> {
@@ -149,8 +154,8 @@ fn a_blend_follows_its_named_edge_to_a_moved_lid_instead_of_the_body_below() {
         let lid_volume = solidcraft_kernel::measure(&lid.body).unwrap().volume;
         assert!((base_volume - 24000.0).abs() < 0.01, "{command}: the base stays sharp: {base_volume}");
         assert!((lid_volume - (6000.0 - removed)).abs() < 0.01, "{command}: the lid keeps its blend: {lid_volume}");
-        assert!(base.body.contains(Vec3::new(39.9, 29.9, 12.5)));
-        assert!(!lid.body.contains(Vec3::new(39.9, 29.9, 22.5)));
+        assert_eq!(base.body.classify_point(Vec3::new(39.9, 29.9, 12.5)).unwrap(), solidcraft_kernel::PointClass::Inside);
+        assert_eq!(lid.body.classify_point(Vec3::new(39.9, 29.9, 22.5)).unwrap(), solidcraft_kernel::PointClass::Outside);
     }
 }
 

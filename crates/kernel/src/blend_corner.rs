@@ -599,7 +599,6 @@ mod tests {
     /// where the front strip's edge 1 + t/2 − w(t) crosses y = 0, so Simpson's rule is exact on
     /// each piece: 375.673069 taken from V0 = 140333.333333 (the prismatoid), 139957.660264.
     #[test]
-    #[ignore = "fails until SMLib builds the cliff overflow of a blended loop: CloseRemovalRegion refuses it (SM_FILERR_NO_ROOM, its fillet boundary closes on one face)"]
     fn a_rim_loop_chamfer_running_off_its_rim_builds() {
         use solidcraft_geom::{Loop2, Plane, Vec2};
         let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);

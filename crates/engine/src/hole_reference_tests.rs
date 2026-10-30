@@ -19,7 +19,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 fn solid_at(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(p))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// The bore (5 mm across, 4 mm deep, down from the top face at z = `top`) is about (x, y):

@@ -100,13 +100,19 @@ fn circular_pattern_about_a_boss_wall_follows_the_boss() {
     let holes = |s: &Session, cx: f64, r: f64| {
         let st = s.world_state().unwrap();
         let body = &st.bodies[0].body;
-        [(r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)].iter().all(|(dx, dy)| !body.contains(Vec3::new(cx + dx, 100.0 + dy, 2.5)))
+        [(r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)]
+            .iter()
+            .all(|(dx, dy)| body.classify_point(Vec3::new(cx + dx, 100.0 + dy, 2.5)).unwrap() == solidcraft_kernel::PointClass::Outside)
     };
     assert!(holes(&s, 100.0, 30.0), "four holes round the boss");
     run(&mut s, "parameters.change", json!({"name": "cx", "expression": "90 mm"}));
     assert!(holes(&s, 90.0, 40.0), "the copies turn about the boss where it is now");
     let st = s.world_state().unwrap();
-    assert!(st.bodies[0].body.contains(Vec3::new(100.0, 130.0, 2.5)), "not where the boss was");
+    assert_eq!(
+        st.bodies[0].body.classify_point(Vec3::new(100.0, 130.0, 2.5)).unwrap(),
+        solidcraft_kernel::PointClass::Inside,
+        "not where the boss was"
+    );
 }
 
 #[test]

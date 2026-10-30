@@ -34,7 +34,7 @@ fn measure(s: &mut Session) -> Result<(f64, i64), String> {
 }
 
 fn solid_at(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(p))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 fn v3(a: [f64; 3]) -> Vec3 {
@@ -826,7 +826,7 @@ fn recessed_drill_point_geometry_roundtrip_preview_and_undo() {
         p.as_object_mut().unwrap().remove("tip_angle");
         let redefine = json!({"feature":hole,"command":"solid.hole","params":p});
         let preview = s.preview(&[("timeline.redefine".into(), redefine.clone())]).unwrap();
-        assert!(preview.after.bodies.iter().any(|b| b.body.contains(probe)));
+        assert!(preview.after.bodies.iter().any(|b| b.body.classify_point(probe).unwrap() == solidcraft_kernel::PointClass::Inside));
         assert_eq!(s.doc.to_json(), saved, "preview cannot accept the bottom change");
         run(&mut s, "timeline.redefine", redefine).unwrap();
         assert!(solid_at(&s, probe));

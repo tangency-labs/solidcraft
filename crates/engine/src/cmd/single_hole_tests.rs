@@ -20,7 +20,7 @@ fn volume(s: &mut Session) -> f64 {
 }
 
 fn solid_at(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(p))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// The circle `c1`'s centre: its point id and where it is in the world.

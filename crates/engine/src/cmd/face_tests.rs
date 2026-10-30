@@ -15,10 +15,15 @@ fn check(s: &mut Session, want: f64, hole: bool, height: f64) {
     let got: f64 = state.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
     // Legacy linked outlines fit tessellated curves; enforce the existing 1e-4 material envelope.
     assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
-    assert!(state.bodies.iter().any(|b| b.body.contains(Vec3::new(5.0, 5.0, height - 1.0))));
-    assert!(!state.bodies.iter().any(|b| b.body.contains(Vec3::new(5.0, 5.0, height + 1.0))));
+    assert!(state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(5.0, 5.0, height - 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
+    assert!(!state.bodies.iter().any(|b| b.body.classify_point(Vec3::new(5.0, 5.0, height + 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
     if hole {
-        assert!(!state.bodies.iter().any(|b| b.body.contains(Vec3::new(20.0, 15.0, height - 1.0))));
+        assert!(
+            !state
+                .bodies
+                .iter()
+                .any(|b| b.body.classify_point(Vec3::new(20.0, 15.0, height - 1.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+        );
     }
 }
 #[test]
@@ -48,8 +53,12 @@ fn generated_face_profiles_keep_exact_links_live_after_edit_and_reopen() {
         let area = 1500.0 - if hole { 25.0 * PI } else { 0.0 };
         check(&mut s, area * 35.0, hole, 35.0);
         let edited = s.model.state();
-        assert!(edited.bodies.iter().any(|body| body.body.contains(Vec3::new(49.0, 5.0, 34.0))));
-        assert!(!edited.bodies.iter().any(|body| body.body.contains(Vec3::new(51.0, 5.0, 34.0))));
+        assert!(
+            edited.bodies.iter().any(|body| body.body.classify_point(Vec3::new(49.0, 5.0, 34.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+        );
+        assert!(
+            !edited.bodies.iter().any(|body| body.body.classify_point(Vec3::new(51.0, 5.0, 34.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+        );
         assert!(edited.sketch(sketch.0).unwrap().sketch.links.iter().all(|link| link.auto_face && !link.lost));
         let solved = edited.sketch(sketch.0).unwrap().plane;
         assert!((solved.origin.z - 25.0).abs() < 1e-6);
@@ -116,16 +125,21 @@ fn generated_profiles_and_press_pull_convert_rotated_occurrence_picks_once() {
         let world = s.world_state().unwrap();
         let occupied = Vec3::new(35.0, 21.0 - height, 15.0);
         let absent = Vec3::new(35.0, 19.0 - height, 15.0);
-        assert!(world.bodies.iter().any(|body| body.body.contains(occupied)));
-        assert!(!world.bodies.iter().any(|body| body.body.contains(absent)));
+        assert!(world.bodies.iter().any(|body| body.body.classify_point(occupied).unwrap() == solidcraft_kernel::PointClass::Inside));
+        assert!(!world.bodies.iter().any(|body| body.body.classify_point(absent).unwrap() == solidcraft_kernel::PointClass::Inside));
         if hole {
-            assert!(!world.bodies.iter().any(|body| body.body.contains(Vec3::new(50.0, 21.0 - height, 25.0))));
+            assert!(
+                !world
+                    .bodies
+                    .iter()
+                    .any(|body| body.body.classify_point(Vec3::new(50.0, 21.0 - height, 25.0)).unwrap() == solidcraft_kernel::PointClass::Inside)
+            );
         }
         let before_volume: f64 = world.bodies.iter().map(|body| solidcraft_kernel::measure(&body.body).unwrap().volume).sum();
         let before_bounds: Vec<_> = world.bodies.iter().map(|body| (body.name.clone(), body.mesh().bounds())).collect();
         let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
         let after = reopened.world_state().unwrap();
-        assert!(after.bodies.iter().any(|body| body.body.contains(occupied)));
+        assert!(after.bodies.iter().any(|body| body.body.classify_point(occupied).unwrap() == solidcraft_kernel::PointClass::Inside));
         let v: f64 = after.bodies.iter().map(|body| solidcraft_kernel::measure(&body.body).unwrap().volume).sum();
         assert!((v - area * height).abs() < area * height * 1e-4);
         assert!((v - before_volume).abs() < 1e-6);
@@ -222,8 +236,8 @@ fn repeated_source_face_profile_requires_and_uses_the_exact_active_occurrence() 
     run(&mut s, "solid.extrude", json!({"face":[55,5,10],"distance":5,"operation":"new"}));
     let state = s.world_state().unwrap();
     for x in [5.0, 55.0] {
-        assert!(state.bodies.iter().any(|body| body.body.contains(Vec3::new(x, 5.0, 14.0))));
-        assert!(!state.bodies.iter().any(|body| body.body.contains(Vec3::new(x, 5.0, 16.0))));
+        assert!(state.bodies.iter().any(|body| body.body.classify_point(Vec3::new(x, 5.0, 14.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
+        assert!(!state.bodies.iter().any(|body| body.body.classify_point(Vec3::new(x, 5.0, 16.0)).unwrap() == solidcraft_kernel::PointClass::Inside));
     }
 }
 

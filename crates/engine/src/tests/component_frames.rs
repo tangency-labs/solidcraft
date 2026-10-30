@@ -227,7 +227,7 @@ fn revolve_to_a_cylinder_in_another_moved_component() {
     assert!(overlap.is_none_or(|b| solidcraft_kernel::measure(&b).unwrap().volume < 1e-3), "the arc runs into the post");
     // Past the picked point's angle (29°) on the inner side, where the post leaves room.
     let at = |r: f64, deg: f64| Vec3::new(r * deg.to_radians().cos(), r * deg.to_radians().sin(), -2.5);
-    assert!(arc.contains(at(10.2, 35.0)), "the arc is not cut back to the post's surface");
+    assert_eq!(arc.classify_point(at(10.2, 35.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "the arc is not cut back to the post's surface");
 }
 
 /// A To Object pick is named after the face it is on, the nearest one, even when a face of a

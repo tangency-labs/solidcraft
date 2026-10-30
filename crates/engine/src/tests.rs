@@ -172,10 +172,16 @@ fn join_extrude_from_a_chamfered_top_face() {
             assert!((solved.plane.origin.z - height).abs() < 1e-8);
             assert!(solved.sketch.links.iter().all(|link| link.auto_face && !link.lost));
             let body = &state.bodies[0];
-            assert!(body.body.contains(solidcraft_geom::Vec3::new(0., 0., height + 4.)));
-            assert!(!body.body.contains(solidcraft_geom::Vec3::new(0., 0., height + 6.)));
-            assert!(body.body.contains(solidcraft_geom::Vec3::new(10. - bevel - 0.5, 0., height + 4.)));
-            assert!(!body.body.contains(solidcraft_geom::Vec3::new(10. - bevel + 0.5, 0., height + 4.)));
+            assert_eq!(body.body.classify_point(solidcraft_geom::Vec3::new(0., 0., height + 4.)).unwrap(), solidcraft_kernel::PointClass::Inside);
+            assert_eq!(body.body.classify_point(solidcraft_geom::Vec3::new(0., 0., height + 6.)).unwrap(), solidcraft_kernel::PointClass::Outside);
+            assert_eq!(
+                body.body.classify_point(solidcraft_geom::Vec3::new(10. - bevel - 0.5, 0., height + 4.)).unwrap(),
+                solidcraft_kernel::PointClass::Inside
+            );
+            assert_eq!(
+                body.body.classify_point(solidcraft_geom::Vec3::new(10. - bevel + 0.5, 0., height + 4.)).unwrap(),
+                solidcraft_kernel::PointClass::Outside
+            );
         }
     }
 }
@@ -1741,7 +1747,7 @@ fn auto_extrude_joins_side_contact_elbow_and_keeps_new_body_explicit() {
             assert!(body.validity().is_empty());
             assert_eq!(body.lumps().unwrap().len(), 1);
             assert_eq!(body.face_count(), 8, "the two flat elbow sides must be single faces");
-            assert!(body.contains(geom::Vec3::new(5.0, 10.0, 25.0)));
+            assert_eq!(body.classify_point(geom::Vec3::new(5.0, 10.0, 25.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
         }
     }
 }
@@ -1763,7 +1769,7 @@ fn auto_extrude_joins_corner_screw_boss() {
     let body = &st.bodies.first().unwrap().body;
     assert_eq!(body.lumps().unwrap().len(), 1);
     assert!(body.validity().is_empty());
-    assert!(!body.contains(geom::Vec3::new(10.0, 10.0, 32.0)), "the screw hole stays open");
+    assert_eq!(body.classify_point(geom::Vec3::new(10.0, 10.0, 32.0)).unwrap(), solidcraft_kernel::PointClass::Outside, "the screw hole stays open");
 }
 
 #[test]

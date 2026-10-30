@@ -307,8 +307,8 @@ fn canonical_symmetric_ring_preview_drag_and_reopen_match_material() {
         let commands = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         let preview = h.app.session.preview_world(&commands).unwrap();
         let body = &preview.after.body("Main").unwrap().body;
-        assert!(body.contains(solidcraft_engine::geom::Vec3::new(3.0, 5.0, 0.0)));
-        assert!(!body.contains(solidcraft_engine::geom::Vec3::new(0.0, 5.0, 3.0)));
+        assert_eq!(body.classify_point(solidcraft_engine::geom::Vec3::new(3.0, 5.0, 0.0)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
+        assert_eq!(body.classify_point(solidcraft_engine::geom::Vec3::new(0.0, 5.0, 3.0)).unwrap(), solidcraft_engine::kernel::PointClass::Outside);
         let bounds = preview.after.body("Main").unwrap().mesh().bounds();
         assert!((bounds.min.x - 2.0f64.sqrt()).abs() < 0.02 && (bounds.max.x - 4.0).abs() < 0.02, "{bounds:?}");
         assert!((bounds.min.z + 2.0 * 2.0f64.sqrt()).abs() < 0.02 && (bounds.max.z - 2.0 * 2.0f64.sqrt()).abs() < 0.02);
@@ -347,9 +347,12 @@ fn reversed_axis_to_object_canvas_sweep_and_preview_follow_the_quarter_target() 
     let preview = h.app.session.preview_world(&commands).unwrap();
     let result = preview.after.body("Main").unwrap();
     assert_eq!(result.mesh().bounds(), before);
-    assert!(result.body.contains(solidcraft_engine::geom::Vec3::new(p, 2.5, p)));
+    assert_eq!(result.body.classify_point(solidcraft_engine::geom::Vec3::new(p, 2.5, p)).unwrap(), solidcraft_engine::kernel::PointClass::Inside);
     for (x, z) in [(-p, p), (-p, -p), (p, -p)] {
-        assert!(!result.body.contains(solidcraft_engine::geom::Vec3::new(x, 2.5, z)));
+        assert_eq!(
+            result.body.classify_point(solidcraft_engine::geom::Vec3::new(x, 2.5, z)).unwrap(),
+            solidcraft_engine::kernel::PointClass::Outside
+        );
     }
     assert!((kernel::measure(&result.body).unwrap().volume - expected_volume(90.0)).abs() < 0.03);
     h.step(&json!({"widget":"OK"})).unwrap();

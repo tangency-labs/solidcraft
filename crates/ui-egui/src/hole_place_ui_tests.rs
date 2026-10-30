@@ -67,7 +67,7 @@ fn last_hole(h: &Harness) -> (u64, Vec3) {
 }
 
 fn solid_at(h: &Harness, p: Vec3) -> bool {
-    h.app.session.model.state().bodies.iter().any(|b| b.body.contains(p))
+    h.app.session.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_engine::kernel::PointClass::Inside)
 }
 
 const MIDDLE: Vec3 = Vec3::new(20.0, 15.0, 20.0);

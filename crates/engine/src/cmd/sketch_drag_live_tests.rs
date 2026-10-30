@@ -93,7 +93,7 @@ fn frames(s: &mut Session, n: usize, live: bool) -> Vec<Value> {
 }
 
 fn body_contains(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.first().expect("a body").body.contains(p)
+    s.model.state().bodies.first().expect("a body").body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside
 }
 
 fn pt(s: &Session, id: &str) -> solidcraft_geom::Vec2 {

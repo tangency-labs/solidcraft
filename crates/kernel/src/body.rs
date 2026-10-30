@@ -1354,11 +1354,6 @@ impl Body {
         Ok(best)
     }
 
-    /// Is the point inside the solid?
-    pub fn contains(&self, p: Vec3) -> bool {
-        self.mesh(&MeshTolerance::chord(self.size() * 2e-3)).map(|m| m.contains(p)).unwrap_or(false)
-    }
-
     /// Where `p` lies against the body, decided exactly on its faces' surfaces and edges' curves
     /// (SMLib's point classification at the body's own tolerance, no mesh): on the boundary when
     /// within that tolerance of a face, an edge or a vertex, else inside its material or outside

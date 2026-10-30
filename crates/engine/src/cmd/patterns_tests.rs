@@ -95,8 +95,11 @@ fn rectangular_cut_pattern_counts_only_target_contacts_and_keeps_landing_copies(
     assert_eq!(reply["warning"], "2 of 3 cut copies remove no material");
     let state = s.world_state().unwrap();
     let plate = &state.body("Plate").unwrap().body;
-    assert!(!plate.contains(solidcraft_geom::Vec3::new(30., 15., 5.)));
-    assert!(state.body("Neighbor").unwrap().body.contains(solidcraft_geom::Vec3::new(50., 15., 5.)));
+    assert_eq!(plate.classify_point(solidcraft_geom::Vec3::new(30., 15., 5.)).unwrap(), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(
+        state.body("Neighbor").unwrap().body.classify_point(solidcraft_geom::Vec3::new(50., 15., 5.)).unwrap(),
+        solidcraft_kernel::PointClass::Inside
+    );
     assert!(rel(volume(&mut s), 24000.0 - 2.0 * PI * 4.0 * 10.0) < 1e-3);
 }
 
@@ -122,8 +125,8 @@ fn feature_rectangular_center_flip_and_oblique_direction_keep_source_and_recompu
         for i in [0.0, 1.0, -1.0, 2.0] {
             for j in [0.0, 1.0] {
                 let p = Vec3::new(60.0 + sign * (15.0 * i + 12.0 * j), 60.0 + sign * 16.0 * j, 2.5);
-                assert!(!body.contains(p), "hole at {p:?}");
-                assert!(body.contains(p + Vec3::new(0.0, 2.0, 0.0)));
+                assert_eq!(body.classify_point(p).unwrap(), solidcraft_kernel::PointClass::Outside, "hole at {p:?}");
+                assert_eq!(body.classify_point(p + Vec3::new(0.0, 2.0, 0.0)).unwrap(), solidcraft_kernel::PointClass::Inside);
             }
         }
         assert!(rel(volume(&mut s), 120.0 * 120.0 * 5.0 - 8.0 * PI * 5.0) < 1e-5);
@@ -159,8 +162,11 @@ fn feature_circular_center_flip_uses_partial_arc_endpoints_and_full_circle_spaci
             for slot in [0.0, 1.0, -1.0, 2.0, -2.0, 3.0] {
                 let a = (step * slot * if flipped { -1.0 } else { 1.0 }).to_radians();
                 let p = Vec3::new(40.0 + 20.0 * a.cos(), 60.0 + 20.0 * a.sin(), 2.5);
-                assert!(!st.bodies[0].body.contains(p), "hole at {p:?}");
-                assert!(st.bodies[0].body.contains(p + Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0)));
+                assert_eq!(st.bodies[0].body.classify_point(p).unwrap(), solidcraft_kernel::PointClass::Outside, "hole at {p:?}");
+                assert_eq!(
+                    st.bodies[0].body.classify_point(p + Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0)).unwrap(),
+                    solidcraft_kernel::PointClass::Inside
+                );
             }
             assert!(rel(volume(&mut s), 120.0 * 120.0 * 5.0 - 6.0 * PI * 5.0) < 1e-5);
             let saved = s.doc.to_json();
@@ -761,10 +767,10 @@ fn patterns_and_mirrors_of_a_rib() {
         assert_eq!(st.bodies.len(), 1);
         let body = &st.bodies[0].body;
         for p in inside {
-            assert!(body.contains(*p), "a rib at {p:?}");
+            assert_eq!(body.classify_point(*p).unwrap(), solidcraft_kernel::PointClass::Inside, "a rib at {p:?}");
             // Beside it, across its thickness: no material (clear of the boss too).
             let side = if p.y == 0.0 { Vec3::new(0.0, 3.0, 0.0) } else { Vec3::new(3.0, 0.0, 0.0) };
-            assert!(!body.contains(*p + side), "nothing beside the rib at {p:?}");
+            assert_eq!(body.classify_point(*p + side).unwrap(), solidcraft_kernel::PointClass::Outside, "nothing beside the rib at {p:?}");
         }
     };
     check(&s, &ribs);
@@ -857,11 +863,15 @@ fn patterns_and_mirrors_of_patterns_and_mirrors() {
         assert_eq!(st.bodies.len(), 1, "{what}");
         let body = &st.bodies[0].body;
         for [x, y] in &holes {
-            assert!(!body.contains(Vec3::new(*x, *y, 10.0)), "{what}: a hole at ({x}, {y})");
-            assert!(body.contains(Vec3::new(*x, *y + 2.5, 10.0)), "{what}: material beside ({x}, {y})");
+            assert_eq!(body.classify_point(Vec3::new(*x, *y, 10.0)).unwrap(), solidcraft_kernel::PointClass::Outside, "{what}: a hole at ({x}, {y})");
+            assert_eq!(
+                body.classify_point(Vec3::new(*x, *y + 2.5, 10.0)).unwrap(),
+                solidcraft_kernel::PointClass::Inside,
+                "{what}: material beside ({x}, {y})"
+            );
         }
         for [x, y] in &material {
-            assert!(body.contains(Vec3::new(*x, *y, 10.0)), "{what}: no hole at ({x}, {y})");
+            assert_eq!(body.classify_point(Vec3::new(*x, *y, 10.0)).unwrap(), solidcraft_kernel::PointClass::Inside, "{what}: no hole at ({x}, {y})");
         }
         // The listed holes the steps added (in the last two cases `Mir` made the first of them).
         let added = holes.len();

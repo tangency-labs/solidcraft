@@ -59,11 +59,15 @@ fn to_object_noop_preserves_cut_targets_and_untargeted_body() {
     let before_a = cut_volume(&state);
     let removed = 0.5 * (15.0f64.powi(2) - 10.0f64.powi(2)) * 5.0 * std::f64::consts::FRAC_PI_2;
     assert!((before_a - (2000.0 - removed)).abs() < 0.2, "cut results {:?}: {before_a}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
-    let in_cut_stock = |p| state.bodies.iter().filter(|b| b.name != "B").any(|b| b.body.contains(p));
+    let in_cut_stock =
+        |p| state.bodies.iter().filter(|b| b.name != "B").any(|b| b.body.classify_point(p).unwrap() == solidcraft_engine::kernel::PointClass::Inside);
     assert!(in_cut_stock(solidcraft_engine::geom::Vec3::new(2.0, 2.0, 2.0)));
     assert!(in_cut_stock(solidcraft_engine::geom::Vec3::new(18.0, 2.0, 18.0)));
     assert!(!in_cut_stock(solidcraft_engine::geom::Vec3::new(9.0, 2.0, 9.0)));
-    assert!(state.body("B").unwrap().body.contains(solidcraft_engine::geom::Vec3::new(9.0, 2.0, 9.0)));
+    assert_eq!(
+        state.body("B").unwrap().body.classify_point(solidcraft_engine::geom::Vec3::new(9.0, 2.0, 9.0)).unwrap(),
+        solidcraft_engine::kernel::PointClass::Inside
+    );
     let before_bounds: Vec<_> = state.bodies.iter().map(|b| (b.name.clone(), b.mesh().bounds())).collect();
     let undo = h.app.session.undo.len();
     open(&mut h);

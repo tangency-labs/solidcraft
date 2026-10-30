@@ -1193,7 +1193,6 @@ fn chamfer_as_wide_as_sloped_basin_rim_builds() {
 /// ([`sloped_basin_rim_chamfer_removed`], clipped to y >= 0): 73.450475 for 2 and 142.112912 for
 /// 3 on the 1 mm rim, 184.526613 for 4 on the 0.5 mm one.
 #[test]
-#[ignore = "fails until SMLib builds the cliff overflow: CloseRemovalRegion refuses it (SM_FILERR_NO_ROOM, its fillet boundary along the side edge's line lies on the surfaces of two faces)"]
 fn chamfer_wider_than_sloped_basin_rim_builds() {
     for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0)] {
         let b = sloped_basin(margin);

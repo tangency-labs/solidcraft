@@ -24,7 +24,7 @@ fn volume(s: &mut Session) -> f64 {
 
 /// Whether the model holds material at (x, y, z).
 fn solid_at(s: &Session, x: f64, y: f64, z: f64) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(Vec3::new(x, y, z)))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(Vec3::new(x, y, z)).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// What the hole feature says (its error and its warning); empty when it is silent.
