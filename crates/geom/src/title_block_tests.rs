@@ -4,6 +4,7 @@ use super::*;
 use crate::bspline::tests::Lcg;
 use crate::cell::{DESCENDER_OF_CAP, Format, PADDING_MM, Part, Source, Warning, place_lines};
 use crate::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet, SheetSize};
+use crate::paper::{Item, ObjectKind};
 
 fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Aabb2 {
     Aabb2 { min: Vec2::new(x0, y0), max: Vec2::new(x1, y1) }
@@ -537,4 +538,70 @@ fn the_built_in_blocks_cells() {
     let content = |name: &str| text_of(block.cells.iter().find(|c| c.name == name).unwrap()).content.clone();
     assert_eq!(content("legal_owner"), Content(vec![field(Source::Drawing, "organization")]));
     assert_eq!(content("general_tolerances"), Content(vec![Part::Text("ISO 2768-m".into())]));
+}
+
+/// The built-in block's lines on A3 landscape, worked out by hand: the outline (230, 10) to
+/// (410, 64), then the three lines across the whole block at y 44, 34 and 24, then the six up and
+/// down: x 289, 348 and 379 between the second and third lines, 310 and 380 from the third line to
+/// the top, two cells' edges joined where they meet at y 44, and 342 between the bottom and the
+/// first line. Each shared edge is drawn once, 24 records in all, and the scene takes them.
+#[test]
+fn the_built_in_blocks_lines_on_a3() {
+    let sheet = iso(PaperSize::A3, Orientation::Landscape);
+    let group = default_block().layout(&sheet).unwrap().paper(7);
+    assert_eq!((group.object, group.kind), (7, ObjectKind::TitleBlock));
+    let drawn: Vec<(Vec<[f64; 4]>, bool, f64)> = group
+        .items
+        .iter()
+        .map(|item| match item {
+            Item::Stroke { path, closed, width_mm } => {
+                (path.iter().map(|s| [s.start().x, s.start().y, s.end().x, s.end().y]).collect(), *closed, *width_mm)
+            }
+            Item::Fill { .. } => panic!("a title block's lines are strokes"),
+        })
+        .collect();
+    let line = |x0: f64, y0: f64, x1: f64, y1: f64| (vec![[x0, y0, x1, y1]], false, 0.35);
+    let outline = vec![[230.0, 10.0, 410.0, 10.0], [410.0, 10.0, 410.0, 64.0], [410.0, 64.0, 230.0, 64.0], [230.0, 64.0, 230.0, 10.0]];
+    let expected = vec![
+        (outline, true, 0.7),
+        line(230.0, 44.0, 410.0, 44.0),
+        line(230.0, 34.0, 410.0, 34.0),
+        line(230.0, 24.0, 410.0, 24.0),
+        line(289.0, 24.0, 289.0, 34.0),
+        line(310.0, 34.0, 310.0, 64.0),
+        line(342.0, 10.0, 342.0, 24.0),
+        line(348.0, 24.0, 348.0, 34.0),
+        line(379.0, 24.0, 379.0, 34.0),
+        line(380.0, 34.0, 380.0, 64.0),
+    ];
+    assert_eq!(drawn, expected);
+    assert_eq!(group.records(), 24);
+    let size_mm = Vec2::new(420.0, 297.0);
+    crate::paper::Scene { size_mm, groups: vec![group] }.validate().unwrap();
+}
+
+/// Cells that don't tile the block still have every edge drawn, and edges that overlap along one
+/// line are one stroke: two cells side by side over one as wide as both, with a gap beside it.
+#[test]
+fn edges_that_overlap_along_a_line_are_one_stroke() {
+    let mut block = default_block();
+    let at = |name: &str, block: &TitleBlock| block.cells.iter().position(|c| c.name == name).unwrap();
+    // Leave only the title and identification cells, the title 10 mm short of the left side.
+    block.cells.retain(|c| c.name == "title" || c.name == "identification_number");
+    let title = at("title", &block);
+    block.cells[title].rect_mm[0] = -170.0;
+    let layout = block.layout(&iso(PaperSize::A3, Orientation::Landscape)).unwrap();
+    let lines: Vec<[f64; 4]> = layout
+        .paper(1)
+        .items
+        .iter()
+        .skip(1)
+        .map(|item| match item {
+            Item::Stroke { path, .. } => [path[0].start().x, path[0].start().y, path[0].end().x, path[0].end().y],
+            Item::Fill { .. } => panic!("strokes"),
+        })
+        .collect();
+    // Their tops are one line across from 240 to the right side; the title's left side and the
+    // shared side are each one line up.
+    assert_eq!(lines, [[240.0, 24.0, 410.0, 24.0], [240.0, 10.0, 240.0, 24.0], [342.0, 10.0, 342.0, 24.0]]);
 }

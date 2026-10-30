@@ -8,8 +8,8 @@
 //! [`default_block`] is the built-in definition. [`TitleBlock::validate`] checks a definition on
 //! its own, as when one is read, and
 //! [`TitleBlock::layout`] places it on one sheet by the cell text rule: each cell's rectangle, where
-//! its label goes and the box its value goes in. Values are set in their boxes once the paper scene
-//! has text; nothing here is saved or drawn yet.
+//! its label goes and the box its value goes in, and [`TitleBlockLayout::paper`] draws its lines.
+//! Values are set in their boxes once the paper scene has text.
 //!
 //! The outline is drawn `outline_line_mm` wide and the lines between cells `cell_line_mm`, each
 //! centred on its edge. The block's right and bottom edges lie on the drawing border, whose line is
@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::cell::{self, Content, Fit, Format, HAlign, Part, Source, is_snake_case};
 use crate::drawing_sheet::SheetLayout;
-use crate::paper::MAX_LINE_MM;
-use crate::{Aabb2, Vec2};
+use crate::paper::{Group, Item, MAX_LINE_MM, ObjectKind};
+use crate::{Aabb2, Loop2, Seg2, Vec2};
 
 /// The most cells a block may have.
 pub const MAX_CELLS: usize = 64;
@@ -250,6 +250,44 @@ impl TitleBlock {
             cells,
         })
     }
+}
+
+impl TitleBlockLayout {
+    /// The block's lines as one paper group of `object` (its sheet): the outline as a closed stroke
+    /// `outline_line_mm` wide, then every cell edge inside it `cell_line_mm` wide, across from the top
+    /// down and then up and down from the left. Each is drawn once, centred on its edge: neighbours'
+    /// shared edges, and edges that meet end to end along one line, are one stroke. The cells' text
+    /// isn't here yet.
+    pub fn paper(&self, object: u64) -> Group {
+        let Aabb2 { min, max } = self.outline;
+        let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
+        let mut items = vec![Item::Stroke { path: Loop2::polygon(&corners).segs, closed: true, width_mm: self.outline_line_mm }];
+        // Each cell edge off the outline, as (the line it is on, where it starts, where it ends).
+        let (mut across, mut down) = (Vec::new(), Vec::new());
+        for Aabb2 { min: a, max: b } in self.cells.iter().map(|cell| cell.rect) {
+            across.extend([a.y, b.y].into_iter().filter(|y| *y != min.y && *y != max.y).map(|y| (y, a.x, b.x)));
+            down.extend([a.x, b.x].into_iter().filter(|x| *x != min.x && *x != max.x).map(|x| (x, a.y, b.y)));
+        }
+        across.sort_by(|p, q| q.0.total_cmp(&p.0).then(p.1.total_cmp(&q.1)));
+        down.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.total_cmp(&q.1)));
+        let line = |a, b| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm: self.cell_line_mm };
+        items.extend(joined(&across).into_iter().map(|(y, x0, x1)| line(Vec2::new(x0, y), Vec2::new(x1, y))));
+        items.extend(joined(&down).into_iter().map(|(x, y0, y1)| line(Vec2::new(x, y0), Vec2::new(x, y1))));
+        Group { object, kind: ObjectKind::TitleBlock, items }
+    }
+}
+
+/// `pieces`, sorted by the line they are on and then where they start, with the pieces on one line
+/// that meet or overlap joined into one.
+fn joined(pieces: &[(f64, f64, f64)]) -> Vec<(f64, f64, f64)> {
+    let mut out: Vec<(f64, f64, f64)> = Vec::new();
+    for &(on, from, to) in pieces {
+        match out.last_mut() {
+            Some(last) if last.0 == on && from <= last.2 => last.2 = last.2.max(to),
+            _ => out.push((on, from, to)),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

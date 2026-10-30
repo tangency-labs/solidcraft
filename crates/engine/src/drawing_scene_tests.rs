@@ -17,13 +17,15 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 /// A block 100 x 50 x 20 mm along X, Y and Z from the origin, and a drawing of it on A3 with the
-/// ISO border: the front view at 1:2 centred at (150, 150), and the view above it, the top view in
-/// third angle, lined up with it at y 220. The session, the sheet and the two views' ids.
+/// ISO border and no title block, so its scene is the border and the views: the front view at 1:2
+/// centred at (150, 150), and the view above it, the top view in third angle, lined up with it at
+/// y 220. The session, the sheet and the two views' ids.
 pub(crate) fn front_and_top() -> (Session, u64, [u64; 2]) {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
+    Arc::make_mut(&mut d.sheets[0]).title_block = None;
     let mut id_source = solidcraft_doc::ids::IdSource::seeded(4890);
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
@@ -175,6 +177,36 @@ fn a_view_of_many_lines_draws_as_its_snapshot() {
     assert_eq!(state.status, Status::Drawn, "{state:?}");
     let ours = scene.scene.groups.iter().find(|g| g.object == top).unwrap();
     assert!(ours.records() > 20 && same_within(ours, &snapped.groups[0], 1e-9), "{ours:?} {:?}", snapped.groups[0]);
+}
+
+/// A sheet's title block is drawn last, over its views, as its layout draws it, the sheet its
+/// object, and the command's reply still matches its schema. Taking it away is a new scene from the
+/// provider, and projects no view again.
+#[test]
+fn a_sheets_title_block_is_drawn_after_its_views() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let block = solidcraft_geom::title_block::default_block();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": serde_json::to_value(&block).unwrap()}));
+    let scene = built(&s, sheet).scene;
+    let order = if front < top { [front, top] } else { [top, front] };
+    let mut expected: Vec<(u64, ObjectKind)> = border(&s, sheet).iter().map(|g| (g.object, g.kind)).collect();
+    expected.extend(order.map(|id| (id, ObjectKind::View)));
+    expected.push((sheet, ObjectKind::TitleBlock));
+    assert_eq!(scene.groups.iter().map(|g| (g.object, g.kind)).collect::<Vec<_>>(), expected);
+    let d = s.drawing("test").unwrap();
+    let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
+    let drawn = block.layout(&record.border.as_ref().unwrap().layout(&record.sheet).unwrap()).unwrap().paper(sheet);
+    assert_eq!(serde_json::to_string(scene.groups.last().unwrap()).unwrap(), serde_json::to_string(&drawn).unwrap());
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let schema = output_schema_for::<SheetSceneResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let before = settled(&mut s, sheet);
+    assert_eq!(bytes(&before.scene), bytes(&scene));
+    let projections = s.drawing_scenes.projections;
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": null}));
+    let after = extract(&mut s, sheet).unwrap();
+    assert!(after.generation > before.generation && after.scene.groups.iter().all(|g| g.kind != ObjectKind::TitleBlock));
+    assert_eq!((after.stale.len(), s.drawing_scenes.projections), (0, projections));
 }
 
 /// A sheet with no views is its border alone.
@@ -346,27 +378,33 @@ fn closing_the_drawing_drops_its_scenes() {
 }
 
 /// A view whose lines would take the sheet past a paper scene's records fails and is left out;
-/// a view after it that fits is still drawn, up to the limit exactly.
+/// a view after it that fits is still drawn, up to the limit exactly. A title block's records are
+/// kept for it, though it is drawn after the views.
 #[test]
 fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     let (s, sheet, _) = front_and_top();
     let d = s.drawing("test").unwrap().clone();
-    let record = d.sheets.iter().find(|x| x.id == sheet).unwrap();
     // One stroke of `n` pieces: n + 2 records with its group.
     let lines = |n: usize| {
         let path = (0..n).map(|i| Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new((i + 1) as f64 * 1e-3, 0.0) }).collect();
         let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5 }];
         Drawn { group: Some(Group { object: n as u64, kind: ObjectKind::View, items }), status: Status::Drawn, stats: None }
     };
-    let left = MAX_RECORDS - border(&s, sheet).iter().map(Group::records).sum::<usize>();
-    // The first leaves 20 records; the second needs 32; the third takes the last 20.
-    let views = [lines(left - 22), lines(30), lines(18)];
-    let centre = Vec2::new(100.0, 100.0);
-    let (scene, states) = assemble(record, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
-    let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
-    assert_eq!(statuses, ["drawn", "failed", "drawn"]);
-    assert_eq!((scene.groups.len(), scene.groups.iter().map(Group::records).sum::<usize>()), (5, MAX_RECORDS));
-    assert!(matches!(&states[1].status, Status::Failed(why) if why.contains("put it on another sheet")), "{:?}", states[1]);
+    for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
+        let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
+        let (empty, _) = assemble(&record, std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap();
+        assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
+        let left = MAX_RECORDS - empty.groups.iter().map(Group::records).sum::<usize>();
+        // The first leaves 20 records; the second needs 32; the third takes the last 20.
+        let views = [lines(left - 22), lines(30), lines(18)];
+        let centre = Vec2::new(100.0, 100.0);
+        let (scene, states) = assemble(&record, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
+        let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
+        assert_eq!(statuses, ["drawn", "failed", "drawn"]);
+        let records = scene.groups.iter().map(Group::records).sum::<usize>();
+        assert_eq!((scene.groups.len(), records), (empty.groups.len() + 2, MAX_RECORDS));
+        assert!(matches!(&states[1].status, Status::Failed(why) if why.contains("put it on another sheet")), "{:?}", states[1]);
+    }
 }
 
 /// A view at 200:1 asks the mesh for chords no finer than its floor, so it is drawn rather than
