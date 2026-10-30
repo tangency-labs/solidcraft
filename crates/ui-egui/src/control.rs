@@ -585,8 +585,17 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 Some(false) => app.home.open = false,
                 None => {}
             }
-            if let Some(i) = p.get("sample").and_then(Value::as_u64) {
-                crate::home::open_sample(app, i as usize);
+            if let Some(sample) = p.get("sample") {
+                // The index is checked here: `open_sample` drops an index that names no sample
+                // and says nothing, so the request would look like it had worked (#9087).
+                let count = solidcraft_engine::sample::samples().len();
+                let Some(index) = sample.as_i64() else {
+                    return err(format!("`sample` must be an index from 0 to {}", count - 1));
+                };
+                if !(0..count as i64).contains(&index) {
+                    return err(format!("`sample` must be an index from 0 to {}, not {index}", count - 1));
+                }
+                crate::home::open_sample(app, index as usize);
             }
             ok(json!({"open": app.home.open, "recent": app.home.recent}))
         }
@@ -2275,5 +2284,24 @@ mod tests {
             assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("takes no ui.start params"), "{r}");
             assert!(h.app.dialog.is_none() && h.app.tool.is_none() && h.app.session.analysis.is_none(), "{command} started nothing");
         }
+    }
+
+    /// #9087: a sample index that names no sample is refused, so an agent can tell a typo from
+    /// a sample that opened. The index is checked before it reaches `open_sample`, which would
+    /// otherwise drop it and reply `ok`.
+    #[test]
+    fn ui_home_refuses_a_sample_index_that_names_no_sample() {
+        let mut h = crate::scenario::Harness::new();
+        let count = solidcraft_engine::sample::samples().len();
+        for bad in [json!({"sample": count}), json!({"sample": 99}), json!({"sample": -1})] {
+            let r = h.call("ui.home", bad.clone());
+            assert_eq!(r["ok"], false, "{bad}: {r}");
+            let error = r["error"].as_str().unwrap_or_default();
+            assert!(error.contains(&format!("0 to {}", count - 1)), "the error names the valid range: {bad}: {r}");
+        }
+        // A sample that exists still opens.
+        let r = h.call("ui.home", json!({"sample": 0}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["result"]["open"], true, "the sample was asked for: {r}");
     }
 }
