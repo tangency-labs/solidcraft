@@ -3,14 +3,12 @@
 //!
 //! The C++ side builds a real `SmBrep` per call with the shared topology fixture (an
 //! upstream `.smb` file, a wire edge, a one-face B-rep or the `my_test_topology` wire
-//! network), replaces analytic geometry by plain B-spline copies, and runs one
-//! `SmBrep` member. The Rust side builds a wire edge, face or network source itself
-//! ([`crate::own_builder`] under this shim's conventions: lists registered first, its
-//! own owner identities). For an `.smb` file it imports the graph the shim exports (the
-//! `topology.vertexuse` importer), restores what the import cannot carry (the B-rep
-//! tolerance, infinite region, region list head, editing flag and each vertex's vertex
-//! use order, from the shim's `Extras`), runs the port and writes the same output
-//! layout (`out`).
+//! network) and runs one `SmBrep` member on it, analytic geometry as it is. The Rust
+//! side builds a wire edge, face or network source itself and reads an `.smb` file with
+//! the Rust reader, both renumbered into the shim's walk order
+//! ([`crate::own_reader::brep_in_order`] under this shim's conventions: lists registered
+//! first, its own owner identities; no C++ export reaches the Rust side), runs the port
+//! and writes the same output layout (`out`).
 //!
 //! Entity selectors are taken modulo the matching entity count (`-1` selects null);
 //! an op that needs an entity the B-rep lacks is skipped on both sides
@@ -57,7 +55,7 @@ use solidcore_ffi::units::topology_brep_p2::{self as ffi, Op};
 use solidcore_ffi::units::topology_vertexuse::counts;
 
 use super::topology_vertexuse::{
-    gen_brep, gen_curve, gen_surface, import, path_of, push_curve, push_surface, BrepIn, CrvIn,
+    gen_brep, gen_curve, gen_surface, path_of, push_curve, push_surface, BrepIn, CrvIn,
     SrfIn,
 };
 use crate::case::CaseContext;
@@ -457,48 +455,6 @@ fn entity(ty: f64, i: f64) -> Option<EntityRef> {
     })
 }
 
-/// The Rust B-rep of the case (with the shim's extras restored).
-fn rust_brep(path: &str, h: &[f64], c: &[usize; 10]) -> Result<Brep, HarnessError> {
-    let export = ffi::eval(Op::Export, path, h).map_err(|e| ffi_err(&e))?;
-    let (mut b, exact) = import(&export)?;
-    if exact.iter().any(|e| !e) {
-        return Err(harness("a face surface was not imported exactly"));
-    }
-    let ex = ffi::eval(Op::Extras, path, h).map_err(|e| ffi_err(&e))?;
-    let mut at = 1usize;
-    let mut next = || -> Result<f64, HarnessError> {
-        let v = ex
-            .get(at)
-            .copied()
-            .ok_or_else(|| harness("extras too short"))?;
-        at += 1;
-        Ok(v)
-    };
-    let tol = next()?;
-    let inf = next()?;
-    let head_r = next()?;
-    let editing = next()? != 0.0;
-    b.set_tolerance(tol);
-    b.set_infinite_region((inf >= 0.0).then(|| RegionId::from_index(inf as u32)));
-    b.set_region_list_head((head_r >= 0.0).then(|| RegionId::from_index(head_r as u32)));
-    b.set_editing_enabled(editing);
-    for v in 0..c[9] {
-        let n = next()? as usize;
-        let mut list = Vec::new();
-        for _ in 0..n {
-            let i = next()?;
-            if i < 0.0 {
-                return Err(harness("unregistered vertex use in a vertex list"));
-            }
-            list.push(VertexuseId::from_index(i as u32));
-        }
-        b.vertex_mut(VertexId::from_index(v as u32))
-            .map_err(|e| harness(e.to_string()))?
-            .vertexuses = list;
-    }
-    Ok(b)
-}
-
 fn rust_curve(c: &CrvIn) -> Result<BSplineCurve, HarnessError> {
     let pw = c
         .cpts
@@ -889,15 +845,16 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: Op, a: &[f64]) -> Result<Vec<f6
             let tol = tol::zone_tol3d(k, arg(6)?);
             let limit = (arg(7)? != 0.0).then_some(arg(8)?);
             // the cache SmBrep::RayFire's solve builds (CacheMakeOrValidate), over the
-            // geometry owners of a native B-rep
-            crate::util::own_arena_geometry(b);
+            // geometry owners the build gave: faces and edges own their surfaces and
+            // curves under this runner's identities ([`CONVENTIONS`], [`key_of`]); no
+            // owner is added to geometry the build left without one
             let kk: &Kernel = k;
             let cache = must(solidcore::topology::brep_cache::make_brep_cache(
                 kk,
                 solidcore::topology::brep_cache::CacheSource::Brep(&*b),
-                &solidcore::topology::brep_cache::arena_identity,
+                &cache_identity,
             ))?;
-            let keys = |o: CacheObject| solidcore::topology::brep_cache::arena_identity(o);
+            let keys = |o: CacheObject| cache_identity(o);
             let owners = |_: ObjectRef| None;
             let (s, r) = status(bp2::ray_fire(
                 kk,
@@ -969,6 +926,18 @@ fn surface_arg(a: &[f64], at: usize) -> Result<Surface, Fail> {
     Ok(rust_surface(&SrfIn::Bspline(b))?)
 }
 
+/// The B-rep cache identity of an object of the Rust B-rep: this runner's [`key_of`]
+/// names, under which the build owns the faces' surfaces and the edges' curves
+/// ([`CONVENTIONS`]), where `brep_cache::arena_identity` would name them by arena index.
+fn cache_identity(o: CacheObject) -> ObjectRef {
+    match o {
+        CacheObject::Edge(e) | CacheObject::Curve(e) => key_of(EntityRef::Edge(e)),
+        CacheObject::Face(f) | CacheObject::Surface(f) => key_of(EntityRef::Face(f)),
+        CacheObject::Vertex(v) => key_of(EntityRef::Vertex(v)),
+        _ => key_of(EntityRef::Brep(BrepId::from_index(0))),
+    }
+}
+
 /// The surface and curve owners of the `topology.brep_p2` Rust B-rep: this runner's
 /// identities ([`key_of`]).
 fn face_owner(f: FaceId) -> ObjectRef {
@@ -1000,16 +969,18 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
 };
 
 /// The Rust B-rep of the case and its entity counts, or the build failure's output:
-/// shim-built sources are built by the Rust kernel ([`crate::own_builder`], the
-/// shim's `editing` flag applied after); `.smb` files are imported from the shim's
-/// export ([`rust_brep`]).
+/// shim-built sources built by the Rust kernel and `.smb` files read by the Rust
+/// reader, both in the shim's walk order ([`crate::own_reader::brep_in_order`]), the
+/// shim's `editing` flag applied after.
 fn own_brep(k: &mut Kernel, i: &Inputs) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
-    use crate::own_builder::{build_with, build_status, counts, Built};
+    use crate::own_builder::{build_status, counts, Built};
     let src: super::topology_edgeuse_p1::BrepIn = serde_json::to_value(&i.brep)
         .and_then(serde_json::from_value)
         .map_err(|e| harness(format!("B-rep source: {e}")))?;
-    match build_with(k, &src, i.validate_only, i.init_gaps, &CONVENTIONS)? {
-        Some(Built::Brep(b)) => {
+    let built =
+        crate::own_reader::brep_in_order(k, &src, i.validate_only, i.init_gaps, &CONVENTIONS)?;
+    match built {
+        Built::Brep(b) => {
             let mut b = *b;
             if i.editing >= 0 {
                 b.set_editing_enabled(i.editing != 0);
@@ -1017,17 +988,10 @@ fn own_brep(k: &mut Kernel, i: &Inputs) -> Result<Result<(Brep, [usize; 10]), Ou
             let c = counts(&b);
             Ok(Ok((b, c)))
         }
-        Some(Built::Failed(e)) => match Output::unported(&e) {
+        Built::Failed(e) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
             None => Ok(Err(Output::new().values("out", vec![-1.0, build_status(&e)]))),
         },
-        None => {
-            let (path, h, c) = match prepare(i)? {
-                Ok(x) => x,
-                Err(o) => return Ok(Err(o)),
-            };
-            Ok(Ok((rust_brep(&path, &h, &c)?, c)))
-        }
     }
 }
 
