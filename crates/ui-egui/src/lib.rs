@@ -1344,7 +1344,7 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
@@ -1865,7 +1865,7 @@ impl SolveApp {
         }
         timeline::stop_playback(self);
         // A file is loading: the design waits for it.
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             return;
         }
         if id != "occurrence.move" {
@@ -3780,8 +3780,9 @@ impl SolveApp {
         }
         let rx = self.control_rx.take();
         for _ in 0..PER_FRAME {
-            // A file loading, a save being written, an agent's design change computing, or the
-            // agent cursor acting one out: commands that change the design wait their turn (the
+            // A file loading (also when the person can go on working: an agent's open and the
+            // edit after it go in that order), a save being written, an agent's design change
+            // computing, or the agent cursor acting one out: commands that change the design wait their turn (the
             // window, inspection and screenshots still answer, #1989). `engine.script` runs
             // directly, past `SolveApp::run`'s guard, so without the save here it changed the
             // design the save was taken up for (#6003).

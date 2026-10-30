@@ -291,6 +291,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             &mut app.preferences.operations_panel,
                             "operations_panel",
                         );
+                        // The design waits for a file being opened or inserted, as before.
+                        layout_check(
+                            ui,
+                            app.tr("prefs.file_operations_wait"),
+                            app.tr("prefs.file_operations_wait_note"),
+                            &mut app.preferences.file_operations_wait,
+                            "file_operations_wait",
+                        );
                     });
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,

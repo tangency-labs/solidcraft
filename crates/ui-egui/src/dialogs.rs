@@ -608,7 +608,7 @@ struct DialogComputation {
 
 impl DialogComputation {
     fn new(app: &SolveApp, d: &Dialog) -> Result<Self, String> {
-        if app.file_load.busy() || app.file_picker_busy() {
+        if app.file_load_holds() || app.file_picker_busy() {
             return Err("a file operation is in progress".into());
         }
         let cmds = apply_commands(app, d)?;
@@ -641,7 +641,7 @@ impl DialogComputation {
 }
 
 fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands, d: &Dialog) -> Result<(), String> {
-    if app.file_load.busy() || app.file_picker_busy() {
+    if app.file_load_holds() || app.file_picker_busy() {
         return Err("a file operation is in progress".into());
     }
     let replies = app.session.accept_commands(prepared).map_err(|e| e.to_string())?;
