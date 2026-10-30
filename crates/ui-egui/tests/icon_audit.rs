@@ -267,6 +267,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         json!({"type":"folder","component":0,"scope":"c0","folder":"sketches"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"construction"}),
         json!({"type":"section","plane":1}),
+        json!({"type":"analysis"}),
         json!({"type":"canvas","id":1}),
     ] {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);

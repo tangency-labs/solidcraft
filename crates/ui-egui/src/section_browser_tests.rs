@@ -716,4 +716,16 @@ fn turn_off_section_view_removes_the_clicked_plane() {
     // On a face the section keeps, the menu has no such item.
     let labels = menu_at(&mut h, [10.0, 25.0, 20.0]);
     assert!(labels.iter().any(|l| l == "Section View") && !labels.iter().any(|l| l == "Turn Off Section View"), "{labels:?}");
+
+    // The cut face offers one way off; the Analysis folder's menu turns every plane off, hidden
+    // ones too.
+    two(&mut h);
+    let labels = menu_at(&mut h, [20.0, 7.0, 10.0]);
+    assert!(!labels.iter().any(|l| l == "Remove Section"), "{labels:?}");
+    h.app.run("inspect.section", json!({"hide": 1})).unwrap();
+    let off = context_menu::items(&h.app, &Target::Analysis).into_iter().find(|i| i.label == "Turn Off Section View").expect("on the folder's menu");
+    assert!(off.enabled);
+    context_menu::run_item(&mut h.app, &off, pos2(0.0, 0.0));
+    assert!(h.app.session.section.is_empty() && h.app.session.section_hidden.is_empty());
+    assert!(context_menu::items(&h.app, &Target::Analysis).iter().all(|i| !i.enabled || i.label.is_empty()));
 }

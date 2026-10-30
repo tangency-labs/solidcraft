@@ -223,7 +223,10 @@ from the side it cuts away (upright on a wall, along X on a floor).
   section off.
 - The browser's **Analysis** folder lists each plane as **Section 1**, **Section 2** and so on,
   by the plane's number. Its eye hides and shows that plane, a double-click edits it, and Delete
-  in its menu removes it. The folder's own eye hides and shows them all.
+  in its menu removes it. The folder's own eye hides the planes on show and brings them back;
+  while it is hidden, a plane's eye says only whether that plane comes back with it, and a plane
+  added or moved shows the folder again, with them. **Turn Off Section View** in the folder's
+  menu removes every plane, hidden ones too.
 
 Scripts use `inspect.section`: a `plane` replaces the section, `add: true` adds the plane to it,
 `replace` moves one plane by its id, `remove` takes a plane out by its id, `hide` and `show` take

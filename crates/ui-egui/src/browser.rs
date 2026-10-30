@@ -2019,6 +2019,9 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
     if r.eye {
         set_analysis_shown(app, !folder_shown);
     }
+    if let Some(p) = r.secondary {
+        acts.menu = Some((p, Target::Analysis));
+    }
     if !open {
         return;
     }
