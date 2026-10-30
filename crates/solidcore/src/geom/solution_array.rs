@@ -1319,6 +1319,13 @@ fn face_uv_domain<O: SolutionObject>(
     }
     // UNPORTED(topology.face_p2): SmFace::GetUVDomain (a handle that cannot reach its
     // face)
+    // Proof (unreachable): only the topology solver's solves name faces (SmTLS* with UV
+    // parameters), and its IdenticalSolutions reads them through TopologyDomains, which
+    // falls back to the required TopologyObjects::face_uv_domain of the faces it named;
+    // the other domains (OwnDomains, TreeCurves, CurvePair, SolveOperands, StoreDomains)
+    // serve solutions naming curves, surfaces, operand stand-ins or loop curves. 0 hits
+    // in the green difftest sweep (intersect.topology_solver_p2 2575/2575 since #1668,
+    // whose silhouette solves stopped naming the face for their temporary curves).
     Err(SolidError::Unported {
         upstream: "SmFace::GetUVDomain",
         unit: "topology.face_p2",
