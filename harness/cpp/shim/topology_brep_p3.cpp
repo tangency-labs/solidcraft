@@ -18,11 +18,14 @@
 #include "sc_topology_fixture.h"
 
 #include <SmApiQueries.h>
+#include <SmAttribute.h>
 #include <SmOffsetSurface.h>
 #include <SmTrackTopologyChanges.h>
 
+#include <algorithm>
 #include <array>
 #include <memory>
+#include <set>
 #include <stdexcept>
 
 namespace
@@ -40,6 +43,7 @@ enum P3Op : int32_t
     P3_TURN_NURBS = 10,
     P3_API_COPY_NULL = 11,
     P3_TURN_NURBS_OFFSET = 12,
+    P3_ATTRIBUTED_COPY = 13,
 };
 
 struct EdgePeek : SmEdge
@@ -554,6 +558,79 @@ void put_graph(std::vector<double>& o, SmBrep* brep)
     }
 }
 
+// P3_ATTRIBUTED_COPY: the first application attribute id (as the boolean.api_brep shim).
+const ULONG ATTRIBUTE_BASE = 10007;
+
+// Every face (GetFaces order) and edge (GetEdges order) of `b` gets its own
+// SmLongAttribute, id = value = ATTRIBUTE_BASE + 500 kind + index (kind 0 face, 1 edge),
+// behaviour `behavior`.
+void tag_brep(SmBrep* b, SmAttributeBehaviorType behavior)
+{
+    const SmContext& ctx = *b->GetContext();
+    SmTArray<SmFace*> faces;
+    b->GetFaces(faces);
+    for (ULONG i = 0; i < faces.GetSize(); i++)
+        faces[i]->AddAttribute(new (ctx) SmLongAttribute(ATTRIBUTE_BASE + i, (long)(ATTRIBUTE_BASE + i), behavior));
+    SmTArray<SmEdge*> edges;
+    b->GetEdges(edges);
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+        edges[i]->AddAttribute(
+            new (ctx) SmLongAttribute(ATTRIBUTE_BASE + 500 + i, (long)(ATTRIBUTE_BASE + 500 + i), behavior));
+}
+
+// `faces rows... edges rows...` of `b`: per object `n` then per attribute (ascending)
+// `id behavior value users`, users counted among `b`'s faces and edges (the port keeps
+// one attribute store per B-rep); the rows sorted.
+void put_attribute_rows(std::vector<double>& o, SmBrep* b)
+{
+    SmTArray<SmFace*> faces;
+    b->GetFaces(faces);
+    SmTArray<SmEdge*> edges;
+    b->GetEdges(edges);
+    std::set<const SmAObject*> scope;
+    for (ULONG i = 0; i < faces.GetSize(); i++)
+        scope.insert(faces[i]);
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+        scope.insert(edges[i]);
+    auto row = [&](const SmAObject* obj) {
+        SmTArray<SmAttribute*> attrs;
+        obj->GetAttributes(attrs);
+        std::vector<std::vector<double>> entries;
+        for (ULONG i = 0; i < attrs.GetSize(); i++)
+        {
+            SmLongAttribute* l = dynamic_cast<SmLongAttribute*>(attrs[i]);
+            SmTArray<SmAObject*> users;
+            attrs[i]->GetUsers(users);
+            double n = 0.0;
+            for (ULONG u = 0; u < users.GetSize(); u++)
+                if (scope.count(users[u]) != 0)
+                    n += 1.0;
+            entries.push_back({(double)attrs[i]->GetAttributeID(), (double)attrs[i]->GetBehavior(),
+                               l != NULL ? (double)l->GetValue() : 0.0, n});
+        }
+        std::sort(entries.begin(), entries.end());
+        std::vector<double> r;
+        r.push_back((double)entries.size());
+        for (auto& e : entries)
+            r.insert(r.end(), e.begin(), e.end());
+        return r;
+    };
+    for (int kind = 0; kind < 2; kind++)
+    {
+        std::vector<std::vector<double>> rows;
+        if (kind == 0)
+            for (ULONG i = 0; i < faces.GetSize(); i++)
+                rows.push_back(row(faces[i]));
+        else
+            for (ULONG i = 0; i < edges.GetSize(); i++)
+                rows.push_back(row(edges[i]));
+        std::sort(rows.begin(), rows.end());
+        o.push_back((double)rows.size());
+        for (auto& r : rows)
+            o.insert(o.end(), r.begin(), r.end());
+    }
+}
+
 void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 {
     const SmContext& ctx = the_context();
@@ -636,6 +713,23 @@ void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back((double)c->GetTolerance());
         o.push_back(flg(c->m_bEditingEnabled));
         put_counts(o, c);
+        delete c;
+        break;
+    }
+    case P3_ATTRIBUTED_COPY:
+    {
+        // the B-rep's faces and edges tagged (tag_brep), then SmApiBrepCopy: `status tol
+        // editing counts`, then the copy's and the source's attribute rows
+        SmAttributeBehaviorType behavior = (SmAttributeBehaviorType)rd.idx();
+        tag_brep(brep, behavior);
+        SmBrep* c = nullptr;
+        SmStatus s = (SmStatus)SmApiBrepCopy(brep, c);
+        o.push_back(st(s));
+        o.push_back((double)c->GetTolerance());
+        o.push_back(flg(c->m_bEditingEnabled));
+        put_counts(o, c);
+        put_attribute_rows(o, c);
+        put_attribute_rows(o, brep);
         delete c;
         break;
     }

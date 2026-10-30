@@ -2435,8 +2435,9 @@ pub(crate) fn glue_edges_general(
     delete: EdgeId,
     inside_faceuses: Option<&[FaceuseId]>,
 ) -> Result<()> {
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(b);
-    Context::with_notification_context(k, |k, context| {
+    // (not upstream) with `b`'s own attributes, given back afterwards
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::with_attributes_of(b);
+    let r = Context::with_notification_context(k, |k, context| {
         let mut env = state.env(Some(context));
         crate::topology::brep::p7::glue_edges_general(
             k,
@@ -2449,7 +2450,10 @@ pub(crate) fn glue_edges_general(
             inside_faceuses,
             &mut env,
         )
-    })?
+    });
+    let restored = state.restore_attributes(b);
+    r??;
+    restored
 }
 
 /// `SmBrep::SqueezeEdge(edge, keep)` (unit `topology.brep_p3`,

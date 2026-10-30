@@ -76,8 +76,13 @@
 //!   with SMLib's handlers, and the attributes left on the result's (and a kept other
 //!   B-rep's) objects go back to those B-reps; those of objects the merge deleted are
 //!   cleared as upstream's destructors do. A reference attribute on objects of both
-//!   returned B-reps becomes one attribute per B-rep. The list, tree and
-//!   [`merge_breps`] entry points do not carry attributes yet.
+//!   returned B-reps becomes one attribute per B-rep. [`merge_breps`] and
+//!   [`boolean_trees`] do the same for every merge they run. [`boolean_lists`] carries
+//!   each list B-rep's attributes into its operand copies (`SM_NO_COPY`), through the
+//!   merge and to every component B-rep it returns; a reference attribute shared by
+//!   several output B-reps (or with the inputs, which keep theirs) becomes one per
+//!   B-rep. `SM_BO_EXTRACT_SEPARATE`'s component B-reps are not returned by any entry
+//!   point here (it is rejected), so their attributes stay in the merge's store.
 //! - The debug drawing (`SM_DEBUG_CODE`) and `SM_ASSERT_VALID` checks are not ported.
 //! - **`SmApiTessellateBoundaries`.** The B-rep is a reference (no `NULL` check); its
 //!   out-arrays are the returned [`BoundaryTessellation`], whose `complete` flag is
@@ -227,15 +232,12 @@ fn merge_boolean_by(
     // SmMerge sMerge(*pContext, pBrep1, pBrep2) (or 0, 0, &sOptions): tolerance and
     // angle 0, both computed by the constructor.
     use crate::boolean::merge::p3::BooleanDriver;
-    let mut driver = crate::boolean::merge::p3::DependencyMerge::default();
+    // (not upstream) the driver carries the operands' attributes through the merge, as
+    // upstream's live on the objects the merge edits
+    let mut driver = crate::boolean::merge::p3::DependencyMerge::carrying_attributes();
     let mut primary = Some(brep1);
     let mut other = Some(brep2);
     driver.construct(k, &mut primary, &mut other, 0.0, 0.0, options.as_ref())?;
-    // (not upstream) the operands' attributes go to the merge's objects, as upstream's
-    // live on the objects the merge edits
-    if let Some(engine) = driver.engine_mut() {
-        engine.seed_operand_attributes(primary.as_mut(), other.as_mut())?;
-    }
     let manifold_solids = match (&primary, &other) {
         (Some(_), Some(_)) if method == MergeMethod::NonManifold => false,
         (Some(a), Some(b)) => is_manifold_solid(a)? && is_manifold_solid(b)?,
@@ -266,11 +268,6 @@ fn merge_boolean_by(
         )?
     };
     let mut result = result.ok_or_else(|| SolidError::null_pointer(OP_BOOLEAN))?;
-    // (not upstream) the attributes the merge's notifications left on the result's and
-    // the kept other B-rep's objects go back to those B-reps
-    if let Some(engine) = driver.engine_mut() {
-        engine.restore_operand_attributes(Some(&mut result), other.as_mut())?;
-    }
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
     if let Some(o) = other.as_mut() {
@@ -378,7 +375,7 @@ pub fn merge_breps(
         breps,
         kernel_operation,
         None,
-        &mut crate::boolean::merge::p3::DependencyMerge::default(),
+        &mut crate::boolean::merge::p3::DependencyMerge::carrying_attributes(),
     )?;
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
@@ -582,7 +579,7 @@ pub fn boolean_trees(
         breps,
         post_fix_trees,
         None,
-        &mut crate::boolean::merge::p3::DependencyMerge::default(),
+        &mut crate::boolean::merge::p3::DependencyMerge::carrying_attributes(),
     )?;
     // (not upstream: the port's cached topology fields, true again for the caller)
     for b in breps.iter_mut().flatten() {

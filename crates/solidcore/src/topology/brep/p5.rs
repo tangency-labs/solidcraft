@@ -121,7 +121,8 @@ const OP: &str = "topology::brep::p5";
 
 /// Runs `f` with the caller's notification environment, or, for a plain entry point
 /// (`notifications` is `None`: the caller keeps no notification state of its own),
-/// with an [`brep_p2::ArenaNotifyState`] of `b` notifying through `context`. `f`'s last
+/// with an [`brep_p2::ArenaNotifyState`] of `b` (holding `b`'s own attributes for the
+/// edit) notifying through `context`. `f`'s last
 /// argument is the context the caller's own environment falls back to (`context`
 /// then; `None` for the arena state, which already holds it).
 pub(super) fn with_notifications<R>(
@@ -137,9 +138,13 @@ pub(super) fn with_notifications<R>(
     if let Some(env) = notifications {
         f(b, env, context)
     } else {
-        let mut state = brep_p2::ArenaNotifyState::new(b);
-        let mut env = state.env(context);
-        f(b, &mut env, None)
+        // (not upstream) with `b`'s own attributes, given back afterwards
+        let mut state = brep_p2::ArenaNotifyState::with_attributes_of(b);
+        let r = f(b, &mut state.env(context), None);
+        let restored = state.restore_attributes(b);
+        let r = r?;
+        restored?;
+        Ok(r)
     }
 }
 

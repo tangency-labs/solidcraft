@@ -105,9 +105,17 @@ pub trait BooleanDriver {
 /// The `SmMerge` the API wrappers drive: `construct` (`boolean.merge_p2`) builds the
 /// engine and `ManifoldBoolean` runs the `boolean.merge_p4` port on it. A default
 /// adapter has none until it is constructed. No engine state or operand result is faked.
+///
+/// A driver made by [`DependencyMerge::carrying_attributes`] also carries the
+/// operands' own attributes ([`Brep::add_attribute`]) through each merge it runs
+/// (not upstream: upstream's live on the objects the merge edits): `construct` moves
+/// them into the engine's store ([`MergeEngine::seed_operand_attributes`]) and
+/// `ManifoldBoolean` gives the survivors back to the B-reps it leaves
+/// ([`MergeEngine::restore_operand_attributes`]).
 #[derive(Debug, Default)]
 pub struct DependencyMerge {
     engine: Option<MergeEngine>,
+    carry_attributes: bool,
 }
 
 /// The `SmMerge` members that `ManifoldBoolean` reads and writes. Their owner
@@ -235,9 +243,10 @@ impl MergeEngine {
             let Some(body) = body else { continue };
             let mut store = self.attributes.clone();
             let live = &*body;
+            let listed = live.listed_entities();
             store.retain_rekeyed(&|key| {
                 crate::boolean::merge::p4::entity_of_notification_key(namespace, key)
-                    .filter(|&(o, e)| o == is_other && live.is_live_entity(e))
+                    .filter(|&(o, e)| o == is_other && live.still_has(&listed, e))
                     .map(|(_, e)| crate::topology::loopuse::notify_ref(e).key)
             })?;
             body.set_attributes(store);
@@ -252,6 +261,7 @@ impl DependencyMerge {
     pub fn with_engine(engine: MergeEngine) -> Self {
         Self {
             engine: Some(engine),
+            carry_attributes: false,
         }
     }
 
@@ -259,6 +269,15 @@ impl DependencyMerge {
     #[must_use]
     pub fn engine(&self) -> Option<&MergeEngine> {
         self.engine.as_ref()
+    }
+
+    /// A driver whose merges carry the operands' own attributes (see the type).
+    #[must_use]
+    pub fn carrying_attributes() -> Self {
+        Self {
+            engine: None,
+            carry_attributes: true,
+        }
     }
 
     /// The adopted engine, mutably, if any.
@@ -291,19 +310,24 @@ impl BooleanDriver for DependencyMerge {
         options: Option<&MergeOptions>,
     ) -> Result<()> {
         // SM_ASSERT(pBrep != NULL); the other B-rep may be null (the stitch methods).
-        let primary = primary.as_ref().ok_or(SolidError::invalid_input(
+        let first = primary.as_ref().ok_or(SolidError::invalid_input(
             OP,
             "SmMerge without primary B-rep",
         ))?;
         let merge = MergeState::with_breps(
             k,
-            (primary, MergeOperand::Primary),
+            (first, MergeOperand::Primary),
             other.as_ref().map(|o| (o, MergeOperand::Other)),
             approx_tol,
             angle_tol,
             options,
         )?;
-        self.engine = Some(MergeEngine::from_merge(&merge)?);
+        let mut engine = MergeEngine::from_merge(&merge)?;
+        if self.carry_attributes {
+            // (not upstream) the operands' attributes go to the merge's objects
+            engine.seed_operand_attributes(primary.as_mut(), other.as_mut())?;
+        }
+        self.engine = Some(engine);
         Ok(())
     }
 
@@ -347,6 +371,12 @@ impl BooleanDriver for DependencyMerge {
         // B-rep's scheme, as every other record's geometry (upstream's owner is the
         // record itself).
         engine.adopt_operand_owners(primary.as_mut(), other.as_mut())?;
+        if self.carry_attributes {
+            // (not upstream) the attributes the merge's notifications left on the
+            // result's (the primary slot's arena) and the kept other B-rep's objects
+            // go back to those B-reps
+            engine.restore_operand_attributes(primary.as_mut(), other.as_mut())?;
+        }
         Ok(if assigned { primary.take() } else { None })
     }
 }
@@ -723,7 +753,9 @@ fn source_ref(e: EntityRef) -> crate::geom::object::ObjectRef {
 /// `new SmBrep(source, pOptCopyBrepMap, pOptReverseMap, bCopyAttributes, bAddAnalytics)`
 /// (`topology::brep::p3::copy_brep`): the list operands carry no notification state, so
 /// the copy notifies through an arena-only store (`ArenaNotifyState`: default records,
-/// no attributes, no context), as the arena entry's component copies do.
+/// no context), as the arena entry's component copies do. (not upstream) The store holds
+/// the source's own attributes under [`source_ref`], so the copy's `SM_NO_COPY`
+/// notifications give the copy's objects theirs; the copy keeps them.
 fn copy_brep(
     k: &mut Kernel,
     source: &Brep,
@@ -733,6 +765,11 @@ fn copy_brep(
     add_analytics: bool,
 ) -> Result<Brep> {
     let mut state = crate::topology::brep::p2::ArenaNotifyState::default();
+    crate::topology::brep::p2::seed_brep_attributes(
+        &mut state.attributes,
+        source.attribute_store().clone(),
+        &source_ref,
+    )?;
     let mut brep = crate::topology::brep::p3::copy_brep(
         k,
         &mut state.env(None),
@@ -744,6 +781,7 @@ fn copy_brep(
         add_analytics,
     )?;
     brep.set_naming(crate::topology::NamingScheme::Notify);
+    state.restore_attributes(&mut brep)?;
     Ok(brep)
 }
 
@@ -757,17 +795,32 @@ fn combine_brep(
     reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
     add_analytics: bool,
 ) -> Result<()> {
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::default();
-    crate::topology::brep::p3::merge_brep(
-        k,
-        &mut state.env(None),
-        target,
-        source,
+    // (not upstream) both B-reps' own attributes, the source's under `source_ref`; the
+    // target keeps those its objects end with
+    let mut state = crate::topology::brep::p2::ArenaNotifyState {
+        attributes: target.take_attributes(),
+        ..Default::default()
+    };
+    let seeded = crate::topology::brep::p2::seed_brep_attributes(
+        &mut state.attributes,
+        source.attribute_store().clone(),
         &source_ref,
-        copy_map,
-        reverse_map,
-        add_analytics,
-    )
+    );
+    let r = seeded.and_then(|()| {
+        crate::topology::brep::p3::merge_brep(
+            k,
+            &mut state.env(None),
+            target,
+            source,
+            &source_ref,
+            copy_map,
+            reverse_map,
+            add_analytics,
+        )
+    });
+    let restored = state.restore_attributes(target);
+    r?;
+    restored
 }
 
 /// `SmBrep::CreateFaceFromSurface(surface, domain, face)`
@@ -983,6 +1036,68 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
     Ok((result, planar))
 }
 
+/// `CopyFaces(faces, component, use_merge = TRUE)` of the arena-only list entry
+/// (`topology::brep::p7::copy_faces`'s merge branch): the copy notifies through an
+/// arena-only store whose source identities ([`source_ref`]) are distinct from the
+/// component's (`loopuse::notify_ref`, faces by `face_ref`), seeded with `result`'s own
+/// attributes; the component gets the attributes its objects end with. The ordinary
+/// status is not acted on, as `copy_faces`' merge branch does not.
+fn copy_component(
+    k: &mut Kernel,
+    result: &mut Brep,
+    connected: &[FaceId],
+    component: &mut Brep,
+    face_ref: &dyn Fn(FaceId) -> crate::geom::object::ObjectRef,
+) -> Result<()> {
+    use crate::topology::loopuse::notify_ref;
+    use crate::topology::{EdgeId, VertexId};
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(result);
+    state.seed(component);
+    crate::topology::brep::p3::seed_records(&mut state.records, result, &source_ref);
+    crate::topology::brep::p2::seed_brep_attributes(
+        &mut state.attributes,
+        result.attribute_store().clone(),
+        &source_ref,
+    )?;
+    {
+        let mut copy = super::p2::TopologyCopy {
+            vertices: super::p1::VertexCopy {
+                records: &mut state.records,
+                attributes: &mut state.attributes,
+                source_key: &|v: VertexId| source_ref(EntityRef::Vertex(v)),
+                destination_key: &notify_ref,
+            },
+            edge_source_key: &|e: EdgeId| source_ref(EntityRef::Edge(e)),
+            edge_destination_key: &|e: EdgeId| notify_ref(EntityRef::Edge(e)),
+            face_source_key: &|f: FaceId| source_ref(EntityRef::Face(f)),
+            face_destination_key: face_ref,
+        };
+        ignored(bp7::copy_faces_with_merge(
+            super::p2::MergeContext::Split(k, None),
+            result,
+            connected,
+            component,
+            &mut crate::boolean::topology_intersector::p1::Relations::default(),
+            &mut copy,
+        ))?;
+    }
+    // the component's faces are named by `face_ref` (the raw arena index), its other
+    // objects by `notify_ref`
+    let faces: std::collections::BTreeMap<u64, FaceId> = bp::faces(component, None)?
+        .into_iter()
+        .map(|f| (face_ref(f).key.0, f))
+        .collect();
+    crate::topology::brep::p2::restore_decoded_attributes(
+        component,
+        core::mem::take(&mut state.attributes),
+        &|key| match faces.get(&key.0) {
+            Some(&f) => Some(EntityRef::Face(f)),
+            None => crate::topology::loopuse::entity_of_notify_key(key)
+                .filter(|e| !matches!(e, EntityRef::Face(_) | EntityRef::Brep(_))),
+        },
+    )
+}
+
 /// The independent B-rep or planar surface outputs of [`boolean_lists`].
 #[derive(Debug, Clone, Default)]
 pub struct BooleanListsResult {
@@ -1047,7 +1162,7 @@ pub fn boolean_lists_with_notifications(
     } else {
         let mut primary = Some(primary);
         let mut other = Some(other);
-        let mut driver = DependencyMerge::default();
+        let mut driver = DependencyMerge::carrying_attributes();
         driver.construct(k, &mut primary, &mut other, 0.0, 0.0, options)?;
         non_manifold_boolean(
             k,
@@ -1122,22 +1237,16 @@ pub fn boolean_lists_with_notifications(
                                 notify,
                             )?;
                         } else {
-                            // the arena entry carries no attribute records: the copy
+                            // the arena entry keeps no notification state: the copy
                             // notifies through an arena-only store (a default record per
                             // object of both B-reps, the objects the copy makes added by
-                            // their makers; empty attributes)
-                            let mut state =
-                                crate::topology::brep::p2::ArenaNotifyState::new(&result);
-                            state.seed(&component);
-                            bp7::copy_faces(
-                                k,
-                                &mut result,
-                                &connected,
-                                &mut component,
-                                true,
-                                &face_ref,
-                                &mut state.env(None),
-                            )?;
+                            // their makers). (not upstream) The store holds the result's
+                            // own attributes under `source_ref`, distinct from the
+                            // component's identities, so the copy's `SM_NO_COPY`
+                            // notifications give the component's objects theirs; the
+                            // component keeps them (one attribute per B-rep for a
+                            // reference attribute) and the result keeps its own.
+                            copy_component(k, &mut result, &connected, &mut component, &face_ref)?;
                         }
                         ignored(stitch_and_orient(
                             k,

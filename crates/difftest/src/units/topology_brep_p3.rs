@@ -42,7 +42,7 @@ use serde_json::Value;
 
 use solidcore::curve::curve::{Curve as SmCurve, CurveKind};
 use solidcore::error::SM_ERR;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::context::Context;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::object::ObjectRef;
@@ -144,6 +144,13 @@ enum OpIn {
         offset: f64,
     },
     ApiCopyNull,
+    /// Every face and edge tagged with its own long attribute (behaviour `behavior`, an
+    /// `SmAttributeBehaviorType` value), then `SmApiBrepCopy`; also compares the
+    /// attributes of the copy's and the source's faces and edges (issue #1462).
+    AttributedCopy {
+        #[serde(default)]
+        behavior: u8,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -218,6 +225,7 @@ fn op_args(op: &OpIn, c: &[usize; 10]) -> Result<Option<(Op, Vec<f64>)>, Harness
         OpIn::TurnNurbsOffset { offset } => (Op::TurnNurbsOffset, vec![*offset]),
         OpIn::Copy { analytics, api } => (Op::Copy, vec![flag(*analytics), flag(*api)]),
         OpIn::Merge { analytics } => (Op::Merge, vec![flag(*analytics)]),
+        OpIn::AttributedCopy { behavior } => (Op::AttributedCopy, vec![f64::from(*behavior)]),
         OpIn::CopyVertices { vertices } => {
             let mut v = vec![vertices.len() as f64];
             for &s in vertices {
@@ -1377,6 +1385,72 @@ fn split_orient(v: Vec<f64>) -> Output {
         .values("tracker", tracker)
 }
 
+/// The shim's `tag_brep`: every face (`GetFaces` order) and edge (`GetEdges` order)
+/// gets its own long attribute, id = value = `10007 + 500 kind + index`.
+fn tag_brep(b: &mut Brep, behavior: Behavior) -> Result<(), Fail> {
+    let faces = must(bp1::faces(b, None))?;
+    let edges = must(bp1::edges(b, None))?;
+    let tagged = faces
+        .into_iter()
+        .enumerate()
+        .map(|(i, f)| (EntityRef::Face(f), 0u64, i))
+        .chain(
+            edges
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| (EntityRef::Edge(e), 1, i)),
+        );
+    for (entity, kind, index) in tagged {
+        let id = 10007 + 500 * kind + index as u64;
+        let value = i64::try_from(id).map_err(|_| Fail::Harness(harness("attribute id")))?;
+        must(b.add_attribute(entity, Attribute::long(id, value, behavior)))?;
+    }
+    Ok(())
+}
+
+/// The shim's `put_attribute_rows`: the sorted face rows then edge rows of `b`, each
+/// `n` and per attribute (ascending) `id behavior value users`.
+fn put_attribute_rows(o: &mut Vec<f64>, b: &Brep) -> Result<(), Fail> {
+    let row = |e: EntityRef| {
+        let mut entries: Vec<[f64; 4]> = b
+            .entity_attributes(e)
+            .into_iter()
+            .map(|(_, a)| {
+                [
+                    a.attribute_id() as f64,
+                    f64::from(a.behavior() as u8),
+                    a.long_value().map_or(0.0, |v| v as f64),
+                    a.users().len() as f64,
+                ]
+            })
+            .collect();
+        entries.sort_by(|x, y| cmp_f64s(x, y));
+        let mut r = vec![entries.len() as f64];
+        r.extend(entries.into_iter().flatten());
+        r
+    };
+    let faces = must(bp1::faces(b, None))?;
+    let edges = must(bp1::edges(b, None))?;
+    for mut rows in [
+        faces.into_iter().map(|f| row(EntityRef::Face(f))).collect::<Vec<_>>(),
+        edges.into_iter().map(|e| row(EntityRef::Edge(e))).collect(),
+    ] {
+        rows.sort_by(|x, y| cmp_f64s(x, y));
+        o.push(rows.len() as f64);
+        o.extend(rows.into_iter().flatten());
+    }
+    Ok(())
+}
+
+/// `std::vector<double>`'s lexicographic `<` (finite values).
+fn cmp_f64s(x: &[f64], y: &[f64]) -> core::cmp::Ordering {
+    x.iter()
+        .zip(y)
+        .map(|(p, q)| p.total_cmp(q))
+        .find(|o| o.is_ne())
+        .unwrap_or_else(|| x.len().cmp(&y.len()))
+}
+
 #[allow(clippy::too_many_lines)]
 fn run_rust_op_in(
     k: &mut Kernel,
@@ -1437,6 +1511,19 @@ fn run_rust_op_in(
             out.push(c.tolerance());
             out.push(flag(c.editing_enabled()));
             put_counts(&mut out, &c)?;
+        }
+        OpIn::AttributedCopy { behavior } => {
+            let behavior = Behavior::from_code(i32::from(*behavior))
+                .map_err(|e| Fail::Harness(harness(format!("behavior: {e}"))))?;
+            tag_brep(b, behavior)?;
+            let src: &Brep = b;
+            let c = must(bp3::api_brep_copy(k, &mut env, Some(src), &source_key_of))?;
+            out.push(0.0);
+            out.push(c.tolerance());
+            out.push(flag(c.editing_enabled()));
+            put_counts(&mut out, &c)?;
+            put_attribute_rows(&mut out, &c)?;
+            put_attribute_rows(&mut out, src)?;
         }
         OpIn::Merge { analytics } => {
             let dst = second.ok_or_else(|| Fail::Harness(harness("no second B-rep")))?;

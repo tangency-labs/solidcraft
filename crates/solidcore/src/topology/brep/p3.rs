@@ -62,6 +62,13 @@
 //!   constructors of uses, loops, shells and regions do not notify
 //!   (`SM_NO_DESTRUCTION` / `SM_NO_CONSTRUCTION` at `SmObject` level; `new_brep`'s own
 //!   construction is reported); faces, edges and vertices do.
+//! - **B-rep-owned attributes.** Upstream's attributes live on the objects; the port's
+//!   live in each [`Brep`]'s own store ([`Brep::add_attribute`]). An edit under the
+//!   kernel's identities (`kernel_named_edit`, [`with_kernel_callbacks`]) lends `b`'s
+//!   store to the edit under those identities and gives back the lists of `b`'s live
+//!   objects afterwards; [`api_brep_copy`] lends the source's to the copy and the copy
+//!   keeps what the `SM_NO_COPY` notifications give it (a reference attribute becomes
+//!   one per B-rep). [`copy_brep`] and [`merge_brep`] use only the caller's `env`.
 //! - **Notification identities.** Upstream names every object in a notification by
 //!   its address. Topology keeps the [`NotifyEnv`] contract: `b`'s objects are named
 //!   by the caller's `env.key_of`, the objects of a B-rep an edit only reads
@@ -1257,9 +1264,11 @@ pub(crate) fn with_lent_context<R>(
 /// kernel key for the edit (`Brep::key` is restored afterwards, whatever the result),
 /// with a default `SmTopology` record for every existing object of `b` from the start
 /// (as every upstream object has one, so a notification sent before any p3 edit runs,
-/// e.g. part 5's edge merge, finds the records it reads) and an empty attribute store
-/// (attribute propagation is not modelled for such callers, nor flags kept between
-/// their edits).
+/// e.g. part 5's edge merge, finds the records it reads) and `b`'s own attributes
+/// ([`Brep::add_attribute`]) under those identities, so the edit's notifications
+/// propagate them as upstream's live on the objects; afterwards `b` gets back the
+/// attributes left on its live objects, whatever the result (flags are not kept
+/// between edits).
 ///
 /// # Errors
 ///
@@ -1277,7 +1286,9 @@ pub(crate) fn kernel_named_edit<R>(
     let mut records = std::mem::take(&mut k.notify_records);
     reseed_records(&mut records, b, &key_of);
     let mut attributes = crate::geom::attribute::AttributeStore::default();
-    let r = {
+    // (not upstream) the B-rep's own attributes, under the edit's identities
+    let seeded = p2::seed_brep_attributes(&mut attributes, b.take_attributes(), &key_of);
+    let r = seeded.and_then(|()| {
         let mut env = NotifyEnv {
             records: &mut records,
             attributes: &mut attributes,
@@ -1285,10 +1296,14 @@ pub(crate) fn kernel_named_edit<R>(
             key_of: &key_of,
         };
         edit(k, b, &mut env)
-    };
+    });
     b.set_key(label);
     k.notify_records = records;
-    r
+    let restored =
+        p2::restore_decoded_attributes(b, attributes, &|key| topology_entity(serial, key));
+    let r = r?;
+    restored?;
+    Ok(r)
 }
 
 /// Runs `edit` for a caller that keeps no notification state of its own (upstream's
@@ -1315,6 +1330,14 @@ pub fn with_kernel_callbacks<R>(
 /// constructor without maps, `bAddAnalytics = FALSE`). `source_key` is the
 /// notification identity of `brep`'s objects (see [`copy_brep`]).
 ///
+/// (not upstream: upstream's attributes live on the objects.) `brep`'s own attributes
+/// ([`Brep::add_attribute`]) go to the copy as the copy's `SM_NO_COPY` notifications
+/// carry them (SMLib's `Copy` handler: copy and reference attributes are passed on,
+/// temporary ones are not); the copy owns the attributes its objects end with, also
+/// those the caller seeded in `env`. `env.attributes` keeps the copy's lists, but not
+/// `brep`'s, which are lent for the copy only (a standalone attribute of `brep`
+/// stays there without users).
+///
 /// # Errors
 ///
 /// `SM_ERR_INVALID_INPUT` for no B-rep; those of [`copy_brep`].
@@ -1331,7 +1354,26 @@ pub fn api_brep_copy(
             entity: None,
         });
     };
-    let mut copy = copy_brep(k, env, brep, source_key, None, None, true, false)?;
+    // (not upstream) lend `brep`'s own attributes to the copy under `source_key`
+    let lent: Vec<(ObjectKey, usize)> = brep
+        .attribute_store()
+        .attributed_objects()
+        .into_iter()
+        .filter_map(crate::topology::loopuse::entity_of_notify_key)
+        .map(|e| {
+            let key = source_key(e).key;
+            (key, env.attributes.attributes(key).len())
+        })
+        .collect();
+    p2::seed_brep_attributes(env.attributes, brep.attribute_store().clone(), source_key)?;
+    let copy = copy_brep(k, env, brep, source_key, None, None, true, false);
+    for (key, before) in lent {
+        for h in env.attributes.attributes(key).into_iter().skip(before) {
+            env.attributes.remove_attribute(key, h, false)?;
+        }
+    }
+    let mut copy = copy?;
+    p2::restore_keyed_attributes(&mut copy, env.attributes, env.key_of)?;
     // (not upstream: the port's cached topology fields, true for the caller)
     copy.refresh_cached_topology();
     Ok(copy)

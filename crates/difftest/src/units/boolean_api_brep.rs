@@ -383,6 +383,14 @@ enum Inputs {
         #[serde(default)]
         drop_curves: Vec<u64>,
     },
+    /// A `merge_breps`, `lists` or `trees` call whose input B-reps (in input order,
+    /// `breps1` then `breps2`) are each tagged as operand `i`, as `attributed` tags its
+    /// two; the record adds the attributes every output B-rep's faces and edges carry.
+    AttributedList {
+        call: Box<Inputs>,
+        #[serde(default)]
+        behavior: u8,
+    },
 }
 
 fn spec(b: &BrepIn) -> BrepSpec {
@@ -609,6 +617,10 @@ fn to_call(i: &Inputs) -> Call {
             angle_tol_deg: *angle_tol_deg,
             drop_curves: drop_curves.clone(),
         },
+        Inputs::AttributedList { call, behavior } => Call::AttributedList {
+            call: Box::new(to_call(call)),
+            behavior: *behavior,
+        },
     }
 }
 
@@ -642,6 +654,11 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(o) => match i {
             Inputs::Measured { .. } => measured_output(&o, "measures"),
             Inputs::Attributed { .. } => measured_output(&o, "attributes"),
+            Inputs::AttributedList { .. } if o.first() == Some(&0.0) => {
+                let (head, rows) = ffi::split_measures(&o)
+                    .ok_or_else(|| harness("cpp: attributed record too short"))?;
+                Ok(to_output(head)?.values("attributes", rows.to_vec()))
+            }
             Inputs::Boolean2d { .. } => {
                 areas_output(&o, o.first() == Some(&0.0) && o.get(1) == Some(&1.0))
             }
@@ -1061,6 +1078,102 @@ fn put_attributes(k: &Kernel, o: &mut Vec<f64>, b: &mut Brep) -> Result<(), Stop
     o.push(rows.len() as f64);
     o.extend(rows.into_iter().flatten());
     Ok(())
+}
+
+/// The shim's `tag_all`: B-rep `i` of `breps` tagged as operand `i`.
+fn tag_all(breps: &mut [Brep], behavior: Behavior) -> Result<(), Stop> {
+    for (i, b) in breps.iter_mut().enumerate() {
+        tag_operand(b, i as u64, behavior)?;
+    }
+    Ok(())
+}
+
+/// An `attributed_list` call (the shim's `run_attributed_list`): the inner list call on
+/// tagged inputs, a successful record followed by each output B-rep's attribute rows.
+fn attributed_list(
+    k: &mut Kernel,
+    call: &Inputs,
+    behavior: Behavior,
+    seen: &dyn Fn(&SolidError),
+) -> Result<Output, Stop> {
+    let err_output = |e: &SolidError| {
+        seen(e);
+        err_output(e)
+    };
+    match call {
+        Inputs::MergeBreps {
+            breps: list,
+            operation,
+        } => {
+            let mut v = build_all(k, list)?;
+            tag_all(&mut v, behavior)?;
+            match api::merge_breps(k, &mut v, op(*operation)?) {
+                Ok(mut res) => {
+                    let mut o = vec![count(v.len())?, 1];
+                    put_brep(&mut o, &res)?;
+                    let mut rows = Vec::new();
+                    put_attributes(k, &mut rows, &mut res)?;
+                    Ok(record(0, o).values("attributes", rows))
+                }
+                Err(e) if matches!(e, SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => {
+                    seen(&e);
+                    Ok(record(status(&e), vec![1, count(v.len())?]))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        Inputs::Lists {
+            breps1,
+            breps2,
+            operation,
+        } => {
+            let mut all = build_all(k, breps1)?;
+            all.extend(build_all(k, breps2)?);
+            tag_all(&mut all, behavior)?;
+            let b2 = all.split_off(breps1.len());
+            match api::boolean_lists(k, &all, &[], &b2, &[], *operation) {
+                Ok(mut res) => {
+                    let mut o = vec![count(res.breps.len())?];
+                    for b in &res.breps {
+                        o.push(1);
+                        put_brep(&mut o, b)?;
+                    }
+                    o.push(count(res.surfaces.len())?);
+                    let mut rows = Vec::new();
+                    for b in &mut res.breps {
+                        put_attributes(k, &mut rows, b)?;
+                    }
+                    Ok(record(0, o).values("attributes", rows))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        Inputs::Trees { breps: list, tree } => {
+            let mut built = build_all(k, list)?;
+            tag_all(&mut built, behavior)?;
+            let mut v: Vec<Option<Brep>> = built.into_iter().map(Some).collect();
+            match api::boolean_trees(k, &mut v, tree) {
+                Ok(()) => {
+                    let mut o = vec![count(v.len())?];
+                    for b in &v {
+                        o.push(i64::from(b.is_some()));
+                        if let Some(b) = b {
+                            put_brep(&mut o, b)?;
+                        }
+                    }
+                    let mut rows = Vec::new();
+                    for b in v.iter_mut().flatten() {
+                        put_attributes(k, &mut rows, b)?;
+                    }
+                    Ok(record(0, o).values("attributes", rows))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        _ => Err(Stop::Harness(harness(
+            "attributed_list call is not merge_breps, lists or trees",
+        ))),
+    }
 }
 
 /// The shim's `put_areas`: `faces` and the face areas in ascending order (a failed face
@@ -1512,6 +1625,11 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
             }
             let points: Vec<f64> = t.points.iter().flat_map(|p| [p.x, p.y, p.z]).collect();
             Ok(record(status, o).values("points", points))
+        }
+        Inputs::AttributedList { call, behavior } => {
+            let behavior = Behavior::from_code(i32::from(*behavior))
+                .map_err(|e| Stop::Harness(harness(format!("behavior: {e}"))))?;
+            attributed_list(k, call, behavior, seen)
         }
         Inputs::Trees { breps: list, tree } => {
             let mut v: Vec<Option<Brep>> = build_all(k, list)?.into_iter().map(Some).collect();

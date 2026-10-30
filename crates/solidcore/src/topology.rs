@@ -1411,6 +1411,36 @@ impl Brep {
         }
     }
 
+    /// The faces, edges and vertices on the B-rep's lists (an edit can unlink one and
+    /// leave its record in the arena: upstream's `delete` of it), for
+    /// [`Brep::still_has`].
+    pub(crate) fn listed_entities(&self) -> std::collections::BTreeSet<EntityRef> {
+        self.face_list()
+            .iter()
+            .map(|&f| EntityRef::Face(f))
+            .chain(self.edge_list().iter().map(|&e| EntityRef::Edge(e)))
+            .chain(self.vertex_list().iter().map(|&v| EntityRef::Vertex(v)))
+            .collect()
+    }
+
+    /// Whether `e` is an object the B-rep still has, as an operation that renamed its
+    /// objects hands their attributes back ([`Brep::is_live_entity`], and for a face,
+    /// edge or vertex on its list, `listed` from [`Brep::listed_entities`]): an object
+    /// upstream deleted has cleared its attributes.
+    pub(crate) fn still_has(
+        &self,
+        listed: &std::collections::BTreeSet<EntityRef>,
+        e: EntityRef,
+    ) -> bool {
+        self.is_live_entity(e)
+            && match e {
+                EntityRef::Face(_) | EntityRef::Edge(_) | EntityRef::Vertex(_) => {
+                    listed.contains(&e)
+                }
+                _ => true,
+            }
+    }
+
     fn attributed_key(&self, e: EntityRef, operation: &'static str) -> Result<ObjectKey> {
         if self.is_live_entity(e) {
             Ok(loopuse::notify_ref(e).key)
