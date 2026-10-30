@@ -916,6 +916,41 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             .map(|e| hd(v1.b, K_EDGE, e.index()))
             .collect())
     }
+    fn face_coincident_edge(
+        &self,
+        k: &Kernel,
+        face: H,
+        start: H,
+        end: H,
+        curve: &SmCurve,
+        interval: Extent1d,
+        tolerance: f64,
+    ) -> crate::Result<Option<(H, f64)>> {
+        if face.kind != K_FACE
+            || start.kind != K_VERTEX
+            || end.kind != K_VERTEX
+            || start.b != face.b
+            || end.b != face.b
+        {
+            return Err(invalid("not a face and two of its B-rep's vertices"));
+        }
+        let b = self.brep_r(face)?;
+        let edges = crate::topology::face::p4::edges(b, fid(face), None, false, None)?;
+        let query = crate::geom::tools::CoincidentEdgeQuery {
+            start_vertex: vid(start),
+            end_vertex: vid(end),
+            curve,
+            curve_owner: None,
+            interval,
+            tolerance,
+        };
+        Ok(
+            crate::geom::tools::find_coincident_edge(k, b, &query, &edges, 0)?.and_then(|found| {
+                let e = edges.get(found.index)?;
+                Some((hd(face.b, K_EDGE, e.index()), found.max_deviation))
+            }),
+        )
+    }
     fn brep_point_3d_classify(
         &mut self,
         k: &Kernel,

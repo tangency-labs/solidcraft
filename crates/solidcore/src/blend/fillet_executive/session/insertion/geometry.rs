@@ -426,6 +426,54 @@ impl<'a> InsertionGeometry<'a> {
                 .collect(),
         )
     }
+    /// `SmTools::FindCoincidentEdge` over an actual face's edges (`SmFace::GetEdges`):
+    /// its first edge between the same-body vertices `start` and `end` along `curve`
+    /// within `tolerance`, with the sampled maximum deviation (WR-580, opt-in).
+    /// # Errors
+    /// Invalid/cross-body operands, topology walks and the search's evaluations.
+    #[allow(clippy::too_many_arguments)] // FindCoincidentEdge's in-params
+    pub fn face_coincident_edge(
+        &self,
+        k: &crate::Kernel,
+        face: FilletObject,
+        start: FilletObject,
+        end: FilletObject,
+        curve: &Curve,
+        interval: crate::geom::extent1d::Extent1d,
+        tolerance: f64,
+    ) -> Result<Option<(FilletObject, f64)>> {
+        let (role, EntityRef::Face(face)) =
+            Self::topology(face).ok_or_else(|| invalid("unknown Face role"))?
+        else {
+            return Err(invalid("handle is not a Face"));
+        };
+        let vertex = |object| match Self::topology(object) {
+            Some((r, EntityRef::Vertex(v))) if r == role => Ok(v),
+            _ => Err(invalid("handle is not a Vertex of the face's body")),
+        };
+        let (start, end) = (vertex(start)?, vertex(end)?);
+        let body = self.body(role);
+        let edges = crate::topology::face::p4::edges(body, face, None, false, None)?;
+        let query = crate::geom::tools::CoincidentEdgeQuery {
+            start_vertex: start,
+            end_vertex: end,
+            curve,
+            curve_owner: None,
+            interval,
+            tolerance,
+        };
+        Ok(
+            crate::geom::tools::find_coincident_edge(k, body, &query, &edges, 0)?.and_then(
+                |found| {
+                    let edge = *edges.get(found.index)?;
+                    Some((
+                        Self::handle(role, EntityRef::Edge(edge)),
+                        found.max_deviation,
+                    ))
+                },
+            ),
+        )
+    }
     /// Classify against the actual B-rep with its existing proven-owner query provider.
     /// # Errors
     /// Invalid body handle or the original point-query failure.

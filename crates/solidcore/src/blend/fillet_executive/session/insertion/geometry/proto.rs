@@ -61,6 +61,20 @@ impl ProtoBrep<FilletObject> for InsertionGeometry<'_> {
     ) -> Result<Vec<FilletObject>> {
         InsertionGeometry::vertex_common_edges(self, first, second)
     }
+    fn face_coincident_edge(
+        &self,
+        k: &Kernel,
+        face: FilletObject,
+        start: FilletObject,
+        end: FilletObject,
+        curve: &Curve,
+        interval: Extent1d,
+        tolerance: f64,
+    ) -> Result<Option<(FilletObject, f64)>> {
+        InsertionGeometry::face_coincident_edge(
+            self, k, face, start, end, curve, interval, tolerance,
+        )
+    }
     fn brep_squeeze_edge(
         &mut self,
         k: &mut Kernel,
