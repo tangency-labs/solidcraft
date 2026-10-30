@@ -29,6 +29,12 @@ pub(crate) fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     imp::blend(body, "fillet", Kind::Round, edges, &vec![radius; edges.len()])
 }
 
+/// [`fillet`], with the picks whose edges a larger, overflowing round removed whole.
+pub(crate) fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Vec3>)> {
+    let (b, dropped) = imp::blend_dropping(body, "fillet", Kind::Round, edges, &vec![radius; edges.len()])?;
+    Ok((b, edges.iter().zip(dropped).filter(|(_, d)| *d).map(|(p, _)| *p).collect()))
+}
+
 /// Each edge rounded at its own radius ([`crate::fillet_each`]).
 pub(crate) fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
     if radii.len() != edges.len() {
@@ -200,6 +206,12 @@ mod imp {
     }
 
     pub(super) fn blend(body: &Body, what: &str, kind: Kind, edges: &[Vec3], sizes: &[f64]) -> Result<Body> {
+        blend_dropping(body, what, kind, edges, sizes).map(|(b, _)| b)
+    }
+
+    /// [`blend`], with whether each of `edges` picked an edge a larger round removed whole: a
+    /// round overflowing its faces is built first, and an edge it takes away is gone.
+    pub(super) fn blend_dropping(body: &Body, what: &str, kind: Kind, edges: &[Vec3], sizes: &[f64]) -> Result<(Body, Vec<bool>)> {
         body.require_brep(what)?;
         sizes_ok(what, sizes)?;
         let picked = resolve(body, edges)?;
@@ -210,23 +222,29 @@ mod imp {
         let tol = pick_tolerance(body);
         let Kind::Round = kind else {
             let kind = blend_kind(kind);
-            return run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol))
+            return run_with(body, what, &picked.edges, &[], |b| b.blend_dropping(kind, &picked.points, sizes, tol))
+                .map(|(out, dropped, _)| (out, dropped))
                 .map_err(|e| crate::blend::with_continuation(e, next));
         };
         // Constant-radius rounds: the body keeps what they were made on, and a later round at a
         // corner where they meet blends them again with it (crate::blend_corner).
         let out = match crate::blend_corner::later_corners(body, &picked.edges, sizes)? {
-            Some((later, new)) => reblend(body, what, &later).map(|b| b.with_rounds(body, new)),
-            None => run(body, what, &picked.edges, |b| b.blend(Blend::Round, &picked.points, sizes, tol))
-                .map(|b| b.with_rounds(body, picked.edges.iter().copied().zip(sizes.iter().copied()).collect())),
+            Some((later, new)) => reblend(body, what, &later).map(|(b, dropped_new)| {
+                // A picked seam has no round of its own: only the new edges can be removed.
+                let dropped = picked.edges.iter().map(|e| new.iter().position(|(n, _)| n == e).is_some_and(|j| dropped_new.get(j).copied().unwrap_or(false))).collect();
+                (b.with_rounds(body, new), dropped)
+            }),
+            None => run_with(body, what, &picked.edges, &[], |b| b.blend_dropping(Blend::Round, &picked.points, sizes, tol))
+                .map(|(out, dropped, _)| (out.with_rounds(body, picked.edges.iter().copied().zip(sizes.iter().copied()).collect()), dropped)),
         };
         out.map_err(|e| crate::blend::with_continuation(e, next))
     }
 
     /// The blend `later` makes of its base, every round from the earliest meeting the new edges'
     /// corners on and the new edges in one, with its history over `body`, the body the later
-    /// round was given ([`crate::blend_corner::rebase`]).
-    fn reblend(body: &Body, what: &str, later: &crate::blend_corner::Later) -> Result<Body> {
+    /// round was given ([`crate::blend_corner::rebase`]), and whether each new edge (in
+    /// `later`'s order) was removed whole by a larger, overflowing round.
+    fn reblend(body: &Body, what: &str, later: &crate::blend_corner::Later) -> Result<(Body, Vec<bool>)> {
         let base = &later.base;
         let mesh = base.mesh(&crate::MeshTolerance::chord((base.size() * 2e-3).max(1e-3)))?;
         let mut indices = Vec::with_capacity(later.edges.len());
@@ -241,9 +259,11 @@ mod imp {
         }
         sizes_ok(what, &radii)?;
         let tol = pick_tolerance(base);
-        let out = run(base, what, &indices, |b| b.blend(Blend::Round, &points, &radii, tol))?;
+        let (out, dropped, _) = run_with(base, what, &indices, &[], |b| b.blend_dropping(Blend::Round, &points, &radii, tol))?;
+        // The new edges are the last of `later.edges`.
+        let dropped_new = dropped.get(dropped.len().saturating_sub(later.new_count())..).map(<[bool]>::to_vec).unwrap_or_default();
         let history = out.history().and_then(|h| crate::blend_corner::rebase(h, later, body));
-        Ok(out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body))
+        Ok((out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body), dropped_new))
     }
 
     /// Rounds with corner setbacks: each corner point picks the body's nearest vertex (within

@@ -1,5 +1,5 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_boolean_union_all`, `smlib_boolean2d`, `smlib_fillet`,
-//! `smlib_chamfer`, `smlib_blend`, `smlib_blend_setback`, `smlib_blend_setback_open`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
+//! `smlib_chamfer`, `smlib_blend`, `smlib_blend_dropping`, `smlib_blend_setback`, `smlib_blend_setback_open`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
 //! `smlib_thicken`, `smlib_draft`, `smlib_merge_faces`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
 //! hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
@@ -94,6 +94,17 @@ unsafe extern "C" {
         tolerance: f64,
         out: *mut *mut RawBrep,
         out_failed_point: *mut i64,
+    ) -> i32;
+    fn smlib_blend_dropping(
+        brep: *const RawBrep,
+        kind: i32,
+        points: *const f64,
+        sizes: *const f64,
+        n_points: i64,
+        tolerance: f64,
+        out: *mut *mut RawBrep,
+        out_failed_point: *mut i64,
+        out_dropped: *mut i64,
     ) -> i32;
     fn smlib_blend_setback(
         brep: *const RawBrep,
@@ -464,6 +475,31 @@ pub fn chamfer_sides(
 
 #[cfg(not(feature = "native"))]
 pub fn chamfer_sides(_: &Handle, _: &[[f64; 3]], _: f64, _: f64, _: f64, _: bool, _: &[f64; 3]) -> Result<Handle, PickError> {
+    Err((NOT_BUILT, None))
+}
+
+/// `smlib_blend_dropping`: `smlib_blend`, with whether each point picked an edge a larger,
+/// overflowing round removed whole (and so not rounded).
+#[cfg(feature = "native")]
+pub fn blend_dropping(kind: i32, b: &Handle, points: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Handle, Vec<bool>), PickError> {
+    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None))?;
+    if sizes.len() != points.len() {
+        return Err((ERR_ARG, None));
+    }
+    let flat = points.as_ptr().cast::<f64>();
+    let mut failed = -1i64;
+    let mut dropped = vec![0i64; points.len()];
+    let out =
+        new_brep(|out| unsafe { smlib_blend_dropping(b.raw(), kind, flat, sizes.as_ptr(), n, tolerance, out, &mut failed, dropped.as_mut_ptr()) })
+            .map_err(|s| {
+                let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
+                (s, at)
+            })?;
+    Ok((out, dropped.iter().map(|d| *d != 0).collect()))
+}
+
+#[cfg(not(feature = "native"))]
+pub fn blend_dropping(_: i32, _: &Handle, _: &[[f64; 3]], _: &[f64], _: f64) -> Result<(Handle, Vec<bool>), PickError> {
     Err((NOT_BUILT, None))
 }
 

@@ -46,6 +46,13 @@ pub(crate) struct Later {
     seams: Vec<usize>,
 }
 
+impl Later {
+    /// How many of `edges`, the last ones, are the new edges.
+    pub(crate) fn new_count(&self) -> usize {
+        self.new.len()
+    }
+}
+
 /// The history of `body` over the body `levels` rounds back ([`Rounds::before`] taken that many
 /// times), composed; `None` when a step has no record or history, or for no levels.
 fn down(body: &Body, levels: usize) -> Option<History> {
@@ -537,9 +544,17 @@ mod tests {
     #[test]
     fn corners_refuse_what_they_cannot_build() {
         let (bx, a, b, _) = setup();
-        // Larger than the faces, or not a size: errors, no panic. Large but fitting is fine.
+        // Not a size: errors, no panic. Large but fitting is fine.
         assert!(fillet_radii(&bx, &[(a, 15.0), (b, 2.0)]).is_ok_and(|r| r.unmeshed_faces() == 0));
-        assert!(fillet_radii(&bx, &[(a, 25.0), (b, 2.0)]).is_err());
+        // R25 on a overflows both its faces and goes first: its circle about (x, z) = (-5, -5)
+        // takes all of the top, and with it b, which is gone. What is left is R25's alone: the
+        // square [0, 20]² inside that circle, with t = x + 5, ∫₅^√600 √(625 − t²) dt − 5 (√600 − 5),
+        // along 20.
+        let g = |t: f64| 0.5 * (t * (625.0 - t * t).sqrt() + 625.0 * (t / 25.0).asin());
+        let w = 600f64.sqrt();
+        let want = 20.0 * (g(w) - g(5.0) - 5.0 * (w - 5.0));
+        let r = fillet_radii(&bx, &[(a, 25.0), (b, 2.0)]).unwrap();
+        assert!((vol(&r) - want).abs() < 1e-9 * want, "{} vs {want}", vol(&r));
         assert!(fillet_radii(&bx, &[(a, f64::NAN)]).is_err());
         assert!(fillet_radii(&bx, &[(a, 0.0)]).is_err());
         assert!(fillet_radii(&bx, &[]).is_err());

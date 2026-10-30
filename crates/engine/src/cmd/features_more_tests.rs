@@ -1348,12 +1348,75 @@ fn cutting_a_text_removes_each_letter_whether_its_letters_stand_apart_or_touch()
     }
 }
 
+/// The area, perimeter and Steiner coefficient C of `regions`: offset outward by e, convex
+/// corners rounded and reflex ones trimmed where the offsets cross, a region's area is
+/// A + P e + C e² while the offset meets nothing, C being half each loop's turning (π for an
+/// outer loop, −π for a hole) less tan(t/2) − t/2 at each reflex corner of turn t.
+fn steiner(regions: &[&solidcraft_geom::Region2]) -> (f64, f64, f64) {
+    let (mut a, mut p, mut c) = (0.0, 0.0, 0.0);
+    for r in regions {
+        a += r.area();
+        // Each loop with the material on its left.
+        let outer = (r.outer.ccw(), std::f64::consts::PI);
+        let holes = r.holes.iter().map(|h| (h.ccw().reversed(), -std::f64::consts::PI));
+        for (l, half_turning) in std::iter::once(outer).chain(holes) {
+            p += l.segs.iter().map(|s| s.length()).sum::<f64>();
+            c += half_turning;
+            for (s, n) in l.joints() {
+                let (u, v) = (s.end_tangent(), n.start_tangent());
+                let t = -u.cross(v).atan2(u.dot(v));
+                if t > 0.0 {
+                    c -= (t / 2.0).tan() - t / 2.0;
+                }
+            }
+        }
+    }
+    (a, p, c)
+}
+
+/// The text's letters (its profiles less their counters, a counter being a profile too).
+fn letters(s: &Session) -> Vec<solidcraft_geom::Region2> {
+    let state = s.world_state().unwrap();
+    let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
+    let sorted = |ids: &[String]| {
+        let mut ids = ids.to_vec();
+        ids.sort();
+        ids
+    };
+    let counter = |p: &solidcraft_sketch::Profile| ss.profiles.iter().any(|q| q.hole_curves.iter().any(|h| sorted(h) == sorted(&p.outer_curves)));
+    ss.profiles.iter().filter(|p| !counter(p)).map(|p| p.region.clone()).collect()
+}
+
 /// A text joined onto a block with a taper: its letters are spline and conic outlines whose
-/// sides slope, standing on the block's face (run on into it) or hanging over its edge (a
-/// straight foot first). An outward taper adds a little more than the straight text; one
-/// steeper than the letters' strokes is refused, saying so.
+/// sides slope, standing on the block's face or hanging over its edge. An outward taper grows
+/// every letter, the t too (SMLib drafted it inward: its loop's normal, summed from the cross
+/// products of its chords, pointed down). Each letter's section at height z is its outline
+/// offset by e = z tan a, by the Round rule of area A + P e + C e² while the offset trims
+/// nothing (Steiner, [`steiner`]), so the letter is A h + P k h²/2 + C k² h³/3 (k = tan a). That
+/// holds exactly for the t at 3° and for s, l and o at 3° and 15°, each extruded alone (SMLib
+/// measures them to 1e-9 of it). The concave joins of r, n, g and e are tighter than e already
+/// at 3°, their swallowtails trimmed, the t's arms meet the trim by 15°, and the letters grow
+/// into each other on the block: the whole word is checked for what holds exactly, one closed
+/// body with the block, every letter's section half-way up holding the straight letter.
 #[test]
 fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
+    let h = 2.0;
+    for (text, degs) in [("t", &[3.0f64][..]), ("s", &[3.0, 15.0]), ("l", &[3.0, 15.0]), ("o", &[3.0, 15.0])] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane":"XY"}));
+        run(&mut s, "sketch.text", json!({"text":text,"at":[5,12],"height":8}));
+        let regions = letters(&s);
+        let (a, p, c) = steiner(&regions.iter().collect::<Vec<_>>());
+        run(&mut s, "sketch.finish", json!({}));
+        for &deg in degs {
+            let k = deg.to_radians().tan();
+            let exact = a * h + p * k * h * h / 2.0 + c * k * k * h.powi(3) / 3.0;
+            let mut t = s.scratch();
+            run(&mut t, "solid.extrude", json!({"distance":h,"taper":format!("{deg} deg"),"corner":"round"}));
+            let v = volume(&mut t);
+            assert!((v - exact).abs() < 1e-6 * exact, "{text:?} {deg}°: {v}, {exact} by its outline");
+        }
+    }
     for (at, hanging) in [([5.0, 12.0], false), ([150.0, 12.0], true)] {
         let mut s = Session::default();
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
@@ -1362,24 +1425,39 @@ fn a_tapered_text_joins_a_block_on_its_face_or_hanging_over_its_edge() {
         run(&mut s, "solid.extrude", json!({"distance":-10}));
         run(&mut s, "sketch.create", json!({"plane":"XY"}));
         run(&mut s, "sketch.text", json!({"text":"tres long","at":at,"height":8}));
-        let state = s.world_state().unwrap();
-        let ss = state.sketch(s.active_sketch.unwrap()).unwrap();
-        // The letters' area, counters left out (a letter's hole is its own profile too).
-        let sorted = |ids: &[String]| {
-            let mut ids = ids.to_vec();
-            ids.sort();
-            ids
-        };
-        let counter = |p: &solidcraft_sketch::Profile| ss.profiles.iter().any(|q| q.hole_curves.iter().any(|h| sorted(h) == sorted(&p.outer_curves)));
-        let area: f64 = ss.profiles.iter().filter(|p| !counter(p)).map(|p| p.area).sum();
+        let regions = letters(&s);
         run(&mut s, "sketch.finish", json!({}));
-        let steep = s.execute("solid.extrude", &json!({"distance":2,"operation":"join","taper":"15 deg"})).unwrap_err();
-        assert!(steep.to_string().contains("the taper closes the profile"), "{steep}");
-        run(&mut s, "solid.extrude", json!({"distance":2,"operation":"join","taper":"3 deg"}));
-        let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-        let (block, text) = (200.0 * 40.0 * 10.0, 2.0 * area);
-        assert!(volume > block + text && volume < block + 1.3 * text, "hanging {hanging}: {volume} for {text} mm³ of straight text");
-        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
+        for deg in [3.0, 15.0] {
+            for corner in [None, Some("round")] {
+                let mut t = s.scratch();
+                let mut params = json!({"distance":h,"operation":"join","taper":format!("{deg} deg")});
+                if let Some(corner) = corner {
+                    params["corner"] = json!(corner);
+                }
+                run(&mut t, "solid.extrude", params);
+                let m = measure(&mut t);
+                let what = format!("hanging {hanging}, {deg}° {corner:?}");
+                assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{what}: {m}");
+                assert_eq!(m["bodies"][0]["closed"], true, "{what}: {m}");
+                // Half-way up each letter is its outline grown by h/2 tan a: every point of the
+                // straight letter's outline lies inside.
+                let state = t.model.state();
+                let mesh = state.bodies[0].body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap();
+                for r in &regions {
+                    for seg in std::iter::once(&r.outer).chain(&r.holes).flat_map(|l| &l.segs) {
+                        for i in 0..8 {
+                            let q = seg.point_at(f64::from(i) / 8.0);
+                            assert!(
+                                mesh.contains(solidcraft_geom::Vec3::new(q.x, q.y, h / 2.0)),
+                                "{what}: ({}, {}) outside the letter half-way up",
+                                q.x,
+                                q.y
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -191,6 +191,23 @@ impl Brep {
         ffi::ops::blend(kind, &self.0, edges, sizes, tolerance).map(Brep).map_err(pick_error)
     }
 
+    /// [`Brep::blend`], with whether each point picked an edge that a larger round, overflowing
+    /// its faces, removed whole: that edge is gone and not rounded (SMLib rounds the edges whose
+    /// blends overflow first, then what is left of the others).
+    pub fn blend_dropping(&self, kind: Blend, edges: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Brep, Vec<bool>)> {
+        init()?;
+        if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
+            return Err(Error::Argument);
+        }
+        let kind = match kind {
+            Blend::Round => ffi::ops::BLEND_ROUND,
+            Blend::Curvature => ffi::ops::BLEND_CURVATURE,
+            Blend::Chord => ffi::ops::BLEND_CHORD,
+            Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
+        };
+        ffi::ops::blend_dropping(kind, &self.0, edges, sizes, tolerance).map(|(b, d)| (Brep(b), d)).map_err(pick_error)
+    }
+
     /// [`Brep::blend`] with corner setbacks: each of `corners` picks the vertex nearest it
     /// (within `tolerance`), a corner where every edge is blended, and that corner's patch starts
     /// `setbacks[j]` along each of its edges from the vertex (one distance per corner, as SMLib

@@ -214,6 +214,16 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     crate::blend_smlib::fillet(body, edges, radius).and_then(|b| closed(body, b))
 }
 
+/// [`fillet`], with the picks whose edges are gone: where some of the rounds overflow their
+/// faces, those are built first, and a picked edge one of them removes whole is not rounded (the
+/// others round what is left of their edges).
+pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body, Vec<Vec3>)> {
+    let _span = solidcraft_profile::span("kernel", "fillet");
+    body.require_brep("fillet")?;
+    let (b, gone) = crate::blend_smlib::fillet_removing(body, edges, radius)?;
+    Ok((closed(body, b)?, gone))
+}
+
 /// [`fillet`] with corner setbacks: each `(at, distance)` sets back the corner at the vertex
 /// nearest `at`, a vertex where every edge is rounded, so its patch starts `distance` along
 /// each of its edges from the vertex (one distance for all of a corner's edges: SMLib keeps one
@@ -1292,7 +1302,6 @@ mod tests {
     /// At 1° the crease rounds from 0.526 mm: R2 lies 0.076 µm in and R20 0.76 µm, and each
     /// builds, removing 20 · r²(tan(δ/2) − δ/2).
     #[test]
-    #[ignore = "fails until SMLib rounds creases from 0.5° (SmEdge::GetBlendEdgeuse calls an edge within 2° of tangent smooth: SM_ERR_INVALID_INPUT)"]
     fn a_one_degree_crease_rounds_from_the_smallest_radius_named() {
         let (gentle, crease) = roof(0.5);
         let turn = 1f64.to_radians();

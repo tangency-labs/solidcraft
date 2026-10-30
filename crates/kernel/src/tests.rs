@@ -394,14 +394,13 @@ fn a_round_wider_than_its_faces_overflows_onto_its_tangent_sides() {
 }
 
 /// A corner's rounds with a radius per edge, one wider than its faces: R21 with R5 on the other
-/// two edges at the corner. The R21 takes both faces beside its edge, and with them the R5
-/// edges, which lie on them: the body is R21's alone
+/// two edges at the corner. The R21 overflows, so it goes first; it takes both faces beside its
+/// edge, and with them the R5 edges, which lie on them and are gone: the body is R21's alone
 /// ([`a_round_wider_than_its_faces_overflows_onto_its_tangent_sides`]). (The same corner at one
 /// radius as wide as the faces, and its fit, are the rig's
 /// fillets/477-fillet-cube-corner-rounds-as-wide-as-faces-* cases; no command takes a radius per
 /// edge.)
 #[test]
-#[ignore = "fails until SMLib blends the corner whole: status 1001, fillet error 4 (edge type 14), Unable to Trim Rail Curve"]
 fn a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges() {
     let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
     let corner = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];

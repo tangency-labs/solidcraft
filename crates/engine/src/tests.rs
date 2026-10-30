@@ -4158,6 +4158,26 @@ fn a_design_saved_before_format_14_with_fewer_body_names_opens_and_names_every_b
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// R21 on the bottom front edge of a 50 x 50 x 20 block overflows the 20 mm front face (its circle
+/// about (y, z) = (21, 21) reaches the top only at y = 21 - sqrt(440)) and goes first; the front
+/// left upright, picked with it, lies wholly in what it removes (every (0, 0, z) is outside that
+/// circle), so it is gone: not rounded, and the feature says so. The block is R21's alone: the
+/// section loses 20 (21 - sqrt(440)) + int_0^sqrt(440) (21 - sqrt(441 - u^2)) du, along 50.
+#[test]
+fn fillet_edge_removed_by_a_larger_overflowing_round_is_noted() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 20}));
+    let out = run(&mut s, "solid.fillet", json!({"edges": [[25, 0, 0], [0, 0, 10]], "radius": 21, "tangent_chain": false, "name": "Round"}));
+    let w = 440f64.sqrt();
+    let f = 0.5 * (w * (441.0 - w * w).sqrt() + 441.0 * (w / 21.0).asin());
+    let lost = 20.0 * (21.0 - w) + 21.0 * w - f;
+    let want = 50.0 * 50.0 * 20.0 - 50.0 * lost;
+    assert!(rel(volume(&mut s), want) < 1e-9, "{} vs {want}", volume(&mut s));
+    let id = out["feature"].as_u64().unwrap();
+    let warning = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert_eq!(warning, "the edge at (0, 0, 10) was removed by the larger round, so it is not rounded");
+}
+
 #[test]
 fn fillet_fit_reduce_uses_the_largest_radius_that_fits() {
     // #293: 3.5 is too large for the 6 mm end faces of a 14 x 6 x 10 box; reduce gives 3 (a full
