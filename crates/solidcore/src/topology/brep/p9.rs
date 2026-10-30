@@ -2596,9 +2596,9 @@ pub fn drop_edge_curve_on_face(
 }
 
 /// [`drop_edge_curve`] onto face `face` of `b`, whose surface `surface` is (a copy for
-/// evaluation): upstream's surface is owned by the face, so the start point drop's
-/// fast-drop trim test classifies on the face
-/// ([`crate::intersect::point_class::live_face_fast_drop_test`]).
+/// evaluation): upstream's surface is owned by the face, so `DropCurve` fetches the
+/// face's cache (made here when its start point drop first asks) but, with that cache's
+/// point testing off for the whole call, never classifies a drop on the face.
 #[allow(clippy::too_many_arguments)]
 fn drop_edge_curve_in_face(
     k: &Kernel,
@@ -2610,17 +2610,21 @@ fn drop_edge_curve_in_face(
     interval: &Extent1d,
     face_tolerance: f64,
 ) -> Result<EdgeCurveDrop> {
-    let mut test_on: Option<bool> = None;
+    let mut cache_made = false;
     for factor in [1.0, 10.0, 300.0] {
-        let mut classify = |k: &Kernel, uv: crate::math::Point2, src_tol: f64| -> Result<bool> {
-            crate::intersect::point_class::live_face_fast_drop_test(
-                k,
-                b,
-                face,
-                &mut test_on,
-                uv,
-                src_tol,
-            )
+        // SmSurface::DropCurve turns the face cache's point testing off for its whole call
+        // (`sChange1`, SmSurfaceDropLib.cpp:4315), so its start point drop keeps every
+        // fast-drop solution without classifying it on the face; the face's cache is
+        // still made there (`smsurf_GetSurfaceCache`, which may create its UV trims)
+        let mut classify = |k: &Kernel, _: crate::math::Point2, _: f64| -> Result<bool> {
+            if !cache_made {
+                cache_made = true;
+                // (`GetOwner()` is NULL while `CreateUVTrimCurve(s)` clears it: no face)
+                if !b.is_surface_owner_cleared(face) {
+                    crate::query::face::p2::face_surface_cache(k, b, face)?.release();
+                }
+            }
+            Ok(true)
         };
         // the virtual SmSurface::DropCurve with the defaults bKeepAllDropCurves = TRUE,
         // no failure record, bCreatingUVTrimCurve = TRUE
