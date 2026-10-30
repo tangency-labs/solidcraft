@@ -165,3 +165,4 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_upstream(int32_t example,
 }
 
 #include "blend_fillet_executive_p3_end_to_end.inc"
+#include "blend_fillet_executive_p3_two_offset_chamfer.inc"

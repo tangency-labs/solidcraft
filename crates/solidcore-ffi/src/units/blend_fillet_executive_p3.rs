@@ -1067,3 +1067,93 @@ pub fn fillet_preview(input: &[f64], path: Option<&str>) -> Result<Vec<f64>, Ffi
         )
     })
 }
+
+extern "C" {
+    fn sc_blend_fillet_executive_p3_two_offset_chamfer(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// Length of the [`two_offset_chamfer`] wire.
+pub const TWO_OFFSET_CHAMFER_WIRE: usize = 28;
+
+/// Validate the [`two_offset_chamfer`] wire: cylinder radius and height; placement
+/// origin, X axis and Y axis; cutting box origin and size; rim z; derive (1: `a`, `b`
+/// are setbacks, 0: they are the two offsets); `a`, `b`; up; body (0: `SmApiCreateCylinder`,
+/// 1: the capped linear sweep of two half-circle arcs); the first arc's start angle in
+/// degrees; which matching rim edge (0 or 1); all (1: every matching rim edge chamfered in
+/// one executive by the given offsets, which needs derive 0 and rim edge 0). Every value is
+/// finite; the
+/// cylinder and box sizes and `a`, `b` are positive; the axes are not parallel (a
+/// degenerate placement is not a body this case builds) and, when deriving, `up` is not
+/// zero. These are fixture contracts, not limits of the public API.
+pub fn validate_two_offset_chamfer(input: &[f64]) -> Result<(), FfiError> {
+    let bad = |what: &str| Err(FfiError::InvalidArgument(what.into()));
+    let Ok(w) = <&[f64; TWO_OFFSET_CHAMFER_WIRE]>::try_from(input) else {
+        return bad("two-offset chamfer wire length");
+    };
+    if w.iter().any(|v| !v.is_finite()) {
+        return bad("non-finite two-offset chamfer wire");
+    }
+    if [w[0], w[1], w[14], w[15], w[16], w[19], w[20]]
+        .iter()
+        .any(|v| *v <= 1e-12)
+    {
+        return bad("non-positive size or offset");
+    }
+    let (x, y) = ([w[5], w[6], w[7]], [w[8], w[9], w[10]]);
+    let cross = [
+        x[1] * y[2] - x[2] * y[1],
+        x[2] * y[0] - x[0] * y[2],
+        x[0] * y[1] - x[1] * y[0],
+    ];
+    let norm = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if norm(cross) <= 1e-12 * norm(x) * norm(y) || norm(x) <= 1e-12 || norm(y) <= 1e-12 {
+        return bad("degenerate placement axes");
+    }
+    if w[18] != 0.0 && w[18] != 1.0 {
+        return bad("invalid derive flag");
+    }
+    if w[18] == 1.0 && norm([w[21], w[22], w[23]]) <= 1e-12 {
+        return bad("zero up direction");
+    }
+    if w[24] != 0.0 && w[24] != 1.0 {
+        return bad("invalid body kind");
+    }
+    if w[26] != 0.0 && w[26] != 1.0 {
+        return bad("invalid rim index");
+    }
+    if w[27] != 0.0 && w[27] != 1.0 {
+        return bad("invalid all-rims flag");
+    }
+    if w[27] == 1.0 && (w[18] != 0.0 || w[26] != 0.0) {
+        return bad("all rims needs given offsets and rim 0");
+    }
+    Ok(())
+}
+
+/// tangency-labs/solidcore#880: the rim a box cuts from a placed cylinder, chamfered
+/// with two offsets (`SmConstantRadiusFS` with `pdOptSecondRadius`, a linear cross
+/// section, every corner a bevel). See [`validate_two_offset_chamfer`] for the wire. The
+/// record is a setup code (0, or -1 no body, -2 no rim, -3 no blend edge use, -4 no
+/// usable offsets, then nothing else); after 0 the rim's `GetEdges` index, the two
+/// offsets, the rim's before-section, the chamfer status, the body's counts, topology,
+/// geometry and mass status and properties.
+pub fn two_offset_chamfer(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_two_offset_chamfer(input)?;
+    // Large enough that the case never runs twice in one child (the retry would see
+    // the first run's latched point step).
+    call_with_buffer(1 << 18, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_two_offset_chamfer(
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}

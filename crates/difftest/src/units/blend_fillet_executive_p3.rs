@@ -30,6 +30,8 @@ mod end_to_end;
 mod preview;
 #[path = "blend_fillet_executive_p3/surface_bodies.rs"]
 mod surface_bodies;
+#[path = "blend_fillet_executive_p3/two_offset_chamfer.rs"]
+mod two_offset_chamfer;
 
 /// Parity runner for the three executive orchestration methods.
 pub struct Runner;
@@ -48,6 +50,9 @@ struct Inputs {
     surface_surface_bodies: Option<surface_bodies::SurfaceSurfaceBodies>,
     #[serde(default)]
     fillet_preview: Option<preview::FilletPreview>,
+    /// tangency-labs/solidcore#880's unequal chamfer (module `two_offset_chamfer`).
+    #[serde(default)]
+    two_offset_chamfer: Option<two_offset_chamfer::TwoOffsetChamfer>,
 }
 
 impl Inputs {
@@ -58,6 +63,11 @@ impl Inputs {
             || self.real_solid.is_some()
             || self.upstream_case.is_some()
             || !self.record.is_empty()
+    }
+
+    /// Whether any other fixture form accompanies a `two_offset_chamfer` case.
+    fn mixed_with_chamfer(&self) -> bool {
+        self.fillet_preview.is_some() || self.mixed_with_preview()
     }
 }
 
@@ -957,6 +967,12 @@ impl UnitDiff for Runner {
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
+        if let Some(chamfer) = &input.two_offset_chamfer {
+            if input.mixed_with_chamfer() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return two_offset_chamfer::cpp(chamfer);
+        }
         if let Some(preview) = &input.fillet_preview {
             if input.mixed_with_preview() {
                 return Err(HarnessError::new("mixed fixture forms"));
@@ -1004,6 +1020,12 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
+        if let Some(chamfer) = &input.two_offset_chamfer {
+            if input.mixed_with_chamfer() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return two_offset_chamfer::rust(chamfer);
+        }
         if let Some(preview) = &input.fillet_preview {
             if input.mixed_with_preview() {
                 return Err(HarnessError::new("mixed fixture forms"));

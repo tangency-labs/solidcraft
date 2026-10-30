@@ -521,7 +521,7 @@ pub(super) fn take_section<'a>(values: &mut &'a [f64]) -> Result<&'a [f64], Harn
     *values = rest;
     Ok(section)
 }
-fn output(mut values: &[f64]) -> Result<Output, HarnessError> {
+pub(super) fn output(mut values: &[f64]) -> Result<Output, HarnessError> {
     let mut out = Output::new();
     out.values.insert(
         "selected_edge_before".into(),
@@ -660,7 +660,7 @@ pub(super) fn status(error: SolidError) -> SolidResult<f64> {
         error => Err(error),
     }
 }
-fn sample(out: &mut Vec<f64>, value: SolidResult<Vec3>) -> SolidResult<()> {
+pub(super) fn sample(out: &mut Vec<f64>, value: SolidResult<Vec3>) -> SolidResult<()> {
     match value {
         Ok(p) => {
             out.push(0.0);
