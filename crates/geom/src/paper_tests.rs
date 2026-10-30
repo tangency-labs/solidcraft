@@ -345,6 +345,75 @@ fn a_scene_on_the_grid_keeps_y_up_and_leaves_the_closing_line_to_the_writer() {
     assert_eq!(on.report, GridReport::default());
 }
 
+/// "AA" in a made-up font whose glyph is a 500 x 700 unit box: 3.5 mm capitals from (20, 30),
+/// turned a quarter and leaning 0.2.
+fn boxed_text() -> (text::TextRun, text::Font) {
+    let metrics = text::FontMetrics {
+        ascent: 900,
+        descent: -200,
+        cap_height: 700,
+        bbox: [0, 0, 500, 700],
+        italic_angle: 0.0,
+        flags: text::FontFlags::default(),
+        stem_v: 80,
+    };
+    let glyph = text::FontGlyph { advance: 600, outline: vec![rectangle(p(0.0, 0.0), p(500.0, 700.0))] };
+    let font = text::Font {
+        id: [1; 32],
+        bytes: std::sync::Arc::from(vec![1u8]),
+        face: 0,
+        postscript_name: "MadeUp".into(),
+        num_glyphs: 2,
+        units_per_em: 1000,
+        metrics,
+        glyphs: [(1, glyph)].into(),
+    };
+    let placed = |x: f64| text::PlacedGlyph { id: 1, x, rise: 0.0, advance: 3.0 };
+    let run = text::TextRun {
+        font: [1; 32],
+        scale: 0.005,
+        origin: p(20.0, 30.0),
+        angle: FRAC_PI_2,
+        slant: 0.2,
+        glyphs: vec![placed(0.0), placed(3.0)],
+        text: "AA".into(),
+        clusters: vec![text::Cluster { glyphs: 0..1, text: 0..1 }, text::Cluster { glyphs: 1..2, text: 1..2 }],
+        rtl: false,
+    };
+    (run, font)
+}
+
+/// A text run on the grid is its glyphs' outlines as the run places them, each loop walked as a
+/// fill's, and keeps its place among its group's items; a writer paints it as a fill, nonzero.
+#[test]
+fn text_on_the_grid_is_its_placed_outlines() {
+    let (run, font) = boxed_text();
+    let outlines: Vec<Loop2> = run.outlines(&font).collect();
+    let scene = Scene { fonts: vec![font], ..sheet(vec![stroke(vec![line(p(0.0, 0.0), p(5.0, 0.0))], false, 0.35), Item::Text(run)]) };
+    let on = scene.prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap();
+    let GridItem::Text { item, loops } = &on.groups[0].items[1] else { panic!("{:?}", on.groups[0].items[1]) };
+    assert_eq!(*item, 1);
+    // By hand, the first glyph's box: (0, 0) at the origin; along the baseline (x + 0.2 y) * 0.005 mm
+    // and up y * 0.005 mm, turned a quarter, so along is up the page and up is to the left.
+    let g = |x: f64, y: f64| Grid::NANOMETRE.point(p(x, y)).unwrap();
+    let lines = |points: &[GridPoint]| points.iter().map(|&to| Piece::Line { to }).collect::<Vec<_>>();
+    let first = GridPath { start: g(20.0, 30.0), pieces: lines(&[g(20.0, 32.5), g(16.5, 33.2), g(16.5, 30.7)]), closed: true };
+    assert_eq!((loops.len(), &loops[0]), (2, &first));
+    // The same loops a fill of the placed outlines gives.
+    let filled = sheet(outlines.into_iter().map(|l| fill(l, vec![])).collect()).prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap();
+    let walked: Vec<GridPath> = filled.groups[0]
+        .items
+        .iter()
+        .flat_map(|i| match i {
+            GridItem::Fill { loops } => loops.clone(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(*loops, walked);
+    assert_eq!(on.groups[0].items[1].paint(), Paint::Fill { loops, rule: FillRule::NonZero });
+    assert_eq!(filled.groups[0].items[0].paint(), Paint::Fill { loops: &walked[..1], rule: FillRule::EvenOdd });
+}
+
 /// Slivers are measured in the grid's own steps: a 5 mm piece goes straight on to the next on a
 /// 1 mm grid, and stays on the nanometre grid. An arc's quarters keep its radius and turn, in
 /// steps; a width under half a step is one step. A curve the walk can't take yet is refused.

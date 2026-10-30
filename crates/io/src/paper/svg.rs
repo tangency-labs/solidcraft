@@ -10,7 +10,9 @@
 //! - **Curves:** lines `L`, circular arcs `A` in the grid's pieces of at most a quarter turn (a half
 //!   turn's centre is ill-conditioned once its ends are rounded), cubics `C`, parabolas `Q`.
 //! - **Paint:** strokes `stroke-width`, with butt caps, miter joins and a miter limit of 4 on the
-//!   root; fills black, even-odd. One `<path>` per item, so each stays one object in an editor.
+//!   root; fills black, even-odd. Text is its glyph outlines, one `<path>` a run, filled black
+//!   nonzero (SVG's default), so it looks the same without the font and never reflows. One `<path>`
+//!   per item, so each stays one object in an editor.
 //! - **Groups** are `<g data-object="…" data-kind="…">`: object ids repeat and start with a digit,
 //!   so they can't be XML ids. No background: the page stays transparent, as cutters want.
 //! - **Pictures** (#5624 S5) are `<image>`s holding a PNG as a data URI, on their own pixel grid
@@ -19,7 +21,7 @@
 
 use std::fmt::Write;
 
-use solidcraft_geom::paper::{Grid, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
+use solidcraft_geom::paper::{FillRule, Grid, GridPath, GridPoint, GridReport, Paint, Picture, Pictures, Piece, Prepared};
 use solidcraft_geom::{Aabb2, Vec2};
 
 use super::png::{PICTURE_DPI, picture_png};
@@ -47,18 +49,20 @@ pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) ->
         let kind = serde_json::to_value(group.kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
         let _ = writeln!(w.out, "<g data-object=\"{}\" data-kind=\"{kind}\">", group.object);
         for item in &group.items {
-            match item {
-                GridItem::Stroke { width, path } => {
+            match item.paint() {
+                Paint::Stroke { width, path } => {
                     w.out.push_str("<path stroke-width=\"");
-                    push_number(&mut w.out, *width);
+                    push_number(&mut w.out, width);
                     w.out.push_str("\" d=\"");
                     w.path(path);
                 }
-                GridItem::Fill { loops } => {
-                    w.out.push_str("<path fill=\"#000\" stroke=\"none\" fill-rule=\"evenodd\" d=\"");
+                Paint::Fill { loops, rule } => {
+                    // Nonzero is SVG's default.
+                    let rule = if rule == FillRule::EvenOdd { " fill-rule=\"evenodd\"" } else { "" };
+                    let _ = write!(w.out, "<path fill=\"#000\" stroke=\"none\"{rule} d=\"");
                     loops.iter().for_each(|l| w.path(l));
                 }
-                GridItem::Picture(picture) => {
+                Paint::Picture(picture) => {
                     let sheet = Aabb2 { min: Vec2::new(0.0, 0.0), max: scene.size_mm() };
                     if !w.picture(picture, sheet, picture_dpi, pictures)? {
                         continue;

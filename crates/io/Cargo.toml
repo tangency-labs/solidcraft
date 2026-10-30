@@ -42,3 +42,6 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 # The computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 gethostname = { workspace = true }
+
+[dev-dependencies]
+solidcraft-sketch = { workspace = true }
