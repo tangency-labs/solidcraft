@@ -987,7 +987,7 @@ fn raw_trim_gap_rust(
         solidcore::geom::tol::USE_DEFAULT,
         solidcore::geom::tol::USE_DEFAULT,
     ).map_err(err)?;
-    let mut records = std::collections::BTreeMap::new();
+    let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     let key_of = super::topology_brep_p8::key_of;
     let this_face = |f| key_of(solidcore::EntityRef::Face(f));

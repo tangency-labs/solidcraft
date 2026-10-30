@@ -58,7 +58,7 @@ use super::intersect_surface_drop_lib_p2::{
     add3, ffi_curve, gen_knots, gen_scale, pick, rust_curve, scale3, unit_dir, CurveIn,
 };
 use super::query_brep::{gen_box_solid, gen_points_brep};
-use super::query_face_p1::{everything, inexact, model};
+use super::query_face_p1::own_model;
 use super::topology_edgeuse_p1::fixture_input;
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -358,11 +358,11 @@ fn cpp_brep(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 fn rust_brep(i: &Inputs) -> Result<Output, HarnessError> {
-    let m = model(brep_value(i)?)?;
-    let (faces, edges) = everything(&m.brep);
-    if let Some(o) = inexact(&m, &faces, &edges) {
-        return Ok(o);
-    }
+    // the Rust-built B-rep (no C++ export reaches the Rust side)
+    let m = match own_model(brep_value(i)?)? {
+        Ok(m) => m,
+        Err(o) => return Ok(o),
+    };
     let mut b = m.brep;
     let mut k = kernel(i.model, i.ratio);
     let small = SmallTopoType::from_code(i.small)
