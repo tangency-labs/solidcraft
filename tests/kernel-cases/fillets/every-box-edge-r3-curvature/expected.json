@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a curvature-continuous (Type: Curvature) round of size 3 on a box's long top edge, between two planar end faces",
+ "source": "analytic",
+ "method": "box 40x30x20, the top back edge (y=30, z=20, 40 long) filleted type curvature size 3: the section is the quintic Bezier with control points at thirds of the setback s = 3 along each face (as fillets/862), zero curvature where it meets the faces. The area between the corner and that curve (Green on the Bezier, exact: 113/756 s^2) is 1.345238; the end faces x=0 and x=40 are square to the edge: V = 24000 - 40 * 1.345238 = 23946.1905. Faces 7; both seams of the round with the faces G2.",
+ "body_count": 1,
+ "volume_mm3": 23946.190476190477,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g2"
+ }
+}

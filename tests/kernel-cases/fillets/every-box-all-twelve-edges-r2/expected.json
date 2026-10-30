@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "all twelve edges of a box rounded r2 at once: the rounded box (twelve quarter cylinders, eight sphere octants)",
+ "source": "analytic",
+ "method": "box 40x30x20 with every edge rounded r = 2 is the inner box (40-2r)x(30-2r)x(20-2r) = 36x26x16 grown by r (Minkowski sum with the ball): V = abc + 2r(ab+bc+ca) + pi r^2 (a+b+c) + 4/3 pi r^3 = 14976 + 4 (936+416+576) + 4 pi 78 + 32 pi/3 = 23701.6872. Faces 6 + 12 rounds + 8 sphere octants = 26; every blend seam G1.",
+ "body_count": 1,
+ "volume_mm3": 23701.68722955831,
+ "faces": 26,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}
