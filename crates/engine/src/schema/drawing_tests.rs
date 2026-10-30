@@ -8,6 +8,24 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TemplateListParams>(), &[]);
     assert_keys(input_schema_for::<TemplateApplyParams>(), &["dry_run", "template"]);
+    assert_keys(input_schema_for::<TemplateSaveParams>(), &["path"]);
+}
+
+/// A template saved as a file, then applied from it, matches the output schemas with no warnings
+/// in warn mode; strict refuses a path that isn't a .json file as the command does.
+#[test]
+fn the_template_save_reply_matches_its_output_schema() {
+    let (mut s, _) = drawing_session(ParamCheck::Warn);
+    let folder = crate::tests::Folder::new("drawing-template-schema");
+    let path = folder.path("shop.json");
+    let saved = output_schema_for::<TemplateSaveResult>();
+    let r = s.execute("drawing.template.save", &json!({"path": path})).unwrap();
+    assert!(conforms(saved.as_value(), saved.as_value(), &r) && r.get("param_warnings").is_none(), "{r}");
+    let applied = output_schema_for::<TemplateApplyResult>();
+    let r = s.execute("drawing.template.apply", &json!({"template": path, "dry_run": true})).unwrap();
+    assert!(conforms(applied.as_value(), applied.as_value(), &r) && r.get("param_warnings").is_none(), "{r}");
+    let error = |level| drawing_session(level).0.execute("drawing.template.save", &json!({"path": "shop.txt"})).err().map(|e| e.to_string());
+    assert_eq!(error(ParamCheck::Strict), error(ParamCheck::Off));
 }
 
 /// A call that already fails gets the same error in strict as with the check off.

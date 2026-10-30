@@ -6,6 +6,7 @@
 //! they change.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -18,16 +19,22 @@ use solidcraft_geom::title_block::CellKind;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
-use crate::schema::drawing::{SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams, TemplateListResult};
+use crate::schema::drawing::{
+    SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams, TemplateListResult, TemplateSaveParams,
+    TemplateSaveResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+/// The longest template file path taken, in bytes, as the sheet export's.
+const MAX_PATH_BYTES: usize = 4096;
 const TEMPLATE_APPLY_CONTRACT: TypedContract<TemplateApplyParams> = TypedContract::new();
 const TEMPLATE_LIST_CONTRACT: TypedContract<TemplateListParams> = TypedContract::new();
+const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
-        "name?: the drawing's name (default: the design's); template?: a template's name (drawing.template.list; default iso-a3-part, or iso-a3-assembly for a design with components); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part, or iso-a3-assembly for a design with components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -36,7 +43,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&TEMPLATE_APPLY_CONTRACT)
         .output(output_schema_for::<TemplateApplyResult>)
         .params(
-            "template: a template's name (drawing.template.list); dry_run?: true to answer without changing anything. Each sheet takes the paper, drawing border and title block of the template's sheet in its place (its last for sheets past its own); text typed over a cell stays while the new block has a text cell of that name. Nothing moves → changed: [{sheet, paper, border, title_block, lost: [cells whose typed text is dropped]}] for each sheet that changes, outside: the views on a restyled sheet that fall outside its drawing space or over its title block (as drawing.sheet.set lists them), dry_run. One undo step, none when nothing changes.",
+            "template: a built-in's name (drawing.template.list) or a .json template file (drawing.template.save); dry_run?: true to answer without changing anything. Each sheet takes the paper, drawing border and title block of the template's sheet in its place (its last for sheets past its own); text typed over a cell stays while the new block has a text cell of that name. Nothing moves → changed: [{sheet, paper, border, title_block, lost: [cells whose typed text is dropped]}] for each sheet that changes, outside: the views on a restyled sheet that fall outside its drawing space or over its title block (as drawing.sheet.set lists them), dry_run. One undo step, none when nothing changes.",
+        ),
+    CommandSpec::new("drawing.template.save", "Save as Drawing Template", crate::checked!("drawing.template.save", template_save))
+        .in_drawing()
+        .icon("save")
+        .noundo()
+        .doc_only()
+        .contract(&TEMPLATE_SAVE_CONTRACT)
+        .output(output_schema_for::<TemplateSaveResult>)
+        .params(
+            "path: a .json file → {path, bytes}. Writes the drawing open as a template: its sheets, borders, title blocks and the text typed over their cells, its projection, units, language and properties, and nothing it draws or documents (its sources, views, dimensions, balloons, revision rows, and the component each sheet documents). drawing.create and drawing.template.apply take the file as their template; a drawing made from it keeps its own copy, so a later save changes no drawing.",
         ),
     CommandSpec::new("drawing.template.list", "List Drawing Templates", crate::checked!("drawing.template.list", template_list))
         .any_part()
@@ -131,8 +148,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let name = text(cmd, p, "name")?.map_or_else(|| s.doc.name.clone(), str::to_string);
     let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
     let from = text(cmd, p, "template")?.unwrap_or_else(|| template::default_name(&s.doc));
-    let unknown = || bad(cmd, format!("no template `{from}` (drawing.template.list lists them)"));
-    let chosen = template::built_in(from).ok_or_else(unknown)?.map_err(fail)?;
+    let chosen = template_named(cmd, from)?;
     // Not the id of a drawing undo or redo could bring back either.
     let steps = s.undo.iter().chain(&s.redo).filter_map(|step| step.part);
     let taken: BTreeSet<u64> = s.doc.drawings.iter().map(|d| d.id).chain(steps).collect();
@@ -158,8 +174,7 @@ fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.template.apply";
     let fail = |e: solidcraft_doc::DocError| bad(cmd, e.to_string());
     let from = text(cmd, p, "template")?.ok_or_else(|| bad(cmd, "`template` must be a template's name (drawing.template.list)"))?;
-    let unknown = || bad(cmd, format!("no template `{from}` (drawing.template.list lists them)"));
-    let chosen = template::built_in(from).ok_or_else(unknown)?.map_err(fail)?;
+    let chosen = template_named(cmd, from)?;
     let dry_run = match p.get("dry_run") {
         None => false,
         Some(Value::Bool(dry_run)) => *dry_run,
@@ -186,6 +201,37 @@ fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
         })?;
     }
     let reply = TemplateApplyResult { changed: listed, outside, dry_run, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// The template `from` names: a built-in (drawing.template.list), or a template file read through
+/// the file check as every file is.
+fn template_named(cmd: &str, from: &str) -> Result<Drawing> {
+    if let Some(made) = template::built_in(from) {
+        return made.map_err(|e| bad(cmd, e.to_string()));
+    }
+    if !template_path(from) {
+        return Err(bad(cmd, format!("no template `{from}`: a built-in's name (drawing.template.list) or a .json template file")));
+    }
+    let text = solidcraft_io::vfs::read_to_string(from, drawing::MAX_DRAWING_BYTES).map_err(|e| bad(cmd, format!("template `{from}`: {e}")))?;
+    template::read(&text).map_err(|e| bad(cmd, format!("template `{from}`: {e}")))
+}
+
+/// Whether `path` can be a template file's: a .json file, at most [`MAX_PATH_BYTES`] long.
+fn template_path(path: &str) -> bool {
+    path.len() <= MAX_PATH_BYTES && Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
+}
+
+fn template_save(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "drawing.template.save";
+    let path = text(cmd, p, "path")?.filter(|path| template_path(path)).ok_or_else(|| bad(cmd, "`path` must be a .json file"))?;
+    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    let made = template::from_drawing(s.drawing(cmd)?).map_err(|e| bad(cmd, e.to_string()))?;
+    let text = made.to_json().map_err(|e| bad(cmd, e.to_string()))?;
+    // Checked again just before writing, as the sheet export does.
+    solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
+    solidcraft_io::write_atomic(Path::new(path), text.as_bytes(), false).map_err(|e| EngineError::Other(e.to_string()))?;
+    let reply = TemplateSaveResult { path: path.into(), bytes: text.len(), param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 

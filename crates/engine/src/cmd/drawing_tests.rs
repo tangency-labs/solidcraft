@@ -91,6 +91,54 @@ fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
     assert_eq!(open_one(&s).sheets, before.sheets, "undo puts the paper back");
 }
 
+/// A drawing saved as a template file starts new drawings and restyles others, with nothing of its
+/// model; a later save changes no drawing made from it. Only a .json path is taken, and only inside
+/// the folders an agent may use while a scope is active.
+#[test]
+fn a_template_file_saves_and_starts_drawings() {
+    let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
+    let folder = Folder::new("drawing-template");
+    let path = folder.path("company-a3.json");
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"material": "See note 3"}}));
+    let saved = run(&mut s, "drawing.template.save", json!({"path": path}));
+    assert_eq!(saved["bytes"].as_u64(), Some(std::fs::metadata(&path).unwrap().len()));
+    let first = open_one(&s);
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"name": "From the file", "template": path}));
+    let from_file = open_one(&s);
+    assert!(from_file.views.is_empty() && from_file.sheets[0].id != first.sheets[0].id, "{made}");
+    assert_eq!((from_file.sheets[0].sheet, &from_file.sheets[0].title_block), (first.sheets[0].sheet, &first.sheets[0].title_block));
+    assert_eq!(from_file.sheets[0].title_block_overrides, first.sheets[0].title_block_overrides);
+    // A later save of another format changes no drawing made from the file.
+    run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    run(&mut s, "drawing.template.save", json!({"path": path}));
+    let other = s.doc.drawings.iter().find(|d| d.id == first.id).unwrap().clone();
+    assert_eq!(other.sheets, first.sheets, "the first drawing kept its own copy");
+    let applied = run(&mut s, "drawing.template.apply", json!({"template": path, "dry_run": true}));
+    assert_eq!(applied["changed"], json!([]), "the file now holds this drawing's own format: {applied}");
+    for (command, p, why) in [
+        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json file"),
+        ("drawing.template.save", json!({}), "`path` must be a .json file"),
+        ("drawing.create", json!({"template": folder.path("missing.json")}), "template `"),
+        ("drawing.create", json!({"template": "company"}), "no template `company`"),
+    ] {
+        assert!(refused(&mut s, command, p.clone()).contains(why), "{command} {p}");
+    }
+    let plain = folder.path("plain.json");
+    std::fs::write(&plain, first.to_json().unwrap()).unwrap();
+    assert!(refused(&mut s, "drawing.create", json!({"template": plain})).contains("a template draws no design"));
+    // While a scope is active, only its folders.
+    let (inside, outside) = (Folder::new("drawing-template-in"), Folder::new("drawing-template-out"));
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([inside.0.clone()])), || {
+        run(&mut s, "drawing.template.save", json!({"path": inside.path("ok.json")}));
+        let refusal = refused(&mut s, "drawing.template.save", json!({"path": outside.path("no.json")}));
+        assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
+        let refusal = refused(&mut s, "drawing.create", json!({"template": path}));
+        assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
+    });
+    assert!(std::path::Path::new(&inside.path("ok.json")).is_file() && !std::path::Path::new(&outside.path("no.json")).exists());
+}
+
 /// The drawing open, as the design holds it.
 fn open_one(s: &Session) -> Arc<Drawing> {
     s.drawing("test").unwrap().clone()

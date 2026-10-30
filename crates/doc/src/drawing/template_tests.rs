@@ -111,6 +111,42 @@ fn a_template_applied_gives_each_sheet_its_format() {
     assert!(apply(&d, &plate()).unwrap_err().to_string().starts_with("a template draws no design"));
 }
 
+/// A drawing saved as a template keeps its sheets and leaves its model behind, and reads back as
+/// one; a drawing's own file is no template.
+#[test]
+fn a_drawing_saved_as_a_template_keeps_only_its_format() {
+    let d = plate();
+    let template = from_drawing(&d).unwrap();
+    check(&template).unwrap();
+    assert!(template.sources.is_empty() && template.views.is_empty() && template.dimensions.is_empty() && template.balloons.is_empty());
+    assert!(template.sheets.iter().all(|sheet| sheet.documents.is_none()));
+    let format = |sheet: &Sheet| (sheet.id, sheet.name.clone(), sheet.sheet, sheet.border, sheet.title_block.clone(), sheet.dpi);
+    assert_eq!(template.sheets.iter().map(|s| format(s)).collect::<Vec<_>>(), d.sheets.iter().map(|s| format(s)).collect::<Vec<_>>());
+    assert_eq!((template.projection, &template.units, &template.properties), (d.projection, &d.units, &d.properties));
+    assert_eq!(read(&template.to_json().unwrap()).unwrap(), template);
+    let refusal = read(&d.to_json().unwrap()).unwrap_err().to_string();
+    assert!(refusal.starts_with("a template draws no design"), "{refusal}");
+}
+
+/// A damaged template file, cut short or with a byte changed anywhere, is read or refused, never
+/// a panic.
+#[test]
+fn a_damaged_template_file_never_panics() {
+    let text = made("iso-a3-part").to_json().unwrap();
+    let mut read_back = 0;
+    for at in (0..text.len()).step_by(7) {
+        let _ = text.get(..at).map(read);
+        for byte in *b"\"9{-x" {
+            let mut bytes = text.clone().into_bytes();
+            bytes[at] = byte;
+            if let Ok(changed) = String::from_utf8(bytes) {
+                read_back += usize::from(read(&changed).is_ok());
+            }
+        }
+    }
+    assert!(read_back > 0, "some changes leave a template that still reads (in a name or a number)");
+}
+
 /// A drawing from a template has its own ids, none of the template's or of `taken`, the same ones
 /// again from the same seed; the name it is given; and everything else of the template, the text
 /// typed over its cells too.

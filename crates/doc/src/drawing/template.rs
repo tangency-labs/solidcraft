@@ -4,6 +4,9 @@
 //! documents a design ([`check`]). So it is saved and read as a drawing is, under the same caps
 //! and damage rules, and a new drawing is a copy of it with ids of its own ([`instantiate`]).
 //!
+//! A drawing saved as a template ([`from_drawing`]) keeps its format and leaves its model behind; a
+//! template file reads as a drawing does, then is held to the template rules ([`read`]).
+//!
 //! A template applied to a drawing ([`apply`]) gives each sheet its paper, drawing border and title
 //! block, and moves nothing on it.
 //!
@@ -17,6 +20,7 @@ use std::sync::Arc;
 
 use solidcraft_geom::cell::{Content, Part};
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
+use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::title_block::{self, CellKind};
 
 use super::{Drawing, fields};
@@ -96,6 +100,35 @@ pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_sou
     Ok(drawing)
 }
 
+/// `drawing` as a template: its format, and nothing it draws or documents (its sources, views,
+/// dimensions, balloons, revision rows, and the component each sheet documents). Its revision
+/// numbering and the text typed over its cells stay.
+pub fn from_drawing(drawing: &Drawing) -> Result<Drawing> {
+    let mut template = drawing.clone();
+    template.sources.clear();
+    template.views.clear();
+    template.dimensions.clear();
+    template.balloons.clear();
+    let mut revisions = RevisionRecord::default();
+    (revisions.numbering, revisions.per_sheet) = (template.revisions.numbering, template.revisions.per_sheet);
+    template.revisions = Arc::new(revisions);
+    for sheet in &mut template.sheets {
+        if sheet.documents.is_some() {
+            Arc::make_mut(sheet).documents = None;
+        }
+    }
+    check(&template)?;
+    Ok(template)
+}
+
+/// A template file's text, read as a drawing is ([`Drawing::from_json`]: its size cap, the format
+/// check and the damage rules), then held to the template rules.
+pub fn read(text: &str) -> Result<Drawing> {
+    let template = Drawing::from_json(text)?;
+    check(&template)?;
+    Ok(template)
+}
+
 /// What applying a template changed on one sheet ([`apply`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Restyled {
@@ -126,7 +159,7 @@ pub fn apply(drawing: &Drawing, template: &Drawing) -> Result<(Drawing, Vec<Rest
         }
         let sheet = Arc::make_mut(sheet);
         sheet.sheet = from.sheet;
-        sheet.border = from.border.clone();
+        sheet.border = from.border;
         sheet.title_block = from.title_block.clone();
         sheet.title_block_overrides.retain(|name, _| kept(name));
         changed.push(Restyled { sheet: sheet.id, paper, border, title_block, lost });
