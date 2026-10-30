@@ -8,7 +8,7 @@ use std::f64::consts::PI;
 use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
 
 use crate::build::{box_solid, extrude, extrude_tapered};
-use crate::{Body, BoolOp, ChamferSide, KernelError, boolean, chamfer, chamfer_sides};
+use crate::{Body, BoolOp, ChamferSide, boolean, chamfer, chamfer_sides};
 
 const TOL: f64 = 1e-3;
 
@@ -193,35 +193,13 @@ fn cone_rim() {
     assert!(rel(base - volume(&out), removed) < 3e-3, "{} vs {removed}", base - volume(&out));
 }
 
+/// A cylinder's seam is smooth: no edge there to chamfer. (The rim chamfers too large for the
+/// faces, past the bottom, past the wall and of an elliptical rim are the rig's
+/// fillets/2893-chamfer-* cases; the seam's place is the kernel's, so it stays here.)
 #[test]
 fn too_large_or_unsupported_is_refused() {
     let c = cylinder(0.0);
-    // Across the whole top: the cone would end in a point.
-    assert!(chamfer_sides(&c, &[RIM], 10.0, ChamferSide::Distance(3.0), false).is_err());
-    assert!(chamfer_sides(&c, &[RIM], 12.0, ChamferSide::Distance(3.0), false).is_err());
-    // Down past the bottom.
-    assert!(chamfer_sides(&c, &[RIM], 2.0, ChamferSide::Distance(25.0), false).is_err());
-    // An angle that runs past the wall.
-    assert!(chamfer_sides(&c, &[RIM], 2.0, ChamferSide::Angle(PI / 2.0 + 0.01), false).is_err());
-    // A cylinder's seam is smooth: nothing to chamfer.
     assert!(chamfer_sides(&c, &[Vec3::new(10.0, 0.0, 10.0)], 2.0, ChamferSide::Distance(3.0), false).is_err());
-    // A tilted cylinder cut flat: its rim on the cut is an ellipse, which the loop chamfer does
-    // not take. Refused as not supported, never a wrong solid.
-    let tilted = crate::build::cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::new(1.0, 0.0, 2.0), 5.0, 40.0).unwrap();
-    let cut = box_solid(Vec3::new(-50.0, -50.0, 10.0), Vec3::new(50.0, 50.0, 50.0)).unwrap();
-    let t = boolean(&tilted, &cut, BoolOp::Cut).unwrap().unwrap();
-    let rim = t
-        .record()
-        .edges
-        .iter()
-        .filter_map(|e| solidcraft_geom::brep::eval::CurveEval::new(e.parameters()).ok()?.point(0.5 * (e.interval[0] + e.interval[1])))
-        .find(|m| (m.z - 10.0).abs() < 1e-6)
-        .unwrap();
-    match chamfer_sides(&t, &[rim], 1.0, ChamferSide::Distance(2.0), false) {
-        Err(KernelError::Failed(m)) => assert!(m.starts_with("not supported yet"), "{m}"),
-        Err(e) => panic!("{e}"),
-        Ok(_) => panic!("an unequal chamfer of an elliptical rim was built"),
-    }
 }
 
 /// The top loop of a plate with rounded corners: lines and quarter circles, planar and

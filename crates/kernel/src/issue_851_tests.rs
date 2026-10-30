@@ -56,19 +56,6 @@ fn part_cut_from_a_box() -> Body {
     boolean(&slab, &disc, BoolOp::Cut).unwrap().unwrap()
 }
 
-/// Area a chamfer of distance `d` takes off the cusp: the triangle between the plane's contact,
-/// the tip and the wall's contact, less the wall's circular segment.
-fn chamfered_area(d: f64) -> f64 {
-    let beta = ((R_WALL - d) / (R_WALL + d)).acos();
-    let o = (TIP_X - (4.0 * R_WALL * d).sqrt(), -d);
-    let c = (TIP_X, -R_WALL);
-    let k = R_WALL / (R_WALL + d);
-    let q2 = (c.0 + (o.0 - c.0) * k, c.1 + (o.1 - c.1) * k);
-    let (t1, tip) = ((o.0, 0.0), (TIP_X, 0.0));
-    let triangle = 0.5 * ((tip.0 - t1.0) * (q2.1 - t1.1) - (q2.0 - t1.0) * (tip.1 - t1.1)).abs();
-    triangle - 0.5 * R_WALL * R_WALL * (beta - beta.sin())
-}
-
 #[test]
 fn fillet_the_knife_edge() {
     for (name, body) in [("plate first", part()), ("corner first", part_other_order()), ("cut from a box", part_cut_from_a_box())] {
@@ -80,21 +67,6 @@ fn fillet_the_knife_edge() {
             let v = measure(&rounded).unwrap().volume;
             let expected = before - HEIGHT * removed_area(r);
             assert!((v - expected).abs() < 1e-3 * expected.abs(), "{name} r={r}: volume {v}, expected {expected}");
-        }
-    }
-}
-
-#[test]
-fn chamfer_the_knife_edge() {
-    for (name, body) in [("plate first", part()), ("corner first", part_other_order()), ("cut from a box", part_cut_from_a_box())] {
-        let before = measure(&body).unwrap().volume;
-        for d in [0.5, 2.0, 5.0] {
-            let cut = chamfer(&body, &[knife()], d).unwrap_or_else(|e| panic!("{name} d={d}: {e}"));
-            assert!(cut.validity().is_empty(), "{name} d={d}: {:?}", cut.validity());
-            assert_eq!(cut.face_count(), body.face_count() + 1, "{name} d={d}: one chamfer face");
-            let v = measure(&cut).unwrap().volume;
-            let expected = before - HEIGHT * chamfered_area(d);
-            assert!((v - expected).abs() < 1e-3 * expected.abs(), "{name} d={d}: volume {v}, expected {expected}");
         }
     }
 }
@@ -226,44 +198,6 @@ fn arc_top_edge_sizes_never_panic() {
             let made = if round { fillet(&body, &[arc_top()], r) } else { chamfer(&body, &[arc_top()], r) };
             if let Ok(b) = made {
                 assert!(b.validity().is_empty(), "r={r}: {:?}", b.validity());
-            }
-        }
-    }
-}
-
-/// At the full wall height the fitted contact coincides with the bottom arc. A round there uses
-/// the wall up (the blend-overflow decision, 237f0ae74: a round may use up a face), taking the
-/// whole corner between the wall and the top; a chamfer of the wall's full height is refused as
-/// too large (it would leave the wall a zero-area face, #1113). Just below the limit the wall
-/// still has area and both build. Face order and mirrored edge directions do not change either
-/// outcome.
-#[test]
-fn arc_top_blend_uses_up_the_wall_and_refuses_a_collapsed_one() {
-    for body in [part(), part_other_order(), part_cut_from_a_box()] {
-        for z in [1.0, -1.0] {
-            let matrix = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, z, 0.0], [0.0, 0.0, 0.0, 1.0]];
-            let body = transform_matrix(&body, matrix).unwrap();
-            let at = arc_top();
-            let pick = [Vec3::new(at.x, at.y, at.z * z)];
-            let before = planned_volume(&body);
-            for round in [true, false] {
-                let blend = |r| if round { fillet(&body, &pick, r) } else { chamfer(&body, &pick, r) };
-                if round {
-                    let made = blend(HEIGHT).unwrap();
-                    assert!(made.validity().is_empty(), "mirror={z}: {:?}", made.validity());
-                    assert_eq!(made.face_count(), body.face_count(), "mirror={z}: the round takes the wall's place");
-                    let removed = before - planned_volume(&made);
-                    let expected = arc_top_removed(HEIGHT, true);
-                    assert!((removed - expected).abs() < 0.01 * expected + 0.01, "mirror={z}: removed {removed}, expected {expected}");
-                } else {
-                    let error = blend(HEIGHT).unwrap_err();
-                    assert!(matches!(error, KernelError::TooLarge(_)), "mirror={z}: {error}");
-                }
-                let made = blend(HEIGHT - 0.5).unwrap();
-                assert!(made.validity().is_empty(), "round={round}, mirror={z}: {:?}", made.validity());
-                let removed = before - planned_volume(&made);
-                let expected = arc_top_removed(HEIGHT - 0.5, round);
-                assert!((removed - expected).abs() < 0.01 * expected + 0.01, "round={round}, mirror={z}: removed {removed}, expected {expected}");
             }
         }
     }

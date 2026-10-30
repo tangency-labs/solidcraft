@@ -1071,21 +1071,6 @@ mod tests {
     }
 
     #[test]
-    fn a_blend_ends_where_a_joined_boss_turns_back_round_its_end() {
-        // The box's top right edge runs into the cylinder at (40, 8, 20): the blend's end lies on
-        // the cylinder where the box was, now laid bare.
-        let body = box_and_boss();
-        let v0 = vol(&body);
-        for (round, area) in [(true, (1.0 - std::f64::consts::PI / 4.0) * 0.64), (false, 0.32)] {
-            let out = blend(&body, &[Vec3::new(40.0, 4.0, 20.0)], 0.8, round).unwrap();
-            assert!(out.validity().is_empty(), "{:?}", out.validity());
-            assert_eq!(out.lumps().unwrap().len(), 1);
-            let removed = v0 - vol(&out);
-            assert!((removed - area * 8.0).abs() < area * 8.0 * 1e-3, "{removed} vs {}", area * 8.0);
-        }
-    }
-
-    #[test]
     fn a_blend_along_a_boss_ends_on_the_box_side_beside_it() {
         // The boss's bottom edge outside the box (a half circle) ends at the box's side, square to
         // it: the side face takes the end section.

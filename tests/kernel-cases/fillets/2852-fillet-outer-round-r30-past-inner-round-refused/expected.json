@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#2852",
+  "tangency-labs/solidcraft#1080"
+ ],
+ "what": "a 3 mm U shell (60 x 20 x 50) whose inside top edges are rounded R15: its outside edges rounded R30 would cross into the hollow and cut the top plate off the walls, so it is refused, naming the largest radius that fits",
+ "source": "analytic",
+ "method": "both rounds' centres lie on the corner's bisector x + z = 50: the outside one's at (R, 50 - R), the inside one's at (18, 32), r 15. Along the bisector from the corner (0, 50) the outside arc's middle lies at R (sqrt2 - 1), the inside arc's at 18 sqrt2 - 15: they meet at R = (18 sqrt2 - 15)/(sqrt2 - 1) = 25.2426. Past that the round crosses the wall along the whole 20 mm and would part the top from the walls (the owner's ruling of 2026-10-30: refused as too large, naming the largest that fits, 25.24).",
+ "outcome": "refused",
+ "refusal": "the largest radius that fits is 25.2"
+}

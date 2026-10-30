@@ -288,59 +288,6 @@ fn fillet_ending_across_two_faces() {
 }
 
 #[test]
-fn loop_fillet_as_tall_as_its_wall_consumes_it() {
-    // The removed cross-section (a square of side r less a quarter disc) and its centroid's
-    // distance from the wall: r(10 − 3π) / (3(4 − π)).
-    let spandrel = |r: f64| ((1.0 - PI / 4.0) * r * r, r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
-    // #190: a disc 13 in radius and 2 high, its top circle rounded by 2. Pappus for the ring.
-    let disc = cylinder(Vec3::ZERO, Vec3::Z, 13.0, 2.0).unwrap();
-    let f = fillet(&disc, &[Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)], 2.0).unwrap();
-    let (a, c) = spandrel(2.0);
-    let want = PI * 169.0 * 2.0 - a * 2.0 * PI * (13.0 - c);
-    let m = measure(&f).unwrap();
-    assert!(rel(m.volume, want) < 2e-4, "{} vs {want}", m.volume);
-    // Top, round and bottom: the wall is gone.
-    assert_eq!(m.merged.faces, 3, "{:?}", m.merged);
-    assert!(f.validity().is_empty(), "{:?}", f.validity());
-    // A 40 x 30 x 5 plate, its whole top outline rounded by 5 (mitred at the corners).
-    let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 5.0)).unwrap();
-    let top = [Vec3::new(20.0, 0.0, 5.0), Vec3::new(40.0, 15.0, 5.0), Vec3::new(20.0, 30.0, 5.0), Vec3::new(0.0, 15.0, 5.0)];
-    let f = fillet(&plate, &top, 5.0).unwrap();
-    let (a, c) = spandrel(5.0);
-    let want = 6000.0 - a * 2.0 * ((40.0 - 2.0 * c) + (30.0 - 2.0 * c));
-    let m = measure(&f).unwrap();
-    assert!(rel(m.volume, want) < 2e-4, "{} vs {want}", m.volume);
-    assert!(f.validity().is_empty(), "{:?}", f.validity());
-    // Taller than the wall the round overflows on its tangent side, past the wall's bottom
-    // edge: it is built on the wall continued down and cut from the disc (the owner's
-    // blend-overflow ruling, 2026-10-30), keeping its radius. Its section in (ρ, z) is the r
-    // square at the edge outside the circle about (13 − r, 2 − r), above z = 0: with
-    // t = z − (2 − r) = r sin θ and ρ(θ) = 13 − r + r cos θ the disc keeps
-    // π (169·2 − ∫ (169 − ρ²) dz), θ from asin((r − 2) / r) (957.692239 at r = 2.5).
-    let kept = |r: f64| {
-        let (n, lo) = (20000, ((r - 2.0) / r).asin());
-        let taken: f64 = (0..n)
-            .map(|i| {
-                let th = lo + (f64::from(i) + 0.5) * (PI / 2.0 - lo) / f64::from(n);
-                let rho = 13.0 - r + r * th.cos();
-                (169.0 - rho * rho) * r * th.cos()
-            })
-            .sum::<f64>()
-            * (PI / 2.0 - lo)
-            / f64::from(n);
-        PI * (169.0 * 2.0 - taken)
-    };
-    assert!(rel(kept(2.0), PI * 169.0 * 2.0 - spandrel(2.0).0 * 2.0 * PI * (13.0 - spandrel(2.0).1)) < 1e-9);
-    assert!((kept(2.5) - 957.692239).abs() < 1e-6, "{}", kept(2.5));
-    for r in [2.0 + 1e-3, 2.5] {
-        let f = fillet(&disc, &[Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)], r).unwrap_or_else(|e| panic!("{r}: {e}"));
-        assert!(f.validity().is_empty(), "{r}: {:?}", f.validity());
-        let v = measure(&f).unwrap().volume;
-        assert!(rel(v, kept(r)) < 1e-6, "{r}: {v} vs {}", kept(r));
-    }
-}
-
-#[test]
 fn fillet_consuming_a_side_face_makes_a_full_round() {
     // 14 x 6 x 10: r = 3 on the four vertical edges uses up both 6 mm end faces (#199).
     let b = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
@@ -393,63 +340,6 @@ fn fillet_max_finds_the_largest_radius_that_works() {
     assert_eq!(fillet_max(&b, &[Vec3::new(500.0, 0.0, 5.0)], 1.0).unwrap_err().to_string(), e.to_string());
 }
 
-/// Rounds past the bottom of a wall (a cliff) are built as if the wall went on and cut from the
-/// part (the blend-overflow decision, 237f0ae74), never refused as too large: a disc's top edge
-/// past its 2 mm wall, and a block's top outline past the 7 mm wall over a notch.
-#[test]
-fn rounds_past_the_bottom_of_a_wall_are_cut_from_the_part() {
-    // A 2 mm disc's top edge at 2.5 runs past the wall's bottom edge (a cliff): the round is
-    // built as if the wall went on down and cut from the disc (the blend-overflow decision,
-    // 237f0ae74), not refused. Its section in (ρ, z), the 2.5 square at the edge outside the
-    // circle about (10.5, -0.5) above z = 0, turned about the axis: with t = z + 0.5 =
-    // 2.5 sin θ, the round's inner radius ρ(θ) = 10.5 + 2.5 cos θ, the disc keeps
-    // π (169·2 − ∫ (169 − ρ²) dz) (2 mm: Pappus, as `loop_fillet_as_tall_as_its_wall_consumes_it`).
-    use std::f64::consts::FRAC_PI_2;
-    let disc = cylinder(Vec3::ZERO, Vec3::Z, 13.0, 2.0).unwrap();
-    let top = [Vec3::new(0.0, 13.0, 2.0), Vec3::new(0.0, -13.0, 2.0)];
-    let past = fillet(&disc, &top, 2.5).unwrap();
-    let (n, lo) = (20000, (0.5f64 / 2.5).asin());
-    let taken: f64 = (0..n)
-        .map(|i| {
-            let th = lo + (i as f64 + 0.5) * (FRAC_PI_2 - lo) / n as f64;
-            let rho = 10.5 + 2.5 * th.cos();
-            (169.0 - rho * rho) * 2.5 * th.cos()
-        })
-        .sum::<f64>()
-        * (FRAC_PI_2 - lo)
-        / n as f64;
-    let want = PI * (169.0 * 2.0 - taken);
-    assert!(rel(measure(&past).unwrap().volume, want) < 1e-6, "{} vs {want}", measure(&past).unwrap().volume);
-    // Walls of different heights, a 7 mm one over a notch: R7 uses that wall up (a round may),
-    // and R8 runs past its bottom edge into the notch (a cliff) and is cut by it. The outline's
-    // mitred round takes (1 − π/4) r² along the outline less 8 times its centroid's distance
-    // from the faces, r (10 − 3π) / (3 (4 − π)); at R8 less its part inside the notch
-    // [35, 40] × [0, 5] × [2, 3], where each of the corner's two rounds reaches g = 8 − √(64 − t²)
-    // in from its face at t = z − 2 on its side of the mitre: ∫₀¹ 2 (5g − g²/2) dt.
-    let notched = boolean(
-        &box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 10.0)).unwrap(),
-        &box_solid(Vec3::new(35.0, -1.0, -1.0), Vec3::new(41.0, 5.0, 3.0)).unwrap(),
-        BoolOp::Cut,
-    )
-    .unwrap()
-    .unwrap();
-    let outline = [Vec3::new(20.0, 0.0, 10.0), Vec3::new(40.0, 15.0, 10.0), Vec3::new(20.0, 30.0, 10.0), Vec3::new(0.0, 15.0, 10.0)];
-    let mitred = |r: f64| (1.0 - PI / 4.0) * r * r * (140.0 - 8.0 * r * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI)));
-    let in_notch: f64 = (0..n)
-        .map(|i| {
-            let t = (i as f64 + 0.5) / n as f64;
-            let g = 8.0 - (64.0 - t * t).sqrt();
-            2.0 * (5.0 * g - g * g / 2.0)
-        })
-        .sum::<f64>()
-        / n as f64;
-    for (r, want) in [(7.0, 11925.0 - mitred(7.0)), (8.0, 11925.0 - (mitred(8.0) - in_notch))] {
-        let b = fillet(&notched, &outline, r).unwrap();
-        assert!(b.validity().is_empty(), "{r}: {:?}", b.validity());
-        assert!(rel(measure(&b).unwrap().volume, want) < 1e-6, "{r}: {} vs {want}", measure(&b).unwrap().volume);
-    }
-}
-
 /// Edges that share no face get their own largest radius: a 2 mm fin's top edge takes at most
 /// its thickness, while a corner of the block it stands on, far from it, keeps the 4 asked for.
 /// Edges that limit each other (the post's four, sharing faces) still share one.
@@ -483,24 +373,14 @@ fn fillet_max_each_reduces_only_where_the_radius_does_not_fit() {
     assert_eq!(fillet_max_each(&post, &mids, 3.5).unwrap().map(|x| x.0), Some(vec![3.0; 4]));
 }
 
-/// A corner's rounds too large for its faces are refused as too large, so a fit can reduce
-/// them, also where only the corner build finds it (the edge-by-edge blend failing otherwise).
+/// A corner's rounds with a radius per edge, one wider than its faces, are refused as too large,
+/// so a fit can reduce them. (The same corner at one radius as wide as the faces, and its fit,
+/// are the rig's fillets/477-fillet-cube-corner-rounds-as-wide-as-faces-* cases; no command
+/// takes a radius per edge.)
 #[test]
 fn corner_rounds_larger_than_their_faces_are_too_large() {
-    let (l, eps) = (20.0, 1e-9);
-    let b = box_solid(Vec3::ZERO, Vec3::new(l, l, l)).unwrap();
+    let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0)).unwrap();
     let corner = [Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)];
-    // As wide as the faces: the first edge's round uses up its neighbour, then the edge-by-edge
-    // blend can't find it; the corner build is what says the radius is too large.
-    let e = fillet(&b, &corner, l).unwrap_err();
-    assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
-    let (r, body) = fillet_max(&b, &corner, l).unwrap().unwrap();
-    assert!((r - 19.99).abs() < eps, "{r}");
-    assert!(body.validity().is_empty(), "{:?}", body.validity());
-    // Three rounds along the edges past the corner cube, and the cube less its sphere octant.
-    let removed = 3.0 * (1.0 - PI / 4.0) * r * r * (l - r) + r * r * r * (1.0 - PI / 6.0);
-    assert!(rel(measure(&body).unwrap().volume, l * l * l - removed) < 2e-4);
-    // Different radii per edge, one wider than its faces.
     let sel: Vec<(Vec3, f64)> = corner.iter().copied().zip([21.0, 5.0, 5.0]).collect();
     let e = crate::blend_corner::fillet_radii(&b, &sel).unwrap_err();
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
@@ -1225,12 +1105,12 @@ fn chamfer_sloped_basin_rim() {
 }
 
 /// A chamfer wider than a basin's thin rim (`chamfer_sloped_basin_rim`'s basin with the rim
-/// `margin` wide at the top) would run its leg off the rim's top, over the slab's front edge,
-/// and lower the front face (a 2 mm chamfer on the 1 mm rim takes its top from 30 to 29.382):
+/// `margin` wide at the top) would run its leg off the rim's top, over the slab's front edge:
 /// refused as too large, naming the largest size that fits, the body unchanged (the owner's
 /// blend-overflow ruling, 2026-10-30). As wide as the rim it would use the rim's top up: refused
 /// too, so the largest that fits is the size just below the rim's width (the fit search's step,
-/// three significant digits of the size asked for). A smaller chamfer builds.
+/// three significant digits of the size asked for). (The chamfers that fit, with their exact
+/// volumes, are the rig's fillets/1080-chamfer-sloped-basin-* cases.)
 #[test]
 fn chamfer_wider_than_sloped_basin_rim_is_refused_naming_the_largest() {
     let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
@@ -1253,19 +1133,6 @@ fn chamfer_wider_than_sloped_basin_rim_is_refused_naming_the_largest() {
         let step = 10f64.powf(distance.log10().floor() - 3.0);
         assert!((margin - step - 1e-12..margin).contains(&largest), "{margin}, {distance}: {message}");
         assert_eq!(measure(&b).unwrap().volume, before);
-    }
-    // Half the rim's width fits: as `chamfer_sloped_basin_rim`, the triangle of legs d on the
-    // top and d down the wall (towards (20, 10), its run 20 − margin over the drop 20) takes
-    // d · drop / 2 with drop = 20 d / √((20 − margin)² + 400), its length 60 − h between the
-    // sloped end walls at depth h, so its volume is that area times 60 − drop / 3.
-    for margin in [0.5, 1.0] {
-        let b = basin(margin);
-        let d = margin * 0.5;
-        let smaller = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], d).unwrap();
-        assert!(smaller.validity().is_empty(), "{margin}: {:?}", smaller.validity());
-        let drop = 20.0 * d / ((20.0 - margin).powi(2) + 400.0).sqrt();
-        let want = measure(&b).unwrap().volume - d * drop / 2.0 * (60.0 - drop / 3.0);
-        assert!(rel(measure(&smaller).unwrap().volume, want) < 1e-8, "{margin}: {} vs {want}", measure(&smaller).unwrap().volume);
     }
 }
 

@@ -1,0 +1,7 @@
+{
+ "sources": [],
+ "what": "a thin bar with a 3 mm concave arc in its profile, its end cut by a plane tilted 21 deg (examples/regressions/oblique_cut_of_cylinder): the edge where the arc's cylinder meets the cut (part of an ellipse) rounded R0.1 (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): regressions/oblique_cut_of_cylinder, Tool F2:side:a1|F4:side:l1 edge.fillet)",
+ "source": "invariants",
+ "method": "an R0.1 round fits along that edge (the faces meet at a finite angle and the arc's radius is 3); the section along an elliptical edge on a cylinder has no closed form here: one closed valid solid is the right answer",
+ "body_count": 2
+}

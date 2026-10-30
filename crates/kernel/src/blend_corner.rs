@@ -298,81 +298,12 @@ mod tests {
         }
     }
 
+    /// A chamfer of a basin's rim loop whose leg would run off the 1 mm rim over the slab's front
+    /// edge is refused as too large, naming the largest that fits, just below the rim's width
+    /// (the fit search's step). (The loop's blends that fit, with their exact mitred volumes,
+    /// are the rig's fillets/1080-*-equal-slope-basin-* cases.)
     #[test]
-    fn sloped_rim_fillets_stay_inside_the_material() {
-        use solidcraft_geom::{Loop2, Plane, Vec2};
-        for margin in [0.5, 1.0] {
-            let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
-            let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
-            let pocket = crate::loft(&[
-                (Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)),
-                (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0)),
-            ])
-            .unwrap();
-            let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
-            let picks = [Vec3::new(50.0, margin, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-            // R4 runs over the thin rim's top past the slab's front edge (a cliff): it is built
-            // as if the top went on and cut from the slab (the blend-overflow decision,
-            // 237f0ae74), so nothing of it lies outside the slab.
-            for count in [1, 2, 4] {
-                for r in [4.0, margin * 0.5] {
-                    let result = fillet(&basin, &picks[..count], r).unwrap_or_else(|e| panic!("{margin}, {count}, {r}: {e}"));
-                    assert!(result.validity().is_empty(), "{margin}, {count}, {r}: {:?}", result.validity());
-                    assert!(vol(&result) < vol(&basin));
-                    for p in vertices(&result) {
-                        assert!(
-                            p.x >= 0.0 && p.x <= 100.0 && p.y >= 0.0 && p.y <= 60.0 && p.z >= 0.0 && p.z <= 30.0 + 1e-8,
-                            "{margin}, {count}, {r}: {p:?}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn chamfers_meet_on_unequal_sloped_rim_walls() {
-        use solidcraft_geom::{Loop2, Plane, Vec2};
-        for margin in [1.0, 4.0] {
-            let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
-            let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
-            let pocket = crate::loft(&[
-                (Plane::XY.offset(30.0), rectangle(20.0, margin, 80.0, 50.0)),
-                (Plane::XY.offset(10.0), rectangle(30.0, 20.0, 70.0, 40.0)),
-            ])
-            .unwrap();
-            let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
-            let picks = [Vec3::new(50.0, margin, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-            for count in [2, 3, 4] {
-                if margin == 1.0 {
-                    assert!(crate::chamfer(&basin, &picks[..count], 2.0).is_err());
-                    assert!(crate::chamfer(&basin, &picks[..count], 1.0).is_err());
-                }
-                let distance = if margin == 1.0 { 0.5 } else { 2.0 };
-                let result = crate::chamfer(&basin, &picks[..count], distance).unwrap();
-                assert!(result.validity().is_empty());
-                assert_eq!(result.unmeshed_faces(), 0);
-                assert!(vol(&result) < vol(&basin));
-                assert!(vol(&basin) - vol(&result) < distance.powi(2) * (60.0 + 50.0 - margin));
-                let reverse: Vec<_> = picks[..count].iter().copied().rev().collect();
-                let reversed = crate::chamfer(&basin, &reverse, distance).unwrap();
-                assert!((vol(&result) - vol(&reversed)).abs() < 1e-6);
-                // These are exact planes, with every boundary on its owning face.
-                let rec = Faces::of(&result).unwrap();
-                for f in 0..rec.rec.faces.len() {
-                    let Some(n) = rec.plane_normal(f) else { continue };
-                    let points: Vec<Vec3> = rec.uses(f).filter_map(|u| rec.ends(u.edge as usize)).flat_map(|(a, b)| [a, b]).collect();
-                    let origin = points[0];
-                    for p in points {
-                        assert!((p - origin).dot(n).abs() < 1e-7);
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn equal_slope_rim_loops_stay_inside_the_material() {
+    fn a_rim_loop_chamfer_running_off_its_rim_is_refused_naming_the_largest() {
         use solidcraft_geom::{Loop2, Plane, Vec2};
         let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
@@ -381,10 +312,6 @@ mod tests {
                 .unwrap();
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 1.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-        // The 2 mm chamfer's leg would run off the 1 mm rim's top over the slab's front edge and
-        // lower the front face: refused as too large, naming the largest that fits, below the
-        // rim's width (a full-width chamfer is refused too), the owner's blend-overflow ruling of
-        // 2026-10-30.
         let message = match crate::chamfer(&basin, &picks, 2.0) {
             Err(KernelError::TooLarge(m)) => m,
             Err(e) => panic!("refused, but not as too large: {e}"),
@@ -392,16 +319,5 @@ mod tests {
         };
         let largest: f64 = message.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
         assert!((1.0 - 1e-3 - 1e-12..1.0).contains(&largest), "{message}");
-        // Past the 1 mm rim the R4 round runs over the slab's front edge on its tangent side (a
-        // cliff) and is cut from the slab (the same ruling): nothing escapes it.
-        for (round, size) in [(true, 4.0), (false, 0.5), (true, 0.5)] {
-            let result = if round { fillet(&basin, &picks, size) } else { crate::chamfer(&basin, &picks, size) };
-            let result = result.unwrap_or_else(|e| panic!("round={round}, {size}: {e}"));
-            assert!(result.validity().is_empty(), "round={round}, {size}: {:?}", result.validity());
-            assert!(vol(&result) < vol(&basin));
-            for p in vertices(&result) {
-                assert!(p.x >= 0.0 && p.x <= 100.0 && p.y >= 0.0 && p.y <= 60.0 && p.z >= 0.0 && p.z <= 30.0 + 1e-8, "round={round}, {size}: {p:?}");
-            }
-        }
     }
 }

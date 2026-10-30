@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1113",
+  "tangency-labs/solidcraft#851"
+ ],
+ "what": "the top edge of #851's concave R21 wall chamfered 10, the wall's full height: refused as too large",
+ "source": "analytic",
+ "method": "a chamfer as tall as the wall would leave the wall a face of no area (its two boundary arcs on one line): refused as too large (#1113), naming the largest distance that fits",
+ "outcome": "refused",
+ "refusal": "the largest distance that fits is"
+}

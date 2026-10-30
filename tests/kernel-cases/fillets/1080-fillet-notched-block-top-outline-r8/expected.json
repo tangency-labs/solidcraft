@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1080"
+ ],
+ "what": "a 40 x 30 x 10 block with a 5 x 5 x 3 notch at a bottom corner, its top outline rounded R8: the round runs past the 7 mm wall over the notch into the notch and is cut by it",
+ "source": "analytic",
+ "method": "block 12000 less the notch 75: 11925. The outline's mitred round takes (1-pi/4) r^2 (140 - 8c), c = r (10-3pi)/(3(4-pi)) (the prisms ending on the 45 deg mitres). R8 reaches z = 2, into the notch [35,40] x [0,5] x [0,3]: at z = 2 + t each round's strip is g = 8 - sqrt(64 - t^2) in from its face, the two strips' union in the notch's 5 x 5 square 2(5g - g^2/2); its part in the notch, Int_0^1 2(5g - g^2/2) dt = 0.208039, is not material and is not taken. V = 10198.718039",
+ "body_count": 1,
+ "volume_mm3": 10198.718038815705,
+ "continuity": {
+  "order": "g1"
+ }
+}

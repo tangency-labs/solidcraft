@@ -1,0 +1,79 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 41.166666666666664,
+    "width": 21,
+    "height": 10,
+    "corner": [
+     0,
+     -21,
+     0
+    ],
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 21,
+    "width": 21,
+    "height": 10,
+    "corner": [
+     41.166666666666664,
+     -21,
+     0
+    ],
+    "body_name": "Corner"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 21,
+    "height": 10,
+    "base": [
+     62.166666666666664,
+     -21,
+     0
+    ],
+    "body_name": "Round"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Corner",
+    "tools": [
+     "Round"
+    ],
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Plate",
+    "tools": [
+     "Corner"
+    ],
+    "operation": "join"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      47.31742426174917,
+      -6.150757595082503,
+      10
+     ]
+    ],
+    "radius": 10,
+    "tangent_chain": false
+   }
+  }
+ ]
+}

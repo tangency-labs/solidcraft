@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#854"
+ ],
+ "what": "a disc r15 x 5 revolved from a sketch, both rims rounded R2.5 in one fillet: a full round of its 5 mm wall (robustness seed 33)",
+ "source": "analytic",
+ "method": "the rectangle 15 x 5 on XZ revolved about Z: a disc r15, z -5..0, V = pi 225 5. The two R2.5 rounds meet in a half circle about (12.5, -2.5): the 2.5 x 5 strip less the half disc, area 12.5 - pi 6.25/2 = 2.682523, its moment about the axis 12.5 x 13.75 - (pi 6.25/2)(12.5 + 10/(3pi)) = 38.739870; Pappus: removed 2 pi x that. V = 3290.881951",
+ "body_count": 1,
+ "volume_mm3": 3290.881951401919,
+ "watertight": true,
+ "continuity": {
+  "order": "g1"
+ }
+}

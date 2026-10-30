@@ -2,11 +2,42 @@
 # rig gate (.github/workflows/fillet-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: develop 242bbc89f with the SMLib fixes of 2026-10-29 (integration-overnight + b78bd4a), aarch64 Linux.
+1080-chamfer-sloped-basin-0-5-mm-rim-as-wide-as-the-rim-refused builds the full-width chamfer where it should be refused, naming the largest that fits
+1080-chamfer-sloped-basin-1-mm-rim-as-wide-as-the-rim-refused builds the full-width chamfer where it should be refused, naming the largest that fits
+1080-fillet-equal-slope-basin-1-mm-rim-loop-0-5 SMLib's check refuses the round: SmSurfOfRevolution Test #7, polar curve intervals do not match the surface's domain
+1080-fillet-equal-slope-basin-1-mm-rim-loop-4 not supported yet: a convex round past its face is not yet built by subtraction
+1080-fillet-notched-block-top-outline-r8 not supported yet: a convex round past its face is not yet built by subtraction (largest that fits named 7 mm)
+1080-fillet-sloped-basin-0-5-mm-rim-r4 not supported yet: a convex round past its face is not yet built by subtraction (largest that fits named 1.185 mm)
+1080-fillet-sloped-basin-0-5-mm-rim-r4-4-edges not supported yet: a convex round past its face is not yet built by subtraction
+1080-fillet-sloped-basin-1-mm-rim-r0-5-4-edges SMLib's check refuses the round: SmSurfOfRevolution Test #7, polar curve intervals do not match the surface's domain
+1080-fillet-sloped-basin-1-mm-rim-r4 not supported yet: a convex round past its face is not yet built by subtraction (largest that fits named 2.329 mm)
+1080-fillet-sloped-basin-1-mm-rim-r4-2-edges not supported yet: a convex round past its face is not yet built by subtraction
+1080-fillet-sloped-basin-1-mm-rim-r4-4-edges not supported yet: a convex round past its face is not yet built by subtraction
+1113-chamfer-arc-top-edge-full-wall-height-refused builds the chamfer as tall as the wall where it should be refused as too large
 1207-fillet-bar-top-edge-after-boss-arc-round-r0-5 SMLib's check refuses the round: internal coincident control points in a B-spline curve (an internal pole)
+190-fillet-disc-rim-past-its-2mm-wall SMLib status 1001: a convex round past its face is not yet built by subtraction
+2852-fillet-outer-round-r30-past-inner-round-refused refused for another reason: SMLib's result is not a closed solid, not too large naming 25.24
+2893-chamfer-distance-and-angle-past-the-wall-refused refused for another reason: SMLib SM_ERR_INVALID_INPUT, not a check saying the angle runs past the wall
+2893-chamfer-two-distances-elliptical-rim SMLib status 1001 on the elliptical rim's chamfer
+2893-chamfer-two-distances-past-the-bottom-refused refused for another reason: SMLib status 1001, not too large
 4782-fillet-bar-edge-wider-than-both-faces SMLib status 1001: a convex round past both its faces is not yet built by subtraction
 5158-fillet-round-just-past-a-10mm-face SMLib status 1001: a convex round 0.01 past its face is not yet built by subtraction (10.0001-10.04 open)
+5835-chamfer-sloped-basin-1-mm-rim-0-5-4-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corners
+5835-chamfer-sloped-basin-1-mm-rim-2-two-edges-refused refused for another reason: SMLib status 1001, not too large naming the largest that fits
+5835-chamfer-sloped-basin-4-mm-rim-2-2-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corner
+5835-chamfer-sloped-basin-4-mm-rim-2-4-edges SMLib status 1001 on the chamfers meeting at the rim's re-entrant corners
+851-chamfer-knife-edge-tip-0-5 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
+851-chamfer-knife-edge-tip-2 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
+851-chamfer-knife-edge-tip-2-box-less-cylinder SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
+851-chamfer-knife-edge-tip-2-sketched SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
+851-chamfer-knife-edge-tip-5 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
+851-fillet-knife-edge-tip-r2 SMLib SM_ERR_INVALID_INPUT on the knife edge (opposite normals on its two faces)
 9-fillet-corner-curvature-with-reduce-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
 9-fillet-corner-curvature-with-taper-fit not supported yet: solid.fillet builds corner g2 with the exact fit only
+926-chamfer-top-edge-ending-on-boss-wall-above-it not supported yet: the chamfer is refused as larger than its faces where it ends on the boss's wall
+cov-chamfer-concave-edge-through-up-down-joined-squares SMLib status 1001 on the concave chamfer's tangent chain
+cov-chamfer-outer-corner-edge-of-a-shelled-box-with-a-lip SMLib's chamfer result is not a closed solid where it ends on the lip
+cov-fillet-arc-edge-on-an-oblique-cut-of-a-bar SMLib's check refuses the round: internal coincident control points in a B-spline curve
 every-block-cylinder-crease-top-edge-after-arc-round-r1 the r1 round's contact seam with the block's side face reads 60 degrees (the cylinder wall's normal) at its end on the crease (8.660, 5, 15.284): G0 where the round is built tangent
 every-chamfer-pocket-rim-5-5-refused refused naming 5 mm as the largest distance: the full-width chamfer (legs as deep as the 5 mm walls) builds instead of being refused
 every-chamfer-pocket-rim-5-full-depth-refused the full-width chamfer (legs as deep as the 5 mm walls) builds instead of being refused

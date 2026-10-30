@@ -1,0 +1,137 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "offset": -462,
+    "name": "Profile"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      147.4407,
+      -849.95
+     ],
+     [
+      147.4407,
+      -851.0
+     ],
+     [
+      151.3952,
+      -851.0
+     ],
+     [
+      151.3952,
+      -847.4709
+     ],
+     [
+      150.3952,
+      -847.4709
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     147.4407,
+     -846.95
+    ],
+    "start": "l1.start",
+    "end": "l4.end"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Profile",
+    "profiles": "all",
+    "direction": "positive",
+    "start_offset": -1,
+    "distance": 437.52,
+    "operation": "new",
+    "body_name": "Tool"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ",
+    "name": "Clip"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -472,
+      853.91
+     ],
+     [
+      -432,
+      838.47
+     ],
+     [
+      -432,
+      820
+     ],
+     [
+      -472,
+      820
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Clip",
+    "profiles": "all",
+    "start_offset": -10,
+    "distance": 920,
+    "operation": "new",
+    "body_name": "ClipBody"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Tool",
+    "tools": [
+     "ClipBody"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      149.588908537341,
+      -458.93634537352193,
+      848.8674293141793
+     ]
+    ],
+    "radius": 0.1,
+    "body": "Tool"
+   }
+  }
+ ]
+}
