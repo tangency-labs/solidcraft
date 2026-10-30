@@ -1,7 +1,10 @@
 //! Differential checks of B-rep pointer reports and coincidence pairs against the
 //! unchanged c9c5979 C++ reference. The Rust side builds a [`BrepIn`] source itself
-//! ([`crate::own_builder`]); `.smb` files and the sheet grids export their actual
-//! topology, geometry ownership and global list order, which the Rust side imports. Post-call curve samples compare the
+//! ([`crate::own_builder`]) and reads an `.smb` file with the Rust reader
+//! ([`crate::own_reader::brep_in_order`]), both under this runner's conventions. Only
+//! the `SmBrepConstructor` sheet grids (`grid_faces`, `shared_boundaries`), whose
+//! constructor is not ported, still export their topology, geometry ownership and
+//! global list order for the Rust side to import. Post-call curve samples compare the
 //! reversal repairs and lazily created UV curves made by the checks themselves.
 use super::topology_edgeuse_p1::{brep_block_of, import_raw_with_types, path_of, BrepIn};
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
@@ -275,26 +278,36 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
     edgeuse_owner: &own_edgeuse_owner,
 };
 /// The Rust B-rep of a [`BrepIn`] source built by the Rust kernel
-/// ([`crate::own_builder`]: native lists, face uses and geometry owners, `Notify`
-/// naming as [`imported`] sets it), or the output of a failed build. `None` for the
-/// sources still imported from the shim's export: an `.smb` file and the
-/// `SmBrepConstructor` sheet grids (`grid_faces`, `shared_boundaries`).
+/// ([`crate::own_builder`]) or, for an `.smb` file, read by the Rust reader and
+/// renumbered into the shim's traversal order ([`crate::own_reader::brep_in_order`]):
+/// native lists, face uses and geometry owners under [`CONVENTIONS`], `Notify` naming as
+/// [`imported`] sets it. A failed build is the shim's failed construction; a failed
+/// read is a Rust divergence, reported as an error. `None` for the sources still
+/// imported from the shim's export: the `SmBrepConstructor` sheet grids (`grid_faces`,
+/// `shared_boundaries`), whose constructor is not ported.
 fn own_brep(i: &Inputs) -> Result<Option<Result<Brep, Output>>, HarnessError> {
-    use crate::own_builder::{build_with, Built};
+    use crate::own_builder::Built;
     if i.grid_faces.is_some() || i.shared_boundaries.is_some() {
         return Ok(None);
     }
+    let file = matches!(i.brep, BrepIn::File { .. });
     let mut k = Kernel::default();
-    Ok(match build_with(&mut k, &i.brep, false, false, &CONVENTIONS)? {
-        None => None,
-        Some(Built::Brep(b)) => {
-            let mut b = *b;
-            b.set_naming(NamingScheme::Notify);
-            Some(Ok(b))
-        }
-        Some(Built::Failed(e)) => Some(Err(Output::unported(&e)
-            .unwrap_or_else(|| Output::rejected("native fixture construction failed")))),
-    })
+    Ok(Some(
+        match crate::own_reader::brep_in_order(&mut k, &i.brep, false, false, &CONVENTIONS)? {
+            Built::Brep(b) => {
+                let mut b = *b;
+                b.set_naming(NamingScheme::Notify);
+                Ok(b)
+            }
+            Built::Failed(e) => Err(Output::unported(&e).unwrap_or_else(|| {
+                if file {
+                    Output::err(format!("rust read failed: {e}"))
+                } else {
+                    Output::rejected("native fixture construction failed")
+                }
+            })),
+        },
+    ))
 }
 fn orient(v: f64) -> solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType {
     use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
