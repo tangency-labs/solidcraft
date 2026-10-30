@@ -62,13 +62,15 @@ fn smlib_results_go_back_into_smlib() {
 }
 
 /// Extruded circles go into SMLib as its cylinder, so a boolean with one intersects a plane with
-/// a cylinder, not with a spline.
+/// a cylinder, not with a spline. The record holds the wall as the cylinder it is (one face,
+/// closed along its seam).
 #[test]
 fn extruded_circles_go_as_cylinders() {
     use solidcraft_smlib::flat;
     let body = cylinder(v(0., 50., -60.), v(0., 0., 1.), 40.0, 120.0).unwrap();
     let record = super::brep_record(&body).unwrap();
-    assert!(record.faces.iter().any(|f| matches!(f.surface, solidcraft_geom::brep::Surface::RationalSpline { .. })));
+    let walls = record.faces.iter().filter(|f| matches!(f.surface, solidcraft_geom::brep::Surface::Cylinder { .. })).count();
+    assert_eq!((walls, record.faces.len()), (1, 3));
     let arrays = solidcraft_smlib::import::arrays(&record, true).unwrap();
     let kinds = &arrays.ints[&flat::FACE_SURFACE_TYPE];
     assert!(kinds.iter().all(|k| *k == i64::from(flat::SURFACE_PLANE) || *k == i64::from(flat::SURFACE_CYLINDER)), "{kinds:?}");

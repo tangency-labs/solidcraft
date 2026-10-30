@@ -34,9 +34,9 @@ fn intersection_curves(body: &Body) -> Vec<Curve> {
 fn a_small_hole_in_a_large_spline_face_cuts_cleanly() {
     let (block, cut) = holed();
     assert!(cut.validity().is_empty(), "{:?}", cut.validity());
-    // The hole adds its wall (two half cylinders) and splits nothing: the bottom and the wave
-    // each gain a loop.
-    assert_eq!(cut.face_count(), block.face_count() + 2);
+    // The hole adds its wall (one cylinder, closed along its seam) and splits nothing: the
+    // bottom and the wave each gain a loop.
+    assert_eq!(cut.face_count(), block.face_count() + 1);
     let curves = intersection_curves(&cut);
     assert!(!curves.is_empty(), "the hole's rim on the wave is an intersection edge");
     // The wave is within a few tenths of a millimetre of flat across a Ø1 hole, so the hole

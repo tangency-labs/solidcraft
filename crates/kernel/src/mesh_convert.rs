@@ -478,7 +478,8 @@ mod tests {
             })
             .collect();
         assert_eq!(fit_loop(&points, 0.001, 1e-6).segs.len(), 16);
-        assert_eq!(fit_loop(&points, 0.2, 1e-6).segs.len(), 2);
+        // A circle is one closed arc.
+        assert_eq!(fit_loop(&points, 0.2, 1e-6).segs.len(), 1);
     }
 
     #[test]
@@ -549,7 +550,8 @@ mod tests {
             .collect();
         let inner = Loop2::polygon(&points);
         let fitted = fit_loop(&points, 0.05, 1e-6);
-        assert_eq!(fitted.segs.len(), 2);
+        // Fitted as a circle: one closed arc.
+        assert_eq!(fitted.segs.len(), 1);
         assert!(certify_nesting(&[outer.clone(), inner], &[outer, fitted], 1e-6, 3.).is_err());
     }
 
