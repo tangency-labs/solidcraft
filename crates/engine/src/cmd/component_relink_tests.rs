@@ -549,3 +549,18 @@ fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
     assert!(result["warnings"].as_array().unwrap().iter().any(|w| w.as_str().is_some_and(|w| w.contains("joint Seat:"))));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn a_physical_override_survives_a_link_update() {
+    let dir = folder("override-update");
+    let file = dir.join("source.solidcraft");
+    let mut part = properties_part(&file, "Steel", None, [12, 34, 56]);
+    let mut s = Session::default();
+    let c = run(&mut s, "component.insert_design", json!({"path": file}))["component"].as_u64().unwrap();
+    run(&mut s, "component.physical_override", json!({"component": c, "mass": 5.0}));
+    run(&mut part, "material.assign", json!({"bodies": ["Cube"], "material": "Aluminum"}));
+    run(&mut part, "file.save", json!({}));
+    assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"].as_array().unwrap().len(), 1);
+    let saved = s.doc.components.iter().find(|x| x.id == c).and_then(|x| x.physical_override);
+    assert_eq!(saved.map(|o| o.mass), Some(5.0));
+}

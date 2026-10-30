@@ -61,6 +61,11 @@ def poses(urdf, expected):
             if got[key] is None or abs(float(got[key]) - value) > TOLERANCE:
                 raise AssertionError(f"{joint} {key}: {got[key]}, expected {value}")
         checked += 1
+    for link, want in expected.get("mass", {}).items():
+        got = robot.link_map[link].inertial.mass
+        if abs(float(got) - want) > TOLERANCE:
+            raise AssertionError(f"{link} mass: {got}, expected {want}")
+        checked += 1
     for pose in expected.get("poses", []):
         for link, want in pose["links"].items():
             rest = transform(link, {})

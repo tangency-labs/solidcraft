@@ -1013,3 +1013,170 @@ fn a_frame_on_a_component_placed_twice_appears_once() {
     let p = package(&s);
     assert_eq!(p.model.links.iter().filter(|l| l.name.starts_with("tool0")).count(), 1, "{}", p.xml);
 }
+
+/// A link's mass, centre of mass (mm) and inertia.
+fn inertial_of(p: &UrdfPackage, link: &str) -> solidcraft_io::urdf::Inertial {
+    let l = p.model.links.iter().find(|l| l.name == link).unwrap_or_else(|| panic!("{}", p.xml));
+    l.inertial.unwrap_or_else(|| panic!("{} has no inertial", l.name))
+}
+
+#[test]
+fn a_mass_override_scales_inertia_and_keeps_the_centre() {
+    let mut s = two_cubes();
+    let before = inertial_of(&package(&s), "B");
+    let mass = before.mass * 2.0;
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": mass}));
+    let after = inertial_of(&package(&s), "B");
+    assert!((after.mass - mass).abs() < 1e-12);
+    for (a, b) in after.inertia.iter().flatten().zip(before.inertia.iter().flatten()) {
+        assert!((a - 2.0 * b).abs() < 1e-15, "{a} {b}");
+    }
+    let moved = after.com - before.com;
+    assert!(moved.dot(moved) < 1e-24);
+}
+
+#[test]
+fn a_full_override_replaces_all_three() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 3.0, "com": [21, 2, 3], "inertia": [1.0, 2.0, 3.0, 0.1, 0.2, 0.3]}));
+    let i = inertial_of(&package(&s), "B");
+    assert_eq!(i.mass, 3.0);
+    let off = i.com - solidcraft_geom::Vec3::new(21.0, 2.0, 3.0);
+    assert!(off.dot(off) < 1e-18, "{:?}", i.com);
+    assert_eq!(i.inertia, [[1.0, 0.1, 0.2], [0.1, 2.0, 0.3], [0.2, 0.3, 3.0]]);
+}
+
+/// A link's centre of mass (mm) and inertia, in world axes.
+fn world_inertial(p: &UrdfPackage, s: &Session, link: &str) -> (solidcraft_geom::Vec3, [[f64; 3]; 3]) {
+    let i = inertial_of(p, link);
+    let f = frame_of(p, s, link);
+    let com = solidcraft_doc::apply_point(&f, i.com);
+    let r = |a: usize, b: usize| f[b][a];
+    let mut out = [[0.0; 3]; 3];
+    for (x, row) in out.iter_mut().enumerate() {
+        for (y, cell) in row.iter_mut().enumerate() {
+            for a in 0..3 {
+                for b in 0..3 {
+                    *cell += r(x, a) * i.inertia[a][b] * r(y, b);
+                }
+            }
+        }
+    }
+    (com, out)
+}
+
+fn assert_world_inertial(p: &UrdfPackage, s: &Session, link: &str, com: [f64; 3], diagonal: [f64; 3]) {
+    let (c, i) = world_inertial(p, s, link);
+    let off = c - solidcraft_geom::Vec3::new(com[0], com[1], com[2]);
+    assert!(off.dot(off) < 1e-16, "{link}: centre {c:?}, expected {com:?}");
+    for k in 0..3 {
+        assert!((i[k][k] - diagonal[k]).abs() < 1e-9, "{link}: {i:?}, expected {diagonal:?}");
+    }
+}
+
+#[test]
+fn each_placement_gets_the_override_in_its_own_frame() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 3.0, "com": [21, 0, 0], "inertia": [1.0, 2.0, 3.0, 0.0, 0.0, 0.0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "B"}));
+    let copy = s.doc.occurrences.iter().map(|o| o.id).max().unwrap_or(0);
+    // A quarter turn about z: x goes to y, so xx and yy swap and the centre swings to +y.
+    run(&mut s, "occurrence.move", json!({"occurrence": copy, "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    let p = package(&s);
+    assert_world_inertial(&p, &s, "B_1", [21.0, 0.0, 0.0], [1.0, 2.0, 3.0]);
+    assert_world_inertial(&p, &s, "B_2", [0.0, 21.0, 0.0], [2.0, 1.0, 3.0]);
+}
+
+#[test]
+fn an_override_on_a_jointed_part_follows_it() {
+    let mut s = two_cubes();
+    // B's bottom centre (25, 5, 0) goes to A's top centre (5, 5, 10): a move of (-20, 0, 10).
+    joint(&mut s, "revolute", "Turn", json!([]));
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 3.0, "com": [25, 5, 5], "inertia": [1.0, 2.0, 3.0, 0.0, 0.0, 0.0]}));
+    let p = package(&s);
+    assert_world_inertial(&p, &s, "B", [5.0, 5.0, 15.0], [1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn nested_components_keep_their_own_values() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Leg"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 30, "corner": [0, 0, 0]}));
+    let leg = s.doc.find_component("Leg").unwrap_or(0);
+    run(&mut s, "component.create", json!({"name": "Foot", "parent": leg}));
+    run(&mut s, "solid.box", json!({"length": 12, "width": 12, "height": 2, "corner": [-1, -1, -2]}));
+    let foot = inertial_of(&package(&s), "Foot").mass;
+    run(&mut s, "component.physical_override", json!({"component": "Leg", "mass": 9.0}));
+    let p = package(&s);
+    assert_eq!(inertial_of(&p, "Leg").mass, 9.0);
+    assert_eq!(inertial_of(&p, "Foot").mass, foot);
+}
+
+#[test]
+fn the_root_design_is_refused() {
+    let mut s = two_cubes();
+    assert!(s.execute("component.physical_override", &json!({"component": "root", "mass": 1.0})).is_err());
+}
+
+#[test]
+fn mass_alone_on_open_surfaces_is_refused_and_works_with_inertia() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Sheet"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
+    assert!(s.execute("component.physical_override", &json!({"component": "Sheet", "mass": 1.0})).is_err());
+    run(&mut s, "component.physical_override", json!({"component": "Sheet", "mass": 1.0, "inertia": [1, 1, 1, 0, 0, 0]}));
+    assert_eq!(inertial_of(&package(&s), "Sheet").mass, 1.0);
+}
+
+#[test]
+fn hand_edited_overrides_are_ignored_with_a_warning() {
+    let mut s = two_cubes();
+    let before = inertial_of(&package(&s), "B").mass;
+    let bad = solidcraft_doc::PhysicalOverride { mass: f64::NAN, com: None, inertia: None };
+    let id = s.doc.find_component("B").unwrap_or(0);
+    if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
+        c.physical_override = Some(bad);
+    }
+    let p = package(&s);
+    assert_eq!(inertial_of(&p, "B").mass, before);
+    assert!(p.warnings.iter().any(|w| w.contains("override") && w.contains('B')), "{:?}", p.warnings);
+}
+
+#[test]
+fn physical_override_refuses_hostile_values() {
+    let mut s = two_cubes();
+    for p in [
+        json!({"component": "B", "mass": 0.0}),
+        json!({"component": "B", "mass": -1.0}),
+        json!({"component": "B", "mass": 1e300}),
+        json!({"component": "B", "mass": 1.0, "com": [1, 2]}),
+        json!({"component": "B", "mass": 1.0, "inertia": [1, 1, 1]}),
+        json!({"component": "B", "mass": 1.0, "inertia": [0, 1, 1, 0, 0, 0]}),
+        json!({"component": "B", "com": [1, 2, 3]}),
+        json!({"component": "Nobody", "mass": 1.0}),
+    ] {
+        assert!(s.execute("component.physical_override", &p).is_err(), "{p}");
+    }
+}
+
+#[test]
+fn omitting_every_value_clears_the_override() {
+    let mut s = two_cubes();
+    let before = inertial_of(&package(&s), "B").mass;
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 5.0}));
+    run(&mut s, "component.physical_override", json!({"component": "B"}));
+    assert_eq!(inertial_of(&package(&s), "B").mass, before);
+}
+
+#[test]
+fn properties_keep_the_computed_mass_and_note_the_override() {
+    let mut s = two_cubes();
+    let before = run(&mut s, "component.properties", json!({"component": "B"}));
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 5.0}));
+    let after = run(&mut s, "component.properties", json!({"component": "B"}));
+    assert_eq!(after["mass"], before["mass"]);
+    assert_eq!(after["physical_override"]["mass"], json!(5.0), "{after}");
+}

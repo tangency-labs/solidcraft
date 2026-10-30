@@ -428,3 +428,36 @@ pub struct ReparentItemsResult {
 #[cfg(test)]
 #[path = "component_tests.rs"]
 mod tests;
+
+/// Set or clear the mass values robot exports use for a component's own bodies (a bought motor
+/// modelled as a solid block). Its nested components keep theirs. Give none to clear them.
+/// Properties and the bill of materials keep the mass worked out from the bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PhysicalOverrideParams {
+    /// The component, by id or name. Not the root design.
+    pub component: IdOrName,
+    /// Mass in kg. Required with `com` or `inertia`.
+    #[serde(default)]
+    pub mass: Option<f64>,
+    /// Centre of mass in mm, in the component's frame. Default: worked out from its bodies.
+    #[serde(default)]
+    pub com: Option<[f64; 3]>,
+    /// Inertia about the centre of mass, kg m², along the component's axes: xx, yy, zz, xy, xz, yz.
+    /// Default: worked out from its bodies, scaled by the mass.
+    #[serde(default)]
+    pub inertia: Option<[f64; 6]>,
+}
+
+/// What `component.physical_override` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PhysicalOverrideResult {
+    /// The component, by id.
+    pub component: u64,
+    /// The mass now saved in kg. Absent when cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

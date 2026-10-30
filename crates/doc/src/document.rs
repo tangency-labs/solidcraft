@@ -2062,6 +2062,38 @@ pub struct Component {
     /// Free text properties of the definition (material grade, finish, supplier…), by name.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub properties: std::collections::BTreeMap<String, String>,
+    /// Mass values that replace those worked out from its bodies, for robot exports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_override: Option<PhysicalOverride>,
+}
+
+/// Measured or catalogue mass values of a component's own bodies (a bought motor modelled as a
+/// solid block). Its nested components keep theirs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PhysicalOverride {
+    /// kg.
+    pub mass: f64,
+    /// Centre of mass: mm, in the component's frame. Default: the one worked out from its bodies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub com: Option<[f64; 3]>,
+    /// About the centre of mass, kg m², along the component's axes: xx, yy, zz, xy, xz, yz.
+    /// Default: the one worked out from its bodies, scaled by the mass.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia: Option<[f64; 6]>,
+}
+
+impl PhysicalOverride {
+    /// The largest mass one can hold (kg).
+    pub const MAX_MASS: f64 = 1e9;
+
+    /// Whether these are numbers a command accepts, unlike what a hand-edited file could hold.
+    pub fn is_sane(&self) -> bool {
+        self.mass.is_finite()
+            && self.mass > 0.0
+            && self.mass <= Self::MAX_MASS
+            && self.com.is_none_or(|c| c.iter().all(|x| x.is_finite()))
+            && self.inertia.is_none_or(|i| i.iter().all(|x| x.is_finite()) && i[..3].iter().all(|x| *x > 0.0))
+    }
 }
 
 /// One loft section: profiles of a sketch.
