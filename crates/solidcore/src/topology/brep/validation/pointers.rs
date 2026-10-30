@@ -1129,6 +1129,46 @@ fn check_edge_geometry(
     } else {
         required(cache.mate(b, primary, false)?)?
     };
+    edge_geometry(k, b, e, eu, false, keys)
+}
+
+/// `SmEdge::ValidateGeometry(bFixTolerances)` (CO-PORTED by unit
+/// `blend.fillet_removal`, which validates with `bFixTolerances = TRUE` through
+/// `SmEdge::SetTrimCurve`): [`check_edge_geometry`] with the primary edge use's mate
+/// found by `GetMate`.
+///
+/// # Errors
+///
+/// As [`check_edge_geometry`].
+pub(crate) fn validate_geometry(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    fix_tolerances: bool,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+) -> Result<()> {
+    let primary = required(b.edge(e)?.edgeuses.first().copied())?;
+    let eu = if b.edgeuse(primary)?.orientation == OrientType::Same {
+        primary
+    } else {
+        required(eu1::mate(b, primary)?)?
+    };
+    edge_geometry(k, b, e, eu, fix_tolerances, keys)
+}
+
+/// The body of `SmEdge::ValidateGeometry(bFixTolerances)` from the edge use `eu` the
+/// curve runs with. With `fix_tolerances` a curve end farther from its vertex than the
+/// tolerances allow, but closer than 100 vertex tolerances, grows the vertex tolerance
+/// to twice the gap instead of failing, and a UV trim curve whose interval differs from
+/// the edge's is reparameterized to it.
+fn edge_geometry(
+    k: &Kernel,
+    b: &mut Brep,
+    e: EdgeId,
+    eu: EdgeuseId,
+    fix_tolerances: bool,
+    keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
+) -> Result<()> {
     let vu = required(b.edgeuse(eu)?.vertexuse)?;
     let start = required(b.vertexuse(vu)?.vertex)?;
     let end = required(edge::other_vertex(b, e, Some(start))?)?;
@@ -1143,13 +1183,32 @@ fn check_edge_geometry(
     let p0 = curve.evaluate_point(k, ivl.min())?;
     let p1 = curve.evaluate_point(k, ivl.max())?;
     for (point, v) in [(p0, start), (p1, end)] {
-        if point.distance(b.vertex(v)?.point) > b.vertex(v)?.tolerance + b.edge(e)?.tolerance {
-            return Err(crate::SolidError::sm_err(super::OP));
+        let dist = point.distance(b.vertex(v)?.point);
+        let v_tol = b.vertex(v)?.tolerance;
+        if dist > v_tol + b.edge(e)?.tolerance {
+            if fix_tolerances && dist < v_tol * 100.0 {
+                let zone = crate::geom::tol::zone_tol3d(k, dist * 2.0);
+                crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
+            } else {
+                return Err(crate::SolidError::sm_err(super::OP));
+            }
         }
     }
     // Interval and UV-distance mismatches only log warnings; they do not change
     // this function's status. Retain their actual evaluations and reversal edits.
     for eu in b.edge(e)?.edgeuses.clone() {
+        if fix_tolerances {
+            if let Some(trim) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
+                let uv_ivl = trim.natural_interval();
+                // (statuses ignored upstream)
+                if !crate::geom::tol::are_same(uv_ivl.min(), ivl.min()) {
+                    crate::error::ignore_status(trim.edit_parameterization(k, &ivl))?;
+                }
+                if !crate::geom::tol::are_same(uv_ivl.max(), ivl.max()) {
+                    crate::error::ignore_status(trim.edit_parameterization(k, &ivl))?;
+                }
+            }
+        }
         if let Some(trim) = b.edgeuse(eu)?.uv_trim_curve.as_ref() {
             let f = required(eu1::face(b, eu)?)?;
             let s = required(b.face(f)?.surface.as_ref())?;

@@ -2988,8 +2988,9 @@ pub(super) fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
 }
 
 /// `SmBSplineCurve::JoinWith` (virtual) on an edge's curve: the `SmLine` and `SmEllipse`
-/// overrides for those kinds, the B-spline join on the `SmBSplineCurve` part otherwise.
-fn join_with(
+/// overrides for those kinds, the B-spline join on the `SmBSplineCurve` part otherwise
+/// (shared with unit `blend.fillet_removal`).
+pub(crate) fn join_with(
     k: &Kernel,
     this: &mut Curve,
     this_at_end: bool,

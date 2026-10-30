@@ -183,7 +183,7 @@ use crate::surface::surface_cache::face_context::FaceQueries;
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::brep::p1 as bp1;
 use crate::topology::brep::p2 as brep_p2;
-use crate::topology::edge::{self as topo_edge, NotificationStores, NotifyState, SetCurveOptions};
+use crate::topology::edge::{self as topo_edge, NotificationStores, NotifyState};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p3::create_uv_trim_curves;
 use crate::topology::proto_topology::ProtoGeometry;
@@ -1409,23 +1409,15 @@ fn brep_replace_curve(
     k: &mut Kernel,
     b: &mut Brep,
     e: EdgeId,
-    mut curve: Curve,
+    curve: Curve,
     stores: &mut NotificationStores<'_>,
 ) -> Result<()> {
-    let interval = curve.natural_interval();
     NotifyState::from_kernel_stores(stores).with_kernel_env(k, |_k, env| {
         let this = Some(brep_p2::NotifyArg::Object(brep_p2::brep_ref(b)));
         brep_p2::notify(b, env, None, NotifyOperation::PreEdit, [this, None, None])?;
 
         // Replace3DCurve
-        let owner = (env.key_of)(EntityRef::Edge(e));
-        let _ = curve.set_owner(Some(owner), Some(brep_p2::brep_ref(b)));
-        let options = SetCurveOptions {
-            delete_old_curve: true,
-            ..SetCurveOptions::default()
-        };
-        let _ = topo_edge::set_curve(b, e, Some(curve), options, env, [None, None])?;
-        topo_edge::set_interval(b, e, &interval)?;
+        topo_edge::replace_3d_curve(b, e, Some(curve), env)?;
 
         // RemoveUVTrimCurves (ClearUVCaches)
         let edge_ref = (env.key_of)(EntityRef::Edge(e));

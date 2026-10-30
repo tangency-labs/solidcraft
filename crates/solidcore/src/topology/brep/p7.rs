@@ -644,7 +644,7 @@ fn mid_edge(ivl: &CurveInterval<IntersectObject>) -> Result<EdgeId> {
 // ---- owning-list edits ----------------------------------------------------------------------
 
 /// `SmEdge::Remove(eu)`: unlinks the edge use from the edge.
-fn edge_remove(b: &mut Brep, e: EdgeId, eu: EdgeuseId) -> Result<()> {
+pub(crate) fn edge_remove(b: &mut Brep, e: EdgeId, eu: EdgeuseId) -> Result<()> {
     let list = &mut b.edge_mut(e)?.edgeuses;
     let Some(at) = list.iter().position(|&x| x == eu) else {
         return Err(SolidError::sm_err(OP));

@@ -2673,6 +2673,38 @@ pub fn set_curve(
     set_curve_with_identity(b, e, new_curve, options, env, curve_refs, None)
 }
 
+/// `Replace3DCurve(p3DCurve)` (CO-PORTED by unit `blend.fillet_removal`; shared with
+/// `SmBrep::ReplaceCurve` in `offset::offset_geometry_creation`): `SetCurve(p3DCurve,
+/// TRUE)` (the old curve and, through the change notification, the edge uses' UV trim
+/// curves deleted), then for a new curve its owner set to the edge (`SetOwner`, under
+/// `env`'s identity of the edge) and the edge's interval to the curve's natural interval.
+///
+/// # Errors
+///
+/// Those of [`set_curve`] and [`set_interval`].
+pub(crate) fn replace_3d_curve(
+    b: &mut Brep,
+    e: EdgeId,
+    curve: Option<Curve>,
+    env: &mut NotifyEnv<'_>,
+) -> Result<()> {
+    let interval = curve.as_ref().map(Curve::natural_interval);
+    let curve = curve.map(|mut c| {
+        let owner = (env.key_of)(EntityRef::Edge(e));
+        let _ = c.set_owner(Some(owner), Some(crate::topology::brep::p2::brep_ref(b)));
+        c
+    });
+    let options = SetCurveOptions {
+        delete_old_curve: true,
+        ..SetCurveOptions::default()
+    };
+    let _ = set_curve(b, e, curve, options, env, [None, None])?;
+    if let Some(interval) = interval {
+        set_interval(b, e, &interval)?;
+    }
+    Ok(())
+}
+
 /// Replace the actual edge curve while notifying its body's issued identity.
 /// The cache, UV invalidation and curve lifecycle share [`set_curve`]'s body.
 /// Other edge APIs retain their existing identity contract.
