@@ -15,6 +15,7 @@
 1080-fillet-sloped-basin-1-mm-rim-r4-4-edges not supported yet: a convex round past its face is not yet built by subtraction
 1113-chamfer-arc-top-edge-full-wall-height-refused builds the chamfer as tall as the wall where it should be refused as too large
 1207-fillet-bar-top-edge-after-boss-arc-round-r0-5 SMLib's check refuses the round: internal coincident control points in a B-spline curve (an internal pole)
+1207-fillet-concave-arc-bar-top-into-cylinder-solver-residues SMLib status 1001: SmFilletNx1Corner cannot make the topology at the arc's end (fillet error 3, corner type 8)
 1207-fillet-corner-after-round-running-into-cylinder-solver-residues SMLib's check refuses the round: its corner's surface of revolution is close to singular at its boundary (SmSurface test 5)
 1668-fillet-outer-top-edge-of-thin-wall-r7-past-inside-corner a slit along the hollow, 0.507 mm^3 off: 38458.389 is V0 less the round's whole section along 104, so the section's part over the hollow (0.005068 mm^2 along 100), which is not material, is taken anyway
 190-fillet-disc-rim-past-its-2mm-wall SMLib status 1001: a convex round past its face is not yet built by subtraction
