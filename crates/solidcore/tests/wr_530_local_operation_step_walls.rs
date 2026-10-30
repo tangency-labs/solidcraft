@@ -9,11 +9,9 @@
 //! the move), and WR-530's boss wall moved out 1 off its base round (the 8 of wall above
 //! the round grows from r10 to r11: plus pi * (121 - 100) * 8).
 //!
-//! Open (ignored below, see the WR-530 addendum): in the port the piece under the
-//! imprinting box (x > split, whose side faces the imprint split) is still refused by
-//! `ExtendTrimEdges`, and the boss wall stops in `CloseLoopGap` with
-//! `SM_ERR_OFFSET_EDGE_VANISHES`; the fork builds both. The piece on the other side of the
-//! split, up and down, is built.
+//! Each moved face gets its own surface offset (`CreateOffsetSurface`), as the fork's
+//! `smlib_offset_faces` moves it: the local operation lifts the face's edges onto the new
+//! surface by their UV, so the new surface must keep the face's parameterization.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -32,10 +30,9 @@ use solidcore::boolean::api_brep::{boolean_union, boolean_with_options};
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::error::{SolidError, SM_ERR};
 use solidcore::geom::a_object::BooleanOperation;
-use solidcore::math::Point3;
-use solidcore::primitive::api_primitives::{
-    create_box, create_cylinder, create_cylinder_surface, create_plane_surface,
-};
+use solidcore::math::{Point3, Vec3};
+use solidcore::nurbs::knots::Side;
+use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::topology::FaceId;
@@ -86,17 +83,24 @@ fn top_piece(k: &Kernel, b: &Brep, dz: f64, split: f64, above: bool) -> FaceId {
     pieces[0]
 }
 
-/// The split block's `piece` given the `dx x dy` plane from `origin` as its new
-/// surface (`SmBrep::LocalOperation`).
-fn move_piece(
-    k: &mut Kernel,
-    b: &mut Brep,
-    piece: FaceId,
-    origin: Point3,
-    dx: f64,
-    dy: f64,
-) -> solidcore::Result<()> {
-    let surface = Surface::from(create_plane_surface(origin, dx, dy).unwrap());
+/// The surface of `f` offset by `d` towards `towards` (`CreateOffsetSurface`, as the
+/// fork's `smlib_offset_faces` moves a face). The offset keeps the face's own
+/// parameterization: the local operation lifts the face's edges onto the new surface by
+/// their UV, so a surface built afresh (another origin, another radius in an arc-length
+/// parameter) carries them elsewhere.
+fn moved_surface(k: &Kernel, b: &Brep, f: FaceId, towards: Vec3, d: f64) -> Surface {
+    let face = b.face(f).unwrap();
+    let s = face.surface.as_ref().unwrap();
+    let n = s
+        .evaluate_normal(k, face.uv_domain.mid(), Side::Left, Side::Left)
+        .unwrap();
+    let signed = if n.dot(towards) > 0.0 { d } else { -d };
+    s.create_offset_surface(k, signed, 1e-6).unwrap().unwrap()
+}
+
+/// The split block's `piece` moved `dz` along z (`SmBrep::LocalOperation`).
+fn move_piece(k: &mut Kernel, b: &mut Brep, piece: FaceId, dz: f64) -> solidcore::Result<()> {
+    let surface = moved_surface(k, b, piece, Vec3::new(0.0, 0.0, 1.0), dz);
     let mut notifications = Notifications::new(b);
     local_operation(k, b, &[piece], vec![surface], &mut notifications.context())
 }
@@ -115,29 +119,21 @@ fn wr_530_step_up_on_a_split_block_top_is_built() {
     let mut k = kernel(true);
     let mut b = split_block(&mut k, 40.0, 30.0, 10.0, 20.0);
     let piece = top_piece(&k, &b, 10.0, 20.0, false);
-    move_piece(
-        &mut k,
-        &mut b,
-        piece,
-        Point3::new(0.0, 0.0, 12.0),
-        20.0,
-        30.0,
-    )
-    .unwrap();
+    move_piece(&mut k, &mut b, piece, 2.0).unwrap();
     b.refresh_cached_topology();
     assert!(report(&k, "wr_530 step up 2", Ok(b), Some(13200.0), 1e-6));
 }
 
 /// `ops_kernel`'s split block: 60 x 40 x 20, the top split at x = 30, one piece up 1
-/// (adds 30 x 40 x 1) and down 1 (takes it off). Here the piece x < 30 (the fork's case
-/// moves the piece x > 30: `wr_530_step_on_the_imprinted_piece_is_built`).
+/// (adds 30 x 40 x 1) and down 1 (takes it off), here the piece x < 30 (the fork's own
+/// piece, x > 30: `wr_530_step_on_the_imprinted_piece_is_built`).
 #[test]
 fn wr_530_step_up_and_down_on_a_split_block_top_is_built() {
     for (to, want) in [(21.0, 49200.0), (19.0, 46800.0)] {
         let mut k = kernel(true);
         let mut b = split_block(&mut k, 60.0, 40.0, 20.0, 30.0);
         let piece = top_piece(&k, &b, 20.0, 30.0, false);
-        move_piece(&mut k, &mut b, piece, Point3::new(0.0, 0.0, to), 30.0, 40.0).unwrap();
+        move_piece(&mut k, &mut b, piece, to - 20.0).unwrap();
         b.refresh_cached_topology();
         assert!(report(
             &k,
@@ -152,20 +148,11 @@ fn wr_530_step_up_and_down_on_a_split_block_top_is_built() {
 /// The fork's own case: the piece x > 30, under the imprinting box (its side neighbours are
 /// the pieces the imprint split off the side faces), up 1.
 #[test]
-#[ignore = "open: the port's ExtendTrimEdges still refuses this piece (WR-530 addendum)"]
 fn wr_530_step_on_the_imprinted_piece_is_built() {
     let mut k = kernel(true);
     let mut b = split_block(&mut k, 60.0, 40.0, 20.0, 30.0);
     let piece = top_piece(&k, &b, 20.0, 30.0, true);
-    move_piece(
-        &mut k,
-        &mut b,
-        piece,
-        Point3::new(30.0, 0.0, 21.0),
-        30.0,
-        40.0,
-    )
-    .unwrap();
+    move_piece(&mut k, &mut b, piece, 1.0).unwrap();
     b.refresh_cached_topology();
     assert!(report(
         &k,
@@ -181,14 +168,7 @@ fn wr_530_split_block_step_is_refused_without_the_opt_in() {
     let mut k = kernel(false);
     let mut b = split_block(&mut k, 60.0, 40.0, 20.0, 30.0);
     let piece = top_piece(&k, &b, 20.0, 30.0, true);
-    refused(move_piece(
-        &mut k,
-        &mut b,
-        piece,
-        Point3::new(30.0, 0.0, 21.0),
-        30.0,
-        40.0,
-    ));
+    refused(move_piece(&mut k, &mut b, piece, 1.0));
 }
 
 const AXIS: (f64, f64) = (30.0, 20.0);
@@ -231,12 +211,15 @@ fn move_boss_wall(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<()> {
         })
         .collect();
     assert!(!faces.is_empty(), "the boss's wall");
+    // each wall face's cylinder, offset 1 outwards (r10 to r11)
     let surfaces = faces
         .iter()
-        .map(|_| {
-            Surface::from(
-                create_cylinder_surface(k, Point3::new(AXIS.0, AXIS.1, 5.0), 11.0, 15.0).unwrap(),
-            )
+        .map(|&f| {
+            let face = b.face(f).unwrap();
+            let s = face.surface.as_ref().unwrap();
+            let p = s.evaluate_point(k, face.uv_domain.mid()).unwrap();
+            let out = Vec3::new(p.x - AXIS.0, p.y - AXIS.1, 0.0);
+            moved_surface(k, b, f, out, 1.0)
         })
         .collect();
     let mut notifications = Notifications::new(b);
@@ -246,7 +229,6 @@ fn move_boss_wall(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<()> {
 /// The boss wall moved off its base round keeps the round and gains a ledge on top of
 /// it (the step wall round the circle, built without folding through its own axis).
 #[test]
-#[ignore = "open: the port stops in CloseLoopGap with SM_ERR_OFFSET_EDGE_VANISHES (WR-530 addendum)"]
 fn wr_530_boss_wall_moved_off_its_round_builds_the_step() {
     let mut k = kernel(true);
     let mut b = boss_part(&mut k);
