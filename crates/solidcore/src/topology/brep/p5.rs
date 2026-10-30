@@ -39,6 +39,9 @@
 //! (`topology.brep_p9`) notify through that environment, so [`make_manifold`] and
 //! [`stitch_and_orient`] take the kernel. Curves have no identity in the port: `SetCurve`'s new/old curve
 //! data are null and a curve's own `SM_NO_CHANGE_OWNER` is not delivered.
+//! Not upstream: with `Kernel::fixes.glue_vertices_joins_every_region` (WR-607; SolidCraft
+//! change, tangency-labs/smlib 661f79c) [`glue_vertices`] joins the pair of shells of every
+//! region both vertices are in, not only the last pair its search finds.
 //! `SmBrep::Notify` is owned by `topology.brep_p2`, not this unit. Owning-list
 //! traversal (`GetRegions`, `GetFaces`, `GetEdges`, `GetVertices`) and the editing
 //! flag are `topology.brep_p1`'s list-order collections and `Brep` member. Pointer inputs are optional typed ids;
@@ -1322,11 +1325,18 @@ fn glue_with_notification_identity(
     }
     let distance = b.vertex(survivor)?.point.distance(b.vertex(deleted)?.point);
     let mut pair = None;
+    // Not upstream (WR-607, `fixes.glue_vertices_joins_every_region`; SolidCraft change,
+    // tangency-labs/smlib 661f79c): every region both vertices are in has its pair of
+    // shells, all of which the glue joins (a solid's vertex is in a shell of the solid's
+    // region and one of the infinite region's); one pair is kept apart below for the
+    // vertex-shell cases.
+    let mut pairs = Vec::new();
     for first in vertex::shells(b, survivor)? {
         let region = b.shell(first)?.region;
         for last in vertex::shells(b, deleted)? {
             if region == b.shell(last)?.region {
                 pair = Some((first, last));
+                pairs.push((first, last));
                 break;
             }
         }
@@ -1369,6 +1379,21 @@ fn glue_with_notification_identity(
         // status; do not invent an empty/partial wire list on those errors.
         shell_wire_edges(k, b, last)?
     };
+    // WR-607: the other regions' pairs of shells, and their wire edges, likewise.
+    let mut others = Vec::new();
+    if k.fixes.glue_vertices_joins_every_region {
+        for (surv, del) in pairs {
+            if del == last || surv == del || b.shell(del)?.is_vertex_shell() {
+                continue;
+            }
+            let other_wires = if let Some(given) = wire_edges {
+                given.to_vec()
+            } else {
+                shell_wire_edges(k, b, del)?
+            };
+            others.push((surv, del, other_wires));
+        }
+    }
     for vu in vertex::vertexuses(b, deleted)? {
         remove_vertexuse(b, deleted, vu)?;
         post_insert_vertexuse(b, survivor, vu)?;
@@ -1392,7 +1417,17 @@ fn glue_with_notification_identity(
             .region
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         crate::error::ignore_status(remove_region_shell(b, region, last))?;
-        destroy_shell(k, b, notifications, last)?;
+        destroy_shell(k, b, notifications.as_deref_mut(), last)?;
+    }
+    // WR-607: join the other regions' pairs as well.
+    for (surv, del, other_wires) in others {
+        transfer_shell_children(k, b, del, surv, &other_wires)?;
+        let region = b
+            .shell(del)?
+            .region
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        remove_region_shell(b, region, del)?;
+        destroy_shell(k, b, notifications.as_deref_mut(), del)?;
     }
     Ok(())
 }
