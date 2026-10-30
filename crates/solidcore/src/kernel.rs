@@ -163,6 +163,8 @@ pub struct UpstreamFixes {
     pub fillet_corner_ball_patch: bool,
     /// `CalcTorusFilletGeom` revolves a linear section into a cone (WR-421, #420).
     pub fillet_chamfer_cone_on_arc: bool,
+    /// `CreateCornerBlend`'s four-sided (not bilinear) corner patch is made tangent to the surfaces along its sides: a bicubic Coons patch meets its cross-boundary derivatives only where their twists agree at the corners, and where two rounds of different curvature meet `sm_CreateCoonsSrf`'s mean twist left both rounds at an angle along whole sides (15.6 degrees off a bar's round at r 2, rig fillets/1207). A copy is refined to 8 up to 64 spans each way and the control points next to each side are moved into that side's tangent planes until every side is within `SM_CONTINUITY_ANGLE` (WR-547; the fork's tangency-labs/smlib@cae8618).
+    pub corner_blend_coons_patch_tangent_to_sides: bool,
     /// A torus blend whose section centre is on the arc's axis turns rail points into the edge ends' half-planes (WR-422, #417).
     pub fillet_torus_center_on_axis: bool,
     /// `DoExtendedOffset` finds the excess offset faces after the merge only, not also on the untrimmed faces before it (WR-341, #977).
