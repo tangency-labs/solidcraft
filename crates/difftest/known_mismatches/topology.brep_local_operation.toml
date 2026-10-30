@@ -8,3 +8,12 @@ case = "nurb_fillet_face5_same"
 libc = "glibc"
 cpp_defect = "ND-493"
 why = "C++ clock-seeded rand() in IsInnerShell's sample points (ND-493): geometry[131] is 1.0308646e-3 (the Rust result) in most runs, 1.0335321e-3 in others; main CI failed intermittently at c47d6d3b5 and 7ca6ce7a9"
+
+# The same mechanism on the generated fillet/cone stream: Solids/nurb_fillet.smb with
+# faces 17, 10 and 5 replaced by planes at offset 0 (face 5 is the parked case above).
+[[mismatch]]
+unit = "topology.brep_local_operation"
+case = "fc0016"
+libc = "glibc"
+cpp_defect = "ND-493"
+why = "C++ clock-seeded rand() in IsInnerShell's sample points (ND-493): in 10 fresh-process runs 1 s apart the C++ result had 255 geometry values (the Rust result) in 9 and 765 in 1"

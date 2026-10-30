@@ -43,8 +43,8 @@ void put_surface_samples(std::vector<double>& o, SmSurface* s) {
         }
 }
 
-// The geometry of the B-rep in list order: every edge's curve and its edge use count (the UV
-// trim curves are lazily made caches and not recorded), then every face's surface.
+// The geometry of the B-rep in list order: every edge's curve and its edge uses' stored UV
+// trim curves (radial order; nothing is made), then every face's surface.
 void put_geometry(std::vector<double>& o, SmBrep* b) {
     SmTArray<SmEdge*> edges;
     b->GetEdges(edges);
@@ -54,6 +54,8 @@ void put_geometry(std::vector<double>& o, SmBrep* b) {
         SmTArray<SmEdgeuse*> uses;
         edges[i]->GetEdgeuses(uses);
         o.push_back((double)uses.GetSize());
+        for (ULONG j = 0; j < uses.GetSize(); ++j)
+            put_curve_samples(o, uses[j]->*EuPeek::uv());
     }
     SmTArray<SmFace*> faces;
     b->GetFaces(faces);
