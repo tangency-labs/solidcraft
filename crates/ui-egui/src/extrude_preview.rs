@@ -144,6 +144,7 @@ impl StraightPreview {
             }
         }
         Some(Ok(Built {
+            interaction: None,
             scene,
             sketches: Vec::new(),
             applied: None,

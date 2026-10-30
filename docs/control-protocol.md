@@ -41,6 +41,17 @@ events, one pointer event per frame. A connection that sent `control.subscribe` 
 event lines `{"event": "…", "params": {…}}`, which have no `id`
 ([Following the design](#following-the-design)).
 
+### Isolated native test profiles
+
+For automation against public-safe test designs, set `SOLIDCRAFT_SETTINGS_DIR` to
+an absolute private folder before starting the desktop app. Settings, graphics
+preferences and startup markers use that folder; legacy-settings adoption is
+skipped. Empty or relative overrides fail before normal-profile startup. Without
+the override, the usual platform settings location is unchanged. On Windows,
+eframe uses the OS roaming-folder API, so `APPDATA` alone does not isolate settings.
+Also set `SOLIDCRAFT_RECOVERY_DIR`, `SOLIDCRAFT_CRASH_DIR` and
+`SOLIDCRAFT_CONTROL_DIR` to private test folders to isolate those separate stores.
+
 ### Token
 
 Every connection must authenticate. At start the app makes a random 256-bit token for this
@@ -412,6 +423,8 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
+- `joint_auto_alignment` (default true): Preferences > Design > Automatically preview joint alignment on hover; false keeps the confirmed pose while hovering hole rims and other secondary references, while explicit clicks still align.
+- `joint_moving_first` (default false): Preferences > Design > Invert joint selection order; applies to new joint dialogs without changing saved joints.
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))

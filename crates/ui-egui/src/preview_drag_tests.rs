@@ -279,7 +279,7 @@ fn a_preview_left_behind_stops_before_its_next_feature() {
     // The job waits before the fillet (feature 1) until it is cancelled.
     progress.hold_at(1);
     pv.running_stream_key = keys(&first).1;
-    spawn(&mut pv, keys(&first).0, s.scratch(), first, colors(), false, progress.clone());
+    spawn(&mut pv, keys(&first).0, s.scratch(), first, colors(), false, PreviewWork { progress: progress.clone(), ..PreviewWork::default() });
     let (key, stream) = keys(&second);
     pv.poll(key, stream);
     assert!(progress.is_cancelled() && pv.running.is_none() && pv.detached.len() == 1, "left behind and asked to stop");

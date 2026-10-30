@@ -74,6 +74,46 @@ fn documents() -> (Document, Document) {
 }
 
 #[test]
+fn secondary_alignment_hole_axis_clone_remaps_cylinder_face_and_occurrence() {
+    use solidcraft_doc::joints::AlignmentRef;
+    let (mut source, mut destination) = documents();
+    source.assembly.joints[0].a.snap = Snap::FaceCenter {
+        pick: Vec3::ZERO,
+        face: Some("F1:top".into()),
+        x: Some(XRef::Reference { reference: AlignmentRef::Cylinder { name: "F10:bore:side:0".into() }, reverse: true }),
+    };
+    clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+        .unwrap();
+    let a = &destination.assembly.joints[4].a;
+    assert_eq!(a.occurrence, 101);
+    assert!(
+        matches!(&a.snap,Snap::FaceCenter{x:Some(XRef::Reference{reference:AlignmentRef::Cylinder{name},reverse:true}),..} if name=="F110:bore:side:0")
+    );
+}
+
+#[test]
+fn secondary_alignment_circle_center_clone_remaps_both_rim_identities() {
+    use solidcraft_doc::joints::AlignmentRef;
+    let (mut source, mut destination) = documents();
+    source.assembly.joints[0].a.snap = Snap::FaceCenter {
+        pick: Vec3::ZERO,
+        face: Some("F1:top".into()),
+        x: Some(XRef::Reference {
+            reference: serde_json::from_value::<AlignmentRef>(serde_json::json!({"type":"circle_center","name":"F10:bore:side:0","end":"F1:top"}))
+                .unwrap(),
+            reverse: true,
+        }),
+    };
+    clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+        .unwrap();
+    let a = &destination.assembly.joints[4].a;
+    assert_eq!(a.occurrence, 101);
+    assert!(
+        matches!(&a.snap,Snap::FaceCenter{x:Some(XRef::Reference{reference:AlignmentRef::CircleCenter(rim),reverse:true}),..} if rim.name=="F110:bore:side:0" && rim.end=="F11:top")
+    );
+}
+
+#[test]
 fn internal_relationships_receive_independent_ids_and_remapped_typed_references() {
     let (source, mut destination) = documents();
     destination.next_id = 1000;
@@ -108,6 +148,33 @@ fn internal_relationships_receive_independent_ids_and_remapped_typed_references(
     assert_eq!(destination.assembly.joints[..4], source.assembly.joints);
     destination.assembly.joints[4].values[0] = 0.75;
     assert_eq!(source.assembly.joints[0].values[0], 0.25);
+}
+
+#[test]
+fn secondary_alignment_copy_remaps_face_names_and_keeps_independent_inversion() {
+    let (mut source, mut destination) = documents();
+    source.assembly.joints[0].a.snap =
+        Snap::FaceCenter { pick: Vec3::ZERO, face: Some("F1:top".into()), x: Some(XRef::Planar { planar_face: "F10:side".into(), reverse: true }) };
+    clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+        .unwrap();
+    assert!(matches!(&destination.assembly.joints[4].a.snap,
+        Snap::FaceCenter { face: Some(face), x: Some(XRef::Planar { planar_face, reverse: true }), .. }
+        if face=="F11:top" && planar_face=="F110:side"));
+    assert_eq!(source.assembly.joints[0].a.snap.face_names(), [&"F1:top".to_string(), &"F10:side".to_string()]);
+}
+
+#[test]
+fn secondary_alignment_feedback_copy_remaps_construction_and_sketch_author_features() {
+    use solidcraft_doc::joints::AlignmentRef;
+    for reference in [AlignmentRef::Construction { feature: 10 }, AlignmentRef::SketchLine { sketch: 10, curve: "l1".into() }] {
+        let (mut source, mut destination) = documents();
+        source.assembly.joints[0].a.snap =
+            Snap::FaceCenter { pick: Vec3::ZERO, face: Some("F1:top".into()), x: Some(XRef::Reference { reference, reverse: true }) };
+        clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())
+            .unwrap();
+        let Snap::FaceCenter { x: Some(XRef::Reference { reference, reverse: true }), .. } = &destination.assembly.joints[4].a.snap else { panic!() };
+        assert!(matches!(reference, AlignmentRef::Construction { feature: 110 } | AlignmentRef::SketchLine { sketch: 110, .. }));
+    }
 }
 
 /// A gear's picked round face is on the copy's occurrence and face; one picked on geometry the

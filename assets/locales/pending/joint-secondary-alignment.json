@@ -1,0 +1,83 @@
+{
+  "en": {
+    "dialog.alignment_1_optional": "Alignment 1 (optional)",
+    "dialog.alignment_2_optional": "Alignment 2 (optional)",
+    "dialog.invert_alignment": "Invert alignment",
+    "settings.joint_auto_alignment": "Automatically preview joint alignment on hover",
+    "settings.joint_auto_alignment_help": "Preview alignment while hovering hole rims or other alignment references. Turn off to align only when you click a reference. Saved joints and primary origins are unchanged.",
+    "settings.joint_moving_first": "Invert joint selection order",
+    "settings.joint_moving_first_help": "Select the moving component first, then the fixed component, when creating a joint."
+  },
+  "it": {
+    "dialog.alignment_1_optional": "Allineamento 1 (facoltativo)",
+    "dialog.alignment_2_optional": "Allineamento 2 (facoltativo)",
+    "dialog.invert_alignment": "Inverti allineamento",
+    "settings.joint_auto_alignment": "Anteprima automatica dell’allineamento dei giunti al passaggio del mouse",
+    "settings.joint_auto_alignment_help": "Mostra l’anteprima dell’allineamento passando sui bordi dei fori o sugli altri riferimenti. Disattiva per allineare solo con un clic. I giunti salvati e le origini primarie non cambiano.",
+    "settings.joint_moving_first": "Inverti ordine di selezione dei giunti",
+    "settings.joint_moving_first_help": "Quando crei un giunto, seleziona prima il componente da spostare, poi quello fisso."
+  },
+  "ja": {
+    "dialog.alignment_1_optional": "位置合わせ 1（任意）",
+    "dialog.alignment_2_optional": "位置合わせ 2（任意）",
+    "dialog.invert_alignment": "位置合わせを反転",
+    "settings.joint_auto_alignment": "ホバー時にジョイントの位置合わせを自動プレビュー",
+    "settings.joint_auto_alignment_help": "穴の縁や他の位置合わせ参照にカーソルを合わせるとプレビューします。オフにすると、参照をクリックしたときだけ位置合わせします。保存済みのジョイントと主原点は変更されません。",
+    "settings.joint_moving_first": "ジョイントの選択順序を反転",
+    "settings.joint_moving_first_help": "ジョイントの作成時に、移動するコンポーネントを先に選択し、次に固定するコンポーネントを選択します。"
+  },
+  "zh": {
+    "dialog.alignment_1_optional": "对齐 1（可选）",
+    "dialog.alignment_2_optional": "对齐 2（可选）",
+    "dialog.invert_alignment": "反转对齐",
+    "settings.joint_auto_alignment": "悬停时自动预览接头对齐",
+    "settings.joint_auto_alignment_help": "悬停在孔边缘或其他对齐参考上时预览对齐。关闭后，仅在点击参考时对齐。已保存的接头和主原点保持不变。",
+    "settings.joint_moving_first": "反转接头选择顺序",
+    "settings.joint_moving_first_help": "创建接头时，先选择移动组件，再选择固定组件。"
+  },
+  "ar": {
+    "dialog.alignment_1_optional": "المحاذاة 1 (اختياري)",
+    "dialog.alignment_2_optional": "المحاذاة 2 (اختياري)",
+    "dialog.invert_alignment": "عكس المحاذاة",
+    "settings.joint_auto_alignment": "معاينة محاذاة المفصل تلقائيًا عند تمرير المؤشر",
+    "settings.joint_auto_alignment_help": "معاينة المحاذاة عند تمرير المؤشر فوق حواف الثقوب أو مراجع المحاذاة الأخرى. عطّلها للمحاذاة فقط عند النقر على مرجع. لا تتغير المفاصل المحفوظة ونقاط الأصل الأساسية.",
+    "settings.joint_moving_first": "عكس ترتيب اختيار المفصل",
+    "settings.joint_moving_first_help": "عند إنشاء مفصل، اختر المكوّن المتحرك أولًا، ثم المكوّن الثابت."
+  },
+  "he": {
+    "dialog.alignment_1_optional": "יישור 1 (אופציונלי)",
+    "dialog.alignment_2_optional": "יישור 2 (אופציונלי)",
+    "dialog.invert_alignment": "היפוך היישור",
+    "settings.joint_auto_alignment": "תצוגה מקדימה אוטומטית של יישור המפרק בריחוף",
+    "settings.joint_auto_alignment_help": "תצוגה מקדימה של היישור בריחוף מעל שפות חורים או הפניות יישור אחרות. כבו כדי ליישר רק בלחיצה על הפניה. המפרקים השמורים ונקודות הראשית הראשיות אינם משתנים.",
+    "settings.joint_moving_first": "היפוך סדר בחירת המפרק",
+    "settings.joint_moving_first_help": "בעת יצירת מפרק, בחרו תחילה את הרכיב הנע ולאחר מכן את הרכיב הקבוע."
+  },
+  "vi": {
+    "dialog.alignment_1_optional": "Căn chỉnh 1 (tùy chọn)",
+    "dialog.alignment_2_optional": "Căn chỉnh 2 (tùy chọn)",
+    "dialog.invert_alignment": "Đảo chiều căn chỉnh",
+    "settings.joint_auto_alignment": "Tự động xem trước căn chỉnh khớp khi di chuột",
+    "settings.joint_auto_alignment_help": "Xem trước căn chỉnh khi di chuột qua vành lỗ hoặc tham chiếu căn chỉnh khác. Tắt để chỉ căn chỉnh khi nhấp vào tham chiếu. Các khớp đã lưu và gốc chính không thay đổi.",
+    "settings.joint_moving_first": "Đảo thứ tự chọn khớp",
+    "settings.joint_moving_first_help": "Khi tạo khớp, chọn thành phần chuyển động trước, rồi chọn thành phần cố định."
+  },
+  "de": {
+    "dialog.alignment_1_optional": "Ausrichtung 1 (optional)",
+    "dialog.alignment_2_optional": "Ausrichtung 2 (optional)",
+    "dialog.invert_alignment": "Ausrichtung umkehren",
+    "settings.joint_auto_alignment": "Gelenkausrichtung beim Darüberfahren automatisch als Vorschau anzeigen",
+    "settings.joint_auto_alignment_help": "Zeigt die Ausrichtung beim Darüberfahren über Lochränder oder andere Ausrichtungsreferenzen als Vorschau an. Deaktivieren, um nur beim Anklicken einer Referenz auszurichten. Gespeicherte Gelenke und primäre Ursprünge bleiben unverändert.",
+    "settings.joint_moving_first": "Reihenfolge der Gelenkauswahl umkehren",
+    "settings.joint_moving_first_help": "Beim Erstellen eines Gelenks zuerst die bewegliche und dann die feste Komponente auswählen."
+  },
+  "ko": {
+    "dialog.alignment_1_optional": "정렬 1 (선택 사항)",
+    "dialog.alignment_2_optional": "정렬 2 (선택 사항)",
+    "dialog.invert_alignment": "정렬 반전",
+    "settings.joint_auto_alignment": "마우스를 올리면 조인트 정렬 자동 미리보기",
+    "settings.joint_auto_alignment_help": "구멍 테두리나 다른 정렬 참조에 마우스를 올리면 정렬을 미리 봅니다. 끄면 참조를 클릭할 때만 정렬합니다. 저장된 조인트와 기본 원점은 변경되지 않습니다.",
+    "settings.joint_moving_first": "조인트 선택 순서 반전",
+    "settings.joint_moving_first_help": "조인트를 만들 때 이동할 구성요소를 먼저 선택한 다음 고정된 구성요소를 선택합니다."
+  }
+}
