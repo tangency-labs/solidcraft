@@ -364,9 +364,20 @@ mod tests {
                 .unwrap();
         let basin = crate::boolean(&slab, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
         let picks = [Vec3::new(50.0, 1.0, 30.0), Vec3::new(80.0, 27.0, 30.0), Vec3::new(50.0, 50.0, 30.0), Vec3::new(20.0, 27.0, 30.0)];
-        // Past the 1 mm rim the blends run over the slab's front edge (a cliff) and are cut from
-        // the slab (the blend-overflow decision, 237f0ae74): nothing escapes it.
-        for (round, size) in [(false, 2.0), (true, 4.0), (false, 0.5), (true, 0.5)] {
+        // The 2 mm chamfer's leg would run off the 1 mm rim's top over the slab's front edge and
+        // lower the front face: refused as too large, naming the largest that fits, below the
+        // rim's width (a full-width chamfer is refused too), the owner's blend-overflow ruling of
+        // 2026-10-30.
+        let message = match crate::chamfer(&basin, &picks, 2.0) {
+            Err(KernelError::TooLarge(m)) => m,
+            Err(e) => panic!("refused, but not as too large: {e}"),
+            Ok(_) => panic!("a chamfer whose leg runs off the rim was built"),
+        };
+        let largest: f64 = message.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
+        assert!((1.0 - 1e-3 - 1e-12..1.0).contains(&largest), "{message}");
+        // Past the 1 mm rim the R4 round runs over the slab's front edge on its tangent side (a
+        // cliff) and is cut from the slab (the same ruling): nothing escapes it.
+        for (round, size) in [(true, 4.0), (false, 0.5), (true, 0.5)] {
             let result = if round { fillet(&basin, &picks, size) } else { crate::chamfer(&basin, &picks, size) };
             let result = result.unwrap_or_else(|e| panic!("round={round}, {size}: {e}"));
             assert!(result.validity().is_empty(), "round={round}, {size}: {:?}", result.validity());

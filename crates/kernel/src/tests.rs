@@ -1195,34 +1195,15 @@ fn chamfer_sloped_basin_rim() {
     assert!(mesh.contains(Vec3::new(50.0, 3.5, 28.0)));
 }
 
-/// The removal of an equal-distance chamfer `d` of the rim edge at y = `margin` of
-/// `chamfer_sloped_basin_rim`'s basin, cut from the slab as if its top went on past y = 0 (the
-/// blend-overflow decision, 237f0ae74): the triangle between the edge (margin, 30), the top's
-/// contact (margin − d, 30) and the wall's contact d down the wall towards (20, 10), clipped to
-/// y >= 0, times the chamfer's length at its depth h, 60 − h between the sloped end walls:
-/// area · (30 + z̄) over the clipped polygon (shoelace).
-fn basin_rim_chamfer_removed(margin: f64, d: f64) -> f64 {
-    let len = ((20.0 - margin).powi(2) + 400.0).sqrt();
-    let (e, t) = ((margin, 30.0), (margin - d, 30.0));
-    let w = (margin + d * (20.0 - margin) / len, 30.0 - d * 20.0 / len);
-    let poly = if t.0 >= 0.0 {
-        vec![e, t, w]
-    } else {
-        let s = -t.0 / (w.0 - t.0);
-        vec![e, (0.0, 30.0), (0.0, t.1 + s * (w.1 - t.1)), w]
-    };
-    let (mut area, mut moment) = (0.0, 0.0);
-    for i in 0..poly.len() {
-        let ((y0, z0), (y1, z1)) = (poly[i], poly[(i + 1) % poly.len()]);
-        let c = y0 * z1 - y1 * z0;
-        area += c / 2.0;
-        moment += (z0 + z1) * c / 6.0;
-    }
-    area.abs() * 30.0 + moment.abs()
-}
-
+/// A chamfer wider than a basin's thin rim (`chamfer_sloped_basin_rim`'s basin with the rim
+/// `margin` wide at the top) would run its leg off the rim's top, over the slab's front edge,
+/// and lower the front face (a 2 mm chamfer on the 1 mm rim takes its top from 30 to 29.382):
+/// refused as too large, naming the largest size that fits, the body unchanged (the owner's
+/// blend-overflow ruling, 2026-10-30). As wide as the rim it would use the rim's top up: refused
+/// too, so the largest that fits is the size just below the rim's width (the fit search's step,
+/// three significant digits of the size asked for). A smaller chamfer builds.
 #[test]
-fn chamfer_wider_than_sloped_basin_rim_is_cut_and_a_full_width_one_refused() {
+fn chamfer_wider_than_sloped_basin_rim_is_refused_naming_the_largest() {
     let rectangle = |x0, y0, x1, y1| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
     let basin = |margin: f64| {
         let slab = box_solid(Vec3::ZERO, Vec3::new(100.0, 60.0, 30.0)).unwrap();
@@ -1231,29 +1212,31 @@ fn chamfer_wider_than_sloped_basin_rim_is_cut_and_a_full_width_one_refused() {
                 .unwrap();
         boolean(&slab, &pocket, BoolOp::Cut).unwrap().unwrap()
     };
-    // The formula reads the fitting chamfer of `chamfer_sloped_basin_rim` as it does.
-    let drop = 2.0 / (1.0 + 0.8f64.powi(2)).sqrt();
-    assert!(rel(basin_rim_chamfer_removed(4.0, 2.0), drop * (60.0 - drop / 3.0)) < 1e-12);
-    // Wider than the rim: the chamfer runs over the slab's front edge (a cliff) and is cut.
-    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0)] {
+    for (margin, distance) in [(1.0, 2.0), (1.0, 3.0), (0.5, 4.0), (0.5, 0.5), (1.0, 1.0)] {
         let b = basin(margin);
         let before = measure(&b).unwrap().volume;
-        let made = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance).unwrap_or_else(|e| panic!("{margin}, {distance}: {e}"));
-        assert!(made.validity().is_empty(), "{margin}, {distance}: {:?}", made.validity());
-        let want = before - basin_rim_chamfer_removed(margin, distance);
-        assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}, {distance}: {} vs {want}", measure(&made).unwrap().volume);
+        let message = match chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], distance) {
+            Err(KernelError::TooLarge(m)) => m,
+            Err(e) => panic!("{margin}, {distance}: refused, but not as too large: {e}"),
+            Ok(_) => panic!("{margin}, {distance}: a chamfer whose leg runs off the rim was built"),
+        };
+        let largest: f64 = message.rsplit("that fits is ").next().and_then(|t| t.trim_end_matches(" mm").parse().ok()).unwrap_or(0.0);
+        let step = 10f64.powf(distance.log10().floor() - 3.0);
+        assert!((margin - step - 1e-12..margin).contains(&largest), "{margin}, {distance}: {message}");
+        assert_eq!(measure(&b).unwrap().volume, before);
     }
-    // As wide as the rim it would use the rim's top up: a full-width chamfer is refused, the
-    // body unchanged. A smaller chamfer on the same thin rim is still supported.
+    // Half the rim's width fits: as `chamfer_sloped_basin_rim`, the triangle of legs d on the
+    // top and d down the wall (towards (20, 10), its run 20 − margin over the drop 20) takes
+    // d · drop / 2 with drop = 20 d / √((20 − margin)² + 400), its length 60 − h between the
+    // sloped end walls at depth h, so its volume is that area times 60 − drop / 3.
     for margin in [0.5, 1.0] {
         let b = basin(margin);
-        let before = measure(&b).unwrap();
-        let error = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin).unwrap_err();
-        assert!(matches!(error, KernelError::TooLarge(_)), "{margin}: {error}");
-        assert_eq!(measure(&b).unwrap().volume, before.volume);
-        let smaller = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], margin * 0.5).unwrap();
-        assert!(smaller.validity().is_empty());
-        assert!(measure(&smaller).unwrap().volume < before.volume);
+        let d = margin * 0.5;
+        let smaller = chamfer(&b, &[Vec3::new(50.0, margin, 30.0)], d).unwrap();
+        assert!(smaller.validity().is_empty(), "{margin}: {:?}", smaller.validity());
+        let drop = 20.0 * d / ((20.0 - margin).powi(2) + 400.0).sqrt();
+        let want = measure(&b).unwrap().volume - d * drop / 2.0 * (60.0 - drop / 3.0);
+        assert!(rel(measure(&smaller).unwrap().volume, want) < 1e-8, "{margin}: {} vs {want}", measure(&smaller).unwrap().volume);
     }
 }
 
