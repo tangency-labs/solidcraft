@@ -48,6 +48,8 @@ impl Walk for crate::frame::Anchor {}
 impl Walk for solidcraft_sketch::Sketch {}
 impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}
+impl Walk for solidcraft_kernel::StepSource {}
+impl Walk for crate::ImportFilter {}
 impl Walk for crate::document::Operation {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for crate::document::Direction {}

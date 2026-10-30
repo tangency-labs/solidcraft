@@ -21,6 +21,333 @@ fn near(a: f64, b: f64) {
 }
 
 #[test]
+fn make_independent_is_one_undoable_edit_and_keeps_pose_and_view_masks() {
+    let mut s = Session::default();
+    let original = component(&mut s, "Bolt");
+    let feature = box2(&mut s);
+    let first = s.doc.occurrence_of(original).unwrap().id;
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence":first,"translate":[20,0,0]}))["occurrence"].as_u64().unwrap();
+    let before = s.occurrence_placement(&[second]).unwrap();
+    let body = s.occurrence_bodies(&[second], true).unwrap()[0].clone();
+    s.visibility.hidden_bodies.push(body.clone());
+    s.visibility.locked_bodies.push(body);
+    let result = run(&mut s, "component.make_independent", json!({"occurrence":second}));
+    let independent = result["component"].as_u64().unwrap();
+    assert_ne!(independent, original);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == first).unwrap().component, original);
+    assert_eq!(s.occurrence_placement(&[second]).unwrap().world, before.world);
+    let new_body = s.occurrence_bodies(&[second], true).unwrap()[0].clone();
+    assert!(s.visibility.hidden_bodies.contains(&new_body) && s.visibility.locked_bodies.contains(&new_body));
+    let parameter = s.doc.feature(feature).unwrap().param_names[0].clone();
+    run(&mut s, "parameters.change", json!({"name":parameter,"expression":"3 mm"}));
+    near(volume(&mut s, original), 12.);
+    near(volume(&mut s, independent), 8.);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == second).unwrap().component, original);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == second).unwrap().component, independent);
+}
+
+#[test]
+fn make_independent_copies_the_selected_parent_path_but_keeps_siblings_linked() {
+    let mut s = Session::default();
+    let parent = component(&mut s, "Assembly");
+    let first_parent = s.doc.occurrence_of(parent).unwrap().id;
+    let child = component(&mut s, "Bolt");
+    box2(&mut s);
+    let bolt = s.doc.occurrence_of(child).unwrap().id;
+    run(&mut s, "component.activate", json!({"component":parent}));
+    let sibling = run(&mut s, "occurrence.copy", json!({"component":child,"translate":[10,0,0]}))["occurrence"].as_u64().unwrap();
+    let second_parent = run(&mut s, "occurrence.copy", json!({"component":parent,"translate":[0,20,0]}))["occurrence"].as_u64().unwrap();
+    let before = s.occurrence_placement(&[second_parent, bolt]).unwrap().world;
+    let count = s.doc.components.len();
+    let result = run(&mut s, "component.make_independent", json!({"path":[second_parent,bolt]}));
+    let path: Vec<u64> = serde_json::from_value(result["path"].clone()).unwrap();
+    assert_eq!(s.doc.components.len(), count + 2);
+    assert_eq!(s.occurrence_placement(&path).unwrap().world, before);
+    assert_ne!(s.occurrence_placement(&path).unwrap().component, child);
+    assert_eq!(s.occurrence_placement(&[first_parent, bolt]).unwrap().component, child);
+    let copied_parent = s.doc.occurrences.iter().find(|o| o.id == second_parent).unwrap().component;
+    assert!(s.doc.occurrences.iter().any(|o| o.parent == copied_parent && o.component == child && o.id != *path.last().unwrap()));
+    assert!(s.doc.occurrences.iter().any(|o| o.id == sibling && o.parent == parent));
+}
+
+#[test]
+fn make_independent_keeps_internal_relationships_on_both_subassembly_placements() {
+    use solidcraft_doc::FeatureKind;
+    for first_selected in [true, false] {
+        let mut s = Session::default();
+        let parent = component(&mut s, "Assembly");
+        let first = s.doc.occurrence_of(parent).unwrap().id;
+        let sketch = run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Hidden sketch"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.finish", json!({}));
+        let child = component(&mut s, "Child");
+        box2(&mut s);
+        let child_occurrence = s.doc.occurrence_of(child).unwrap().id;
+        let joint = run(&mut s, "joint.as_built", json!({"type":"rigid", "a":first, "b":child_occurrence}))["joint"].as_u64().unwrap();
+        run(&mut s, "contact.create", json!({"name":"Internal contact", "occurrences":[first, child_occurrence]}));
+        run(&mut s, "explode.create", json!({"name":"Internal explode", "moves":[{"occurrence":child_occurrence, "translate":[0,0,10]}]}));
+        run(&mut s, "component.activate", json!({"component":0}));
+        let second = run(&mut s, "occurrence.copy", json!({"component":parent, "translate":[20,0,0]}))["occurrence"].as_u64().unwrap();
+        let (selected, remaining) = if first_selected { (first, second) } else { (second, first) };
+        let boundary = run(&mut s, "joint.as_built", json!({"type":"rigid", "a":0, "b":selected}))["joint"].as_u64().unwrap();
+        s.visibility.hidden_joints.push(joint);
+        s.visibility.hidden_sketches.push(sketch);
+        s.visibility.hidden_profiles.push(sketch);
+        s.visibility.shown_dimensions.push(sketch);
+        let world = s.occurrence_placement(&[selected, child_occurrence]).unwrap().world;
+        let result = run(&mut s, "component.make_independent", json!({"path":[selected]}));
+        let copied = result["component"].as_u64().unwrap();
+        let copied_child = s.doc.occurrences.iter().find(|o| o.parent == copied).unwrap().id;
+        assert_eq!(s.occurrence_placement(&[selected, copied_child]).unwrap().world, world);
+        assert_eq!(s.occurrence_placement(&[remaining, child_occurrence]).unwrap().component, child);
+        let original = s.doc.assembly.joints.iter().find(|j| j.id == joint).unwrap();
+        assert_eq!((original.a.occurrence, original.b.occurrence), (remaining, child_occurrence));
+        let independent = s.doc.assembly.joints.iter().find(|j| j.a.occurrence == selected && j.b.occurrence == copied_child).unwrap();
+        assert_ne!(independent.id, joint);
+        assert!(s.visibility.hidden_joints.contains(&joint) && s.visibility.hidden_joints.contains(&independent.id));
+        let external = s.doc.assembly.joints.iter().find(|j| j.id == boundary).unwrap();
+        assert_eq!((external.a.occurrence, external.b.occurrence), (0, selected));
+        assert_eq!(s.doc.assembly.contact_sets.len(), 2);
+        assert_eq!(s.doc.assembly.contact_sets[0].occurrences, [remaining, child_occurrence]);
+        assert_eq!(s.doc.assembly.contact_sets[1].occurrences, [selected, copied_child]);
+        assert_eq!(s.doc.assembly.exploded[0].moves[0].0, child_occurrence);
+        assert_eq!(s.doc.assembly.exploded[1].moves[0].0, copied_child);
+        let copied_sketch = s.doc.features.iter().find(|f| f.component == copied && matches!(f.kind, FeatureKind::Sketch { .. })).unwrap().id;
+        assert!(s.visibility.hidden_sketches.contains(&sketch) && s.visibility.hidden_sketches.contains(&copied_sketch));
+        assert!(s.visibility.hidden_profiles.contains(&copied_sketch) && s.visibility.shown_dimensions.contains(&copied_sketch));
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&s.design().to_json()).unwrap());
+        assert_eq!(reopened.doc.assembly, s.doc.assembly);
+        assert_eq!(reopened.visibility, s.visibility);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.assembly.joints.len(), 2);
+        assert_eq!(s.doc.assembly.joints.iter().find(|j| j.id == joint).unwrap().a.occurrence, first);
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.doc.assembly, reopened.doc.assembly);
+    }
+}
+
+#[test]
+fn make_independent_refuses_unscoped_relationships_below_unchanged_children_atomically() {
+    for first_selected in [true, false] {
+        let mut s = Session::default();
+        let child = component(&mut s, "Shared child");
+        let outside_child = s.doc.occurrence_of(child).unwrap().id;
+        let grandchild = component(&mut s, "Grandchild");
+        box2(&mut s);
+        let grandchild_occurrence = s.doc.occurrence_of(grandchild).unwrap().id;
+        run(&mut s, "component.activate", json!({"component":0}));
+        let parent = component(&mut s, "Assembly");
+        let first = s.doc.occurrence_of(parent).unwrap().id;
+        let child_occurrence = run(&mut s, "occurrence.copy", json!({"component":child, "parent":parent}))["occurrence"].as_u64().unwrap();
+        assert_eq!(s.doc.first_path(child), [outside_child]);
+        run(&mut s, "joint.as_built", json!({"type":"rigid", "a":first, "b":grandchild_occurrence}));
+        run(&mut s, "component.activate", json!({"component":parent}));
+        let sibling = component(&mut s, "Sibling");
+        box2(&mut s);
+        let sibling_occurrence = s.doc.occurrence_of(sibling).unwrap().id;
+        run(&mut s, "component.activate", json!({"component":0}));
+        let second = run(&mut s, "occurrence.copy", json!({"component":parent, "translate":[20,0,0]}))["occurrence"].as_u64().unwrap();
+        let selected = if first_selected { first } else { second };
+        let before = s.doc.clone();
+        let visibility = s.visibility.clone();
+        assert!(s.execute("component.make_independent", &json!({"path":[selected, sibling_occurrence]})).is_err());
+        assert!(std::sync::Arc::ptr_eq(&s.doc, &before));
+        assert_eq!(s.visibility, visibility);
+        assert_eq!(s.occurrence_placement(&[selected, child_occurrence, grandchild_occurrence]).unwrap().component, grandchild);
+    }
+}
+
+#[test]
+fn source_duplicates_with_different_mapped_placements_keep_their_product_geometry() {
+    use solidcraft_doc::IDENTITY;
+    use solidcraft_geom::Vec3;
+    use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, step_export_products};
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap();
+    let part =
+        || ExportProduct { name: "Bolt".into(), bodies: vec![ExportBody { name: "Bolt".into(), body: &body, color: None }], children: Vec::new() };
+    let products = [
+        ExportProduct { name: "Assembly".into(), bodies: Vec::new(), children: vec![(1, IDENTITY, "First".into()), (2, IDENTITY, "Second".into())] },
+        part(),
+        part(),
+    ];
+    let text = step_export_products(&products, 0, &StepHeader::default()).unwrap();
+    let mut mapped = text.clone();
+    let mut extra = String::new();
+    for (i, line) in text.lines().filter(|l| l.contains("ADVANCED_BREP_SHAPE_REPRESENTATION(")).enumerate() {
+        let (representation, record) = line.split_once('=').unwrap();
+        let (items, context) = record.split_once(",(").unwrap().1.split_once("),").unwrap();
+        let origin = items.rsplit(',').next().unwrap();
+        let context = context.trim_end_matches(");");
+        let id = 1_000_000 + i * 10;
+        let ending = format!(",{representation});");
+        let relationship = text.lines().find(|l| l.contains("SHAPE_REPRESENTATION_RELATIONSHIP(") && l.ends_with(&ending)).unwrap();
+        mapped = mapped.replace(relationship, &relationship.replace(&ending, &format!(",#{});", id + 4)));
+        extra.push_str(&format!(
+            "#{id}=REPRESENTATION_MAP({origin},{representation});\n#{}=CARTESIAN_POINT('',({}.,0.,0.));\n#{}=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#{},1.,$);\n#{}=MAPPED_ITEM('',#{id},#{});\n#{}=SHAPE_REPRESENTATION('Bolt',(#{}),{context});\n",
+            id + 1, i * 10, id + 2, id + 1, id + 3, id + 2, id + 4, id + 3
+        ));
+    }
+    mapped.insert_str(mapped.rfind("ENDSEC;").unwrap(), &extra);
+    let imported = solidcraft_io::step_import_feature(mapped.as_bytes(), "mapped.step").unwrap();
+    assert_eq!(imported.import.bodies[0].geometry_item, imported.import.bodies[1].geometry_item);
+    let mut s = Session::default();
+    crate::cmd::file::import::add_in_component(
+        &mut s,
+        imported.kind,
+        "Mapped bolts",
+        imported.body_names,
+        "Mapped bolts",
+        crate::cmd::file::import::Tree::Step { import: &imported.import, share_parts: true },
+    )
+    .unwrap();
+    let mut x: Vec<_> = s.world_state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().centroid.x).collect();
+    x.sort_by(f64::total_cmp);
+    assert_eq!(x.len(), 2);
+    near(x[0], 1.);
+    near(x[1], 11.);
+}
+
+#[test]
+fn duplicate_step_definitions_share_geometry_and_survive_independence_and_source_only_reopen() {
+    use solidcraft_doc::{FeatureKind, IDENTITY};
+    use solidcraft_geom::Vec3;
+    use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, step_export_products};
+    use std::sync::Arc;
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap();
+    let at = |x| solidcraft_doc::rigid(Vec3::new(x, 0., 0.), Vec3::ZERO, Vec3::Z, 0.);
+    let part = |name: &str, color| ExportProduct {
+        name: name.into(),
+        bodies: vec![ExportBody { name: "Bolt".into(), body: &body, color }],
+        children: Vec::new(),
+    };
+    let products = vec![
+        ExportProduct {
+            name: "Assembly".into(),
+            bodies: Vec::new(),
+            children: vec![(1, IDENTITY, "Bolt:1".into()), (2, at(10.), "Bolt:2".into()), (3, at(20.), "Painted".into())],
+        },
+        part("Bolt", None),
+        part("Bolt", None),
+        part("Painted bolt", Some([1., 0., 0.])),
+    ];
+    let text = step_export_products(&products, 0, &StepHeader::default()).unwrap();
+    let imported = solidcraft_io::step_import_feature(text.as_bytes(), "bolts.step").unwrap();
+    let product = imported.import.tree[0].children[1].definition;
+    let with_properties = text.replace("END-ISO-10303-21;", "");
+    let end = with_properties.rfind("ENDSEC;").unwrap();
+    let with_properties = format!(
+        "{}#1000000=PRODUCT_DEFINITION_SHAPE('','',#{product});\n#1000001=PROPERTY_DEFINITION('material','brass',#1000000);\nENDSEC;\nEND-ISO-10303-21;\n",
+        &with_properties[..end]
+    );
+    let separate = solidcraft_io::step_import_feature(with_properties.as_bytes(), "properties.step").unwrap();
+    let mut properties = Session::default();
+    crate::cmd::file::import::add_in_component(
+        &mut properties,
+        separate.kind,
+        "Properties",
+        separate.body_names,
+        "Properties",
+        crate::cmd::file::import::Tree::Step { import: &separate.import, share_parts: true },
+    )
+    .unwrap();
+    properties.refresh();
+    assert_eq!(properties.model.state().bodies.len(), 3, "an uninterpreted property through a shape definition keeps the part independent");
+    let separate = solidcraft_io::step_import_feature(text.as_bytes(), "bolts.step").unwrap();
+    let mut authored = Session::default();
+    crate::cmd::file::import::add_in_component(
+        &mut authored,
+        separate.kind,
+        "Bolts",
+        separate.body_names,
+        "Bolts",
+        crate::cmd::file::import::Tree::Step { import: &separate.import, share_parts: false },
+    )
+    .unwrap();
+    let first = authored.doc.occurrences.iter().find(|o| o.name == "Bolt:1").unwrap();
+    let second = authored.doc.occurrences.iter().find(|o| o.name == "Bolt:2").unwrap();
+    assert_ne!(first.component, second.component);
+    let (first, second, component) = (authored.doc.first_path(first.component), authored.doc.first_path(second.component), first.component);
+    let world = authored.world_state();
+    assert_eq!(world.bodies.len(), 3);
+    let meshes: Vec<_> = world.bodies.iter().map(|b| b.mesh_in_place().0).collect();
+    assert!(meshes.windows(2).all(|m| Arc::ptr_eq(&m[0], &m[1])), "independent edit identities still share display geometry");
+    run(&mut authored, "component.activate", json!({"component":component}));
+    run(&mut authored, "solid.box", json!({"length":1,"width":1,"height":1,"corner":[50,0,0]}));
+    assert_eq!(authored.occurrence_bodies(&first, false).unwrap().len(), 2);
+    assert_eq!(authored.occurrence_bodies(&second, false).unwrap().len(), 1, "editing one definition leaves the other unchanged");
+    let mut s = Session::default();
+    let (_, placed) = crate::cmd::file::import::add_in_component(
+        &mut s,
+        imported.kind,
+        "Bolts",
+        imported.body_names,
+        "Bolts",
+        crate::cmd::file::import::Tree::Step { import: &imported.import, share_parts: true },
+    )
+    .unwrap();
+    s.refresh();
+    let parent = placed.component;
+    let root_path = s.doc.first_path(parent);
+    let bolts: Vec<_> = s.doc.occurrences.iter().filter(|o| o.parent == parent && o.name.starts_with("Bolt:")).cloned().collect();
+    assert_eq!(bolts.len(), 2);
+    assert_eq!(bolts[0].component, bolts[1].component);
+    assert_eq!(s.model.state().bodies.len(), 2, "the coloured identity stays separate");
+    let world = s.world_state();
+    assert_eq!(world.bodies.len(), 3);
+    let meshes: Vec<_> = world.bodies.iter().map(|b| b.mesh_in_place().0).collect();
+    assert!(meshes.windows(2).all(|m| Arc::ptr_eq(&m[0], &m[1])), "all three appearances reuse one geometry resource");
+    let mut path = root_path;
+    path.push(bolts[1].id);
+    let result = run(&mut s, "component.make_independent", json!({"path":path}));
+    assert_ne!(result["component"], bolts[0].component);
+    let sources: Vec<_> = s
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Import { step, .. } => Some(step),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sources.len(), 2);
+    assert!(sources[0].same_source(sources[1]), "independence shares the source rather than re-exporting geometry");
+    let bytes = solidcraft_io::write_design_container(&s.doc).unwrap();
+    drop(s);
+    let doc = solidcraft_io::read_design(&bytes).unwrap();
+    let sources: Vec<_> = doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Import { step, .. } => Some(step),
+            _ => None,
+        })
+        .collect();
+    assert!(sources[0].same_source(sources[1]), "reopen hydrates one authoritative source");
+    let reopened = Session::new(doc);
+    assert!(reopened.model.last_recomputed > 0, "source-only reopening evaluates the imports");
+    let world = reopened.world_state();
+    assert_eq!(world.bodies.len(), 3);
+    let meshes: Vec<_> = world.bodies.iter().map(|b| b.mesh_in_place().0).collect();
+    assert!(meshes.windows(2).all(|m| Arc::ptr_eq(&m[0], &m[1])));
+    let mut volumes: Vec<_> = world.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
+    volumes.sort_by(f64::total_cmp);
+    for volume in volumes {
+        near(volume, 24.);
+    }
+    let saved = reopened.model.saved(&reopened.doc).unwrap();
+    let cached = solidcraft_io::write_design_container_with_cache(&reopened.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
+    let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(&cached)).unwrap();
+    let geometry = reader.geometry().unwrap();
+    let restored = Session::opened(reader.read_document().unwrap(), Some(&geometry));
+    assert_eq!(restored.model.last_recomputed, 0, "the native cache avoids evaluating imports");
+    let world = restored.world_state();
+    let meshes: Vec<_> = world.bodies.iter().map(|b| b.mesh_in_place().0).collect();
+    assert!(meshes.windows(2).all(|m| Arc::ptr_eq(&m[0], &m[1])), "cache adoption retains shared GPU sources");
+}
+
+#[test]
 fn coincident_independent_primitives_keep_their_own_semantic_faces() {
     let mut s = Session::default();
     let first = box2(&mut s);

@@ -190,7 +190,7 @@ mod tests {
                     file: "original-generated.step".into(),
                     step: step.into(),
                     components: Vec::new(),
-                    skip: Vec::new(),
+                    skip: Default::default(),
                 },
                 None,
             )

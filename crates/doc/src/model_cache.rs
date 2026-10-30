@@ -298,6 +298,7 @@ impl SavedModel {
             let body = bodies.get(index(r.get("body"), bodies.len())?).cloned().ok_or_else(|| bad("saved model: body"))?;
             let mut b =
                 ModelBody::new(text(r.get("name"))?, body, r.get("feature").and_then(Json::as_u64).ok_or_else(|| bad("saved model: feature"))?);
+            b.mesh_placement = placed_mesh::PlacedMesh::from_display(&b.body).map(Arc::new);
             b.component = r.get("component").and_then(Json::as_u64).ok_or_else(|| bad("saved model: component"))?;
             b.key = unhex(r.get("key").unwrap_or(&Json::Null))?;
             let depth =

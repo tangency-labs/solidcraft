@@ -887,6 +887,15 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let Ok(placement) = app.session.occurrence_placement(path) else { return Vec::new() };
     let mut entries = component_items(app, placement.component);
+    let shared = path.iter().any(|id| {
+        app.session
+            .doc
+            .occurrences
+            .iter()
+            .find(|o| o.id == *id)
+            .is_some_and(|o| app.session.doc.occurrences.iter().filter(|other| other.component == o.component).take(2).count() > 1)
+    });
+    entries.push(cmd(app, "component.make_independent", "Make independent").with(json!({"occurrence":placement.occurrence,"path":path})).on(shared));
     if app.session.occurrence_scope_count(path).is_ok_and(|n| n > 1) {
         entries.insert(0, Item::heading("Shared child: edits affect all copies of its parent"));
     }

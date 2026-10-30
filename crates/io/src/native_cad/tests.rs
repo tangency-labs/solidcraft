@@ -17,6 +17,7 @@ fn imports_the_block(bytes: &[u8], file: &str) {
     let sf = crate::step_import_feature(bytes, &format!("dir/{file}")).unwrap();
     assert_eq!(sf.import.bodies.len(), 1, "{file}");
     let solidcraft_doc::FeatureKind::Import { file: held, step, .. } = &sf.kind else { panic!("not an Import feature") };
+    let step = step.expanded_text().unwrap();
     assert_eq!(held, file);
     assert!(step.contains("MANIFOLD_SOLID_BREP"), "the feature keeps the restated STEP");
     let v = solidcraft_kernel::measure(&sf.import.bodies[0].body).unwrap().volume;

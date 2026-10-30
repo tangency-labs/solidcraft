@@ -257,6 +257,10 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             app.preferences.browser_bodies_folders = *mode;
                         }
                     });
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::share_imported_parts(app, ui).on_hover_text(app.tr("prefs.share_imported_parts_note"));
+                        crate::scenario::publish_target("prefs:share_imported_parts", check.rect);
+                    });
                     // What is being edited, the sketch's state and the units, along the bottom (#7243).
                     ui_kit::row(ui, "", |ui| {
                         let check = setting::status_bar(app, ui).on_hover_text(app.tr("prefs.status_bar_note"));

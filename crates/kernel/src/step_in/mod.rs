@@ -11,7 +11,11 @@ mod brep;
 pub(crate) mod geom;
 pub(crate) mod p21;
 mod parallel;
+mod sharing;
+mod source;
 pub(crate) mod split;
+
+pub use source::{StepLibrary, StepSource, StepText};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -43,6 +47,15 @@ const MAX_CLOSURE_WORK: usize = 1 << 16;
 pub struct ImportedBody {
     /// Immutable STEP source item, scoped to its embedded payload.
     pub source_item: u64,
+    /// Verified identical source geometry (names and appearances remain this body's own).
+    pub geometry_item: u64,
+    /// Length, angle, boundary and snap units used when preparing the source geometry.
+    pub geometry_units: [f64; 4],
+    /// Canonical geometry before the source assembly places it.
+    pub geometry: Body,
+    pub placement: [[f64; 4]; 4],
+    /// Stable position in the source walk, before failed or unselected bodies are left out.
+    pub planned_index: usize,
     /// Original STEP face entity of each kernel face, including seam pieces.
     pub face_origin: Vec<u64>,
     /// Solid name (the brep's label), else the product name.
@@ -67,6 +80,15 @@ pub struct ImportedBody {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StepNode {
     pub name: String,
+    #[serde(default)]
+    pub definition: u64,
+    #[serde(default, skip_serializing_if = "<[String]>::is_empty")]
+    pub product: Arc<[String]>,
+    /// Uninterpreted product properties prevent linking independently declared definitions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_properties: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
     /// Placement in the parent (column-major 4×4, millimetres).
     pub transform: [[f64; 4]; 4],
     /// Indices into [`StepImport::bodies`] of this product's own bodies.
@@ -92,6 +114,7 @@ pub struct StepImport {
     pub preprocessor: String,
     /// FILE_DESCRIPTION text.
     pub description: String,
+    sharing: Arc<sharing::Sharing>,
 }
 
 /// A solid the walk found, converted later.
@@ -123,7 +146,7 @@ pub(crate) struct Ctx<'a> {
     pub snap: f64,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct Units {
     len: f64,
     ang: f64,
@@ -271,6 +294,7 @@ fn rigid_inverse(m: &mt::Matrix4) -> mt::Matrix4 {
 
 struct Reader {
     ex: Arc<Exchange>,
+    sharing: sharing::Sharing,
     units: HashMap<u64, Units>,
     warnings: BTreeMap<String, usize>,
     /// Representation → its items and context.
@@ -279,6 +303,8 @@ struct Reader {
     rep_links: HashMap<u64, Vec<u64>>,
     /// Product definition → its shape representations.
     pd_reps: HashMap<u64, Vec<u64>>,
+    properties: HashSet<u64>,
+    product_info: HashMap<u64, Arc<[String]>>,
     /// Product definition → child occurrences (NAUO ids).
     children: HashMap<u64, Vec<u64>>,
     /// NAUO → placement relationship entity.
@@ -295,7 +321,7 @@ struct Reader {
     once: HashSet<u64>,
     /// An item placed more than once: its first instance's display, shared by every instance
     /// (with the placement that first instance had), so the part is meshed once.
-    shown: HashMap<u64, (Arc<crate::body::SharedDisplay>, mt::Matrix4)>,
+    shown: HashMap<u64, Arc<crate::body::SharedDisplay>>,
     /// How many planned solids place each item.
     uses: HashMap<u64, usize>,
     /// An item placed more than once: read and oriented where the file defines it, so each
@@ -312,6 +338,7 @@ struct Reader {
     /// Solids the walk found, in file order, to be converted into bodies afterwards (so the
     /// conversion, the long part, can be done a piece at a time: [`StepReading`]).
     plan: Vec<Planned>,
+    selection: Option<HashSet<usize>>,
     /// What the solids of one batch (consecutive solids of one representation) share.
     batches: Vec<Batch>,
     /// Planned solids converted so far.
@@ -330,12 +357,15 @@ struct Reader {
 impl Reader {
     fn new(ex: Arc<Exchange>, workers: usize) -> Self {
         Self {
+            sharing: if ex.duplicates.is_empty() { sharing::find(&ex) } else { sharing::Sharing::default() },
             ex,
             units: HashMap::new(),
             warnings: BTreeMap::new(),
             reps: HashMap::new(),
             rep_links: HashMap::new(),
             pd_reps: HashMap::new(),
+            properties: HashSet::new(),
+            product_info: HashMap::new(),
             children: HashMap::new(),
             placements: HashMap::new(),
             colors: HashMap::new(),
@@ -351,6 +381,7 @@ impl Reader {
             unmeshed_checked: HashSet::new(),
             bodies: Vec::new(),
             plan: Vec::new(),
+            selection: None,
             batches: Vec::new(),
             converted: 0,
             made: Vec::new(),
@@ -411,6 +442,9 @@ impl Reader {
                 "PRODUCT_DEFINITION_SHAPE" | "PROPERTY_DEFINITION" => {
                     if let Some(d) = rf(2) {
                         pds.insert(id, d);
+                        if e.name() == "PROPERTY_DEFINITION" {
+                            self.properties.insert(d);
+                        }
                     }
                 }
                 "SHAPE_DEFINITION_REPRESENTATION" => {
@@ -447,6 +481,32 @@ impl Reader {
                     }
                 }
                 _ => {}
+            }
+        }
+        // Properties may target the product through a shape definition/aspect. Unresolved
+        // associations conservatively prevent linking independently declared products.
+        let properties = std::mem::take(&mut self.properties);
+        for mut target in properties {
+            let mut resolved = false;
+            for _ in 0..64 {
+                let Some(entity) = ex.get(target) else { break };
+                if matches!(
+                    entity.name(),
+                    "PRODUCT_DEFINITION" | "PRODUCT_DEFINITION_FORMATION" | "PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE" | "PRODUCT"
+                ) {
+                    self.properties.insert(target);
+                    resolved = true;
+                    break;
+                }
+                let next = pds
+                    .get(&target)
+                    .copied()
+                    .or_else(|| entity.has("SHAPE_ASPECT").then(|| entity.params().get(2).and_then(Param::as_ref_id)).flatten());
+                let Some(next) = next else { break };
+                target = next;
+            }
+            if !resolved {
+                self.properties.insert(0);
             }
         }
         for (d, r) in sdrs {
@@ -758,11 +818,12 @@ impl Reader {
         // waits for the next one, which places the orientation its first instance found.
         let mut last = first + 1;
         if !single {
-            let mut fresh: HashSet<u64> = self.plan.get(first).map(|p| p.item).into_iter().collect();
+            let mut fresh: HashSet<u64> = self.plan.get(first).map(|p| self.sharing.item(p.item)).into_iter().collect();
             while let Some(p) = self.plan.get(last)
                 && last - first < MAX_WINDOW
             {
-                if !self.oriented.contains_key(&p.item) && !fresh.insert(p.item) {
+                let source = self.sharing.item(p.item);
+                if !self.oriented.contains_key(&source) && !fresh.insert(source) {
                     break;
                 }
                 last += 1;
@@ -774,6 +835,9 @@ impl Reader {
         let mut jobs = Vec::new();
         for i in first..last {
             self.made.push(None);
+            if self.selection.as_ref().is_some_and(|selected| !selected.contains(&i)) {
+                continue;
+            }
             let Some(p) = self.plan.get(i) else { continue };
             let (item, units) = (p.item, p.units);
             if let Some(again) = self.unreadable.get(&item) {
@@ -783,9 +847,10 @@ impl Reader {
                 }
                 continue;
             }
-            let source = match self.oriented.get(&item) {
+            let geometry = self.sharing.item(item);
+            let source = match self.oriented.get(&geometry) {
                 Some(part) => parallel::Source::Oriented(part.clone()),
-                None => parallel::Source::Item { item, units },
+                None => parallel::Source::Item { item: geometry, units },
             };
             let placement = self.batches.get(p.batch).map_or(mt::Matrix4::from_scale(1.0), |b| b.m);
             sources.push((i, item));
@@ -795,7 +860,9 @@ impl Reader {
         let prepared = parallel::bodies(&ex, &jobs, self.workers);
         for ((i, item), made) in sources.into_iter().zip(prepared) {
             let Some(e) = ex.get(item) else { continue };
-            let Some(batch) = self.plan.get(i).and_then(|p| self.batches.get(p.batch)) else { continue };
+            let Some(planned) = self.plan.get(i) else { continue };
+            let units = planned.units;
+            let Some(batch) = self.batches.get(planned.batch) else { continue };
             let (m, path, product, instance) = (batch.m, batch.path.clone(), batch.product.clone(), batch.instance.clone());
             match made {
                 Ok(parallel::Made { body, missing, part, read }) => {
@@ -809,10 +876,12 @@ impl Reader {
                             self.warn(format!("{label}: imported as an open body (the shell is not closed)"));
                         }
                     }
-                    if !self.once.contains(&item) {
-                        self.oriented.entry(item).or_insert_with(|| part.clone());
+                    let geometry = self.sharing.item(item);
+                    if !self.once.contains(&item) || self.sharing.repeated(item) {
+                        self.oriented.entry(geometry).or_insert_with(|| part.clone());
                     }
-                    let (closed, file_faces, face_origin) = (part.closed, part.file_faces, part.face_origin.clone());
+                    let (closed, file_faces) = (part.closed, part.file_faces);
+                    let face_origin: Vec<_> = part.face_origin.iter().map(|face| self.sharing.face(item, *face)).collect();
                     let own = e.params().first().and_then(Param::as_str).unwrap_or("").trim().to_string();
                     let name = if own.is_empty() { product.clone() } else { own };
                     // Faces the mesher gives up on (or that the budget cut short) are reported.
@@ -839,14 +908,14 @@ impl Reader {
                         .map(|face| Some(crate::FaceSource::Imported { item, face: *face, payload_sha256: None, producer: None }))
                         .collect();
                     let body = body.with_face_sources(Some(std::sync::Arc::new(identities)));
-                    // Every instance of a part placed more than once shows its first instance's
-                    // mesh, placed (the first one too: meshing its own would mesh the part twice).
-                    let body = match self.shown.get(&item) {
-                        Some((shared, first)) => body.with_display_of(shared.clone(), to_array(&mat_mul(&m, &rigid_inverse(first)))),
-                        None if self.uses.get(&item).is_some_and(|n| *n > 1) => {
-                            let shared = Arc::new(crate::body::SharedDisplay::new(body.clone()));
-                            self.shown.insert(item, (shared.clone(), m));
-                            body.with_display_of(shared, to_array(&mt::Matrix4::from_scale(1.0)))
+                    // Every placement shows the canonical part in its own frame. Face identities
+                    // and paint stay on the placed body, independent of its shared display.
+                    let body = match self.shown.get(&geometry) {
+                        Some(shared) => body.with_display_of(shared.clone(), to_array(&m)),
+                        None if self.uses.get(&item).is_some_and(|n| *n > 1) || self.sharing.repeated(item) => {
+                            let shared = Arc::new(crate::body::SharedDisplay::new(part.body.clone()));
+                            self.shown.insert(geometry, shared.clone());
+                            body.with_display_of(shared, to_array(&m))
                         }
                         None => body,
                     };
@@ -859,6 +928,11 @@ impl Reader {
                         closed,
                         file_faces,
                         source_item: item,
+                        geometry_item: geometry,
+                        geometry_units: [units.len, units.ang, units.tol, units.snap],
+                        geometry: part.body.clone(),
+                        placement: to_array(&m),
+                        planned_index: i,
                         face_origin,
                     });
                 }
@@ -957,7 +1031,38 @@ impl Reader {
         stack: &mut Vec<u64>,
     ) -> StepNode {
         let name = self.product_name(pd);
-        let mut node = StepNode { name: name.clone(), transform: to_array(&local), bodies: Vec::new(), children: Vec::new() };
+        let product = match self.product_info.get(&pd) {
+            Some(product) => product.clone(),
+            None => {
+                let mut product = Vec::new();
+                if let Some(definition) = self.ex.get(pd) {
+                    product.extend(definition.params().iter().take(2).filter_map(Param::as_str).map(str::to_owned));
+                    if let Some(formation) = definition.params().get(2).and_then(Param::as_ref_id).and_then(|id| self.ex.get(id)) {
+                        product.extend(formation.params().iter().take(2).filter_map(Param::as_str).map(str::to_owned));
+                        if let Some(record) = formation.params().get(2).and_then(Param::as_ref_id).and_then(|id| self.ex.get(id)) {
+                            product.extend(record.params().iter().take(3).filter_map(Param::as_str).map(str::to_owned));
+                        }
+                    }
+                }
+                let product: Arc<[String]> = product.into();
+                self.product_info.insert(pd, product.clone());
+                product
+            }
+        };
+        let mut node = StepNode {
+            name: name.clone(),
+            definition: pd,
+            product,
+            has_properties: {
+                let formation = self.ex.get(pd).and_then(|e| e.params().get(2)).and_then(Param::as_ref_id);
+                let product = formation.and_then(|id| self.ex.get(id)).and_then(|e| e.params().get(2)).and_then(Param::as_ref_id);
+                self.properties.contains(&0) || [Some(pd), formation, product].into_iter().flatten().any(|id| self.properties.contains(&id))
+            },
+            instance: instance.map(str::to_owned),
+            transform: to_array(&local),
+            bodies: Vec::new(),
+            children: Vec::new(),
+        };
         if self.stop() {
             return node;
         }
@@ -1150,6 +1255,7 @@ pub fn step_validate(text: &str) -> std::result::Result<usize, String> {
 /// read the file, until the timeline has evaluated it), and strongly only when it is small.
 struct Recent {
     key: (u64, usize),
+    source: (u64, usize),
     import: std::sync::Weak<StepImport>,
     /// Keeps a small import alive (never read).
     _small: Option<Arc<StepImport>>,
@@ -1187,9 +1293,13 @@ fn text_key(text: &str) -> (u64, usize) {
 
 /// Keep `imp` in the recent imports (strongly only when `small`).
 fn remember(key: (u64, usize), imp: &Arc<StepImport>, small: bool) {
+    remember_selection(key, key, imp, small);
+}
+
+fn remember_selection(key: (u64, usize), source: (u64, usize), imp: &Arc<StepImport>, small: bool) {
     if let Ok(mut cache) = RECENT.lock() {
         cache.retain(|r| r.key != key && r.import.strong_count() > 0);
-        cache.push(Recent { key, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
+        cache.push(Recent { key, source, import: Arc::downgrade(imp), _small: small.then(|| imp.clone()) });
         while cache.len() > 4 {
             cache.remove(0);
         }
@@ -1242,6 +1352,11 @@ impl StepReading {
             Err(_) if cancelled() => return Err(crate::watch::cancelled_error("STEP import")),
             Err(e) => return Err(KernelError::Invalid(e)),
         };
+        Self::with_exchange(ex, key, text.len() <= KEEP_SMALL_BYTES, workers)
+    }
+
+    fn with_exchange(ex: Arc<Exchange>, key: (u64, usize), small: bool, workers: usize) -> Result<StepReading> {
+        let watch = crate::watch::current();
         let mut rd = Reader::new(ex.clone(), workers);
         rd.solid_items = ex
             .entities
@@ -1282,10 +1397,20 @@ impl StepReading {
             for r in loose {
                 rd.rep_bodies(r, &identity, &[], "Import", None, &mut bodies, 0);
             }
-            tree.push(StepNode { name: "Import".into(), transform: to_array(&identity), bodies, children: Vec::new() });
+            tree.push(StepNode {
+                name: "Import".into(),
+                definition: 0,
+                product: Default::default(),
+                has_properties: false,
+                instance: None,
+                transform: to_array(&identity),
+                bodies,
+                children: Vec::new(),
+            });
         }
         let single = workers <= 1;
-        Ok(StepReading { rd, tree, key, small: text.len() <= KEEP_SMALL_BYTES, single })
+        rd.sharing.units(&rd.plan);
+        Ok(StepReading { rd, tree, key, small, single })
     }
 
     /// Convert the next solid (or batch of solids); false once all are converted (or the
@@ -1330,6 +1455,7 @@ impl StepReading {
             system: ex.originating_system.clone(),
             preprocessor: ex.preprocessor.clone(),
             description: ex.description.clone(),
+            sharing: Arc::new(std::mem::take(&mut rd.sharing)),
         })
     }
 

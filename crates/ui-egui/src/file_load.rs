@@ -108,6 +108,22 @@ pub(crate) fn insert_command(path: &str) -> &'static str {
         .unwrap_or_else(|| if solidcraft_engine::io::is_mesh_path(path) { "file.insert_mesh" } else { "file.insert_step" })
 }
 
+/// Apply the sharing preference unless the caller chose explicitly. Other CAD formats keep
+/// their own import options, and opening an existing design keeps its saved identities.
+pub(crate) fn import_preferences(command: &str, params: &mut Value, share_parts: bool) {
+    if !matches!(command, "doc.open" | "file.insert_step") || params.get("share_parts").is_some_and(|v| !v.is_null()) {
+        return;
+    }
+    if let Some(path) = params.get("path").and_then(Value::as_str)
+        && solidcraft_engine::io::is_step_path(path)
+        && !solidcraft_engine::io::is_iges_path(path)
+        && !solidcraft_engine::io::is_native_cad_path(path)
+        && let Some(params) = params.as_object_mut()
+    {
+        params.insert("share_parts".into(), Value::Bool(share_parts));
+    }
+}
+
 struct Made {
     session: Session,
     result: Value,
@@ -444,7 +460,8 @@ fn start(app: &mut SolveApp) {
     let worker_progress = progress.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     let (preview_tx, preview_rx) = std::sync::mpsc::channel();
-    let (command, params) = request.command();
+    let (command, mut params) = request.command();
+    import_preferences(command, &mut params, app.preferences.share_imported_parts);
     let scope = request.scope.clone();
     let allow_hosts = request.allow_hosts.clone();
     let thumbnail = request.kind == Kind::Open;
@@ -554,7 +571,8 @@ fn start_staged(app: &mut SolveApp) {
     if insert {
         session.selection = app.session.selection.clone();
     }
-    let (command, params) = request.command();
+    let (command, mut params) = request.command();
+    import_preferences(command, &mut params, app.preferences.share_imported_parts);
     let (tx, rx) = std::sync::mpsc::channel();
     let progress = Arc::new(Progress::default());
     #[cfg(test)]
@@ -1518,6 +1536,93 @@ mod tests {
             }
             tick(&mut app, &crate::fonts::test_context());
             assert!(Arc::ptr_eq(&newer, &app.session.doc));
+        }
+    }
+
+    #[test]
+    fn step_sharing_preference_reaches_synchronous_worker_and_staged_imports() {
+        use solidcraft_engine::doc::IDENTITY;
+        use solidcraft_engine::geom::Vec3;
+        use solidcraft_engine::kernel::{ExportBody, ExportProduct, StepHeader};
+
+        let h = crate::scenario::Harness::new();
+        let path = h.dir.join("bolts.STEP").to_string_lossy().into_owned();
+        let body = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap();
+        let part = || ExportProduct {
+            name: "Bolt".into(),
+            bodies: vec![ExportBody { name: "Bolt".into(), body: &body, color: None }],
+            children: Vec::new(),
+        };
+        let text = solidcraft_engine::kernel::step_export_products(
+            &[
+                ExportProduct {
+                    name: "Assembly".into(),
+                    bodies: Vec::new(),
+                    children: vec![
+                        (1, IDENTITY, "Bolt:1".into()),
+                        (2, solidcraft_engine::doc::rigid(Vec3::new(10., 0., 0.), Vec3::ZERO, Vec3::Z, 0.), "Bolt:2".into()),
+                    ],
+                },
+                part(),
+                part(),
+            ],
+            0,
+            &StepHeader::default(),
+        )
+        .unwrap();
+        std::fs::write(&path, text).unwrap();
+        let check = |app: &SolveApp, shared| {
+            let first = app.session.doc.occurrences.iter().find(|o| o.name == "Bolt:1").unwrap();
+            let second = app.session.doc.occurrences.iter().find(|o| o.name == "Bolt:2").unwrap();
+            assert_eq!(first.component == second.component, shared, "the import must preserve the chosen edit identity");
+            assert_eq!(app.session.world_state().bodies.len(), 2, "both placements survive either choice");
+        };
+        for insert in [false, true] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.share_imported_parts = false;
+            if insert {
+                app.insert_path(&path);
+            } else {
+                app.open_path(&path);
+            }
+            check(&app, false);
+        }
+        for (kind, staged, preference, explicit) in [
+            (Kind::Open, false, false, None),
+            (Kind::Insert, false, false, Some(true)),
+            (Kind::Insert, true, false, None),
+            (Kind::Open, true, true, Some(false)),
+        ] {
+            let mut app = SolveApp::new(Session::default(), Default::default());
+            app.preferences.share_imported_parts = preference;
+            let mut options = serde_json::Map::new();
+            if let Some(shared) = explicit {
+                options.insert("share_parts".into(), json!(shared));
+            }
+            let reply = if staged {
+                let mut request = Request::new(&path, kind);
+                let (tx, rx) = std::sync::mpsc::channel();
+                request.reply = Some(tx);
+                request.options = options;
+                app.file_load.queued.push_back(request);
+                start_staged(&mut app);
+                rx
+            } else {
+                let command = if kind == Kind::Open { "doc.open" } else { "file.insert_step" };
+                options.insert("path".into(), json!(path));
+                let (request, rx) = crate::control::ControlRequest::new("engine.execute", json!({"command":command,"params":options}));
+                assert!(control(&mut app, request).is_none());
+                rx
+            };
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            while app.file_load.busy() && std::time::Instant::now() < deadline {
+                tick(&mut app, &h.ctx);
+                std::thread::yield_now();
+            }
+            assert!(!app.file_load.busy(), "the import did not finish");
+            let reply = reply.try_recv().unwrap();
+            assert_eq!(reply["ok"], true, "{reply}");
+            check(&app, explicit.unwrap_or(preference));
         }
     }
 

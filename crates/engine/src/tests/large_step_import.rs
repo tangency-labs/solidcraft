@@ -21,7 +21,7 @@ fn step_file(name: &str, count: usize) -> String {
     path.to_string_lossy().to_string()
 }
 
-fn step_text(s: &Session) -> Arc<str> {
+fn step_text(s: &Session) -> solidcraft_kernel::StepSource {
     s.doc.features.iter().find_map(|f| if let FeatureKind::Import { step, .. } = &f.kind { Some(step.clone()) } else { None }).unwrap()
 }
 
@@ -40,14 +40,14 @@ fn edits_after_a_large_import_share_one_copy_of_its_text() {
     for snap in &s.undo {
         for f in &snap.doc.features {
             if let FeatureKind::Import { step, .. } = &f.kind {
-                assert!(Arc::ptr_eq(step, &text), "an undo state holds its own copy of the STEP text");
+                assert!(step.same_source(&text), "an undo state holds its own copy of the STEP source");
             }
         }
     }
-    assert!(Arc::ptr_eq(&step_text(&s), &text));
+    assert!(step_text(&s).same_source(&text));
     // Every Document clone (preview, scratch session) shares it too.
     let copy = (*s.doc).clone();
-    assert!(copy.features.iter().any(|f| matches!(&f.kind, FeatureKind::Import { step, .. } if Arc::ptr_eq(step, &text))));
+    assert!(copy.features.iter().any(|f| matches!(&f.kind, FeatureKind::Import { step, .. } if step.same_source(&text))));
     let _ = std::fs::remove_file(path);
 }
 
@@ -89,23 +89,27 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "first"})).unwrap();
     s.execute("file.insert_step", &json!({"path": path})).unwrap();
     let import = s.doc.features.iter().position(|f| matches!(f.kind, FeatureKind::Import { .. })).unwrap();
+    // Keep the geometry unchanged but miss the prepared-import cache: this preview must
+    // actually read the source, rather than finish from the import the design holds alive.
+    let mut source = std::fs::read_to_string(&path).unwrap();
+    source.push('\n');
+    if let FeatureKind::Import { step, .. } = &mut s.doc_mut().features[import].kind {
+        *step = source.into();
+    }
     // A new length for the box: the import after it is evaluated again on new inputs.
     let redefine =
         json!({"feature": s.doc.features[0].id, "command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "body_name": "first"}});
     let mut scratch = s.scratch();
     let progress = Arc::new(Progress::default());
-    let canceller = {
-        let progress = progress.clone();
-        std::thread::spawn(move || {
-            while progress.work().is_none() {
-                std::thread::yield_now();
-            }
-            progress.cancel();
-        })
-    };
-    let _ = solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("timeline.redefine", &redefine));
-    canceller.join().unwrap();
-    let (_, done, total) = progress.work().unwrap();
+    std::thread::scope(|scope| {
+        let preview = scope.spawn(|| solidcraft_doc::progress::watch(progress.clone(), || scratch.execute("timeline.redefine", &redefine)));
+        while progress.work().is_none() && !preview.is_finished() {
+            std::thread::yield_now();
+        }
+        progress.cancel();
+        let _ = preview.join().unwrap();
+    });
+    let (_, done, total) = progress.work().expect("the preview must import the uncached source");
     assert!(done < total, "the preview's import stopped part way ({done} of {total})");
     s.execute("timeline.redefine", &redefine).unwrap();
     let result = &s.model.results[import];

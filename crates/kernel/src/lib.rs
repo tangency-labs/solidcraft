@@ -190,7 +190,7 @@ pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
 pub use meshbody::{MAX_TRIANGLES, mesh_body};
-pub use native::{decode_native_body, encode_native_body, native_preview_mesh};
+pub use native::{decode_native_body, encode_native_body, exact_geometry_eq, native_preview_mesh};
 pub use offset::with_same_surface;
 pub use ops::{
     BoolOp, boolean, can_join_all_touching_faces, can_join_touching_faces, compound_disjoint_extrusions, half_space, is_planar, join_apart,
@@ -204,7 +204,8 @@ pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;
 pub use step_in::{
-    ImportedBody, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared, step_orientation_errors, step_validate,
+    ImportedBody, StepImport, StepLibrary, StepNode, StepReading, StepSource, StepText, step_cache_alive, step_import, step_import_shared,
+    step_orientation_errors, step_validate,
 };
 pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};

@@ -52,7 +52,7 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
     let header = solidcraft_kernel::StepHeader { organization: "SolidCraft".into(), ..Default::default() };
     let step = solidcraft_kernel::step_export_bodies(&list, &header)?;
     let mut scratch = s.scratch();
-    let kind = FeatureKind::Import { file: format!("{} (pasted)", copy.design), step: step.into(), components: Vec::new(), skip: Vec::new() };
+    let kind = FeatureKind::Import { file: format!("{} (pasted)", copy.design), step: step.into(), components: Vec::new(), skip: Default::default() };
     // Named as any import is ("Import1"); the design they came from stays on it as its file.
     let id = scratch.doc_mut().add_feature(kind, None)?;
     let feature = scratch.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();

@@ -224,6 +224,38 @@ impl ModelBody {
         self.mesh.clone()
     }
 
+    /// Immutable display geometry before a proper rigid placement. Different placements keep
+    /// their own display identities, but can plan and draw this source once.
+    pub fn display_source_identity(&self) -> Arc<dyn std::any::Any + Send + Sync> {
+        self.mesh_placement.as_deref().map_or_else(|| self.display_identity(), placed_mesh::PlacedMesh::identity)
+    }
+
+    /// The proper rigid move from the shared display source to this body.
+    pub fn display_transform(&self) -> crate::Mat {
+        self.mesh_placement.as_deref().map_or(crate::IDENTITY, placed_mesh::PlacedMesh::transform)
+    }
+
+    /// The display source's chord tolerance. Turning a placement's bounding box must not
+    /// change the error used to choose a detail level for the shared source.
+    pub fn display_chord(&self, q: crate::display_quality::DisplayQuality) -> f64 {
+        self.mesh_placement.as_deref().map_or_else(|| q.chord(self.body.size()), |placed| placed.chord(q))
+    }
+
+    /// A shared source's display mesh where this body stands. Only callers that require world
+    /// coordinates need this copy; the viewport draws the source mesh with its placement.
+    pub fn place_display_mesh(&self, mesh: &Arc<Mesh>) -> Arc<Mesh> {
+        self.mesh_placement.as_deref().map_or_else(|| mesh.clone(), |placed| placed.place_mesh(mesh))
+    }
+
+    /// Refine in the definition's frame, placed by [`Self::display_transform`]. The caller
+    /// owns the refinement's lifetime; no view-dependent data is retained by the document.
+    pub fn refined_display_in_place(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<TessPlan>, Arc<Mesh>)> {
+        match self.mesh_placement.as_deref() {
+            Some(placed) => placed.refinement(q, k),
+            None => self.refined_display(q, k),
+        }
+    }
+
     /// [`ModelBody::mesh`] as a shared mesh and the move that places it: for a rigid placement
     /// of a definition, the definition's own mesh (the same one for every placement of it) and
     /// the placement; for any other body its own mesh, unmoved. The mesh moved by the matrix is
@@ -303,15 +335,7 @@ impl ModelBody {
         if k == 0 {
             return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
         }
-        let plan = match self.body.display_plan_angular(q.refined_chord(self.body.size(), k), q.refined_angle(k)) {
-            Ok(plan) => plan,
-            Err(e) => {
-                log::debug!("{}: no display plan refined {k} steps ({e})", self.name);
-                return None;
-            }
-        };
-        let mesh = self.body.display_mesh_of(&plan).ok()?;
-        Some((Arc::new(plan), Arc::new(mesh)))
+        placed_mesh::refined(&self.body, q, k)
     }
 
     /// The chord tolerance of [`ModelBody::mesh`] (mm): 1/1000 of the definition's size, at least
@@ -1357,7 +1381,7 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
 /// each time made every command as slow as the files are large: a text is shared (`Arc`), so
 /// its digest is taken once and kept while the feature holds that same text.
 #[derive(Clone, Debug, Default)]
-struct StepDigests(std::collections::HashMap<u64, (Arc<str>, u64)>);
+struct StepDigests(std::collections::HashMap<u64, (kernel::StepSource, u64)>);
 
 impl StepDigests {
     /// The digests of `doc`'s imported texts, reusing `known` for texts it has seen.
@@ -1377,17 +1401,15 @@ impl StepDigests {
     }
 
     /// The digest of `step`, when it is the text feature `id` was last seen with.
-    fn get(&self, id: u64, step: &Arc<str>) -> Option<u64> {
-        self.0.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
+    fn get(&self, id: u64, step: &kernel::StepSource) -> Option<u64> {
+        self.0.get(&id).filter(|(text, _)| text.same_source(step)).map(|(_, digest)| *digest)
     }
 }
 
-fn step_text_digest(text: &str) -> u64 {
+fn step_text_digest(text: &kernel::StepSource) -> u64 {
     #[cfg(test)]
     cost_tests::count(|c| c.digested += 1);
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut h);
-    h.finish()
+    text.fingerprint()
 }
 
 /// Positions and radii are fingerprinted to this quantum (mm): far below anything a design
@@ -1451,7 +1473,7 @@ fn feature_json(f: &Feature, steps: &StepDigests) -> String {
         let mut g = f.clone();
         if let FeatureKind::Import { step: text, .. } = &mut g.kind {
             let digest = steps.get(f.id, step).unwrap_or_else(|| step_text_digest(step));
-            *text = Arc::from(format!("{digest:016x}:{}", step.len()));
+            *text = format!("{digest:016x}:{}", step.len()).into();
         }
         return serde_json::to_string(&g).unwrap_or_default();
     }
@@ -7979,14 +8001,20 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::Import { step, skip, .. } => {
-            let imp = kernel::step_import_shared(step)?;
-            let digest = crate::config::payload_digest(step);
+            let imp = match skip {
+                crate::ImportFilter::Only { only } => step.import_only(only)?,
+                crate::ImportFilter::Skip(_) => step.import_shared()?,
+            };
+            let digest = step.payload_digest();
+            let mesh_digest = digest.as_bytes().try_into().ok();
             let names = import_body_names(st, &f.body_names, &imp, skip);
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
                 let carried = f.link_faces.get(k).map_or(&[][..], Vec::as_slice);
-                let b = crate::lineage::linked_tool(b.body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
-                st.bodies.push(ModelBody::traced_new(name, b, f.id));
+                let traced = crate::lineage::linked_tool(b.body.clone().with_import_certificate(&digest, f.id)?, f.id, carried);
+                let mut model = ModelBody::traced_new(name, traced, f.id);
+                model.mesh_placement = mesh_digest.and_then(|digest| placed_mesh::PlacedMesh::imported(b, digest, &imp)).map(Arc::new);
+                st.bodies.push(model);
             }
             if !imp.warnings.is_empty() {
                 let n = imp.warnings.len();
@@ -8020,8 +8048,13 @@ fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
 /// The names an Import feature gives the file's bodies, added after the bodies of `st`, in the
 /// file's order: `None` for a body it skips (a later instance of a repeated part). `body_names`
 /// are the feature's stored names (by index), else the file's own.
-pub fn import_body_names(st: &ModelState, body_names: &[String], imp: &kernel::StepImport, skip: &[u64]) -> Vec<Option<String>> {
-    let skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
+pub fn import_body_names(st: &ModelState, body_names: &[String], imp: &kernel::StepImport, skip: &crate::ImportFilter) -> Vec<Option<String>> {
+    let (include, indices) = match skip {
+        crate::ImportFilter::Skip(indices) => (false, indices),
+        crate::ImportFilter::Only { only } => (true, only),
+    };
+    let indices: std::collections::HashSet<u64> = indices.iter().copied().collect();
+    let mut selected_names = body_names.iter();
     // Files from board and assembly tools give thousands of bodies the same name: name them
     // from a set, not by searching the bodies for every candidate (cubic).
     let mut names = BodyNames::new(st);
@@ -8029,10 +8062,11 @@ pub fn import_body_names(st: &ModelState, body_names: &[String], imp: &kernel::S
         .iter()
         .enumerate()
         .map(|(k, b)| {
-            if skip.contains(&(k as u64)) {
+            let index = if include { b.planned_index } else { k };
+            if indices.contains(&(index as u64)) != include {
                 return None;
             }
-            let base = body_names.get(k).filter(|n| !n.trim().is_empty()).unwrap_or(&b.name);
+            let base = if include { selected_names.next() } else { body_names.get(k) }.filter(|n| !n.trim().is_empty()).unwrap_or(&b.name);
             Some(names.unique(base))
         })
         .collect()

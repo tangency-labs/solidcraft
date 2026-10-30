@@ -574,6 +574,32 @@ impl<'de> Deserialize<'de> for FlangeEdge {
     }
 }
 
+/// Imported body indices: legacy exclusions, or the compact selection of an independent part.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ImportFilter {
+    Skip(Vec<u64>),
+    Only { only: Vec<u64> },
+}
+
+impl Default for ImportFilter {
+    fn default() -> Self {
+        Self::Skip(Vec::new())
+    }
+}
+
+impl From<Vec<u64>> for ImportFilter {
+    fn from(indices: Vec<u64>) -> Self {
+        Self::Skip(indices)
+    }
+}
+
+impl ImportFilter {
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Skip(indices) if indices.is_empty())
+    }
+}
+
 /// Feature definitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1743,17 +1769,16 @@ pub enum FeatureKind {
     Import {
         /// Source file name (display only).
         file: String,
-        /// The STEP (ISO 10303-21) text, shared by every copy of the design (undo states,
-        /// previews, scratch sessions): a large file is held once, not once per edit.
-        step: std::sync::Arc<str>,
+        /// Authoritative STEP source: legacy text or a shared entity library, held once across
+        /// features, undo states, previews and scratch sessions.
+        step: solidcraft_kernel::StepSource,
         /// The file's product/assembly tree, kept for components.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         components: Vec<solidcraft_kernel::StepNode>,
-        /// The file's bodies (by index) this feature does not build: later instances of a part
-        /// the file places more than once, shown by the other occurrences of that part's
-        /// component (#1386). Empty in designs from before format 22: every body is built.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        skip: Vec<u64>,
+        /// Legacy converted-body exclusions, or selected planned source indices. Later instances
+        /// are displayed through occurrences; an independent copy selects only its own parts.
+        #[serde(default, skip_serializing_if = "ImportFilter::is_empty")]
+        skip: ImportFilter,
     },
     /// Rebuild an upstream constant-section mesh with analytic planar/cylindrical faces.
     MeshConvert {
@@ -2054,6 +2079,9 @@ pub struct Component {
     /// Parent component (0 = the root).
     #[serde(default)]
     pub parent: u64,
+    /// STEP import that supplied this definition; browser grouping stays inside that import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported_from: Option<u64>,
     /// The definition's part properties (part number, description, revision…) and other tools'
     /// data, under the same rules as the design's own `metadata`. Every occurrence shares them;
     /// the bill of materials reads them.
@@ -2554,10 +2582,10 @@ impl Feature {
     /// Where in `body_names` the names of the first `count` bodies the feature builds are kept,
     /// in the order it builds them. The same index for most features. An Import keeps its names
     /// by the file's body index, and builds no body for the file bodies it skips, so its built
-    /// bodies pass their slots by (#2175).
+    /// bodies pass their slots by (#2175). A selected import stores only its selected names.
     pub fn body_name_slots(&self, count: usize) -> Vec<usize> {
         let skip: std::collections::HashSet<u64> = match &self.kind {
-            FeatureKind::Import { skip, .. } => skip.iter().copied().collect(),
+            FeatureKind::Import { skip: ImportFilter::Skip(skip), .. } => skip.iter().copied().collect(),
             _ => Default::default(),
         };
         (0..count.saturating_add(skip.len())).filter(|k| !skip.contains(&(*k as u64))).take(count).collect()

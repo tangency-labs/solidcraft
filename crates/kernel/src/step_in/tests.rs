@@ -335,8 +335,11 @@ fn parallel_import_does_not_prepare_past_body_budget_with_duplicates_or_mapped_i
         let out = reader.remap(&out);
         assert_eq!(reader.bodies.len(), MAX_BODIES);
         assert_eq!(out, vec![MAX_BODIES - 2, MAX_BODIES - 1]);
-        assert_eq!(reader.bodies.last().unwrap().name, "Second");
-        assert_eq!(reader.oriented.len(), 2);
+        let (first, second) = (&reader.bodies[MAX_BODIES - 2], &reader.bodies[MAX_BODIES - 1]);
+        assert_eq!((first.source_item, first.name.as_str()), (2001, "First"));
+        assert_eq!((second.source_item, second.name.as_str()), (2002, "Second"));
+        assert_eq!(first.geometry_item, second.geometry_item, "both occurrences reuse shell #100");
+        assert_eq!(reader.oriented.len(), 1, "one prepared shell still consumes two body slots");
         assert!(!reader.oriented.contains_key(&2003) && !reader.unreadable.contains_key(&2003));
         assert!(!reader.used_items.contains(&3000));
         assert_eq!(reader.warnings.len(), 1);
@@ -778,10 +781,63 @@ fn distinct_parts_convert_together_across_instances() {
     assert!(threaded.warnings.is_empty(), "{:?}", threaded.warnings);
     crate::body::ORIENTED.with(|c| c.set(0));
     let serial = step_import_with_workers(&t, 1).unwrap();
-    assert_eq!(crate::body::ORIENTED.with(|c| c.get()), 2, "two parts");
+    assert_eq!(crate::body::ORIENTED.with(|c| c.get()), 1, "different products share exactly identical geometry");
     assert_same_import(&serial, &threaded);
     assert_eq!(threaded.bodies[1].name, "Cube1");
     assert_eq!(threaded.bodies[1].path, vec!["Assembly".to_string(), "Block1".to_string()]);
+}
+
+#[test]
+fn exact_source_copies_restore_original_topology_and_reject_a_changed_coordinate() {
+    let cube = box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap();
+    let different = box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.0001)).unwrap();
+    let text = step_export(&[&cube, &cube, &different], "Copies").unwrap();
+    let imported = step_import_shared(&text).unwrap();
+    assert_eq!(imported.bodies.len(), 3);
+    assert_eq!(imported.bodies[0].geometry_item, imported.bodies[1].geometry_item);
+    assert_ne!(imported.bodies[0].geometry_item, imported.bodies[2].geometry_item);
+    assert_ne!(imported.bodies[0].face_origin, imported.bodies[1].face_origin);
+    let source = StepSource::compact(text.clone(), &imported);
+    assert!(matches!(source, StepSource::Shared(_)), "the repeated topology should be stored once");
+    let reopened: StepSource = serde_json::from_str(&serde_json::to_string(&source).unwrap()).unwrap();
+    // Expanding reads and verifies the library directly, independent of the recent-import cache.
+    let expanded = reopened.expanded_text().unwrap();
+    assert_eq!(p21::parse(&text).unwrap().entities, p21::parse(&expanded).unwrap().entities);
+    let cold = StepReading::with_workers(&expanded, 1).unwrap().finish_shared().unwrap();
+    assert_same_import(&imported, &cold);
+    let selected = reopened.import_only(&[2]).unwrap();
+    assert_eq!(selected.bodies.len(), 1);
+    assert!(rel(measure(&selected.bodies[0].body).unwrap().volume, 24.0006) < 1e-9);
+    let mut corrupt = serde_json::to_value(&source).unwrap();
+    corrupt["copies"][0]["entities"][0][0] = serde_json::json!(0);
+    let corrupt: StepSource = serde_json::from_value(corrupt).unwrap();
+    assert!(corrupt.expanded_text().is_err());
+}
+
+#[test]
+fn coincident_but_distinct_topology_is_not_a_source_copy() {
+    // Both graphs have the same recursively expanded values. Only one reuses its point, so
+    // their topology is not interchangeable even though a structural digest can match them.
+    let text = format!(
+        "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));#2=CARTESIAN_POINT('',(0.,0.,0.));\n\
+        #3=EDGE_CURVE('',#1,#1,#1,.T.);#4=EDGE_CURVE('',#1,#2,#1,.T.);\n\
+        #5=MANIFOLD_SOLID_BREP('Same',#3);#6=MANIFOLD_SOLID_BREP('Same',#4);{TAIL}"
+    );
+    let ex = p21::parse(&text).unwrap();
+    assert!(sharing::find(&ex).copies.is_empty());
+}
+
+#[test]
+fn matching_source_coordinates_with_different_units_keep_different_geometry() {
+    let text = instanced_assembly_of(2, 2).replace(
+        "#1110=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#1120,#1115),#20);",
+        "#1110=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#1120,#1115),#30);",
+    );
+    let imported = StepReading::with_workers(&text, 1).unwrap().finish().unwrap();
+    assert_eq!(imported.bodies.len(), 2);
+    assert_ne!(imported.bodies[0].geometry_item, imported.bodies[1].geometry_item);
+    assert!(rel(measure(&imported.bodies[0].body).unwrap().volume, 1000.) < 1e-9);
+    assert!(rel(measure(&imported.bodies[1].body).unwrap().volume, 1.) < 1e-9);
 }
 
 /// A part an assembly places twice is meshed once: the second instance shows the first one's
