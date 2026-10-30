@@ -1,0 +1,12 @@
+id = "blend.identify_fillet"
+upstream = ["source/SMLib/src/SmFace.cpp", "source/SMLib/inc/SmFace.h"]
+rust_module = "blend::identify_fillet"
+depends_on = ["curve.curve_cache", "curve.curve_p2", "curve.curve_p4", "curve.curve_p5", "curve.curve_p6", "geom.axis2_placement", "geom.local_solve1d", "geom.polynomial", "nurbs.b_spline_curve_n_lib", "surface.surface_p1", "surface.surface_p2", "surface.surface_p5", "surface.surface_p7", "surface.surface_p9", "topology.edge", "topology.edgeuse_p1", "topology.edgeuse_p3", "topology.face_p2", "topology.loopuse"]
+soft_depends_on = []
+est_lines = 1008
+layer = 42
+tests = []
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN: difftest 510 cases, 510 pass, 0 deferred, max_rel_err 0 (every face of 18 upstream fillet solids x 3 flag sets). New unit (step 2 of #1060, the fork's SmOffsetFaces): SmFace::IdentifyFillet and SmFace::IdentifyFilletUOrV (SmFace.cpp), unowned in harness/callgraph (unused_functions.txt). The only pinned caller is SmApiFillets.cpp's sm_IsFilletFace (SmApiRemoveFillet, which also needs the unported SmFeatureExecutive). CO-PORTED in blend.identify_fillet (PR #1844): SmBSplineSurface::TestForFilletSurfaceUOrV, SmBSplineCurve::TestForFilletCrossSection, smgu_CircleFromPointsTangents, SmSurface::FindFilletMinMaxRadii, SmSurface::CalculateFilletRadius -> crate::blend::identify_fillet (all unowned). SmBSplineSurface::TestForFilletSurface (the U+V wrapper) has no caller in the pinned closure and is not ported."
