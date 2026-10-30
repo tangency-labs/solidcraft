@@ -568,8 +568,46 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
     rect.center().y
 }
 
-fn group_for(groups: &[solidcraft_engine::doc::TimelineGroup], feature: u64) -> Option<u64> {
+pub(crate) fn group_for(groups: &[solidcraft_engine::doc::TimelineGroup], feature: u64) -> Option<u64> {
     groups.iter().find(|group| group.features.contains(&feature)).map(|group| group.id)
+}
+
+/// The features a drag starting on feature `id`'s row moves: the selection, with the row
+/// selected first when it isn't. Shared with the History in the browser (#9565).
+pub(crate) fn drag_features(app: &mut SolveApp, id: u64, selected: bool) -> Vec<u64> {
+    if !selected {
+        select_only(app, TimelineItem::Feature(id));
+    }
+    selected_feature_ids(app)
+}
+
+/// Drops dragged History items at timeline `position`, into folder `group` (`None`: the timeline
+/// root), before the history marker when `active`. Shared with the History in the browser (#9565).
+pub(crate) fn drop_items(
+    app: &mut SolveApp,
+    plan: &HistoryRows,
+    features: &[u64],
+    groups: &[u64],
+    group: Option<u64>,
+    position: usize,
+    active: bool,
+) {
+    let mut params = json!({"group": group, "position": position});
+    // A feature and the sketches listed under it move as one block (#6489); the move's own checks
+    // refuse a place where anything would fail.
+    let features = plan.with_listed(features);
+    if !features.is_empty() {
+        params["features"] = json!(features);
+    }
+    if !groups.is_empty() {
+        params["groups"] = json!(groups);
+    }
+    // Crossing the marker rolls the moved features back or forward, in the same step.
+    params["active"] = json!(active);
+    let _ = app.run("timeline.move_many", params);
+    if let Some(group) = group {
+        app.tree.collapsed.remove(&format!("timeline_group:{group}"));
+    }
 }
 
 fn selected_drag_items(app: &SolveApp, origin_x: f32, source_group: Option<u64>) -> DragItems {
@@ -1383,22 +1421,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
                     vertical_drop_group(pointer, slot, &folder_drop_zones, &groups, panel_left, drag_x(&items, pointer.x), items.source_group);
                 let valid_target = folder_target.is_none_or(|target| valid_folder_target(&items, &groups, target));
                 if valid_target {
-                    let mut params = json!({"group": folder_target, "position": slot.position});
-                    // A feature and the sketches listed under it move as one block (#6489); the
-                    // move's own checks refuse a place where anything would fail.
-                    let features = plan.with_listed(&items.features);
-                    if !features.is_empty() {
-                        params["features"] = json!(features);
-                    }
-                    if !items.groups.is_empty() {
-                        params["groups"] = json!(items.groups);
-                    }
-                    // Crossing the marker rolls the moved features back or forward, in the same step.
-                    params["active"] = json!(slot.y < marker_y);
-                    let _ = app.run("timeline.move_many", params);
-                    if let Some(group) = folder_target {
-                        app.tree.collapsed.remove(&format!("timeline_group:{group}"));
-                    }
+                    drop_items(app, &plan, &items.features, &items.groups, folder_target, slot.position, slot.y < marker_y);
                 }
             }
         }
@@ -1497,11 +1520,9 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         rows.hovered = Some(id);
     }
     if response.drag_started() && !on_fold {
-        if !selected {
-            select_only(app, TimelineItem::Feature(id));
-        }
+        let features = drag_features(app, id, selected);
         let origin_x = drag_press_x(&response, rect.center().x);
-        rows.drag = Some(Drag::Items(selected_drag_items(app, origin_x, group_id)));
+        rows.drag = Some(Drag::Items(DragItems { features, ..selected_drag_items(app, origin_x, group_id) }));
     }
     let listed_under = plan.host(id).and_then(|host| features.iter().find(|feature| feature.0 == host)).map(|feature| feature.1.as_str());
     let mut tooltip = egui::Tooltip::for_enabled(&response);

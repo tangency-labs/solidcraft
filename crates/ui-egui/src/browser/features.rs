@@ -117,7 +117,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     };
     if !compact {
         for index in indices {
-            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index));
+            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index), None);
         }
         return;
     }
@@ -129,32 +129,59 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     // Where the marker can be dropped: the top of each row (it and the sketches listed under it
     // first rolled back) and below the last.
     let mut slots: Vec<(f32, usize)> = Vec::new();
+    // Where dragged rows can be dropped, as in the History at the left: these slots and one
+    // before the marker, each with the folder the rows join (#9565).
+    let drag_id = egui::Id::new(("sc_browser_history_drag", &scope));
+    let mut dragged: Option<Vec<u64>> = ui.data(|d| d.get_temp(drag_id));
+    let mut drops: Vec<DropSlot> = Vec::new();
     let mut marker_resp = None;
     for row in &plan.rows {
         let index = global(row.index);
+        let drop = DropSlot {
+            y: ui.cursor().min.y,
+            position: global(row.slot.min(row.index)),
+            group: crate::timeline_left::group_for(&app.session.doc.timeline_groups, row.feature),
+        };
         if marker_resp.is_none() && index >= marker {
+            drops.push(drop);
             marker_resp = Some(marker_row(app, ui, depth + 1));
         }
         slots.push((ui.cursor().min.y, global(row.slot)));
+        drops.push(DropSlot { y: ui.cursor().min.y, ..drop });
         // The same fold as in the vertical History, so it stays open when the layout changes.
         let key = crate::timeline_left::sketches_key(row.feature);
         let open = is_open(app, &key, false);
         let listed: Vec<usize> = row.listed.iter().filter(|listed| !listed.reference).map(|listed| global(listed.index)).collect();
         let fold = (!listed.is_empty()).then_some(open);
-        if feature_row(app, ui, acts, &here, index, depth + 1, fold, mark(app, index)) {
+        if feature_row(app, ui, acts, &here, index, depth + 1, fold, mark(app, index), Some(&mut dragged)) {
             toggle(app, &key, false);
         }
         if open {
             for index in listed {
-                let _ = feature_row(app, ui, acts, &here, index, depth + 2, None, mark(app, index));
+                let _ = feature_row(app, ui, acts, &here, index, depth + 2, None, mark(app, index), Some(&mut dragged));
             }
         }
     }
+    let end = global(indices.len());
+    if marker_resp.is_none() {
+        drops.push(DropSlot { y: ui.cursor().min.y, position: end, group: None });
+    }
     let resp = marker_resp.unwrap_or_else(|| marker_row(app, ui, depth + 1));
     if !plan.rows.is_empty() {
-        slots.push((ui.cursor().min.y, global(indices.len())));
+        slots.push((ui.cursor().min.y, end));
+        drops.push(DropSlot { y: ui.cursor().min.y, position: end, group: None });
     }
     drag_marker(app, ui, &resp, &slots, marker);
+    drag_rows(app, ui, &plan, drag_id, dragged, &drops, resp.rect.center().y);
+}
+
+/// A place in the browser's History where dragged rows can land: its height, the timeline
+/// position they move to and the folder they join (`None`: the timeline root).
+#[derive(Clone, Copy)]
+struct DropSlot {
+    y: f32,
+    position: usize,
+    group: Option<u64>,
 }
 
 /// Where a history row is drawn: its component and placement.
@@ -205,6 +232,7 @@ fn feature_row(
     depth: usize,
     fold: Option<bool>,
     mark: Mark,
+    drag: Option<&mut Option<Vec<u64>>>,
 ) -> bool {
     let Some(feature) = app.session.doc.features.get(index) else { return false };
     let (component, path) = (here.component, here.path);
@@ -280,6 +308,13 @@ fn feature_row(
     if let Some(at) = r.secondary {
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
     }
+    // In the History: a drag of the row (not of its fold arrow or eye) moves the feature (#9565).
+    if let Some(drag) = drag
+        && !r.on_control
+        && r.resp.as_ref().is_some_and(egui::Response::drag_started)
+    {
+        *drag = Some(crate::timeline_left::drag_features(app, id, selected));
+    }
     r.fold
 }
 
@@ -312,6 +347,44 @@ fn drag_marker(app: &mut SolveApp, ui: &egui::Ui, resp: &egui::Response, slots: 
         let n = app.session.doc.features.len();
         let _ = app.run_heavy("timeline.roll_to", if position >= n { json!({}) } else { json!({ "position": position }) });
     }
+}
+
+/// Dragging feature rows shows where they land with the History's drop bar; letting go moves them
+/// with the History's own move, before or behind the marker by the side of it they land on.
+fn drag_rows(app: &mut SolveApp, ui: &egui::Ui, plan: &HistoryRows, drag_id: egui::Id, dragged: Option<Vec<u64>>, drops: &[DropSlot], marker_y: f32) {
+    let Some(features) = dragged else { return };
+    let (released, down) = ui.input(|i| (i.pointer.any_released(), i.pointer.any_down()));
+    if released || !down {
+        ui.data_mut(|d| d.remove::<Vec<u64>>(drag_id));
+    }
+    if !released && !down {
+        return;
+    }
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    // Only over the History's rows: let go anywhere else, nothing moves.
+    let reach = crate::ui_kit::TREE_ROW_HEIGHT;
+    let (top, bottom) = drops.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(top, bottom), drop| (top.min(drop.y), bottom.max(drop.y)));
+    let slot = ui
+        .ctx()
+        .pointer_latest_pos()
+        .filter(|p| ui.max_rect().x_range().contains(p.x) && p.y >= top - reach && p.y <= bottom + reach)
+        .and_then(|p| drops.iter().min_by(|a, b| (a.y - p.y).abs().total_cmp(&(b.y - p.y).abs())).copied());
+    if released {
+        if let Some(drop) = slot {
+            crate::timeline_left::drop_items(app, plan, &features, &[], drop.group, drop.position, drop.y < marker_y);
+        }
+        return;
+    }
+    if let Some(drop) = slot {
+        let rect = ui.max_rect();
+        crate::ui_kit::history_drop_bar(
+            ui.painter(),
+            Rect::from_min_max(pos2(rect.left() + 4.0, drop.y), pos2(rect.right() - 5.0, drop.y)),
+            true,
+            Tokens::get().sketch_accent,
+        );
+    }
+    ui.data_mut(|d| d.insert_temp(drag_id, features));
 }
 
 #[cfg(test)]
@@ -870,5 +943,34 @@ mod tests {
         set(&mut h);
         h.frames(2);
         assert_eq!(marks(), ["status:warning:Warned"], "a suppressed feature isn't built and has no mark");
+    }
+
+    /// #9565: with the History in the browser, dragging a feature row moves the feature as the
+    /// History at the left does, and the marker still drags on its own.
+    #[test]
+    fn browser_history_rows_reorder_by_drag_and_the_marker_still_rolls_back() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for (i, name) in ["First", "Second", "Third"].into_iter().enumerate() {
+            let size = 5 + i as u64;
+            let r = h.app.run("solid.box", json!({"length":size,"width":size,"height":size,"name":name,"body_name":name})).unwrap();
+            ids.push(r["feature"].as_u64().unwrap());
+        }
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        settle_heavy(&mut h);
+        let order = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.id).collect::<Vec<_>>();
+        assert_eq!(order(&h), ids);
+
+        let first = crate::scenario::handle_at(&format!("row:browser-feature:c0:{}", ids[0])).unwrap();
+        h.step(&json!({"drag":[{"handle":format!("row:browser-feature:c0:{}", ids[2])},[first.x, first.y - 8.0]]})).unwrap();
+        settle_heavy(&mut h);
+        assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "dropped above the first row: the third feature moves to the top");
+        assert_eq!(h.app.session.doc.marker, None, "dropped above the marker: still built");
+
+        let second = crate::scenario::handle_at(&format!("row:browser-feature:c0:{}", ids[1])).unwrap();
+        h.step(&json!({"drag":[{"handle":"browser:rollback"},[second.x, second.y - 8.0]]})).unwrap();
+        settle_heavy(&mut h);
+        assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
+        assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
     }
 }
