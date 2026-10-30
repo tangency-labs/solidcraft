@@ -322,6 +322,7 @@ fn loop_fillet_as_tall_as_its_wall_consumes_it() {
 fn fillet_consuming_a_side_face_makes_a_full_round() {
     // 14 x 6 x 10: r = 3 on the four vertical edges uses up both 6 mm end faces (#199).
     let b = box_solid(Vec3::new(14.0, 0.0, 0.0), Vec3::new(28.0, 6.0, 10.0)).unwrap();
+    let before = measure(&b).unwrap().volume;
     let mids = [Vec3::new(14.0, 0.0, 5.0), Vec3::new(28.0, 0.0, 5.0), Vec3::new(14.0, 6.0, 5.0), Vec3::new(28.0, 6.0, 5.0)];
     let full = 840.0 - (4.0 - PI) * 9.0 * 10.0;
     for order in [mids.to_vec(), mids.iter().rev().copied().collect()] {
@@ -343,12 +344,13 @@ fn fillet_consuming_a_side_face_makes_a_full_round() {
     let c = fillet(&post, &corners, 3.0).unwrap();
     assert!(rel(measure(&c).unwrap().volume, PI * 9.0 * 10.0) < 2e-4, "{}", measure(&c).unwrap().volume);
     assert!(c.validity().is_empty());
-    // Past the limit there is no face left to consume: still refused, the body unchanged.
+    // Past the limit the two rounds on each 6 mm end would cross: still refused as too large
+    // (SMLib's NO_ROOM), the body unchanged.
     for r in [3.0 + 1e-3, 3.5] {
         let e = fillet(&b, &mids, r).unwrap_err();
-        assert!(e.to_string().contains("larger than the neighbouring faces"), "{r}: {e}");
+        assert!(matches!(e, KernelError::TooLarge(_)), "{r}: {e}");
     }
-    assert_eq!(measure(&b).unwrap().volume, 840.0);
+    assert_eq!(measure(&b).unwrap().volume, before);
 }
 
 #[test]
