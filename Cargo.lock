@@ -4218,6 +4218,7 @@ dependencies = [
  "hidapi",
  "keyring",
  "libc",
+ "libloading",
  "log",
  "muda",
  "objc2 0.6.5",

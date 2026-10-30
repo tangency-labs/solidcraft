@@ -929,6 +929,8 @@ preference_settings! {
     space_mouse_axis_source: [usize; 6] = crate::space_mouse::SAME_AXES, PAGE_NAVIGATION;
     /// Which program reads the 3D mouse when spacenavd and the device itself are both there (Linux).
     space_mouse_driver: SpaceMouseDriver = SpaceMouseDriver::default(), PAGE_NAVIGATION;
+    /// On macOS, prefer the installed Navigation Library; restarting applies this choice.
+    space_mouse_navlib: bool = true, PAGE_NAVIGATION => check_id("ui.3d_mouse_navlib");
     /// Where the 3D mouse picture sits in the 3D view, when it is shown there (`space_mouse_in_view`).
     space_mouse_ghost_position: SpaceMouseGhost = SpaceMouseGhost::default(), PAGE_NAVIGATION;
     /// The user turned the calibration offer off for good ("Never show again"). Unlike closing the
@@ -2491,6 +2493,16 @@ fn space_mouse_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 const FORM_LABEL_WIDTH: f32 = 150.0;
 
 fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if cfg!(target_os = "macos") {
+        setting::space_mouse_navlib(app, ui);
+        ui_kit::text(ui, app.tr("ui.3d_mouse_navlib_restart"), ui_kit::Text::Hint("navlib_restart"));
+    }
+    if app.viewport.space_mouse_driver_settings {
+        setting::space_mouse_enabled(app, ui);
+        ui_kit::text(ui, app.tr("ui.3d_mouse_driver_settings"), ui_kit::Text::Hint("navlib_settings"));
+        navigation::nav_bridge(app, ui);
+        return;
+    }
     let t = Tokens::get();
     // The two checkboxes sit in the two-column grid Wheel and trackpad uses (`navigation.rs`).
     let width = (ui.available_width() - (t.space_16 + t.space_4)) * 0.5;
@@ -2853,6 +2865,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     let d = Prefs::default();
     let p = &mut app.preferences;
     p.space_mouse_driver = d.space_mouse_driver;
+    p.space_mouse_navlib = d.space_mouse_navlib;
     p.space_mouse_speed = d.space_mouse_speed;
     p.space_mouse_reverse = d.space_mouse_reverse;
     p.space_mouse_axis_speed = d.space_mouse_axis_speed;
@@ -3545,6 +3558,23 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn space_mouse_navlib_opt_out_survives_preferences_and_resets_on_navigation_only() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(app.preferences.space_mouse_navlib);
+        set(&mut app, &json!({"space_mouse_navlib": false})).unwrap();
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(!restored.preferences.space_mouse_navlib);
+        reset_preferences(&mut restored.preferences, PAGE_GENERAL);
+        assert!(!restored.preferences.space_mouse_navlib);
+        reset_preferences(&mut restored.preferences, PAGE_NAVIGATION);
+        assert!(restored.preferences.space_mouse_navlib);
+        restored.preferences.space_mouse_navlib = false;
+        restore_space_mouse_defaults(&mut restored);
+        assert!(restored.preferences.space_mouse_navlib);
+    }
+
     #[test]
     fn trackpad_zoom_modifier_roundtrips_and_validates_control_values() {
         assert_eq!(Prefs::default().trackpad_zoom_modifier, TrackpadZoomModifier::Off);

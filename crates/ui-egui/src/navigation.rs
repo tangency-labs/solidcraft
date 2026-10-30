@@ -847,6 +847,16 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
 /// stays off while the camera is in its initial sketch orientation. [`handle`] calls it for its page; the 3D
 /// mouse only reads the device and queues the motion ([`crate::space_mouse::navigate_frame`]).
 pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
+    if let Some(mut camera) = app.viewport.device_camera.take() {
+        if !caps.orbit || app.session.active_sketch.is_some() {
+            camera.yaw = app.cam.yaw;
+            camera.pitch = app.cam.pitch;
+            camera.roll = app.cam.roll;
+        }
+        if camera.is_valid() {
+            app.cam = camera;
+        }
+    }
     if app.viewport.device_motion.is_none() && app.viewport.bridge_motion.is_none() {
         return;
     }
