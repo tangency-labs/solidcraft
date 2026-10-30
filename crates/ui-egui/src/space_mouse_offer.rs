@@ -723,8 +723,11 @@ mod preferences_tests {
             run(&mut h, 2.0);
             assert!(card_up(&h), "{widget}");
             let before = h.app.preferences.clone();
+            // Where the button was: once the guard hides the card, a name finds nothing (or another
+            // control), so a click by name would not test the click behind it.
+            let at = h.widget(widget).unwrap();
             crate::issue_report::set_cad_input_blocked_for_test(true);
-            h.step(&serde_json::json!({"widget": widget})).ok();
+            h.step(&serde_json::json!({"click": at})).unwrap();
             h.frames(3);
             crate::issue_report::set_cad_input_blocked_for_test(false);
             assert!(h.app.space_mouse.calibrating.is_none() && !h.app.prefs_window.open, "{widget}: no wizard, no Preferences");

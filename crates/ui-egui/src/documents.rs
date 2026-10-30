@@ -1040,6 +1040,8 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         if resp.secondary_clicked() {
             menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
         }
+        // Named apart from a dialog's Close: egui 0.37 names an unnamed widget after its tooltip.
+        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, crate::i18n::tr("ui.close_tab")));
         if xresp.backing_on_hover_text("Close").clicked() {
             shut = Some(i);
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
