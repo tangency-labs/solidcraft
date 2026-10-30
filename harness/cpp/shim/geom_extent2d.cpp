@@ -72,6 +72,7 @@ int64_t input_size(int32_t op)
     case 21: return 11; // map_to_domain: A, p, B, switch
     case 22: return 8;  // intervals: A, u ivl, v ivl
     case 23: return 4;  // scaled_zero: A
+    case 24: return 7;  // scale: A, scale, has_scale_v, scale_v
     default: return -2;
     }
 }
@@ -282,6 +283,13 @@ SC_EXPORT int32_t sc_geom_extent2d_op(int32_t op, const double* in, int64_t n_in
         break;
     }
     case 23: o.push_back((double)SmTol::GetScaledZero(ext(in))); break;
+    case 24:
+    {
+        SmExtent2d e = ext(in);
+        double scale_v = in[6];
+        put_ext(o, e.Scale(in[4], in[5] != 0.0 ? &scale_v : NULL));
+        break;
+    }
     default: return SC_ERR_ARG;
     }
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);

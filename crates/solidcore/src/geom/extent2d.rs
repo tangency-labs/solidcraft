@@ -366,6 +366,9 @@ impl Extent2d {
 
     /// Scales every bounded end by `scale` in x and by `scale_v` in y (`scale` when
     /// `None`); unbounded ends stay (`Scale`, its `pOptScaleV`).
+    ///
+    /// The ends are not reordered: a negative factor leaves the extent inverted
+    /// (`min > max` on that axis), as upstream does.
     pub fn scale(&mut self, scale: f64, scale_v: Option<f64>) -> &mut Self {
         let scale_v = scale_v.unwrap_or(scale);
 

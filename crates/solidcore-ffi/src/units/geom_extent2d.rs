@@ -81,6 +81,9 @@ pub enum Op {
     Intervals = 22,
     /// `SmTol::GetScaledZero(const SmExtent2d&)`: in `A` -> value.
     ScaledZero = 23,
+    /// `Scale`: in `A, scale, has_scale_v, scale_v` -> extent (`pOptScaleV` is NULL
+    /// when `has_scale_v` is 0).
+    Scale = 24,
 }
 
 impl Op {
@@ -94,7 +97,7 @@ impl Op {
             Op::FromPoints | Op::Transpose | Op::ScaledZero => 4,
             Op::Queries | Op::ExpandRelative | Op::ExpandAbsolute => 5,
             Op::FromExtent3d | Op::Evaluate | Op::ExpandAbsoluteVec => 6,
-            Op::Inversion => 7,
+            Op::Inversion | Op::Scale => 7,
             Op::SetMinMax | Op::SetMinMaxCoords | Op::Union | Op::Intersect | Op::Intervals => 8,
             Op::Compare | Op::PointOps | Op::ContainsPeriodic | Op::ClipLine => 9,
             Op::MapToDomain => 11,

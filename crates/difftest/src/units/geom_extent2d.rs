@@ -29,10 +29,13 @@
 //! | `map_to_domain`       | `point_map_to_domain`                              | `Point2dMapToDomain` |
 //! | `intervals`           | `u/v_interval`, `set_u/v_interval`                 | `GetU/VInterval`, `SetU/VInterval` |
 //! | `scaled_zero`         | `ScaledZero for Extent2d`                          | `SmTol::GetScaledZero(const SmExtent2d&)` |
+//! | `scale`               | `scale`                                            | `Scale` |
 //!
 //! Upstream statuses are compared as the int `status` (0 = `SM_SUCCESS`, else the
 //! `SM_ERR_*` value; Rust `InvalidInput` is 1007). Every run has at least
-//! [`MIN_GENERATED`] generated cases.
+//! [`MIN_GENERATED`] generated cases, plus the `scale` cases of `scale_cases`
+//! (named edge cases and [`SCALE_GENERATED`] generated ones, kept apart from the main
+//! generator so its cases keep their inputs).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -47,12 +50,15 @@ use solidcore::SolidError;
 use solidcore_ffi::units::geom_extent2d::{self as ffi, Op};
 use solidcore_ffi::FfiError;
 
-use crate::case::CaseContext;
+use crate::case::{CaseContext, CaseSource};
 use crate::runner::default_cases;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 3000;
+
+/// Generated `scale` cases per run (`scale_gen<i>`, own seeds).
+pub const SCALE_GENERATED: usize = 400;
 
 /// `geom.extent2d` runner.
 pub struct Runner;
@@ -168,6 +174,11 @@ enum Inputs {
     ScaledZero {
         e: E4,
     },
+    Scale {
+        e: E4,
+        s: f64,
+        s_v: Option<f64>,
+    },
 }
 
 /// Kind of an output slot.
@@ -194,7 +205,8 @@ fn layout(i: &Inputs) -> &'static [(&'static str, usize, K)] {
         | Inputs::ExpandRelative { .. }
         | Inputs::ExpandAbsolute { .. }
         | Inputs::ExpandAbsoluteVec { .. }
-        | Inputs::Transpose { .. } => EXT,
+        | Inputs::Transpose { .. }
+        | Inputs::Scale { .. } => EXT,
         Inputs::New {} => &[("extent", 4, K::F), ("flags", 2, K::I)],
         Inputs::SetMinMax { .. } | Inputs::SetMinMaxCoords { .. } | Inputs::Intersect { .. } => {
             ST_EXT
@@ -454,6 +466,12 @@ fn flat_input(i: &Inputs) -> (Op, Vec<f64>) {
             v.extend(e);
             Op::ScaledZero
         }
+        Inputs::Scale { e, s, s_v } => {
+            v.extend(e);
+            v.push(*s);
+            opt(&mut v, *s_v);
+            Op::Scale
+        }
     };
     (op, v)
 }
@@ -619,6 +637,11 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             o.extend(ext4(&x));
         }
         Inputs::ScaledZero { e } => o.push(ext(*e).scaled_zero()),
+        Inputs::Scale { e, s, s_v } => {
+            let mut x = ext(*e);
+            x.scale(*s, *s_v);
+            o.extend(ext4(&x));
+        }
     }
     Ok(o)
 }
@@ -941,6 +964,102 @@ fn gen_inputs(rng: &mut Rng) -> Inputs {
     }
 }
 
+/// A `Scale` factor: ordinary, integral, negative, zero, huge or tiny.
+fn scale_factor(rng: &mut Rng) -> f64 {
+    match rng.below(5) {
+        0 | 1 => rng.uniform(-4.0, 4.0),
+        2 => rng.range_i64(-3, 3) as f64,
+        3 => *rng
+            .choose(&[0.0, -0.0, 1.0, -1.0, 1e-300, -1e-12, 1e12, 1e300, -1e300])
+            .unwrap_or(&1.0),
+        _ => rng.uniform(-1.0, 1.0) * *rng.choose(&[1e-9, 1e-6, 1e6, 1e9]).unwrap_or(&1.0),
+    }
+}
+
+/// An extent for `Scale`: [`extent`], often with sentinel ends (and values next to
+/// them, which must scale).
+fn scale_extent(rng: &mut Rng) -> E4 {
+    let scale = *rng.choose(&[1.0, 10.0, 1e-3, 1e4]).unwrap_or(&1.0);
+    let mut e = extent(rng, scale);
+    if rng.chance(0.4) {
+        for c in &mut e {
+            if rng.chance(0.35) {
+                let v = *rng.choose(&SENTINELS).unwrap_or(&INFINITE_PARAMETER);
+                *c = if rng.chance(0.15) {
+                    v * (1.0 + f64::EPSILON)
+                } else {
+                    v
+                };
+            }
+        }
+    }
+    e
+}
+
+fn gen_scale(rng: &mut Rng) -> Inputs {
+    let e = scale_extent(rng);
+    let s = scale_factor(rng);
+    let s_v = rng.chance(0.6).then(|| scale_factor(rng));
+    Inputs::Scale { e, s, s_v }
+}
+
+/// `Scale` cases: named edge cases (both factors and `None`, negative and zero
+/// factors, every sentinel end, huge and tiny factors, an inverted and an `Init`
+/// extent) and [`SCALE_GENERATED`] generated ones.
+fn scale_cases(unit: &str) -> Vec<Case> {
+    let ip = INFINITE_PARAMETER;
+    let sq = INFINITE_PARAMETER_SQRT;
+    let ord = [-1.0, 2.0, 3.0, 4.0];
+    let edges: [(&str, E4, f64, Option<f64>); 20] = [
+        ("none", ord, 2.0, None),
+        ("both", ord, 0.5, Some(-3.0)),
+        ("v_equal", ord, 2.5, Some(2.5)),
+        ("negative_none", ord, -2.0, None),
+        ("negative_u", ord, -1.5, Some(2.0)),
+        ("negative_v", ord, 2.0, Some(-1.0)),
+        ("zero_none", ord, 0.0, None),
+        ("zero_v", ord, 3.0, Some(0.0)),
+        ("neg_zero", ord, -0.0, Some(-0.0)),
+        ("unbounded_ip", [-ip, -ip, ip, ip], 3.0, Some(-2.0)),
+        ("unbounded_sqrt", [-sq, -sq, sq, sq], 3.0, Some(-2.0)),
+        ("half_unbounded", [-ip, 1.0, 2.0, sq], -4.0, None),
+        ("mixed_sentinels", [sq, -ip, -sq, ip], 7.0, Some(0.25)),
+        ("near_sentinel", [-ip * (1.0 + f64::EPSILON), -sq, sq * (1.0 - f64::EPSILON), ip], 2.0, None),
+        ("huge", ord, 1e300, Some(-1e300)),
+        ("tiny", ord, 1e-300, Some(-5e-324)),
+        ("huge_extent_tiny_factor", [-1e300, -1e15, 1e300, 1e15], 1e-12, Some(1e-300)),
+        ("inverted", [3.0, 4.0, -1.0, 2.0], 2.0, Some(-0.5)),
+        ("inverted_negative", [3.0, 4.0, -1.0, 2.0], -1.0, None),
+        ("empty_init", ext4(&Extent2d::new()), 2.0, Some(-3.0)),
+    ];
+    let mut out: Vec<Case> = edges
+        .iter()
+        .filter_map(|&(name, e, s, s_v)| {
+            let inputs = serde_json::to_value(Inputs::Scale { e, s, s_v }).ok()?;
+            Some(Case {
+                unit: unit.to_string(),
+                name: format!("scale_{name}"),
+                source: CaseSource::Inline,
+                inputs,
+            })
+        })
+        .collect();
+    let gen_unit = format!("{unit}/scale");
+    for i in 0..SCALE_GENERATED {
+        let seed = CaseContext::seed_for(&gen_unit, i);
+        let mut rng = Rng::new(seed);
+        if let Ok(inputs) = serde_json::to_value(gen_scale(&mut rng)) {
+            out.push(Case {
+                unit: unit.to_string(),
+                name: format!("scale_gen{i:04}"),
+                source: CaseSource::Generated { seed },
+                inputs,
+            });
+        }
+    }
+    out
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "geom.extent2d"
@@ -963,6 +1082,8 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut cases = default_cases(self, &ctx)?;
+        cases.extend(scale_cases(self.id()));
+        Ok(cases)
     }
 }
