@@ -1222,6 +1222,9 @@ preference_settings! {
     /// Personal Hole parameter combinations, shared by every design in this profile.
     /// No page reset discards this user-authored library.
     hole_presets: crate::hole_presets::Library = crate::hole_presets::Library::default();
+    /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
+    /// (#9346). No page reset discards this user-authored library.
+    personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
     /// Save as mesh: the last format (`stl` or `3mf`). Older versions also kept a "send to slicer"
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
@@ -5151,6 +5154,51 @@ mod tests {
         let p = super::lenient(&json!({"hole_presets":[row]}));
         let saved = serde_json::to_value(p.hole_presets).unwrap();
         assert_eq!(saved[0]["thread_options"]["starts"], 2, "unknown thread semantics must not silently become the defaults");
+    }
+
+    fn personal_sheet_rule_row(name: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": name, "thickness": "1.6 mm", "k_factor": "0.42", "bend_radius": "Thickness",
+            "relief_width": "Thickness", "relief_depth": "Thickness * 0.5", "corner_relief": "Thickness * 4.0",
+            "corner_relief_shape": "round", "hem_gap": "0.01 mm", "gap": "Thickness", "angle_display": "included"
+        })
+    }
+
+    #[test]
+    fn personal_sheet_rules_corrupt_rows_and_limits_do_not_discard_other_preferences() {
+        use serde_json::json;
+        let good = personal_sheet_rule_row("CRS 1.6");
+        let mut oversized = personal_sheet_rule_row("Too long");
+        oversized["thickness"] = json!("x".repeat(513));
+        let mut duplicate = good.clone();
+        duplicate["name"] = json!("crs 1.6");
+        let p = super::lenient(&json!({"length_decimals":4,"personal_sheet_rules":[null,good,oversized,duplicate,{"name":"incomplete"}]}));
+        assert_eq!(p.length_decimals, 4);
+        assert_eq!(serde_json::to_value(&p.personal_sheet_rules).unwrap(), json!([personal_sheet_rule_row("CRS 1.6")]));
+        let corrupt = super::lenient(&json!({"length_decimals":3,"personal_sheet_rules":{"unexpected":true}}));
+        assert_eq!(corrupt.length_decimals, 3);
+        assert_eq!(serde_json::to_value(corrupt.personal_sheet_rules).unwrap(), json!([]));
+        let many: Vec<_> = (0..100).map(|i| personal_sheet_rule_row(&format!("Rule {i}"))).collect();
+        let capped = super::lenient(&json!({"personal_sheet_rules":many}));
+        assert_eq!(serde_json::to_value(capped.personal_sheet_rules).unwrap().as_array().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn personal_sheet_rules_survive_application_preferences_roundtrip_and_page_resets() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        super::set(&mut app, &json!({"personal_sheet_rules":[personal_sheet_rule_row("CRS 1.6")]})).unwrap();
+        let expected = serde_json::to_value(&app.preferences.personal_sheet_rules).unwrap();
+        assert_eq!(expected[0]["angle_display"], "included");
+        for page in 0..super::PAGES.len() {
+            super::reset_preferences(&mut app.preferences, page);
+        }
+        assert_eq!(serde_json::to_value(&app.preferences.personal_sheet_rules).unwrap(), expected);
+        let saved = app.prefs();
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&saved);
+        assert_eq!(serde_json::to_value(&other.preferences.personal_sheet_rules).unwrap(), expected);
+        assert!(other.session.doc.sheet.rules.is_empty(), "a personal rule is not a rule of the design");
     }
 
     /// The interface font (#1290): a font that can be read, or empty for the built-in one; saved
