@@ -9,6 +9,7 @@
 //!
 //! Deviations: typed arena ids replace pointers; each part documents its dependency boundaries.
 
+mod attributes;
 mod crossing_loops;
 mod edgeuse;
 mod face;

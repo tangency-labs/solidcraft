@@ -80,7 +80,7 @@ use serde_json::Value;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::line::Line;
 use solidcore::error::EntityRef;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::object::{FaceKey, ObjectRef};
@@ -346,6 +346,12 @@ struct Inputs {
     /// `plan/findings/offset.offset_executive_p2--exact-2tol-shell-heap-layout.md`).
     #[serde(default)]
     heap_ordered_vertices: bool,
+    /// Attributed case (#1462, fixtures only): every source face and edge gets its own
+    /// long attribute of this `SmAttributeBehaviorType` (0 to 4) before the call (the
+    /// shim's `SmLongAttribute`s, [`Brep::add_attribute`] here), and the result's face
+    /// and edge attribute sets are compared (`attributes`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attributed: Option<u8>,
 }
 impl Inputs {
     fn native(&self) -> ffi::Request {
@@ -356,6 +362,7 @@ impl Inputs {
             faces: self.faces.iter().copied().map(Selection::native).collect(),
             tolerance: self.tolerance,
             config: self.config.native(),
+            attributed: self.attributed,
         }
     }
 }
@@ -387,6 +394,9 @@ fn interval(range: [f64; 2], strict: bool) -> HResult<()> {
     Ok(())
 }
 fn validate(input: &Inputs) -> HResult<()> {
+    if input.attributed.is_some_and(|b| b > 4) {
+        return Err(bad("attributed behaviour outside SmAttributeBehaviorType"));
+    }
     let cfg = &input.config;
     finite(&[
         input.tolerance,
@@ -1489,7 +1499,81 @@ fn native_output(input: &Inputs, snapshot: &ffi::Snapshot) -> HResult<Output> {
             .transpose()?;
         output = project_result(output, key, projection, input.heap_ordered_vertices);
     }
+    if input.attributed.is_some() {
+        let rows = snapshot
+            .attributes
+            .clone()
+            .ok_or_else(|| bad("native attributed snapshot without attributes"))?;
+        output = output.ints("attributes", rows);
+    }
     Ok(output)
+}
+
+/// The shim's `tag_source`: every face (`GetFaces` order) and edge (`GetEdges` order)
+/// gets its own long attribute, id = value = `ATTRIBUTE_BASE + index` (`+ 500` for an
+/// edge).
+fn tag_source(brep: &mut Brep, behavior: u8) -> HResult<()> {
+    let behavior =
+        Behavior::from_code(i32::from(behavior)).map_err(|e| bad(format!("behaviour: {e}")))?;
+    let faces = brep_p1::faces(brep, None).map_err(setup)?;
+    let edges = brep_p1::edges(brep, None).map_err(setup)?;
+    let tagged = faces
+        .into_iter()
+        .enumerate()
+        .map(|(i, f)| (EntityRef::Face(f), i as u64))
+        .chain(
+            edges
+                .into_iter()
+                .enumerate()
+                .map(|(i, e)| (EntityRef::Edge(e), 500 + i as u64)),
+        );
+    for (entity, offset) in tagged {
+        let id = ffi::ATTRIBUTE_BASE + offset;
+        let value = i64::try_from(id).map_err(|_| bad("attribute id overflow"))?;
+        brep.add_attribute(entity, Attribute::long(id, value, behavior))
+            .map_err(setup)?;
+    }
+    Ok(())
+}
+
+/// The shim's `put_attributes`: `present`, then `count` and the face rows then edge
+/// rows, each sorted; a row is `n` then per attribute (ascending) `id behavior value`.
+fn attribute_rows(brep: Option<&Brep>) -> HResult<Vec<i64>> {
+    let Some(brep) = brep else {
+        return Ok(vec![0]);
+    };
+    let row = |entity: EntityRef| -> Vec<i64> {
+        let mut entries: Vec<[i64; 3]> = brep
+            .entity_attributes(entity)
+            .into_iter()
+            .map(|(_, a)| {
+                [
+                    a.attribute_id() as i64,
+                    i64::from(a.behavior() as u8),
+                    a.long_value().unwrap_or(0),
+                ]
+            })
+            .collect();
+        entries.sort_unstable();
+        let mut row = vec![entries.len() as i64];
+        row.extend(entries.into_iter().flatten());
+        row
+    };
+    let mut rows = Vec::new();
+    let faces = brep_p1::faces(brep, None).map_err(setup)?;
+    let edges = brep_p1::edges(brep, None).map_err(setup)?;
+    for list in [
+        faces.into_iter().map(EntityRef::Face).collect::<Vec<_>>(),
+        edges.into_iter().map(EntityRef::Edge).collect(),
+    ] {
+        let mut part: Vec<Vec<i64>> = list.into_iter().map(row).collect();
+        part.sort();
+        rows.push(part.len() as i64);
+        rows.extend(part.into_iter().flatten());
+    }
+    let mut out = vec![1, rows.len() as i64];
+    out.extend(rows);
+    Ok(out)
 }
 fn native_outcome(input: &Inputs, outcome: ffi::Outcome) -> HResult<Output> {
     match outcome {
@@ -1725,6 +1809,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
     let mut attributes = AttributeStore::default();
     if let Some(brep) = source.as_mut() {
         register_notification_brep(&mut records, brep, NAMESPACE_SOURCE);
+        if let Some(behavior) = input.attributed {
+            tag_source(brep, behavior)?;
+        }
     }
     if let Some(brep) = foreign.as_mut() {
         register_notification_brep(&mut records, brep, NAMESPACE_FOREIGN);
@@ -1895,6 +1982,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         vec![i64::from(source_pure), i64::from(foreign_pure)],
     )
 ;
+    if input.attributed.is_some() {
+        output = output.ints("attributes", attribute_rows(result.as_ref())?);
+    }
     let heap_ordered = input.heap_ordered_vertices;
     output = project_result(output, "result", result_projection, heap_ordered);
     output = project_result(output, "executive_offset", offset_projection, heap_ordered);
@@ -2005,6 +2095,7 @@ fn generated(rng: &mut Rng) -> Inputs {
             skip_stitch_merge: flags & 16 != 0,
         },
         heap_ordered_vertices: false,
+        attributed: None,
     };
     match category {
         0 | 1 => {
@@ -2123,6 +2214,7 @@ mod tests {
             tolerance: 1e-6,
             config: Config::default(),
             heap_ordered_vertices: false,
+            attributed: None,
         }
     }
     fn case(input: &Inputs) -> Case {
@@ -2155,6 +2247,7 @@ mod tests {
             foreign_after: None,
             result: None,
             executive_offset: None,
+            attributes: None,
         }
     }
 

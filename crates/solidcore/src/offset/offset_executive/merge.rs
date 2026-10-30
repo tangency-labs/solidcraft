@@ -16,12 +16,16 @@
 //! (the temporary is handle 0). The no-SSI relation names surfaces by the merge's
 //! surface identity ([`KernelManifoldIntersector::surface_identity`]) instead of
 //! surface pointers. The temporary returns to the executive on every exit, as
-//! `m_pOffsetBrep` stays alive upstream. No recursion.
+//! `m_pOffsetBrep` stays alive upstream. The merged B-rep's attribute lists move to the
+//! result identities, under which the callers go on (the temporary's are cleared). No
+//! recursion.
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::boolean::merge::p4::KernelManifoldIntersector;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
-use crate::geom::attribute::ObjectKey;
+use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::object::ObjectRef;
 use crate::geom::tol::Relation;
 use crate::kernel::Kernel;
@@ -183,9 +187,50 @@ pub(crate) fn merge_offset(
             store.with_merge(merged, merged, offset_id, merge_tol, angle_tol, |s, id| {
                 s.piecewise_merge_skipping(id, Some(&skip), true, true)
             })?;
-        store.take_brep(result)
+        Ok((result, store.take_brep(result)?))
     })();
     // m_pOffsetBrep still exists here; the caller cleans it up
     let offset = store.take_brep(offset_id).ok();
+    drop(store);
+    let result = result.and_then(|(id, merged)| {
+        rename_merged_attributes(
+            notifications.attributes,
+            &merged,
+            &|e| identities.topology(id, e),
+            offset.as_ref(),
+            notifications.result_key_of,
+        )?;
+        Ok(merged)
+    });
     (result, offset)
+}
+
+/// (not upstream: upstream's attributes stay on the objects.) The merged B-rep takes
+/// the offset temporary's place as the offset's result, which its callers notify under
+/// the result identities: the attribute lists of its objects (under the merge's
+/// `merged_key_of`) move to `result_key_of`'s names of them, and those of the
+/// temporary's objects (the same names) are cleared first, as when upstream's
+/// executive deletes `m_pOffsetBrep` (dependent attributes die with their last user).
+fn rename_merged_attributes(
+    attributes: &mut AttributeStore,
+    merged: &Brep,
+    merged_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    offset: Option<&Brep>,
+    result_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<()> {
+    let renamed: BTreeMap<ObjectKey, ObjectKey> = super::attributes::live_entities(merged)
+        .into_iter()
+        .map(|e| (merged_key_of(e).key, result_key_of(e).key))
+        .collect();
+    let gone: BTreeSet<ObjectKey> = offset
+        .map(super::attributes::live_entities)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| result_key_of(e).key)
+        .collect();
+    attributes.retain_rekeyed(&|key| match renamed.get(&key) {
+        Some(&new) => Some(new),
+        None if gone.contains(&key) => None,
+        None => Some(key),
+    })
 }

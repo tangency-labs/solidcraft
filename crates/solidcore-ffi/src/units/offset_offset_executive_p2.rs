@@ -65,8 +65,15 @@
 //! operation, tolerance,
 //! offset_distance, member_distance, member_approx_tol, member_operation,
 //! inset, extend_convex, merge_results, create_offset_solid, skip_stitch_merge,
-//! source_fixture, foreign_fixture, selection_count, (origin, index)...
+//! source_fixture, foreign_fixture, selection_count, (origin, index)..., attributed
 //! ```
+//!
+//! `attributed` is `-1`, or the `SmAttributeBehaviorType` (0 to 4) of the
+//! `SmLongAttribute` each source face (`GetFaces` order) and edge (`GetEdges` order)
+//! gets before the call (#1462): id = value = [`ATTRIBUTE_BASE`] `+ index` (`+ 500` for
+//! an edge). An attributed snapshot ends with `present` (a result) then `count` and the
+//! result's face rows then edge rows, each `rows` then sorted rows: a row is `n` then
+//! per attribute (ascending) `id behavior value` (value: the long value, else 0).
 //!
 //! Fixture tags: `0` null; `1` empty; `2` wire followed by start xyz, end xyz,
 //! domain min/max, trim min/max; `3` plane sheet followed by origin xyz, X axis
@@ -148,6 +155,8 @@ pub const MAX_FILE_PATH: usize = 1024;
 pub const MAX_FILE_FACES: usize = 1024;
 /// Maximum native snapshot size, bounding buffer retries and decoding allocation.
 pub const MAX_OUTPUT_VALUES: usize = 262_144;
+/// The first attribute id of an attributed case's source tags (#1462).
+pub const ATTRIBUTE_BASE: u64 = 10007;
 /// Unmodified `SM_SUCCESS`, not the transport status `SC_OK`.
 pub const NATIVE_SUCCESS: i32 = 1000;
 /// Unmodified native member NER error for a null original B-rep.
@@ -322,6 +331,9 @@ pub struct Request {
     pub tolerance: f64,
     /// Operation-specific settings; unused scalars remain finite but are not applied.
     pub config: Config,
+    /// `Some(behavior)`: tag every source face and edge with its own `SmLongAttribute`
+    /// of that `SmAttributeBehaviorType` (0 to 4) and report the result's attributes.
+    pub attributed: Option<u8>,
 }
 
 /// Cheap observed topology and sampled numerical geometry, in native traversal order.
@@ -388,6 +400,9 @@ pub struct Snapshot {
     pub result: Option<BrepSnapshot>,
     /// Executive-owned intermediate, sampled before destruction; never deleted twice.
     pub executive_offset: Option<BrepSnapshot>,
+    /// An attributed case's `present`, then the result's face rows then edge rows (see
+    /// the module protocol); `None` for a case that is not attributed.
+    pub attributes: Option<Vec<i64>>,
 }
 
 /// Native fixture rejection is distinct from an ordinary operation failure.
@@ -615,6 +630,11 @@ fn pack(request: &Request) -> Result<Vec<f64>, FfiError> {
         }
         out.extend_from_slice(&[origin, index as f64]);
     }
+    match request.attributed {
+        None => out.push(-1.0),
+        Some(behavior) if behavior <= 4 => out.push(f64::from(behavior)),
+        Some(_) => return Err(invalid("attribute behaviour outside native enum")),
+    }
     if out.len() > MAX_PACKED_VALUES {
         return Err(invalid("aggregate fixture budget exceeded"));
     }
@@ -690,6 +710,21 @@ impl Reader<'_> {
             .collect()
     }
 
+    fn attributes(&mut self) -> Result<Vec<i64>, FfiError> {
+        if !self.flag()? {
+            return Ok(vec![0]);
+        }
+        let count = self.count()?;
+        if count > self.remaining.len() {
+            return Err(invalid("truncated native attributes"));
+        }
+        let mut out = vec![1, count as i64];
+        for _ in 0..count {
+            out.push(self.integer(i64::from(i32::MIN), i64::from(i32::MAX))?);
+        }
+        Ok(out)
+    }
+
     fn brep(&mut self) -> Result<Option<BrepSnapshot>, FfiError> {
         if !self.flag()? {
             return Ok(None);
@@ -714,7 +749,7 @@ impl Reader<'_> {
     }
 }
 
-fn decode(raw: &[f64], operation: Operation) -> Result<Outcome, FfiError> {
+fn decode(raw: &[f64], operation: Operation, attributed: bool) -> Result<Outcome, FfiError> {
     if raw.len() > MAX_OUTPUT_VALUES {
         return Err(invalid("native snapshot exceeds output budget"));
     }
@@ -767,6 +802,11 @@ fn decode(raw: &[f64], operation: Operation) -> Result<Outcome, FfiError> {
         foreign_after: rd.brep()?,
         result: rd.brep()?,
         executive_offset: rd.brep()?,
+        attributes: if attributed {
+            Some(rd.attributes()?)
+        } else {
+            None
+        },
     };
     if !rd.remaining.is_empty() {
         return Err(invalid("trailing native snapshot values"));
@@ -797,7 +837,7 @@ pub fn eval(request: &Request) -> Result<Outcome, FfiError> {
             )
         }
     })?;
-    decode(&raw, request.operation)
+    decode(&raw, request.operation, request.attributed.is_some())
 }
 
 #[cfg(test)]
@@ -812,6 +852,7 @@ mod tests {
             faces: Vec::new(),
             tolerance: 1e-6,
             config: Config::default(),
+            attributed: None,
         }
     }
 
@@ -1130,12 +1171,12 @@ mod tests {
     #[test]
     fn decoder_does_not_conflate_transport_success_and_native_status() {
         assert_eq!(
-            decode(&[-1.0, 1007.0], Operation::ApiShell).unwrap(),
+            decode(&[-1.0, 1007.0], Operation::ApiShell, false).unwrap(),
             Outcome::Rejected { status: 1007 }
         );
-        assert!(decode(&[-1.0, 1000.0], Operation::ApiShell).is_err());
-        assert!(decode(&[0.0, 1.0, 4.0], Operation::ApiShell).is_err());
-        assert!(decode(&[f64::NAN], Operation::ApiShell).is_err());
+        assert!(decode(&[-1.0, 1000.0], Operation::ApiShell, false).is_err());
+        assert!(decode(&[0.0, 1.0, 4.0], Operation::ApiShell, false).is_err());
+        assert!(decode(&[f64::NAN], Operation::ApiShell, false).is_err());
     }
 
     #[cfg(feature = "cpp")]
@@ -1333,7 +1374,9 @@ mod tests {
         r.config.offset_distance = 0.5;
         let base = pack(&r).unwrap();
         let mut invalid_selector = base.clone();
-        *invalid_selector.last_mut().unwrap() = 6.0;
+        // the selector index (the attributed flag follows it)
+        let at = invalid_selector.len() - 2;
+        invalid_selector[at] = 6.0;
         let mut trailing_data = base;
         trailing_data.push(0.0);
         for input in [invalid_selector, trailing_data] {
@@ -1517,7 +1560,9 @@ mod tests {
             let base = pack(&r).unwrap();
             let mut invalid_inputs = Vec::new();
             let mut invalid_selector = base.clone();
-            *invalid_selector.last_mut().unwrap() = 1.0;
+            // the selector index (the attributed flag follows it)
+        let at = invalid_selector.len() - 2;
+        invalid_selector[at] = 1.0;
             invalid_inputs.push(invalid_selector);
             let mut trailing_data = base.clone();
             trailing_data.push(0.0);

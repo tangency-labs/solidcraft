@@ -14,6 +14,7 @@
 //! | `order_edgeuses_by_brep` (private) | `sm_OrderEdgeusesByBrep` |
 //! | [`api_shell_brep_full`], [`ShellCopyIdentities`] | `SmApiShellBrepFull` (and its working copy's identities) |
 //! | [`api_offset_brep_full`] | `SmApiOffsetBrepFull` |
+//! | [`offset_brep_simple`], [`shell_brep_simple`] | (not upstream) the API calls with their own notification identities |
 //! | [`faceuse_offset`] | `SmOffsetGeometryCreation::FaceuseOffset` over the owned B-rep |
 //!
 //! Deviations: original B-reps and the kernel are explicit arguments, not retained
@@ -44,10 +45,13 @@
 //! every `Result` exit. The shell difference delegates native context/error state
 //! to the real Boolean adapter; late deferred errors report actual operand ownership,
 //! not parity with the native ownership flag.
+//! Every entry point carries the source B-rep's own attributes ([`Brep::add_attribute`])
+//! through the caller's stores to the returned B-rep (`attributes`).
 //! There is no new recursion; all owned loops are bounded by existing arena/relation lengths.
 
 use std::collections::BTreeSet;
 
+use super::attributes;
 use super::p1::{OffsetExecutive, OffsetOperation};
 use crate::boolean::merge::p4::{
     BooleanKernels, KernelManifoldIntersector, ManifoldKernelAdapter, ManifoldNotificationKeys,
@@ -232,13 +236,24 @@ pub fn offset_brep(
     options: OffsetOptions,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
+    // (not upstream) the source's own attributes go to the caller's stores, as
+    // upstream's live on the objects the offset copies
+    attributes::seed_attributes(
+        original,
+        notifications.original_key_of,
+        notifications.attributes,
+    )?;
+    let original_key = original.key();
     let mut executive = configured_executive(original, options);
-    collapse_offset_status(executive.do_solid_offset(
+    let mut result = collapse_offset_status(executive.do_solid_offset(
         kernel,
         Some(original),
         SolidOffsetOptions::default(),
         notifications,
-    ))
+    ))?;
+    // (not upstream) the attributes the notifications left on the result's objects
+    attributes::finish_attributes(&mut result, original_key, notifications)?;
+    Ok(result)
 }
 
 impl OffsetExecutive {
@@ -256,9 +271,17 @@ impl OffsetExecutive {
         faces: &[FaceId],
         notifications: &mut OffsetNotifications<'_>,
     ) -> ShellOutcome {
+        let original_key = original.key();
         let mut input = Some(original);
         let result = (|| {
             let original = required(input.as_mut(), OP_SHELL)?;
+            // (not upstream) the source's own attributes go to the caller's stores, as
+            // upstream's live on the objects the shell copies and edits
+            attributes::seed_attributes(
+                original,
+                notifications.original_key_of,
+                notifications.attributes,
+            )?;
             // cpp:206–215: do not move the guard before this real query.
             let radius = options.offset.distance.abs();
             let tolerance = original.tolerance();
@@ -380,6 +403,11 @@ impl OffsetExecutive {
             make_shell_edges_exact(kernel, &mut shell, notifications)?;
             Ok(shell)
         })();
+        // (not upstream) the attributes the notifications left on the result's objects
+        let result = result.and_then(|mut shell| {
+            attributes::finish_attributes(&mut shell, original_key, notifications)?;
+            Ok(shell)
+        });
         ShellOutcome {
             result,
             retained_input: input,
@@ -1325,7 +1353,14 @@ pub fn api_shell_brep_full(
     // cpp:2389–2393: SmCopyBrepMap sOriginalToCopyMap; new SmBrep(*pBrep, NULL,
     // &sOriginalToCopyMap) with bCopyAttributes = bAddAnalytics = TRUE.
     let mut original_to_copy = CopyBrepMap::new();
-    let working = {
+    // (not upstream) the source's own attributes go to the caller's stores, so the
+    // copy's Copy notifications carry them to the working copy (bCopyAttributes)
+    attributes::seed_attributes(
+        original.brep,
+        notifications.original_key_of,
+        notifications.attributes,
+    )?;
+    let mut working = {
         let source_key = notifications.original_key_of;
         let mut stores = NotificationStores {
             records: &mut *notifications.records,
@@ -1345,6 +1380,10 @@ pub fn api_shell_brep_full(
             )
         })?
     };
+
+    // (not upstream) the working copy's attributes are those the copy notified into the
+    // caller's stores; the shell must not seed them a second time
+    working.set_attributes(AttributeStore::default());
 
     // cpp:2395–2404: map every selection in order.
     let mut working_faces = Vec::with_capacity(faces.len());
@@ -1402,6 +1441,88 @@ pub fn api_offset_brep_full(
     // (not upstream: the port's cached topology, true again for the caller)
     result.refresh_cached_topology();
     Ok(result)
+}
+
+/// (not upstream) [`api_offset_brep_full`] with notification identities of its own:
+/// for a caller that keeps no notification stores. The source's attributes
+/// ([`Brep::add_attribute`]) reach the result as upstream's notifications carry them
+/// (each offset face copies its source face's, `SmOffsetExecutive.cpp:1237`); the
+/// source keeps its own, and its [`Brep::key`] is restored.
+///
+/// # Errors
+///
+/// Those of [`api_offset_brep_full`].
+pub fn offset_brep_simple(
+    kernel: &mut Kernel,
+    original: &mut Brep,
+    options: OffsetOptions,
+) -> Result<Brep> {
+    let saved_key = original.key();
+    original.set_key(attributes::original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+    let mut records = attributes::simple_records(original);
+    let mut store = AttributeStore::default();
+    let mut notifications = OffsetNotifications {
+        records: &mut records,
+        attributes: &mut store,
+        original_key_of: &attributes::original_key,
+        result_key_of: &attributes::result_key,
+        original_curve_ref: &attributes::original_curve,
+        result_curve_ref: &attributes::result_curve,
+        boolean_source_lists: &attributes::source_lists,
+        result_brep: attributes::result_key(EntityRef::Brep(BrepId::from_index(0))),
+        merge_identities: Some(&attributes::SimpleIdentities),
+    };
+    let result = api_offset_brep_full(kernel, Some(original), options, &mut notifications);
+    original.set_key(saved_key);
+    result
+}
+
+/// (not upstream) [`api_shell_brep_full`] with notification identities of its own,
+/// on faces of `original` (`faces` removed: open faces; empty: a closed shell). The
+/// source's attributes reach the result as upstream's notifications carry them; the
+/// source is not changed.
+///
+/// # Errors
+///
+/// Those of [`api_shell_brep_full`].
+pub fn shell_brep_simple(
+    kernel: &mut Kernel,
+    original: &Brep,
+    options: ShellOptions,
+    faces: &[FaceId],
+) -> Result<Brep> {
+    let source_id = BrepId::from_index(0);
+    let mut source = original.clone();
+    source.set_key(attributes::original_key(EntityRef::Brep(source_id)).key);
+    let mut records = attributes::simple_records(&source);
+    let mut store = AttributeStore::default();
+    let mut notifications = OffsetNotifications {
+        records: &mut records,
+        attributes: &mut store,
+        original_key_of: &attributes::original_key,
+        result_key_of: &attributes::result_key,
+        original_curve_ref: &attributes::original_curve,
+        result_curve_ref: &attributes::result_curve,
+        boolean_source_lists: &attributes::source_lists,
+        result_brep: attributes::result_key(EntityRef::Brep(source_id)),
+        merge_identities: Some(&attributes::SimpleIdentities),
+    };
+    let selections: Vec<Option<FaceKey>> = faces.iter().map(|&f| Some((source_id, f))).collect();
+    api_shell_brep_full(
+        kernel,
+        Some(BrepRef {
+            brep: &source,
+            handle: source_id,
+        }),
+        options,
+        &selections,
+        &ShellCopyIdentities {
+            key_of: &attributes::copy_key,
+            curve_ref: &attributes::copy_curve,
+            boolean_source_lists: &attributes::copy_source_lists,
+        },
+        &mut notifications,
+    )
 }
 
 /// `SmOffsetGeometryCreation(distance, approx_tol_3d).FaceuseOffset(faceuse, TRUE)`: the

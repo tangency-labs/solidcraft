@@ -23,6 +23,7 @@
 #include <SmApiBrep.h>
 #include <SmApiGeneral.h>
 #include <SmApiPrimitives.h>
+#include <SmAttribute.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
@@ -42,6 +43,7 @@
 #include <SmShell.h>
 #include <SmVertex.h>
 #include <nurbs.h>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <memory>
@@ -143,6 +145,7 @@ struct Program {
     SmBoolean inset, extend, merge, solid, skip;
     Spec source, foreign;
     std::vector<Selection> selections;
+    int attributed = -1; // -1: no attributes, else the tags' SmAttributeBehaviorType
     bool member() const { return operation == 2 || operation == 3; }
     bool can_extend() const {
         // Called only after the whole DTO is parsed and every index validated.
@@ -181,6 +184,7 @@ Program read_program(Reader& rd) {
             throw Argument{};
         p.selections.push_back({origin, index});
     }
+    p.attributed = (int)rd.integer(-1, 4);
     if (rd.pos != rd.size) throw Argument{};
     // All scalars remain finite and all selectors remain bounds-checked, even
     // for proven early returns. Only the unused fivefold product is exempted.
@@ -511,6 +515,65 @@ void put_block(std::vector<double>& out, const Block& block) {
     out.insert(out.end(),block.values.begin(),block.values.end());
 }
 
+// Attributed cases (#1462): every source face (GetFaces order) and edge (GetEdges order)
+// gets its own SmLongAttribute, id = value = attribute_base + index (+ 500 for an edge).
+constexpr ULONG attribute_base = 10007;
+void tag_source(SmBrep* b, SmContext& ctx, SmAttributeBehaviorType behavior) {
+    SmTArray<SmFace*> faces;
+    b->GetFaces(faces);
+    for (ULONG i=0; i<faces.GetSize(); ++i) {
+        ULONG id = attribute_base + i;
+        faces[i]->AddAttribute(new (ctx) SmLongAttribute(id, (long)id, behavior));
+    }
+    SmTArray<SmEdge*> edges;
+    b->GetEdges(edges);
+    for (ULONG i=0; i<edges.GetSize(); ++i) {
+        ULONG id = attribute_base + 500 + i;
+        edges[i]->AddAttribute(new (ctx) SmLongAttribute(id, (long)id, behavior));
+    }
+}
+// One object's row: `n`, then per attribute `id behavior value` (value: an
+// SmLongAttribute's, else 0), the attributes in ascending order.
+std::vector<double> attribute_row(const SmAObject* obj) {
+    SmTArray<SmAttribute*> attrs;
+    obj->GetAttributes(attrs);
+    std::vector<std::array<double, 3>> entries;
+    for (ULONG i=0; i<attrs.GetSize(); ++i) {
+        SmAttribute* a = attrs[i];
+        SmLongAttribute* l = dynamic_cast<SmLongAttribute*>(a);
+        entries.push_back({(double)a->GetAttributeID(), (double)a->GetBehavior(),
+            l ? (double)l->GetValue() : 0.0});
+    }
+    std::sort(entries.begin(), entries.end());
+    std::vector<double> row{(double)entries.size()};
+    for (const auto& e : entries) row.insert(row.end(), e.begin(), e.end());
+    return row;
+}
+template<class T> void put_rows(std::vector<double>& out, const SmTArray<T*>& objects) {
+    std::vector<std::vector<double>> rows;
+    for (ULONG i=0; i<objects.GetSize(); ++i) rows.push_back(attribute_row(objects[i]));
+    std::sort(rows.begin(), rows.end());
+    out.push_back((double)rows.size());
+    for (const auto& row : rows) out.insert(out.end(), row.begin(), row.end());
+}
+// `present`, then `count` and the result's face rows then edge rows, each sorted (the
+// sets are compared, not the lists' order).
+void put_attributes(std::vector<double>& out, SmBrep* brep) {
+    out.push_back(brep ? 1.0 : 0.0);
+    if (!brep) return;
+    SmTArray<SmFace*> faces;
+    SmTArray<SmEdge*> edges;
+    brep->GetFaces(faces);
+    brep->GetEdges(edges);
+    std::vector<double> rows;
+    put_rows(rows, faces);
+    put_rows(rows, edges);
+    if (rows.size() + out.size() + 1 > max_output)
+        throw std::length_error("native attribute output budget");
+    out.push_back((double)rows.size());
+    out.insert(out.end(), rows.begin(), rows.end());
+}
+
 std::vector<double> observe_selectors(const SmTArray<SmFace*>& selectors, SmBrep* source,
                                      SmBrep* foreign, const std::vector<double>* before = nullptr) {
     SmTArray<SmFace*> sources, foreigners;
@@ -541,6 +604,7 @@ void run(const Program& p, std::vector<double>& out) {
     size_t source_token = allocations.token(source), foreign_token = allocations.token(foreign);
     SmTArray<SmFace*> source_faces, foreign_faces, selectors;
     SmTArray<const SmFace*> api_selectors;
+    if (source && p.attributed >= 0) tag_source(source, ctx, (SmAttributeBehaviorType)p.attributed);
     if (source) source->GetFaces(source_faces);
     if (foreign) foreign->GetFaces(foreign_faces);
     for (const auto& selection : p.selections) {
@@ -628,6 +692,7 @@ void run(const Program& p, std::vector<double>& out) {
     put_block(out,snapshot(foreign_live ? foreign : nullptr));
     put_block(out,snapshot(result));
     put_block(out,snapshot(offset));
+    if (p.attributed >= 0) put_attributes(out, result);
     // Executive destruction owns offset; then allocation scope reclaims every
     // remaining distinct B-rep (source/foreign/result/unreturned native working data).
     executive.reset();

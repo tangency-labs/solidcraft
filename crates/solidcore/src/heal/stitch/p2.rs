@@ -1332,6 +1332,21 @@ pub fn solid_stitch_start(k: &Kernel, b: &Brep) -> Result<(f64, f64)> {
 /// Those of `CalculateBoundingBox` and [`Stitch::do_stitching`];
 /// [`SolidError::InvalidInput`] past [`MAX_TOL_DOUBLINGS`].
 pub fn stitch_into_solid(k: &mut Kernel, b: &mut Brep) -> Result<AdvancedStitch> {
+    stitch_into_solid_with(k, b, None)
+}
+
+/// [`stitch_into_solid`] whose edits notify through `edits` (the caller's stores and
+/// identities of `b`'s objects, as upstream's notify the objects themselves) instead
+/// of the default call-local records.
+///
+/// # Errors
+///
+/// Those of [`stitch_into_solid`].
+pub(crate) fn stitch_into_solid_with(
+    k: &mut Kernel,
+    b: &mut Brep,
+    mut edits: Option<&mut dyn super::p1::StitchEditContext>,
+) -> Result<AdvancedStitch> {
     let mut out = AdvancedStitch {
         produces_a_solid: false,
         stitched_edges: 0,
@@ -1358,6 +1373,9 @@ pub fn stitch_into_solid(k: &mut Kernel, b: &mut Brep) -> Result<AdvancedStitch>
         stitch.fast_edge_compare = true;
         stitch.split_edges_with_vertices = false;
         stitch.making_manifold_solid = true;
+        stitch.edits = edits
+            .as_mut()
+            .map(|e| &mut **e as &mut dyn super::p1::StitchEditContext);
         let r = stitch.do_stitching(k, b, None, None, MinGapRequest::default())?;
         if r.max_vertex_gap > out.max_vertex_gap {
             out.max_vertex_gap = r.max_vertex_gap;
@@ -1394,6 +1412,22 @@ pub fn stitch_into_shell(
     shell_is_well_formed: bool,
     max_stitch_tol_3d: f64,
 ) -> Result<AdvancedStitch> {
+    stitch_into_shell_with(k, b, shell_is_well_formed, max_stitch_tol_3d, None)
+}
+
+/// [`stitch_into_shell`] whose edits notify through `edits`, as
+/// [`stitch_into_solid_with`].
+///
+/// # Errors
+///
+/// Those of [`stitch_into_shell`].
+pub(crate) fn stitch_into_shell_with(
+    k: &mut Kernel,
+    b: &mut Brep,
+    shell_is_well_formed: bool,
+    max_stitch_tol_3d: f64,
+    mut edits: Option<&mut dyn super::p1::StitchEditContext>,
+) -> Result<AdvancedStitch> {
     // init output
     let mut out = AdvancedStitch {
         produces_a_solid: false,
@@ -1413,6 +1447,9 @@ pub fn stitch_into_shell(
     stitch.ignore_problems = !shell_is_well_formed;
     stitch.validate_result = false;
     stitch.squeeze_small_edges = true;
+    stitch.edits = edits
+        .as_mut()
+        .map(|e| &mut **e as &mut dyn super::p1::StitchEditContext);
 
     let mut doublings = 0u32;
     while stitch_tol_3d < max_stitch_tol_3d {

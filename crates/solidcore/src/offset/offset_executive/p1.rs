@@ -86,6 +86,7 @@ use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{Solution, SolutionArray};
 use crate::geom::tol::Relation;
+use crate::heal::stitch::p1::{BorrowedStitchEdits, StitchEditContext};
 use crate::heal::stitch::p2 as stitch;
 use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
@@ -103,6 +104,7 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
 use crate::topology::brep::p4::shrink_geometry;
 use crate::topology::brep::p7::{self as bp7, FaceCurvesInput, SelfIntersectionCurve};
+use crate::topology::brep::p9::CurveIdentity;
 use crate::topology::brep_cache::{
     arena_identity, make_brep_cache, BrepCache, BrepObjects, CacheObject, CacheSource,
 };
@@ -1689,19 +1691,50 @@ impl OffsetExecutive {
         if !self.merge_results {
             self.clear_relations();
             let mut result = required(self.offset_brep.take())?;
-            // the stitch statuses are ignored upstream
-            if self.create_offset_solid {
-                // Tol: StitchIntoShell() adds in the tols of the topology objects,
-                // so the Brep's tolerance should be plenty.
-                let stitch_tol_3d = result.tolerance();
-                ignore_status(stitch::stitch_into_shell(
-                    kernel,
-                    &mut result,
-                    true,
-                    stitch_tol_3d,
-                ))?;
-            } else {
-                ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
+            // the stitch statuses are ignored upstream. Its edits notify the offset's
+            // objects (its glue merges and splits carry their attributes, as upstream's
+            // objects' own do) through the caller's stores under the result identities;
+            // without them, on call-local records.
+            let create_offset_solid = self.create_offset_solid;
+            let run = |kernel: &mut Kernel,
+                       result: &mut Brep,
+                       edits: Option<&mut dyn StitchEditContext>|
+             -> Result<()> {
+                if create_offset_solid {
+                    // Tol: StitchIntoShell() adds in the tols of the topology objects,
+                    // so the Brep's tolerance should be plenty.
+                    let stitch_tol_3d = result.tolerance();
+                    ignore_status(stitch::stitch_into_shell_with(
+                        kernel,
+                        result,
+                        true,
+                        stitch_tol_3d,
+                        edits,
+                    ))
+                } else {
+                    ignore_status(stitch::stitch_into_solid_with(kernel, result, edits))
+                }
+            };
+            match notifications {
+                Some(n) => {
+                    let key_of = n.result_key_of;
+                    let curve_ref = n.result_curve_ref;
+                    let (records, attributes) = (&mut *n.records, &mut *n.attributes);
+                    Context::with_notification_context(kernel, |kernel, context| {
+                        let mut env = NotifyEnv {
+                            records,
+                            attributes,
+                            context: Some(context),
+                            key_of,
+                        };
+                        let mut edits = BorrowedStitchEdits {
+                            env: &mut env,
+                            curve_identity: CurveIdentity::Legacy(curve_ref),
+                        };
+                        run(kernel, &mut result, Some(&mut edits))
+                    })??;
+                }
+                None => run(kernel, &mut result, None)?,
             }
 
             if bp1::regions(&result, None)?.len() > 1 {
