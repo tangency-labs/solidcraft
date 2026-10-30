@@ -2175,7 +2175,9 @@ pub fn set_orientation(b: &mut Brep, e: EdgeId, orientation: OrientType) -> Resu
 /// By default a failed curve reversal's status is ignored, as upstream: the edge
 /// gets the default interval and its uses are still flipped. With the opt-in
 /// [`crate::kernel::UpstreamFixes::edge_reversal_keeps_failed_edge`] (WR-260) a
-/// failed reversal returns before changing the interval or edge uses.
+/// failed reversal returns before changing the interval or edge uses, and an edge
+/// without curve keeps its interval (upstream installs the default one; fork
+/// tangency-labs/smlib 47507b6).
 ///
 /// # Errors
 ///
@@ -2194,6 +2196,9 @@ pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
             Err(err) if k.fixes.edge_reversal_keeps_failed_edge => return Err(err),
             Err(err) => failed(err)?,
         }
+    } else if k.fixes.edge_reversal_keeps_failed_edge {
+        // nothing reversed the interval: the edge keeps it (WR-260 addendum)
+        new_ivl = old_ivl;
     }
     b.edge_mut(e)?.interval = new_ivl;
 
@@ -3478,6 +3483,26 @@ mod tests {
         for eu in eus {
             assert!(b.edgeuse(eu).unwrap().uv_trim_curve.is_none());
         }
+    }
+
+    /// WR-260 addendum (fork tangency-labs/smlib 47507b6): reversing an edge without
+    /// curve installs the default interval upstream; with
+    /// `edge_reversal_keeps_failed_edge` the edge keeps its own.
+    #[test]
+    fn reversing_an_edge_without_curve_keeps_its_interval_with_the_opt_in() {
+        let mut k = Kernel::default();
+        let (mut b, e, _, _) = wire();
+        b.edge_mut(e).unwrap().curve = None;
+        let ivl = b.edge(e).unwrap().interval;
+        assert_ne!(ivl, Extent1d::new());
+        reverse_orientation(&k, &mut b, e).unwrap();
+        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
+
+        k.fixes.edge_reversal_keeps_failed_edge = true;
+        let (mut b, e, _, _) = wire();
+        b.edge_mut(e).unwrap().curve = None;
+        reverse_orientation(&k, &mut b, e).unwrap();
+        assert_eq!(b.edge(e).unwrap().interval, ivl);
     }
 
     #[test]
