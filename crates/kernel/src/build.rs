@@ -225,11 +225,18 @@ fn extrude_with(plane: &Plane, regions: &[Region2], start: f64, end: f64, whole_
         // A joined side's source is its first piece, a segment of the profile as drawn (the side
         // lies along it): the sketch curve it is certified and named by, as when it stood alone.
         let first_piece = |side: &ProfileEdge| {
+            if side.numbers.len() < 2 {
+                return side.segment;
+            }
+            // Among the run's own pieces (its profile numbers, never another loop's segment that
+            // happens to share a vertex), the one the side starts with: the run may wrap past the
+            // loop's first segment, so the lowest number is not always first.
             pieces
                 .loops()
-                .flat_map(|l| l.lp.segs.iter())
-                .copied()
-                .find(|piece| side.numbers.len() > 1 && piece.start() == side.segment.start())
+                .flat_map(|l| l.lp.segs.iter().enumerate().map(move |(i, piece)| (l.numbers(i), *piece)))
+                .filter(|(numbers, _)| numbers.iter().any(|n| side.numbers.contains(n)))
+                .map(|(_, piece)| piece)
+                .find(|piece| piece.start() == side.segment.start())
                 .unwrap_or(side.segment)
         };
         let profile = region_wires(&base, &numbered)?;
