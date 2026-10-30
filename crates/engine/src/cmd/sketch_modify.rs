@@ -1497,7 +1497,10 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
         _ => None,
     };
     let (Some((a0, a1)), Some((b0, b1))) = (ends(la), ends(lb)) else { return Ok(()) };
-    if la == lb || [a0, a1].iter().any(|x| *x == b0 || *x == b1) {
+    // Ends already at one place (two profiles drawn apart, each with a corner point of its own
+    // at the same spot) are one corner to round or cut, not lines to bring together: the corner
+    // keeps each profile's own point.
+    if la == lb || [a0, a1].iter().any(|x| [b0, b1].iter().any(|y| one_place(sk, *x, *y))) {
         return Ok(());
     }
     let (Some(p0), Some(p1), Some(q0), Some(q1)) = (sk.point(a0), sk.point(a1), sk.point(b0), sk.point(b1)) else { return Ok(()) };
@@ -1543,15 +1546,40 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     Ok(())
 }
 
-/// A corner of two lines: (line a, line b, corner point, far end of a, far end of b).
-fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usize, usize)> {
+/// A corner of two lines: the lines, the end each has at the corner, and each one's far end. The
+/// two corner ends are one point, or two points at one place (two profiles drawn apart and meeting
+/// there, each with a corner point of its own).
+struct Corner {
+    la: usize,
+    lb: usize,
+    ca: usize,
+    cb: usize,
+    fa: usize,
+    fb: usize,
+}
+
+impl Corner {
+    /// Where the corner is: both corner ends are there.
+    fn at(&self, sk: &Sketch) -> Vec2 {
+        sk.point(self.ca).unwrap_or_default()
+    }
+}
+
+/// Whether two points are at one place: the same point, or two points at one position.
+fn one_place(sk: &Sketch, a: usize, b: usize) -> bool {
+    a == b || matches!((sk.point(a), sk.point(b)), (Some(u), Some(v)) if u.dist(v) <= TOL * 10.0)
+}
+
+fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<Corner> {
     let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };
     let (la, lb) = if let Some(r) = str_(p, "point") {
         let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?;
-        let lines: Vec<usize> = (0..sk.curves.len()).filter(|i| ends(*i).is_some_and(|(a, b)| a == q || b == q) && !sk.is_linked_curve(*i)).collect();
+        let lines: Vec<usize> = (0..sk.curves.len())
+            .filter(|i| ends(*i).is_some_and(|(a, b)| one_place(sk, a, q) || one_place(sk, b, q)) && !sk.is_linked_curve(*i))
+            .collect();
         // A construction line ending there too (a diagonal that centres something) is not one of
         // the corner's sides: it keeps its end on the virtual sharp corner (#1026).
         let sides: Vec<usize> =
@@ -1567,10 +1595,31 @@ fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usi
     };
     let (a0, a1) = ends(la).ok_or_else(|| bad(cmd, "fillets and chamfers work on two lines"))?;
     let (b0, b1) = ends(lb).ok_or_else(|| bad(cmd, "fillets and chamfers work on two lines"))?;
-    let shared = [a0, a1].into_iter().find(|x| *x == b0 || *x == b1).ok_or_else(|| bad(cmd, "the lines must share a corner point"))?;
-    let fa = if a0 == shared { a1 } else { a0 };
-    let fb = if b0 == shared { b1 } else { b0 };
-    Ok((la, lb, shared, fa, fb))
+    // The end each line has at the corner: one point, or two points at one place.
+    let (ca, cb) = [a0, a1]
+        .into_iter()
+        .find_map(|x| [b0, b1].into_iter().find(|y| one_place(sk, x, *y)).map(|y| (x, y)))
+        .ok_or_else(|| bad(cmd, "the lines must share a corner point"))?;
+    let fa = if a0 == ca { a1 } else { a0 };
+    let fb = if b0 == cb { b1 } else { b0 };
+    Ok(Corner { la, lb, ca, cb, fa, fb })
+}
+
+/// What keeping either of two corner points gave: one answer for both.
+fn merge_kept(parts: Vec<Option<CornerKept>>) -> Option<CornerKept> {
+    let mut out: Option<CornerKept> = None;
+    for part in parts.into_iter().flatten() {
+        match &mut out {
+            None => out = Some(part),
+            Some(kept) => {
+                kept.moved.extend(part.moved);
+                if kept.virtual_corner.is_none() {
+                    kept.virtual_corner = part.virtual_corner;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Replace the corner end of line `l` with point `np`.
@@ -1636,18 +1685,13 @@ struct CornerKept {
 /// curve. It stays as a virtual sharp corner, held on both curves' extensions (their
 /// intersection), and the line lengths become distances from the far end to it, so the part
 /// keeps its size. Otherwise None: the caller removes the point.
-fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize); 2]) -> Result<Option<CornerKept>> {
+fn keep_corner(sk: &mut Sketch, c: usize, ends: &[(usize, usize)]) -> Result<Option<CornerKept>> {
     let used = sk.curves.iter().any(|x| uses(x, c));
     let mut moved: Vec<String> = sk.constraints.iter().filter(|k| k.kind.refers_to_point(c)).map(|k| k.id.clone()).collect();
     for k in sk.constraints.iter_mut() {
         let ConstraintKind::Length { l, value } = k.kind else { continue };
-        let new_end = if l == ca {
-            na
-        } else if l == cb {
-            nb
-        } else {
-            continue;
-        };
+        let Some((_, new_end)) = ends.iter().find(|(curve, _)| *curve == l) else { continue };
+        let new_end = *new_end;
         let Some(CurveKind::Line { a, b }) = sk.curves.get(l).map(|x| &x.kind) else { continue };
         // Same direction as the line, so the dimension keeps its side and text place.
         k.kind = if *a == new_end { ConstraintKind::Distance { p: c, q: *b, value } } else { ConstraintKind::Distance { p: *a, q: c, value } };
@@ -1657,7 +1701,7 @@ fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize);
     if moved.is_empty() && !used && c != 0 && !positioned {
         return Ok(None);
     }
-    for cu in [ca, cb] {
+    for cu in ends.iter().map(|(curve, _)| *curve) {
         let k = ConstraintKind::PointOnCurve { p: c, c: cu };
         if !sk.constraints.iter().any(|x| x.kind == k) {
             add_c(sk, k)?;
@@ -1677,18 +1721,8 @@ fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize);
 }
 
 /// Points at distances `da` along a and `db` along b from the corner; lines shortened to them.
-fn cut_corner(
-    sk: &mut Sketch,
-    la: usize,
-    lb: usize,
-    c: usize,
-    fa: usize,
-    fb: usize,
-    da: f64,
-    db: f64,
-    cmd: &str,
-) -> Result<(usize, usize, Vec2, CornerKept)> {
-    let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
+fn cut_corner(sk: &mut Sketch, c: &Corner, da: f64, db: f64, cmd: &str) -> Result<(usize, usize, Vec2, CornerKept)> {
+    let (pc, pa, pb) = (c.at(sk), sk.point(c.fa).unwrap_or_default(), sk.point(c.fb).unwrap_or_default());
     if !(da > 1e-9 && db > 1e-9 && da < pc.dist(pa) - 1e-9 && db < pc.dist(pb) - 1e-9) {
         return Err(bad(cmd, "too large for these lines"));
     }
@@ -1696,20 +1730,38 @@ fn cut_corner(
     let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let ta = sk.add_point(pc + u * da, None)?;
     let tb = sk.add_point(pc + v * db, None)?;
-    let mut moved = keep_side_relations(sk, la)?;
-    moved.extend(keep_side_relations(sk, lb)?);
-    reattach(sk, la, c, ta);
-    reattach(sk, lb, c, tb);
-    let mut kept = keep_corner(sk, c, [(la, ta), (lb, tb)])?;
+    let mut moved = keep_side_relations(sk, c.la)?;
+    moved.extend(keep_side_relations(sk, c.lb)?);
+    reattach(sk, c.la, c.ca, ta);
+    reattach(sk, c.lb, c.cb, tb);
+    // The sharp corner stays on its line's extension: one point for both lines, or a point of
+    // each profile's own when the two profiles meet at one place.
+    let mut gone: Vec<usize> = Vec::new();
+    let mut kept = if c.ca == c.cb {
+        let one = keep_corner(sk, c.ca, &[(c.la, ta), (c.lb, tb)])?;
+        if one.is_none() {
+            gone.push(c.ca);
+        }
+        one
+    } else {
+        let mut parts = Vec::new();
+        for (point, line, end) in [(c.ca, c.la, ta), (c.cb, c.lb, tb)] {
+            let part = keep_corner(sk, point, &[(line, end)])?;
+            if part.is_none() {
+                gone.push(point);
+            }
+            parts.push(part);
+        }
+        merge_kept(parts)
+    };
     if let Some(k) = &mut kept {
         k.moved.extend(moved);
     }
-    let removed = kept.is_none();
-    if removed {
-        sk.remove_points(&[c]);
-    }
-    // Indices shift when the corner point was removed.
-    let fix = |i: usize| if removed && i > c { i - 1 } else { i };
+    gone.sort_unstable();
+    gone.dedup();
+    sk.remove_points(&gone);
+    // Indices shift when corner points were removed.
+    let fix = |i: usize| i - gone.iter().filter(|g| **g < i).count();
     Ok((fix(ta), fix(tb), pc, kept.unwrap_or_default()))
 }
 
@@ -1781,12 +1833,12 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     refuse_offset_corner(sk, p, cmd)?;
     weld_corner(sk, p);
     meet_lines(sk, p, cmd)?;
-    let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
+    let c = match corner(sk, p, cmd) {
         Ok(x) => x,
         // Not two lines: a corner with an arc.
         Err(e) => return round_corner(sk, p, r, cmd)?.ok_or(e),
     };
-    let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
+    let (pc, pa, pb) = (c.at(sk), sk.point(c.fa).unwrap_or_default(), sk.point(c.fb).unwrap_or_default());
     let u = (pa - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let v = (pb - pc).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
     let half = 0.5 * u.cross(v).atan2(u.dot(v)).abs();
@@ -1804,11 +1856,11 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     let (spent_a, spent_b) = (d >= len_a - tol, d >= len_b - tol);
     // A spent line is cut just short of its far end, and the stub is removed below.
     let short = |len: f64| len - (len * 1e-6).max(1e-6);
-    let far_ids = [fa, fb].map(|i| sk.points.get(i).map(|p| p.id.clone()).unwrap_or_default());
+    let far_ids = [c.fa, c.fb].map(|i| sk.points.get(i).map(|p| p.id.clone()).unwrap_or_default());
     let bis = (u + v).normalized().ok_or_else(|| bad(cmd, "the lines are parallel"))?;
     let center = pc + bis * (r / half.sin());
     let (da, db) = (if spent_a { short(len_a) } else { d }, if spent_b { short(len_b) } else { d });
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
+    let (ta, tb, _, kept) = cut_corner(sk, &c, da, db, cmd)?;
     let (qa, qb) = (sk.point(ta).unwrap_or_default(), sk.point(tb).unwrap_or_default());
     let ccw = (qa - center).cross(qb - center) > 0.0;
     let arc = if ccw {
@@ -1817,14 +1869,14 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
         sk.add_arc(center, qb, qa, [None, Some(tb), Some(ta)], None)?
     };
     if !spent_a && !spent_b {
-        let cons = vec![add_c(sk, ConstraintKind::Tangent { a: la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: lb, b: arc })?];
+        let cons = vec![add_c(sk, ConstraintKind::Tangent { a: c.la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: c.lb, b: arc })?];
         return Ok((arc, cons, kept));
     }
     let id = |sk: &Sketch, i: usize| sk.curves.get(i).map(|c| c.id.clone()).unwrap_or_default();
     let arc_id = id(sk, arc);
     let mut cons = Vec::new();
     let mut stubs = Vec::new();
-    for ((line, t, spent), far_id) in [(la, ta, spent_a), (lb, tb, spent_b)].into_iter().zip(&far_ids) {
+    for ((line, t, spent), far_id) in [(c.la, ta, spent_a), (c.lb, tb, spent_b)].into_iter().zip(&far_ids) {
         if !spent {
             cons.push(add_c(sk, ConstraintKind::Tangent { a: line, b: arc })?);
             continue;
@@ -1932,7 +1984,7 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     let arc =
         if ccw { sk.add_arc(cen, ta, tb, [None, Some(na), Some(nb)], None)? } else { sk.add_arc(cen, tb, ta, [None, Some(nb), Some(na)], None)? };
     let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: arc })?];
-    match keep_corner(sk, q, [(ca, na), (cb, nb)])? {
+    match keep_corner(sk, q, &[(ca, na), (cb, nb)])? {
         Some(kept) => Ok(Some((arc, cons, kept))),
         None => {
             let arc_id = sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default();

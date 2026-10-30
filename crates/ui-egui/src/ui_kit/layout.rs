@@ -607,6 +607,42 @@ pub(crate) fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
     response
 }
 
+/// A corner row: its two lines, an optional Flip and the button that turns the cut off and on
+/// again (the row stays, dimmed while off), all in columns measured from the right edge. Every
+/// row's buttons sit in the same place, whatever the label says and however many rows there are.
+/// Returns the button's response and the row's new Flip state when its Flip was clicked.
+/// Tokens: `control_height, space_4/8/24, font_label, form_ink, form_dim; icon-button tokens`.
+pub(crate) fn corner_row(ui: &mut Ui, key: &str, name: &str, text: &str, on: bool, flip: Option<bool>) -> (Response, Option<bool>) {
+    let t = Tokens::get();
+    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
+    // Measured from the right edge the user can see: a row that runs past the clip (a scroll
+    // bar takes room the width still counted) would put its buttons where a click cannot land,
+    // and move them again as soon as the list grows.
+    let right = rect.right().min(ui.clip_rect().right());
+    let left = rect.left().min(right);
+    let toggle = egui::Rect::from_min_max(egui::pos2((right - row_height()).max(left), rect.top()), egui::pos2(right, rect.bottom()));
+    let flip_rect = flip.map(|_| {
+        let end = (toggle.left() - t.space_4).max(left);
+        egui::Rect::from_min_max(egui::pos2((end - t.space_24 - t.space_4).max(left), rect.top()), egui::pos2(end, rect.bottom()))
+    });
+    let label_right = flip_rect.map_or(toggle.left(), |r| r.left()) - t.space_8;
+    let label = egui::Rect::from_min_max(egui::pos2(left, rect.top()), egui::pos2(label_right.max(left), rect.bottom()));
+    paint_text(ui, label, text, egui::FontId::proportional(t.font_label), if on { t.form_ink } else { t.form_dim }, false);
+    let mut flipped = None;
+    if let (Some(flip_rect), Some(state)) = (flip_rect, flip) {
+        let response = ui.push_id((key, "flip"), |ui| super::toggle_icon_at(ui, flip_rect, name, "pattern_flip", "Flip", state)).inner;
+        if response.clicked() {
+            flipped = Some(!state);
+        }
+    }
+    // The X takes the cut away and the V brings it back, so the button says what a click does.
+    let (icon, tip) = if on { ("close", "Remove") } else { ("check", "Show") };
+    let response = ui.push_id((key, "toggle"), |ui| super::icon_button_at(ui, toggle, icon, tip)).inner;
+    scenario::publish_rect(&format!("dialog:list:{key}"), rect);
+    scenario::publish_handle(&format!("dialog:list:{key}:remove"), toggle.center());
+    (response, flipped)
+}
+
 /// Full-width rule; Tokens: dialog_rule. Use between groups without extra padding.
 /// Full-width rule without extra padding. Tokens: `dialog_rule`.
 pub(crate) fn divider(ui: &mut Ui, key: &str) {
